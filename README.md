@@ -63,11 +63,14 @@ Every app follows the same four ideas:
 setup-all.bat
 ```
 
-Then either drive everything from the **[GUI control panel](gui)**:
+Then either drive everything from the **[GUI control panel](gui)** — pick an
+app and account, click an action, and watch the live output:
 
 ```bat
 gui\run_gui.bat
 ```
+
+![PaperPull control panel](docs/control-panel.gif)
 
 …or run a single app directly (using `amex` as the example):
 
