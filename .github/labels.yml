@@ -1,0 +1,37 @@
+# PaperPull issue/PR labels.
+#
+# These are the labels the issue templates and PR checklist expect, plus a few
+# for triage. GitHub does NOT auto-create a label just because a template
+# references it, so create these once (see below) or a template's label is
+# silently skipped.
+#
+# Apply them either way:
+#   - By hand: repo -> Issues -> Labels -> "New label" for each row.
+#   - With the GitHub CLI (if you have `gh`): run, from the repo,
+#       gh label create "<name>" --color <color> --description "<description>" --force
+#     (see docs/… or the README contributor section for the exact commands).
+#   - Or point a label-sync GitHub Action (e.g. action-label-syncer) at this file.
+
+- name: provider-request
+  color: 1d76db
+  description: A request to support a new provider
+
+- name: provider-contribution
+  color: 0e8a16
+  description: Someone is building / has claimed a provider
+
+- name: good first provider
+  color: 7057ff
+  description: A newcomer-friendly provider to build (easy site)
+
+- name: help wanted
+  color: 008672
+  description: A provider looking for someone to build it
+
+- name: site-changed
+  color: fbca04
+  description: A provider changed its site; an existing app needs a fix
+
+- name: bug
+  color: d73a4a
+  description: Something isn't working
