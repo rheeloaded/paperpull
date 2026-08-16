@@ -4,7 +4,7 @@ A small local web UI that wraps every downloader app: pick an app + account,
 click an action, and watch the live output. It only runs the same predefined
 commands the `.bat` files do — nothing from the page is passed to a shell.
 
-![actions: Login · Discover · Pilot · Run All · Resume · Verify]
+![PaperPull control panel — pick an app, click Pilot, watch the live output](../docs/control-panel.gif)
 
 ## Run it
 
