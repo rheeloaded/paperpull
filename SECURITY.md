@@ -33,6 +33,12 @@ The `.gitignore` already blocks all of the following. Do not override it.
   or changes a setting.
 - **You sign in, not the tool.** The tools attach to a browser *you* logged into
   (via Chrome DevTools Protocol). They never handle your password or 2FA.
+- **Local only.** The browser's debugging port and the GUI both listen on
+  `127.0.0.1` (localhost) — nothing is exposed to your network. Note that while
+  the signed-in browser is open, any program running **on your own machine**
+  could attach to that debugging port, so close the browser window when you're
+  done downloading. The GUI additionally refuses any request whose `Origin`/
+  `Referer` is not localhost, so another website you have open cannot drive it.
 - **Delete-safe.** A sticky `downloaded_ok` marker means deleting the PDFs after
   you import them elsewhere will not cause re-downloads.
 

@@ -20,8 +20,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 HERE = Path(__file__).resolve().parent
@@ -44,6 +45,24 @@ ACTIONS = {
 ENTRY_RE = re.compile(r".*_(receipts|docs)\.py$")
 
 app = FastAPI(title="PaperPull")
+
+# The panel runs the apps' commands, so its API must only answer requests that
+# originate from the panel page itself (served on localhost). A CSRF attempt
+# driven by another website carries an Origin/Referer whose host is that site;
+# same-origin requests from the panel carry a localhost host or no such header
+# at all. There is no CORS middleware, so cross-origin JS can't read responses
+# either - this closes the remaining "trigger a run" vector.
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]", ""}
+
+
+def _same_origin_only(request: Request) -> None:
+    for header in ("origin", "referer"):
+        value = request.headers.get(header)
+        if not value:
+            continue
+        host = (urlsplit(value).hostname or "").lower()
+        if host not in _LOCAL_HOSTS:
+            raise HTTPException(403, "cross-origin request refused")
 
 
 def _entry_script(app_dir: Path):
@@ -98,7 +117,7 @@ def discover_apps():
     return apps
 
 
-@app.get("/api/apps")
+@app.get("/api/apps", dependencies=[Depends(_same_origin_only)])
 def api_apps():
     apps = discover_apps()
     return {"apps_root": str(APPS_ROOT), "actions": {k: v["label"] for k, v in ACTIONS.items()},
@@ -119,7 +138,7 @@ def _build_cmd(app_meta: dict, account: str, action: str):
     return cmd
 
 
-@app.get("/api/run")
+@app.get("/api/run", dependencies=[Depends(_same_origin_only)])
 def api_run(app: str, account: str = "primary", action: str = "pilot"):
     apps = discover_apps()
     if app not in apps:
