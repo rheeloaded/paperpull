@@ -1,0 +1,41 @@
+name: "🛠️ I'll build a provider"
+description: Claim a provider you have an account with and are going to add.
+title: "[Building] <provider name>"
+labels: ["provider-contribution"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Awesome — you're the ideal person to add a provider you actually use.
+        Open this to **claim** it so nobody builds the same thing twice, then
+        follow the guide: **[Adding a provider](../blob/main/docs/adding-a-provider.md)**.
+  - type: input
+    id: provider
+    attributes:
+      label: Provider you're building
+      placeholder: e.g. Fidelity
+    validations:
+      required: true
+  - type: input
+    id: slug
+    attributes:
+      label: Planned app slug + CDP port
+      description: A short folder name, and the next free debugging port (9222–9232 are taken; use 9233+).
+      placeholder: e.g. fidelity / 9233
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: The non-negotiables
+      description: These keep PaperPull safe to run against real financial accounts.
+      options:
+        - label: My app will be **read-only** — it never pays, transfers, redeems, enrolls, or changes a setting (guarded by FORBIDDEN_CONTROL_RE / SAFE_DOC_CONTROL_RE).
+          required: true
+        - label: It **never handles credentials** — the user signs in themselves; my code attaches to that session and only reads.
+          required: true
+        - label: I will **not commit** any real config.json, browser profile, PDF, or other private data.
+          required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything unusual? (optional)
+      placeholder: e.g. bot detection, an SPA session, a weird download mechanism…

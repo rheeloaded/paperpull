@@ -1,0 +1,47 @@
+name: "🔧 A supported app stopped working"
+description: A provider changed its site and one of the existing apps needs a fix.
+title: "[Broken] <app> — <what fails>"
+labels: ["bug", "site-changed"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Providers redesign their sites often. When that happens, the fix is
+        almost always confined to that app's `*_site.py` (selectors / URLs /
+        download flow) — the rest of the app is provider-agnostic.
+  - type: input
+    id: app
+    attributes:
+      label: Which app?
+      placeholder: e.g. redcard, amex, walmart
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where does it fail?
+      options:
+        - Login / can't connect to the browser
+        - Discover (finds no documents)
+        - Download (fails or saves a bad PDF)
+        - Verify (existing PDFs)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you ran and what it did. **Redact anything private** — no account numbers, balances, or personal paths.
+      placeholder: |
+        Command: python redcard_docs.py --pilot
+        Output (redacted): ...
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I've removed any account numbers, balances, names, and personal file paths from the text above.
+          required: true

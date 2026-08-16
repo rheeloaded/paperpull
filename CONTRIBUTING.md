@@ -20,14 +20,25 @@ app (discovery, delete-safe state, PDF validation, folders) is provider-agnostic
 
 ## Adding a new provider
 
-Clone the closest existing app (a receipt-style one like `amazon`/`target`, or a
-statement-style one like `amex`/`robinhood`), then:
+**The best way to grow PaperPull is to add the providers *you* use.** There's a
+full walkthrough — architecture, the read-only contract, exploring a site,
+testing, and submitting — in **[docs/adding-a-provider.md](docs/adding-a-provider.md)**.
+See **[PROVIDERS.md](PROVIDERS.md)** for what's supported and what's requested,
+and to claim one so two people don't build the same thing.
+
+In short: clone the closest existing app (a receipt-style one like
+`amazon`/`target`, or a statement-style one like `amex`/`robinhood`/`redcard`),
+then:
 
 1. Rewrite `*_site.py` for the new site (navigation + document collection +
-   download).
-2. Point `config.example.json` at a fresh CDP port and output folders.
+   download). This is the only file with real work in it.
+2. Point `config.example.json` at a **unique** CDP port (9222–9232 are taken;
+   use 9233+) and this app's output folders.
 3. Update `document_rules.json` (classification) if the app uses it.
-4. Keep the tests green (`python -m pytest tests`).
+4. Tune `FORBIDDEN_CONTROL_RE` for the provider, and keep the tests green
+   (`python -m pytest tests`).
+5. Verify against your real account (`--discover`, `--pilot`, re-run skips), then
+   add yourself to PROVIDERS.md and open a PR.
 
 ## Tests
 
