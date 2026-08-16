@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────
+#  SECURITY: this project drives real, signed-in financial accounts.
+#  Everything below can contain private data or live sessions. Never commit it.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Live browser sessions (cookies / auth tokens) — the most dangerous leak
+*browser-profile/
+browser-profile/
+**/*browser-profile*/
+
+# Real per-account config (KEEP the sanitized example)
+config.json
+config.*.json
+!config.example.json
+
+# Downloaded documents — your actual financial records
+*.pdf
+*.zip
+
+# Runtime state / output
+discovery.json
+progress.json
+new-this-run.txt
+run-summary.txt
+*.log
+*.csv
+
+# Output / working folders created by the tools
+**/Statements/
+**/Tax Documents/
+**/Year-End Summaries/
+**/Manual Review/
+**/Trade Confirmations/
+**/Insurance Documents/
+**/Other Documents/
+**/Receipts/
+**/Orders/
+**/In-Store/
+**/Online/
+**/Logs/
+**/Diagnostics/
+**/Backups/
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

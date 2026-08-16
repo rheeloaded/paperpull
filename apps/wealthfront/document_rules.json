@@ -1,0 +1,38 @@
+{
+  "_comment": "Editable rules mapping Wealthfront's document titles to filename summaries. Patterns are case-insensitive regexes matched against the document title shown on the Documents page. First match wins, tax rules before statement rules.",
+  "tax_rules": [
+    {"pattern": "1099-?B\\b", "summary": "1099-B Tax Form"},
+    {"pattern": "1099-?DIV\\b", "summary": "1099-DIV Tax Form"},
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?NEC\\b", "summary": "1099-NEC Tax Form"},
+    {"pattern": "1099-?Q\\b", "summary": "1099-Q Tax Form"},
+    {"pattern": "consolidated\\s+(form\\s+)?1099", "summary": "Consolidated 1099 Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "\\b1042-?S\\b", "summary": "1042-S Tax Form"},
+    {"pattern": "\\b5498\\b", "summary": "5498 Tax Form"},
+    {"pattern": "\\b480\\.6\\b", "summary": "480.6 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package)", "summary": "Tax Document"},
+    {"pattern": "cost\\s+basis", "summary": "Cost Basis Tax Document"},
+    {"pattern": "realized\\s+(gain|loss)", "summary": "Realized Gains Tax Document"}
+  ],
+  "statement_rules": [
+    {"pattern": "monthly\\s+statement", "summary": "Monthly Statement"},
+    {"pattern": "quarterly\\s+statement", "summary": "Quarterly Statement"},
+    {"pattern": "annual\\s+statement|yearly\\s+statement", "summary": "Annual Statement"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "cash\\s+account\\s+statement", "summary": "Cash Account Statement"},
+    {"pattern": "brokerage\\s+statement", "summary": "Brokerage Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Account Statement"}
+  ],
+  "skip_patterns": [
+    "trade\\s+confirmation",
+    "confirmation\\s+of\\s+trade",
+    "prospectus",
+    "advisory\\s+agreement",
+    "form\\s+adv",
+    "privacy\\s+(notice|policy)",
+    "terms\\s+of\\s+service"
+  ]
+}
