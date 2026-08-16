@@ -61,6 +61,35 @@ So your job is really to answer three questions for your provider, inside
 
 ---
 
+## Which provider is a good first build?
+
+Some sites are much friendlier than others. If this is your first PaperPull app,
+pick one that looks **easy**, and save the hard ones for later.
+
+**Easy (great first build)** — a portal that:
+- keeps you signed in across normal navigation (`page.goto` works — a
+  server-side cookie session), **and**
+- lists statements in a plain HTML table or list, **and**
+- has a direct "Download PDF" link that fires a real browser download, **and**
+- doesn't block the bundled Chromium.
+
+Closest templates: **`redcard`**, **`tmobile`**, **`dominion`**. If your
+provider looks like these, you can likely be done in an afternoon.
+
+**Medium** — statements split across a year/period dropdown or pagination;
+multiple document types to classify; a download that opens a blob in a new tab
+you have to `fetch()` (see `navyfederal`).
+
+**Hard (not a first project)** — bot detection that blocks Chromium (needs real
+Edge — `walmart`, `verizon`); an in-memory SPA session where `page.goto` logs
+you out (`amex`); print-only receipts with no download button, captured via
+`printToPDF` (`walmart`, `target`); or a portal whose session expires fast and
+silently (`redcard`).
+
+Not sure which bucket yours is in? Sign in, poke around the statements page for
+ten minutes, and check: does refreshing the URL keep you logged in, and does a
+statement have a real download link? Two yeses = easy.
+
 ## Step by step
 
 ### 1. Clone the closest existing app
