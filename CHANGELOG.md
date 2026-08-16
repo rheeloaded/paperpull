@@ -7,7 +7,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.3.1] — 2026-08-16
+
+### Security
+- **GUI control panel** now refuses any request whose `Origin`/`Referer` host is
+  not localhost, closing a cross-site "trigger a run" vector on the command API
+  (`/api/apps`, `/api/run`). The server already binds to `127.0.0.1` only and
+  has no CORS; `SECURITY.md` now documents the localhost/CDP posture (close the
+  signed-in browser when you're done — while it is open, any local process could
+  attach to its debugging port).
+
+## [0.3.0] — 2026-08-16
 
 ### Added
 - **Verizon (Fios)** — Fios / Home Internet bill statements (10th provider).
