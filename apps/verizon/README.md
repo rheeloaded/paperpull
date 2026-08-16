@@ -1,45 +1,39 @@
-# Verizon (Virginia) — bill downloader
+# Verizon (Fios) — bill downloader
 
-Downloads your monthly **billing statements** as PDFs from the Verizon
-Virginia account portal (`myaccount.verizonenergy.com`). Read-only, delete-safe,
-and part of [PaperPull](../../README.md).
+Downloads your Verizon **Fios / Home Internet** monthly bill statements as PDFs
+from My Verizon. Read-only, delete-safe, part of [PaperPull](../../README.md).
 
 ## Setup
 
 ```bat
-setup.bat                 REM one-time: create the venv + install Playwright
-login.bat                 REM opens Chromium on port 9230 — sign in yourself
+setup.bat                 REM one-time: venv + Playwright
+login.bat                 REM opens Microsoft Edge on port 9230 — sign in yourself
 run_pilot.bat             REM download the newest 5 bills as a test
-run_all.bat               REM download every available bill
+run_all.bat               REM download every available bill (up to ~24 months)
 ```
-
-The first run asks *"Whose account is this?"* — the name you enter is saved to
-`config.json` and stamped on every bill (the **Account Holder** column of the
-index CSV).
 
 ## How it works
 
-- **You sign in.** `login.bat` opens a normal Chromium window using this app's
-  own profile and port (9230). You complete sign-in and 2FA yourself; the tool
-  attaches to that signed-in browser over CDP and **reuses your tab** (the portal
-  keeps its session there).
-- **Discovery** reads the paginated **Billing History** table — each bill is a
-  Material-UI accordion whose header shows the statement date. It walks every
-  page to list all bills.
-- **Download** expands a bill's row and clicks its *"Download Your Detailed Bill
-  PDF"* button, capturing the PDF.
+- **Real Edge, not Chromium.** Verizon's bot-protection blocks the bundled
+  Playwright Chromium ("This page isn't available right now"). `login.bat`
+  therefore launches your installed **Microsoft Edge** (falling back to Chrome,
+  then Chromium) with the debugging port, and the tool attaches to that.
+- **You sign in** in that Edge window; the tool reuses the signed-in tab.
+- **Downloads via the "Download Your Bill" page** (`verizon.com/downloadbill`):
+  it reads the Bill Date dropdown (Verizon keeps ~24 months), then for each bill
+  selects the date, chooses **Download PDF**, and clicks **Get My Bill**.
+- **Download capture.** Because we attach to your *real* Edge (not a
+  Playwright-managed browser), downloads land in Edge's own download folder. The
+  tool points that folder at a temp dir (`.vz-downloads`) over CDP, then moves
+  each PDF into `Statements/`.
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays a bill, changes
-  service, or edits the account; a control must also look like a document action
-  (`SAFE_DOC_CONTROL_RE`) before it's ever clicked. Pagination is the only thing
-  clicked beyond download/expand.
+  a plan, or edits the account; a control must also look like a document action.
 
-## Good to know
+## Scope
 
-- **Verizon only keeps bill PDFs for ~18 months.** Older bills all return an
-  identical *"Images for Bills older than 18 months are not available"*
-  placeholder. The tool detects that, deletes the junk file, and marks those
-  bills **No Receipt Available** (they won't be retried). So a full run saves the
-  ~18 most recent bills and records the rest as unavailable.
-- **Delete-safe.** Once a bill is downloaded it's marked done for good — delete
-  the PDF after importing it elsewhere and it won't be re-downloaded.
-- **Multi-account** via `--config config.<name>.json` (see `add_account.py`).
+- **Fios / Home Internet only.** If you also have (or had) Verizon *Wireless*,
+  that's a separate account. An **active** second account can be added with the
+  multi-account feature (`add_account.py`, its own login/profile/port). A
+  **closed** wireless account is generally no longer downloadable through My
+  Verizon — check your email for the final Verizon Wireless bill PDFs instead.
+- Delete-safe & multi-account like every PaperPull app.
