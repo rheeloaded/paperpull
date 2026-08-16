@@ -9,7 +9,7 @@ accounts and download your **statements and receipts** as PDFs — so you can
 archive them (e.g. into [paperless-ngx](https://docs.paperless-ngx.com/)) instead
 of clicking through each site by hand.
 
-Ten providers are supported today, all built on the same pattern:
+Eleven providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -19,6 +19,7 @@ Ten providers are supported today, all built on the same pattern:
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
+| [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
@@ -89,7 +90,7 @@ Each app also has its own README with provider-specific details and quirks.
 ## Status & roadmap
 
 - ✅ All ten apps work and are in regular use.
-- 🔜 **Planned providers:** Target RedCard, T-Mobile.
+- 🔜 **Planned providers:** Target RedCard.
 - 🔜 **Shared core:** the apps grew independently and duplicate a fair amount of
   support code (`storage.py`, `receipt_pdf.py`, `models.py`). Extracting a shared
   library is a known future cleanup — deferred so as not to destabilize working

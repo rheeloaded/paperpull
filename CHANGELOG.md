@@ -7,6 +7,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Verizon (Fios)** — Fios / Home Internet bill statements (10th provider).
+  Uses your installed Microsoft Edge (T-Mobile-style bot protection blocks the
+  bundled Chromium) and captures downloads via a controlled directory over CDP.
+- **T-Mobile** — monthly bill statements (11th provider). Reads the bill-history
+  page and downloads each period's detailed-bill PDF via a real download event.
+
 ## [0.1.0] — 2026-08-15
 
 First tagged release.
