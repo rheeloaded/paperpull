@@ -1,0 +1,55 @@
+{
+  "_comment": "Editable rules mapping Navy Federal document titles to filename summaries. Patterns are case-insensitive regexes matched against the document title/row text. Checked in order: tax, then insurance, then statement. Repair these after running diagnose.bat against your real Documents page.",
+  "tax_rules": [
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?DIV\\b", "summary": "1099-DIV Tax Form"},
+    {"pattern": "1099-?B\\b", "summary": "1099-B Tax Form"},
+    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
+    {"pattern": "1099-?SA\\b", "summary": "1099-SA Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?C\\b", "summary": "1099-C Tax Form"},
+    {"pattern": "1099-?Q\\b", "summary": "1099-Q Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "1098-?E\\b", "summary": "1098-E Tax Form"},
+    {"pattern": "\\b1098\\b", "summary": "1098 Tax Form"},
+    {"pattern": "\\b5498-?SA\\b", "summary": "5498-SA Tax Form"},
+    {"pattern": "\\b5498\\b", "summary": "5498 Tax Form"},
+    {"pattern": "\\bW-?2\\b", "summary": "W-2 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package|information)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [
+    {"pattern": "declaration|\\bdec\\s*page\\b", "summary": "Insurance Declarations"},
+    {"pattern": "auto.*policy|policy.*auto|automobile", "summary": "Auto Insurance Policy"},
+    {"pattern": "home.?owner.*policy|policy.*home.?owner", "summary": "Homeowners Insurance Policy"},
+    {"pattern": "renter.*policy|policy.*renter", "summary": "Renters Insurance Policy"},
+    {"pattern": "valuable\\s+personal\\s+property|\\bvpp\\b", "summary": "Valuable Personal Property Policy"},
+    {"pattern": "umbrella", "summary": "Umbrella Insurance Policy"},
+    {"pattern": "life\\s+insurance", "summary": "Life Insurance Document"},
+    {"pattern": "insurance\\s+(bill|billing|statement|invoice)", "summary": "Insurance Billing Statement"},
+    {"pattern": "id\\s*card|proof\\s+of\\s+insurance|insurance\\s+card", "summary": "Insurance ID Card"},
+    {"pattern": "policy\\s+(package|document|change|renewal)", "summary": "Insurance Policy Document"},
+    {"pattern": "\\bpolicy\\b", "summary": "Insurance Policy Document"},
+    {"pattern": "\\binsurance\\b", "summary": "Insurance Document"}
+  ],
+  "statement_rules": [
+    {"pattern": "checking\\s+.*statement|statement.*checking", "summary": "Checking Statement"},
+    {"pattern": "savings\\s+.*statement|statement.*savings", "summary": "Savings Statement"},
+    {"pattern": "credit\\s+card\\s+.*statement|statement.*credit\\s+card", "summary": "Credit Card Statement"},
+    {"pattern": "\\bmonthly\\s+statement\\b", "summary": "Monthly Statement"},
+    {"pattern": "\\bquarterly\\s+statement\\b", "summary": "Quarterly Statement"},
+    {"pattern": "\\bannual\\s+statement\\b|year.?end\\s+statement", "summary": "Annual Statement"},
+    {"pattern": "e-?statement", "summary": "Account Statement"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Account Statement"}
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+use|and\\s+conditions)",
+    "disclosure\\s+statement",
+    "marketing",
+    "promotional",
+    "newsletter",
+    "^\\s*notice\\s+of",
+    "electronic\\s+communication\\s+consent"
+  ]
+}

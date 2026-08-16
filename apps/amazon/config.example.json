@@ -1,0 +1,13 @@
+{
+  "owner": "",
+  "owner_in_filename": false,
+  "output_dir": ".",
+  "profile_dir": "./browser-profile",
+  "cdp_url": "http://localhost:9223",
+  "min_pdf_bytes": 3000,
+  "max_path_length": 240,
+  "include_invoices": true,
+  "delay_min_seconds": 2.0,
+  "delay_max_seconds": 4.5,
+  "pilot_online": 5
+}

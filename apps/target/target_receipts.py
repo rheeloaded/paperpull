@@ -1,0 +1,1070 @@
+﻿"""Target purchase-history & receipt downloader (local, supervised).
+
+Usage:
+    python target_receipts.py --login
+    python target_receipts.py --discover
+    python target_receipts.py --pilot            (5 newest Online + 3 newest In-store)
+    python target_receipts.py --pilot-online
+    python target_receipts.py --pilot-instore
+    python target_receipts.py --online
+    python target_receipts.py --instore
+    python target_receipts.py --all
+    python target_receipts.py --resume
+    python target_receipts.py --verify
+    python target_receipts.py --review-names
+    python target_receipts.py --diagnose [--order-number N]
+    python target_receipts.py --dry-run
+
+Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
+         --max-purchases N  --order-number N  --include-invoices
+
+Everything runs locally. No receipt data leaves this machine.
+Authentication is always manual (--login opens a browser and waits for you).
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import random
+import re
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+
+import classification
+import receipt_pdf
+import target_site as site
+from models import (DONE_STATES, IN_STORE, ONLINE, Item, Purchase, State)
+from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
+                     RECEIPT_INDEX_COLUMNS, atomic_write_text, backup_file,
+                     build_pdf_filename, load_config, now_iso, title_case,
+                     unique_path)
+
+from storage import ensure_owner, PROJECT_DIR, set_filename_owner
+log = logging.getLogger("target_receipts")
+
+
+def ask(prompt: str) -> str:
+    """input() that stops cleanly (progress already saved by callers) when
+    no interactive console is attached, instead of corrupting the run."""
+    try:
+        return input(prompt)
+    except EOFError:
+        print("\nNo interactive console available to answer a required prompt.")
+        print("Run this command from a real console window (use the .bat files).")
+        raise SystemExit(3)
+
+
+# ---------------------------------------------------------------------------
+# Application
+# ---------------------------------------------------------------------------
+
+class App:
+    def __init__(self, args):
+        self.args = args
+        # --config lets one copy of the code serve several people/accounts:
+        # each config points at its own output_dir, profile_dir and port, so
+        # progress.json, the CSVs, the PDFs and the browser session are all
+        # kept separate. Nothing is ever re-downloaded across accounts.
+        cfg_path = Path(args.config) if getattr(args, "config", None) \
+            else (PROJECT_DIR / "config.json")
+        self.config = load_config(cfg_path)
+        ensure_owner(self.config, cfg_path)
+        set_filename_owner(self.config.get("owner", "") if self.config.get("owner_in_filename") else "")
+        if args.include_invoices:
+            self.config["include_invoices"] = True
+        self.paths = Paths(Path(self.config["output_dir"]))
+        self.paths.ensure()
+        self._setup_logging()
+
+        self.progress = JsonStore(self.paths.progress_json, self.paths.backups)
+        self.discovery = JsonStore(self.paths.discovery_json, self.paths.backups)
+        self.progress.load()
+        self.discovery.load()
+
+        self.order_csv = CsvFile(self.paths.order_history_csv,
+                                 ORDER_HISTORY_COLUMNS, self.paths.backups)
+        self.index_csv = CsvFile(self.paths.receipt_index_csv,
+                                 RECEIPT_INDEX_COLUMNS, self.paths.backups)
+        self.rules = classification.load_rules()
+
+        self._pw = None
+        self._context = None
+        self.stats = {
+            "mode": "", "started": now_iso(), "ended": "",
+            "online_discovered": 0, "instore_discovered": 0,
+            "receipts_downloaded": 0, "invoices_downloaded": 0,
+            "skipped_completed": 0, "canceled": 0, "no_receipt": 0,
+            "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
+            "validation_failures": 0, "dates_processed": [], "new_files": [],
+        }
+
+    # -- infrastructure -----------------------------------------------------
+
+    def _setup_logging(self):
+        logfile = self.paths.logs / f"run-{datetime.now():%Y%m%d-%H%M%S}.log"
+        fmt = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+        logging.basicConfig(level=logging.INFO, format=fmt,
+                            handlers=[logging.FileHandler(logfile, encoding="utf-8"),
+                                      logging.StreamHandler(sys.stdout)])
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
+
+    def _delay(self, factor: float = 1.0):
+        lo = float(self.config["delay_min_seconds"]) * factor
+        hi = float(self.config["delay_max_seconds"]) * factor
+        time.sleep(random.uniform(lo, hi))
+
+    def browser(self):
+        """Launch (or return) the persistent, headed, supervised browser."""
+        if self._context is not None:
+            return self._context
+        from playwright.sync_api import sync_playwright
+        self._pw = sync_playwright().start()
+        profile = Path(self.config["profile_dir"])
+        profile.mkdir(parents=True, exist_ok=True)
+        self._context = self._pw.chromium.launch_persistent_context(
+            str(profile),
+            headless=False,
+            accept_downloads=True,
+            viewport={"width": 1400, "height": 950},
+        )
+        self._context.add_init_script(receipt_pdf.PRINT_SUPPRESS_INIT_SCRIPT)
+        self._context.set_default_timeout(30000)
+        return self._context
+
+    def page(self):
+        ctx = self.browser()
+        return ctx.pages[0] if ctx.pages else ctx.new_page()
+
+    def close(self):
+        try:
+            if self._context:
+                self._context.close()
+        except Exception:
+            pass
+        try:
+            if self._pw:
+                self._pw.stop()
+        except Exception:
+            pass
+        self._context = None
+        self._pw = None
+
+    # -- session safety -----------------------------------------------------
+
+    def check_session(self, page) -> None:
+        """Raise/pause on sign-out or security challenges."""
+        challenge = site.detect_security_challenge(page)
+        if challenge:
+            self.progress.save(backup=True)
+            print(f"\n!! {challenge}")
+            print("Processing stopped. Please resolve the challenge yourself in the")
+            print("browser window. I will NOT attempt to bypass it.")
+            ask("Press Enter once the page looks normal again (or Ctrl+C to quit)... ")
+        if site.looks_signed_out(page):
+            self.progress.save(backup=True)
+            print("\n!! Target appears to have signed you out.")
+            print("Please sign in manually in the open browser window.")
+            ask("Press Enter after you are signed in again... ")
+            site.goto_orders(page)
+
+    # -- commands -----------------------------------------------------------
+
+    def cmd_login(self):
+        print("Opening Target.com in a dedicated supervised browser profile.")
+        print("Sign in manually (username, password, any verification codes).")
+        print("This tool never touches your credentials.\n")
+        page = self.page()
+        page.goto(site.URLS["home"], wait_until="domcontentloaded", timeout=60000)
+        ask("Press Enter here AFTER you have finished signing in... ")
+        site.goto_orders(page)
+        if site.looks_signed_out(page):
+            print("It still looks like you are signed out; the orders page bounced to login.")
+            print("Sign in in the browser, then run:  python target_receipts.py --login")
+        else:
+            print("Signed-in session detected. Login state is stored in the local")
+            print(f"browser profile: {self.config['profile_dir']}")
+        self.close()
+
+    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
+        """Discovery pass over one or both history sections. Saves discovery.json."""
+        types = types or [ONLINE, IN_STORE]
+        page = self.page()
+        counts = {}
+        for ptype in types:
+            site.goto_orders(page)
+            self.check_session(page)
+            found_tab = site.select_history_tab(page, ptype)
+            if ptype == IN_STORE and not found_tab:
+                log.warning("In-store tab not found; recording zero in-store purchases "
+                            "(run --diagnose to inspect the page).")
+                counts[ptype] = 0
+                continue
+            n_new = 0
+            year_options = site.get_year_options(page)
+            option_list = year_options or [None]
+            log.info("%s: url=%s year_options=%s", ptype, page.url, year_options)
+            for option in option_list:
+                if option is not None:
+                    if not site.select_year_option(page, option):
+                        continue
+                    self._delay()
+                n_cards = site.load_all_cards(page, ptype, delay_ms=int(
+                    self.config["delay_min_seconds"] * 1000))
+                raw_cards = site.collect_cards(page, ptype)
+                log.info("%s: %d card elements, %d raw cards collected",
+                         ptype, n_cards, len(raw_cards))
+                for card in raw_cards:
+                    purchase = site.card_to_purchase(card, ptype)
+                    if not purchase:
+                        log.info("%s: unparseable card href=%r text=%r",
+                                 ptype, card.href, (card.text or "")[:120])
+                        continue
+                    key = purchase.key
+                    if self.discovery.get(key) is None:
+                        rec = purchase.to_dict()
+                        rec["state"] = State.DISCOVERED.value
+                        self.discovery.update(key, rec, save=False)
+                        n_new += 1
+                    else:
+                        # refresh volatile fields
+                        self.discovery.update(key, {
+                            "details_url": purchase.details_url,
+                            "total": purchase.total or self.discovery.get(key).get("total", ""),
+                            "status": purchase.status or self.discovery.get(key).get("status", ""),
+                        }, save=False)
+            self.discovery.save()
+            counts[ptype] = n_new
+            self._delay()
+
+        all_recs = list(self.discovery.data.values())
+        online = [r for r in all_recs if r.get("purchase_type") == ONLINE]
+        instore = [r for r in all_recs if r.get("purchase_type") == IN_STORE]
+        self.stats["online_discovered"] = len(online)
+        self.stats["instore_discovered"] = len(instore)
+
+        if not quiet:
+            print(f"\nDiscovery complete. Total known purchases: {len(all_recs)}")
+            for label, group in ((ONLINE, online), (IN_STORE, instore)):
+                by_year = {}
+                for r in group:
+                    year = (r.get("purchase_date") or "?")[:4]
+                    by_year[year] = by_year.get(year, 0) + 1
+                summary = ", ".join(f"{y}: {c}" for y, c in sorted(by_year.items(), reverse=True))
+                print(f"  {label}: {len(group)}  ({summary or 'none'})")
+            dates = sorted(r.get("purchase_date") for r in all_recs if r.get("purchase_date"))
+            if dates:
+                print(f"  Earliest available purchase date: {dates[0]}")
+                print("  (If Target limits history depth, older purchases simply were")
+                print("   not shown by Target and are NOT included.)")
+        return counts
+
+    # -- selection ----------------------------------------------------------
+
+    def _select_purchases(self, ptype: Optional[str] = None,
+                          limit: Optional[int] = None,
+                          newest_first: bool = True) -> List[Purchase]:
+        args = self.args
+        records = list(self.discovery.data.values())
+        purchases = [Purchase.from_dict(r) for r in records
+                     if isinstance(r, dict) and r.get("order_number")]
+        if ptype:
+            purchases = [p for p in purchases if p.purchase_type == ptype]
+        if args.order_number:
+            purchases = [p for p in purchases if p.order_number == args.order_number]
+        if args.year:
+            purchases = [p for p in purchases if p.purchase_date.startswith(str(args.year))]
+        if args.start_date:
+            purchases = [p for p in purchases if p.purchase_date and p.purchase_date >= args.start_date]
+        if args.end_date:
+            purchases = [p for p in purchases if p.purchase_date and p.purchase_date <= args.end_date]
+        purchases.sort(key=lambda p: p.purchase_date or "0000", reverse=newest_first)
+        limit = limit if limit is not None else args.max_purchases
+        if limit:
+            purchases = purchases[:limit]
+        return purchases
+
+    def _already_done(self, purchase: Purchase) -> bool:
+        """Skip purchases already handled. A receipt that was successfully
+        downloaded once is done FOR GOOD - it is not re-downloaded even if you
+        later delete the PDF (e.g. after importing it into paperless-ngx). Use
+        --redownload to override and fetch everything in scope again."""
+        if getattr(self.args, "redownload", False):
+            return False
+        rec = self.progress.get(purchase.key)
+        if not rec:
+            return False
+        if rec.get("downloaded_ok"):
+            return True
+        state = rec.get("state")
+        # terminal / already-completed (incl. records made before the
+        # downloaded_ok marker existed): done, do not re-download.
+        if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
+                     State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
+            return True
+        # a review copy counts only if its PDF is still present and valid;
+        # a quarantined / failed one should be retried.
+        if state == State.NEEDS_MANUAL_REVIEW.value:
+            pdf_path = rec.get("pdf_path", "")
+            return bool(pdf_path and Path(pdf_path).exists()
+                        and receipt_pdf.validate_pdf(
+                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
+        return False
+
+    # -- processing core ----------------------------------------------------
+
+    def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
+        page = self.page()
+        for i, purchase in enumerate(purchases, 1):
+            print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
+                  f"{purchase.purchase_date or '(date unknown)'} "
+                  f"#{purchase.order_number}")
+            if self._already_done(purchase):
+                print("  Already completed and PDF verified - skipping.")
+                self.stats["skipped_completed"] += 1
+                continue
+            try:
+                self.process_one(page, purchase, dry_run=dry_run)
+            except KeyboardInterrupt:
+                print("\nInterrupted. Progress is saved; run --resume to continue.")
+                raise
+            except Exception as e:
+                log.exception("Unhandled failure on %s", purchase.key)
+                self._record_state(purchase, State.FAILED, notes=f"Unhandled error: {e}")
+                self.stats["failed"] += 1
+            self._delay()
+
+    def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+        # ---- open details (retry once, per spec 22) ----
+        for attempt in (1, 2):
+            try:
+                site.goto_details(page, purchase)
+                self.check_session(page)
+                break
+            except Exception as e:
+                log.warning("Details page failed (attempt %d): %s", attempt, e)
+                if attempt == 2:
+                    self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                                       notes="Details page failed to load twice")
+                    self.stats["manual_review"] += 1
+                    return
+                time.sleep(5)
+                site.goto_orders(page)
+
+        # ---- extract ----
+        purchase = site.extract_details(page, purchase)
+        self._record_state(purchase, State.DETAILS_EXTRACTED)
+        if purchase.purchase_date:
+            self.stats["dates_processed"].append(purchase.purchase_date)
+
+        # ---- classify (local, deterministic) ----
+        cls = classification.classify_items(purchase.items, self.rules)
+        purchase.summary = cls.summary
+        purchase.confidence = cls.confidence
+        review_needed = cls.confidence == classification.LOW
+        notes_extra = f"Items: {'; '.join(i.name for i in purchase.items[:12])}" \
+            if review_needed and purchase.items else ""
+        print(f"  {len(purchase.items)} item(s); summary: {cls.summary} "
+              f"[{cls.confidence}] ({cls.notes})")
+
+        # ---- canceled orders: record, no receipt expected ----
+        if re.search(r"cancell?ed", purchase.status or "", re.I):
+            self._record_state(purchase, State.CANCELED,
+                               notes="Order canceled; no receipt downloaded")
+            self._write_csv_rows(purchase, receipt_status="Canceled",
+                                 processing_status=State.CANCELED.value,
+                                 notes_extra=notes_extra)
+            self.stats["canceled"] += 1
+            print("  Canceled order - recorded, no receipt.")
+            return
+
+        if dry_run:
+            filename = build_pdf_filename(purchase.purchase_date, purchase.summary)
+            print(f"  DRY RUN - would save: {filename}")
+            return
+
+        # ---- locate + save receipt ----
+        saved = self._save_receipt(page, purchase)
+        if not saved:
+            return  # state already recorded inside
+
+        # ---- CSVs + progress ----
+        status = State.NEEDS_MANUAL_REVIEW.value if review_needed else State.COMPLETED.value
+        receipt_status = "Downloaded"
+        self._write_csv_rows(purchase, receipt_status=receipt_status,
+                             processing_status="Review Needed" if review_needed else "Completed",
+                             notes_extra=notes_extra)
+        final_state = State.NEEDS_MANUAL_REVIEW if review_needed else State.COMPLETED
+        self._record_state(purchase, final_state,
+                           notes=("Low classification confidence" if review_needed else ""))
+        if review_needed:
+            self.stats["manual_review"] += 1
+        if purchase.document_type == "Invoice":
+            self.stats["invoices_downloaded"] += 1
+        else:
+            self.stats["receipts_downloaded"] += 1
+        print(f"  Saved: {purchase.pdf_filename}")
+
+    # -- receipt saving -----------------------------------------------------
+
+    def _save_receipt(self, page, purchase: Purchase) -> bool:
+        """Locate the printable receipt and save it as a verified PDF.
+        Returns True on success; records failure states otherwise."""
+        opened = site.open_receipt_section(page)
+
+        # Target requires fresh authentication to view Receipts & invoices.
+        # If we got bounced to the sign-in page, pause for the user, then
+        # navigate back and reopen the receipt section.
+        if site.looks_signed_out(page):
+            print("  Target is asking you to verify your sign-in to view receipts.")
+            print("  Complete it in the browser window (passkey/password/code).")
+            self.check_session(page)
+            site.goto_details(page, purchase)
+            opened = site.open_receipt_section(page)
+            if site.looks_signed_out(page):
+                self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                                   notes="Could not pass receipt re-authentication")
+                self.stats["manual_review"] += 1
+                return False
+
+        content_kind = site.wait_for_receipt_content(page) if opened else ""
+        controls = site.find_print_receipt_controls(page)
+        popup = None
+
+        if not controls and not opened:
+            return self._handle_no_receipt(page, purchase)
+        if opened and not controls and not content_kind:
+            # Section opened but nothing receipt-like ever rendered.
+            return self._handle_no_receipt(page, purchase)
+
+        self._record_state(purchase, State.RECEIPT_LOCATED)
+        folder = self.paths.folder_for(purchase.purchase_type)
+        filename = build_pdf_filename(purchase.purchase_date, purchase.summary)
+        out_path = unique_path(folder, filename, self.config["max_path_length"])
+        if out_path.name != filename:
+            self.stats["duplicate_filenames"] += 1
+
+        target_page = page
+        try:
+            if controls:
+                kind, obj = site.trigger_print_receipt(page, controls[0])
+                purchase.receipt_url = page.url
+                if kind == "download":
+                    receipt_pdf.save_download(obj, out_path)
+                    return self._finish_pdf(page, purchase, out_path)
+                if kind == "popup":
+                    popup = obj
+                    target_page = popup
+                    purchase.receipt_url = popup.url
+                elif kind in ("navigated", "print_called", "inline"):
+                    target_page = page
+                # Popup/page may itself have triggered window.print(); wait for
+                # its content to settle before rendering.
+                try:
+                    target_page.wait_for_load_state("networkidle", timeout=15000)
+                except Exception:
+                    pass
+                target_page.wait_for_timeout(1500)
+
+            self._capture_document(target_page, purchase, out_path, content_kind)
+            return self._finish_pdf(page, purchase, out_path,
+                                    popup=popup, source_page=target_page)
+        except Exception as e:
+            log.warning("Primary PDF path failed for %s: %s", purchase.key, e)
+            # Fallback: local headless render of the receipt/details URL.
+            try:
+                url = (popup.url if popup else None) or purchase.receipt_url or page.url
+                state = self._context.storage_state()
+                receipt_pdf.render_url_headless(self._pw, state, url, out_path)
+                return self._finish_pdf(page, purchase, out_path, popup=popup)
+            except Exception as e2:
+                log.error("Headless fallback failed for %s: %s", purchase.key, e2)
+                self._record_state(purchase, State.FAILED,
+                                   notes=f"PDF generation failed: {e2}")
+                self.stats["failed"] += 1
+                return False
+        finally:
+            if popup is not None:
+                try:
+                    popup.close()
+                except Exception:
+                    pass
+            receipt_pdf.restore_print(page)
+
+    def _capture_document(self, target_page, purchase: Purchase,
+                          out_path: Path, content_kind: str = "") -> None:
+        """Render the receipt/invoice currently presented by Target to PDF.
+
+        Preference order:
+          1. The HTML snapshot stashed at the moment print() was called —
+             exactly the document the print dialog would have rendered
+          2. Target's print iframe, if it still exists in the DOM
+          3. In-store receipt modal, isolated
+          4. Online receipts column, isolated with gift receipts hidden
+          5. The page as-is
+        """
+        snapshot = receipt_pdf.get_print_snapshot(target_page)
+        if snapshot:
+            try:
+                log.info("Capture path: print-call HTML snapshot (%d chars)",
+                         len(snapshot))
+                receipt_pdf.print_html_to_pdf(target_page, snapshot, out_path)
+                return
+            except Exception as e:
+                log.warning("Print-snapshot capture failed (%s); falling back", e)
+        frame = site.find_printing_frame(target_page, wait_ms=3000)
+        if frame is not None:
+            try:
+                log.info("Capture path: live print iframe")
+                receipt_pdf.print_frame_to_pdf(target_page, frame, out_path)
+                return
+            except Exception as e:
+                log.warning("Print-iframe capture failed (%s); falling back "
+                            "to page isolation", e)
+        log.info("Capture path: page isolation (%s)",
+                 content_kind or purchase.purchase_type)
+        if content_kind == "store-receipt":
+            receipt_pdf.isolate_for_print(
+                target_page, site.FALLBACK["store_receipt_container"])
+        elif purchase.purchase_type == ONLINE:
+            purchase.receipt_count = site.count_store_receipts(target_page)
+            receipt_pdf.isolate_online_receipts(target_page)
+        receipt_pdf.print_page_to_pdf(target_page, out_path)
+
+    def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
+                    popup=None, source_page=None) -> bool:
+        purchase.pdf_path = str(out_path)
+        purchase.pdf_filename = out_path.name
+        self._record_state(purchase, State.PDF_SAVED)
+
+        tokens = receipt_pdf.expected_tokens_for(purchase)
+        result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
+        if not result.ok:
+            log.warning("Validation failed (%s); retrying once", result.reason)
+            self.stats["validation_failures"] += 1
+            try:
+                retry_page = source_page or page
+                receipt_pdf.print_page_to_pdf(retry_page, out_path)
+                result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
+            except Exception as e:
+                log.warning("Retry failed: %s", e)
+        if not result.ok:
+            # Quarantine the questionable file; never mark Completed.
+            quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                     self.config["max_path_length"])
+            try:
+                out_path.replace(quarantine)
+            except OSError:
+                quarantine = out_path
+            purchase.pdf_path = str(quarantine)
+            purchase.pdf_filename = quarantine.name
+            self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                               notes=f"PDF validation failed: {result.reason}")
+            self._write_csv_rows(purchase, receipt_status="Validation Failed",
+                                 processing_status=State.NEEDS_MANUAL_REVIEW.value,
+                                 notes_extra=f"Validation: {result.reason}")
+            self.stats["manual_review"] += 1
+            print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
+            return False
+
+        purchase.receipt_count = 1
+        # Sticky marker: a valid PDF was produced, so this purchase is done for
+        # good and will not be re-downloaded even if the file is later deleted.
+        self._record_state(purchase, State.PDF_VERIFIED, extra={
+            "pdf_size": result.size_bytes, "pdf_pages": result.page_count,
+            "downloaded_ok": True})
+        self.stats["new_files"].append(str(out_path))
+        return True
+
+    def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
+        """No Print receipts control found. Optionally save invoice; record."""
+        invoices = site.find_invoice_controls(page)
+        if invoices and self.config.get("include_invoices"):
+            purchase.document_type = "Invoice"
+            filename = build_pdf_filename(purchase.purchase_date, purchase.summary, "Invoice")
+            out_path = unique_path(self.paths.invoices, filename,
+                                   self.config["max_path_length"])
+            popup = None
+            try:
+                kind, obj = site.trigger_print_receipt(page, invoices[0])
+                target_page = obj if kind == "popup" else page
+                popup = obj if kind == "popup" else None
+                if kind == "download":
+                    receipt_pdf.save_download(obj, out_path)
+                else:
+                    try:
+                        target_page.wait_for_load_state("networkidle", timeout=15000)
+                    except Exception:
+                        pass
+                    target_page.wait_for_timeout(1500)
+                    # An invoice *list* page may need one more click on a
+                    # per-invoice print/view control.
+                    again = site.find_invoice_controls(target_page)
+                    if again and site.find_printing_frame(target_page, wait_ms=1000) is None:
+                        kind2, obj2 = site.trigger_print_receipt(target_page, again[0])
+                        if kind2 == "download":
+                            receipt_pdf.save_download(obj2, out_path)
+                            kind = "download"
+                        elif kind2 == "popup":
+                            target_page = obj2
+                    if kind != "download":
+                        self._capture_document(target_page, purchase, out_path)
+                if popup is not None:
+                    try:
+                        popup.close()
+                    except Exception:
+                        pass
+                ok = self._finish_pdf(page, purchase, out_path)
+                if ok:
+                    self._write_csv_rows(
+                        purchase, receipt_status="No printable receipt available",
+                        processing_status="Review Needed",
+                        notes_extra="Invoice saved instead of receipt (distinct document)")
+                    # NO_RECEIPT_AVAILABLE is a terminal state: the invoice is
+                    # saved and this purchase won't be re-downloaded on resume.
+                    self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
+                                       notes="Invoice saved; no printable receipt exists")
+                    self.stats["invoices_downloaded"] += 1
+                    self.stats["manual_review"] += 1
+                    print("  No printable receipt; invoice saved to Invoices folder.")
+                return ok
+            except Exception as e:
+                log.warning("Invoice save failed: %s", e)
+
+        self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
+                           notes="No printable receipt available")
+        self._write_csv_rows(purchase, receipt_status="No printable receipt available",
+                             processing_status=State.NEEDS_MANUAL_REVIEW.value,
+                             notes_extra="No Print receipts control found"
+                             + ("" if not invoices else "; invoice exists (use --include-invoices)"))
+        self.stats["no_receipt"] += 1
+        self.stats["manual_review"] += 1
+        print("  No printable receipt available - marked for manual review.")
+        return False
+
+    # -- records ------------------------------------------------------------
+
+    def _record_state(self, purchase: Purchase, state: State,
+                      notes: str = "", extra: Optional[dict] = None):
+        purchase.state = state.value
+        if notes:
+            purchase.notes = (purchase.notes + "; " if purchase.notes else "") + notes
+        rec = purchase.to_dict()
+        if extra:
+            rec.update(extra)
+        self.progress.update(purchase.key, rec)  # atomic save on every update
+        self.discovery.update(purchase.key, {"state": state.value})
+
+    def _write_csv_rows(self, purchase: Purchase, receipt_status: str,
+                        processing_status: str, notes_extra: str = ""):
+        notes = "; ".join(x for x in (purchase.notes, notes_extra) if x)
+        items = purchase.items or [Item(name="")]
+        self.order_csv.append_rows([{
+            "Account Holder": self.config.get("owner", ""),
+            "Purchase Date": purchase.purchase_date,
+            "Purchase Type": purchase.purchase_type,
+            "Order or Receipt Number": purchase.order_number,
+            "Order Status": purchase.status,
+            "Item Name": it.name,
+            "Quantity": it.quantity,
+            "Unit Price": it.unit_price,
+            "Line Item Total": it.line_total,
+            "Order Total": purchase.total,
+            "Fulfillment Method": it.fulfillment or purchase.fulfillment,
+            "Return Status": it.return_status,
+            "Purchase Summary": purchase.summary,
+            "PDF Filename": purchase.pdf_filename,
+            "Purchase Details URL": purchase.details_url,
+            "Receipt URL": purchase.receipt_url,
+            "Processing Status": processing_status,
+            "Notes": notes,
+        } for it in items])
+
+        if purchase.pdf_filename or receipt_status != "Downloaded":
+            prog = self.progress.get(purchase.key) or {}
+            self.index_csv.append_rows([{
+                "Account Holder": self.config.get("owner", ""),
+                "Purchase Date": purchase.purchase_date,
+                "Purchase Type": purchase.purchase_type,
+                "Order or Receipt Number": purchase.order_number,
+                "Order Total": purchase.total,
+                "Purchase Summary": purchase.summary,
+                "PDF Filename": purchase.pdf_filename,
+                "PDF Full Path": purchase.pdf_path,
+                "Document Type": purchase.document_type,
+                "Receipt Status": receipt_status,
+                "Receipt Count": purchase.receipt_count,
+                "Classification Confidence": purchase.confidence,
+                "Receipt URL": purchase.receipt_url,
+                "PDF File Size": prog.get("pdf_size", ""),
+                "PDF Page Count": prog.get("pdf_pages", ""),
+                "Downloaded At": now_iso() if purchase.pdf_filename else "",
+                "Verified At": now_iso() if prog.get("pdf_pages") else "",
+                "Processing Status": processing_status,
+                "Notes": notes,
+            }])
+
+    # -- modes --------------------------------------------------------------
+
+    def cmd_pilot(self, online: bool = True, instore: bool = True):
+        self.stats["mode"] = "pilot"
+        types = ([ONLINE] if online else []) + ([IN_STORE] if instore else [])
+        print("PILOT MODE - limited supervised test run.")
+        self.cmd_discover(types=types, quiet=False)
+        selected: List[Purchase] = []
+        if online:
+            selected += self._select_purchases(ONLINE, limit=self.config["pilot_online"])
+        if instore:
+            selected += self._select_purchases(IN_STORE, limit=self.config["pilot_instore"])
+        if not selected:
+            print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
+            return
+        print(f"\nProcessing {len(selected)} pilot purchase(s)...")
+        self.process_purchases(selected, dry_run=self.args.dry_run)
+        self._pilot_report(selected)
+
+    def _pilot_report(self, selected: List[Purchase]):
+        print("\n" + "=" * 70)
+        print("PILOT RESULTS - please inspect these files before approving a full run")
+        print("=" * 70)
+        problems = []
+        for p in selected:
+            rec = self.progress.get(p.key) or {}
+            state = rec.get("state", "?")
+            fn = rec.get("pdf_filename", "")
+            print(f"\n  {p.purchase_type}  {rec.get('purchase_date', p.purchase_date)}  "
+                  f"#{rec.get('order_number', p.order_number)}")
+            print(f"    State:      {state}")
+            print(f"    Summary:    {rec.get('summary','')} "
+                  f"[confidence: {rec.get('confidence','')}]")
+            print(f"    PDF:        {fn or '(none)'}")
+            if fn:
+                path = Path(rec.get("pdf_path", ""))
+                exists = path.exists()
+                print(f"    PDF exists: {exists}  "
+                      f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
+                if not exists:
+                    problems.append(f"{p.key}: PDF missing")
+            if state in (State.NEEDS_MANUAL_REVIEW.value, State.FAILED.value,
+                         State.NO_RECEIPT_AVAILABLE.value):
+                problems.append(f"{p.key}: {state} - {rec.get('notes','')}")
+        print("\n" + "-" * 70)
+        if problems:
+            print("Needs attention:")
+            for pr in problems:
+                print(f"  ! {pr}")
+        else:
+            print("No problems detected in the pilot.")
+        print("\nPilot finished. Inspect the PDFs and CSVs in:")
+        print(f"  {self.paths.root}")
+        print("Nothing further will run until you explicitly start a full command,")
+        print("e.g.:  python target_receipts.py --all")
+
+    def cmd_run(self, types: List[str], mode_name: str):
+        self.stats["mode"] = mode_name
+        if mode_name == "all" and not self.args.yes:
+            print("This will download your FULL available Target purchase history")
+            print(f"({', '.join(types)}). Type YES to continue:")
+            if ask("> ").strip().upper() != "YES":
+                print("Aborted. (Run the pilot first if you haven't: --pilot)")
+                return
+        self.cmd_discover(types=types, quiet=False)
+        selected: List[Purchase] = []
+        for t in types:
+            selected += self._select_purchases(t)
+        print(f"\nProcessing {len(selected)} purchase(s)...")
+        self.process_purchases(selected, dry_run=self.args.dry_run)
+
+    def cmd_resume(self):
+        self.stats["mode"] = "resume"
+        pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
+                if isinstance(r, dict) and r.get("order_number")]
+        pend = [p for p in pend if not self._already_done(p)]
+        pend.sort(key=lambda p: p.purchase_date or "0000", reverse=True)
+        if self.args.max_purchases:
+            pend = pend[:self.args.max_purchases]
+        if not pend:
+            print("Nothing to resume - all discovered purchases are complete.")
+            return
+        print(f"Resuming: {len(pend)} incomplete purchase(s).")
+        self.process_purchases(pend, dry_run=self.args.dry_run)
+
+    def cmd_verify(self):
+        self.stats["mode"] = "verify"
+        rows = self.index_csv.read_all()
+        if not rows:
+            print("Receipt index is empty - nothing to verify.")
+            return
+        bad = 0
+        seen_keys = {}
+        for row in rows:
+            path = row.get("PDF Full Path", "")
+            key = f"{row.get('Purchase Type')}:{row.get('Order or Receipt Number')}"
+            seen_keys[key] = seen_keys.get(key, 0) + 1
+            if not path:
+                continue
+            result = receipt_pdf.validate_pdf(Path(path), self.config["min_pdf_bytes"])
+            mark = "OK " if result.ok else "BAD"
+            if not result.ok:
+                bad += 1
+                print(f"  {mark} {row.get('PDF Filename','')}: {result.reason}")
+            row["Verified At"] = now_iso() if result.ok else row.get("Verified At", "")
+        dups = {k: c for k, c in seen_keys.items() if c > 1}
+        self.index_csv.rewrite(rows)
+        print(f"\nVerified {len(rows)} index rows; {bad} problem(s).")
+        if dups:
+            print("Note: multiple index rows for these purchases (may be legitimate "
+                  "multi-document orders):")
+            for k, c in dups.items():
+                print(f"  {k}: {c} rows")
+
+    def cmd_review_names(self):
+        rows = self.index_csv.read_all()
+        review = [r for r in rows if r.get("Classification Confidence") == "Low"
+                  or "Review" in (r.get("Processing Status") or "")]
+        if not review:
+            print("No receipts need name review.")
+            return
+        print(f"{len(review)} receipt(s) need review. Enter a new summary, "
+              "press Enter to keep, or 'q' to stop.\n")
+        order_rows = self.order_csv.read_all()
+        changed = False
+        for r in review:
+            key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
+            prog = self.progress.get(key) or {}
+            items = [i.get("name", "") for i in prog.get("items", [])][:10]
+            print(f"  {r.get('Purchase Date')}  #{r.get('Order or Receipt Number')}"
+                  f"  [{r.get('Classification Confidence')}]")
+            print(f"    Current file: {r.get('PDF Filename')}")
+            if items:
+                print(f"    Items: {'; '.join(items)}")
+            new = ask("    New summary (blank=keep, q=quit): ").strip()
+            if new.lower() == "q":
+                break
+            if not new:
+                print()
+                continue
+            new_summary = title_case(new)
+            old_path = Path(r.get("PDF Full Path") or "")
+            date = r.get("Purchase Date") or (old_path.name[:10] if old_path.name else "")
+            doc_type = r.get("Document Type") or "Receipt"
+            new_name = build_pdf_filename(date, new_summary, doc_type)
+            if old_path.exists():
+                new_path = unique_path(old_path.parent, new_name,
+                                       self.config["max_path_length"])
+                old_path.rename(new_path)  # unique_path guarantees no overwrite
+            else:
+                new_path = old_path.parent / new_name if old_path.name else Path(new_name)
+                print("    (warning: original PDF not found on disk; records updated only)")
+            old_filename = r.get("PDF Filename")
+            r["PDF Filename"] = new_path.name
+            r["PDF Full Path"] = str(new_path)
+            r["Purchase Summary"] = new_summary
+            r["Processing Status"] = "Completed"
+            r["Notes"] = (r.get("Notes", "") + "; renamed via --review-names").strip("; ")
+            for orow in order_rows:
+                if (orow.get("Order or Receipt Number") == r.get("Order or Receipt Number")
+                        and orow.get("PDF Filename") == old_filename):
+                    orow["PDF Filename"] = new_path.name
+                    orow["Purchase Summary"] = new_summary
+                    orow["Processing Status"] = "Completed"
+            self.progress.update(key, {  # key (purchase identifier) unchanged
+                "summary": new_summary, "pdf_filename": new_path.name,
+                "pdf_path": str(new_path), "confidence": "High",
+                "state": State.COMPLETED.value})
+            changed = True
+            print(f"    Renamed -> {new_path.name}\n")
+        if changed:
+            self.index_csv.rewrite(rows)
+            self.order_csv.rewrite(order_rows)
+            print("CSV files and progress.json updated.")
+
+    def cmd_diagnose(self):
+        """Inspect one purchase per type and record local diagnostics."""
+        self.stats["mode"] = "diagnose"
+        import json as _json
+        page = self.page()
+        if not self.discovery.data:
+            self.cmd_discover(quiet=True)
+        for ptype in (ONLINE, IN_STORE):
+            candidates = self._select_purchases(ptype, limit=1)
+            if self.args.order_number:
+                candidates = [p for p in
+                              self._select_purchases(None, limit=None)
+                              if p.order_number == self.args.order_number]
+            if not candidates:
+                print(f"No {ptype} purchase available to diagnose.")
+                continue
+            p = candidates[0]
+            print(f"\nDiagnosing {ptype} purchase #{p.order_number} ...")
+            info = {"purchase": p.key, "timestamp": now_iso()}
+            try:
+                site.goto_details(page, p)
+                info["url"] = page.url
+                info["title"] = page.title()
+                info["signed_out"] = site.looks_signed_out(page)
+                info["challenge"] = site.detect_security_challenge(page)
+                buttons = []
+                for role in ("button", "link", "tab"):
+                    try:
+                        loc = page.get_by_role(role)
+                        for i in range(min(loc.count(), 80)):
+                            t = (loc.nth(i).inner_text(timeout=800) or "").strip()
+                            if t and len(t) < 80:
+                                buttons.append({"role": role, "name": t})
+                    except Exception:
+                        continue
+                info["controls"] = buttons
+                info["receipt_section_found"] = site.open_receipt_section(page)
+                controls = site.find_print_receipt_controls(page)
+                info["print_receipt_controls"] = len(controls)
+                info["invoice_controls"] = len(site.find_invoice_controls(page))
+                info["iframe_receipt"] = site.find_receipt_iframe(page) is not None
+                info["items_extracted"] = [i.name for i in site.extract_items(page)][:20]
+                shot = self.paths.diagnostics / f"diagnose-{ptype}-{p.order_number}.png"
+                page.screenshot(path=str(shot), full_page=True)
+                info["screenshot"] = str(shot)
+            except Exception as e:
+                info["error"] = str(e)
+            out = self.paths.diagnostics / f"diagnose-{ptype}-{p.order_number}.json"
+            atomic_write_text(out, _json.dumps(info, indent=2))
+            print(f"  Wrote {out}")
+            print(f"  Print-receipt controls found: {info.get('print_receipt_controls', '?')}; "
+                  f"receipt section: {info.get('receipt_section_found', '?')}")
+
+    # -- run summary --------------------------------------------------------
+
+    def write_run_summary(self):
+        s = self.stats
+        s["ended"] = now_iso()
+        dates = sorted(d for d in s["dates_processed"] if d)
+        new_files = s.get("new_files", [])
+        lines = [
+            "Target Receipts - run summary",
+            "=" * 40,
+            f"Run start:                 {s['started']}",
+            f"Run end:                   {s['ended']}",
+            f"Mode:                      {s['mode'] or '(none)'}",
+            f"Online purchases known:    {s['online_discovered']}",
+            f"In-store purchases known:  {s['instore_discovered']}",
+            f"NEW files this run:        {len(new_files)}",
+            f"Receipts downloaded:       {s['receipts_downloaded']}",
+            f"Invoices downloaded:       {s['invoices_downloaded']}",
+            f"Skipped (already done):    {s['skipped_completed']}",
+            f"Canceled purchases:        {s['canceled']}",
+            f"No printable receipt:      {s['no_receipt']}",
+            f"Needs manual review:       {s['manual_review']}",
+            f"Failed:                    {s['failed']}",
+            f"Duplicate filenames (#'d): {s['duplicate_filenames']}",
+            f"PDF validation failures:   {s['validation_failures']}",
+            f"Earliest date processed:   {dates[0] if dates else '-'}",
+            f"Latest date processed:     {dates[-1] if dates else '-'}",
+            "",
+        ]
+        atomic_write_text(self.paths.run_summary, "\n".join(lines))
+        # A plain list of exactly the files downloaded THIS run (all new, since
+        # already-downloaded items are skipped). Handy for knowing what to
+        # import into paperless-ngx, and safe to ignore/delete afterward.
+        if new_files:
+            atomic_write_text(
+                self.paths.root / "new-this-run.txt",
+                f"# {len(new_files)} file(s) downloaded on this run "
+                f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
+            print(f"\n{len(new_files)} NEW file(s) downloaded this run "
+                  f"(listed in new-this-run.txt).")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(description="Local supervised Target receipt downloader")
+    modes = [
+        ("login", "open browser for manual Target sign-in"),
+        ("discover", "discovery pass only; writes discovery.json"),
+        ("pilot", "pilot: 5 newest Online + 3 newest In-store"),
+        ("pilot-online", "pilot Online section only"),
+        ("pilot-instore", "pilot In-store section only"),
+        ("online", "process all Online purchases"),
+        ("instore", "process all In-store purchases"),
+        ("all", "process everything (asks for confirmation)"),
+        ("resume", "resume incomplete purchases"),
+        ("verify", "re-validate every indexed PDF"),
+        ("review-names", "interactively fix low-confidence names"),
+        ("diagnose", "inspect one purchase per section, write diagnostics"),
+    ]
+    for name, help_text in modes:
+        ap.add_argument(f"--{name}", action="store_true", help=help_text)
+    ap.add_argument("--dry-run", action="store_true",
+                    help="extract and plan filenames but save no PDFs/CSVs")
+    ap.add_argument("--year", type=int)
+    ap.add_argument("--start-date")
+    ap.add_argument("--end-date")
+    ap.add_argument("--max-purchases", type=int)
+    ap.add_argument("--order-number")
+    ap.add_argument("--include-invoices", action="store_true",
+                    help="save invoices (to Invoices folder) when no receipt exists")
+    ap.add_argument("--yes", action="store_true", help="skip the --all confirmation prompt")
+    ap.add_argument("--redownload", action="store_true",
+                    help="re-download everything in scope, ignoring the "
+                         "'already downloaded' memory (rebuilds deleted files)")
+    ap.add_argument("--config", help="use an alternate config file, e.g. "
+                                     "config.jane.json (separate account)")
+    return ap
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    for d in (args.start_date, args.end_date):
+        if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            print(f"Bad date '{d}': use YYYY-MM-DD")
+            return 2
+
+    app = App(args)
+    try:
+        if args.login:
+            app.cmd_login()
+        elif args.discover:
+            app.cmd_discover()
+        elif args.pilot:
+            app.cmd_pilot()
+        elif getattr(args, "pilot_online"):
+            app.cmd_pilot(online=True, instore=False)
+        elif getattr(args, "pilot_instore"):
+            app.cmd_pilot(online=False, instore=True)
+        elif args.online:
+            app.cmd_run([ONLINE], "online")
+        elif args.instore:
+            app.cmd_run([IN_STORE], "instore")
+        elif args.all:
+            app.cmd_run([ONLINE, IN_STORE], "all")
+        elif args.resume:
+            app.cmd_resume()
+        elif args.verify:
+            app.cmd_verify()
+        elif getattr(args, "review_names"):
+            app.cmd_review_names()
+        elif args.diagnose:
+            app.cmd_diagnose()
+        elif args.dry_run:
+            app.cmd_run([ONLINE, IN_STORE], "dry-run")
+        else:
+            build_parser().print_help()
+            return 0
+    except KeyboardInterrupt:
+        print("\nStopped by user. Progress saved.")
+    finally:
+        app.progress.save()
+        app.discovery.save()
+        if app.stats["mode"]:
+            app.write_run_summary()
+        app.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+

@@ -1,0 +1,40 @@
+{
+  "_comment": "Editable rules mapping American Express document titles to filename summaries. Checked in order: tax, then year-end, then insurance (unused for Amex), then statement. Repair after running diagnose.bat against your real Statements & Activity / Documents pages.",
+  "tax_rules": [
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?C\\b", "summary": "1099-C Tax Form"},
+    {"pattern": "1099-?K\\b", "summary": "1099-K Tax Form"},
+    {"pattern": "1099-?DIV\\b", "summary": "1099-DIV Tax Form"},
+    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "\\b1098\\b", "summary": "1098 Tax Form"},
+    {"pattern": "\\b5498\\b", "summary": "5498 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package|information)", "summary": "Tax Document"}
+  ],
+  "year_end_rules": [
+    {"pattern": "year.?end\\s+summary", "summary": "Year-End Summary"},
+    {"pattern": "annual\\s+summary", "summary": "Year-End Summary"},
+    {"pattern": "year\\s+in\\s+review", "summary": "Year-End Summary"},
+    {"pattern": "spending\\s+(report|summary)", "summary": "Year-End Summary"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "monthly\\s+(account\\s+)?statement", "summary": "Monthly Statement"},
+    {"pattern": "billing\\s+statement", "summary": "Billing Statement"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Statement"}
+  ],
+  "skip_patterns": [
+    "cardmember\\s+agreement",
+    "\\bagreement\\b",
+    "disclosure",
+    "privacy\\s+(notice|policy|statement)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "important\\s+(notice|changes)",
+    "change\\s+in\\s+terms",
+    "benefits?\\s+guide",
+    "insert\\b"
+  ]
+}
