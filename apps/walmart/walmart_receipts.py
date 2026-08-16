@@ -246,18 +246,38 @@ class App:
         profile = self.config["profile_dir"]
         Path(profile).mkdir(parents=True, exist_ok=True)
         local = os.environ.get("LOCALAPPDATA", "")
-        candidates = (glob.glob(os.path.join(local, "ms-playwright", "chromium-*",
-                                             "chrome-win64", "chrome.exe"))
-                      + glob.glob(os.path.join(local, "ms-playwright", "chromium-*",
-                                               "chrome-win", "chrome.exe")))
+        # Walmart's bot protection (PerimeterX) fingerprints the Playwright
+        # Chromium build as automation and shows the "Robot or human?" wall on
+        # loop. A real, branded browser passes far more reliably, so prefer
+        # Microsoft Edge, then Google Chrome, then the bundled Chromium. Receipt
+        # capture is CDP Page.printToPDF (not download events), so attaching to
+        # a real browser needs no extra download plumbing.
+        pf = os.environ.get("PROGRAMFILES", "")
+        pfx = os.environ.get("PROGRAMFILES(X86)", "")
+        real_paths = [
+            os.path.join(pfx, "Microsoft", "Edge", "Application", "msedge.exe"),
+            os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
+            os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(pfx, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(local, "Google", "Chrome", "Application", "chrome.exe"),
+        ]
+        candidates = [p for p in real_paths if p and os.path.exists(p)]
+        real = candidates[0] if candidates else None
+        candidates += (glob.glob(os.path.join(local, "ms-playwright", "chromium-*",
+                                              "chrome-win64", "chrome.exe"))
+                       + glob.glob(os.path.join(local, "ms-playwright", "chromium-*",
+                                                "chrome-win", "chrome.exe")))
         if not candidates:
-            print("Could not find the Playwright Chromium. Run setup.bat first.")
+            print("Could not find Microsoft Edge, Google Chrome, or the Playwright")
+            print("Chromium. Install Edge/Chrome, or run setup.bat first.")
             return
+        which = ("Microsoft Edge" if real and "msedge" in real.lower()
+                 else "Google Chrome" if real else "Chromium")
         url = site.URLS.get("orders") or site.URLS.get("login") or site.URLS["home"]
         subprocess.Popen([candidates[0], f"--user-data-dir={profile}",
                           f"--remote-debugging-port={port}", "--no-first-run",
                           "--no-default-browser-check", url])
-        print(f"Opened a sign-in browser on port {port}.")
+        print(f"Opened a sign-in browser on port {port} ({which}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
 

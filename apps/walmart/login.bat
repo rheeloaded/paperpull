@@ -8,8 +8,11 @@ echo  Walmart Receipts - sign in
 echo ============================================================
 if not "%~1"=="" echo Account: %~1
 echo.
-echo A normal Chromium window will open. Then:
-echo   1. Sign in to Walmart (handle any "Robot or human?" check).
+echo A browser window opens - Microsoft Edge if installed (it passes
+echo Walmart's bot check far better than the bundled Chromium), else
+echo Chrome/Chromium. Then:
+echo   1. Sign in to Walmart (handle any "Robot or human?" check). If this is
+echo      your first time on Edge, you'll need to sign in again here.
 echo   2. Go to walmart.com/orders and confirm you see the orders.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
 echo   4. Then run run_pilot.bat %~1
