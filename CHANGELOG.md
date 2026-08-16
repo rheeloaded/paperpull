@@ -15,6 +15,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   bundled Chromium) and captures downloads via a controlled directory over CDP.
 - **T-Mobile** — monthly bill statements (11th provider). Reads the bill-history
   page and downloads each period's detailed-bill PDF via a real download event.
+- **Target RedCard / Target Circle Card** — monthly billing statements (12th
+  provider). The RedCard credit account is serviced by TD Bank USA; reads the
+  statements table (per-year switcher) at mytargetcirclecard.target.com and
+  downloads each row's statement PDF via a real download event.
 
 ## [0.1.0] — 2026-08-15
 
