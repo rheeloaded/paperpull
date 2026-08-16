@@ -91,14 +91,30 @@ Each app also has its own README with provider-specific details and quirks.
 - Python 3.11+
 - Playwright (installed per app via `setup.bat`)
 
+## Contributing — add your provider
+
+No one has accounts everywhere, so **PaperPull grows when people add the
+providers they use.** If a bank, card, brokerage, utility, telecom, or retailer
+you use isn't here yet, you're the ideal person to add it:
+
+- 📖 **[Adding a provider](docs/adding-a-provider.md)** — a step-by-step guide
+  (clone the closest app, rewrite one file, stay read-only, test, submit).
+- 📋 **[PROVIDERS.md](PROVIDERS.md)** — what's supported and what's requested;
+  claim one so nobody builds it twice.
+- 📥 Can't build it yourself? [Request a provider](https://github.com/rheeloaded/paperpull/issues/new/choose)
+  and someone with that account may pick it up.
+
+Every contribution keeps the **read-only, local, no-credentials** design — see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
 ## Status & roadmap
 
-- ✅ All ten apps work and are in regular use.
-- 🔜 **Planned providers:** none in the queue — suggestions welcome.
+- ✅ All **twelve** apps work and are in regular use.
+- 🔜 **More providers:** community-driven — see [PROVIDERS.md](PROVIDERS.md).
 - 🔜 **Shared core:** the apps grew independently and duplicate a fair amount of
   support code (`storage.py`, `receipt_pdf.py`, `models.py`). Extracting a shared
   library is a known future cleanup — deferred so as not to destabilize working
-  tools. See each app's code for now.
+  tools.
 
 ## Support
 

@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 How to add a provider
+    url: https://github.com/rheeloaded/paperpull/blob/main/docs/adding-a-provider.md
+    about: Step-by-step guide to building a new downloader app.
+  - name: 📋 Provider list (supported + requested)
+    url: https://github.com/rheeloaded/paperpull/blob/main/PROVIDERS.md
+    about: See what's supported and what people want next.
+  - name: 🔒 Security & privacy
+    url: https://github.com/rheeloaded/paperpull/blob/main/SECURITY.md
+    about: What the tools do, and what must never be committed.

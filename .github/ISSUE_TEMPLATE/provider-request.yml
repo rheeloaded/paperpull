@@ -1,0 +1,54 @@
+name: "📥 Request a provider"
+description: Ask for a bank, card, brokerage, utility, telecom, or retailer to be supported.
+title: "[Provider request] <provider name>"
+labels: ["provider-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Want PaperPull to support a provider you use but you can't build it
+        yourself? Describe it here so someone with that account can pick it up.
+        (If you *can* build it, use the **"I'll build a provider"** template
+        instead.)
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      description: The company / service name.
+      placeholder: e.g. Chase, Fidelity, PG&E, Comcast, Costco
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Bank / credit union
+        - Credit card
+        - Brokerage / investing
+        - Utility
+        - Telecom / internet
+        - Retail
+        - Insurance
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Where you sign in
+      description: The login or account URL (no credentials, just the address).
+      placeholder: e.g. https://www.chase.com
+  - type: textarea
+    id: documents
+    attributes:
+      label: What documents do you want?
+      description: Statements, bills, receipts, tax forms, year-end summaries…
+      placeholder: e.g. monthly statements + 1099 tax forms
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you help?
+      options:
+        - label: I have an account with this provider and can help test a build.
+        - label: I'm only requesting it; I can't test.
