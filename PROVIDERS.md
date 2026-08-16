@@ -33,6 +33,10 @@ Anyone can add a row (via a [provider request](https://github.com/rheeloaded/pap
 or a PR). Claim one by commenting on its issue so two people don't build the
 same thing. When it merges, it moves up to **Supported**.
 
+New to this? Look for the **`good first provider`** label — those are easy sites
+(a plain statements table + a real download link). See
+[Which provider is a good first build?](docs/adding-a-provider.md#which-provider-is-a-good-first-build)
+
 | Provider | Category | Requested by | Status |
 |----------|----------|--------------|--------|
 | _(none yet — add yours)_ | | | |
