@@ -12,6 +12,7 @@ YOUR account = just the batch name.  SPOUSE = add "spouse".
   Fix a name      review_names.bat       review_names.bat spouse
 
 FLOW:  login.bat  ->  run_pilot.bat  ->  run_all.bat
+Online orders land in Online\, in-store purchases in In-Store\.
 Keep the sign-in browser OPEN during the run.
 
 HOW FAR BACK: Gap only shows about the LAST 13 MONTHS of orders, and every

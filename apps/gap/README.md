@@ -1,7 +1,8 @@
 # Gap Receipts Downloader (local, supervised)
 
-Downloads your Gap Inc. order history and saves each order's **order-details
-receipt** as a PDF, plus two CSV files:
+Downloads your Gap Inc. purchase history — **online orders and in-store
+purchases** — and saves each one's **order-details receipt** as a PDF, plus
+two CSV files:
 
 - `Gap Order History.csv` — one row per purchased item
 - `Gap Receipt Index.csv` — one row per downloaded PDF
@@ -9,6 +10,13 @@ receipt** as a PDF, plus two CSV files:
 Everything runs **locally**. Nothing is sent to any external AI API or
 third-party service. You sign in to Gap **manually**; the tool never
 touches your credentials and never bypasses CAPTCHAs or OTP.
+
+## Online orders and in-store purchases
+
+Gap's history page mixes both. Online orders go to `Online\` and record the
+Gap Inc. brand that shipped them; in-store purchases go to `In-Store\` and
+record the store they were made at (e.g. "Riverside Commons"). Run one kind on
+its own with `--online` / `--instore`.
 
 ## One login, every Gap Inc. brand
 
@@ -44,9 +52,9 @@ signed-in browsers can be open at once.
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
 | 2 | `login.bat` | Opens Chromium; sign in, open Order History, **leave it open** |
-| 3 | `run_pilot.bat` | 5 newest orders, then **stops** for your inspection |
+| 3 | `run_pilot.bat` | newest few of each kind, then **stops** for your inspection |
 | 4 | inspect the PDFs/CSVs | You approve before anything bigger runs |
-| 5 | `run_all.bat` | Your entire order history (asks for `yes`) |
+| 5 | `run_all.bat` | Your entire purchase history (asks for `yes`) |
 | any time | `resume.bat` | Continue after an interruption; never redoes finished work |
 | any time | `verify_receipts.bat` | Re-validate every indexed PDF |
 | any time | `review_names.bat` | Fix low-confidence filenames interactively |
@@ -54,7 +62,8 @@ signed-in browsers can be open at once.
 Useful for splitting a run:
 
 ```
-python gap_receipts.py --all --year 2026
+python gap_receipts.py --online                     REM online orders only
+python gap_receipts.py --instore                    REM in-store purchases only
 python gap_receipts.py --all --start-date 2026-01-01 --max-purchases 100
 ```
 
@@ -67,7 +76,7 @@ purchase-summary block, and renders that with Chromium's `printToPDF` — a
 clean one-page receipt instead of three pages of site navigation. Hiding is a
 display-only change in the local page; nothing is submitted to Gap. No
 buttons are clicked and the native print dialog is never involved. Files land
-in `Online\` as `YYYY-MM-DD Gap <Category> Receipt.pdf`.
+in `Online\` (or `In-Store\`) as `YYYY-MM-DD Gap <Category> Receipt.pdf`.
 
 Canceled orders are recorded in the CSVs with no PDF (nothing to print).
 

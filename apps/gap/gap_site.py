@@ -19,7 +19,9 @@ How Gap differs from the other merchants:
   everything outside the receipt block - the purchase header, line items and
   charge summary - so the PDF holds the receipt and nothing else.
 
-Gap purchases are all treated as "Online" (there is no in-store section).
+Gap's single history page mixes ONLINE orders with IN-STORE purchases
+(a card reading "Purchased In Store - 5 Items" plus the store name).
+Both are collected in one pass and split by type afterwards.
 
 This file is READ-ONLY by design: nothing here clicks an action control.
 Capture is pure navigation + printToPDF, so ``FORBIDDEN_CONTROL_RE`` exists
@@ -35,7 +37,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from models import ONLINE, Item, Purchase
+from models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
 
 log = logging.getLogger("gap_receipts.site")
@@ -97,6 +99,7 @@ DEFAULT_BRAND = "Gap"
 
 TAB_NAME = {
     ONLINE: re.compile(r"^\s*order\s+history\s*$", re.I),
+    IN_STORE: re.compile(r"^\s*order\s+history\s*$", re.I),
 }
 
 LOAD_MORE_RE = re.compile(r"(load more|show more|view more|see more)", re.I)
@@ -164,7 +167,8 @@ FALLBACK = {
     "print_page_body": "body",
 }
 
-CARD_CONTAINER = {ONLINE: FALLBACK["order_card"]}
+CARD_CONTAINER = {ONLINE: FALLBACK["order_card"],
+                  IN_STORE: FALLBACK["order_card"]}
 
 DATE_PATTERNS = [
     (re.compile(r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
@@ -349,8 +353,9 @@ def goto_orders(page) -> None:
 
 
 def select_history_tab(page, purchase_type: str) -> bool:
-    """Gap has no in-store section; everything is Online."""
-    return purchase_type == ONLINE
+    """Gap has no separate tabs: one history page holds both online orders
+    and in-store purchases."""
+    return purchase_type in (ONLINE, IN_STORE)
 
 
 def goto_year_page(page, year: int, start_index: int = 0) -> bool:
@@ -383,6 +388,25 @@ def _card_count(page, purchase_type: str = ONLINE) -> int:
     return _order_link_count(page)
 
 
+# An in-store purchase card reads "Purchased In Store - 5 Items" followed by
+# the store name ("RIVERSIDE COMMONS"). Online cards say "Shipping"/"Delivery".
+IN_STORE_RE = re.compile(r"purchased\s+in\s+store\s*-\s*\d+\s*items?", re.I)
+
+
+def store_from_text(text: str) -> str:
+    """The store name printed under an in-store purchase's "Purchased In
+    Store" line."""
+    lines = [l.strip() for l in (text or "").splitlines()]
+    for i, line in enumerate(lines):
+        if IN_STORE_RE.search(line):
+            for nxt in lines[i + 1: i + 3]:
+                if nxt and not MONEY_RE.search(nxt) and len(nxt) < 60 \
+                        and not re.match(r"^(details|image|track)", nxt, re.I):
+                    return nxt.title()
+            break
+    return ""
+
+
 @dataclass
 class RawCard:
     href: str
@@ -390,26 +414,49 @@ class RawCard:
     order_id: str = ""
     kind: str = ONLINE
     brand: str = ""
+    in_store: bool = False
+    store: str = ""
 
 
 # Collect one record per order card: the id from the details link, plus the
-# text of the smallest ancestor that actually reads like a card (so the date
-# and any total come along) and the raw hrefs inside it (for the brand).
+# card's own text (so its date, store and any total come along) and the raw
+# hrefs inside it (for the brand).
+#
+# The card boundary is found by walking up from the order's link for as long
+# as everything under the ancestor still belongs to ONE order id. The moment a
+# second order's id appears, we have left this card.
+#
+# Two traps this avoids:
+#  * Bounding by TEXT LENGTH sails past sparse cards (in-store purchases carry
+#    very little text) and grabs the whole list, handing every order the same
+#    text - and therefore the first card's date.
+#  * Counting LINKS rather than distinct ids cuts a card in half, because each
+#    order links to itself twice (the date/number header and a "Details"
+#    button). That drops the store name and the in-store marker.
 _COLLECT_CARDS_JS = r"""
 () => {
+  const LINK = "a[href*='order-details/']";
+  const RE = /order-details\/([A-Za-z0-9][A-Za-z0-9_-]{3,23})/;
+  const idsIn = (el) => {
+    const s = new Set();
+    for (const l of el.querySelectorAll(LINK)) {
+      const m = (l.getAttribute('href') || '').match(RE);
+      if (m) s.add(m[1]);
+    }
+    return s;
+  };
   const out = [];
   const seen = new Set();
-  for (const a of document.querySelectorAll("a[href*='order-details/']")) {
-    const m = (a.getAttribute('href') || '').match(/order-details\/([A-Za-z0-9][A-Za-z0-9_-]{3,23})/);
+  for (const a of document.querySelectorAll(LINK)) {
+    const m = (a.getAttribute('href') || '').match(RE);
     if (!m) continue;
     const id = m[1];
     if (seen.has(id)) continue;
     seen.add(id);
     let best = a, el = a.parentElement;
     while (el && el !== document.body) {
-      const t = (el.innerText || '').trim();
-      if (t.length > 700) break;
-      if (t.length > 25) best = el;
+      if (idsIn(el).size > 1) break;      // reached a sibling order
+      best = el;
       el = el.parentElement;
     }
     const hrefs = Array.from(best.querySelectorAll('a[href]'))
@@ -421,10 +468,13 @@ _COLLECT_CARDS_JS = r"""
 """
 
 
-def collect_cards(page, purchase_type: str = ONLINE) -> List[RawCard]:
-    """Collect every order card currently rendered on the history page."""
-    if purchase_type != ONLINE:
-        return []
+def collect_cards(page, purchase_type: str = "") -> List[RawCard]:
+    """Collect every purchase card currently rendered on the history page.
+
+    Online orders and in-store purchases share one list, so everything is
+    collected in a single pass; each card carries its own type in `kind`.
+    Pass a purchase_type to get only that kind.
+    """
     try:
         raw = page.evaluate(_COLLECT_CARDS_JS) or []
     except Exception as e:
@@ -436,14 +486,22 @@ def collect_cards(page, purchase_type: str = ONLINE) -> List[RawCard]:
         if not oid:
             continue
         text = r.get("text") or ""
+        in_store = bool(IN_STORE_RE.search(text))
         cards.append(RawCard(
             href=order_details_url(oid), text=text, order_id=oid,
-            brand=brand_from_text(r.get("hrefs", "")) or brand_from_text(text)))
+            kind=IN_STORE if in_store else ONLINE,
+            brand=brand_from_text(r.get("hrefs", "")) or brand_from_text(text),
+            in_store=in_store,
+            store=store_from_text(text)))
+    if purchase_type:
+        cards = [c for c in cards if c.kind == purchase_type]
     return cards
 
 
-def card_to_purchase(card: RawCard, purchase_type: str,
+def card_to_purchase(card: RawCard, purchase_type: str = "",
                      base_url: str = BASE) -> Optional[Purchase]:
+    """Build a Purchase from a card. The type comes from the CARD (Gap mixes
+    both kinds in one list), not from the caller's argument."""
     if not card.order_id:
         return None
     text = card.text or ""
@@ -462,12 +520,15 @@ def card_to_purchase(card: RawCard, purchase_type: str,
     m = re.search(r"total[^$]{0,20}(\$[\d,]+\.\d{2})", text, re.I)
     total = m.group(1) if m else parse_money(text)
     return Purchase(
-        purchase_type=ONLINE,
+        purchase_type=IN_STORE if card.in_store else ONLINE,
         purchase_date=date,
         order_number=card.order_id,
         total=total,
         status=parse_status(text),
-        store_info=card.brand or DEFAULT_BRAND,
+        # In-store purchases record the store they were made at; online
+        # orders record the Gap Inc. brand that shipped them.
+        store_info=(card.store or "In Store") if card.in_store
+        else (card.brand or DEFAULT_BRAND),
         details_url=order_details_url(card.order_id),
         receipt_url=order_details_url(card.order_id),
         discovered_at=now_iso(),

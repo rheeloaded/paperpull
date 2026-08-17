@@ -53,6 +53,7 @@ def load_config(path: Optional[Path] = None) -> dict:
     cfg.setdefault("delay_min_seconds", 2.0)
     cfg.setdefault("delay_max_seconds", 4.0)
     cfg.setdefault("pilot_online", 5)
+    cfg.setdefault("pilot_instore", 3)
     cfg.setdefault("profile_dir", str(PROJECT_DIR / "gap-browser-profile"))
     cfg.setdefault("owner", "")
     cfg.setdefault("owner_in_filename", False)
@@ -100,6 +101,7 @@ class Paths:
     def __init__(self, output_dir: Path):
         self.root = Path(output_dir)
         self.online = self.root / "Online"
+        self.instore = self.root / "In-Store"
         self.invoices = self.root / "Invoices"
         self.manual_review = self.root / "Manual Review"
         self.logs = self.root / "Logs"
@@ -112,7 +114,7 @@ class Paths:
         self.run_summary = self.root / "run-summary.txt"
 
     def all_dirs(self) -> List[Path]:
-        return [self.root, self.online, self.invoices,
+        return [self.root, self.online, self.instore, self.invoices,
                 self.manual_review, self.logs, self.diagnostics, self.backups]
 
     def ensure(self) -> None:
@@ -126,7 +128,7 @@ class Paths:
     def folder_for(self, purchase_type: str = "Online", document_type: str = "Receipt") -> Path:
         if document_type == "Invoice":
             return self.invoices
-        return self.online
+        return self.online if purchase_type == "Online" else self.instore
 
 
 # ---------------------------------------------------------------------------
