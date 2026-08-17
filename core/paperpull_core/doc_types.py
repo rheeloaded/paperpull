@@ -1,6 +1,6 @@
-"""Deterministic local classification of T-Mobile documents.
+"""Deterministic local classification of provider documents.
 
-T-Mobile labels every document, so we map that label to a clean, searchable
+Most providers label every document, so we map that label to a clean, searchable
 filename summary. Rules live in the editable document_rules.json.
 
 Categories: Statement (bank), Tax Document, Insurance Document, Other.
@@ -15,7 +15,14 @@ import re
 from pathlib import Path
 from typing import Optional, Tuple
 
-RULES_PATH = Path(__file__).resolve().parent / "document_rules.json"
+DEFAULT_RULES_FILENAME = "document_rules.json"
+
+
+def _rules_path() -> Path:
+    """The rules file lives in the APP's folder, not the package - each
+    provider tunes its own keywords and ships them alongside its code."""
+    from .storage import spec
+    return spec().rules_path or (spec().project_dir / DEFAULT_RULES_FILENAME)
 
 STATEMENT = "Statement"
 TAX = "Tax Document"
@@ -28,7 +35,7 @@ LOW = "Low"
 
 
 def load_rules(path: Optional[Path] = None) -> dict:
-    with open(path or RULES_PATH, "r", encoding="utf-8") as f:
+    with open(path or _rules_path(), "r", encoding="utf-8") as f:
         rules = json.load(f)
     rules.setdefault("tax_rules", [])
     rules.setdefault("insurance_rules", [])

@@ -17,9 +17,41 @@ import re
 from pathlib import Path
 from typing import Iterable, Optional
 
-from models import ValidationResult
+from .models import ValidationResult
 
-log = logging.getLogger("tmobile_docs.pdf")
+log = logging.getLogger("paperpull.pdf")
+
+# ---------------------------------------------------------------------------
+# Provider binding
+# ---------------------------------------------------------------------------
+# Everything in this module is provider-agnostic except three facts: the name
+# to look for when validating a PDF, the host to use as <base href> when
+# re-rendering a saved HTML snapshot, and the name shown in a failure message.
+# The app binds its AppSpec once at import time.
+
+_SPEC = None
+
+
+def bind(spec) -> None:
+    """Attach this process's AppSpec. Called by the app's storage shim."""
+    global _SPEC
+    _SPEC = spec
+
+
+def _provider_name() -> str:
+    return _SPEC.provider if _SPEC else "the provider"
+
+
+def _provider_token() -> str:
+    return _SPEC.token if _SPEC else ""
+
+
+def _base_href() -> str:
+    if _SPEC and _SPEC.base_url:
+        return _SPEC.base_url
+    return ""
+
+
 
 PDF_MAGIC = b"%PDF-"
 
@@ -31,20 +63,20 @@ PRINT_SUPPRESS_INIT_SCRIPT = """
 (() => {
   try {
     const orig = window.print ? window.print.bind(window) : null;
-    window.__rhDocsOriginalPrint = orig;
-    window.__rhDocsPrintCalled = false;
+    window.__paperpullOriginalPrint = orig;
+    window.__paperpullPrintCalled = false;
     window.print = function () {
-      window.__rhDocsPrintCalled = true;
+      window.__paperpullPrintCalled = true;
       // Snapshot the printing document RIGHT NOW: sites often build the
       // print view in a temporary iframe and remove it immediately after
       // print() returns. Stash the HTML on the top window so the automation
       // can retrieve exactly what the print dialog would have rendered.
       try {
         const html = document.documentElement.outerHTML;
-        window.__rhDocsPrintHTML = html;
+        window.__paperpullPrintHTML = html;
         try {
-          window.top.__rhDocsPrintHTML = html;
-          window.top.__rhDocsPrintCalled = true;
+          window.top.__paperpullPrintHTML = html;
+          window.top.__paperpullPrintCalled = true;
         } catch (e) {}
       } catch (e) {}
     };
@@ -55,8 +87,8 @@ PRINT_SUPPRESS_INIT_SCRIPT = """
 PRINT_RESTORE_SCRIPT = """
 (() => {
   try {
-    if (window.__rhDocsOriginalPrint) {
-      window.print = window.__rhDocsOriginalPrint;
+    if (window.__paperpullOriginalPrint) {
+      window.print = window.__paperpullOriginalPrint;
     }
   } catch (e) {}
 })();
@@ -113,7 +145,7 @@ def isolate_for_print(page, selector: str) -> bool:
 
 
 # Tag the smallest element containing every given text needle. Used to find
-# the receipts column on pages without stable ids/landmarks (T-Mobile's
+# the receipts column on pages without stable ids/landmarks (the provider's
 # receipts page has no #content or <main>; everything sits in div#__next).
 ISOLATE_BY_TEXT_SCRIPT = """
 (needles) => {
@@ -128,7 +160,7 @@ ISOLATE_BY_TEXT_SCRIPT = """
     }
   }
   if (!best) return false;
-  best.setAttribute('data-rh-docs-isolate', '1');
+  best.setAttribute('data-paperpull-isolate', '1');
   return true;
 }
 """
@@ -142,7 +174,7 @@ HIDE_GIFT_RECEIPTS_SCRIPT = """
   const giftRe = /gift\\s+receipt/i;
   const storeRe = /store\\s+receipt/i;
   let hidden = 0;
-  const root = document.querySelector('[data-rh-docs-isolate]')
+  const root = document.querySelector('[data-paperpull-isolate]')
                || document.querySelector('#content')
                || document.querySelector('main') || document.body;
   for (const el of root.querySelectorAll('*')) {
@@ -169,7 +201,7 @@ def isolate_online_receipts(page) -> None:
     except Exception:
         pass
     if found:
-        isolate_for_print(page, "[data-rh-docs-isolate='1']")
+        isolate_for_print(page, "[data-paperpull-isolate='1']")
     else:
         for sel in ("#content", "main"):
             if isolate_for_print(page, sel):
@@ -196,7 +228,7 @@ def install_print_suppression(page) -> None:
 
 def was_print_called(page) -> bool:
     try:
-        return bool(page.evaluate("() => window.__rhDocsPrintCalled === true"))
+        return bool(page.evaluate("() => window.__paperpullPrintCalled === true"))
     except Exception:
         return False
 
@@ -246,9 +278,10 @@ def print_html_to_pdf(page, html: str, out_path: Path) -> None:
     printed) to PDF in a temporary tab of the same browser context."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    if "<base" not in html.lower():
+    base = _base_href()
+    if base and "<base" not in html.lower():
         html = re.sub(r"(<head[^>]*>)",
-                      lambda m: m.group(1) + '<base href="https://tmobile.com/">',
+                      lambda m: m.group(1) + f'<base href="{base}">',
                       html, count=1, flags=re.I)
     tmp = page.context.new_page()
     try:
@@ -266,7 +299,7 @@ def get_print_snapshot(page) -> Optional[str]:
     """HTML stashed by the print hook at the moment print() was called
     (from the main window or any same-origin iframe), or None."""
     try:
-        html = page.evaluate("() => window.__rhDocsPrintHTML || null")
+        html = page.evaluate("() => window.__paperpullPrintHTML || null")
         if html and len(html) > 500:
             return html
     except Exception:
@@ -276,8 +309,8 @@ def get_print_snapshot(page) -> Optional[str]:
 
 def clear_print_snapshot(page) -> None:
     try:
-        page.evaluate("() => { window.__rhDocsPrintHTML = null; "
-                      "window.__rhDocsPrintCalled = false; }")
+        page.evaluate("() => { window.__paperpullPrintHTML = null; "
+                      "window.__paperpullPrintCalled = false; }")
     except Exception:
         pass
 
@@ -314,7 +347,7 @@ ZIP_MAGIC = b"PK\x03\x04"
 
 
 def is_zip(path: Path) -> bool:
-    """Some T-Mobile tax forms (e.g. 1099-R) download as a ZIP holding the
+    """Some the provider tax forms (e.g. 1099-R) download as a ZIP holding the
     PDF(s) rather than a bare PDF."""
     try:
         with open(path, "rb") as f:
@@ -381,7 +414,7 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
                  expect_tokens: Optional[Iterable[str]] = None) -> ValidationResult:
     """Verify a saved PDF: exists, non-trivial size, PDF signature, opens
     with pypdf, has >= 1 page. Optionally check extracted text for expected
-    tokens (T-Mobile, date, order number, item names). An image-based PDF with
+    tokens (the provider, date, order number, item names). An image-based PDF with
     little text is NOT rejected for missing tokens."""
     path = Path(path)
     if not path.exists():
@@ -427,7 +460,8 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
             if text_lower.strip() and not token_found:
                 # Text was extractable but none of the expected tokens appear.
                 return ValidationResult(
-                    False, "Extractable text does not mention T-Mobile/order details",
+                    False,
+                    f"Extractable text does not mention {_provider_name()}/order details",
                     size_bytes=size, page_count=pages, text_token_found=False)
             # Little/no extractable text: likely image-based PDF -> accept.
         except Exception:
@@ -439,7 +473,7 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
 
 def expected_tokens_for(purchase) -> list:
     """Tokens whose presence in the PDF text confirms it is the right receipt."""
-    tokens = ["tmobile"]
+    tokens = [t for t in (_provider_token(),) if t]
     if purchase.order_number:
         tokens.append(purchase.order_number)
         # order numbers sometimes render with dashes/spaces stripped

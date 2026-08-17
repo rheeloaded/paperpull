@@ -3,9 +3,8 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage import JsonStore, atomic_write_json, backup_file
+from paperpull_core.storage import JsonStore, atomic_write_json, backup_file
 
 
 def test_atomic_write_and_load(tmp_path):

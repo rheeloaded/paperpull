@@ -1,4 +1,4 @@
-"""Data models for the T-Mobile receipt downloader.
+"""Data models shared by every PaperPull app.
 
 Everything here is plain dataclasses + an explicit processing-state machine.
 No network or browser logic lives in this module.
@@ -15,7 +15,7 @@ PURCHASE_TYPES = (ONLINE, IN_STORE)
 
 
 class State(str, Enum):
-    """Processing states a purchase moves through (see spec section 20)."""
+    """Processing states a purchase moves through ."""
 
     DISCOVERED = "Discovered"
     DETAILS_EXTRACTED = "Details Extracted"
@@ -59,11 +59,15 @@ class Item:
 
 @dataclass
 class Purchase:
-    """One Online order or In-store transaction."""
+    """One purchase: an online order or an in-store transaction.
+
+    Receipt apps fill in items and totals; document apps use the
+    Document model instead.
+    """
 
     purchase_type: str = ONLINE
     purchase_date: str = ""  # YYYY-MM-DD (order-placed / transaction date)
-    order_number: str = ""  # T-Mobile order / receipt / transaction identifier
+    order_number: str = ""  # provider order / receipt / transaction identifier
     total: str = ""
     status: str = ""
     details_url: str = ""
@@ -83,7 +87,7 @@ class Purchase:
 
     @property
     def key(self) -> str:
-        """Unique internal key: Purchase Type + T-Mobile identifier."""
+        """Unique internal key: Purchase Type + the provider identifier."""
         return f"{self.purchase_type}:{self.order_number}"
 
     def to_dict(self) -> dict:

@@ -2,9 +2,8 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from receipt_pdf import validate_pdf
+from paperpull_core.receipt_pdf import validate_pdf
 
 
 def make_pdf(path: Path, pages: int = 1, pad_to: int = 4000):
@@ -67,7 +66,7 @@ def test_zip_detection_and_extraction(tmp_path):
     """T-Mobile delivers some tax forms (e.g. 1099-R) as a ZIP holding the
     PDF; it must be detected and unpacked, not saved as a broken 'PDF'."""
     import zipfile
-    from receipt_pdf import extract_pdfs_from_zip, is_zip
+    from paperpull_core.receipt_pdf import extract_pdfs_from_zip, is_zip
 
     inner = tmp_path / "inner.pdf"
     make_pdf(inner)
@@ -87,7 +86,7 @@ def test_zip_detection_and_extraction(tmp_path):
 
 def test_zip_with_multiple_pdfs_numbers_extras(tmp_path):
     import zipfile
-    from receipt_pdf import extract_pdfs_from_zip
+    from paperpull_core.receipt_pdf import extract_pdfs_from_zip
 
     a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
     make_pdf(a); make_pdf(b)
@@ -104,7 +103,7 @@ def test_zip_with_multiple_pdfs_numbers_extras(tmp_path):
 
 def test_zip_without_pdfs_returns_empty(tmp_path):
     import zipfile
-    from receipt_pdf import extract_pdfs_from_zip
+    from paperpull_core.receipt_pdf import extract_pdfs_from_zip
 
     out = tmp_path / "Form.pdf"
     with zipfile.ZipFile(out, "w") as z:
