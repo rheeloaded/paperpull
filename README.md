@@ -120,10 +120,11 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
   runs stay out of scope by design: the tools never store credentials or bypass
   2FA, so a human sign-in stays in the loop (long-session retailer apps may
   tolerate more automation than banks/cards).
-- 🔜 **Shared core:** the apps grew independently and duplicate a fair amount of
-  support code (`storage.py`, `receipt_pdf.py`, `models.py`). Extracting a shared
-  library is a known future cleanup — deferred so as not to destabilize working
-  tools.
+- ✅ **Shared core:** the support code the apps used to duplicate now lives once
+  in [`core/`](core) as `paperpull-core`. An app declares an `AppSpec` — its
+  folders, routing, CSV columns and config defaults — and keeps only its
+  orchestrator and its `*_site.py`. `tools/check_installs.py` reports whether
+  your installs have drifted from the repo.
 
 ## Support
 
