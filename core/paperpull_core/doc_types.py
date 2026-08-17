@@ -1,12 +1,12 @@
 """Deterministic local classification of provider documents.
 
-Most providers label every document, so we map that label to a clean, searchable
+the provider labels every document, so we map that label to a clean, searchable
 filename summary. Rules live in the editable document_rules.json.
 
-Categories: Statement (bank), Tax Document, Insurance Document, Other.
-Order of checks matters: tax before insurance before statement, because an
-insurance *billing statement* contains the word "statement" but belongs under
-Insurance, and a tax form may mention an account.
+Categories: Statement, Year-End Summary, Tax Document, Insurance Document,
+Other. Order of checks matters: tax before year-end before insurance before
+statement, because a year-end summary or insurance billing statement can
+contain the word "statement" but belongs under its own category.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ def _rules_path() -> Path:
     return spec().rules_path or (spec().project_dir / DEFAULT_RULES_FILENAME)
 
 STATEMENT = "Statement"
+YEAR_END = "Year-End Summary"
 TAX = "Tax Document"
 INSURANCE = "Insurance Document"
 OTHER = "Other Document"
@@ -38,6 +39,7 @@ def load_rules(path: Optional[Path] = None) -> dict:
     with open(path or _rules_path(), "r", encoding="utf-8") as f:
         rules = json.load(f)
     rules.setdefault("tax_rules", [])
+    rules.setdefault("year_end_rules", [])
     rules.setdefault("insurance_rules", [])
     rules.setdefault("statement_rules", [])
     rules.setdefault("skip_patterns", [])
@@ -58,6 +60,9 @@ def classify_document(title: str, rules: Optional[dict] = None) -> Tuple[str, st
     for rule in rules["tax_rules"]:
         if _matches(rule["pattern"], text):
             return TAX, rule["summary"], HIGH
+    for rule in rules["year_end_rules"]:
+        if _matches(rule["pattern"], text):
+            return YEAR_END, rule["summary"], HIGH
     for rule in rules["insurance_rules"]:
         if _matches(rule["pattern"], text):
             return INSURANCE, rule["summary"], HIGH
@@ -68,6 +73,8 @@ def classify_document(title: str, rules: Optional[dict] = None) -> Tuple[str, st
     # Unlabeled but recognizable
     if _matches(r"\b(1099|1098|1042|5498|w-?2|tax)\b", text):
         return TAX, "Tax Document", MEDIUM
+    if _matches(r"year.?end\s+summary|annual\s+summary|year\s+in\s+review", text):
+        return YEAR_END, "Year-End Summary", MEDIUM
     if _matches(r"\b(policy|declaration|dec\s*page|insurance|coverage|"
                 r"auto|homeowner|renter)\b", text):
         return INSURANCE, "Insurance Document", MEDIUM

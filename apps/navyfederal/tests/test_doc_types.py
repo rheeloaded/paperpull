@@ -4,7 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import doc_types
+import storage  # binds this provider's AppSpec
+from paperpull_core import doc_types
 import navyfederal_site as site
 from storage import build_pdf_filename
 

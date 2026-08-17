@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from models import ONLINE, Item, Purchase
+from paperpull_core.models import ONLINE, Item, Purchase
 from storage import now_iso
 
 log = logging.getLogger("amazon_receipts.site")

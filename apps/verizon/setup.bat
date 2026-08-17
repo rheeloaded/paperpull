@@ -17,6 +17,14 @@ if not defined PYEXE (
 call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip || goto :fail
 pip install -r requirements.txt || goto :fail
+
+rem  The shared core. In a repo checkout it lives two levels up; a standalone
+rem  install ships a vendored wheel in core\ instead.
+if exist "..\..\core\pyproject.toml" (
+    pip install -e "..\..\core" || goto :fail
+) else (
+    for %%W in ("core\paperpull_core-*.whl") do pip install "%%W" || goto :fail
+)
 python -m playwright install chromium || goto :fail
 
 echo.
