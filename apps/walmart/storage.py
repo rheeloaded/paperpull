@@ -125,10 +125,21 @@ class Paths:
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
 
+    @staticmethod
+    def _ready(folder: Path) -> Path:
+        """Create a routed folder on demand.
+
+        ensure() only pre-creates the folders this provider actually fills,
+        so a category that IS reachable but rare (e.g. after adding a
+        document type to config.json) still gets its folder the moment a
+        document routes there."""
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
     def folder_for(self, purchase_type: str, document_type: str = "Receipt") -> Path:
         if document_type == "Invoice":
-            return self.invoices
-        return self.online if purchase_type == "Online" else self.instore
+            return self._ready(self.invoices)
+        return self._ready(self.online if purchase_type == "Online" else self.instore)
 
 
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ Usage:
     python gap_receipts.py --dry-run
 
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
-         --max-purchases N  --order-number N  --include-invoices
+         --max-purchases N  --order-number N
 
 Everything runs locally. No receipt data leaves this machine.
 Authentication is always manual (--login opens a browser and waits for you).
@@ -71,8 +71,6 @@ class App:
         self.config = load_config(cfg_path)
         ensure_owner(self.config, cfg_path)
         set_filename_owner(self.config.get("owner", "") if self.config.get("owner_in_filename") else "")
-        if args.include_invoices:
-            self.config["include_invoices"] = True
         self.paths = Paths(Path(self.config["output_dir"]))
         self.paths.ensure()
         self._setup_logging()
@@ -96,7 +94,7 @@ class App:
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "online_discovered": 0, "instore_discovered": 0,
-            "receipts_downloaded": 0, "invoices_downloaded": 0,
+            "receipts_downloaded": 0,
             "skipped_completed": 0, "canceled": 0, "no_receipt": 0,
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
             "validation_failures": 0, "dates_processed": [], "new_files": [],
@@ -503,10 +501,7 @@ class App:
                            notes=("Low classification confidence" if review_needed else ""))
         if review_needed:
             self.stats["manual_review"] += 1
-        if purchase.document_type == "Invoice":
-            self.stats["invoices_downloaded"] += 1
-        else:
-            self.stats["receipts_downloaded"] += 1
+        self.stats["receipts_downloaded"] += 1
         print(f"  Saved: {purchase.pdf_filename}")
 
     # -- receipt saving -----------------------------------------------------
@@ -652,47 +647,6 @@ class App:
         self.stats["new_files"].append(str(out_path))
         return True
 
-    def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
-        """No in-store store receipt ("View receipt details"). Online orders
-        expose "Print invoice" instead; capture that invoice dialog-free by
-        rendering the live details page with print media (same no-click
-        printToPDF used for receipts)."""
-        invoices = site.find_invoice_controls(page)
-        if invoices and self.config.get("include_invoices"):
-            purchase.document_type = "Invoice"
-            filename = build_pdf_filename(purchase.purchase_date, purchase.summary, "Invoice")
-            out_path = unique_path(self.paths.invoices, filename,
-                                   self.config["max_path_length"])
-            try:
-                purchase.receipt_url = page.url
-                # No click: the invoice/order summary is embedded in the live
-                # page with print-only CSS. printToPDF reproduces it cleanly
-                # without opening Gap's native print dialog.
-                self._capture_document(page, purchase, out_path)
-                ok = self._finish_pdf(page, purchase, out_path)
-                if ok:
-                    self._write_csv_rows(
-                        purchase, receipt_status="Invoice (no store receipt)",
-                        processing_status="Completed",
-                        notes_extra="Online order: invoice saved (no in-store receipt exists)")
-                    self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                                       notes="Invoice saved; online order has no store receipt")
-                    self.stats["invoices_downloaded"] += 1
-                    print("  Online invoice saved to Invoices folder.")
-                return ok
-            except Exception as e:
-                log.warning("Invoice save failed: %s", e)
-
-        self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                           notes="No printable receipt available")
-        self._write_csv_rows(purchase, receipt_status="No printable receipt available",
-                             processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                             notes_extra="No Print receipts control found"
-                             + ("" if not invoices else "; invoice exists (use --include-invoices)"))
-        self.stats["no_receipt"] += 1
-        self.stats["manual_review"] += 1
-        print("  No printable receipt available - marked for manual review.")
-        return False
 
     # -- records ------------------------------------------------------------
 
@@ -999,7 +953,6 @@ class App:
             f"In-store purchases known:  {s['instore_discovered']}",
             f"NEW files this run:        {len(new_files)}",
             f"Receipts downloaded:       {s['receipts_downloaded']}",
-            f"Invoices downloaded:       {s['invoices_downloaded']}",
             f"Skipped (already done):    {s['skipped_completed']}",
             f"Canceled purchases:        {s['canceled']}",
             f"No printable receipt:      {s['no_receipt']}",
@@ -1051,8 +1004,6 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--end-date")
     ap.add_argument("--max-purchases", type=int)
     ap.add_argument("--order-number")
-    ap.add_argument("--include-invoices", action="store_true",
-                    help="save invoices (to Invoices folder) when no receipt exists")
     ap.add_argument("--yes", action="store_true", help="skip the --all confirmation prompt")
     ap.add_argument("--redownload", action="store_true",
                     help="re-download everything in scope, ignoring the "
