@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from models import Classification, Item
+from .models import Classification, Item
 
 DEFAULT_RULES_FILENAME = "category_rules.json"
 

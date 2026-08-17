@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from models import IN_STORE, ONLINE, Item, Purchase
+from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
 
 log = logging.getLogger("target_receipts.site")

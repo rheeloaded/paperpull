@@ -33,10 +33,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-import classification
-import receipt_pdf
+from paperpull_core import classification, receipt_pdf
 import target_site as site
-from models import (DONE_STATES, IN_STORE, ONLINE, Item, Purchase, State)
+from paperpull_core.models import (DONE_STATES, IN_STORE, ONLINE, Item, Purchase, State)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, backup_file,
                      build_pdf_filename, load_config, now_iso, title_case,

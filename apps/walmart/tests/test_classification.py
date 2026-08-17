@@ -4,9 +4,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import classification
-from classification import classify_items, load_rules
-from models import Item
+import storage  # binds this provider's AppSpec
+from paperpull_core import classification
+from paperpull_core.classification import classify_items, load_rules
+from paperpull_core.models import Item
 
 RULES = load_rules()
 

@@ -4,9 +4,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import classification
-from classification import classify_items, load_rules
-from models import Item
+import storage  # binds this provider's AppSpec
+from paperpull_core import classification
+from paperpull_core.classification import classify_items, load_rules
+from paperpull_core.models import Item
 
 RULES = load_rules()
 
@@ -240,14 +241,14 @@ def test_gap_in_store_card_records_the_store():
     assert p.purchase_date == "2026-08-08"
     assert p.store_info == "Riverside Commons"
     # the type comes from the card, never from the caller
-    from models import IN_STORE
+    from paperpull_core.models import IN_STORE
     assert p.purchase_type == IN_STORE
     assert p.key == "In-Store:099999000011112026080812345"
 
 
 def test_gap_in_store_and_online_route_to_different_folders(tmp_path):
     """In-store purchases must not land in the Online folder."""
-    from models import IN_STORE, ONLINE
+    from paperpull_core.models import IN_STORE, ONLINE
     from storage import Paths
     paths = Paths(tmp_path)
     assert paths.folder_for(ONLINE).name == "Online"
@@ -263,7 +264,7 @@ def test_gap_online_card_records_the_brand_not_a_store():
     assert gap_site.store_from_text(card.text) == ""
     p = gap_site.card_to_purchase(card)
     assert p.store_info == "Old Navy"
-    from models import ONLINE
+    from paperpull_core.models import ONLINE
     assert p.purchase_type == ONLINE
 
 
