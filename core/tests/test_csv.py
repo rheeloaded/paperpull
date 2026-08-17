@@ -2,9 +2,22 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage import CsvFile, ORDER_HISTORY_COLUMNS, RECEIPT_INDEX_COLUMNS
+from paperpull_core.storage import CsvFile
+
+# Column sets are per-provider; CsvFile's mechanics are not, so these
+# tests use representative lists of their own.
+ORDER_HISTORY_COLUMNS = [
+    "Account Holder", "Purchase Date", "Purchase Type",
+    "Order or Receipt Number", "Item Name", "Unit Price", "Order Total",
+    "Purchase Summary", "PDF Filename", "Processing Status", "Notes",
+]
+RECEIPT_INDEX_COLUMNS = [
+    "Account Holder", "Purchase Date", "Purchase Type",
+    "Order or Receipt Number", "Order Total", "Purchase Summary",
+    "PDF Filename", "PDF Full Path", "Receipt Status", "Processing Status",
+    "Notes",
+]
 
 
 def test_header_and_bom(tmp_path):

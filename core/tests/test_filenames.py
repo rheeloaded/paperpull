@@ -2,32 +2,32 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage import build_pdf_filename, sanitize_component, title_case, unique_path
+from paperpull_core.storage import (build_pdf_filename, sanitize_component,
+                                    title_case, unique_path)
 
 
 def test_basic_filename():
     assert build_pdf_filename("2024-12-31", "Groceries") == \
-        "2024-12-31 T-Mobile Groceries Receipt.pdf"
+        "2024-12-31 Testco Groceries Receipt.pdf"
 
 
 def test_apostrophe_preserved():
     assert build_pdf_filename("2023-04-12", "Children's Clothing") == \
-        "2023-04-12 T-Mobile Children's Clothing Receipt.pdf"
+        "2023-04-12 Testco Children's Clothing Receipt.pdf"
 
 
 def test_invoice_document_type():
     assert build_pdf_filename("2024-01-01", "Electronics", "Invoice") == \
-        "2024-01-01 T-Mobile Electronics Invoice.pdf"
+        "2024-01-01 Testco Electronics Invoice.pdf"
 
 
 def test_multi_part_filename():
     assert build_pdf_filename("2024-01-01", "Groceries", part=(1, 2)) == \
-        "2024-01-01 T-Mobile Groceries Receipt (1 of 2).pdf"
+        "2024-01-01 Testco Groceries Receipt (1 of 2).pdf"
     # single-document orders get no part suffix
     assert build_pdf_filename("2024-01-01", "Groceries", part=(1, 1)) == \
-        "2024-01-01 T-Mobile Groceries Receipt.pdf"
+        "2024-01-01 Testco Groceries Receipt.pdf"
 
 
 def test_title_case():
@@ -61,23 +61,23 @@ def test_sanitize_length_cap():
 
 
 def test_unique_path_no_collision(tmp_path):
-    p = unique_path(tmp_path, "2026-07-19 T-Mobile Clothing Receipt.pdf")
-    assert p.name == "2026-07-19 T-Mobile Clothing Receipt.pdf"
+    p = unique_path(tmp_path, "2026-07-19 Testco Clothing Receipt.pdf")
+    assert p.name == "2026-07-19 Testco Clothing Receipt.pdf"
 
 
 def test_unique_path_numbering(tmp_path):
-    (tmp_path / "2026-07-19 T-Mobile Clothing Receipt.pdf").write_bytes(b"x")
-    p2 = unique_path(tmp_path, "2026-07-19 T-Mobile Clothing Receipt.pdf")
-    assert p2.name == "2026-07-19 T-Mobile Clothing Receipt (2).pdf"
+    (tmp_path / "2026-07-19 Testco Clothing Receipt.pdf").write_bytes(b"x")
+    p2 = unique_path(tmp_path, "2026-07-19 Testco Clothing Receipt.pdf")
+    assert p2.name == "2026-07-19 Testco Clothing Receipt (2).pdf"
     p2.write_bytes(b"x")
-    p3 = unique_path(tmp_path, "2026-07-19 T-Mobile Clothing Receipt.pdf")
-    assert p3.name == "2026-07-19 T-Mobile Clothing Receipt (3).pdf"
+    p3 = unique_path(tmp_path, "2026-07-19 Testco Clothing Receipt.pdf")
+    assert p3.name == "2026-07-19 Testco Clothing Receipt (3).pdf"
 
 
 def test_unique_path_case_insensitive(tmp_path):
-    (tmp_path / "2026-07-19 T-Mobile CLOTHING RECEIPT.PDF").write_bytes(b"x")
-    p = unique_path(tmp_path, "2026-07-19 T-Mobile Clothing Receipt.pdf")
-    assert p.name == "2026-07-19 T-Mobile Clothing Receipt (2).pdf"
+    (tmp_path / "2026-07-19 Testco CLOTHING RECEIPT.PDF").write_bytes(b"x")
+    p = unique_path(tmp_path, "2026-07-19 Testco Clothing Receipt.pdf")
+    assert p.name == "2026-07-19 Testco Clothing Receipt (2).pdf"
 
 
 def test_unique_path_never_existing(tmp_path):

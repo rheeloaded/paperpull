@@ -41,6 +41,10 @@ run-summary.txt
 **/Diagnostics/
 **/Backups/
 
+# Build artifacts (the core wheel is built on demand)
+core/dist/
+build/
+
 # Python
 .venv/
 venv/
