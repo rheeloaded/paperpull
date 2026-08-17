@@ -125,7 +125,19 @@ any app's history) or use `--diagnose`, and answer:
   pagination or "load more"?
 - **How does a download actually happen?** This varies a lot (see Tips below).
 
-### 4. Implement the site layer
+### 4. Declare the provider
+
+Your app's `storage.py` is a short `AppSpec` declaration, not a copy of anyone
+else's storage code — the folders you file into, how a document routes to one,
+your CSV columns, and a few config defaults. Everything else comes from
+`paperpull-core`. See [core/README.md](../core/README.md) for the fields, and
+any existing app for a worked example.
+
+Mark a folder `precreate=False` when the provider *can* route there but rarely
+does; it is then created only when a document actually lands in it, so an
+install never grows a folder it can never fill.
+
+### 5. Implement the site layer
 
 Rewrite `*_site.py` to answer the three questions. At minimum the engine expects
 these (names vary slightly by base app — match whatever your cloned `*_docs.py`
@@ -140,14 +152,14 @@ calls):
 | `is_safe_control(name)` + `FORBIDDEN_CONTROL_RE` / `SAFE_DOC_CONTROL_RE` | The read-only guard — **tune the blocklist to your provider** |
 | `parse_date` / `parse_period_date` | Date parsing (inherited; extend the format list if your dates are unusual) |
 
-### 5. Tune the read-only guard
+### 6. Tune the read-only guard
 
 Add provider-specific dangerous verbs to `FORBIDDEN_CONTROL_RE` (e.g. a card
 portal needs `redeem`, `balance transfer`, `cash advance`; a utility needs
 `autopay`, `budget billing`). The tests in `tests/test_doc_types.py` assert a
 long list of money/account controls are refused — keep them green.
 
-### 6. Test it
+### 7. Test it
 
 From the app folder, with its venv active:
 
@@ -160,7 +172,7 @@ python -m pytest tests               # keep tests green
 Verify the pilot PDFs open and look right, then re-run `--pilot` and confirm it
 reports **"already downloaded — skipping"** (delete-safe works).
 
-### 7. Scrub and open a PR
+### 8. Scrub and open a PR
 
 `git status` — only source should be staged (no profile/config/PDFs/state). Add
 your provider to [PROVIDERS.md](../PROVIDERS.md), fill in the PR checklist, and
