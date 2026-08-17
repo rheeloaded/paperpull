@@ -9,7 +9,12 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "Pilot: 5 newest Gap orders (in scope), then STOPS"
-echo "Make sure that account's signed-in browser is still OPEN"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo 'Pilot: 5 newest Gap orders (in scope), then STOPS'
+echo 'Make sure that account'\''s signed-in browser is still OPEN'
 
 "$PY" gap_receipts.py --pilot $CFG

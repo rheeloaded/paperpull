@@ -9,12 +9,17 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "============================================================"
-echo "T-Mobile Documents - sign in"
-echo "============================================================"
-echo "A normal Chromium window will open. Then:"
-echo "1. Sign in to T-Mobile (do all the 2FA / device approval yourself)"
-echo "2. Open your Bills page (Account -^> Bill -^> View bill history)"
-echo "3. LEAVE THAT BROWSER WINDOW OPEN - do not close it"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo '============================================================'
+echo 'T-Mobile Documents - sign in'
+echo '============================================================'
+echo 'A normal Chromium window will open. Then:'
+echo '1. Sign in to T-Mobile (do all the 2FA / device approval yourself)'
+echo '2. Open your Bills page (Account -^> Bill -^> View bill history)'
+echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
 
 "$PY" tmobile_docs.py --open-browser $CFG

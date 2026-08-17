@@ -9,13 +9,18 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "============================================================"
-echo "Target Circle Card (RedCard) Statements - sign in"
-echo "============================================================"
-echo "A normal Chromium window will open at the "Manage my Target Circle Card""
-echo "sign-in (rcam.target.com). Then:"
-echo "1. Sign in to your Target Circle Card / RedCard credit account (do all"
-echo "the 2FA / verification yourself)"
-echo "2. Open your Statements / eStatements / Documents section"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo '============================================================'
+echo 'Target Circle Card (RedCard) Statements - sign in'
+echo '============================================================'
+echo 'A normal Chromium window will open at the "Manage my Target Circle Card"'
+echo 'sign-in (rcam.target.com). Then:'
+echo '1. Sign in to your Target Circle Card / RedCard credit account (do all'
+echo 'the 2FA / verification yourself)'
+echo '2. Open your Statements / eStatements / Documents section'
 
 "$PY" redcard_docs.py --open-browser $CFG

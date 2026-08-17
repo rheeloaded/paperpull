@@ -43,10 +43,13 @@ Every app follows the same four ideas:
    approval yourself. The tool then connects to that already-authenticated
    browser over the Chrome DevTools Protocol (CDP). It never sees your password
    or handles your 2FA.
-2. **Read-only by construction.** All site interaction lives in `*_site.py`,
-   guarded by a hard blocklist (`FORBIDDEN_CONTROL_RE`) *and* a document
-   allowlist (`SAFE_DOC_CONTROL_RE`). Nothing that buys, sells, transfers, pays,
-   deletes, or changes a setting can be clicked.
+2. **Read-only by construction.** All site interaction lives in `*_site.py`.
+   Nothing that buys, sells, transfers, pays, deletes, or changes a setting is
+   ever clicked. The statement apps enforce this deny-by-default — a control
+   must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
+   allowlist (`SAFE_DOC_CONTROL_RE`); the receipt apps screen a narrow
+   print/invoice pattern against the blocklist; Gap clicks nothing at all.
+   [SECURITY.md](SECURITY.md) spells out which app does which.
 3. **Delete-safe.** Once a document is saved it gets a sticky `downloaded_ok`
    marker. Delete the PDFs after importing them elsewhere and a re-run will
    **not** fetch them again — it only grabs what's genuinely new
@@ -99,9 +102,21 @@ Each app also has its own README with provider-specific details and quirks.
 - Playwright (installed per app by the setup script)
 
 Every app ships both launchers: `.bat` for Windows and `.command` for
-macOS/Linux, with the same names and the same behaviour. On macOS you may need
-to allow a script the first time (right-click → Open), and the very first run
-of `chmod +x *.command` if your copy lost the executable bit in transit.
+macOS/Linux, with the same names and the same behaviour.
+
+**On macOS, first time only:** if you downloaded the project as a ZIP rather
+than cloning it, macOS quarantines the scripts and double-clicking one gives
+*"cannot be opened because it is from an unidentified developer."* Either
+right-click → **Open** (once per script), or clear the flag for the whole
+folder:
+
+```bash
+xattr -dr com.apple.quarantine .
+chmod +x setup-all.command apps/*/*.command gui/*.command
+```
+
+A `git clone` is not quarantined, and the executable bit is stored in the
+repo, so cloning avoids both steps.
 
 ## Contributing — add your provider
 

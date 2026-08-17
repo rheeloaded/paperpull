@@ -28,6 +28,11 @@ PY=.venv/bin/python
 #   ./run_all.command spouse   ->  --config config.spouse.json
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
+
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
 """
 
 SETUP = """#!/usr/bin/env bash
@@ -63,6 +68,18 @@ echo
 echo "Setup complete. Next step: ./login.command and sign in to {provider}."
 """
 
+def windows_to_unix(text: str) -> str:
+    """A macOS user should never be told to run a .bat file."""
+    return re.sub(r"\b([A-Za-z_]+)\.bat\b", r"./\1.command", text)
+
+
+def shell_quote(text: str) -> str:
+    """Single-quote for bash, so quotes, backticks and $ in a .bat's echo text
+    stay literal instead of being re-interpreted - or executed - when the
+    generated script runs."""
+    return "'" + text.replace("'", "'" + chr(92) + "''") + "'"
+
+
 ACTION_RE = re.compile(r"python\.exe\s+(\S+\.py)\s+(--[\w-]+)", re.I)
 
 
@@ -82,7 +99,8 @@ def build(app_dir: Path) -> list:
             continue
         script, flag = m.group(1), m.group(2)
         notes = [e.strip().rstrip(".") for e in re.findall(r"^echo (.+)$", text, re.M)]
-        banner = "\n".join(f'echo "{n}"' for n in notes[:8]
+        banner = "\n".join(f"echo {shell_quote(windows_to_unix(n))}"
+                           for n in notes[:8]
                            if n and "%" not in n and n != ".")
         out = app_dir / (bat.stem + ".command")
         out.write_text(HEADER + "\n" + banner + "\n\n"

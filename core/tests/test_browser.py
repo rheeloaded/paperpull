@@ -89,7 +89,7 @@ def test_setup_hint_matches_the_platform(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     assert browser.setup_hint() == "setup.bat"
     monkeypatch.setattr(sys, "platform", "darwin")
-    assert browser.setup_hint() == "./setup.sh"
+    assert browser.setup_hint() == "./setup.command"   # the file that exists
 
 
 @pytest.mark.parametrize("url,expected", [
@@ -112,3 +112,20 @@ def test_launch_passes_the_profile_and_port(monkeypatch, tmp_path):
     assert f"--user-data-dir={profile}" in seen["args"]
     assert "--remote-debugging-port=9231" in seen["args"]
     assert seen["args"][-1] == "https://example.test"
+
+
+def test_newest_chromium_build_wins(monkeypatch, tmp_path):
+    """Playwright leaves old builds behind; picking one older than the
+    installed playwright expects causes confusing launch failures."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    for build in ("chromium-999", "chromium-1000", "chromium-1228"):
+        exe = tmp_path / build / "chrome-mac/Chromium.app/Contents/MacOS/Chromium"
+        exe.parent.mkdir(parents=True)
+        exe.write_text("x")
+    found = browser._bundled_chromium()
+    assert "chromium-1228" in found[0], found
+    # a plain text sort would have put chromium-1000 ahead of chromium-999
+    assert [b for b in ("chromium-1228", "chromium-1000", "chromium-999")] == \
+        [next(b for b in ("chromium-1228", "chromium-1000", "chromium-999") if b in p)
+         for p in found]

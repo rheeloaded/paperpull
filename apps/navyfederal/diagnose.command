@@ -9,7 +9,12 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "Read-only inspection of the Navy Federal documents page. Downloads NOTHING"
-echo "Make sure you are signed in and your documents page is open"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo 'Read-only inspection of the Navy Federal documents page. Downloads NOTHING'
+echo 'Make sure you are signed in and your documents page is open'
 
 "$PY" navyfederal_docs.py --diagnose $CFG

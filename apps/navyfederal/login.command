@@ -9,12 +9,17 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "============================================================"
-echo "Navy Federal Documents - sign in"
-echo "============================================================"
-echo "A normal Chromium window will open. Then:"
-echo "1. Sign in to Navy Federal (do all the 2FA / verification yourself)"
-echo "2. Go to your Documents / Statements area and open it"
-echo "3. LEAVE THAT BROWSER WINDOW OPEN - do not close it"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo '============================================================'
+echo 'Navy Federal Documents - sign in'
+echo '============================================================'
+echo 'A normal Chromium window will open. Then:'
+echo '1. Sign in to Navy Federal (do all the 2FA / verification yourself)'
+echo '2. Go to your Documents / Statements area and open it'
+echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
 
 "$PY" navyfederal_docs.py --open-browser $CFG

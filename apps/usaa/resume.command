@@ -9,7 +9,12 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "Resuming USAA document download"
-echo "Make sure that account's signed-in browser is still OPEN"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo 'Resuming USAA document download'
+echo 'Make sure that account'\''s signed-in browser is still OPEN'
 
 "$PY" usaa_docs.py --resume $CFG

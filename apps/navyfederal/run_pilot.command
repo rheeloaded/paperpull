@@ -9,7 +9,12 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "Pilot: downloads the 5 newest documents, then STOPS"
-echo "Make sure that account's signed-in browser is still OPEN"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo 'Pilot: downloads the 5 newest documents, then STOPS'
+echo 'Make sure that account'\''s signed-in browser is still OPEN'
 
 "$PY" navyfederal_docs.py --pilot $CFG
