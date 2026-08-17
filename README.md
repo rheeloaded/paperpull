@@ -113,6 +113,12 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
 
 - ✅ All **twelve** apps work and are in regular use.
 - 🔜 **More providers:** community-driven — see [PROVIDERS.md](PROVIDERS.md).
+- 🔜 **Scheduled/assisted runs:** a monthly "nudge + sweep" (e.g. the 1st) that
+  opens the login browsers and then runs discover + resume across every app once
+  you've signed in — delete-safe, so it only grabs what's new. Fully unattended
+  runs stay out of scope by design: the tools never store credentials or bypass
+  2FA, so a human sign-in stays in the loop (long-session retailer apps may
+  tolerate more automation than banks/cards).
 - 🔜 **Shared core:** the apps grew independently and duplicate a fair amount of
   support code (`storage.py`, `receipt_pdf.py`, `models.py`). Extracting a shared
   library is a known future cleanup — deferred so as not to destabilize working
