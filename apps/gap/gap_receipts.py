@@ -3,8 +3,10 @@
 Usage:
     python gap_receipts.py --login
     python gap_receipts.py --discover
-    python gap_receipts.py --pilot            (5 newest orders)
+    python gap_receipts.py --pilot            (newest few of each kind)
     python gap_receipts.py --all
+    python gap_receipts.py --online           (online orders only)
+    python gap_receipts.py --instore          (in-store purchases only)
     python gap_receipts.py --resume
     python gap_receipts.py --verify
     python gap_receipts.py --review-names
@@ -32,7 +34,7 @@ from typing import List, Optional
 import classification
 import receipt_pdf
 import gap_site as site
-from models import (DONE_STATES, ONLINE, Item, Purchase, State)
+from models import (DONE_STATES, IN_STORE, ONLINE, Item, Purchase, State)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, backup_file,
                      build_pdf_filename, load_config, now_iso, title_case,
@@ -93,7 +95,7 @@ class App:
         self._cdp_mode = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
-            "online_discovered": 0,
+            "online_discovered": 0, "instore_discovered": 0,
             "receipts_downloaded": 0, "invoices_downloaded": 0,
             "skipped_completed": 0, "canceled": 0, "no_receipt": 0,
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
@@ -307,13 +309,14 @@ class App:
         # so one pass sees the entire available history.
         site.goto_orders(page)
         self.check_session(page)
-        cards = site.collect_cards(page, ONLINE)
-        log.info("Order history: %d order card(s)", len(cards))
+        cards = site.collect_cards(page)
+        log.info("Purchase history: %d card(s) (%d in-store)",
+                 len(cards), sum(1 for c in cards if c.in_store))
         if not cards:
-            log.warning("No order cards found. If you are signed in and do have "
-                        "orders, run --diagnose to inspect the page.")
+            log.warning("No purchase cards found. If you are signed in and do "
+                        "have purchases, run --diagnose to inspect the page.")
         for card in cards:
-            purchase = site.card_to_purchase(card, ONLINE)
+            purchase = site.card_to_purchase(card)
             if not purchase:
                 continue
             if floor and purchase.purchase_date and purchase.purchase_date < floor:
@@ -336,7 +339,10 @@ class App:
         self.discovery.save()
 
         all_recs = list(self.discovery.data.values())
-        self.stats["online_discovered"] = len(all_recs)
+        self.stats["online_discovered"] = sum(
+            1 for r in all_recs if r.get("purchase_type") == ONLINE)
+        self.stats["instore_discovered"] = sum(
+            1 for r in all_recs if r.get("purchase_type") == IN_STORE)
 
         if not quiet:
             print(f"\nDiscovery complete. Purchases known: {len(all_recs)}")
@@ -543,7 +549,8 @@ class App:
             return False
 
         purchase.document_type = "Receipt"
-        folder = self.paths.online
+        folder = self.paths.folder_for(purchase.purchase_type,
+                                       purchase.document_type)
         filename = build_pdf_filename(purchase.purchase_date, purchase.summary,
                                       purchase.document_type)
         out_path = unique_path(folder, filename, self.config["max_path_length"])
@@ -754,9 +761,11 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.")
-        self.cmd_discover(types=[ONLINE], quiet=False)
+        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False)
         selected: List[Purchase] = self._select_purchases(
             ONLINE, limit=self.config["pilot_online"])
+        selected += self._select_purchases(
+            IN_STORE, limit=self.config["pilot_instore"])
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
             return
@@ -927,7 +936,7 @@ class App:
         page = self.page()
         if not self.discovery.data:
             self.cmd_discover(quiet=True)
-        for ptype in (ONLINE,):
+        for ptype in (ONLINE, IN_STORE):
             candidates = self._select_purchases(ptype, limit=1)
             if self.args.order_number:
                 candidates = [p for p in
@@ -986,7 +995,8 @@ class App:
             f"Run start:                 {s['started']}",
             f"Run end:                   {s['ended']}",
             f"Mode:                      {s['mode'] or '(none)'}",
-            f"Purchases known:           {s['online_discovered']}",
+            f"Online orders known:       {s['online_discovered']}",
+            f"In-store purchases known:  {s['instore_discovered']}",
             f"NEW files this run:        {len(new_files)}",
             f"Receipts downloaded:       {s['receipts_downloaded']}",
             f"Invoices downloaded:       {s['invoices_downloaded']}",
@@ -1023,8 +1033,10 @@ def build_parser() -> argparse.ArgumentParser:
     modes = [
         ("login", "open browser for manual Gap sign-in"),
         ("discover", "discovery pass only; writes discovery.json"),
-        ("pilot", "pilot: 5 newest orders"),
-        ("all", "process every order (asks for confirmation)"),
+        ("pilot", "pilot: newest few online orders and in-store purchases"),
+        ("all", "process every purchase (asks for confirmation)"),
+        ("online", "process all Online orders"),
+        ("instore", "process all In-store purchases"),
         ("resume", "resume incomplete purchases"),
         ("verify", "re-validate every indexed PDF"),
         ("review-names", "interactively fix low-confidence names"),
@@ -1070,7 +1082,11 @@ def main(argv=None):
         elif args.pilot:
             app.cmd_pilot()
         elif args.all:
-            app.cmd_run([ONLINE], "all")
+            app.cmd_run([ONLINE, IN_STORE], "all")
+        elif args.online:
+            app.cmd_run([ONLINE], "online")
+        elif args.instore:
+            app.cmd_run([IN_STORE], "instore")
         elif args.resume:
             app.cmd_resume()
         elif args.verify:
@@ -1080,7 +1096,7 @@ def main(argv=None):
         elif args.diagnose:
             app.cmd_diagnose()
         elif args.dry_run:
-            app.cmd_run([ONLINE], "dry-run")
+            app.cmd_run([ONLINE, IN_STORE], "dry-run")
         else:
             build_parser().print_help()
             return 0

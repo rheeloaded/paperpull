@@ -10,7 +10,8 @@ from enum import Enum
 from typing import List, Optional
 
 ONLINE = "Online"
-PURCHASE_TYPES = (ONLINE,)
+IN_STORE = "In-Store"
+PURCHASE_TYPES = (ONLINE, IN_STORE)
 
 
 class State(str, Enum):
@@ -58,7 +59,7 @@ class Item:
 
 @dataclass
 class Purchase:
-    """One Gap order."""
+    """One Gap purchase - an online order or an in-store purchase."""
 
     purchase_type: str = ONLINE
     purchase_date: str = ""  # YYYY-MM-DD (order-placed / transaction date)
