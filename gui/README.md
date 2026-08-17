@@ -41,7 +41,7 @@ It finds any subfolder containing an entry script (`*_receipts.py` /
 
 | Button | What it runs |
 |--------|--------------|
-| **Login** | Opens that app's Chromium — **you** sign in and leave it open |
+| **Login** | Opens that app's browser (Chromium, or Edge/Chrome for bot-protected sites) — **you** sign in and leave it open |
 | **Discover** | Enumerate available documents (downloads nothing) |
 | **Pilot** | Download the newest few as a test |
 | **Run All** | Download everything available (`--yes`, no prompt) |

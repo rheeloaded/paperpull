@@ -44,11 +44,11 @@ day of that period** so they sort chronologically.
 
 ## ⚠ These files are sensitive
 
-This folder is inside **OneDrive**, so its contents sync to Microsoft's cloud.
-Tax forms typically contain your **SSN and full account numbers**. That's a
-deliberate choice you made; if you'd rather keep them off the cloud, change
-`output_dir` in `config.json` to a local path (e.g. `C:\Users\YOU\Documents\...`)
-and move the existing folders.
+Statements and especially tax forms typically contain your **SSN and full
+account numbers**. They're saved to the output folder you set as `output_dir`
+in `config.json` (the default is this app's own folder). Keep it somewhere
+safe, and if that folder syncs to a cloud drive, know these documents go with
+it.
 
 The index CSV deliberately records **no** account numbers, balances, or SSN —
 only what's needed to locate and verify a file.

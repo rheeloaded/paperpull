@@ -65,20 +65,21 @@ no code changes needed).
 Filters: `--type "Insurance Document"`, `--year 2025`,
 `--start-date 2025-01-01`.
 
-## First run needs a repair pass
+## If a site change breaks it
 
-Unlike the other projects, USAA's pages could not be inspected while this was
-built (it's behind a login). `usaa_site.py` ships with best-guess selectors
-and a generic document-list collector. **Run `diagnose.bat` after signing
-in** — it writes the real page structure to `Diagnostics\` — then the
-selectors in `usaa_site.py` get adjusted to match before the pilot.
+All the site-specific logic lives in `usaa_site.py`. If USAA redesigns its
+pages and discovery or download stops working, run `diagnose.bat` after signing
+in — it dumps the current page structure to `Diagnostics\` so the selectors in
+`usaa_site.py` can be updated to match.
 
 ## Sensitive files
 
-These are inside OneDrive, so they sync to Microsoft's cloud (a deliberate
-choice for this consolidated folder). Tax forms contain your SSN. The index
-CSV records no account numbers, balances, or SSN - only what's needed to
-find and verify a file.
+Statements and especially tax forms can contain your SSN and account numbers.
+They're saved to the output folder you set as `output_dir` in `config.json`
+(the default is this app's own folder). Keep it somewhere safe, and if that
+folder syncs to a cloud drive, know these documents go with it. The index CSV
+deliberately records **no** account numbers, balances, or SSN — only what's
+needed to find and verify a file.
 
 ## Tests
 
