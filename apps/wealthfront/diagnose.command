@@ -9,6 +9,11 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "Read-only inspection of the Documents page. Downloads nothing"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo 'Read-only inspection of the Documents page. Downloads nothing'
 
 "$PY" wealthfront_docs.py --diagnose $CFG

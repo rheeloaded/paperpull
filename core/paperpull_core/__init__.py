@@ -18,7 +18,7 @@ Typical use, from an app's storage.py shim:
 """
 from .spec import AppSpec, CsvSpec, DOCUMENT, Folder, INFRASTRUCTURE_FOLDERS, RECEIPT
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = ["AppSpec", "CsvSpec", "Folder", "INFRASTRUCTURE_FOLDERS",
            "RECEIPT", "DOCUMENT", "__version__"]

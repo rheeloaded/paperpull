@@ -9,7 +9,12 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "Pilot run: 5 newest Online + 3 newest In-store purchases, then STOPS"
-echo "Make sure that account's signed-in browser is still OPEN"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo 'Pilot run: 5 newest Online + 3 newest In-store purchases, then STOPS'
+echo 'Make sure that account'\''s signed-in browser is still OPEN'
 
 "$PY" walmart_receipts.py --pilot $CFG

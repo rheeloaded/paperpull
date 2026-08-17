@@ -9,12 +9,17 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "============================================================"
-echo "Verizon Documents - sign in"
-echo "============================================================"
-echo "A normal Chromium window will open. Then:"
-echo "1. Sign in to Verizon (do all the 2FA / device approval yourself)"
-echo "2. Go to Account -^> Reports ^& statements (Documents / Tax center)"
-echo "3. LEAVE THAT BROWSER WINDOW OPEN - do not close it"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo '============================================================'
+echo 'Verizon Documents - sign in'
+echo '============================================================'
+echo 'A normal Chromium window will open. Then:'
+echo '1. Sign in to Verizon (do all the 2FA / device approval yourself)'
+echo '2. Go to Account -^> Reports ^& statements (Documents / Tax center)'
+echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
 
 "$PY" verizon_docs.py --open-browser $CFG

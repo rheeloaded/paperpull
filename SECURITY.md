@@ -26,11 +26,22 @@ The `.gitignore` already blocks all of the following. Do not override it.
 
 ## Design safety (what the tools themselves do)
 
-- **Read-only.** Each `*_site.py` pairs a hard blocklist (`FORBIDDEN_CONTROL_RE`
-  — buy/sell/transfer/pay/delete/change-setting/…) with a document allowlist
-  (`SAFE_DOC_CONTROL_RE`). A control must pass **both** before it is ever
-  clicked. There is no code that submits a form, confirms a dialog, moves money,
-  or changes a setting.
+- **Read-only.** There is no code anywhere that submits a form, confirms a
+  dialog, moves money, or changes a setting. How that is enforced depends on
+  how the provider exposes its documents:
+
+  - **The statement apps** (Amex, Dominion, Navy Federal, RedCard, Robinhood,
+    T-Mobile, USAA, Verizon, Wealthfront) click a download control, and gate it
+    with `is_safe_control()`: a hard blocklist (`FORBIDDEN_CONTROL_RE` —
+    buy/sell/transfer/pay/delete/change-setting/…) **plus** a document
+    allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass **both**, so
+    anything unrecognised is refused — deny by default.
+  - **The receipt apps** (Amazon, Target, Walmart) click a print/invoice
+    control matched by a narrow pattern and screened against the same
+    blocklist. There is no separate allowlist in these three, so the guard is
+    blocklist-only.
+  - **Gap** clicks nothing at all: it navigates to the order page and renders
+    it, so no control is ever activated.
 - **You sign in, not the tool.** The tools attach to a browser *you* logged into
   (via Chrome DevTools Protocol). They never handle your password or 2FA.
 - **Local only.** The browser's debugging port and the GUI both listen on
