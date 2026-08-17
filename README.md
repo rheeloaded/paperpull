@@ -35,11 +35,13 @@ Twelve providers are supported today, all built on the same pattern:
 
 Every app follows the same four ideas:
 
-1. **You sign in; the tool attaches.** `login.bat` opens a plain Chromium window
-   using that app's own profile and a dedicated debugging port. **You** complete
-   sign-in, 2FA, and any device approval yourself. The tool then connects to that
-   already-authenticated browser over the Chrome DevTools Protocol (CDP). It
-   never sees your password or handles your 2FA.
+1. **You sign in; the tool attaches.** `login.bat` opens a browser window — a
+   plain Chromium for most apps, or your installed Edge/Chrome for the few sites
+   with bot detection (e.g. Walmart, Verizon) — using that app's own profile and
+   a dedicated debugging port. **You** complete sign-in, 2FA, and any device
+   approval yourself. The tool then connects to that already-authenticated
+   browser over the Chrome DevTools Protocol (CDP). It never sees your password
+   or handles your 2FA.
 2. **Read-only by construction.** All site interaction lives in `*_site.py`,
    guarded by a hard blocklist (`FORBIDDEN_CONTROL_RE`) *and* a document
    allowlist (`SAFE_DOC_CONTROL_RE`). Nothing that buys, sells, transfers, pays,
