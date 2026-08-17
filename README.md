@@ -36,7 +36,7 @@ Thirteen providers are supported today, all built on the same pattern:
 
 Every app follows the same four ideas:
 
-1. **You sign in; the tool attaches.** `login.bat` opens a browser window — a
+1. **You sign in; the tool attaches.** `login.bat` (or `./login.command`) opens a browser window — a
    plain Chromium for most apps, or your installed Edge/Chrome for the few sites
    with bot detection (e.g. Walmart, Verizon) — using that app's own profile and
    a dedicated debugging port. **You** complete sign-in, 2FA, and any device
@@ -53,8 +53,8 @@ Every app follows the same four ideas:
    (`new-this-run.txt` lists them each run).
 4. **Multi-account.** A `--config config.<name>.json` flag lets one app serve a
    second person's account with its own profile, port, and output folders — no
-   data mixing. The `.bat` files take the account label as an argument
-   (`login.bat spouse`, `run_all.bat spouse`).
+   data mixing. The launchers take the account label as an argument
+   (`login.bat spouse` / `./login.command spouse`).
 
 ## Quick start
 
@@ -63,7 +63,11 @@ Every app follows the same four ideas:
 **One-shot setup** (creates a venv for every app + the GUI, installs the browser):
 
 ```bat
-setup-all.bat
+setup-all.bat        REM Windows
+```
+
+```bash
+./setup-all.command  # macOS / Linux
 ```
 
 Then either drive everything from the **[GUI control panel](gui)** — pick an
@@ -86,13 +90,18 @@ run_all.bat               REM download everything available
 ```
 
 Each app also has its own README with provider-specific details and quirks.
-(Prefer to set apps up one at a time? Each has its own `setup.bat`.)
+(Prefer to set apps up one at a time? Each has its own `setup.bat` / `setup.command`.)
 
 ## Requirements
 
-- Windows (the `.bat` launchers are Windows-oriented; the Python is portable)
+- **Windows or macOS** (Linux works too — it uses the same scripts as macOS)
 - Python 3.11+
-- Playwright (installed per app via `setup.bat`)
+- Playwright (installed per app by the setup script)
+
+Every app ships both launchers: `.bat` for Windows and `.command` for
+macOS/Linux, with the same names and the same behaviour. On macOS you may need
+to allow a script the first time (right-click → Open), and the very first run
+of `chmod +x *.command` if your copy lost the executable bit in transit.
 
 ## Contributing — add your provider
 

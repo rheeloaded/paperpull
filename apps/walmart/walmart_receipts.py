@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from paperpull_core import classification, receipt_pdf
+from paperpull_core import browser as browser_launcher
 import walmart_site as site
 from paperpull_core.models import (DONE_STATES, IN_STORE, ONLINE, Item, Purchase, State)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
@@ -229,54 +230,21 @@ class App:
     # -- commands -----------------------------------------------------------
 
     def cmd_open_browser(self):
-        """Launch a normal sign-in Chromium using THIS config's own profile
-        and debugging port. Because it reads profile_dir and cdp_url from the
-        (possibly --config) file, a second account opens its own browser on
-        its own port with its own saved session - no path/port duplication in
-        the .bat files."""
-        import glob
-        import os
-        import re as _re
-        import subprocess
-        port = "9222"
-        m = _re.search(r":(\d+)", self.config.get("cdp_url", "") or "")
-        if m:
-            port = m.group(1)
+        """Open a sign-in window on THIS config's own port and profile.
+
+        A second account opens its own browser, on its own port, with its own
+        saved session - so nothing is duplicated in the launcher scripts. You
+        sign in; the tool attaches afterwards.
+        """
+        # This provider's bot protection fingerprints the Playwright Chromium
+        # build as automation, so a real branded browser is tried first.
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9222")
         profile = self.config["profile_dir"]
-        Path(profile).mkdir(parents=True, exist_ok=True)
-        local = os.environ.get("LOCALAPPDATA", "")
-        # Walmart's bot protection (PerimeterX) fingerprints the Playwright
-        # Chromium build as automation and shows the "Robot or human?" wall on
-        # loop. A real, branded browser passes far more reliably, so prefer
-        # Microsoft Edge, then Google Chrome, then the bundled Chromium. Receipt
-        # capture is CDP Page.printToPDF (not download events), so attaching to
-        # a real browser needs no extra download plumbing.
-        pf = os.environ.get("PROGRAMFILES", "")
-        pfx = os.environ.get("PROGRAMFILES(X86)", "")
-        real_paths = [
-            os.path.join(pfx, "Microsoft", "Edge", "Application", "msedge.exe"),
-            os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
-            os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
-            os.path.join(pfx, "Google", "Chrome", "Application", "chrome.exe"),
-            os.path.join(local, "Google", "Chrome", "Application", "chrome.exe"),
-        ]
-        candidates = [p for p in real_paths if p and os.path.exists(p)]
-        real = candidates[0] if candidates else None
-        candidates += (glob.glob(os.path.join(local, "ms-playwright", "chromium-*",
-                                              "chrome-win64", "chrome.exe"))
-                       + glob.glob(os.path.join(local, "ms-playwright", "chromium-*",
-                                                "chrome-win", "chrome.exe")))
-        if not candidates:
-            print("Could not find Microsoft Edge, Google Chrome, or the Playwright")
-            print("Chromium. Install Edge/Chrome, or run setup.bat first.")
-            return
-        which = ("Microsoft Edge" if real and "msedge" in real.lower()
-                 else "Google Chrome" if real else "Chromium")
         url = site.URLS.get("orders") or site.URLS.get("login") or site.URLS["home"]
-        subprocess.Popen([candidates[0], f"--user-data-dir={profile}",
-                          f"--remote-debugging-port={port}", "--no-first-run",
-                          "--no-default-browser-check", url])
-        print(f"Opened a sign-in browser on port {port} ({which}).")
+        name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=True)
+        if not name:
+            return
+        print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
 
