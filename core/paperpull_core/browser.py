@@ -54,8 +54,17 @@ def _bundled_chromium() -> List[str]:
         patterns = ["chromium-*/chrome-linux/chrome"]
     found: List[str] = []
     for pattern in patterns:
-        found += sorted(glob.glob(str(root / pattern)))
-    return found
+        found += glob.glob(str(root / pattern))
+
+    # Newest build first. Playwright pins a build per release and leaves older
+    # ones behind, so "whatever glob returned first" can hand back a build
+    # older than the installed playwright expects. Sort on the build NUMBER,
+    # not the string - "chromium-1000" sorts before "chromium-999" as text.
+    def build_number(path: str) -> int:
+        m = re.search(r"chromium-(\d+)", path)
+        return int(m.group(1)) if m else -1
+
+    return sorted(found, key=build_number, reverse=True)
 
 
 def _real_browsers() -> List[Tuple[str, str]]:
@@ -111,7 +120,7 @@ def port_from_cdp_url(cdp_url: str, default: str = "9222") -> str:
 
 
 def setup_hint() -> str:
-    return "setup.bat" if sys.platform == "win32" else "./setup.sh"
+    return "setup.bat" if sys.platform == "win32" else "./setup.command"
 
 
 def open_signin_browser(profile_dir, port: str, url: str,

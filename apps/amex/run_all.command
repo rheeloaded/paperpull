@@ -9,7 +9,12 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "FULL download of American Express statements and tax documents"
-echo "Make sure that account's signed-in browser is still OPEN"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo 'FULL download of American Express statements and tax documents'
+echo 'Make sure that account'\''s signed-in browser is still OPEN'
 
 "$PY" amex_docs.py --all $CFG

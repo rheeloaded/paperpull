@@ -9,13 +9,18 @@ PY=.venv/bin/python
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 
-echo "============================================================"
-echo "Walmart Receipts - sign in"
-echo "============================================================"
-echo "A browser window opens - Microsoft Edge if installed (it passes"
-echo "Walmart's bot check far better than the bundled Chromium), else"
-echo "Chrome/Chromium. Then:"
-echo "1. Sign in to Walmart (handle any "Robot or human?" check). If this is"
-echo "your first time on Edge, you'll need to sign in again here"
+if [ ! -x "$PY" ]; then
+    echo "This app is not set up yet - run ./setup.command first."
+    exit 1
+fi
+
+echo '============================================================'
+echo 'Walmart Receipts - sign in'
+echo '============================================================'
+echo 'A browser window opens - Microsoft Edge if installed (it passes'
+echo 'Walmart'\''s bot check far better than the bundled Chromium), else'
+echo 'Chrome/Chromium. Then:'
+echo '1. Sign in to Walmart (handle any "Robot or human?" check). If this is'
+echo 'your first time on Edge, you'\''ll need to sign in again here'
 
 "$PY" walmart_receipts.py --open-browser $CFG
