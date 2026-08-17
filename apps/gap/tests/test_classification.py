@@ -221,6 +221,52 @@ def test_gap_brand_from_narvar_tracking_link():
     assert gap_site.brand_from_text("no tracking link here") == ""
 
 
+def test_gap_in_store_card_records_the_store():
+    """Gap's history mixes in-store purchases in with online orders; the card
+    names the store under a "Purchased In Store - N Items" line."""
+    import gap_site
+    card = gap_site.RawCard(
+        href="", order_id="099999000011112026080812345",
+        text=("Purchased on Aug 8, 2026\n"
+              "#099999000011112026080812345\n"
+              "Purchased In Store - 5 Items\n"
+              "RIVERSIDE COMMONS\n"
+              "Details\n"))
+    card.in_store = bool(gap_site.IN_STORE_RE.search(card.text))
+    card.store = gap_site.store_from_text(card.text)
+    assert card.in_store is True
+    assert card.store == "Riverside Commons"
+    p = gap_site.card_to_purchase(card)
+    assert p.purchase_date == "2026-08-08"
+    assert p.store_info == "Riverside Commons"
+    # the type comes from the card, never from the caller
+    from models import IN_STORE
+    assert p.purchase_type == IN_STORE
+    assert p.key == "In-Store:099999000011112026080812345"
+
+
+def test_gap_in_store_and_online_route_to_different_folders(tmp_path):
+    """In-store purchases must not land in the Online folder."""
+    from models import IN_STORE, ONLINE
+    from storage import Paths
+    paths = Paths(tmp_path)
+    assert paths.folder_for(ONLINE).name == "Online"
+    assert paths.folder_for(IN_STORE).name == "In-Store"
+    assert paths.instore in paths.all_dirs()
+
+
+def test_gap_online_card_records_the_brand_not_a_store():
+    import gap_site
+    card = gap_site.RawCard(
+        href="", order_id="K7X4P2Q", brand="Old Navy",
+        text="Order placed Nov 25, 2025\n#K7X4P2Q\nDelivered\n")
+    assert gap_site.store_from_text(card.text) == ""
+    p = gap_site.card_to_purchase(card)
+    assert p.store_info == "Old Navy"
+    from models import ONLINE
+    assert p.purchase_type == ONLINE
+
+
 def test_gap_card_to_purchase_prefers_the_order_date():
     """A card shows both an order date and a delivery estimate; the delivery
     estimate must not become the purchase date."""
@@ -230,7 +276,7 @@ def test_gap_card_to_purchase_prefers_the_order_date():
         text=("Order placed Jan 5, 2026\n"
               "Arriving Tue, Jan 9\n"
               "Total: $84.31\n"))
-    p = gap_site.card_to_purchase(card, "Online")
+    p = gap_site.card_to_purchase(card)
     assert p.order_number == "K4M9XQ2"
     assert p.purchase_date == "2026-01-05"
     assert p.total == "$84.31"
