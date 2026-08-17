@@ -49,7 +49,6 @@ def load_config(path: Optional[Path] = None) -> dict:
     cfg.setdefault("output_dir", str(DEFAULT_OUTPUT_DIR))
     cfg.setdefault("min_pdf_bytes", 3000)
     cfg.setdefault("max_path_length", 240)
-    cfg.setdefault("include_invoices", False)
     cfg.setdefault("delay_min_seconds", 2.0)
     cfg.setdefault("delay_max_seconds", 4.0)
     cfg.setdefault("pilot_online", 5)
@@ -100,7 +99,6 @@ class Paths:
     def __init__(self, output_dir: Path):
         self.root = Path(output_dir)
         self.online = self.root / "Online"
-        self.invoices = self.root / "Invoices"
         self.manual_review = self.root / "Manual Review"
         self.logs = self.root / "Logs"
         self.diagnostics = self.root / "Diagnostics"
@@ -138,8 +136,6 @@ class Paths:
         return folder
 
     def folder_for(self, purchase_type: str = "Online", document_type: str = "Receipt") -> Path:
-        if document_type == "Invoice":
-            return self._ready(self.invoices)
         return self._ready(self.online)
 
 

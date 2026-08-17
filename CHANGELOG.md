@@ -21,6 +21,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   sibling order id.
 
 ### Changed
+- **Gap** gained `run_online.bat` / `run_instore.bat`, matching Target and
+  Walmart.
+- **Amazon** drops the same dead invoice branch as Gap: `_handle_no_receipt`
+  was never called, so the `Invoices\` folder and the `include_invoices` knob
+  it depended on could never be reached. What Amazon saves is unchanged — its
+  printable order summary is captured as the receipt, as it always was.
 - **Every app** now creates only the document folders it can actually fill.
   Each app was cloned from the nearest existing one and inherited that app's
   whole folder list, so installs grew permanently-empty folders — `Insurance
