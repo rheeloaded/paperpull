@@ -72,9 +72,21 @@ def _entry_script(app_dir: Path):
     return None
 
 
+def _venv_python(app_dir: Path):
+    """The app's own interpreter, on either venv layout.
+
+    Windows puts it in .venv\Scripts\python.exe; macOS and Linux use
+    .venv/bin/python."""
+    for rel in ("Scripts/python.exe", "bin/python", "bin/python3"):
+        candidate = app_dir / ".venv" / rel
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _python_for(app_dir: Path) -> str:
-    venv = app_dir / ".venv" / "Scripts" / "python.exe"
-    return str(venv) if venv.exists() else sys.executable
+    venv = _venv_python(app_dir)
+    return str(venv) if venv else sys.executable
 
 
 def _login_flag(script: Path) -> str:
@@ -112,7 +124,7 @@ def discover_apps():
             "python": _python_for(d),
             "login_flag": _login_flag(script),
             "accounts": _accounts(d),
-            "has_venv": (d / ".venv" / "Scripts" / "python.exe").exists(),
+            "has_venv": _venv_python(d) is not None,
         }
     return apps
 

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from paperpull_core import classification, receipt_pdf
+from paperpull_core import browser as browser_launcher
 import gap_site as site
 from paperpull_core.models import (DONE_STATES, IN_STORE, ONLINE, Item, Purchase, State)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
@@ -226,32 +227,19 @@ class App:
     # -- commands -----------------------------------------------------------
 
     def cmd_open_browser(self):
-        """Launch a normal sign-in Chromium using THIS config's own profile
-        and debugging port. A second account opens its own browser on its own
-        port with its own saved session - no path/port duplication in .bat."""
-        import glob
-        import os
-        import re as _re
-        import subprocess
-        port = "9233"
-        m = _re.search(r":(\d+)", self.config.get("cdp_url", "") or "")
-        if m:
-            port = m.group(1)
+        """Open a sign-in window on THIS config's own port and profile.
+
+        A second account opens its own browser, on its own port, with its own
+        saved session - so nothing is duplicated in the launcher scripts. You
+        sign in; the tool attaches afterwards.
+        """
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9233")
         profile = self.config["profile_dir"]
-        Path(profile).mkdir(parents=True, exist_ok=True)
-        local = os.environ.get("LOCALAPPDATA", "")
-        candidates = (glob.glob(os.path.join(local, "ms-playwright", "chromium-*",
-                                             "chrome-win64", "chrome.exe"))
-                      + glob.glob(os.path.join(local, "ms-playwright", "chromium-*",
-                                               "chrome-win", "chrome.exe")))
-        if not candidates:
-            print("Could not find the Playwright Chromium. Run setup.bat first.")
-            return
         url = site.URLS.get("orders") or site.URLS.get("login") or site.URLS["home"]
-        subprocess.Popen([candidates[0], f"--user-data-dir={profile}",
-                          f"--remote-debugging-port={port}", "--no-first-run",
-                          "--no-default-browser-check", url])
-        print(f"Opened a sign-in browser on port {port}.")
+        name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=False)
+        if not name:
+            return
+        print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
 
