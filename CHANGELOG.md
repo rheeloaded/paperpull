@@ -7,6 +7,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.4.0] — 2026-08-16
+
+### Added
+- **Gap Inc.** — order receipts (13th provider). One Gap login covers Gap, Old
+  Navy, Banana Republic, Athleta and Gap Factory, and a single order history
+  holds orders from all of them; the brand is recorded per order. The order
+  history lazy-loads on scroll rather than paginating by year, so discovery is a
+  single scrolled pass over everything Gap still exposes (about the last 13
+  months). Gap ships no printable invoice and no print stylesheet, so each
+  order's own details page is captured: the app waits for the page to load its
+  data, hides everything outside the purchase-summary block (a display-only
+  change to the local page), and renders the result with `printToPDF` — a
+  receipt with the purchase header, line items and charge summary, and none of
+  the site navigation.
+
 ## [0.3.1] — 2026-08-16
 
 ### Security

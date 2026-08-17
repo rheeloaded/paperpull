@@ -107,7 +107,7 @@ e.g. "American Express" as well as "Amex" — the token substitution misses it).
 ### 2. Pick a free CDP port + set config
 
 Each app uses its own debugging port so several signed-in browsers can be open
-at once. Taken so far: **9222–9232**. Use the **next free port (9233+)** in your
+at once. Taken so far: **9222–9233**. Use the **next free port (9234+)** in your
 `config.example.json` and local `config.json`, and point `output_dir` /
 `profile_dir` at this app's folder.
 
@@ -168,7 +168,7 @@ open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ---
 
-## Tips (hard-won across 12 apps)
+## Tips (hard-won across 13 apps)
 
 - **Download mechanisms vary — identify yours first.** Seen so far: a real
   browser **download event** (`page.expect_download`, most common); an inline

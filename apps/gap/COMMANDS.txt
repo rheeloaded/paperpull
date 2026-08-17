@@ -1,0 +1,24 @@
+GAP RECEIPTS  -  commands
+============================================================
+YOUR account = just the batch name.  SPOUSE = add "spouse".
+
+  Task            You                    Spouse
+  --------------  ---------------------  --------------------------
+  Sign in         login.bat              login.bat spouse
+  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
+  Full run        run_all.bat            run_all.bat spouse
+  Continue        resume.bat             resume.bat spouse
+  Re-check PDFs   verify_receipts.bat    verify_receipts.bat spouse
+  Fix a name      review_names.bat       review_names.bat spouse
+
+FLOW:  login.bat  ->  run_pilot.bat  ->  run_all.bat
+Keep the sign-in browser OPEN during the run.
+
+HOW FAR BACK: Gap only shows about the LAST 13 MONTHS of orders, and every
+one of them loads onto a single page - so a full run simply takes whatever
+Gap still has. Older orders are gone from the site and cannot be downloaded.
+To narrow a run, set "default_start_date" in the config or pass a date:
+   .venv\Scripts\python.exe gap_receipts.py --all --start-date 2026-01-01
+
+Your files: this folder.   Spouse's: "Gap Receipts - spouse".
+Full command reference: COMMANDS.txt in the parent folder.
