@@ -49,7 +49,6 @@ def load_config(path: Optional[Path] = None) -> dict:
     cfg.setdefault("output_dir", str(DEFAULT_OUTPUT_DIR))
     cfg.setdefault("min_pdf_bytes", 3000)
     cfg.setdefault("max_path_length", 240)
-    cfg.setdefault("include_invoices", False)
     cfg.setdefault("delay_min_seconds", 2.0)
     cfg.setdefault("delay_max_seconds", 4.0)
     cfg.setdefault("pilot_online", 5)
@@ -102,7 +101,6 @@ class Paths:
         self.root = Path(output_dir)
         self.online = self.root / "Online"
         self.instore = self.root / "In-Store"
-        self.invoices = self.root / "Invoices"
         self.manual_review = self.root / "Manual Review"
         self.logs = self.root / "Logs"
         self.diagnostics = self.root / "Diagnostics"
@@ -114,8 +112,11 @@ class Paths:
         self.run_summary = self.root / "run-summary.txt"
 
     def all_dirs(self) -> List[Path]:
-        return [self.root, self.online, self.instore, self.invoices,
-                self.manual_review, self.logs, self.diagnostics, self.backups]
+        # Only the folders this provider actually fills. Anything else it
+        # can route to (see folder_for) is created on demand, so an empty
+        # folder never appears for a document type that cannot occur here.
+        return [self.root, self.online, self.instore, self.manual_review,
+                self.logs, self.diagnostics, self.backups]
 
     def ensure(self) -> None:
         for d in self.all_dirs():
@@ -125,10 +126,22 @@ class Paths:
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
 
-    def folder_for(self, purchase_type: str = "Online", document_type: str = "Receipt") -> Path:
-        if document_type == "Invoice":
-            return self.invoices
-        return self.online if purchase_type == "Online" else self.instore
+    @staticmethod
+    def _ready(folder: Path) -> Path:
+        """Create a routed folder on demand.
+
+        ensure() only pre-creates the folders this provider actually fills,
+        so a category that IS reachable but rare (e.g. after adding a
+        document type to config.json) still gets its folder the moment a
+        document routes there."""
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def folder_for(self, purchase_type: str = "Online",
+                   document_type: str = "Receipt") -> Path:
+        """Gap publishes no separate invoice, so every document is a
+        receipt filed by where the purchase happened."""
+        return self._ready(self.online if purchase_type == "Online" else self.instore)
 
 
 # ---------------------------------------------------------------------------

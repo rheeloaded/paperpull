@@ -7,6 +7,29 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.4.1] — 2026-08-16
+
+### Fixed
+- **Gap** — in-store purchases are now separated from online orders. Gap's
+  history page mixes the two; they were all being typed "Online" and filed in
+  `Online\`. There is now an `In-Store\` folder (matching the Target and
+  Walmart apps), online orders record the Gap Inc. brand that shipped them,
+  in-store purchases record the store, and `--online` / `--instore` run one
+  kind. Also fixes card-boundary detection: card text was bounded by length,
+  so on an account whose cards are sparse the walk captured the whole list and
+  every purchase inherited the first card's date. A card now ends at the first
+  sibling order id.
+
+### Changed
+- **Every app** now creates only the document folders it can actually fill.
+  Each app was cloned from the nearest existing one and inherited that app's
+  whole folder list, so installs grew permanently-empty folders — `Insurance
+  Documents` (real only for USAA, which is also an insurer), `Other Documents`
+  (never a configurable document type), and `Invoices` (reachable only in the
+  Target and Walmart apps). Routing is unchanged and now creates a folder on
+  demand, so a category that is reachable but rare still gets its folder the
+  moment a document lands there. Nothing that holds documents is affected.
+
 ## [0.4.0] — 2026-08-16
 
 ### Added
