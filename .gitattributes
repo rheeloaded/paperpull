@@ -1,7 +1,27 @@
-# Normalize line endings. Windows batch files must stay CRLF.
+# Line endings matter here, in one direction each.
+#
+# A shell script with CRLF line endings fails on macOS and Linux with a
+# confusing "bad interpreter: /usr/bin/env bash^M", so the .command and .sh
+# launchers must always check out with LF - including on Windows, where git
+# would otherwise convert them.
+#
+# Windows .bat files want the opposite: CRLF.
+
 * text=auto
-*.py text eol=lf
-*.md text eol=lf
-*.json text eol=lf
-*.txt text eol=lf
-*.bat text eol=crlf
+
+*.command   text eol=lf
+*.sh        text eol=lf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+*.py        text
+*.md        text
+*.json      text
+*.txt       text
+*.toml      text
+
+*.pdf       binary
+*.png       binary
+*.gif       binary
+*.whl       binary
+*.zip       binary

@@ -35,3 +35,18 @@ def test_every_declared_route_resolves(tmp_path):
     paths = storage.Paths(tmp_path)
     for key in storage.SPEC.routes:
         assert paths.folder_for(key).is_dir()
+
+def test_the_orchestrator_imports():
+    """Catches a core that is installed but too old for this app.
+
+    The unit tests exercise storage and the site layer directly, so a missing
+    module in the orchestrator's own imports slipped past them once - the
+    install had a core predating paperpull_core.browser and every command
+    died on startup while the tests stayed green.
+    """
+    import importlib
+    here = Path(__file__).resolve().parents[1]
+    entry = next(p for p in list(here.glob("*_docs.py")) + list(here.glob("*_receipts.py")))
+    module = importlib.import_module(entry.stem)
+    assert hasattr(module, "main")
+    assert hasattr(module, "App")

@@ -45,7 +45,8 @@ def app_for(install: Path) -> Path | None:
 
 
 def core_version(install: Path) -> str:
-    for site in (install / ".venv" / "Lib").rglob("paperpull_core/__init__.py"):
+    # Windows: .venv\Lib\site-packages, posix: .venv/lib/pythonX.Y/site-packages
+    for site in (install / ".venv").rglob("paperpull_core/__init__.py"):
         m = re.search(r'__version__ = "([^"]+)"', site.read_text(encoding="utf-8"))
         if m:
             return m.group(1)

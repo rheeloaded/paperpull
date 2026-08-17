@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
 # project folder -> (config filename, base port)
@@ -77,11 +78,21 @@ def main():
     made = [make_config(p, args.name, args.port_offset, owner) for p in PROJECTS]
     made = [m for m in made if m]
     print(f"\nDone: {len(made)} config(s).\n")
+    label = slug(args.name)
+    here = Path(__file__).resolve().parent
+    entry = next((p.name for p in list(here.glob("*_docs.py"))
+                  + list(here.glob("*_receipts.py"))), "run.py")
+    if sys.platform == "win32":
+        runner = ".venv" + chr(92) + "Scripts" + chr(92) + "python.exe " + entry
+        launcher = "login.bat " + label
+    else:
+        runner = ".venv/bin/python " + entry
+        launcher = "./login.command " + label
     print("To use them, add --config to any command, e.g.:")
-    print(f'  .venv\\Scripts\\python.exe target_receipts.py --pilot '
-          f'--config config.{slug(args.name)}.json')
-    print("\nSign in first with that account's own browser profile/port:")
-    print(f'  login.bat {slug(args.name)}')
+    print("  " + runner + " --pilot --config config." + label + ".json")
+    print("")
+    print("Sign in first with that account's own browser profile/port:")
+    print("  " + launcher)
     print("\nYour existing downloads are untouched - the new account writes to")
     print("its own folders, and each account's progress.json is separate.")
 
