@@ -15,6 +15,13 @@ run_gui.bat
 That creates a small venv (FastAPI + uvicorn), starts the server, and opens
 <http://127.0.0.1:8765>. It listens on localhost only.
 
+Needs **Python 3.11+**, the same floor as the rest of PaperPull.
+
+Closing the browser tab stops the run it was showing. That is deliberate: a
+downloader driving your signed-in browser should not keep going once nothing
+is watching it. Nothing is lost — a document is only marked done after it is
+saved, so the next run picks up exactly where this one stopped.
+
 Or manually:
 
 ```bat
