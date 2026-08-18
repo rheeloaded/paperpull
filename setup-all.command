@@ -31,8 +31,12 @@ for app in apps/*/; do
     [ -f "$app/requirements.txt" ] || continue
     printf '  %-14s ' "$name"
 
-    if ! python3 -m venv "$app/.venv" >/dev/null 2>&1; then
-        echo "FAILED (venv)"; failed="$failed $name"; continue
+    # Reuse an existing environment. Rebuilding one that is in use fails,
+    # and re-running setup should be safe.
+    if [ ! -x "$app/.venv/bin/python" ]; then
+        if ! python3 -m venv "$app/.venv" >/dev/null 2>&1; then
+            echo "FAILED (venv)"; failed="$failed $name"; continue
+        fi
     fi
     if ! "$app/.venv/bin/pip" install -q -r "$app/requirements.txt" >/dev/null 2>&1; then
         echo "FAILED (requirements)"; failed="$failed $name"; continue
@@ -49,7 +53,7 @@ done
 
 echo
 printf '  %-14s ' "gui"
-if python3 -m venv gui/.venv >/dev/null 2>&1 &&
+if { [ -x gui/.venv/bin/python ] || python3 -m venv gui/.venv >/dev/null 2>&1; } &&
    gui/.venv/bin/pip install -q -r gui/requirements.txt >/dev/null 2>&1; then
     echo "ok"
 else
