@@ -116,8 +116,6 @@ class App:
         # UKG has no single address: every employer runs its own tenant, so
         # the site layer is pointed at this config's before anything navigates.
         site.configure(self.config.get("base_url", ""))
-        if not site.is_configured():
-            raise SystemExit(site.configuration_help())
         self.paths = Paths(Path(self.config["output_dir"]))
         self.paths.ensure()
         self._setup_logging()
@@ -250,15 +248,32 @@ class App:
         """
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9234")
         profile = self.config["profile_dir"]
-        url = site.URLS["home"]
+
+        # Chicken and egg: you have to sign in to find out what your employer's
+        # UKG address is, so a browser opens even before base_url is set.
+        first_run = not site.is_configured()
+        url = site.URLS["home"] if not first_run else "https://www.ukg.com/login"
+
         name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=False)
         if not name:
             return
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
-        print("Sign in, keep the window OPEN, then run the pilot.")
+        if first_run:
+            print()
+            print("No base_url is set yet, so this opened UKG's general sign-in page.")
+            print("Go to YOUR employer's UKG site and sign in - your company's")
+            print("intranet or HR portal links to it, and IT can tell you the address.")
+            print("Then copy the address from the browser bar and put it in")
+            print("config.json as \"base_url\", for example:")
+            print('    "base_url": "https://yourcompany.ultipro.com"')
+            print()
+            print("Leave the browser OPEN either way.")
+        else:
+            print("Sign in, keep the window OPEN, then run the pilot.")
 
     def cmd_login(self):
+        self.require_base_url()
         print("Checking the connection to your signed-in UKG browser...\n")
         page = self.page()
         ok = site.goto_documents(page)
@@ -361,6 +376,7 @@ class App:
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
+        self.require_base_url()
         page = self.page()
         n_new = 0
         # UKG lists every bill on one paginated billing-history page. Open

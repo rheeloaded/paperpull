@@ -137,3 +137,33 @@ def test_filename_uses_the_bound_provider(tmp_path):
     assert storage.build_pdf_filename("2026-08-17", "august bill", "Statement") == \
         "2026-08-17 Sam T-Mobile August Bill Statement.pdf"
     storage.set_filename_owner("")
+
+
+def test_missing_config_explains_itself(tmp_path):
+    """A first run with no config.json used to die inside pathlib with
+    FileNotFoundError, which told the user nothing."""
+    spec = document_spec(tmp_path)
+    (tmp_path / "config.example.json").write_text("{}", encoding="utf-8")
+    storage.bind(spec)
+    with pytest.raises(SystemExit) as e:
+        storage.load_config(tmp_path / "config.json")
+    message = str(e.value)
+    assert "No config file at" in message
+    assert "config.example.json config.json" in message
+
+
+def test_malformed_config_explains_itself(tmp_path):
+    storage.bind(document_spec(tmp_path))
+    bad = tmp_path / "config.json"
+    bad.write_text('{"owner": "Sam",}', encoding="utf-8")   # trailing comma
+    with pytest.raises(SystemExit) as e:
+        storage.load_config(bad)
+    assert "not valid JSON" in str(e.value)
+
+
+def test_config_saved_with_a_bom_still_loads(tmp_path):
+    """Notepad writes UTF-8 with a BOM; that used to break json.load."""
+    storage.bind(document_spec(tmp_path))
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"owner": "Sam"}', encoding="utf-8-sig")
+    assert storage.load_config(cfg)["owner"] == "Sam"

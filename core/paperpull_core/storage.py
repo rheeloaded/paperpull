@@ -46,9 +46,26 @@ def spec():
 def load_config(path: Optional[Path] = None) -> dict:
     """Read config.json and fill in this provider's defaults."""
     sp = spec()
-    path = path or (sp.project_dir / "config.json")
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
+    path = Path(path) if path else (sp.project_dir / "config.json")
+    if not path.exists():
+        copy_cmd = ("copy config.example.json config.json"
+                    if sys.platform == "win32"
+                    else "cp config.example.json config.json")
+        lines = ["No config file at " + str(path) + "."]
+        if (sp.project_dir / "config.example.json").exists():
+            lines += ["Create one from the template, then edit the paths in it:",
+                      "    " + copy_cmd]
+        lines += ["This file holds your own folders, port and settings, which is",
+                  "why it is not shipped and never committed."]
+        raise SystemExit("\n".join(lines))
+    try:
+        # utf-8-sig: a config saved from Notepad carries a BOM
+        with open(path, "r", encoding="utf-8-sig") as f:
+            cfg = json.load(f)
+    except json.JSONDecodeError as e:
+        raise SystemExit(
+            str(path) + " is not valid JSON: " + str(e) + "\n"
+            "Open it and fix the syntax - a trailing comma is the usual cause.")
     cfg.setdefault("output_dir", str(Path.home() / "Downloads" / sp.provider))
     cfg.setdefault("min_pdf_bytes", 3000)
     cfg.setdefault("max_path_length", 240)
