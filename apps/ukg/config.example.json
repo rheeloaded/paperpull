@@ -1,0 +1,23 @@
+{
+  "owner": "",
+  "owner_in_filename": false,
+  "output_dir": ".",
+  "profile_dir": "./browser-profile",
+  "cdp_url": "http://localhost:9234",
+
+  "//": "YOUR employer's UKG address. Every company has its own, and the",
+  "//2": "product differs too - UKG Pro/UltiPro, UKG Ready, or Workforce",
+  "//3": "Central. Copy the address from your browser after signing in.",
+  "//4": "Examples: https://xxxx.ultipro.com  |  https://secureN.saashr.com",
+  "base_url": "https://REPLACE-ME.ultipro.com",
+
+  "document_types": [
+    "Statement",
+    "Tax Document"
+  ],
+  "min_pdf_bytes": 2000,
+  "max_path_length": 240,
+  "delay_min_seconds": 2.5,
+  "delay_max_seconds": 5.0,
+  "pilot_count": 3
+}
