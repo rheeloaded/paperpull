@@ -7,6 +7,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **The control panel left a downloader running after you closed its tab.**
+  `/api/run` streams a run's output over SSE; when the browser disconnected,
+  nothing stopped the child process. The downloader kept going unseen - still
+  driving your signed-in browser over CDP, still writing PDFs and
+  `progress.json` - with no output on screen. Believing it had stopped, you
+  could press Run again and put two runs on one `progress.json`, one CDP port
+  and one output folder, which is the collision that has previously mixed two
+  accounts. Closing the tab now stops the run. Nothing is lost: `downloaded_ok`
+  is only set once a document is saved, so the next run resumes and re-fetches
+  nothing.
+
+  The stream had to become an async generator to fix this. With a sync one,
+  Starlette wraps it in `iterate_in_threadpool`, which never calls `.close()`
+  on it - so a `try/finally` around the loop looks correct, and still never
+  runs. Verified over a real socket against a throwaway app, both for the
+  disconnect path and for a normal run's exit code.
+- `gui/app.py` raised `SyntaxWarning: invalid escape sequence '\S'` on every
+  import - a `\Scripts` path inside a non-raw docstring. Harmless today, a
+  `SyntaxError` in a future Python.
+
+### Changed
+- The control panel states the project's Python floor (3.11+) and checks it at
+  startup, failing with one sentence rather than something obscure. Nothing
+  under `gui/` had recorded which Python version it targets.
+
 ## [0.6.2] — 2026-08-18
 
 ### Fixed
