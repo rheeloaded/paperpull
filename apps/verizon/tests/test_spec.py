@@ -28,7 +28,9 @@ def test_precreated_folders_are_unchanged(tmp_path):
     paths = storage.Paths(tmp_path)
     paths.ensure()
     made = sorted(p.name for p in tmp_path.iterdir() if p.is_dir())
-    assert made == ['Backups', 'Diagnostics', 'Logs', 'Manual Review', 'Statements', 'Tax Documents']
+    # No Tax Documents: Verizon posts bills only, so that folder would sit
+    # empty forever. The route stays; the folder is made on demand.
+    assert made == ['Backups', 'Diagnostics', 'Logs', 'Manual Review', 'Statements']
 
 
 def test_every_declared_route_resolves(tmp_path):

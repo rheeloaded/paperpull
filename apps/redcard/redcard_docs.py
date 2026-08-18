@@ -1,4 +1,4 @@
-"""Target Circle Card statement & tax-document downloader (local, supervised).
+"""Target Circle Card bill-statement downloader (local, supervised).
 
 Usage:
     python redcard_docs.py --login       verify connection to your browser
