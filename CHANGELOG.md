@@ -7,6 +7,31 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.6.1] — 2026-08-18
+
+### Fixed
+- **`setup-all.bat` never installed the shared core, so a fresh Windows clone
+  produced fourteen virtual environments that all failed at startup with
+  `ModuleNotFoundError: paperpull_core`.** Every app has imported the core
+  since 0.5.0, and each app's own `setup.bat` was updated to install it; the
+  one-shot script was missed. `setup-all.command` on macOS was unaffected, so
+  Windows was the broken path. It installs the core from `core/` in a repo
+  checkout and falls back to the bundled wheel in a standalone copy.
+- `setup-all.bat` downloaded Playwright's Chromium once per app. It is a
+  single shared install, so thirteen of the fourteen downloads were redundant
+  — and it is by far the slowest step.
+- `setup-all.bat` reported "All set - 9 apps" regardless of how many it had
+  set up; the count was hardcoded when there were nine. It counts now.
+- The failure summary in `setup-all.bat` began `echo !!`, and `!` is the
+  delayed-expansion escape, so `cmd` consumed the marker *and* the list of
+  failed apps with it — the one line that says what went wrong printed as a
+  bare `FAILED`.
+
+### Changed
+- Both `setup-all` scripts reuse an existing virtual environment instead of
+  rebuilding it. Rebuilding one that is in use fails with a permission error,
+  which is exactly the situation in which someone re-runs setup.
+
 ## [0.6.0] — 2026-08-18
 
 ### Added
