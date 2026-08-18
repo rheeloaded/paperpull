@@ -2,8 +2,8 @@
 
 When UKG changes its site, repair this file only.
 
-TWO THINGS MAKE UKG DIFFERENT FROM EVERY OTHER PROVIDER HERE
-------------------------------------------------------------
+WHAT MAKES UKG DIFFERENT FROM THE OTHER PROVIDERS HERE
+------------------------------------------------------
 1. **There is no single UKG address.** Each employer runs its own tenant, and
    UKG ships several products with different page structures:
 
@@ -14,31 +14,46 @@ TWO THINGS MAKE UKG DIFFERENT FROM EVERY OTHER PROVIDER HERE
 
    So the base address is read from `config.json` (`base_url`) and handed to
    `configure()` at startup. It is deliberately NOT hardcoded: it varies per
-   employer and it identifies that employer, so it does not belong in a public
-   repo.
+   employer, and it identifies that employer, so it does not belong in a
+   public repo. **This file is written against UKG Pro / UltiPro.**
 
 2. **Sign-in varies per employer.** Some companies use a UKG username and
-   password; others hand off to corporate SSO (Okta, Entra/Azure AD, Ping,
-   ...), sometimes with a redirect chain and an MFA prompt. The tool does not
-   care which: it opens the tenant address, you sign in however your company
-   works, and it attaches to the session afterwards. There is no login code
-   here to break, and none that could ever handle your credentials.
+   password; others hand off to corporate SSO (Okta, Entra/Azure AD, Ping)
+   with an MFA prompt. The tool does not care which: you sign in, it attaches
+   afterwards. There is no login code here.
 
-WHAT STILL NEEDS FILLING IN
----------------------------
-The selectors below are placeholders. The pay-statement list and the download
-mechanism (a real download event vs. a blob tab vs. a viewer vs. printToPDF)
-have to be read off the live, signed-in page - that is the one unknown for
-every new provider. Sign in, then run:
+HOW THE DOCUMENTS ARE FOUND AND FETCHED
+---------------------------------------
+UKG Pro's pay area is an Angular app built from Ignite web components, and it
+is fed by the same JSON API the UKG mobile app uses, proxied through the
+tenant so it carries the ordinary session cookie:
 
-    python ukg_docs.py --diagnose
+    GET {API}/pay/companies
+        -> [{companyId, companyName, country}]
 
-and repair the FALLBACK entries against the Diagnostics/ output.
+    GET {API}/pay/payStatements/{coid}?visibleColumns=payDate
+        -> [{payId, coid, companyId, docNumber, payDate, netPay, ...}]
+
+    GET {API}/pay/statements/{coid}/{payId}/pdf
+        -> application/pdf
+
+**Nothing is ever clicked.** The list and the PDFs both come from GETs with
+the session cookie, so on a site that can also change direct deposit and tax
+withholding, this app never activates a control at all. The guard below still
+exists because a future repair might reach for one - and on a payroll site it
+should have to argue with a blocklist first.
+
+(The UI route is `.../Pay.PayHub.Web/pay-details/{coid}/{payId}`, and its
+"more actions" menu offers "Download PDF statement". That menu lives in a
+shadow root, which is why plain querySelectorAll finds nothing there. The API
+route above is what that menu item ends up calling.)
 """
 from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import List, Optional
 
 log = logging.getLogger("ukg_docs.site")
@@ -50,21 +65,18 @@ log = logging.getLogger("ukg_docs.site")
 BASE = ""
 URLS: dict = {}
 
+PROXY = "/handlers/ExternalServicesProxy.ashx"
+API = f"{PROXY}/Ultipro.Api.External/services/mobileapp/api/v1"
+
 
 def configure(base_url: str) -> None:
-    """Point this module at the employer's UKG tenant.
-
-    Called once by the orchestrator with `config["base_url"]`. Everything that
-    navigates goes through URLS, so this is the only place the address enters.
-    """
+    """Point this module at the employer's UKG tenant."""
     global BASE, URLS
     BASE = (base_url or "").rstrip("/")
     URLS = {
-        "home": BASE or "",
-        # Filled in once the live site is explored - different per UKG
-        # product, so they are derived from BASE rather than guessed here.
-        "pay": BASE,
-        "documents": BASE,
+        "home": BASE,
+        "documents": f"{BASE}/c/hcm/VIEW/PayStatements",
+        "pay_overview": f"{BASE}/c/hcm/VIEW/PayOverview",
     }
 
 
@@ -75,18 +87,20 @@ def is_configured() -> bool:
 def configuration_help() -> str:
     return (
         "No UKG address is configured.\n"
-        "Open config.json and set \"base_url\" to your employer's UKG site -\n"
+        'Open config.json and set "base_url" to your employer\'s UKG site -\n'
         "the address in your browser once you are signed in, for example\n"
         "  https://yourcompany.ultipro.com      (UKG Pro / UltiPro)\n"
-        "  https://secure6.saashr.com           (UKG Ready)\n"
         "Your employer's IT or HR portal links to it if you are unsure.")
+
+
+def api_url(path: str) -> str:
+    return f"{BASE}{API}{path}"
 
 
 # ---------------------------------------------------------------------------
 # Session / safety
 # ---------------------------------------------------------------------------
 
-# Sign-in can be UKG's own form or a corporate SSO host, so this stays broad.
 LOGIN_URL_MARKERS = ["/login", "/signin", "/sign-in", "/auth", "/sso",
                      "okta.com", "microsoftonline.com", "pingidentity",
                      "adfs", "/idp/", "samlsso"]
@@ -96,33 +110,42 @@ SECURITY_CHALLENGE_MARKERS = [
     "two-factor", "multi-factor", "approve the request", "check your phone",
 ]
 
-# Controls that must NEVER be activated. Payroll sites carry genuinely
-# destructive actions - direct deposit, tax withholding, address changes -
-# so this blocklist matters more here than anywhere else in the project.
+# Controls that must NEVER be activated. A payroll site can redirect where
+# someone's wages land, so this matters more here than anywhere else in the
+# project. UKG Pro helpfully encodes intent in its own URLs too - compare
+# /c/hcm/VIEW/PayStatements with /c/hcm/EDIT/EePayrollDirectDepositSummary -
+# which is what is_safe_url() below leans on.
 FORBIDDEN_CONTROL_RE = re.compile(
     r"(direct\s+deposit|bank\s+account|routing\s+number|"
-    r"tax\s+withholding|w-?4|withhold|allowance|"
+    r"tax\s+withholding|w-?4\b|withhold|allowance|"
     r"change\s+(address|name|phone|email|password|beneficiar)|"
     r"update\s+(profile|address|contact|payment)|"
     r"enroll|benefit|open\s+enrollment|life\s+event|"
     r"request\s+(time\s+off|leave)|submit|approve|delete|remove|cancel|"
-    r"punch|clock\s+(in|out)|timecard\s+(approve|submit))", re.I)
+    r"punch|clock\s+(in|out)|timecard)", re.I)
 
-# Only these may be activated: viewing or downloading a pay document.
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(download|view|print|open|pdf|pay\s*statement|pay\s*stub|paystub|"
-    r"earnings\s+statement|w-?2|1095|tax\s+form|year[-\s]?end)", re.I)
+    r"(download|view\s+pay|print|pdf|pay\s*statement|pay\s*stub|paystub|"
+    r"earnings\s+statement|w-?2\b|1095|tax\s+form|year[-\s]?end)", re.I)
 
 
 def is_safe_control(name: str) -> bool:
-    """Deny by default: a control must clear the blocklist AND be recognised
-    as a document control before anything clicks it."""
+    """Deny by default: clear the blocklist AND match the document allowlist."""
     name = (name or "").strip()
     if not name:
         return False
     if FORBIDDEN_CONTROL_RE.search(name):
         return False
     return bool(SAFE_DOC_CONTROL_RE.search(name))
+
+
+def is_safe_url(url: str) -> bool:
+    """UKG Pro puts the verb in the path. Anything that says EDIT is refused,
+    whatever else it claims to be."""
+    u = (url or "")
+    if re.search(r"/c/hcm/(EDIT|ADD|DELETE)/", u, re.I):
+        return False
+    return u.startswith(BASE) if BASE else False
 
 
 def looks_signed_out(page) -> bool:
@@ -147,49 +170,119 @@ def detect_security_challenge(page) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Pay documents  (PLACEHOLDERS - repair after --diagnose on the live site)
+# The JSON API
 # ---------------------------------------------------------------------------
 
-FALLBACK = {
-    "pay_row": "[data-automation*='payStatement'], tr[class*='pay'], "
-               "[class*='PayStatement'], [class*='paystub']",
-    "date_cell": "[data-automation*='date'], td:first-child",
-    "download_control": "a[href*='.pdf'], button[title*='Download' i], "
-                        "[aria-label*='Download' i]",
-    "page_ready": "[data-automation], main, #root",
-}
-
-DATE_RE = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b")
+@dataclass
+class RawDoc:
+    """One pay statement, in the shape the orchestrator records."""
+    title: str
+    date_text: str
+    pdf_url: str
+    doc_number: str = ""
 
 
-def parse_date(text: str) -> Optional[str]:
-    m = DATE_RE.search(text or "")
-    if not m:
+def parse_period_date(title: str):
+    """Fallback date parsing. The API already gives an exact date, so this
+    only catches a title the API could not date."""
+    m = re.search(r"(20\d{2})-(\d{2})-(\d{2})", title or "")
+    return (m.group(0) if m else "", "")
+
+
+def _get_json(page, path):
+    """GET a proxied API path using the signed-in session."""
+    url = api_url(path)
+    if not is_safe_url(url):
+        raise RuntimeError(f"refusing to request a non-view URL: {url}")
+    resp = page.context.request.get(url)
+    if not resp.ok:
+        log.warning("API %s returned %s", path, resp.status)
         return None
-    mm, dd, yyyy = m.groups()
-    return f"{int(yyyy):04d}-{int(mm):02d}-{int(dd):02d}"
+    return resp.json()
 
 
 def goto_documents(page) -> bool:
-    """Navigate to the pay-statement list. Filled in after exploration."""
+    """Open the pay-statements page.
+
+    The API calls below work on their own, but loading the page first keeps
+    the session warm and gives the user something recognisable to look at.
+    """
     if not is_configured():
         raise SystemExit(configuration_help())
-    page.goto(URLS["home"], wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_timeout(3000)
+    page.goto(URLS["documents"], wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(4000)
     return not looks_signed_out(page)
 
 
-def collect_documents(page) -> List[dict]:
-    """One dict per pay document: date_text, title, and how to fetch it.
+def company_ids(page) -> List[str]:
+    data = _get_json(page, "/pay/companies") or []
+    ids = [c.get("companyId") for c in data if c.get("companyId")]
+    log.info("UKG companies: %d", len(ids))
+    return ids
 
-    NOT YET IMPLEMENTED - needs the live DOM.
+
+def _iso_from_epoch_ms(value) -> str:
+    try:
+        return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def collect_documents(page) -> List[RawDoc]:
+    """Every pay statement the account can see, newest first."""
+    docs: List[RawDoc] = []
+    for coid in company_ids(page):
+        rows = _get_json(page, f"/pay/payStatements/{coid}?visibleColumns=payDate") or []
+        log.info("company %s: %d pay statement(s)", coid, len(rows))
+        for row in rows:
+            pay_id = row.get("payId")
+            if not pay_id:
+                continue
+            this_coid = row.get("coid") or coid
+            date_text = _iso_from_epoch_ms(row.get("payDate"))
+            docs.append(RawDoc(
+                # Deliberately no amounts: the index records what a file IS,
+                # never what it says. The row also carries netPay, grossPay,
+                # taxes and deductions - none of which are kept.
+                title=f"Pay Statement {date_text}".strip(),
+                date_text=date_text,
+                pdf_url=api_url(f"/pay/statements/{this_coid}/{pay_id}/pdf"),
+                doc_number=str(row.get("docNumber") or "")))
+    # A pay date is NOT unique: an off-cycle or bonus run lands on the same
+    # date as the regular one, and identical titles would collapse to a single
+    # record - silently losing a statement. Disambiguate only the dates that
+    # actually repeat, so ordinary titles stay clean.
+    seen = {}
+    for d in docs:
+        seen[d.date_text] = seen.get(d.date_text, 0) + 1
+    for d in docs:
+        if seen.get(d.date_text, 0) > 1 and d.doc_number:
+            d.title = f"{d.title} (#{d.doc_number})"
+
+    docs.sort(key=lambda d: (d.date_text or "", d.doc_number), reverse=True)
+    return docs
+
+
+def download_document(page, pdf_url: str, out_path) -> bool:
+    """Save one pay statement's PDF.
+
+    A plain GET with the session cookie - no control is clicked, no print
+    dialog, no blob tab.
     """
-    log.warning("collect_documents is not implemented yet; run --diagnose "
-                "against the signed-in site and repair ukg_site.py")
-    return []
-
-
-def download_document(page, doc: dict, out_path) -> bool:
-    """Save one document's PDF. NOT YET IMPLEMENTED - needs the live DOM."""
-    log.warning("download_document is not implemented yet")
-    return False
+    from pathlib import Path
+    url = pdf_url
+    if not is_safe_url(url):
+        log.error("refusing to fetch a non-view URL")
+        return False
+    resp = page.context.request.get(url)
+    if not resp.ok:
+        log.warning("PDF fetch returned %s", resp.status)
+        return False
+    body = resp.body()
+    if not body.startswith(b"%PDF"):
+        log.warning("response was not a PDF")
+        return False
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(body)
+    return True

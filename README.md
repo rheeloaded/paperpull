@@ -12,7 +12,7 @@ of clicking through each site by hand.
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Thirteen providers are supported today, all built on the same pattern:
+Fourteen providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -25,6 +25,7 @@ Thirteen providers are supported today, all built on the same pattern:
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
+| [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements**, W-2s | Per-employer tenant; JSON-API, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
@@ -162,7 +163,7 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
 
 ## Status & roadmap
 
-- ✅ All **thirteen** apps work and are in regular use.
+- ✅ All **fourteen** apps work and are in regular use.
 - 🔜 **More providers:** community-driven — see [PROVIDERS.md](PROVIDERS.md).
 - 🔜 **Scheduled/assisted runs:** a monthly "nudge + sweep" (e.g. the 1st) that
   opens the login browsers and then runs discover + resume across every app once

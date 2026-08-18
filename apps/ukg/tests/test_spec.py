@@ -88,3 +88,62 @@ def test_the_orchestrator_imports():
     import importlib
     module = importlib.import_module("ukg_docs")
     assert hasattr(module, "main") and hasattr(module, "App")
+
+
+# --- the API mechanism ------------------------------------------------------
+
+def test_pdf_url_is_built_from_the_configured_tenant():
+    site.configure("https://example.ultipro.com")
+    url = site.api_url("/pay/statements/ABCDE/XYZ123/pdf")
+    assert url.startswith("https://example.ultipro.com/handlers/")
+    assert url.endswith("/pay/statements/ABCDE/XYZ123/pdf")
+
+
+def test_only_view_urls_are_allowed():
+    """UKG Pro puts the verb in the path, so EDIT routes are refused outright
+    - a payroll site's edit pages change direct deposit and withholding."""
+    site.configure("https://example.ultipro.com")
+    assert site.is_safe_url("https://example.ultipro.com/c/hcm/VIEW/PayStatements")
+    assert not site.is_safe_url(
+        "https://example.ultipro.com/c/hcm/EDIT/EePayrollDirectDepositSummary")
+    assert not site.is_safe_url("https://example.ultipro.com/c/hcm/ADD/Something")
+    # and never off-tenant
+    assert not site.is_safe_url("https://evil.example.com/c/hcm/VIEW/PayStatements")
+
+
+def test_same_pay_date_statements_stay_distinct(monkeypatch):
+    """An off-cycle run lands on the same pay date as the regular one. Both
+    must survive: identical titles would collapse into one record and lose a
+    statement silently."""
+    site.configure("https://example.ultipro.com")
+    rows = [
+        {"payId": "AAA", "coid": "CO", "docNumber": "1001", "payDate": 1_780_000_000_000},
+        {"payId": "BBB", "coid": "CO", "docNumber": "1002", "payDate": 1_780_000_000_000},
+        {"payId": "CCC", "coid": "CO", "docNumber": "1003", "payDate": 1_781_000_000_000},
+    ]
+    monkeypatch.setattr(site, "company_ids", lambda page: ["CO"])
+    monkeypatch.setattr(site, "_get_json", lambda page, path: rows)
+
+    docs = site.collect_documents(page=None)
+    assert len(docs) == 3
+    assert len({d.title for d in docs}) == 3, [d.title for d in docs]
+    # the unique date keeps a clean title; the repeated one is disambiguated
+    clean = [d for d in docs if "#" not in d.title]
+    assert len(clean) == 1
+    assert all(d.pdf_url.endswith("/pdf") for d in docs)
+
+
+def test_no_pay_amounts_are_recorded(monkeypatch):
+    """The index says what a file IS, never what it says. A pay row carries
+    netPay/grossPay/taxes/deductions - none may reach the record."""
+    site.configure("https://example.ultipro.com")
+    rows = [{"payId": "AAA", "coid": "CO", "docNumber": "1001",
+             "payDate": 1_780_000_000_000, "netPay": 1234.56, "grossPay": 2345.67,
+             "taxes": 111.11, "deductions": 22.22}]
+    monkeypatch.setattr(site, "company_ids", lambda page: ["CO"])
+    monkeypatch.setattr(site, "_get_json", lambda page, path: rows)
+
+    doc = site.collect_documents(page=None)[0]
+    blob = f"{doc.title} {doc.date_text} {doc.pdf_url} {doc.doc_number}"
+    for amount in ("1234.56", "2345.67", "111.11", "22.22"):
+        assert amount not in blob
