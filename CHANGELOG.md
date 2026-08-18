@@ -7,6 +7,45 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.6.0] — 2026-08-18
+
+### Added
+- **UKG Pro / UltiPro — pay statements (14th provider), and a new category:
+  payroll.** UKG is the first provider without a fixed address: every employer
+  runs its own tenant, so the site is read from `base_url` in `config.json`
+  rather than hardcoded — which also keeps it out of the repo, since a tenant
+  address identifies the employer. Sign-in varies too (a UKG username and
+  password, or corporate SSO with MFA); neither involves the tool.
+
+  Statements and PDFs both come from the JSON API that UKG's own mobile app
+  uses, over the ordinary session, so **on a site that can also change direct
+  deposit and tax withholding this app never activates a control at all.** It
+  additionally refuses any URL whose path says `EDIT` rather than `VIEW`,
+  which is how UKG Pro itself separates the two.
+
+  W-2s and other tax forms are *not* fetched yet; the routing and rules for
+  them are in place, so adding them is a change to `ukg_site.py` alone.
+
+### Fixed
+- A first run with no `config.json` died with a `FileNotFoundError` traceback.
+  It now names the file, gives the copy command for the platform, and explains
+  why the file is not shipped. Malformed JSON reports the syntax error, and a
+  config saved from Notepad with a BOM now loads. This is every app's first
+  run, not just the new one.
+- **UKG:** two pay runs sharing a date (a regular and an off-cycle) collapsed
+  into one record, silently losing a statement. Repeated dates are now
+  disambiguated by document number.
+- **UKG:** the tenant guard compared URLs with a string prefix, so
+  `https://tenant.example.com.evil.test/` and
+  `https://tenant.example.com@evil.test/` both passed it. It now parses the
+  URL and compares scheme, host and port, and rejects embedded credentials.
+
+### Changed
+- **UKG:** records store the API path rather than the full URL, so the
+  employer's tenant address no longer reaches `discovery.json`,
+  `progress.json` or the index CSV.
+- The provider tables no longer claim UKG downloads W-2s, which it does not.
+
 ## [0.5.0] — 2026-08-17
 
 ### Added
