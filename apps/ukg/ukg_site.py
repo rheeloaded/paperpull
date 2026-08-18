@@ -43,6 +43,11 @@ withholding, this app never activates a control at all. The guard below still
 exists because a future repair might reach for one - and on a payroll site it
 should have to argue with a blocklist first.
 
+Only PAY STATEMENTS are fetched. W-2s and other tax forms live elsewhere in
+UKG (Menu -> Myself -> Pay -> Tax Forms) behind a different endpoint, and are
+not read yet. The spec already routes and classifies them, so adding them is
+a change to this file alone.
+
 (The UI route is `.../Pay.PayHub.Web/pay-details/{coid}/{payId}`, and its
 "more actions" menu offers "Download PDF statement". That menu lives in a
 shadow root, which is why plain querySelectorAll finds nothing there. The API
@@ -53,6 +58,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -140,12 +146,38 @@ def is_safe_control(name: str) -> bool:
 
 
 def is_safe_url(url: str) -> bool:
-    """UKG Pro puts the verb in the path. Anything that says EDIT is refused,
-    whatever else it claims to be."""
-    u = (url or "")
-    if re.search(r"/c/hcm/(EDIT|ADD|DELETE)/", u, re.I):
+    """Is this a URL we are willing to request?
+
+    Two rules, both of which have to hold:
+
+    * It is on the configured tenant. Compared by parsed HOST, not by string
+      prefix - `https://tenant.example.com.evil.test/` and
+      `https://tenant.example.com@evil.test/` both *start with* the tenant
+      address while pointing somewhere else entirely.
+    * Its path does not say EDIT/ADD/DELETE. UKG Pro puts the verb in the
+      path, so /c/hcm/EDIT/EePayrollDirectDepositSummary is refused while
+      /c/hcm/VIEW/PayStatements is allowed.
+    """
+    if not BASE:
         return False
-    return u.startswith(BASE) if BASE else False
+    try:
+        want = urlparse(BASE)
+        got = urlparse(url or "")
+    except ValueError:
+        return False
+    if got.scheme != want.scheme or not got.hostname:
+        return False
+    if (got.hostname or "").lower() != (want.hostname or "").lower():
+        return False
+    if got.port != want.port:
+        return False
+    # credentials in a URL are never legitimate here and are a classic way to
+    # disguise the real host
+    if got.username or got.password:
+        return False
+    if re.search(r"/c/hcm/(EDIT|ADD|DELETE)/", got.path or "", re.I):
+        return False
+    return True
 
 
 def looks_signed_out(page) -> bool:
@@ -222,6 +254,13 @@ def company_ids(page) -> List[str]:
 
 
 def _iso_from_epoch_ms(value) -> str:
+    """Epoch milliseconds -> YYYY-MM-DD, read in UTC.
+
+    UTC is deliberate, not incidental. UKG sends a date-only value as midnight
+    UTC, so reading it in local time shifts every pay date back a day for
+    anyone west of UTC - a silent, plausible-looking off-by-one across the
+    whole archive. Verified against the dates UKG's own UI shows.
+    """
     try:
         return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
     except (TypeError, ValueError, OSError):
@@ -246,7 +285,10 @@ def collect_documents(page) -> List[RawDoc]:
                 # taxes and deductions - none of which are kept.
                 title=f"Pay Statement {date_text}".strip(),
                 date_text=date_text,
-                pdf_url=api_url(f"/pay/statements/{this_coid}/{pay_id}/pdf"),
+                # The PATH only. The full URL would put the employer's tenant
+                # into discovery.json, progress.json and the index CSV, and it
+                # is not needed there - base_url rebuilds it at download time.
+                pdf_url=f"/pay/statements/{this_coid}/{pay_id}/pdf",
                 doc_number=str(row.get("docNumber") or "")))
     # A pay date is NOT unique: an off-cycle or bonus run lands on the same
     # date as the regular one, and identical titles would collapse to a single
@@ -270,7 +312,8 @@ def download_document(page, pdf_url: str, out_path) -> bool:
     dialog, no blob tab.
     """
     from pathlib import Path
-    url = pdf_url
+    # Records store the API path; older ones may hold a full URL.
+    url = pdf_url if "://" in (pdf_url or "") else api_url(pdf_url or "")
     if not is_safe_url(url):
         log.error("refusing to fetch a non-view URL")
         return False

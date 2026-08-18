@@ -397,7 +397,7 @@ class App:
         for r in docs:
             n_new += self._record_rawdoc(r, r.pdf_url)
         self.discovery.save()
-        log.info("billing history: %d statements, %d new", len(docs), n_new)
+        log.info("pay statements: %d found, %d new", len(docs), n_new)
 
         self.stats["discovered"] = len(self.discovery.data)
 

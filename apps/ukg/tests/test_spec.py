@@ -21,8 +21,11 @@ def test_precreated_folders(tmp_path):
     paths = storage.Paths(tmp_path)
     paths.ensure()
     made = sorted(p.name for p in tmp_path.iterdir() if p.is_dir())
+    # No "Tax Documents": the app does not fetch tax forms yet, so the folder
+    # would only sit there empty. It appears when one actually arrives.
     assert made == ["Backups", "Diagnostics", "Logs", "Manual Review",
-                    "Pay Statements", "Tax Documents"]
+                    "Pay Statements"]
+    assert "Tax Documents" not in made
 
 
 def test_routing(tmp_path):
@@ -131,6 +134,8 @@ def test_same_pay_date_statements_stay_distinct(monkeypatch):
     clean = [d for d in docs if "#" not in d.title]
     assert len(clean) == 1
     assert all(d.pdf_url.endswith("/pdf") for d in docs)
+    # a path, not a full URL - see the privacy test below
+    assert all(not d.pdf_url.startswith("http") for d in docs)
 
 
 def test_no_pay_amounts_are_recorded(monkeypatch):
@@ -147,3 +152,41 @@ def test_no_pay_amounts_are_recorded(monkeypatch):
     blob = f"{doc.title} {doc.date_text} {doc.pdf_url} {doc.doc_number}"
     for amount in ("1234.56", "2345.67", "111.11", "22.22"):
         assert amount not in blob
+
+
+def test_pay_date_is_read_in_utc_not_local_time():
+    """UKG sends a date-only value as midnight UTC. Reading it in local time
+    would shift every pay date back a day for anyone west of UTC - a silent
+    off-by-one across the whole archive, with plausible-looking dates."""
+    midnight_utc_2026_08_07 = 1_786_060_800_000
+    assert site._iso_from_epoch_ms(midnight_utc_2026_08_07) == "2026-08-07"
+    # and a garbage value must not explode a whole run
+    assert site._iso_from_epoch_ms(None) == ""
+    assert site._iso_from_epoch_ms("nonsense") == ""
+
+
+def test_every_request_is_a_GET():
+    """This app must never write to a payroll system. The only HTTP verb
+    anywhere in the site layer is GET."""
+    source = (Path(__file__).resolve().parents[1] / "ukg_site.py").read_text(encoding="utf-8")
+    for verb in (".post(", ".put(", ".patch(", ".delete(", ".fetch("):
+        assert verb not in source, verb
+    assert source.count("request.get(") >= 1
+
+
+def test_records_do_not_carry_the_employer_tenant(monkeypatch):
+    """discovery.json, progress.json and the index CSV all store source_url.
+    The tenant address identifies the employer, and is not needed at rest -
+    base_url rebuilds the request at download time."""
+    site.configure("https://verysecret-employer.ultipro.com")
+    monkeypatch.setattr(site, "company_ids", lambda page: ["CO"])
+    monkeypatch.setattr(site, "_get_json", lambda page, path: [
+        {"payId": "AAA", "coid": "CO", "docNumber": "1", "payDate": 1_786_060_800_000}])
+
+    doc = site.collect_documents(page=None)[0]
+    stored = f"{doc.title} {doc.date_text} {doc.pdf_url} {doc.doc_number}"
+    assert "verysecret-employer" not in stored
+    assert "ultipro" not in stored
+    # ...and it still resolves to the right request
+    assert site.api_url(doc.pdf_url).startswith("https://verysecret-employer.ultipro.com/")
+    assert site.is_safe_url(site.api_url(doc.pdf_url))

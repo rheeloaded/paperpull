@@ -1,7 +1,7 @@
 # UKG Pay Statements Downloader (local, supervised)
 
-Downloads your **pay statements** (and payroll tax forms like W-2s) from your
-employer's UKG site and saves them as PDFs, plus an index CSV:
+Downloads your **pay statements** from your employer's UKG site and saves them
+as PDFs, plus an index CSV:
 
 - `UKG Document Index.csv` — one row per downloaded PDF
 
@@ -61,8 +61,13 @@ browsers can be open at once.
 ## Where files land
 
 - `Pay Statements\` — the pay stubs
-- `Tax Documents\` — W-2s, 1095-Cs, and similar
 - `Manual Review\` — anything that failed validation
+
+**Not yet: W-2s and other tax forms.** They live in a different part of UKG
+(Menu → Myself → Pay → Tax Forms / W-2), which this app does not read yet.
+The routing and the classification rules for them are already in place, so
+adding them is a change to `ukg_site.py` alone — a `Tax Documents\` folder
+appears the moment one is actually downloaded.
 
 ## Safety
 

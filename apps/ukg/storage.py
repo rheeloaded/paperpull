@@ -34,7 +34,10 @@ SPEC = AppSpec(
     kind=DOCUMENT,
     folders=[
         Folder("pay_statements", "Pay Statements"),
-        Folder("tax_documents", "Tax Documents"),
+        # Routed and ready, but NOT pre-created: this app does not fetch
+        # tax forms yet (see ukg_site.py), so the folder would only sit
+        # there empty. It appears the moment something lands in it.
+        Folder("tax_documents", "Tax Documents", precreate=False),
         # Reachable but not pre-created, so an install never grows an empty
         # folder for something this provider may never issue.
         Folder("year_end_summaries", "Year-End Summaries", precreate=False),
