@@ -38,30 +38,85 @@ Fourteen providers are supported today, all built on the same pattern:
 
 ## How it works (the shared design)
 
-Every app follows the same four ideas:
+### The one decision everything follows from
 
-1. **You sign in; the tool attaches.** `login.bat` (or `./login.command`) opens a browser window — a
-   plain Chromium for most apps, or your installed Edge/Chrome for the few sites
-   with bot detection (e.g. Walmart, Verizon) — using that app's own profile and
-   a dedicated debugging port. **You** complete sign-in, 2FA, and any device
-   approval yourself. The tool then connects to that already-authenticated
-   browser over the Chrome DevTools Protocol (CDP). It never sees your password
-   or handles your 2FA.
-2. **Read-only by construction.** All site interaction lives in `*_site.py`.
-   Nothing that buys, sells, transfers, pays, deletes, or changes a setting is
-   ever clicked. The statement apps enforce this deny-by-default — a control
-   must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
-   allowlist (`SAFE_DOC_CONTROL_RE`); the receipt apps screen a narrow
-   print/invoice pattern against the blocklist; Gap clicks nothing at all.
-   [SECURITY.md](SECURITY.md) spells out which app does which.
-3. **Delete-safe.** Once a document is saved it gets a sticky `downloaded_ok`
-   marker. Delete the PDFs after importing them elsewhere and a re-run will
-   **not** fetch them again — it only grabs what's genuinely new
-   (`new-this-run.txt` lists them each run).
-4. **Multi-account.** A `--config config.<name>.json` flag lets one app serve a
-   second person's account with its own profile, port, and output folders — no
-   data mixing. The launchers take the account label as an argument
-   (`login.bat spouse` / `./login.command spouse`).
+Your documents live on the provider's site, and it will only hand them to a
+browser that is already signed in. So PaperPull never tries to *be* you — it
+works *beside* you. You sign in yourself, in a real browser window, and the
+tool attaches to that window afterwards and reads.
+
+```mermaid
+flowchart TB
+    you(["You"]) -->|"sign in · 2FA · device approval"| br["A real browser window<br/>its own profile · its own debugging port"]
+    br -.->|"attaches over CDP — reads, never authenticates"| app
+    subgraph app ["One app = one provider"]
+        orch["Orchestrator<br/>discover → download → verify<br/>the same in all fourteen apps"]
+        site["provider_site.py<br/>selectors · URLs · download quirks"]
+        core["paperpull-core<br/>naming · filing · state · CSV · PDF checks"]
+        orch --> site
+        orch --> core
+    end
+    app --> out[("Your folders<br/>PDFs + an index CSV")]
+```
+
+That single choice is why there is no password anywhere in this project, why
+2FA and device approvals are never an obstacle, and why a provider tightening
+its login breaks nothing here.
+
+In practice that first step is `login.bat` (or `./login.command`), which opens
+the browser for you — a plain Chromium for most apps, or your own installed
+Edge/Chrome for the few sites whose bot detection turns a fresh Chromium away
+(Walmart, Verizon). Each app gets its own profile and its own debugging port,
+so several signed-in browsers can sit open at once without colliding.
+
+**Everything a provider knows lives in one file.** `provider_site.py` holds
+every selector, URL and download quirk for that site. The orchestrator around
+it is the same in all fourteen apps, and `paperpull-core` underneath it is
+shared. When a provider redesigns, the repair is one file — never a rewrite,
+and never a change to how documents get named, filed or tracked.
+
+### What one run actually does
+
+```mermaid
+flowchart TB
+    D["Discover<br/>list what the provider still has"] --> Q{"Already downloaded?"}
+    Q -->|yes| S["Skip it"]
+    Q -->|no| DL["Download the PDF"]
+    DL --> V{"Is it a real PDF?"}
+    V -->|no| MR["Manual Review<br/>flagged, never silently lost"]
+    V -->|yes| F["Classify, name, file<br/>+ append to the index CSV"]
+    F --> OK["Mark downloaded_ok<br/>sticky — survives deletion"]
+```
+
+Three plain-text files carry the state, and you can read all of them:
+
+| File | Holds |
+|------|-------|
+| `discovery.json` | what the provider showed us this run |
+| `progress.json` | what happened to each document — including the sticky `downloaded_ok` |
+| `<Provider> Index.csv` | one row per saved document, for humans and spreadsheets |
+
+That last step is what makes a re-run safe. `downloaded_ok` is keyed to the
+document, not to the file on disk — so you can import everything into
+paperless-ngx, delete the PDFs, and the next run still skips them. It only
+fetches what is genuinely new, and lists it in `new-this-run.txt`.
+
+### Read-only by construction
+
+Nothing that buys, sells, transfers, pays, deletes, or changes a setting is
+ever clicked, and all site interaction lives in `provider_site.py` where it can
+be read in one sitting. The statement apps enforce this deny-by-default — a
+control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
+allowlist (`SAFE_DOC_CONTROL_RE`). The receipt apps screen a narrow
+print/invoice pattern against the blocklist. Gap and UKG click nothing at all.
+[SECURITY.md](SECURITY.md) spells out which app does which.
+
+### One app, more than one person
+
+A `--config config.<name>.json` flag lets one app serve a second person's
+account with its own profile, port and output folders, so no data mixes. The
+launchers take the account label as an argument (`login.bat spouse` /
+`./login.command spouse`).
 
 ## Quick start
 
