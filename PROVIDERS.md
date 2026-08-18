@@ -23,7 +23,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |
-| [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements, W-2s | Payroll |
+| [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements | Payroll |
 | [`usaa`](apps/usaa) | USAA | Statements | Bank / insurance |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Telecom |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |
