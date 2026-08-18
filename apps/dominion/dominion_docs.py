@@ -1,4 +1,4 @@
-"""Dominion statement & tax-document downloader (local, supervised).
+"""Dominion bill-statement downloader (local, supervised).
 
 Usage:
     python dominion_docs.py --login       verify connection to your browser

@@ -46,9 +46,10 @@ SPEC = AppSpec(
         CsvSpec("document_index_csv", "American Express Document Index.csv", DOCUMENT_INDEX_COLUMNS),
     ],
     config_defaults={
-        "include_invoices": False,
-        "pilot_online": 5,
-        "pilot_instore": 3,
+        # How many documents --pilot fetches. The online/in-store split and
+        # include_invoices that used to sit here are receipt-app concepts and
+        # were never read by a statement app.
+        "pilot_count": 5,
     },
     base_url="https://www.americanexpress.com/",
     rules_filename="document_rules.json",

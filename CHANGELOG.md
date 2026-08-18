@@ -7,6 +7,49 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **The Dominion app was a Robinhood clone whose text and rules were never
+  rewritten.** Dominion Energy is a residential utility, but the app described
+  itself as "a brokerage / crypto account", and `login.bat` promised the user
+  it "NEVER buys, sells, trades, ... moves crypto" — telling them the wrong
+  thing about what it does on their account. Its `document_rules.json` was
+  Robinhood's whole vocabulary (consolidated 1099, crypto 1099, 1042-S, 5498,
+  480.6, prospectus, trade confirmations), and its tests asserted that a power
+  company issues "Crypto Statement" and "1099-B" — and passed. Rules, tests,
+  docstrings and the sign-in text now describe a utility that posts bills.
+  This mattered beyond one app: `docs/adding-a-provider.md` recommends cloning
+  `dominion` for statement providers, so every new app inherited it.
+- **Contributor docs sent people onto a port already in use.** The issue
+  template and PR checklist said "9222–9232 are taken; use 9233+" and
+  CONTRIBUTING said "9234+", but Gap is 9233 and UKG is 9234. A colliding port
+  makes two apps share one browser profile, which has previously merged two
+  accounts' documents. All four documents now say 9222–9234 taken, 9235+ free.
+- **`.gitignore` covered every output folder except `Pay Statements`** — the
+  UKG one, holding the most sensitive documents in the project. PDFs were
+  already ignored by `*.pdf`, so nothing leaked, but the folder was the only
+  one not named.
+- Five site modules claimed, two lines apart, both "verified working against
+  the live site" and "best-guess scaffolding written WITHOUT having seen the
+  signed-in pages" (Dominion, Navy Federal, Robinhood, USAA, Verizon). The
+  stale half is gone.
+- Dominion, RedCard, T-Mobile and Verizon each described themselves as a
+  "statement & tax-document downloader" and precreated a `Tax Documents`
+  folder, though none has any tax discovery at all — the same permanently
+  empty folder 0.4.1 removed elsewhere and the UKG audit fixed for UKG. The
+  routes remain, so a surprise tax document is still filed rather than dropped.
+
+### Changed
+- Eight statement apps carried `include_invoices`, `pilot_online` and
+  `pilot_instore` in their config defaults. All three are receipt-app concepts
+  and none was ever read by a statement app; they are replaced by the
+  `pilot_count` those apps actually use.
+- Removed two functions with no callers anywhere: `ensure_statements_page`
+  (Amex, an alias) and `find_download_control` (Wealthfront), plus the unread
+  `tax_center` URL in Dominion and Verizon — another Robinhood leftover, in
+  both cases pointing at the billing page.
+
 ## [0.6.1] — 2026-08-18
 
 ### Fixed

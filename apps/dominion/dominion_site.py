@@ -2,22 +2,24 @@
 
 When Dominion changes its site, repair this file only.
 
-SAFETY (this is a brokerage / crypto account):
-  This module is strictly READ-ONLY. It navigates to the reports/statements
-  and tax areas, reads a list of documents, and downloads the PDFs Dominion
-  already generated. It must NEVER activate any control that buys, sells,
-  trades, places or cancels an order, transfers/withdraws/deposits money,
-  moves or converts crypto, exercises options, closes a position, stakes, or
-  changes any setting. FORBIDDEN_CONTROL_RE is the guard; a control must ALSO
-  look like a document action (SAFE_DOC_CONTROL_RE) before it may be clicked.
-  There is no code here that submits a form or confirms a dialog.
+SAFETY (this is a utility billing account):
+  This module is strictly READ-ONLY. It navigates to the billing-history
+  area, reads the list of bills, and downloads the PDFs Dominion already
+  generated. It must NEVER activate any control that pays a bill, sets up
+  AutoPay or a payment plan, adds or changes a bank account or card, starts,
+  stops or transfers service, or changes any setting. FORBIDDEN_CONTROL_RE is
+  the guard; a control must ALSO look like a document action
+  (SAFE_DOC_CONTROL_RE) before it may be clicked. There is no code here that
+  submits a form or confirms a dialog.
 
 Documents are genuine PDF downloads (not rendered pages). Dominion is a
 heavy React SPA backed by a JSON API, so - like the USAA project - discovery
 prefers capturing the documents API response, with table scraping as a
-fallback. All of this is best-guess scaffolding until `diagnose.bat` is run
-against the signed-in pages; repair the FALLBACK entries + goto_documents
-URLs + collect_documents_via_api matcher afterward.
+fallback.
+
+Dominion posts monthly bills and no tax forms, so what this returns is always
+a billing statement. It also serves a placeholder PDF for bills older than
+about 18 months - see is_unavailable_bill().
 """
 # Site layer verified working against the live site: 2026-08
 from __future__ import annotations
@@ -36,13 +38,11 @@ log = logging.getLogger("dominion_docs.site")
 BASE = "https://www.dominionenergy.com"
 URLS = {
     "home": f"{BASE}/virginia",
-    # The user signs in here manually; the real billing/statements URLs are
-    # filled in after exploring the signed-in portal.
+    # The user signs in here manually.
     "login": f"{BASE}/virginia",
     "documents": f"{BASE}/account/billing-and-payments",
     "statements": f"{BASE}/account/billing-and-payments",
     "documents_alt": f"{BASE}/account",
-    "tax_center": f"{BASE}/account",
 }
 DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["statements"],
                            URLS["documents_alt"]]
@@ -493,11 +493,10 @@ def download_by_url(page, url: str, out_path) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Dominion document pages (verified 2026-07). Each document is an
-# <a download href="#"> whose own text is the title (statements) or whose
-# ancestor holds the title (tax "Download PDF"). Clicking it fires a real
-# download event. Statements live on per-account pages; tax docs on the tax
-# center. Trade confirmations are intentionally not listed here (out of scope).
+# Dominion document pages (verified 2026-07). Every bill lives on the one
+# paginated billing-history page as an <a download href="#"> whose own text is
+# the title; clicking it fires a real download event. There is no tax area -
+# a utility issues no tax forms.
 def document_source_urls() -> List[Tuple[str, str]]:
     """The single billing-history page holds every statement (paginated)."""
     return [(BILLING_URL, "statements")]
