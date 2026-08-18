@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.6.2] — 2026-08-18
 
 ### Fixed
 - **The Dominion app was a Robinhood clone whose text and rules were never
