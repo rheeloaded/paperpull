@@ -22,8 +22,18 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
+
+# PaperPull targets Python 3.11+ (README, and core/pyproject.toml's
+# requires-python). Nothing here declared that, so a reader - or a scanner -
+# landing in this file had no way to know which version it is written against.
+# Say it once, and fail with a sentence rather than something obscure.
+if sys.version_info < (3, 11):
+    raise SystemExit(
+        "PaperPull needs Python 3.11 or newer; this is "
+        f"{sys.version_info.major}.{sys.version_info.minor}.")
 
 HERE = Path(__file__).resolve().parent
 try:
@@ -73,7 +83,7 @@ def _entry_script(app_dir: Path):
 
 
 def _venv_python(app_dir: Path):
-    """The app's own interpreter, on either venv layout.
+    r"""The app's own interpreter, on either venv layout.
 
     Windows puts it in .venv\Scripts\python.exe; macOS and Linux use
     .venv/bin/python."""
@@ -158,7 +168,10 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
     meta = apps[app]
     cmd = _build_cmd(meta, account, action)
 
-    def stream():
+    # Deliberately an *async* generator. With a plain sync one, Starlette wraps
+    # it in iterate_in_threadpool, which never calls .close() on it - so the
+    # cleanup below would never run and a closed tab left the downloader going.
+    async def stream():
         yield f"data: $ {' '.join(cmd)}\n\n"
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
         try:
@@ -170,12 +183,33 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
             yield f"data: [failed to start] {e}\n\n"
             yield "event: done\ndata: 1\n\n"
             return
-        for line in iter(proc.stdout.readline, ""):
-            yield f"data: {line.rstrip()}\n\n"
-        proc.stdout.close()
-        code = proc.wait()
-        yield f"data: \n\n"
-        yield f"event: done\ndata: {code}\n\n"
+        # Closing the browser tab closes this generator. Without the finally
+        # below, the downloader kept running unseen - still driving your
+        # signed-in browser over CDP and still writing PDFs and progress.json -
+        # with nothing on screen. Worse, believing it had stopped, you could
+        # press Run again and put two runs on one progress.json, one CDP port
+        # and one output folder. Stopping is safe: downloaded_ok is only set
+        # after a document is saved, so a re-run resumes and re-fetches nothing.
+        try:
+            while True:
+                # readline blocks, so it goes to a worker thread rather than
+                # stalling the event loop for every other request.
+                line = await to_thread.run_sync(proc.stdout.readline)
+                if not line:
+                    break
+                yield f"data: {line.rstrip()}\n\n"
+            code = await to_thread.run_sync(proc.wait)
+            yield "data: \n\n"
+            yield f"event: done\ndata: {code}\n\n"
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            if proc.stdout:
+                proc.stdout.close()
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
