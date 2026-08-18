@@ -2,12 +2,15 @@
 
 ![Version](https://img.shields.io/github/v/tag/rheeloaded/paperpull?sort=semver&label=version&color=blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rheeloaded)
 
 **Receipt & Statement Downloader** — a family of small, **read-only** tools that log in *alongside you* to your own
 accounts and download your **statements and receipts** as PDFs — so you can
 archive them (e.g. into [paperless-ngx](https://docs.paperless-ngx.com/)) instead
 of clicking through each site by hand.
+
+Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
 Thirteen providers are supported today, all built on the same pattern:
 
@@ -95,28 +98,51 @@ run_all.bat               REM download everything available
 Each app also has its own README with provider-specific details and quirks.
 (Prefer to set apps up one at a time? Each has its own `setup.bat` / `setup.command`.)
 
-## Requirements
+## Windows and macOS
 
-- **Windows or macOS** (Linux works too — it uses the same scripts as macOS)
-- Python 3.11+
-- Playwright (installed per app by the setup script)
+One download covers both. Every app ships two launchers with the same names
+and the same behaviour — `.bat` for Windows, `.command` for macOS and Linux —
+so the instructions in this README and in each app's own README apply
+wherever you are:
 
-Every app ships both launchers: `.bat` for Windows and `.command` for
-macOS/Linux, with the same names and the same behaviour.
+| Task | Windows | macOS / Linux |
+|------|---------|---------------|
+| One-shot setup | `setup-all.bat` | `./setup-all.command` |
+| Set up one app | `setup.bat` | `./setup.command` |
+| Sign in | `login.bat` | `./login.command` |
+| Test run | `run_pilot.bat` | `./run_pilot.command` |
+| Full run | `run_all.bat` | `./run_all.command` |
+| Control panel | `gui\run_gui.bat` | `gui/run_gui.command` |
 
-**On macOS, first time only:** if you downloaded the project as a ZIP rather
-than cloning it, macOS quarantines the scripts and double-clicking one gives
-*"cannot be opened because it is from an unidentified developer."* Either
-right-click → **Open** (once per script), or clear the flag for the whole
-folder:
+A second account is the same on both: `run_all.bat spouse` /
+`./run_all.command spouse`.
+
+Only one thing genuinely differs. macOS keeps Playwright's browser inside an
+app bundle and in a different cache directory, and a couple of providers need
+a branded Edge/Chrome to get past their bot protection — that lookup lives in
+`paperpull_core.browser` and is handled for you.
+
+### Getting it onto a Mac
+
+**`git clone` is the smoothest route** — it preserves the scripts' executable
+bit and macOS does not quarantine it.
+
+If you download a release archive instead, prefer the **`.tar.gz`**: it keeps
+the executable bit, while a `.zip` drops it. After unpacking a download,
+macOS may also quarantine the scripts, so a double-click reports *"cannot be
+opened because it is from an unidentified developer."* Both are cleared in one
+go:
 
 ```bash
 xattr -dr com.apple.quarantine .
 chmod +x setup-all.command apps/*/*.command gui/*.command
 ```
 
-A `git clone` is not quarantined, and the executable bit is stored in the
-repo, so cloning avoids both steps.
+## Requirements
+
+- **Windows, macOS, or Linux**
+- Python 3.11+
+- Playwright (installed per app by the setup script)
 
 ## Contributing — add your provider
 

@@ -7,6 +7,50 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.5.0] — 2026-08-17
+
+### Added
+- **macOS and Linux support.** Every app ships a `.command` launcher beside
+  each `.bat`, with the same names and behaviour, plus `setup-all.command` and
+  `gui/run_gui.command`. Browser discovery is platform-aware: Playwright keeps
+  Chromium under `LOCALAPPDATA` on Windows, `~/Library/Caches` on macOS (inside
+  `Chromium.app`) and `~/.cache` on Linux, and the Edge/Chrome lookup that two
+  bot-protected providers rely on knows where those live on each OS.
+- **`paperpull-core`** — the support code the apps used to duplicate now lives
+  once in `core/`. An app declares an `AppSpec` (its folders, routing, CSV
+  columns and config defaults) and keeps only its orchestrator and `*_site.py`.
+  About 15,400 duplicated lines became a 1,500-line core plus short
+  declarations, so a fix lands once instead of thirteen times.
+- **`tools/check_installs.py`** reports whether standalone installs have
+  drifted from the repo. It reads only code — never config, state, CSVs, PDFs
+  or browser profiles.
+
+### Fixed
+- AES-encrypted PDFs failed validation because pypdf needs its optional crypto
+  extra; some providers issue them. Depending on `pypdf[crypto]` fixes it
+  everywhere at once.
+- Browser discovery picked the *oldest* installed Playwright Chromium, and
+  sorted lexicographically so `chromium-1000` ranked below `chromium-999`.
+  Newest build now wins.
+- The macOS launchers referred users to `.bat` files, and their banner text was
+  interpolated into double quotes — mangling output, and executing anything
+  shaped like `$(...)` had a `.bat` ever contained it. Banners are now properly
+  single-quoted.
+- `setup-all.command` used an empty-array expansion that errors under `set -u`
+  on the bash 3.2 macOS still ships.
+- Running a launcher before setup gave a bare "No such file or directory"; it
+  now names the script to run.
+
+### Changed
+- `SECURITY.md` and the README described the read-only guard as a blocklist
+  **and** an allowlist for every app. That is true of the nine statement apps,
+  which refuse any control not on the allowlist; the three receipt apps have no
+  allowlist and screen a narrow print/invoice pattern against the blocklist,
+  and Gap clicks nothing at all. Both documents now say what each app actually
+  enforces.
+- Test fixtures and code comments no longer carry real order numbers or a real
+  carrier tracking number; they use same-shaped fakes.
+
 ## [0.4.1] — 2026-08-16
 
 ### Fixed
