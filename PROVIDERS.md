@@ -2,7 +2,7 @@
 
 The running list of what PaperPull supports — and what people want next. The
 goal is an ever-growing set covering the banks, cards, brokerages, utilities,
-telecoms, and retailers real people actually use.
+telecoms, payroll systems, and retailers real people actually use.
 
 - **Have an account with a provider that's not here?** You're the ideal person
   to add it — see **[Adding a provider](docs/adding-a-provider.md)**.
@@ -10,7 +10,7 @@ telecoms, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (13)
+## Supported (14)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -23,6 +23,7 @@ telecoms, and retailers real people actually use.
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |
+| [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements, W-2s | Payroll |
 | [`usaa`](apps/usaa) | USAA | Statements | Bank / insurance |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Telecom |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |

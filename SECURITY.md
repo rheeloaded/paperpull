@@ -40,8 +40,12 @@ The `.gitignore` already blocks all of the following. Do not override it.
     control matched by a narrow pattern and screened against the same
     blocklist. There is no separate allowlist in these three, so the guard is
     blocklist-only.
-  - **Gap** clicks nothing at all: it navigates to the order page and renders
-    it, so no control is ever activated.
+  - **Gap** and **UKG** click nothing at all. Gap navigates to the order page
+    and renders it; UKG reads its pay statements and PDFs from the same JSON
+    API its own mobile app uses, over the ordinary session. On a site that can
+    also change direct deposit and tax withholding, not activating a control
+    is the strongest guarantee available - and UKG additionally refuses any
+    URL whose path says `EDIT` rather than `VIEW`.
 - **You sign in, not the tool.** The tools attach to a browser *you* logged into
   (via Chrome DevTools Protocol). They never handle your password or 2FA.
 - **Local only.** The browser's debugging port and the GUI both listen on

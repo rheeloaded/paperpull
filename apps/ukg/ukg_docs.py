@@ -237,6 +237,13 @@ class App:
             ask("Press Enter after you are signed in... ")
             site.goto_documents(page)
 
+    def require_base_url(self):
+        """Commands that navigate need the tenant address; opening a
+        browser so you can go and find that address does not.
+        """
+        if not site.is_configured():
+            raise SystemExit(site.configuration_help())
+
     # -- commands ----------------------------------------------------------
 
     def cmd_open_browser(self):
@@ -386,9 +393,9 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        docs = site.collect_documents(page)
         for r in docs:
-            n_new += self._record_rawdoc(r, site.BILLING_URL)
+            n_new += self._record_rawdoc(r, r.pdf_url)
         self.discovery.save()
         log.info("billing history: %d statements, %d new", len(docs), n_new)
 
@@ -482,12 +489,8 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Open the bill-history page and click this bill's "Download detailed
-        # bill" button; Playwright captures the resulting download event.
-        if not site.goto_documents(page):
-            self.check_session(page)
-            site.goto_documents(page)
-        saved = site.download_bill(page, self._dl_dir, doc.date, out_path)
+        # The PDF is a plain GET on the session - nothing is clicked.
+        saved = site.download_document(page, doc.source_url, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
