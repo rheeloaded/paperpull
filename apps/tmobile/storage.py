@@ -32,7 +32,9 @@ SPEC = AppSpec(
     kind=DOCUMENT,
     folders=[
         Folder("statements", "Statements"),
-        Folder("tax_documents", "Tax Documents"),
+        # This provider posts no tax forms. The route stays so a surprise
+        # one is still filed, but the folder is made on demand.
+        Folder("tax_documents", "Tax Documents", precreate=False),
         # Reachable if "Insurance Document" is added to document_types, but
         # T-Mobile does not issue them — so it is created only if one ever
         # actually routes there, never left sitting empty.

@@ -10,13 +10,13 @@ if not "%~1"=="" echo Account: %~1
 echo.
 echo A normal Chromium window will open. Then:
 echo   1. Sign in to Dominion (do all the 2FA / device approval yourself).
-echo   2. Go to Account -^> Reports ^& statements (Documents / Tax center).
+echo   2. Go to Account -^> Billing ^& payments (your bill history).
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
 echo   4. Then run:  diagnose.bat %~1   (a safe look, downloads nothing)
 echo.
-echo READ-ONLY: this tool only downloads statements and tax documents.
-echo It NEVER buys, sells, trades, transfers, withdraws, moves crypto, or
-echo changes any setting.
+echo READ-ONLY: this tool only downloads your bill PDFs.
+echo It NEVER pays a bill, sets up AutoPay, adds or changes a bank account
+echo or card, starts or stops service, or changes any setting.
 echo.
 .venv\Scripts\python.exe dominion_docs.py --open-browser %CFG%
 echo.

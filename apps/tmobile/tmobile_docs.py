@@ -1,4 +1,4 @@
-"""T-Mobile statement & tax-document downloader (local, supervised).
+"""T-Mobile bill-statement downloader (local, supervised).
 
 Usage:
     python tmobile_docs.py --login       verify connection to your browser

@@ -15,9 +15,10 @@ SAFETY (this is a brokerage / crypto account):
 Documents are genuine PDF downloads (not rendered pages). Robinhood is a
 heavy React SPA backed by a JSON API, so - like the USAA project - discovery
 prefers capturing the documents API response, with table scraping as a
-fallback. All of this is best-guess scaffolding until `diagnose.bat` is run
-against the signed-in pages; repair the FALLBACK entries + goto_documents
-URLs + collect_documents_via_api matcher afterward.
+fallback. The selectors are verified against the live signed-in pages (see
+the date recorded under this docstring). When the provider redesigns, run
+`diagnose.bat` and repair the FALLBACK entries + goto_documents URLs +
+collect_documents_via_api matcher against Diagnostics/.
 """
 # Site layer verified working against the live site: 2026-08
 from __future__ import annotations

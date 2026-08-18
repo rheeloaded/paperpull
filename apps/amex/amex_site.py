@@ -265,11 +265,6 @@ def goto_documents(page) -> bool:
         return page.locator("[data-testid*='download-button']").count() > 0
 
 
-# Backwards-compatible alias for the click-based statements navigation.
-def ensure_statements_page(page) -> bool:
-    return goto_documents(page)
-
-
 def expand_sections(page) -> None:
     """Open the collapsible 'Older Statements' and 'Year End Summary' sections
     so their download buttons become clickable. 'Older Statements' is expanded

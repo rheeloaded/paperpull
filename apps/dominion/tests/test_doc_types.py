@@ -1,4 +1,4 @@
-"""Dominion document classification + the READ-ONLY (brokerage) safety guard."""
+"""Dominion document classification + the READ-ONLY (utility billing) guard."""
 import sys
 from pathlib import Path
 
@@ -15,39 +15,42 @@ RULES = doc_types.load_rules()
 # -- classification -------------------------------------------------------
 
 def test_statements():
+    # What Dominion actually posts is a monthly bill. The first case is the
+    # exact title collect_download_docs() builds.
     for title, summary in [
+            ("Statement - July 22, 2026", "Account Statement"),
             ("Account Statement", "Account Statement"),
             ("Monthly Account Statement - December 2025", "Monthly Statement"),
-            ("Brokerage Statement", "Brokerage Statement"),
-            ("Crypto Statement", "Crypto Statement")]:
+            ("Detailed Bill", "Detailed Bill"),
+            ("Monthly Bill", "Monthly Statement"),
+            ("Bill", "Bill")]:
         cat, s, _ = doc_types.classify_document(title, RULES)
         assert cat == doc_types.STATEMENT, title
         assert s == summary, (title, s)
 
 
-def test_tax_forms():
-    for title, summary in [
-            ("Consolidated 1099", "Consolidated 1099 Tax Form"),
-            ("Consolidated Form 1099", "Consolidated 1099 Tax Form"),
-            ("Dominion Crypto 1099", "Crypto 1099 Tax Form"),
-            ("1099-B", "1099-B Tax Form"),
-            ("Form 1099-DIV", "1099-DIV Tax Form"),
-            ("1042-S", "1042-S Tax Form")]:
-        cat, s, _ = doc_types.classify_document(title, RULES)
-        assert cat == doc_types.TAX, title
-        assert s == summary, (title, s)
+def test_a_utility_has_no_brokerage_vocabulary():
+    """This app was cloned from Robinhood and for a while classified
+    "Crypto Statement" and "Consolidated 1099" as if a power company issued
+    them. Nothing here should route on brokerage words."""
+    for title in ["Brokerage Statement", "Crypto Statement",
+                  "Consolidated 1099", "1099-B", "1042-S"]:
+        _, summary, _ = doc_types.classify_document(title, RULES)
+        assert "Crypto" not in summary and "Brokerage" not in summary, title
+        assert "1099" not in summary and "1042" not in summary, title
 
 
-def test_trade_confirmations_are_skipped():
-    assert doc_types.should_skip("Trade Confirmation", RULES)
-    assert doc_types.should_skip("Trade Confirmation - AAPL", RULES)
-    assert not doc_types.should_skip("Account Statement", RULES)
+def test_generic_tax_catch_still_routes():
+    """Dominion issues no tax forms, but if one ever appears it should be
+    filed rather than dropped into Other."""
+    cat, _, _ = doc_types.classify_document("Tax Document", RULES)
+    assert cat == doc_types.TAX
 
 
-def test_other_skips():
-    for t in ["Customer Agreement", "Prospectus for VTI", "Privacy Policy",
-              "Options Agreement Disclosure"]:
+def test_boilerplate_is_skipped():
+    for t in ["Privacy Policy", "Terms of Service", "Regulatory Communication"]:
         assert doc_types.should_skip(t, RULES), t
+    assert not doc_types.should_skip("Statement - July 22, 2026", RULES)
 
 
 def test_wanted_respects_config():
@@ -70,7 +73,7 @@ def test_month_year_files_on_last_day():
 
 
 def test_year_only():
-    assert site.parse_period_date("2025 Consolidated 1099")[0] == "2025-12-31"
+    assert site.parse_period_date("2025 Annual Summary")[0] == "2025-12-31"
 
 
 # -- filenames ------------------------------------------------------------

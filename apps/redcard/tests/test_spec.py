@@ -28,7 +28,9 @@ def test_precreated_folders_are_unchanged(tmp_path):
     paths = storage.Paths(tmp_path)
     paths.ensure()
     made = sorted(p.name for p in tmp_path.iterdir() if p.is_dir())
-    assert made == ['Backups', 'Diagnostics', 'Logs', 'Manual Review', 'Statements', 'Tax Documents', 'Year-End Summaries']
+    # No Tax Documents: this app reads the statements table only and has no
+    # tax discovery, so that folder would sit empty forever.
+    assert made == ['Backups', 'Diagnostics', 'Logs', 'Manual Review', 'Statements', 'Year-End Summaries']
 
 
 def test_every_declared_route_resolves(tmp_path):

@@ -15,9 +15,10 @@ SAFETY (this is a BANK):
 Documents are genuine PDF downloads (not rendered pages), captured via the
 Playwright download event -> download.save_as().
 
-INITIAL SELECTORS are best-guess scaffolding written 2026-07-23 WITHOUT having
-seen the signed-in pages. Run `diagnose.bat` after signing in and repair the
-FALLBACK entries + goto_documents URLs against the Diagnostics/ output.
+The selectors below are verified against the live signed-in pages (see the
+date recorded under this docstring). Each keeps a FALLBACK entry as a safety
+net. When the provider redesigns, run `diagnose.bat` after signing in and
+repair the FALLBACK entries + goto_documents URLs against Diagnostics/.
 """
 # Site layer verified working against the live site: 2026-08
 from __future__ import annotations

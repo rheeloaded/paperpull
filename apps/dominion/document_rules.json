@@ -1,37 +1,18 @@
 {
-  "_comment": "Editable rules mapping Dominion document titles to filename summaries. Checked in order: tax, then insurance (unused for Dominion), then statement. Repair after running diagnose.bat against your real Documents page. Trade confirmations are intentionally skipped (see skip_patterns).",
+  "_comment": "Editable rules mapping Dominion Energy document titles to filename summaries. Checked in order: tax, then insurance (unused for a utility), then statement. Dominion is a residential electric/gas utility: what it posts are monthly bills. It issues no tax forms, so tax_rules keeps only a generic catch and the Tax Documents folder is created on demand rather than up front.",
   "tax_rules": [
-    {"pattern": "consolidated\\s+(form\\s+)?1099", "summary": "Consolidated 1099 Tax Form"},
-    {"pattern": "crypto\\s+1099|1099\\s+crypto", "summary": "Crypto 1099 Tax Form"},
-    {"pattern": "1099-?B\\b", "summary": "1099-B Tax Form"},
-    {"pattern": "1099-?DIV\\b", "summary": "1099-DIV Tax Form"},
-    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
-    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
-    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
-    {"pattern": "1099-?OID\\b", "summary": "1099-OID Tax Form"},
-    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
-    {"pattern": "\\b1042-?S\\b", "summary": "1042-S Tax Form"},
-    {"pattern": "\\b5498\\b", "summary": "5498 Tax Form"},
-    {"pattern": "\\b480\\.6", "summary": "480.6 Tax Form"},
-    {"pattern": "tax\\s+(document|form|statement|package|information|center)", "summary": "Tax Document"}
+    {"pattern": "tax\\s+(document|form|statement)", "summary": "Tax Document"}
   ],
   "insurance_rules": [],
   "statement_rules": [
-    {"pattern": "monthly\\s+(account\\s+)?statement", "summary": "Monthly Statement"},
-    {"pattern": "quarterly\\s+statement", "summary": "Quarterly Statement"},
-    {"pattern": "annual\\s+statement|year.?end\\s+statement", "summary": "Annual Statement"},
-    {"pattern": "brokerage\\s+.*statement|statement.*brokerage", "summary": "Brokerage Statement"},
-    {"pattern": "crypto\\s+.*statement|statement.*crypto", "summary": "Crypto Statement"},
+    {"pattern": "detailed\\s+bill", "summary": "Detailed Bill"},
+    {"pattern": "monthly\\s+(bill|(account\\s+)?statement)", "summary": "Monthly Statement"},
+    {"pattern": "annual\\s+(usage|summary)|year.?end\\s+summary", "summary": "Annual Summary"},
     {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "\\bbill\\b", "summary": "Bill"},
     {"pattern": "\\bstatement\\b", "summary": "Account Statement"}
   ],
   "skip_patterns": [
-    "trade\\s+confirmation",
-    "confirmation\\s+of\\s+trade",
-    "\\bconfirmation\\b",
-    "prospectus",
-    "customer\\s+agreement",
-    "account\\s+agreement",
     "disclosure",
     "privacy\\s+(notice|policy)",
     "terms\\s+of\\s+service",

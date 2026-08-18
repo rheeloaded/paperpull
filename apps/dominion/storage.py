@@ -29,7 +29,9 @@ SPEC = AppSpec(
     kind=DOCUMENT,
     folders=[
         Folder("statements", "Statements"),
-        Folder("tax_documents", "Tax Documents"),
+        # A utility issues no tax forms. The route stays so a surprise one is
+        # still filed rather than dropped, but the folder is made on demand.
+        Folder("tax_documents", "Tax Documents", precreate=False),
         Folder("insurance_documents", "Insurance Documents", precreate=False),  # created on demand
         Folder("other_documents", "Other Documents", precreate=False),  # created on demand
         *INFRASTRUCTURE_FOLDERS,
@@ -44,9 +46,10 @@ SPEC = AppSpec(
         CsvSpec("document_index_csv", "Dominion Document Index.csv", DOCUMENT_INDEX_COLUMNS),
     ],
     config_defaults={
-        "include_invoices": False,
-        "pilot_online": 5,
-        "pilot_instore": 3,
+        # How many documents --pilot fetches. The online/in-store split and
+        # include_invoices that used to sit here are receipt-app concepts and
+        # were never read by a statement app.
+        "pilot_count": 5,
     },
     base_url="https://www.dominionenergy.com/",
     rules_filename="document_rules.json",

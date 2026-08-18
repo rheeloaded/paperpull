@@ -1,4 +1,4 @@
-"""Verizon statement & tax-document downloader (local, supervised).
+"""Verizon bill-statement downloader (local, supervised).
 
 Usage:
     python verizon_docs.py --login       verify connection to your browser

@@ -606,34 +606,3 @@ def find_row_download(page, account: str, title: str):
     except Exception:
         pass
     return None
-
-
-def find_download_control(page, row_index: int):
-    """The safe download/view control inside a given document row."""
-    try:
-        rows = page.locator(FALLBACK["doc_row"])
-        if row_index < 0 or row_index >= rows.count():
-            return None
-        row = rows.nth(row_index)
-        for sel in ("a[download]", "a[href$='.pdf']", "a[href*='.pdf']",
-                    "button", "a"):
-            loc = row.locator(sel)
-            for j in range(min(loc.count(), 6)):
-                el = loc.nth(j)
-                try:
-                    label = (el.inner_text(timeout=800) or "").strip()
-                except Exception:
-                    label = ""
-                aria = ""
-                try:
-                    aria = el.get_attribute("aria-label") or ""
-                except Exception:
-                    pass
-                name = label or aria
-                if FORBIDDEN_CONTROL_RE.search(name):
-                    continue
-                if sel.startswith("a[") or is_safe_control(name):
-                    return el
-        return None
-    except Exception:
-        return None

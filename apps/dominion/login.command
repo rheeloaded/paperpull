@@ -19,7 +19,7 @@ echo 'Dominion Documents - sign in'
 echo '============================================================'
 echo 'A normal Chromium window will open. Then:'
 echo '1. Sign in to Dominion (do all the 2FA / device approval yourself)'
-echo '2. Go to Account -^> Reports ^& statements (Documents / Tax center)'
+echo '2. Go to Account -^> Billing ^& payments (your bill history)'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
 
 "$PY" dominion_docs.py --open-browser $CFG
