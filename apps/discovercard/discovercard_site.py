@@ -26,33 +26,47 @@ a tripped check on a card account can mean a step-up verification loop or a
 temporary lock, so the first contact is never from an obviously-automated
 browser. Do not "just try" the bundled Chromium to find out.
 
-STATUS: NOT YET VERIFIED against the live site. Every URL, selector and
-mechanism below marked "candidate" is an informed guess, deliberately layered
-so that `--diagnose` still reports something useful when a guess is wrong.
-Nothing guesses silently: an unrecognised page yields no documents rather than
-the wrong ones.
+WHAT THE LIVE PROBE ESTABLISHED (2026-08-19):
+  * The page is "Activity & Statements" at
+      card.discover.com/cardmembersvcs/statements/app/activity
+    hash-routed: #/recent, #/current, #/stmt_YYYYMMDD. page.goto WORKS and
+    keeps the session, so this app pastes the URL first - the opposite of the
+    Ally and Chase apps, where only clicking the app's own nav worked.
+  * There is NO <select> anywhere. The "Show me" period chooser is a
+    link-based dropdown, which is why a select-based lookup finds nothing.
+  * It does not need to be opened. Every period's row, each with its own PDF
+    link, is already in the DOM on plain page load (24 links before any
+    interaction, the same 24 after opening the chooser). Discovery is
+    therefore ONE READ with nothing clicked and nothing swept - no accordions
+    and no per-year sweep, which is all the Chase app's machinery existed for.
+  * A statement is served directly:
+        GET /cardmembersvcs/statements/app/stmtPDF?view=true&date=YYYYMMDD
+          -> 200 application/pdf
+             content-disposition: inline;
+               filename=Discover-Statement-20260619-1234.pdf
+    where date is the statement's CLOSING date. The bytes are fetched with the
+    context's own cookies, using the href READ FROM THE PAGE - not a URL built
+    from a template, so a change to the query string cannot silently fetch the
+    wrong period. The served filename also carries the card's last four, which
+    is the only place a single-card login states them.
+  * The neighbouring "Download" control opens a MODAL DIALOG (a transactions
+    export, not the statement PDF), and "Print" opens a popup. Neither is used:
+    answering a dialog is exactly what this project never does.
+  * History observed: 24 statements, 2024-08-19 .. 2026-07-19 - about two
+    years. Older statements are not reachable from this page and are not
+    guessed at.
+  * Discover shows an inactivity "stay logged in?" modal; only its keep-alive
+    control is ever clicked (dismiss_timeout).
 
-Two guesses are cheap to be wrong about, and one is not:
-  * URLs and nav labels - `--diagnose` reports which candidate landed.
-  * The document list - the generic row scraper reads a plain table or list,
-    and probe_api reports any JSON the SPA fetches for itself.
-  * ATTRIBUTION is the expensive one. If Discover shows more than one card in
-    one list, a document must be filed under the card printed ON ITS ROW, not
-    inferred from position or from an async API reply. That mistake filed one
-    card's statements under another during the Chase build and produced
-    plausible-looking, wrong output. read_rows below is written that way
-    from the start; if Discover turns out to have one card per login, the
-    question disappears - but do not remove the check to find out.
-
-WHAT TO ESTABLISH ON THE FIRST SIGNED-IN PROBE (see README):
-  1. Does the session survive page.goto, or is it click-navigation only?
-  2. Is there a JSON API behind the statements list? (probe_api reports it.)
-  3. How is a statement PDF served - download event, new tab, blob, or a
-     direct .pdf href?
-  4. How far back does the history go, and is it behind a year picker,
-     pagination, or a "view more" control?
-  5. If the login has more than one card, how does a row say which card it
-     belongs to?
+STILL UNVERIFIED:
+  * A login with MORE THAN ONE Discover card. This account has one, so no card
+    chooser was observed and none is coded for. If one exists, the last four in
+    each served filename is the handle to tell statements apart - do not infer
+    a card from row position. Attributing by position rather than by what the
+    document itself says filed one card's statements under another during the
+    Chase build, and the output looked entirely plausible.
+  * Whether Discover blocks the bundled Chromium. This app uses a real browser
+    regardless; see above.
 
 OUT OF SCOPE: tax documents. Discover Bank issues 1099-INT for deposit
 accounts, which this app does not cover; a card account's only tax-ish
@@ -60,10 +74,11 @@ document is an occasional 1099-C or 1099-MISC. `document_types` in config
 lists Statement only, so a stray one is classified and then skipped rather
 than half-filed.
 """
-# Site layer verified working against the live site: NOT YET
+# Site layer verified working against the live site: 2026-08-19
+# (discovery of 24 statements 2024-08-19..2026-07-19, and one PDF
+# fetched and checked: 4 pages, card ...1234, %PDF-1.7).
 from __future__ import annotations
 
-import base64
 import html as _html
 import json
 import logging
@@ -79,23 +94,39 @@ PUBLIC = "https://www.discover.com"
 URLS = {
     "home": f"{BASE}/cardmembersvcs/achome/homepage",
     "login": f"{PUBLIC}/",
-    # CANDIDATES ONLY - none of these is confirmed. Unlike Chase and Ally,
-    # Discover's card portal looks like a server-rendered app under
-    # /cardmembersvcs/ rather than a hash-routed SPA, so page.goto may well
-    # work here where it did not there. goto_documents still clicks the app's
-    # own navigation FIRST and treats these as fallback, because that ordering
-    # is what made the Ally and Chase apps work when every guessed URL was
-    # wrong. --diagnose reports which route actually landed.
-    "documents": f"{BASE}/cardmembersvcs/statements/app/statement",
-    "documents_alt": f"{BASE}/cardmembersvcs/statements/app/statements",
-    "documents_alt2": f"{BASE}/cardmembersvcs/documents/app/documents",
+    # CONFIRMED 2026-08-19. "Activity & Statements", hash-routed within one
+    # page: #/recent (transactions to date), #/current, #/stmt_YYYYMMDD.
+    # page.goto works and keeps the session - Discover does NOT need the
+    # click-only navigation Ally and Chase did.
+    #
+    # #/recent is the right landing route: the statement index is present on
+    # any of them, and #/recent is the page's own default.
+    "documents": f"{BASE}/cardmembersvcs/statements/app/activity#/recent",
+    "documents_alt": f"{BASE}/cardmembersvcs/statements/app/activity",
+    # kept only as a last resort if the route above is ever retired
+    "documents_alt2": f"{BASE}/cardmembersvcs/statements/app/statement",
     "statements": f"{BASE}/cardmembersvcs/statements",
 }
-DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["documents_alt"],
-                           URLS["documents_alt2"], URLS["statements"]]
+# Only the two CONFIRMED routes. The speculative ones were removed after a
+# live run ended on Discover's logoff page: a bad path under /cardmembersvcs/
+# may end the session, and even if that run was really an inactivity timeout
+# (it could not be told apart afterwards), guessing paths on a bank while
+# signed in is not worth the doubt. If both of these stop working, click the
+# app's own nav - that is the fallback below, not more guesses.
+DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["documents_alt"]]
 
+# Confirmed live: a signed-out session lands on
+#   portal.discover.com/customersvcs/universalLogin/logoff_confirmed
+# which matched NONE of the original markers - "universalLogin" does not
+# contain "/login". The app therefore kept trying instead of telling the user
+# to sign in again, which is the worst of both: no documents and no
+# explanation. Substring matching on a URL is brittle; these are deliberately
+# generous.
 LOGIN_URL_MARKERS = ["/logon", "/login", "/signin", "/sign-in", "/auth/logon",
-                     "/idp", "/mfa", "/verify", "/cardmembersvcs/authentication"]
+                     "/idp", "/mfa", "/verify", "/cardmembersvcs/authentication",
+                     "universallogin", "logoff", "logout", "loggedout",
+                     "signed-out", "signedout", "sessionend", "session-expired",
+                     "timeout"]
 
 # ---------------------------------------------------------------------------
 # HARD SAFETY GUARD - never click anything matching this. Tuned for a bank.
@@ -265,9 +296,36 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
 # Session / safety
 # ---------------------------------------------------------------------------
 
+# A page that is not part of the signed-in application at all: a 404, or the
+# public marketing site. Reached by a wrong guessed URL, and the reason the
+# first live probe ended up poking Discover's public login form.
+PUBLIC_OR_ERROR_MARKERS = [
+    "error404", "/404", "page-not-found", "pagenotfound", "error.shtml",
+    "www.discover.com/discover/data/misc",
+]
+
+
+def looks_public_or_error(page) -> bool:
+    """True when the current page is a 404 or the public site.
+
+    Checked before ANY control on the page is read or written. A wrong URL
+    guess is expected during a first probe; treating whatever it lands on as
+    if it were the application is what turns that into a safety problem.
+    """
+    url = (page.url or "").lower()
+    if any(m in url for m in PUBLIC_OR_ERROR_MARKERS):
+        return True
+    # the public site is a different host from the signed-in card portal
+    if url.startswith("https://www.discover.com/") and "/cardmembersvcs" not in url:
+        return True
+    return False
+
+
 def looks_signed_out(page) -> bool:
     url = (page.url or "").lower()
     if any(m in url for m in LOGIN_URL_MARKERS):
+        return True
+    if looks_public_or_error(page):
         return True
     try:
         if page.locator("input[type='password']").count() > 0:
@@ -333,16 +391,25 @@ def dismiss_timeout(page) -> None:
 # Documents page
 # ---------------------------------------------------------------------------
 
+# Discover's top nav is "Activity" (a menu), and the page itself is titled
+# "Activity & Statements". Clicking nav is only the fallback here, since
+# page.goto works.
 DOCUMENTS_NAV_RE = re.compile(
-    r"^\s*(documents?|statements?\s*(&|and)\s*documents?|"
-    r"statements?|tax\s+forms?)\s*$", re.I)
+    r"^\s*(activity(\s*(&|and)\s*statements?)?|documents?|"
+    r"statements?\s*(&|and)\s*documents?|statements?)\s*(menu)?\s*$", re.I)
 
 
 def on_documents_page(page) -> bool:
-    """Are we looking at a document list? Requires rows the scraper can
-    actually read - a page that merely says "Documents" does not count."""
+    """Are we on the statements page?
+
+    The test is whether the page publishes statement PDF links - not whether
+    it says "Statements" anywhere. A page that merely has the word on it, or a
+    public 404 that happens to render a nav, does not count.
+    """
     try:
-        return len(collect_documents(page)) > 0
+        if looks_public_or_error(page):
+            return False
+        return page.locator(STMT_PDF_SEL).count() > 0
     except Exception:
         return False
 
@@ -409,14 +476,43 @@ def goto_documents(page) -> bool:
     dismiss_timeout(page)
     if on_documents_page(page):
         return True
+    # Discover accepts a pasted URL, so try that first here - the reverse of
+    # the Ally/Chase ordering, and confirmed to work.
+    for url in DOCUMENT_URL_CANDIDATES[:2]:
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(4000)
+            dismiss_timeout(page)
+            if looks_public_or_error(page) or looks_signed_out(page):
+                break
+            if on_documents_page(page):
+                log.info("statements page reached at %s", page.url)
+                return True
+        except Exception as e:
+            log.info("documents URL %s failed: %s", url, str(e).splitlines()[0][:70])
     if click_documents_nav(page):
         log.info("documents area reached at %s", page.url)
         return True
+    # Signed out already? Say so instead of navigating around a dead session.
+    if looks_signed_out(page):
+        log.info("session is signed out (%s) - not navigating", page.url[:70])
+        return False
+    started_at = page.url
     for url in DOCUMENT_URL_CANDIDATES:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3500)
             dismiss_timeout(page)
+            if looks_public_or_error(page):
+                # A wrong guess. Go back to where the user left us rather than
+                # leaving them stranded on a 404 with the public site's login
+                # form on screen, and stop guessing.
+                log.info("URL %s landed on a public/error page - reverting", url)
+                try:
+                    page.goto(started_at, wait_until="domcontentloaded", timeout=45000)
+                except Exception:
+                    pass
+                return False
             if looks_signed_out(page):
                 return False
             try:
@@ -597,6 +693,28 @@ MONEY_CONTROL_RE = re.compile(
     r"transfer|payment|pay\b|bill|deposit|withdraw|zelle|wire|remit|"
     r"send\s*money|move\s*money|recipient|payee|amount|frequency|schedule", re.I)
 
+# A control that belongs to a SIGN-IN / registration form is off-limits, full
+# stop. Non-negotiable #2 is that this tool never touches authentication.
+#
+# This is not hypothetical: the first live Discover probe walked its guessed
+# URLs onto a public 404 page, found the marketing site's "what do you want to
+# log into" dropdown (identity "choose-card | login-form | loginForm", options
+# "Credit Card / Bank Account / Student Loans / ...") and tried to SET it. The
+# money-control test did not match - correctly, it is not a transfer widget -
+# so nothing refused it. The enclosing form's id was already in the identity
+# string; nothing was asking about it.
+AUTH_CONTROL_RE = re.compile(
+    r"log[\s_-]?(in|on)|sign[\s_-]?(in|on|up)|signin|logon|"
+    r"authenticat|credential|register|enroll(ment)?\b|"
+    r"username|user[\s_-]?id|password|passcode|remember\s*me", re.I)
+
+# A PRODUCT chooser ("which Discover product?") is not a document picker, and
+# options alone give it away wherever it appears.
+PRODUCT_PICKER_RE = re.compile(
+    r"bank\s+account|student\s+loans?|personal\s+loans?|home\s+loans?|"
+    r"mortgage|auto\s+loans?|certificate\s+of\s+deposit|"
+    r"select\s+an?\s+account", re.I)
+
 # What the element identity JS returns for a control inside a money widget.
 _IDENTITY_JS = r"""el => {
   const attrs = ['id','name','aria-label','placeholder','data-testid',
@@ -628,6 +746,28 @@ def control_identity(loc) -> str:
         return ""
 
 
+def is_forbidden_control_context(identity: str, options: Optional[List[str]] = None) -> bool:
+    """True when this control must not be read OR written, for any reason.
+
+    Fails CLOSED: an identity we could not read at all is treated as unsafe.
+    Three independent reasons, any one of which is disqualifying:
+      * it is part of a money-movement widget      (MONEY_CONTROL_RE)
+      * it is part of a sign-in / registration form (AUTH_CONTROL_RE)
+      * its OPTIONS describe Discover products rather than documents
+        (PRODUCT_PICKER_RE) - context-free, so it holds on any page
+    """
+    if not identity:
+        return True
+    if (MONEY_CONTROL_RE.search(identity) or AUTH_CONTROL_RE.search(identity)
+            or FORBIDDEN_CONTROL_RE.search(identity)
+            or PRODUCT_PICKER_RE.search(identity)):
+        return True
+    for opt in options or []:
+        if PRODUCT_PICKER_RE.search(opt or ""):
+            return True
+    return False
+
+
 def is_money_control(identity: str) -> bool:
     """True if this control belongs to anything that moves money. Fails
     CLOSED: an identity we could not read at all is treated as unsafe."""
@@ -648,8 +788,15 @@ def _safe_selects(page, limit: int = 12):
     for i in range(n):
         s = loc.nth(i)
         identity = control_identity(s)
-        if is_money_control(identity):
-            log.info("refusing dropdown (money control): %s", identity[:120])
+        # Options are read (harmless) before any decision, because a product
+        # picker is identifiable from its options alone even when its identity
+        # looks innocent.
+        try:
+            options = s.locator("option").all_text_contents()
+        except Exception:
+            options = []
+        if is_forbidden_control_context(identity, options):
+            log.info("refusing dropdown: %s", (identity or "<unreadable>")[:120])
             continue
         yield s, identity
 
@@ -671,8 +818,25 @@ def describe_selects(page, limit: int = 12) -> List[dict]:
             opts = [o.strip() for o in s.locator("option").all_inner_texts()][:12]
         except Exception:
             opts = []
+        reasons = []
+        if not identity:
+            reasons.append("unreadable identity (fails closed)")
+        else:
+            if MONEY_CONTROL_RE.search(identity):
+                reasons.append("money widget")
+            if AUTH_CONTROL_RE.search(identity):
+                reasons.append("sign-in form")
+            if FORBIDDEN_CONTROL_RE.search(identity):
+                reasons.append("forbidden control")
+            if PRODUCT_PICKER_RE.search(identity):
+                reasons.append("product picker (identity)")
+        if any(PRODUCT_PICKER_RE.search(o or "") for o in opts):
+            reasons.append("product picker (options)")
         out.append({"identity": identity[:200],
-                    "refused_as_money_control": is_money_control(identity),
+                    "refused": bool(reasons),
+                    "refused_because": reasons,
+                    # kept under the old key so existing notes/tools still read
+                    "refused_as_money_control": is_forbidden_control_context(identity, opts),
                     "option_count": len(opts),
                     # option labels can carry balances - keep only their shape
                     "option_sample": [re.sub(r"\$[\d,.]+", "$…", o)[:60] for o in opts[:6]]})
@@ -681,7 +845,11 @@ def describe_selects(page, limit: int = 12) -> List[dict]:
 
 def account_select(page):
     """Return (locator, [labels]) for a <select> that lists accounts, or
-    (None, []). Money-movement pickers are refused outright."""
+    (None, []).
+
+    Money-movement widgets, sign-in forms and product pickers are refused
+    outright by _safe_selects before this ever sees them.
+    """
     for s, _identity in _safe_selects(page):
         try:
             opts = [o.strip() for o in s.locator("option").all_inner_texts()]
@@ -793,15 +961,6 @@ def discovercard_collect(page) -> List[dict]:
 # session cookies). Whichever wins, the bytes are checked for %PDF- before the
 # file is written.
 # ---------------------------------------------------------------------------
-_FETCH_AS_B64 = r"""async (u) => {
-    const r = await fetch(u, {credentials: 'include'});
-    if (!r.ok) return null;
-    const buf = new Uint8Array(await r.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-    return btoa(s);
-}"""
-
-
 def _write_if_pdf(data: bytes, out_path: Path) -> bool:
     if not data or b"%PDF-" not in data[:1024]:
         return False
@@ -836,175 +995,106 @@ def _row_download_control(row):
     return None
 
 
-_MONTHS_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+# ===========================================================================
+# Downloading a statement. CONFIRMED LIVE 2026-08-19.
+#
+# Discover serves each statement at its own URL, which the page itself puts in
+# an <a href> - one per period, all present on load:
+#
+#     GET /cardmembersvcs/statements/app/stmtPDF?view=true&date=YYYYMMDD
+#       -> 200 application/pdf
+#          content-disposition: inline;
+#            filename=Discover-Statement-20260619-1234.pdf
+#
+# So there is nothing to click. The bytes are fetched with the browser
+# context's own authenticated request (cookie session, same origin, plain GET
+# of a URL the page published). This is NOT the "synthesise an endpoint" move
+# that failed on Ally: that guessed a URL and needed an Authorization header
+# the SPA added in JavaScript. Here the href is read from the DOM and used
+# verbatim.
+#
+# Not clicking is also what keeps this read-only in the strongest sense: the
+# "Download" control next to it opens a MODAL DIALOG (a transactions export,
+# not the statement), and answering a dialog is exactly what this project
+# never does.
+#
+# The server's filename carries the card's last four digits, which is the only
+# place a single-card login states them.
+# ===========================================================================
+CD_FILENAME_RE = re.compile(r"filename\*?=(?:UTF-8'')?\"?([^\";]+)", re.I)
+CD_LAST4_RE = re.compile(r"-(\d{4})\.pdf$", re.I)
 
 
-# Candidate words a row's download control may carry. Chase used "Saves
-# document"; Discover's is unknown, so several are tried in order and the
-# element's own name must still clear is_safe_control().
-ROW_ACTION_CANDIDATES = ("Saves document", "opens document", "Download",
-                         "View", "PDF", "Statement")
-
-
-def row_label_re(date: str, account: str = "", action: str = ""):
-    """Match one row's control by its accessible name.
-
-    Date is required; the card and the action word are OPTIONAL, because a
-    single-card Discover login may print neither on the row. Whatever IS
-    present is required to match, so the pattern never becomes so loose that
-    two different statements both satisfy it - if a page turns out to label
-    rows identically, the caller must fall back to something other than the
-    label (see the Ally app, where identical labels forced content-based
-    naming and served-id verification).
-    """
-    month = _MONTHS_ABBR[int(date[5:7]) - 1]
-    day = date[8:10]
-    day_pat = f"0?{int(day)}"                      # "Aug 9" or "Aug 09"
-    pat = rf"{month}\s+{day_pat},?\s*{date[:4]}"
-    if account:
-        pat += rf".*{re.escape(account)}"
-    if action:
-        pat += rf".*{re.escape(action)}"
-    return re.compile(pat, re.I | re.S)
+def served_last4(disposition: str) -> str:
+    """The card's last 4 from the served filename, or ""."""
+    m = CD_FILENAME_RE.search(disposition or "")
+    if not m:
+        return ""
+    m2 = CD_LAST4_RE.search(m.group(1).strip())
+    return m2.group(1) if m2 else ""
 
 
 def discovercard_download(page, ctx, account: str, date: str, out_path,
                    occurrence: int = 0, document_id: str = "",
                    title: str = "") -> bool:
-    """Download one document: right period, right card, right row.
+    """Download one statement PDF.
 
-    The period chooser and the card group (when the page has either) are set
-    first, through the page's own controls, because a row can only be clicked
-    while it is rendered. Both steps are tolerant: a page with no chooser and
-    no groups goes straight to the row.
+    `document_id` is the statement's own URL as discovery read it from the
+    page. Nothing is clicked and nothing is navigated: the file is fetched
+    with the signed-in context's cookies and written only if it really is a
+    PDF and really is the statement that was asked for.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    dismiss_timeout(page)
-    if not ensure_statements(page):
-        log.info("documents page not available for %r %s", account, date)
+
+    href = document_id or ""
+    if not href:
+        # Re-find it on the page by its date, rather than rebuilding the URL
+        # from a template - if Discover changes the query string, guessing it
+        # would download the wrong period under a confident filename.
+        href = statement_href_for(page, date)
+    if not href:
+        log.info("no statement URL for %s", date)
         return False
 
-    periods = period_options(page)
-    if periods and date[:4] in periods and not select_period(page, date[:4]):
-        log.info("period %s offered but could not be selected - cannot reach %s %s",
-                 date[:4], account, date)
+    # The URL must still be one of Discover's own statement URLs, and must
+    # still name the date we want. A stored href from an earlier run cannot
+    # send this anywhere else.
+    if not STMT_PDF_RE.search(href):
+        log.warning("refusing a non-statement URL for %s: %s", date, href[:80])
         return False
-    if account and card_groups(page) and not expand_only_group(page, account):
-        log.info("could not open the card group %r", account[:40])
+    want = date.replace("-", "")
+    if want and want not in href:
+        log.warning("MISMATCH: %s does not name %s - refusing", href[:80], want)
         return False
 
-    # Which document Discover actually serves, so the file can be checked against
-    # the one that was asked for rather than trusted.
-    served: List[str] = []
-
-    def _note(r):
-        try:
-            u = r.url
-            if document_id and document_id in u:
-                served.append(document_id)
-            m = re.search(r"documentId=([\w-]{8,})", u)
-            if m:
-                served.append(m.group(1))
-        except Exception:
-            pass
-
-    page.on("response", _note)
+    url = href if href.startswith("http") else BASE + href
     try:
-        ok = _click_row_and_capture(page, ctx, account, date, out_path)
-    finally:
-        try:
-            page.remove_listener("response", _note)
-        except Exception:
-            pass
-
-    if not ok:
+        resp = ctx.request.get(url, timeout=90000)
+    except Exception as e:
+        log.info("fetch failed for %s: %s", date, str(e).splitlines()[0][:80])
         return False
-    if document_id and served and document_id not in served:
-        log.warning("MISMATCH: wanted %s, Discover served %s - discarding",
-                    document_id[-8:], ", ".join(s[-8:] for s in served[:3]))
-        try:
-            out_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+    if resp.status != 200:
+        log.info("statement %s returned HTTP %s", date, resp.status)
         return False
+    ctype = (resp.headers.get("content-type") or "").lower()
+    if "pdf" not in ctype:
+        # An HTML body here usually means the session lapsed and Discover
+        # answered with a sign-in page. Do not write it.
+        log.info("statement %s came back as %r, not a PDF", date, ctype[:40])
+        return False
+    try:
+        data = resp.body()
+    except Exception as e:
+        log.info("could not read body for %s: %s", date, e)
+        return False
+    if not _write_if_pdf(data, out_path):
+        return False
+    last4 = served_last4(resp.headers.get("content-disposition", ""))
+    log.info("saved %s (%d bytes%s)", date, len(data),
+             f", card ...{last4}" if last4 else "")
     return True
 
-
-def _click_row_and_capture(page, ctx, account: str, date: str,
-                           out_path: Path) -> bool:
-    """Click this row's save control and keep whatever PDF it produces."""
-    link = None
-    for action in ROW_ACTION_CANDIDATES + ("",):
-        try:
-            loc = page.get_by_role("link", name=row_label_re(date, account, action))
-            if loc.count():
-                label = " ".join((loc.first.inner_text(timeout=1500) or "").split())
-                if not is_safe_control(label or action):
-                    log.info("row control %r did not clear the guard", label[:60])
-                    continue
-                link = loc.first
-                break
-        except Exception as e:
-            log.info("row lookup failed (%s): %s", action, str(e).splitlines()[0][:70])
-    if link is None:
-        log.info("no row for %s on %s", account[:40], date)
-        return False
-
-    before = {id(p) for p in ctx.pages}
-    try:
-        with page.expect_download(timeout=25000) as dl:
-            link.click()
-        dl.value.save_as(str(out_path))
-        if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-            log.info("captured via download event")
-            return True
-    except Exception as e:
-        log.info("no download event for %s %s (%s); trying tab capture",
-                 account[:30], date, str(e).splitlines()[0][:60])
-
-    new_page = None
-    for _ in range(30):
-        page.wait_for_timeout(500)
-        dismiss_timeout(page)
-        for p in ctx.pages:
-            if id(p) not in before and not p.is_closed():
-                new_page = p
-                break
-        if new_page:
-            break
-    if new_page is None:
-        log.info("nothing opened for %s %s", account[:30], date)
-        return False
-
-    ok = False
-    try:
-        new_page.wait_for_load_state("domcontentloaded", timeout=20000)
-        url = new_page.url or ""
-        b64 = page.evaluate(_FETCH_AS_B64, url) if url.startswith("blob:") \
-            else new_page.evaluate(_FETCH_AS_B64, url)
-        if b64:
-            ok = _write_if_pdf(base64.b64decode(b64), out_path)
-            if ok:
-                log.info("captured via new tab (%s)", url[:70])
-    except Exception as e:
-        log.info("tab capture failed for %s %s: %s", account[:30], date, e)
-    try:
-        new_page.close()
-    except Exception:
-        pass
-    return ok
-
-
-# ---------------------------------------------------------------------------
-# Probe: what JSON does the SPA call?
-#
-# Several PaperPull apps (USAA, Navy Federal's document center) turned out to
-# be far more reliable read through the provider's own JSON API than scraped
-# from the DOM. This records candidate endpoints during --diagnose so we can
-# see whether Discover offers one. It only listens; it issues no requests.
-# ---------------------------------------------------------------------------
 
 _DIGITS_RE = re.compile(r"\d{4,}")
 
@@ -1024,72 +1114,36 @@ DOCREF_API_RE = re.compile(r"/(documents?|statements?|docref)[a-z/]*/(list|searc
 
 
 def probe_statements_api(page) -> dict:
-    """Capture the RAW document records Discover sends and report their fields.
+    """Report the statement index exactly as the page publishes it.
 
-    Why this exists: a truncated sample of one response is not enough to
-    design against. This opens each card once on the year the picker is
-    already showing, captures every docref/list reply the page makes for
-    itself, dumps the field names with a redacted sample of each, and reports
-    the rows the page shows for the same cards - so a change in either can be
-    seen before any code depends on it.
+    Discover needs no API call for discovery - the whole index is static
+    markup - so this reports what a read of that markup yields: how many PDF
+    links there are, their date range, a sample of the period labels, and
+    whether any link was refused by the read-only guard. That is the thing to
+    compare against after a redesign.
 
-    Read-only: it listens to the page's own traffic and drives only the card
-    accordions.
+    Read-only, and it neither clicks nor navigates.
     """
-    raw: List[dict] = []
-    rows: List[dict] = []
-
-    def on_resp(r):
-        try:
-            if not DOCREF_API_RE.search(r.url):
-                return
-            refs = (r.json() or {}).get("idaldocRefs")
-            if isinstance(refs, list):
-                raw.extend(x for x in refs if isinstance(x, dict))
-        except Exception:
-            pass
-
-    page.on("response", on_resp)
     try:
         ensure_statements(page)
-        page.wait_for_timeout(1500)
-        groups = card_groups(page)
-        if not groups:
-            rows.extend(read_rows(page))
-        for _el, label in groups:
-            rows.extend(read_rows(page, label))
-            collapse_all_groups(page)
+        page.wait_for_timeout(1200)
     except Exception as e:
         log.info("probe_statements_api: %s", e)
-    finally:
-        try:
-            page.remove_listener("response", on_resp)
-        except Exception:
-            pass
-
-    keys: dict = {}
-    for rec in raw:
-        for k, v in rec.items():
-            info = keys.setdefault(k, {"present": 0, "empty": 0, "distinct": set()})
-            info["present"] += 1
-            if v in ("", None, [], {}):
-                info["empty"] += 1
-            elif len(info["distinct"]) < 12:
-                info["distinct"].add(str(_redact(v))[:60])
-
-    by_card: dict = {}
-    for r in rows:
-        by_card[r["account"]] = by_card.get(r["account"], 0) + 1
-
+    try:
+        raw_links = page.locator(STMT_PDF_SEL).count()
+    except Exception:
+        raw_links = 0
+    recs = statement_links(page)
+    dates = [r["date"] for r in recs]
     return {
-        "api_records": len(raw),
-        "fields": {k: {"present": v["present"], "empty": v["empty"],
-                       "distinct_sample": sorted(v["distinct"])[:12]}
-                   for k, v in sorted(keys.items())},
-        "rows_shown": len(rows),
-        "rows_per_card": {_redact(k): v for k, v in sorted(by_card.items())},
-        "note": "api_records and rows_shown should agree for the year the "
-                "picker is showing; discovery files documents by ROW.",
+        "pdf_links_in_dom": raw_links,
+        "statements": len(recs),
+        "oldest": dates[-1] if dates else "",
+        "newest": dates[0] if dates else "",
+        "period_labels_sample": [r["period"] for r in recs[:4] if r["period"]],
+        "href_shape": _redact(recs[0]["href"]) if recs else "",
+        "note": "pdf_links_in_dom may exceed statements: the period chooser's "
+                "markup repeats a link. Discovery de-duplicates by date.",
     }
 
 
@@ -1150,303 +1204,137 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
 
 
 # ===========================================================================
-# Discovery: candidate layer. NOTHING HERE IS CONFIRMED.
+# Discovery. CONFIRMED LIVE 2026-08-19.
 #
-# Chase's document centre was one accordion per card plus a styled year
-# picker. Discover is a different portal and there is no reason to assume that
-# shape - a single-card login showing one plain statements list is at least as
-# likely. So this layer does not commit to either:
+# The statements page is
+#     card.discover.com/cardmembersvcs/statements/app/activity
+# with hash routes #/recent, #/current and #/stmt_YYYYMMDD. page.goto works
+# and keeps the session (unlike Ally and Chase, where it did not).
 #
-#   1. period_options()  - reads whatever period/year chooser exists, whether
-#      it is a <select> (checked through the money-control guard) or a styled
-#      input like Chase's. Returns [] when there is none, and the sweep then
-#      simply reads the one list on screen.
-#   2. card_groups()     - returns the per-card groupings IF the page has any.
-#      No groups is the normal single-card case, not an error.
-#   3. read_rows()       - reads the rows on screen and takes the card name
-#      FROM THE ROW when one is printed there.
+# The page's "Show me" period chooser is a link-based dropdown, NOT a <select>
+# - which is why a select-based lookup finds nothing here. It does not need to
+# be opened: every period's row, each with its own PDF link, is already in the
+# DOM on plain page load. Verified: 24 links before any interaction, the same
+# 24 after opening the chooser.
 #
-# Why (3) matters even though Discover may well have one card per login: on
-# Chase, attributing documents by "which card did I just click" instead of
-# "which card does this row name" filed one card's statements under another
-# and produced output that looked entirely plausible. If a login can ever show
-# two cards, position-based attribution is silently wrong. Reading the row
-# costs nothing when there is only one card.
+# So discovery is one read of
+#     a[href*="stmtPDF"]   ->  ...stmtPDF?view=true&date=YYYYMMDD
+# where the date is the statement's CLOSING date, and the enclosing <li> gives
+# the human period label ("May 20 - Jun 19, 2026", or "Current (...)").
 #
-# CARD_RE below matches Chase's "(...1234)" masked-card form as one candidate;
-# Discover may print "Discover it ...1234", "Account ending in 1234", or no
-# card at all on a single-card login. Repair it from --diagnose output.
+# Nothing is clicked, no accordion is expanded, no period is swept. The Chase
+# app needed all of that because its rows only existed while one card's
+# accordion was open on one year; here the whole index is static markup.
+#
+# History observed: 24 statements, 2024-08-19 .. 2026-07-19 - Discover keeps
+# about two years online. Older ones are not reachable from this page and are
+# not guessed at.
 # ===========================================================================
-# Candidate forms of a masked card label. Deliberately several, because which
-# one Discover uses is unknown.
-CARD_RE = re.compile(
-    r"\(\s*\.{2,}\s*\d{4}\s*\)|"          # "(...1234)"   - Chase's form
-    r"\bending\s+in\s+\d{4}\b|"             # "ending in 1234"
-    r"\bx{2,}\s*\d{4}\b|"                   # "xxxx1234"
-    r"\*{2,}\s*\d{4}\b", re.I)              # "****1234"
-
-# A styled (non-<select>) period chooser, as on Chase. Candidate.
-YEAR_PICKER_SEL = ("input[id*='filterstyledselect'], "
-                   "input[id*='yearselect'], input[aria-label*='View' i]")
+STMT_PDF_RE = re.compile(r"/statements/app/stmtPDF\b[^\"\']*?date=(\d{8})", re.I)
+STMT_PDF_SEL = "a[href*='stmtPDF']"
+# "May 20 - Jun 19, 2026" / "Dec 20, 2025 - Jan 19, 2026" / "Current (...)"
+PERIOD_LABEL_RE = re.compile(
+    r"((?:Current\s*\()?[A-Z][a-z]{2}\s+\d{1,2}(?:,\s*\d{4})?\s*[-\u2013]\s*"
+    r"[A-Z][a-z]{2}\s+\d{1,2},\s*\d{4}\)?)")
 
 
-# A card group header is a NOUN PHRASE ("Discover it Cash Back ...1234").
-# What makes a look-alike dangerous is a VERB ("Pay ...1234", "Freeze it
-# ...1234"), so that is what is checked here.
-#
-# Why not just reuse FORBIDDEN_CONTROL_RE: Discover's card products are named
-# "Discover it Miles" and "Discover it Cash Back", and the blocklist forbids
-# `miles` and `cashback` because "Redeem Miles" is a rewards action. Reusing it
-# would refuse the card's own header and the app could never open that card's
-# documents - the same collision as the Ally account nicknamed "...- 1099"
-# tripping the document allowlist, but load-bearing instead of harmless.
-#
-# The blocklist stays broad for ordinary controls, where over-blocking is
-# free. Here, and only here, the test is "does this label contain an action?"
-CARD_ACTION_RE = re.compile(
-    r"\b(pay|paying|payment|activate|freeze|unfreeze|lock|unlock|replace|"
-    r"redeem|transfer|dispute|close|cancel|apply|request|increase|add|remove|"
-    r"delete|change|edit|update|set|enable|disable|report|submit|confirm|"
-    r"authorize|send|move|withdraw|deposit|advance)\b", re.I)
+def _iso_from_yyyymmdd(raw: str) -> str:
+    return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}" if re.fullmatch(r"\d{8}", raw or "") else ""
 
 
-def is_card_control(label: str) -> bool:
-    """A per-card group header may be expanded, though it is not a document
-    control.
+def statement_links(page) -> List[dict]:
+    """Every statement Discover is offering, read from its own PDF links.
 
-    A narrow, deliberate exception to SAFE_DOC_CONTROL_RE: a header reading
-    "Discover it (...1234)" names no document action, so the document
-    allowlist alone would refuse it and the app could never see past the first
-    card. It must still LOOK like a card AND name no action, so
-    "Pay Discover it (...1234)" or "Activate card ending in 1234" stay
-    refused - see CARD_ACTION_RE above for why that check is not the full
-    blocklist.
+    One plain read of the DOM - no clicking, no expanding, no navigation.
+    Returns {date, href, period, occurrence, ambiguous, documentId} per
+    statement, de-duplicated by date (the markup repeats a link when the
+    chooser is open).
     """
-    label = (label or "").strip()
-    if not label or not CARD_RE.search(label):
-        return False
-    return not CARD_ACTION_RE.search(label)
-
-
-def card_groups(page) -> List[Tuple[object, str]]:
-    """(header, label) for each per-card group, or [] if the page has none.
-
-    An empty list is the ordinary single-card case, NOT a failure - the caller
-    reads the one list on screen instead.
-    """
-    out: List[Tuple[object, str]] = []
+    out: List[dict] = []
+    seen = set()
     try:
-        loc = page.get_by_role("button", name=CARD_RE)
-        n = min(loc.count(), 20)
-    except Exception:
-        return out
+        loc = page.locator(STMT_PDF_SEL)
+        n = min(loc.count(), 400)
+    except Exception as e:
+        log.info("could not read statement links: %s", e)
+        return []
     for i in range(n):
         el = loc.nth(i)
         try:
-            label = " ".join((el.inner_text(timeout=1000) or "").split())
+            href = el.get_attribute("href") or ""
         except Exception:
             continue
-        if is_card_control(label):
-            out.append((el, label))
-        elif label:
-            log.info("refusing group control %r", label[:60])
+        m = STMT_PDF_RE.search(href)
+        if not m:
+            continue
+        date = _iso_from_yyyymmdd(m.group(1))
+        if not date or date in seen:
+            continue
+        # The control must still clear the read-only guard, even though it is
+        # only ever fetched and never clicked.
+        try:
+            label = " ".join((el.inner_text(timeout=600) or "").split())
+        except Exception:
+            label = ""
+        if label and not is_safe_control(label):
+            log.info("refusing statement control %r", label[:60])
+            continue
+        # The human period label lives on an ANCESTOR of the link, but not a
+        # predictable one: closest('div') matches a bare wrapper holding only
+        # the word "PDF". So walk up until the text actually looks like a
+        # period, a few levels at most.
+        period = ""
+        try:
+            texts = el.evaluate("""e => {
+                const out = []; let n = e.parentElement;
+                for (let i = 0; i < 5 && n; i++, n = n.parentElement) {
+                    out.push(n.innerText || '');
+                }
+                return out;
+            }""") or []
+            for raw in texts:
+                pm = PERIOD_LABEL_RE.search(" ".join(raw.split()))
+                if pm:
+                    period = pm.group(1).strip()
+                    break
+        except Exception:
+            pass
+        seen.add(date)
+        out.append({"date": date, "href": href, "period": period,
+                    # identity IS the URL: durable, and it re-finds the file
+                    # without depending on row order.
+                    "documentId": href,
+                    "title": "Statement", "account": "",
+                    "kind": "statement", "occurrence": 0, "ambiguous": False})
+    out.sort(key=lambda r: r["date"], reverse=True)
     return out
 
 
-def collapse_all_groups(page) -> None:
-    """Close every per-card group."""
-    for el, name in card_groups(page):
-        try:
-            if (el.get_attribute("aria-expanded") or "").lower() == "true":
-                el.click()
-                page.wait_for_timeout(400)
-        except Exception as e:
-            log.info("could not collapse %r: %s", name[:40], e)
-
-
-def expand_only_group(page, label: str) -> bool:
-    """Expand this card's group, with the others closed.
-
-    The group is ALWAYS collapsed first if it is already open. On Chase, a card
-    whose accordion happened to be expanded never re-fetched, so a discovery
-    run recorded nothing for it - five of six cards collected, with a
-    plausible total. Whether Discover fetches lazily is unknown, so the safe
-    order is kept.
-    """
-    for el, name in card_groups(page):
-        if name != label:
-            continue
-        try:
-            if (el.get_attribute("aria-expanded") or "").lower() == "true":
-                el.click()                      # close, so opening re-fetches
-                page.wait_for_timeout(600)
-            el.click()
-            page.wait_for_timeout(2000)
-            return True
-        except Exception as e:
-            log.info("could not expand %r: %s", name[:40], e)
-            return False
-    return False
-
-
-def period_options(page) -> List[str]:
-    """The periods/years the page offers, from EITHER kind of chooser.
-
-    A <select> is read through the money-control guard (an unreadable identity
-    fails closed); a styled input is opened and its options read. Returns []
-    when the page has no chooser, which is not an error.
-    """
-    sel, labels = year_select(page)               # guarded <select> path
-    if sel is not None and labels:
-        years = sorted({l.strip() for l in labels
-                        if re.fullmatch(r"(19|20)\d{2}", l.strip())}, reverse=True)
-        if years:
-            return years
-    try:                                          # styled-input path
-        inp = page.locator(YEAR_PICKER_SEL).first
-        if inp.count() == 0:
-            return []
-        label = inp.get_attribute("aria-label") or "View:"
-        if not is_safe_control(label) and not re.search(r"view|year|period|statement",
-                                                        label, re.I):
-            log.info("period picker %r did not clear the guard", label)
-            return []
-        inp.click()
-        page.wait_for_timeout(1200)
-        years = page.evaluate("""() => {
-            const s = new Set();
-            for (const el of document.querySelectorAll('[role="option"], li, span')) {
-                const t = (el.innerText || '').trim();
-                if (/^(19|20)\\d{2}$/.test(t)) s.add(t);
-            }
-            return [...s];
-        }""")
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(400)
-        return sorted(years, reverse=True)
-    except Exception as e:
-        log.info("period options failed: %s", e)
-        return []
-
-
-def select_period(page, year: str) -> bool:
-    """Choose a period/year, the way a person would, on either chooser."""
-    sel, labels = year_select(page)
-    if sel is not None and any(l.strip() == str(year) for l in labels):
-        if _select_option(page, sel, str(year)):
-            page.wait_for_timeout(2500)
-            dismiss_timeout(page)
-            return True
-    try:
-        inp = page.locator(YEAR_PICKER_SEL).first
-        if inp.count() == 0:
-            return False
-        if (inp.get_attribute("value") or "").strip() == str(year):
-            return True
-        inp.click()
-        page.wait_for_timeout(1000)
-        # Anchor the START of the option name only: Chase's last option is
-        # named "2019, you've reached the end of the list" and its current one
-        # "2020, current selection", so matching the whole name against the
-        # year silently reported the oldest year as "not offered" - 36
-        # statements missed with no error.
-        opt = page.get_by_role("option", name=re.compile(rf"^\s*{year}\b"))
-        if opt.count() == 0:
-            page.keyboard.press("Escape")
-            log.info("period %s not offered", year)
-            return False
-        opt.first.click()
-        page.wait_for_timeout(3000)
-        dismiss_timeout(page)
-        return True
-    except Exception as e:
-        log.info("could not select period %s: %s", year, e)
-        return False
-
-
-# A row's accessible name. Candidate patterns: a card name may or may not be
-# printed on the row. Both are handled - `card` is optional.
-ROW_NAME_RE = re.compile(
-    r"(?P<mon>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+"
-    r"(?P<day>\d{1,2}),?\s*(?P<year>(?:19|20)\d{2})"
-    r"(?P<rest>.*)", re.I)
-
-
-def read_rows(page, label: str = "") -> List[dict]:
-    """The statements on screen, read from the rows themselves.
-
-    `label` is the card group opened, used ONLY as a fallback when a row does
-    not name its own card. When a row DOES name one, the row wins - see the
-    section comment above for why that direction matters.
-    """
-    if label and not expand_only_group(page, label):
-        return []
-    out: List[dict] = []
-    rows = collect_documents(page)                # generic scraper
-    for r in rows:
-        text = " ".join((r.text or "").split())
-        date = None
-        m = ROW_NAME_RE.search(text)
-        if m:
-            date, _ = parse_period_date(
-                f"{m.group('mon')} {m.group('day')}, {m.group('year')}")
-        if not date:
-            date, _ = parse_period_date(r.date_text or text)
-        if not date:
-            continue
-        card = ""
-        cm = CARD_RE.search(text)
-        if cm:
-            # the card as printed on this row, with a little of its name
-            head = text[:cm.start()].strip()
-            card = " ".join((head.split()[-4:] if head else []) + [cm.group(0)]).strip()
-        out.append({"documentId": "", "date": date,
-                    "title": (r.title or "Statement").strip() or "Statement",
-                    "account": card or label, "kind": "statement",
-                    "row_index": r.row_index,
-                    "occurrence": 0, "ambiguous": False})
-    return out
+def statement_href_for(page, date: str) -> str:
+    """Re-find one statement's URL on the page by its closing date."""
+    want = (date or "").replace("-", "")
+    for rec in statement_links(page):
+        if rec["date"].replace("-", "") == want:
+            return rec["href"]
+    return ""
 
 
 def discovercard_collect_via_api(page) -> List[dict]:
-    """Every statement Discover still shows, driven the way a person drives it.
+    """Every statement Discover still offers.
 
-    Sweeps each period the page offers and, within it, each per-card group if
-    the page has any. Issues no request of its own; a JSON endpoint, once
-    --diagnose reports one, is the intended upgrade (see the usaa app).
+    Named for the shared orchestrator's call site. There is no API call here
+    and none is needed - the page publishes its whole statement index as
+    links, so this is a single read with nothing clicked.
     """
-    found: List[dict] = []
     if not ensure_statements(page):
-        log.info("documents page not reachable")
+        log.info("statements page not reachable")
         return []
-    periods = period_options(page) or [""]
-    cards = [label for _el, label in card_groups(page)]
-    log.info("Discover: %d card group(s) x %d period(s)",
-             len(cards) or 1, len(periods))
-
-    for period in periods:
-        if period and not select_period(page, period):
-            continue
-        scroll_full_page(page, rounds=3)
-        if not cards:
-            rows = read_rows(page)
-            log.info("  %s: %d document(s)", period or "(current)", len(rows))
-            found.extend(rows)
-            continue
-        collapse_all_groups(page)
-        for label in cards:
-            rows = read_rows(page, label)
-            log.info("  %s %s: %d document(s)",
-                     period or "(current)", label[:34], len(rows))
-            found.extend(rows)
-            collapse_all_groups(page)
-
-    out, seen = [], set()
-    for rec in found:
-        key = (rec["account"], rec["date"], rec["title"])
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(rec)
-    out.sort(key=lambda r: (r["date"], r["account"]), reverse=True)
-    return out
+    scroll_full_page(page, rounds=2)
+    recs = statement_links(page)
+    if not recs:
+        log.info("no statement PDF links found - the page layout may have changed; "
+                 "run --diagnose and check STMT_PDF_SEL")
+        return []
+    log.info("Discover: %d statement(s), %s .. %s",
+             len(recs), recs[-1]["date"], recs[0]["date"])
+    return recs

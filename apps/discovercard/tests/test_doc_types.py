@@ -154,55 +154,110 @@ def test_unreadable_identity_fails_closed():
     assert site.is_money_control("")
 
 
-def test_row_label_re_needs_the_date_and_whatever_else_is_present():
-    """Date is required; card and action are optional, because a single-card
-    login may print neither on the row."""
-    rx = site.row_label_re("2026-08-09")
-    assert rx.search("Aug 09, 2026 Statement")
-    assert rx.search("Aug 9, 2026 View statement")          # unpadded day
-    assert not rx.search("Aug 19, 2026 Statement")          # different day
-
-    # when a card IS printed, it must match - so two cards cannot be confused
-    rx = site.row_label_re("2026-08-09", "Discover it (...1234)")
-    assert rx.search("Aug 09, 2026 Statement Discover it (...1234) Download")
-    assert not rx.search("Aug 09, 2026 Statement Discover it (...5678) Download")
+def test_statement_pdf_re_reads_the_closing_date():
+    """The confirmed download URL: the page's own statement link."""
+    href = "/cardmembersvcs/statements/app/stmtPDF?view=true&date=20260619"
+    m = site.STMT_PDF_RE.search(href)
+    assert m and m.group(1) == "20260619"
+    assert site._iso_from_yyyymmdd(m.group(1)) == "2026-06-19"
 
 
-def test_row_name_re_reads_a_date_with_or_without_a_card():
-    m = site.ROW_NAME_RE.search("Aug 09, 2026 Statement")
-    assert m and (m.group("mon"), m.group("day"), m.group("year")) == ("Aug", "09", "2026")
-    m = site.ROW_NAME_RE.search("Aug 09, 2026 Statement Discover it (...1234)")
-    assert m and "Discover it" in m.group("rest")
+def test_statement_pdf_re_refuses_other_urls():
+    """discovercard_download re-checks the stored URL before fetching it, so a
+    stored value can never send the fetch somewhere else."""
+    for href in ["/cardmembersvcs/statements/app/search",
+                 "/cardmembersvcs/payments/app/pay?date=20260619",
+                 "https://evil.example/stmtPDF?date=20260619",
+                 "/cardmembersvcs/statements/app/stmtPDF?view=true"]:
+        assert not site.STMT_PDF_RE.search(href), href
 
 
-def test_card_re_accepts_the_common_masked_forms():
-    """Which form Discover prints is unknown, so several are recognised."""
-    for label in ["Discover it (...1234)", "Discover it ending in 1234",
-                  "Discover it xxxx1234", "Discover it ****1234"]:
-        assert site.CARD_RE.search(label), label
-    assert not site.CARD_RE.search("Discover it")
+def test_period_label_re_reads_both_forms():
+    for row, want in [
+            ("May 20 - Jun 19, 2026 PDF", "May 20 - Jun 19, 2026"),
+            ("Dec 20, 2025 - Jan 19, 2026 PDF", "Dec 20, 2025 - Jan 19, 2026"),
+            ("Current (Jun 20 - Jul 19, 2026) PDF", "Current (Jun 20 - Jul 19, 2026)")]:
+        m = site.PERIOD_LABEL_RE.search(row)
+        assert m, row
+        assert m.group(1).strip() == want, (row, m.group(1))
 
 
-def test_card_headers_are_the_only_non_document_control_allowed():
-    assert site.is_card_control("Discover it (...1234)")
-    assert not site.is_card_control("Discover it")           # no masked number
-    assert not site.is_card_control("Pay card")
-    assert not site.is_card_control("Pay Discover it (...1234)")
-    assert not site.is_card_control("Activate card ending in 1234")
-    assert not site.is_card_control("Freeze it (...1234)")
-    assert not site.is_card_control("Redeem Cashback Bonus ...1234")
-    assert not site.is_card_control("")
+def test_served_last4_reads_the_card_from_the_filename():
+    """Discover's Content-Disposition is the only place a single-card login
+    states the card's last four digits."""
+    cd = "inline; filename=Discover-Statement-20260619-1234.pdf"
+    assert site.served_last4(cd) == "1234"
+    assert site.served_last4("inline; filename=statement.pdf") == ""
+    assert site.served_last4("") == ""
 
 
-def test_product_names_are_not_mistaken_for_rewards_actions():
-    """Discover's cards are NAMED "Miles" and "Cash Back", and the blocklist
-    forbids that vocabulary because "Redeem Miles" is an action. A card header
-    must survive it, or the app can never open that card's documents."""
-    for header in ["Discover it Miles ending in 5678",
-                   "Discover it Cash Back (...1234)",
-                   "Discover it Chrome xxxx1234",
-                   "Discover More ****9012"]:
-        assert site.is_card_control(header), header
-        # ...while the blocklist still refuses them as *document* controls,
-        # so the card-header path stays the only way in.
-        assert not site.is_safe_control(header), header
+def test_the_pdf_control_clears_the_guard():
+    """The statement links are labelled just "PDF"."""
+    assert site.is_safe_control("PDF")
+    assert site.is_safe_control("View Billing Statement PDF")
+    # ...while the neighbouring transactions-export control, which opens a
+    # modal dialog, must never be treated as a document action to click.
+    assert not site.is_safe_control("Set up AutoPay")
+
+
+# -- SAFETY: the first live probe tried to set a control on a SIGN-IN form ---
+#
+# Every guessed URL missed and the app landed on Discover's public 404, where
+# the account-picker lookup matched the marketing site's "what do you want to
+# log into" dropdown and tried to select in it. Not a money widget, so the
+# money test correctly did not fire - and nothing else was asking.
+
+def test_signin_form_controls_are_refused():
+    for identity in [
+            "choose-card | choose-card | login-form | loginForm | choose-card",
+            "userid | User ID | logon-form",
+            "cardSelect | Select | signInForm | Log In"]:
+        assert site.is_forbidden_control_context(identity), identity
+
+
+def test_product_pickers_are_refused_by_their_options():
+    """Context-free: a product chooser gives itself away wherever it appears."""
+    opts = ["Select an Account", "Credit Card", "Bank Account",
+            "Student Loans", "Personal Loans", "Home Loans"]
+    assert site.is_forbidden_control_context("innocent-looking-id", opts)
+
+
+def test_forbidden_context_fails_closed_on_an_unreadable_identity():
+    assert site.is_forbidden_control_context("")
+    assert site.is_forbidden_control_context(None)
+
+
+def test_a_real_statement_picker_still_passes():
+    """Over-blocking would leave the app unable to read anything."""
+    for identity in ["statementPeriod | Statement period | Statements",
+                     "documentYear | Year | Statements & documents"]:
+        assert not site.is_forbidden_control_context(identity, ["2026", "2025"]), identity
+
+
+def test_signed_out_urls_are_recognised():
+    """A live run ended on Discover's logoff page, which matched none of the
+    original markers - "universalLogin" does not contain "/login" - so the app
+    kept trying instead of saying the session had ended."""
+    class FakePage:
+        def __init__(self, url): self.url = url
+        class _L:
+            def count(self): return 0
+        def locator(self, _sel): return self._L()
+    for url in [
+            "https://portal.discover.com/customersvcs/universalLogin/logoff_confirmed#/recent",
+            "https://card.discover.com/cardmembersvcs/logout",
+            "https://card.discover.com/session-expired"]:
+        assert site.looks_signed_out(FakePage(url)), url
+    assert not site.looks_signed_out(
+        FakePage("https://card.discover.com/cardmembersvcs/statements/app/activity#/recent"))
+
+
+def test_public_and_error_pages_are_recognised():
+    class FakePage:
+        def __init__(self, url): self.url = url
+    for url in ["https://www.discover.com/discover/data/misc/error404.shtml",
+                "https://www.discover.com/credit-cards/index.html",
+                "https://card.discover.com/cardmembersvcs/404"]:
+        assert site.looks_public_or_error(FakePage(url)), url
+    assert not site.looks_public_or_error(
+        FakePage("https://card.discover.com/cardmembersvcs/statements/app/activity#/recent"))
