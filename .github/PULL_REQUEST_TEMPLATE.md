@@ -28,7 +28,7 @@
 ## For a new provider
 
 - [ ] Cloned the closest existing app; entry files renamed to `<slug>_*.py`.
-- [ ] Uses a **unique CDP port** (9222–9234 are taken; used 9235+).
+- [ ] Uses a **unique CDP port** (9222–9235 are taken; used 9236+).
 - [ ] Added a `config.example.json` (no real paths/owner).
 - [ ] Added the provider to [PROVIDERS.md](../blob/main/PROVIDERS.md).
 - [ ] Verified end-to-end against my real account: `--discover` lists documents,
