@@ -48,8 +48,17 @@ def _bundled_chromium() -> List[str]:
     if sys.platform == "win32":
         patterns = ["chromium-*/chrome-win64/chrome.exe", "chromium-*/chrome-win/chrome.exe"]
     elif sys.platform == "darwin":
+        # Playwright renamed the macOS bundle: builds up to ~1200 shipped
+        # "Chromium.app/Contents/MacOS/Chromium", newer ones ship "Google
+        # Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing".
+        # Only the old name was matched here, so on an up-to-date install NO
+        # bundled Chromium was found and every app silently fell back to
+        # Edge/Chrome - or reported no browser at all when neither was
+        # installed. Both layouts are matched now.
         patterns = ["chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
-                    "chromium-*/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"]
+                    "chromium-*/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium",
+                    "chromium-*/chrome-mac*/Google Chrome for Testing.app"
+                    "/Contents/MacOS/Google Chrome for Testing"]
     else:
         patterns = ["chromium-*/chrome-linux/chrome"]
     found: List[str] = []
@@ -143,7 +152,15 @@ def open_signin_browser(profile_dir, port: str, url: str,
         return None
 
     Path(profile_dir).mkdir(parents=True, exist_ok=True)
+    # The browser must not inherit our stdio. It outlives this process by
+    # design (the user keeps it open), so if it holds our stdout, whoever is
+    # reading that pipe - the control panel's Login action - waits for the
+    # window to close before it considers the login step finished, with every
+    # button disabled meanwhile. It also spares the console the browser's own
+    # updater/crash-handler chatter.
     subprocess.Popen([exe, f"--user-data-dir={profile_dir}",
                       f"--remote-debugging-port={port}", "--no-first-run",
-                      "--no-default-browser-check", url])
+                      "--no-default-browser-check", url],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
     return name
