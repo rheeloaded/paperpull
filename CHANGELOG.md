@@ -7,6 +7,52 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.9.0] — 2026-08-21
+
+### Added
+- **Discover credit cards — the seventeenth provider** (`apps/discovercard`,
+  CDP port 9237). Card statements only, read-only and delete-safe, in a **real
+  Edge/Chrome** window. Verified against a live account: 24 statements
+  (2024-08-19 - 2026-07-19, about two years of history), downloaded and
+  checked, with a delete-safe re-run confirmed.
+
+  Discover is the simplest bank-style provider so far, and the app is
+  correspondingly small:
+
+  - **Discovery is one read.** Every statement period's row, each with its own
+    PDF link, is already in the DOM on plain page load - 24 links before any
+    interaction, the same 24 after opening the period chooser. Nothing is
+    clicked, no accordion expanded, no year swept. The Chase app's machinery
+    exists because its rows only exist while one card's accordion is open on
+    one year; none of it was carried over.
+  - **A statement is served directly** at `stmtPDF?view=true&date=YYYYMMDD`, so
+    the bytes are fetched with the signed-in context's own cookies using the
+    href *read from the page* - never a URL built from a template, so a change
+    to the query string cannot silently fetch the wrong period.
+  - There is **no `<select>`** on the page: the period chooser is a link-based
+    dropdown, which is why a select-based lookup finds nothing.
+
+  The app slug is `discovercard` rather than `discover` because `--discover` is
+  the CLI's own verb and the control panel has a **Discover** button; `redcard`
+  sets the precedent of naming by the card product.
+
+  A login with more than one Discover card is **unverified** and documented as
+  such: the account this was built against has one card, so the page names none.
+
+### Fixed
+- **The read-only guard did not cover sign-in forms.** Found by running the new
+  Discover app against the live site: every guessed URL missed, the app landed
+  on Discover's public 404, and the account-picker lookup matched the marketing
+  site's "what do you want to log into" dropdown - then called `select_option`
+  on it. Nothing was submitted and no credential was touched, but selecting
+  inside a login form is not read-only behaviour, and the enclosing form's id
+  was already in the identity string the guard reads. A control is now refused
+  for any of three independent reasons - money-movement widget, sign-in or
+  registration form, or options describing products rather than documents - and
+  still fails closed on an unreadable identity. `--diagnose` additionally
+  refuses to inspect any control unless the page is a signed-in application
+  page, and reverts a wrong URL guess instead of stranding the user on a 404.
+
 ## [0.8.1] — 2026-08-21
 
 ### Fixed
