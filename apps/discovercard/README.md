@@ -5,7 +5,7 @@ Downloads your Discover **credit-card** statements as PDFs from
 [PaperPull](../../README.md).
 
 Verified end to end against a live account on 2026-08-19: `--discover` found
-24 statements (2024-08-19 … 2026-07-19), `--pilot` downloaded valid PDFs each
+24 statements (about two years), `--pilot` downloaded valid PDFs each
 containing its own closing date, a re-run after deleting one skipped it, and
 `--verify` reported it missing without re-fetching it.
 
@@ -83,7 +83,7 @@ is correspondingly small.
 
 24 statements — about two years. Older ones are not reachable from this page and
 are not guessed at. Statements are named by **closing date**, and the human
-period label ("May 20 - Jun 19, 2026") goes in the index CSV's Period column.
+period label ("Mar 16 - Apr 15, 2025") goes in the index CSV's Period column.
 
 ## What the read-only guard learned here
 
@@ -124,6 +124,21 @@ Statements, run `./diagnose.command` (it downloads nothing) and read
 
 If statements stop being found, look at `STMT_PDF_SEL` and `STMT_PDF_RE`; if the
 period labels go missing, at `PERIOD_LABEL_RE`.
+
+## Known: the oldest periods may not have a PDF
+
+On a full run against the built-against account, 22 of the 24 listed periods
+downloaded cleanly and the **two oldest returned `text/html` instead of
+`application/pdf`**. The app refuses to write a non-PDF body, so those two were
+flagged **Needs Manual Review** rather than saved as broken files, and the log
+says exactly what came back.
+
+The cause is not established. It may be that Discover lists more periods than it
+still serves PDFs for, or that something rate-limited the tail of a 24-file run.
+Either way the behaviour is the safe one, and the fix if it turns out to be
+retention is a message, not a download: this app will not invent a PDF that
+Discover does not serve. If you see it, the log line to look for is
+`came back as 'text/html...', not a PDF`.
 
 ## Known limitation
 
