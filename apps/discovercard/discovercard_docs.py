@@ -767,7 +767,7 @@ class App:
         out = self.paths.diagnostics / "diagnose-documents.json"
         atomic_write_text(out, _json.dumps(info, indent=2))
         print(f"Wrote {out}")
-        print(f"Rows collected: {info.get('collected', '?')}")
+        print(f"Rows collected (generic scraper): {info.get('collected', '?')}")
         refused = [s for s in info.get("selects", [])
                    if s.get("refused_as_money_control")]
         if refused:
@@ -795,8 +795,15 @@ class App:
                 print(f"  period label: {lbl}")
             if sapi.get("href_shape"):
                 print(f"  href shape:   {sapi['href_shape']}")
-        for s in info.get("samples", [])[:5]:
-            print(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}")
+        if info.get("samples"):
+            # These come from the GENERIC row scraper, which Discover discovery
+            # does not use - it reads the page's statement links instead. Shown
+            # only so a layout change is visible; the categories here are the
+            # fallback's guesses, not what gets filed.
+            print("\nGeneric row scraper (fallback only - not used for filing):")
+            for s in info.get("samples", [])[:5]:
+                print(f"  [{s['category']}] {s['date']}  {s['summary']}"
+                      f"  <- {s['title'][:50]}")
 
     # -- summary -----------------------------------------------------------
 
