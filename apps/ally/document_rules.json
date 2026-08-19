@@ -1,0 +1,46 @@
+{
+  "_comment": "Editable rules mapping Ally Bank document titles to filename summaries. Patterns are case-insensitive regexes matched against the document title/row text. Checked in order: tax, then insurance (unused - Ally Bank issues none), then statement. Repair these after running diagnose against your real Statements & Documents pages, using the real titles it reports.",
+  "tax_rules": [
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
+    {"pattern": "1099-?SA\\b", "summary": "1099-SA Tax Form"},
+    {"pattern": "1099-?C\\b", "summary": "1099-C Tax Form"},
+    {"pattern": "1099-?Q\\b", "summary": "1099-Q Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "\\b1098\\b", "summary": "1098 Tax Form"},
+    {"pattern": "\\b5498\\b", "summary": "5498 Tax Form"},
+    {"pattern": "\\bW-?2\\b", "summary": "W-2 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package|information)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "interest\\s+checking.*statement|statement.*interest\\s+checking", "summary": "Interest Checking Statement"},
+    {"pattern": "spending\\s+account.*statement|statement.*spending\\s+account", "summary": "Spending Account Statement"},
+    {"pattern": "checking\\s+.*statement|statement.*checking", "summary": "Checking Statement"},
+    {"pattern": "online\\s+savings.*statement|statement.*online\\s+savings", "summary": "Online Savings Statement"},
+    {"pattern": "savings\\s+.*statement|statement.*savings", "summary": "Savings Statement"},
+    {"pattern": "money\\s*market.*statement|statement.*money\\s*market", "summary": "Money Market Statement"},
+    {"pattern": "\\bcd\\b.*statement|statement.*\\bcd\\b|certificate\\s+of\\s+deposit", "summary": "CD Statement"},
+    {"pattern": "\\bira\\b.*statement|statement.*\\bira\\b", "summary": "IRA Statement"},
+    {"pattern": "\\bmonthly\\s+statement\\b", "summary": "Monthly Statement"},
+    {"pattern": "\\bquarterly\\s+statement\\b", "summary": "Quarterly Statement"},
+    {"pattern": "\\bannual\\s+statement\\b|year.?end\\s+statement", "summary": "Annual Statement"},
+    {"pattern": "e-?statement", "summary": "Account Statement"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Account Statement"}
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+use|and\\s+conditions)",
+    "disclosure\\s+statement",
+    "deposit\\s+agreement",
+    "fee\\s+schedule",
+    "rate\\s+(sheet|change\\s+notice)",
+    "marketing",
+    "promotional",
+    "newsletter",
+    "^\\s*notice\\s+of",
+    "electronic\\s+communication\\s+consent"
+  ]
+}
