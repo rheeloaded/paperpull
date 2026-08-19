@@ -12,10 +12,11 @@ of clicking through each site by hand.
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Fourteen providers are supported today, all built on the same pattern:
+Fifteen providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
+| [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Per-year order pagination |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
@@ -50,7 +51,7 @@ flowchart TB
     you(["You"]) -->|"sign in · 2FA · device approval"| br["A real browser window<br/>its own profile · its own debugging port"]
     br -.->|"attaches over CDP — reads, never authenticates"| app
     subgraph app ["One app = one provider"]
-        orch["Orchestrator<br/>discover → download → verify<br/>the same in all fourteen apps"]
+        orch["Orchestrator<br/>discover → download → verify<br/>the same in all fifteen apps"]
         site["provider_site.py<br/>selectors · URLs · download quirks"]
         core["paperpull-core<br/>naming · filing · state · CSV · PDF checks"]
         orch --> site
@@ -71,7 +72,7 @@ so several signed-in browsers can sit open at once without colliding.
 
 **Everything a provider knows lives in one file.** `provider_site.py` holds
 every selector, URL and download quirk for that site. The orchestrator around
-it is the same in all fourteen apps, and `paperpull-core` underneath it is
+it is the same in all fifteen apps, and `paperpull-core` underneath it is
 shared. When a provider redesigns, the repair is one file — never a rewrite,
 and never a change to how documents get named, filed or tracked.
 
@@ -218,7 +219,7 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
 
 ## Status & roadmap
 
-- ✅ All **fourteen** apps work and are in regular use.
+- ✅ All **fifteen** apps work and are in regular use.
 - 🔜 **More providers:** community-driven — see [PROVIDERS.md](PROVIDERS.md).
 - 🔜 **Scheduled/assisted runs:** a monthly "nudge + sweep" (e.g. the 1st) that
   opens the login browsers and then runs discover + resume across every app once

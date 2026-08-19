@@ -1,0 +1,27 @@
+Ally DOCUMENTS  -  commands   (READ-ONLY)
+============================================================
+YOUR account = just the batch name.  SPOUSE = add "spouse".
+
+  Task            You                    Spouse
+  --------------  ---------------------  --------------------------
+  Sign in         login.bat              login.bat spouse
+  Look (no d/l)   diagnose.bat           diagnose.bat spouse
+  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
+  Full run        run_all.bat            run_all.bat spouse
+  Continue        resume.bat             resume.bat spouse
+  Re-check PDFs   verify_documents.bat   verify_documents.bat spouse
+
+FLOW:  login.bat  ->  diagnose.bat  ->  run_pilot.bat  ->  run_all.bat
+Sign in, open your Documents/Statements area, keep the browser OPEN,
+do the 2FA yourself.
+
+READ-ONLY: downloads statements and tax forms only. It NEVER
+transfers money, pays bills, uses Zelle, deposits, trades, opens
+or closes accounts, renews a CD, or changes any account setting.
+
+Scope: bank statements + tax documents (Ally Bank only).
+Tax forms contain your SSN - handle accordingly.
+
+Your files: this folder (Statements\, Tax Documents\).
+Spouse's:  "Ally Statements - spouse".
+Full command reference: COMMANDS.txt in the parent folder.
