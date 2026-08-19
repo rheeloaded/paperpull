@@ -106,6 +106,10 @@ class Document:
         return cls(**d)
 
 
+class _StopProbe(Exception):
+    """Stop the diagnostic sweep early, keeping what was collected."""
+
+
 class App:
     def __init__(self, args):
         self.args = args
@@ -292,8 +296,9 @@ class App:
     def _record_discover_doc(self, d: dict) -> int:
         """Record one collected statement. Returns 1 if new.
 
-        Accepts both shapes: an API record {documentId, date, title, account}
-        and the DOM fallback's {account, date, title}.
+        A record is {date, href, period, documentId, title}, where `date` is
+        the statement's closing date and `documentId` is the statement's own
+        URL as the page published it - see discovercard_site.statement_links.
         """
         title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
         if doc_types.should_skip(title, self.rules):
@@ -311,10 +316,14 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        # `account` is the card this document belongs to, as the page names it
-        # ("Freedom Unlimited (...1234)"). One card's statement per cycle, so
-        # unlike a bank statement it is unambiguous - the card name is both
-        # what re-finds the row and what goes in the filename.
+        # `account` is the card, when the page names one. On the account this
+        # was built against there is a single card and the page names none, so
+        # this is normally empty and the closing date alone identifies a
+        # statement. A multi-card login is UNVERIFIED: if one exists, the
+        # card's last four arrives with the download (Discover puts it in the
+        # served filename) rather than from the page, so it cannot be known
+        # here. Statements would then share a filename and be numbered apart
+        # by unique_path rather than overwriting - visible, not silent.
         account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
         doc_id = d.get("documentId", "")
         if d.get("corrected"):
@@ -331,7 +340,8 @@ class App:
         else:
             full_summary = summary
         doc = Document(title=title, category=category, summary=full_summary,
-                       date=date, confidence=confidence, account=account,
+                       date=date, period=(d.get("period") or ""),
+                       confidence=confidence, account=account,
                        date_text=date, document_id=doc_id,
                        occurrence=int(d.get("occurrence", 0) or 0),
                        ambiguous=bool(d.get("ambiguous")))
@@ -704,8 +714,25 @@ class App:
                         controls.append({"role": role, "text": t,
                                          "safe": site.is_safe_control(t)})
             info["controls"] = controls
-            # Account / period pickers, so we know whether the history is split
-            # behind dropdowns (and can walk them during discovery).
+            # Account / period pickers, so we know whether the history is
+            # split behind dropdowns (and can walk them during discovery).
+            #
+            # NOT inspected unless this really is a signed-in application page.
+            # The first live Discover probe landed on a public 404 after every
+            # guessed URL missed, and then interrogated the marketing site's
+            # sign-in dropdown - a control this tool must never touch. A wrong
+            # URL guess is expected; treating whatever it lands on as the
+            # application is the actual defect.
+            if site.looks_public_or_error(page) or site.looks_signed_out(page):
+                info["selects_skipped"] = (
+                    "not a signed-in application page (public site, 404, or "
+                    "signed out) - no control on it was read or written")
+                print("\nThis is not your signed-in Discover statements page")
+                print("(it looks like a public page, a 404, or a signed-out")
+                print("session), so no dropdown or control on it was touched.")
+                print("Sign in, open Statements, leave the window open, and")
+                print("run this again.")
+                raise _StopProbe()
             try:
                 info["selects"] = site.describe_selects(page)
                 _asel, accounts = site.account_select(page)
@@ -713,10 +740,10 @@ class App:
                 # account labels carry live balances; keep the shape, not the money
                 info["account_options"] = [re.sub(r"\$[\d,.]+", "$...", a)
                                            for a in accounts]
-                # Whatever Discover actually uses: per-card groups if any, and
-                # a period chooser of either kind (<select> or styled input).
-                info["cards"] = [label for _el, label in site.card_groups(page)]
-                info["year_options"] = site.period_options(page) or years
+                # Discover's index is static markup, so what matters is how
+                # many statement PDF links the page publishes.
+                info["year_options"] = years
+                info["statement_links"] = len(site.statement_links(page))
             except Exception as e:
                 info["selectors_error"] = str(e)
             page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
@@ -733,6 +760,8 @@ class App:
                 info["statements_api"] = site.probe_statements_api(page)
             except Exception as e:
                 info["statements_api"] = f"ERR {e}"
+        except _StopProbe:
+            pass
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
@@ -747,12 +776,10 @@ class App:
                 print(f"  refused: {s['identity'][:70]}")
         if info.get("account_options"):
             print(f"Account picker:  {len(info['account_options'])} options")
-        print(f"Card groups:     {len(info.get('cards') or [])}"
-              "   (0 = a single-card login, which is normal)")
+        if "statement_links" in info:
+            print(f"Statement links: {info['statement_links']}")
         if info.get("year_options"):
-            print(f"Period chooser:  {', '.join(info['year_options'])}")
-        else:
-            print("Period chooser:  none found (one list on screen?)")
+            print(f"Period <select>: {', '.join(info['year_options'])}")
         api = info.get("api_candidates")
         if isinstance(api, list) and api:
             print(f"JSON endpoints seen ({len(api)}):")
@@ -760,12 +787,14 @@ class App:
                 print(f"  {a['status']}  {a['url']}")
         sapi = info.get("statements_api")
         if isinstance(sapi, dict):
-            print(f"\nAPI records captured (year on screen): {sapi.get('api_records')}"
-                  f"   rows shown: {sapi.get('rows_shown')}")
-            print("Fields present on those records:")
-            for k, v in (sapi.get("fields") or {}).items():
-                print(f"  {k:16} present={v['present']:4} empty={v['empty']:4}  "
-                      f"e.g. {', '.join(str(x) for x in v['distinct_sample'][:3])[:60]}")
+            print(f"\nStatements published by the page: {sapi.get('statements')}"
+                  f"   (PDF links in DOM: {sapi.get('pdf_links_in_dom')})")
+            if sapi.get("newest"):
+                print(f"Range: {sapi.get('oldest')} .. {sapi.get('newest')}")
+            for lbl in sapi.get("period_labels_sample") or []:
+                print(f"  period label: {lbl}")
+            if sapi.get("href_shape"):
+                print(f"  href shape:   {sapi['href_shape']}")
         for s in info.get("samples", [])[:5]:
             print(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}")
 
