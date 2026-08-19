@@ -38,6 +38,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
   2025 1099-INT is issued in January 2026), and a `corrected` form is flagged
   so it cannot be mistaken for the original.
 
+- **Chase credit cards — the sixteenth provider** (`apps/chase`, CDP port
+  9236). Card statements only, read-only and delete-safe, in a **real
+  Edge/Chrome** window (the `verizon`/`walmart` pattern) rather than the
+  bundled Chromium. Verified against a live account: 333 statements across 6
+  cards, 2019–2026, each filename checked against the account number printed
+  inside the PDF.
+
+  Chase's document centre is one accordion per card with a styled "View:"
+  year picker. Two things it taught:
+
+  - **Attribute a document from its row, not from the API reply.** Every row
+    names itself in full — "Aug 09, 2026 Statement SAPPHIRE RESERVE (...1234)
+    Saves document" — while the JSON reply carries no account field, and
+    collapsing, expanding and changing the year all hit the same endpoint. A
+    listener that tagged "the next reply" with "the current card" filed one
+    card's statements under its neighbour; matching on the row cannot.
+  - **A card that is already expanded never re-fetches.** The first live run
+    silently missed one of six cards for exactly that reason, with a total
+    that looked perfectly plausible. Every card is now collapsed before it is
+    opened.
+
+  Tax documents and year-end summaries are deliberately out of scope for this
+  app.
+
 ## [0.6.4] — 2026-08-19
 
 ### Fixed
