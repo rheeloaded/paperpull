@@ -22,6 +22,15 @@ discovery.json
 progress.json
 new-this-run.txt
 run-summary.txt
+# ...and any hand-made copy of them. A file like "discovery.json.pre-fix" or
+# "progress.json.bak" holds the same real account data as the original, but
+# the exact-name rules above do not cover it - one was nearly committed while
+# building a new app.
+discovery.json.*
+progress.json.*
+*.json.bak
+*.json.orig
+*.csv.bak
 *.log
 *.csv
 

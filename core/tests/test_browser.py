@@ -129,3 +129,51 @@ def test_newest_chromium_build_wins(monkeypatch, tmp_path):
     assert [b for b in ("chromium-1228", "chromium-1000", "chromium-999")] == \
         [next(b for b in ("chromium-1228", "chromium-1000", "chromium-999") if b in p)
          for p in found]
+
+
+# -- the macOS bundle rename ----------------------------------------------
+#
+# Playwright used to ship "Chromium.app/Contents/MacOS/Chromium" and now ships
+# "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing".
+# Only the old name was matched, so on an up-to-date install _bundled_chromium()
+# found NOTHING and every app quietly launched Edge instead - or refused to open
+# a browser at all where Edge and Chrome were absent. The tests missed it
+# because they only ever built the old layout.
+
+_NEW_MAC_BUNDLE = ("chrome-mac-arm64/Google Chrome for Testing.app"
+                   "/Contents/MacOS/Google Chrome for Testing")
+
+
+def test_mac_chromium_is_found_under_the_new_bundle_name(monkeypatch, tmp_path):
+    monkeypatch.setattr(browser.sys, "platform", "darwin")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    exe = tmp_path / f"chromium-1234/{_NEW_MAC_BUNDLE}"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert browser._bundled_chromium() == [str(exe)]
+
+
+def test_new_bundle_name_also_found_on_intel_macs(monkeypatch, tmp_path):
+    monkeypatch.setattr(browser.sys, "platform", "darwin")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    exe = tmp_path / ("chromium-1234/chrome-mac/Google Chrome for Testing.app"
+                      "/Contents/MacOS/Google Chrome for Testing")
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert browser._bundled_chromium() == [str(exe)]
+
+
+def test_bundled_chromium_wins_when_prefer_real_is_off(monkeypatch, tmp_path):
+    """The regression that mattered: with an Edge installed and a CURRENT
+    Playwright, an app that asked for Chromium was handed Edge."""
+    monkeypatch.setattr(browser.sys, "platform", "darwin")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    exe = tmp_path / f"chromium-1234/{_NEW_MAC_BUNDLE}"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    edge = tmp_path / "Microsoft Edge"
+    edge.write_text("")
+    monkeypatch.setattr(browser, "_real_browsers",
+                        lambda: [(browser.EDGE, str(edge))])
+    assert browser.find_browser(prefer_real=False)[0] == browser.CHROMIUM
+    assert browser.find_browser(prefer_real=True)[0] == browser.EDGE
