@@ -1,0 +1,40 @@
+{
+  "_comment": "Editable rules mapping U.S. Bank credit-card document titles to filename summaries. Checked in order: tax, then insurance (unused - a credit card issues none), then statement. U.S. Bank labels every credit-card statement row simply 'Statement' (the row names a date, not a title), so statement_rules mostly matter for other document types; skip_patterns keep the E-statement disclosures section's paperwork out. Repair these using the titles diagnose reports.",
+  "tax_rules": [
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?C\\b", "summary": "1099-C Tax Form"},
+    {"pattern": "1099-?K\\b", "summary": "1099-K Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package|information)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "credit\\s+card\\s+.*statement|statement.*credit\\s+card", "summary": "Credit Card Statement"},
+    {"pattern": "billing\\s+statement", "summary": "Billing Statement"},
+    {"pattern": "\\bmonthly\\s+statement\\b", "summary": "Monthly Statement"},
+    {"pattern": "\\bannual\\s+statement\\b|year.?end\\s+statement", "summary": "Annual Statement"},
+    {"pattern": "year.?end\\s+summary|annual\\s+summary", "summary": "Year-End Summary"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "e-?statement", "summary": "Account Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Statement"}
+  ],
+  "skip_patterns": [
+    "cardmember\\s+agreement",
+    "cardholder\\s+agreement",
+    "\\bagreement\\b",
+    "disclosure",
+    "consumer\\s+pricing\\s+information",
+    "privacy\\s+(pledge|notice|policy|statement)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "change\\s+in\\s+terms",
+    "important\\s+(notice|information|changes)",
+    "benefits?\\s+(guide|summary)",
+    "guide\\s+to\\s+benefits",
+    "marketing",
+    "promotional",
+    "\\binsert\\b",
+    "electronic\\s+communication\\s+consent",
+    "esign\\s+(consent|disclosure)"
+  ]
+}

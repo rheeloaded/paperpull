@@ -1,0 +1,31 @@
+Discover DOCUMENTS  -  commands   (READ-ONLY)
+============================================================
+YOUR account = just the batch name.  SPOUSE = add "spouse".
+
+  Task            You                    Spouse
+  --------------  ---------------------  --------------------------
+  Sign in         login.bat              login.bat spouse
+  Look (no d/l)   diagnose.bat           diagnose.bat spouse
+  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
+  Full run        run_all.bat            run_all.bat spouse
+  Continue        resume.bat             resume.bat spouse
+  Re-check PDFs   verify_documents.bat   verify_documents.bat spouse
+
+FLOW:  login.bat  ->  diagnose.bat  ->  run_pilot.bat  ->  run_all.bat
+Sign in, open your Documents/Statements area, keep the browser OPEN,
+do the 2FA yourself.
+
+READ-ONLY: downloads statements only. It NEVER pays your bill,
+sets up autopay, transfers a balance, takes a cash advance, redeems
+Cashback Bonus or Miles, freezes or replaces your card, requests a
+credit-line increase, disputes a charge, or changes any setting.
+
+Scope: Discover credit-card statements only (no tax documents).
+Discover Bank, personal/student/home loans are NOT covered.
+
+STATUS: not yet verified against the live site - run diagnose.bat
+first and expect to repair discovercard_site.py. See README.md.
+
+Your files: this folder (Statements\).
+Spouse's:  "Discover Statements - spouse".
+Full command reference: COMMANDS.txt in the parent folder.

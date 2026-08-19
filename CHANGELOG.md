@@ -7,7 +7,182 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.9.0] — 2026-08-19
+
+### Added
+- **Discover credit cards — the seventeenth provider** (`apps/discovercard`,
+  CDP port 9237). Card statements only, read-only and delete-safe, in a **real
+  Edge/Chrome** window. Verified against a live account: 24 statements
+  (about two years, about two years of history), downloaded and
+  checked, with a delete-safe re-run confirmed.
+
+  Discover is the simplest bank-style provider so far, and the app is
+  correspondingly small:
+
+  - **Discovery is one read.** Every statement period's row, each with its own
+    PDF link, is already in the DOM on plain page load - 24 links before any
+    interaction, the same 24 after opening the period chooser. Nothing is
+    clicked, no accordion expanded, no year swept. The Chase app's machinery
+    exists because its rows only exist while one card's accordion is open on
+    one year; none of it was carried over.
+  - **A statement is served directly** at `stmtPDF?view=true&date=YYYYMMDD`, so
+    the bytes are fetched with the signed-in context's own cookies using the
+    href *read from the page* - never a URL built from a template, so a change
+    to the query string cannot silently fetch the wrong period.
+  - There is **no `<select>`** on the page: the period chooser is a link-based
+    dropdown, which is why a select-based lookup finds nothing.
+
+  The app slug is `discovercard` rather than `discover` because `--discover` is
+  the CLI's own verb and the control panel has a **Discover** button; `redcard`
+  sets the precedent of naming by the card product.
+
+  A login with more than one Discover card is **unverified** and documented as
+  such: the account this was built against has one card, so the page names none.
+
+  On a full run, 22 of 24 listed periods downloaded and the two oldest returned
+  `text/html` instead of a PDF. The app refuses to write a non-PDF body, so
+  those are flagged for manual review rather than saved broken; the cause (a
+  retention limit shorter than the listed periods, or rate limiting at the tail
+  of a long run) is not established and is documented as open.
+
+### Fixed
+- **The read-only guard did not cover sign-in forms.** Found by running the new
+  Discover app against the live site: every guessed URL missed, the app landed
+  on Discover's public 404, and the account-picker lookup matched the marketing
+  site's "what do you want to log into" dropdown - then called `select_option`
+  on it. Nothing was submitted and no credential was touched, but selecting
+  inside a login form is not read-only behaviour, and the enclosing form's id
+  was already in the identity string the guard reads. A control is now refused
+  for any of three independent reasons - money-movement widget, sign-in or
+  registration form, or options describing products rather than documents - and
+  still fails closed on an unreadable identity. `--diagnose` additionally
+  refuses to inspect any control unless the page is a signed-in application
+  page, and reverts a wrong URL guess instead of stranding the user on a 404.
+
+- **U.S. Bank credit cards — the eighteenth provider** (`apps/usbank`, CDP
+  port 9238). Card statements only, read-only and delete-safe, in a **real
+  Edge/Chrome** window (the `chase`/`verizon`/`walmart` pattern). Verified
+  against a live account: discovery across the full 2019–2026 range the year
+  filter offers, both available statements downloaded, and each filename
+  checked against the **closing date and account number printed inside the
+  PDF**; delete-safe re-run confirmed, including after deleting a PDF.
+
+  Signed in, U.S. Bank is one hash-routed SPA under
+  `/digital/servicing/shellapp/`. The documents area
+  (`#/highvolume/edocs/statements`, "E-statements") is reached by clicking the
+  portal's own **Statements** nav, and has **no `<table>`, no `[role=row]` and
+  no `<select>` anywhere** — it is a `data-testid` component tree, so a
+  generic row scraper reads nothing there. Statements are grouped by an
+  account selector (static text on a single-account login, not a dropdown)
+  and split by a styled "Document year" filter offering 2019–2026.
+
+  Four failure modes here are **silent** — "no rows found" is indistinguishable
+  from "no statements this year" — and each cost real data before it was fixed:
+
+  - Each row carries **two controls naming the same statement** (a View link
+    and a Download button, both bearing the date), so reading both counted
+    every statement twice. The Download button alone is authoritative.
+  - The account is printed on the **section heading**
+    (`Credit Card ...4321 statements`), not on the row, whose label is only
+    `Download March 15, 2026 statement.` Requiring the account name in the
+    row matched nothing at all.
+  - The list renders a **second section with identical row markup**,
+    "E-statement disclosures", holding the Electronic document agreement.
+    Only sections whose heading ends in "statements" are read.
+  - **An empty year is a working page** ("You have no statements for the
+    selected year"). `on_documents_page()` therefore keys on the page's own
+    container rather than on "did we read any rows" — the row-count version
+    made `ensure_statements` navigate away mid-run — and `select_period()`
+    treats "no picker at all" as success, since returning False there fails
+    every download before it is attempted.
+
+  Two guard changes, both because U.S. Bank **names its cards after rewards**
+  (Cash+, Shopper Cash Rewards, Triple Cash Rewards, Altitude Reserve,
+  FlexPerks Gold) while the blocklist forbids `rewards`:
+
+  - Account labels are vetted by `CARD_ACTION_RE` (verbs) instead of the
+    blocklist, which would otherwise refuse the card's own name — the defect
+    the Discover app hit with "Discover it Miles". A label is a noun phrase;
+    what makes a look-alike dangerous is a verb, so "Pay Cash+ (...1234)"
+    stays refused.
+  - `is_safe_row_control()` applies the same reasoning one level down, where
+    it costs **data** rather than access: a row control that names its card
+    would be refused on the word "Rewards", dropping the statement and
+    reporting a smaller total that looks entirely plausible.
+
+  Row labels are read and matched in **Python** rather than through
+  `get_by_role(name=…)`: the pattern contains `/` for the `MM/DD/YYYY` form,
+  which ends the regex literal early inside Playwright's selector syntax
+  (`InvalidSelectorError`). Discovery and download consequently walk the same
+  rows and cannot disagree about what exists.
+
+  The year filter is browser state and survives between runs, so anything that
+  *reports* what the page holds (`--diagnose`, the probes) resets to the newest
+  year first — otherwise the report describes whichever year the last run left
+  on screen.
+
+## [0.8.0] — 2026-08-18
+
+### Added
+- **Chase credit cards — the sixteenth provider** (`apps/chase`, CDP port
+  9236). Card statements only, read-only and delete-safe, in a **real
+  Edge/Chrome** window (the `verizon`/`walmart` pattern) rather than the
+  bundled Chromium. Verified against a live account: 333 statements across 6
+  cards, 2019–2026, each filename checked against the account number printed
+  inside the PDF.
+
+  Chase's document centre is one accordion per card with a styled "View:"
+  year picker. Two things it taught:
+
+  - **Attribute a document from its row, not from the API reply.** Every row
+    names itself in full — "Aug 09, 2026 Statement SAPPHIRE RESERVE (...1234)
+    Saves document" — while the JSON reply carries no account field, and
+    collapsing, expanding and changing the year all hit the same endpoint. A
+    listener that tagged "the next reply" with "the current card" filed one
+    card's statements under its neighbour; matching on the row cannot.
+  - **A card that is already expanded never re-fetches.** The first live run
+    silently missed one of six cards for exactly that reason, with a total
+    that looked perfectly plausible. Every card is now collapsed before it is
+    opened.
+
+  Tax documents and year-end summaries are deliberately out of scope for this
+  app.
+
+## [0.7.0] — 2026-08-18
+
+### Added
+- **Ally Bank — the fifteenth provider** (`apps/ally`, CDP port 9235). Account
+  statements and tax forms, read-only and delete-safe. Verified against a live
+  account: 198 statements across 2020–2026 and 12 tax forms.
+
+  Ally needed two things no earlier app did:
+
+  - **Statements cannot be told apart by their metadata.** Ally posts several
+    on the same date — one per account grouping, plus a copy of each joint
+    statement addressed to each accountholder — and describes them
+    identically: same `documentName`, same row label, no account information.
+    Only `documentId` differs. So a downloaded statement is named from **its
+    own first page**, whose account table and addressee are parsed
+    structurally (by Ally's template text and the masked account-number
+    column, never by a list of expected account nicknames — those are chosen
+    by each customer). Unrecognised layout keeps the metadata name and says
+    so; nothing is guessed.
+  - **Every download is verified.** Because several rows look identical, the
+    row clicked is an inference — so the app watches which `documentId` Ally
+    actually serves and discards the file if it is not the one requested. This
+    caught two real mismatches during development that would otherwise have
+    filed one document under another's name.
+
+  Tax forms come from the same endpoint with `docType=TAXFORMS`, found by
+  opening the page's own tax tab and capturing the request rather than
+  assuming the parameter. They file by **tax year, not posting date** (the
+  2025 1099-INT is issued in January 2026), and a `corrected` form is flagged
+  so it cannot be mistaken for the original.
+
 ## [0.6.3] — 2026-08-19
+
+_Two 0.6.3 releases were cut in parallel — one upstream, one on the
+provider branches — and both sets of fixes are recorded here._
 
 ### Fixed
 - **The control panel left a downloader running after you closed its tab.**
@@ -29,11 +204,31 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - `gui/app.py` raised `SyntaxWarning: invalid escape sequence '\S'` on every
   import - a `\Scripts` path inside a non-raw docstring. Harmless today, a
   `SyntaxError` in a future Python.
+- **The control panel's Login button never finished, leaving every button
+  disabled.** The sign-in browser inherited the launcher's stdout, and since
+  the user is told to keep that window open, the panel's stream never reached
+  end-of-file. The browser is now started with its stdio detached (which also
+  stops its updater/crash-handler chatter flooding the console).
+- **On macOS, no app could find the bundled Chromium.** Playwright renamed its
+  macOS bundle from `Chromium.app/Contents/MacOS/Chromium` to `Google Chrome
+  for Testing.app/Contents/MacOS/Google Chrome for Testing`; only the old name
+  was matched. On an up-to-date install every app silently launched Edge or
+  Chrome instead — and on a Mac with neither, reported that no browser was
+  installed while Playwright's Chromium sat right there. The tests missed it
+  because they only ever constructed the old layout. Both are matched now, and
+  the new one is covered by tests. Core is 0.1.4 so `check_installs.py` can
+  tell an install still running the old lookup.
+- **`.gitignore` did not cover hand-made copies of the state files.** A file
+  such as `discovery.json.pre-fix` or `progress.json.bak` holds the same real
+  account data as the original, but only the exact names were ignored — one
+  such copy was nearly committed while building a new app. Suffixed copies
+  and `*.json.bak` / `*.json.orig` / `*.csv.bak` are now ignored too.
 
 ### Changed
 - The control panel states the project's Python floor (3.11+) and checks it at
   startup, failing with one sentence rather than something obscure. Nothing
   under `gui/` had recorded which Python version it targets.
+
 
 ## [0.6.2] — 2026-08-18
 
