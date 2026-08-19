@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (16)
+## Supported (17)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -18,6 +18,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Card |
+| [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
@@ -43,7 +44,7 @@ New to this? Look for the **`good first provider`** label — those are easy sit
 
 | Provider | Category | Requested by | Status |
 |----------|----------|--------------|--------|
-| Discover (credit cards) | Card | @davidrudnick | **claimed** — app scaffolded in [`apps/discovercard`](apps/discovercard), awaiting live verification |
+| _(none yet — add yours)_ | | | |
 
 Status legend: **requested** → **claimed** (someone's building it) →
 **in review** (PR open) → merged (moves to Supported).

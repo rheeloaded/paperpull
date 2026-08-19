@@ -12,7 +12,7 @@ of clicking through each site by hand.
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Sixteen providers are supported today, all built on the same pattern:
+Seventeen providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -20,6 +20,7 @@ Sixteen providers are supported today, all built on the same pattern:
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Per-year order pagination |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
+| [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Direct PDF URLs; whole index in one read; ~2-year limit |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Lazy-loading history; ~13-month limit |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
@@ -52,7 +53,7 @@ flowchart TB
     you(["You"]) -->|"sign in · 2FA · device approval"| br["A real browser window<br/>its own profile · its own debugging port"]
     br -.->|"attaches over CDP — reads, never authenticates"| app
     subgraph app ["One app = one provider"]
-        orch["Orchestrator<br/>discover → download → verify<br/>the same in all sixteen apps"]
+        orch["Orchestrator<br/>discover → download → verify<br/>the same in all seventeen apps"]
         site["provider_site.py<br/>selectors · URLs · download quirks"]
         core["paperpull-core<br/>naming · filing · state · CSV · PDF checks"]
         orch --> site
@@ -73,7 +74,7 @@ so several signed-in browsers can sit open at once without colliding.
 
 **Everything a provider knows lives in one file.** `provider_site.py` holds
 every selector, URL and download quirk for that site. The orchestrator around
-it is the same in all sixteen apps, and `paperpull-core` underneath it is
+it is the same in all seventeen apps, and `paperpull-core` underneath it is
 shared. When a provider redesigns, the repair is one file — never a rewrite,
 and never a change to how documents get named, filed or tracked.
 
@@ -220,7 +221,7 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
 
 ## Status & roadmap
 
-- ✅ All **sixteen** apps work and are in regular use.
+- ✅ All **seventeen** apps work and are in regular use.
 - 🔜 **More providers:** community-driven — see [PROVIDERS.md](PROVIDERS.md).
 - 🔜 **Scheduled/assisted runs:** a monthly "nudge + sweep" (e.g. the 1st) that
   opens the login browsers and then runs discover + resume across every app once
