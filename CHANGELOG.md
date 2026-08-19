@@ -13,7 +13,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **Discover credit cards — the seventeenth provider** (`apps/discovercard`,
   CDP port 9237). Card statements only, read-only and delete-safe, in a **real
   Edge/Chrome** window. Verified against a live account: 24 statements
-  (2024-08-19 - 2026-07-19, about two years of history), downloaded and
+  (about two years, about two years of history), downloaded and
   checked, with a delete-safe re-run confirmed.
 
   Discover is the simplest bank-style provider so far, and the app is
@@ -38,6 +38,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
   A login with more than one Discover card is **unverified** and documented as
   such: the account this was built against has one card, so the page names none.
+
+  On a full run, 22 of 24 listed periods downloaded and the two oldest returned
+  `text/html` instead of a PDF. The app refuses to write a non-PDF body, so
+  those are flagged for manual review rather than saved broken; the cause (a
+  retention limit shorter than the listed periods, or rate limiting at the tail
+  of a long run) is not established and is documented as open.
 
 ### Fixed
 - **The read-only guard did not cover sign-in forms.** Found by running the new

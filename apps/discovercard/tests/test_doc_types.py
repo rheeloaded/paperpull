@@ -156,27 +156,27 @@ def test_unreadable_identity_fails_closed():
 
 def test_statement_pdf_re_reads_the_closing_date():
     """The confirmed download URL: the page's own statement link."""
-    href = "/cardmembersvcs/statements/app/stmtPDF?view=true&date=20260619"
+    href = "/cardmembersvcs/statements/app/stmtPDF?view=true&date=20250115"
     m = site.STMT_PDF_RE.search(href)
-    assert m and m.group(1) == "20260619"
-    assert site._iso_from_yyyymmdd(m.group(1)) == "2026-06-19"
+    assert m and m.group(1) == "20250115"
+    assert site._iso_from_yyyymmdd(m.group(1)) == "2025-01-15"
 
 
 def test_statement_pdf_re_refuses_other_urls():
     """discovercard_download re-checks the stored URL before fetching it, so a
     stored value can never send the fetch somewhere else."""
     for href in ["/cardmembersvcs/statements/app/search",
-                 "/cardmembersvcs/payments/app/pay?date=20260619",
-                 "https://evil.example/stmtPDF?date=20260619",
+                 "/cardmembersvcs/payments/app/pay?date=20250115",
+                 "https://evil.example/stmtPDF?date=20250115",
                  "/cardmembersvcs/statements/app/stmtPDF?view=true"]:
         assert not site.STMT_PDF_RE.search(href), href
 
 
 def test_period_label_re_reads_both_forms():
     for row, want in [
-            ("May 20 - Jun 19, 2026 PDF", "May 20 - Jun 19, 2026"),
-            ("Dec 20, 2025 - Jan 19, 2026 PDF", "Dec 20, 2025 - Jan 19, 2026"),
-            ("Current (Jun 20 - Jul 19, 2026) PDF", "Current (Jun 20 - Jul 19, 2026)")]:
+            ("Mar 16 - Apr 15, 2025 PDF", "Mar 16 - Apr 15, 2025"),
+            ("Dec 16, 2024 - Jan 15, 2025 PDF", "Dec 16, 2024 - Jan 15, 2025"),
+            ("Current (Apr 16 - May 15, 2025) PDF", "Current (Apr 16 - May 15, 2025)")]:
         m = site.PERIOD_LABEL_RE.search(row)
         assert m, row
         assert m.group(1).strip() == want, (row, m.group(1))
@@ -185,7 +185,7 @@ def test_period_label_re_reads_both_forms():
 def test_served_last4_reads_the_card_from_the_filename():
     """Discover's Content-Disposition is the only place a single-card login
     states the card's last four digits."""
-    cd = "inline; filename=Discover-Statement-20260619-1234.pdf"
+    cd = "inline; filename=Discover-Statement-20250115-1234.pdf"
     assert site.served_last4(cd) == "1234"
     assert site.served_last4("inline; filename=statement.pdf") == ""
     assert site.served_last4("") == ""

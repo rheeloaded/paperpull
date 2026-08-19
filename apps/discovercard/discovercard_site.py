@@ -43,7 +43,7 @@ WHAT THE LIVE PROBE ESTABLISHED (2026-08-19):
         GET /cardmembersvcs/statements/app/stmtPDF?view=true&date=YYYYMMDD
           -> 200 application/pdf
              content-disposition: inline;
-               filename=Discover-Statement-20260619-1234.pdf
+               filename=Discover-Statement-20250115-1234.pdf
     where date is the statement's CLOSING date. The bytes are fetched with the
     context's own cookies, using the href READ FROM THE PAGE - not a URL built
     from a template, so a change to the query string cannot silently fetch the
@@ -52,7 +52,7 @@ WHAT THE LIVE PROBE ESTABLISHED (2026-08-19):
   * The neighbouring "Download" control opens a MODAL DIALOG (a transactions
     export, not the statement PDF), and "Print" opens a popup. Neither is used:
     answering a dialog is exactly what this project never does.
-  * History observed: 24 statements, 2024-08-19 .. 2026-07-19 - about two
+  * History observed: 24 statements, the oldest .. the newest - about two
     years. Older statements are not reachable from this page and are not
     guessed at.
   * Discover shows an inactivity "stay logged in?" modal; only its keep-alive
@@ -75,7 +75,7 @@ lists Statement only, so a stray one is classified and then skipped rather
 than half-filed.
 """
 # Site layer verified working against the live site: 2026-08-19
-# (discovery of 24 statements 2024-08-19..2026-07-19, and one PDF
+# (discovery of 24 statements spanning about two years, and one PDF
 # fetched and checked: 4 pages, card ...1234, %PDF-1.7).
 from __future__ import annotations
 
@@ -1004,7 +1004,7 @@ def _row_download_control(row):
 #     GET /cardmembersvcs/statements/app/stmtPDF?view=true&date=YYYYMMDD
 #       -> 200 application/pdf
 #          content-disposition: inline;
-#            filename=Discover-Statement-20260619-1234.pdf
+#            filename=Discover-Statement-20250115-1234.pdf
 #
 # So there is nothing to click. The bytes are fetched with the browser
 # context's own authenticated request (cookie session, same origin, plain GET
@@ -1220,19 +1220,19 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
 # So discovery is one read of
 #     a[href*="stmtPDF"]   ->  ...stmtPDF?view=true&date=YYYYMMDD
 # where the date is the statement's CLOSING date, and the enclosing <li> gives
-# the human period label ("May 20 - Jun 19, 2026", or "Current (...)").
+# the human period label ("Mar 16 - Apr 15, 2025", or "Current (...)").
 #
 # Nothing is clicked, no accordion is expanded, no period is swept. The Chase
 # app needed all of that because its rows only existed while one card's
 # accordion was open on one year; here the whole index is static markup.
 #
-# History observed: 24 statements, 2024-08-19 .. 2026-07-19 - Discover keeps
+# History observed: 24 statements, the oldest .. the newest - Discover keeps
 # about two years online. Older ones are not reachable from this page and are
 # not guessed at.
 # ===========================================================================
 STMT_PDF_RE = re.compile(r"/statements/app/stmtPDF\b[^\"\']*?date=(\d{8})", re.I)
 STMT_PDF_SEL = "a[href*='stmtPDF']"
-# "May 20 - Jun 19, 2026" / "Dec 20, 2025 - Jan 19, 2026" / "Current (...)"
+# "Mar 16 - Apr 15, 2025" / "Dec 16, 2024 - Jan 15, 2025" / "Current (...)"
 PERIOD_LABEL_RE = re.compile(
     r"((?:Current\s*\()?[A-Z][a-z]{2}\s+\d{1,2}(?:,\s*\d{4})?\s*[-\u2013]\s*"
     r"[A-Z][a-z]{2}\s+\d{1,2},\s*\d{4}\)?)")
