@@ -1,0 +1,36 @@
+{
+  "_comment": "Editable rules mapping Discover credit-card document titles to filename summaries. Checked in order: tax, then insurance (unused - a credit card issues none), then statement. Repair these after running diagnose against your real Statements & Documents page, using the titles it reports.",
+  "tax_rules": [
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?C\\b", "summary": "1099-C Tax Form"},
+    {"pattern": "1099-?K\\b", "summary": "1099-K Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package|information)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "credit\\s+card\\s+.*statement|statement.*credit\\s+card", "summary": "Credit Card Statement"},
+    {"pattern": "billing\\s+statement", "summary": "Billing Statement"},
+    {"pattern": "\\bmonthly\\s+statement\\b", "summary": "Monthly Statement"},
+    {"pattern": "\\bannual\\s+statement\\b|year.?end\\s+statement", "summary": "Annual Statement"},
+    {"pattern": "year.?end\\s+summary|annual\\s+summary", "summary": "Year-End Summary"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "e-?statement", "summary": "Account Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Statement"}
+  ],
+  "skip_patterns": [
+    "cardmember\\s+agreement",
+    "\\bagreement\\b",
+    "disclosure",
+    "privacy\\s+(notice|policy|statement)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "change\\s+in\\s+terms",
+    "important\\s+(notice|changes)",
+    "benefits?\\s+guide",
+    "marketing",
+    "promotional",
+    "\\binsert\\b",
+    "electronic\\s+communication\\s+consent"
+  ]
+}

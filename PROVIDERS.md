@@ -43,7 +43,7 @@ New to this? Look for the **`good first provider`** label — those are easy sit
 
 | Provider | Category | Requested by | Status |
 |----------|----------|--------------|--------|
-| _(none yet — add yours)_ | | | |
+| Discover (credit cards) | Card | @davidrudnick | **claimed** — app scaffolded in [`apps/discovercard`](apps/discovercard), awaiting live verification |
 
 Status legend: **requested** → **claimed** (someone's building it) →
 **in review** (PR open) → merged (moves to Supported).
