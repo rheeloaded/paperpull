@@ -1,20 +1,20 @@
-"""Navy Federal statement & tax-document downloader (local, supervised).
+"""Armed Forces Mutual statement & tax-document downloader (local, supervised).
 
 Usage:
-    python navyfederal_docs.py --login       verify connection to your browser
-    python navyfederal_docs.py --discover    list available documents
-    python navyfederal_docs.py --pilot       download the 5 newest, then stop
-    python navyfederal_docs.py --all         download everything in scope
-    python navyfederal_docs.py --resume      continue an interrupted run
-    python navyfederal_docs.py --verify      re-validate every saved PDF
-    python navyfederal_docs.py --diagnose    dump page structure (no downloads)
-    python navyfederal_docs.py --dry-run     plan filenames, save nothing
+    python aafmaa_docs.py --login       verify connection to your browser
+    python aafmaa_docs.py --discover    list available documents
+    python aafmaa_docs.py --pilot       download the 5 newest, then stop
+    python aafmaa_docs.py --all         download everything in scope
+    python aafmaa_docs.py --resume      continue an interrupted run
+    python aafmaa_docs.py --verify      re-validate every saved PDF
+    python aafmaa_docs.py --diagnose    dump page structure (no downloads)
+    python aafmaa_docs.py --dry-run     plan filenames, save nothing
 
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N  --type Statement|"Tax Document"
 
 READ-ONLY: this tool only reads the Documents area and downloads PDFs that
-Navy Federal already generated. It never transfers funds, trades, rebalances,
+Armed Forces Mutual already generated. It never transfers funds, trades, rebalances,
 or changes any account setting. Everything stays on this machine; nothing is
 sent to any external service.
 """
@@ -32,14 +32,14 @@ from typing import List, Optional
 
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
-import navyfederal_site as site
+import aafmaa_site as site
 from paperpull_core.models import State
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
-log = logging.getLogger("navyfederal_docs")
+log = logging.getLogger("aafmaa_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 
@@ -54,7 +54,7 @@ def ask(prompt: str) -> str:
 
 
 class Document:
-    """One Navy Federal document."""
+    """One Armed Forces Mutual document."""
 
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
@@ -66,7 +66,7 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # Navy Federal's stable per-document UUID
+        self.document_id = document_id  # Armed Forces Mutual's stable per-document UUID
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -84,7 +84,7 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. Navy Federal's API gives each document a durable
+        """Stable identity. Armed Forces Mutual's API gives each document a durable
         documentId (UUID) - use it. Fall back to category:date:title:account
         for anything discovered without one."""
         if self.document_id:
@@ -187,20 +187,15 @@ class App:
         ctx = self.browser()
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
-        if self._cdp_mode:
-            # Reuse the user's signed-in Navy Federal tab (the digitalomni portal
-            # keeps its session there; a fresh tab is unauthenticated).
-            live = [p for p in ctx.pages if not p.is_closed()]
-            nfcu = [p for p in live if "navyfederal" in (p.url or "")]
-            self._work_page = nfcu[0] if nfcu else (live[0] if live else ctx.new_page())
-        else:
-            self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        self._work_page = ctx.new_page() if self._cdp_mode else (
+            ctx.pages[0] if ctx.pages else ctx.new_page())
         return self._work_page
 
     def close(self):
         try:
             if self._cdp_mode:
-                pass  # never close the user's own signed-in tab
+                if self._work_page is not None and not self._work_page.is_closed():
+                    self._work_page.close()
             elif self._context:
                 self._context.close()
         except Exception:
@@ -224,7 +219,7 @@ class App:
             ask("Press Enter once the page looks normal (or Ctrl+C to quit)... ")
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
-            print("\n!! Navy Federal appears to have signed you out.")
+            print("\n!! Armed Forces Mutual appears to have signed you out.")
             print("Please sign in again in the open browser window.")
             ask("Press Enter after you are signed in... ")
             site.goto_documents(page)
@@ -249,14 +244,14 @@ class App:
         print("Sign in, keep the window OPEN, then run the pilot.")
 
     def cmd_login(self):
-        print("Checking the connection to your signed-in Navy Federal browser...\n")
+        print("Checking the connection to your signed-in Armed Forces Mutual browser...\n")
         page = self.page()
         ok = site.goto_documents(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
-            print("Connected, but Navy Federal shows a signed-out page.")
+            print("Connected, but Armed Forces Mutual shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
             print("Success: connected and the Documents page is visible.")
@@ -275,7 +270,7 @@ class App:
         if a.year and not (doc.date or "").startswith(str(a.year)):
             return False
         # Hard floor: never process documents before the configured start date
-        # (You already has Navy Federal documents from 2023 and earlier).
+        # (You already has Armed Forces Mutual documents from 2023 and earlier).
         floor = a.start_date or self.config.get("default_start_date")
         if floor and (not doc.date or doc.date < floor):
             return False
@@ -318,39 +313,8 @@ class App:
                                         "href": r.href}, save=False)
         return 0
 
-    def _record_nfcu_doc(self, d: dict) -> int:
-        """Record one collected row {account,date,title}. Returns 1 if new."""
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
-        if doc_types.should_skip(title, self.rules):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        category, summary, confidence = doc_types.classify_document(title, self.rules)
-        if category == doc_types.OTHER and re.search(r"statement", title, re.I):
-            category = doc_types.STATEMENT
-        if not doc_types.wanted(category, self.config):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        date = (d.get("date") or "").strip()
-        floor = self.args.start_date or self.config.get("default_start_date")
-        if floor and (not date or date < floor):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
-        acct_short = re.sub(r"\b(COMBINED|ACCOUNTS?)\b", "", account, flags=re.I)
-        acct_short = re.sub(r"\s+", " ", acct_short).strip().title()
-        full_summary = f"{summary} - {acct_short}" if acct_short else summary
-        doc = Document(title=title, category=category, summary=full_summary,
-                       date=date, confidence=confidence, account=account,
-                       date_text=date, document_id="")
-        if self.discovery.get(doc.key) is None:
-            rec = doc.to_dict()
-            rec["state"] = State.DISCOVERED.value
-            self.discovery.update(doc.key, rec, save=False)
-            return 1
-        return 0
-
-    def _record_api_doc(self, d: dict) -> int:
-        """Record one document dict from Navy Federal's documents API. Returns 1 if new."""
+    def _record_indexed_doc(self, d: dict) -> int:
+        """Record one document dict from Armed Forces Mutual's documents API. Returns 1 if new."""
         title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()
         if not title:
             return 0
@@ -358,12 +322,15 @@ class App:
             self.stats["skipped_out_of_scope"] += 1
             return 0
         category, summary, confidence = doc_types.classify_document(title, self.rules)
-        # The API's own category is a reliable backstop for routing.
-        api_cat = (d.get("category") or "").lower()
+        # Whatever section or Type column the document was listed under is a
+        # useful backstop when the title alone is ambiguous.
+        listed_cat = (d.get("category") or "").lower()
         if category == doc_types.OTHER:
-            if "insur" in api_cat:
+            if any(w in listed_cat for w in ("insur", "polic", "certificate", "coverage")):
                 category = doc_types.INSURANCE
-            elif "bank" in api_cat and re.search(r"statement", title, re.I):
+            elif "tax" in listed_cat:
+                category = doc_types.TAX
+            elif any(w in listed_cat for w in ("statement", "premium", "billing", "loan")):
                 category = doc_types.STATEMENT
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
@@ -393,21 +360,21 @@ class App:
 
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
-        if not site.ensure_statements(page):
+        if not site.goto_documents(page):
             self.check_session(page)
-            if not site.ensure_statements(page):
-                print("Could not open your Navy Federal statements. Sign in and open")
-                print("Statements & Documents in the browser, then try again.")
+            if not site.goto_documents(page):
+                print("Could not open your Armed Forces Mutual documents. Sign in and open your")
+                print("Documents page in the browser, then try again.")
                 return 0
         self.check_session(page)
 
-        # Statements are grouped by account into expandable accordions; each
-        # group's rows carry a date + a "View" button (no documents API).
-        raw = site.nfcu_collect(page)
-        log.info("Navy Federal: collected %d document rows across accounts", len(raw))
+        # Enumerate EVERY document via Armed Forces Mutual's documents JSON API (stable
+        # documentIds, full history), not by scraping the visible table.
+        api_docs = site.collect_document_index(page)
+        log.info("Armed Forces Mutual documents API returned %d unique documents", len(api_docs))
         n_new = 0
-        for d in raw:
-            n_new += self._record_nfcu_doc(d)
+        for d in api_docs:
+            n_new += self._record_indexed_doc(d)
         self.discovery.save()
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -504,13 +471,15 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Reach the statements page (reuse the signed-in tab), then expand this
-        # document's account group and click its "View" button; the PDF opens as
-        # a blob in a new tab, whose bytes we fetch and save.
-        if not site.ensure_statements(page):
-            self.check_session(page)
-            site.ensure_statements(page)
-        saved = site.nfcu_download(page, page.context, doc.account, doc.date, out_path)
+        # Armed Forces Mutual renders each document as an inline PDF at its deep link
+        # (?documentId=...). Navigate there and capture the blob bytes. Falls
+        # back to clicking the row if no documentId was captured.
+        extra_hrefs: List[str] = []
+        if doc.document_id:
+            saved = site.download_by_id(page, doc.document_id, doc.date, out_path)
+        else:
+            saved = site.download_document_row(
+                page, doc.title, doc.date_text, doc.account, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -556,6 +525,36 @@ class App:
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
+
+        # A form set can include corrected versions (idx=1, ...). Save those
+        # alongside the primary file so nothing is silently dropped.
+        for n, href in enumerate(extra_hrefs, start=2):
+            try:
+                url = href if href.startswith("http") else site.BASE + href
+                with page.expect_download(timeout=45000) as dl:
+                    try:
+                        page.goto(url)
+                    except Exception:
+                        pass
+                download = dl.value
+                # Companion files in a 1099 set are often spreadsheets, not
+                # PDFs. Keep Armed Forces Mutual's own extension so the file is
+                # openable instead of a .pdf that nothing can read.
+                suggested = getattr(download, "suggested_filename", "") or ""
+                ext = Path(suggested).suffix.lower() or ".pdf"
+                stem = f"{out_path.stem} ({n} of {len(extra_hrefs) + 1})"
+                extra_path = unique_path(folder, stem + ext,
+                                         self.config["max_path_length"])
+                receipt_pdf.save_download(download, extra_path)
+                if receipt_pdf.is_zip(extra_path) and ext not in (".zip", ".xlsx"):
+                    inner = receipt_pdf.extract_pdfs_from_zip(extra_path, extra_path)
+                    if inner:
+                        extra_path = inner[0]
+                print(f"  + additional file: {extra_path.name}")
+                doc.notes = (doc.notes + "; " if doc.notes else "") + \
+                    f"form set has {len(extra_hrefs) + 1} files"
+            except Exception as e:
+                log.warning("Extra tax file %s failed: %s", href, e)
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
@@ -647,7 +646,7 @@ class App:
         self.stats["mode"] = mode_name
         if mode_name == "all" and not self.args.yes:
             scope = ", ".join(self.config.get("document_types", []))
-            print(f"This downloads ALL available Navy Federal documents ({scope}).")
+            print(f"This downloads ALL available Armed Forces Mutual documents ({scope}).")
             print("Type YES to continue:")
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
@@ -750,7 +749,7 @@ class App:
         dates = sorted(d for d in s["dates"] if d)
         new_files = s.get("new_files", [])
         atomic_write_text(self.paths.run_summary, "\n".join([
-            "Navy Federal Documents - run summary",
+            "Armed Forces Mutual Documents - run summary",
             "=" * 40,
             f"Run start:                 {s['started']}",
             f"Run end:                   {s['ended']}",
@@ -785,7 +784,7 @@ class App:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="Local supervised Navy Federal document downloader (read-only)")
+        description="Local supervised Armed Forces Mutual document downloader (read-only)")
     for name, help_text in [
             ("login", "verify connection to your signed-in browser"),
             ("discover", "list available documents; writes discovery.json"),
