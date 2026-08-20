@@ -1,0 +1,42 @@
+{
+  "_comment": "Editable rules mapping AAFMAA (Armed Forces Mutual) document titles to filename summaries. Checked in order: tax, then year-end, then insurance, then statement - so an 'annual premium statement' files as a year-end summary rather than an ordinary statement. AAFMAA is a member association: life insurance certificates, premium billing, policy loans, and survivor-assistance paperwork. These are STARTING GUESSES until diagnose.bat has been run against the real Member Center and the Digital Vault - repair them against what your account actually shows.",
+  "tax_rules": [
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "\\b1098\\b", "summary": "1098 Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|information)", "summary": "Tax Document"}
+  ],
+  "year_end_rules": [
+    {"pattern": "annual\\s+(statement|summary|report|review)", "summary": "Annual Statement"},
+    {"pattern": "year.?end\\s+(statement|summary)", "summary": "Year-End Summary"}
+  ],
+  "insurance_rules": [
+    {"pattern": "certificate\\s+of\\s+insurance|insurance\\s+certificate", "summary": "Certificate of Insurance"},
+    {"pattern": "\\bcertificate\\b", "summary": "Certificate"},
+    {"pattern": "policy\\s+(document|packet|contract|summary)", "summary": "Policy Document"},
+    {"pattern": "coverage\\s+(summary|confirmation|change)", "summary": "Coverage Summary"},
+    {"pattern": "beneficiary\\s+(designation|confirmation)", "summary": "Beneficiary Designation"},
+    {"pattern": "\\b(level\\s*term|value.?added\\s*whole\\s*life|whole\\s*life|term\\s*life)\\b", "summary": "Policy Document"},
+    {"pattern": "survivor\\s+assistance", "summary": "Survivor Assistance Document"},
+    {"pattern": "\\bpolicy\\b", "summary": "Policy Document"}
+  ],
+  "statement_rules": [
+    {"pattern": "premium\\s+(statement|notice|invoice|billing)", "summary": "Premium Statement"},
+    {"pattern": "billing\\s+statement|statement\\s+of\\s+account", "summary": "Billing Statement"},
+    {"pattern": "loan\\s+(statement|balance|summary)", "summary": "Loan Statement"},
+    {"pattern": "dividend\\s+(statement|notice)", "summary": "Dividend Statement"},
+    {"pattern": "payment\\s+(confirmation|receipt|history)", "summary": "Payment Record"},
+    {"pattern": "monthly\\s+statement", "summary": "Monthly Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Statement"}
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+use|and\\s+conditions)",
+    "marketing",
+    "newsletter",
+    "membership\\s+brochure",
+    "advertisement"
+  ]
+}
