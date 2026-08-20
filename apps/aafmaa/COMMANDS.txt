@@ -1,0 +1,27 @@
+AAFMAA DOCUMENTS  -  commands   (READ-ONLY)
+============================================================
+YOUR account = just the batch name.  SPOUSE = add "spouse".
+
+  Task            You                    Spouse
+  --------------  ---------------------  --------------------------
+  Sign in         login.bat              login.bat spouse
+  Look (no d/l)   diagnose.bat           diagnose.bat spouse
+  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
+  Full run        run_all.bat            run_all.bat spouse
+  Continue        resume.bat             resume.bat spouse
+  Re-check PDFs   verify_documents.bat   verify_documents.bat spouse
+
+FLOW:  login.bat  ->  diagnose.bat  ->  run_pilot.bat  ->  run_all.bat
+Sign in at connect.aafmaa.com, open your documents area, keep the
+browser OPEN, do the 2FA yourself.
+
+READ-ONLY: downloads statements, policy documents and tax forms only.
+It NEVER pays a premium, requests or repays a loan, surrenders or
+withdraws value, changes a beneficiary, or edits any policy setting.
+
+Scope: premium statements + insurance documents + tax documents.
+Tax forms contain your SSN - handle accordingly.
+
+Your files: this folder (Statements\, Tax Documents\, Insurance Documents\).
+Spouse's:  "AAFMAA Documents - spouse".
+Full command reference: COMMANDS.txt in the parent folder.

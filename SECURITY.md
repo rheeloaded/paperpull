@@ -30,8 +30,8 @@ The `.gitignore` already blocks all of the following. Do not override it.
   dialog, moves money, or changes a setting. How that is enforced depends on
   how the provider exposes its documents:
 
-  - **The statement apps** (Amex, Dominion, Navy Federal, RedCard, Robinhood,
-    T-Mobile, USAA, Verizon, Wealthfront) click a download control, and gate it
+  - **The statement apps** (AAFMAA, Amex, Dominion, Navy Federal, RedCard,
+    Robinhood, T-Mobile, USAA, Verizon, Wealthfront) click a download control, and gate it
     with `is_safe_control()`: a hard blocklist (`FORBIDDEN_CONTROL_RE` —
     buy/sell/transfer/pay/delete/change-setting/…) **plus** a document
     allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass **both**, so

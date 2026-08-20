@@ -1,0 +1,69 @@
+"""What makes the Armed Forces Mutual app different - everything else is paperpull_core.
+
+This file used to be a full copy of the storage logic every other app carried.
+That logic now lives in `paperpull_core`; what remains here is Armed Forces Mutual's own
+facts: the folders it files into, how a document routes to one, its CSV
+columns, and its config defaults.
+
+To repair Armed Forces Mutual's *page* behaviour, edit `aafmaa_site.py` instead.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from paperpull_core import storage as _core
+from paperpull_core.spec import (AppSpec, CsvSpec, DOCUMENT, Folder,
+                                 INFRASTRUCTURE_FOLDERS)
+
+DOCUMENT_INDEX_COLUMNS = [
+    "Account Holder",
+    "Document Date", "Category", "Document Summary", "Document Title",
+    "Period", "PDF Filename", "PDF Full Path", "PDF File Size",
+    "PDF Page Count", "Source URL", "Classification Confidence",
+    "Downloaded At", "Verified At", "Processing Status", "Notes",
+]
+
+SPEC = AppSpec(
+    provider="AAFMAA",
+    project_dir=Path(__file__).resolve().parent,
+    kind=DOCUMENT,
+    folders=[
+        Folder("statements", "Statements"),
+        Folder("tax_documents", "Tax Documents"),
+        Folder("insurance_documents", "Insurance Documents"),
+        # AAFMAA sends an annual statement; routed so one is filed rather
+        # than dropped, but not precreated until we have seen one.
+        Folder("year_end_summaries", "Year-End Summaries", precreate=False),
+        Folder("other_documents", "Other Documents", precreate=False),  # created on demand
+        *INFRASTRUCTURE_FOLDERS,
+    ],
+    routes={
+        "Tax Document": "tax_documents",
+        "Insurance Document": "insurance_documents",
+        "Statement": "statements",
+        "Year-End Summary": "year_end_summaries",
+    },
+    default_route="other_documents",
+    csv_files=[
+        CsvSpec("document_index_csv", "AAFMAA Document Index.csv", DOCUMENT_INDEX_COLUMNS),
+    ],
+    config_defaults={
+        # How many documents --pilot fetches. The online/in-store split and
+        # include_invoices that used to sit here are receipt-app concepts and
+        # were never read by a statement app.
+        "pilot_count": 5,
+    },
+    base_url="https://connect.aafmaa.com/",
+    rules_filename="document_rules.json",
+)
+
+_core.bind(SPEC)
+
+PROJECT_DIR = SPEC.project_dir
+
+# The shared API, re-exported so the orchestrator's imports read as they always did.
+from paperpull_core.storage import (  # noqa: E402  (must follow bind)
+    CsvFile, JsonStore, Paths, atomic_write_json, atomic_write_text,
+    backup_file, build_pdf_filename, ensure_owner, load_config, now_iso,
+    sanitize_component, set_filename_owner, title_case, unique_path,
+)
