@@ -31,13 +31,13 @@ or confirms a dialog.
 
 ## How it connects
 
-`login.bat` opens an ordinary Chromium (debugging port **9235**) that **you**
+`login.bat` opens an ordinary Chromium (debugging port **9236**) that **you**
 sign into. The tool then connects to that already-signed-in browser and reads
 only the pages you are authorised to see. No stealth, no evasion.
 
 **The signed-in browser window must stay OPEN while the tool runs.**
 
-Port 9235 is this app's alone, so several signed-in browsers can be open at
+Port 9236 is this app's alone, so several signed-in browsers can be open at
 once without two apps sharing a profile.
 
 ## How the site is built
@@ -76,7 +76,7 @@ you have seen what your account actually calls things.
 | Step | Command | What it does |
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
-| 2 | `login.bat` | Opens Chromium (port 9235); sign in, open your documents area, **leave open** |
+| 2 | `login.bat` | Opens Chromium (port 9236); sign in, open your documents area, **leave open** |
 | 3 | `diagnose.bat` | Read-only look at the page structure; downloads nothing |
 | 4 | `run_pilot.bat` | 5 newest documents, then **stops** for your inspection |
 | 5 | inspect the PDFs/CSV | You approve before anything bigger runs |
