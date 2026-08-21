@@ -22,6 +22,13 @@ downloader driving your signed-in browser should not keep going once nothing
 is watching it. Nothing is lost — a document is only marked done after it is
 saved, so the next run picks up exactly where this one stopped.
 
+Apps run from the panel get no stdin, so nothing can stop and wait for an
+answer nobody is able to type. One thing follows from that. An app asks for
+the account holder's name on its first run, and it cannot ask here, so that
+stays unset and the index CSV's **Account Holder** column stays blank. Set it
+by running the app once from a terminal, or by putting `"owner"` in its
+`config.json`.
+
 Or manually:
 
 ```bat
