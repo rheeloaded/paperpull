@@ -172,6 +172,25 @@ def test_statement_pdf_re_refuses_other_urls():
         assert not site.STMT_PDF_RE.search(href), href
 
 
+def test_statement_url_must_stay_on_discovers_host():
+    """The fetch carries the signed-in session's cookies, so the URL guard
+    parses and compares scheme+host rather than trusting a string prefix.
+    Review of this app fetched from evil.test through the old
+    startswith("http") check; both of those probes are pinned here."""
+    rel = "/cardmembersvcs/statements/app/stmtPDF?view=true&date=20250115"
+    assert site.resolve_statement_url(rel) == site.BASE + rel
+    absolute = site.BASE + rel
+    assert site.resolve_statement_url(absolute) == absolute
+    for href in [
+            "https://evil.test/cardmembersvcs/statements/app/stmtPDF?date=20250115",
+            "https://card.discover.com.evil.test/statements/app/stmtPDF?date=20250115",
+            "https://card.discover.com@evil.test/statements/app/stmtPDF?date=20250115",
+            "http://card.discover.com/cardmembersvcs/statements/app/stmtPDF?date=20250115",
+            "//evil.test/statements/app/stmtPDF?date=20250115",
+            "javascript:fetch('/statements/app/stmtPDF?date=20250115')"]:
+        assert site.resolve_statement_url(href) is None, href
+
+
 def test_period_label_re_reads_both_forms():
     for row, want in [
             ("Mar 16 - Apr 15, 2025 PDF", "Mar 16 - Apr 15, 2025"),

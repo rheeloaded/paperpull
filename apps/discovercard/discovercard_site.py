@@ -86,6 +86,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import urlsplit
+
+from paperpull_core import controls as _controls
 
 log = logging.getLogger("discovercard_docs.site")
 
@@ -684,163 +687,69 @@ _ACCOUNT_HINT_RE = re.compile(
     r"(checking|savings|money\s*market|\bcd\b|certificate|spending|"
     r"interest|account|x{2,}\d|\*{2,}\d|\.{3}\d{3,}|\d{4}\s*$)", re.I)
 
-# A control belonging to a money-movement widget. Matched against the element's
-# own identity (id/name/aria-label/placeholder/data-testid/allytmfn) AND its
-# enclosing form/section, so a picker inside a transfer card is refused even
-# when its own attributes look innocent.
-MONEY_CONTROL_RE = re.compile(
-    r"(from|to|source|destination|target)\s*_?-?account|"
-    r"transfer|payment|pay\b|bill|deposit|withdraw|zelle|wire|remit|"
-    r"send\s*money|move\s*money|recipient|payee|amount|frequency|schedule", re.I)
-
-# A control that belongs to a SIGN-IN / registration form is off-limits, full
-# stop. Non-negotiable #2 is that this tool never touches authentication.
+# The guard that decides whether a control may be touched now lives in
+# paperpull_core.controls - this app's copy was the third one written, the
+# first to consider that a control might belong to a sign-in form, and the
+# version the core module was built from. Deleting it here means the next
+# lesson lands in one place instead of three.
 #
-# This is not hypothetical: the first live Discover probe walked its guessed
-# URLs onto a public 404 page, found the marketing site's "what do you want to
-# log into" dropdown (identity "choose-card | login-form | loginForm", options
-# "Credit Card / Bank Account / Student Loans / ...") and tried to SET it. The
-# money-control test did not match - correctly, it is not a transfer widget -
-# so nothing refused it. The enclosing form's id was already in the identity
-# string; nothing was asking about it.
-AUTH_CONTROL_RE = re.compile(
-    r"log[\s_-]?(in|on)|sign[\s_-]?(in|on|up)|signin|logon|"
-    r"authenticat|credential|register|enroll(ment)?\b|"
-    r"username|user[\s_-]?id|password|passcode|remember\s*me", re.I)
-
-# A PRODUCT chooser ("which Discover product?") is not a document picker, and
-# options alone give it away wherever it appears.
+# What stays in this file is this provider's own vocabulary:
+# FORBIDDEN_CONTROL_RE above, and PRODUCT_PICKER_RE below, passed to the core
+# as an extra rule. A PRODUCT chooser ("which Discover product?") is not a
+# document picker, and its OPTIONS alone give it away wherever it appears, so
+# they are checked against the same pattern.
 PRODUCT_PICKER_RE = re.compile(
     r"bank\s+account|student\s+loans?|personal\s+loans?|home\s+loans?|"
     r"mortgage|auto\s+loans?|certificate\s+of\s+deposit|"
     r"select\s+an?\s+account", re.I)
 
-# What the element identity JS returns for a control inside a money widget.
-_IDENTITY_JS = r"""el => {
-  const attrs = ['id','name','aria-label','placeholder','data-testid',
-                 'allytmfn','data-allytmfn','data-track-name'];
-  const bits = attrs.map(a => el.getAttribute(a) || '');
-  const form = el.closest('form');
-  if (form) bits.push(form.id || '', form.getAttribute('name') || '',
-                      form.getAttribute('aria-label') || '');
-  // the nearest labelled section/card this control lives in
-  const sect = el.closest("section, [role='region'], [class*='card'], [class*='Card'], " +
-                          "[class*='widget'], [class*='Widget'], [class*='module']");
-  if (sect) {
-    bits.push(sect.getAttribute('aria-label') || '', sect.className || '');
-    const h = sect.querySelector('h1,h2,h3,h4,legend');
-    if (h) bits.push((h.innerText || '').slice(0, 60));
-  }
-  const lbl = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
-  if (lbl) bits.push((lbl.innerText || '').slice(0, 60));
-  return bits.filter(Boolean).join(' | ');
-}"""
+# Re-exported because the tests and the rest of this module refer to them.
+MONEY_CONTROL_RE = _controls.MONEY_CONTROL_RE
+AUTH_CONTROL_RE = _controls.AUTH_CONTROL_RE
+control_identity = _controls.control_identity
+
+_EXTRA_RES = (PRODUCT_PICKER_RE,)
 
 
-def control_identity(loc) -> str:
-    """Every name this control answers to: its own attributes, its label, its
-    form, and the card it sits in."""
-    try:
-        return loc.evaluate(_IDENTITY_JS) or ""
-    except Exception:
-        return ""
-
-
-def is_forbidden_control_context(identity: str, options: Optional[List[str]] = None) -> bool:
-    """True when this control must not be read OR written, for any reason.
-
-    Fails CLOSED: an identity we could not read at all is treated as unsafe.
-    Three independent reasons, any one of which is disqualifying:
-      * it is part of a money-movement widget      (MONEY_CONTROL_RE)
-      * it is part of a sign-in / registration form (AUTH_CONTROL_RE)
-      * its OPTIONS describe Discover products rather than documents
-        (PRODUCT_PICKER_RE) - context-free, so it holds on any page
-    """
-    if not identity:
-        return True
-    if (MONEY_CONTROL_RE.search(identity) or AUTH_CONTROL_RE.search(identity)
-            or FORBIDDEN_CONTROL_RE.search(identity)
-            or PRODUCT_PICKER_RE.search(identity)):
-        return True
-    for opt in options or []:
-        if PRODUCT_PICKER_RE.search(opt or ""):
-            return True
-    return False
+def is_forbidden_control_context(identity: Optional[str],
+                                 options: Optional[List[str]] = None) -> bool:
+    """This provider's controls, judged by the shared rules. Fails CLOSED on
+    an unreadable identity, exactly as the core does."""
+    return _controls.is_forbidden_context(identity or "", FORBIDDEN_CONTROL_RE,
+                                          extra_res=_EXTRA_RES,
+                                          options=options or ())
 
 
 def is_money_control(identity: str) -> bool:
-    """True if this control belongs to anything that moves money. Fails
-    CLOSED: an identity we could not read at all is treated as unsafe."""
-    if not identity:
-        return True
-    return bool(MONEY_CONTROL_RE.search(identity)
-                or FORBIDDEN_CONTROL_RE.search(identity))
+    """Kept for callers that only ask the narrower question. Still fails
+    closed, and still refuses anything the full check would refuse."""
+    return is_forbidden_control_context(identity)
 
 
 def _safe_selects(page, limit: int = 12):
-    """Yield (locator, identity) for the <select> elements that are NOT part of
-    a money-movement widget."""
-    try:
-        loc = page.locator("select")
-        n = min(loc.count(), limit)
-    except Exception:
-        return
-    for i in range(n):
-        s = loc.nth(i)
-        identity = control_identity(s)
-        # Options are read (harmless) before any decision, because a product
-        # picker is identifiable from its options alone even when its identity
-        # looks innocent.
+    """Yield (locator, identity) for the <select> elements safe to touch.
+
+    The core refuses by identity; the option labels are then read (harmless)
+    and checked too, because a product picker is identifiable from its
+    options alone even when its identity looks innocent.
+    """
+    for s, identity in _controls.safe_selects(page, FORBIDDEN_CONTROL_RE,
+                                              signed_out=looks_signed_out,
+                                              extra_res=_EXTRA_RES,
+                                              limit=limit):
         try:
             options = s.locator("option").all_text_contents()
         except Exception:
             options = []
         if is_forbidden_control_context(identity, options):
-            log.info("refusing dropdown: %s", (identity or "<unreadable>")[:120])
+            log.info("refusing dropdown by its options: %s", identity[:120])
             continue
         yield s, identity
 
 
 def describe_selects(page, limit: int = 12) -> List[dict]:
-    """Every <select> on the page with its identity and the guard's verdict.
-    Diagnostic only - it reads, and never sets, anything. If a real statements
-    picker is ever refused, this is where you will see why."""
-    out: List[dict] = []
-    try:
-        loc = page.locator("select")
-        n = min(loc.count(), limit)
-    except Exception:
-        return out
-    for i in range(n):
-        s = loc.nth(i)
-        identity = control_identity(s)
-        try:
-            opts = [o.strip() for o in s.locator("option").all_inner_texts()][:12]
-        except Exception:
-            opts = []
-        reasons = []
-        if not identity:
-            reasons.append("unreadable identity (fails closed)")
-        else:
-            if MONEY_CONTROL_RE.search(identity):
-                reasons.append("money widget")
-            if AUTH_CONTROL_RE.search(identity):
-                reasons.append("sign-in form")
-            if FORBIDDEN_CONTROL_RE.search(identity):
-                reasons.append("forbidden control")
-            if PRODUCT_PICKER_RE.search(identity):
-                reasons.append("product picker (identity)")
-        if any(PRODUCT_PICKER_RE.search(o or "") for o in opts):
-            reasons.append("product picker (options)")
-        out.append({"identity": identity[:200],
-                    "refused": bool(reasons),
-                    "refused_because": reasons,
-                    # kept under the old key so existing notes/tools still read
-                    "refused_as_money_control": is_forbidden_control_context(identity, opts),
-                    "option_count": len(opts),
-                    # option labels can carry balances - keep only their shape
-                    "option_sample": [re.sub(r"\$[\d,.]+", "$…", o)[:60] for o in opts[:6]]})
-    return out
+    return _controls.describe_selects(page, FORBIDDEN_CONTROL_RE,
+                                      extra_res=_EXTRA_RES, limit=limit)
 
 
 def account_select(page):
@@ -1034,6 +943,26 @@ def served_last4(disposition: str) -> str:
     return m2.group(1) if m2 else ""
 
 
+def resolve_statement_url(href: str) -> Optional[str]:
+    """The absolute URL to fetch, or None if the href leaves Discover's host.
+
+    The fetch below carries the signed-in session's cookies, so an absolute
+    href must be on BASE's own scheme and host before it may be followed - a
+    hostile absolute href sitting in the DOM must not be able to send those
+    cookies anywhere else. Parsed and compared, never a string prefix: a
+    prefix check passes both a suffix host (card.discover.com.evil.test) and
+    a userinfo host (card.discover.com@evil.test), which is exactly how the
+    UKG app's tenant guard was once walked through.
+    """
+    parts = urlsplit(href)
+    if not parts.scheme and not parts.netloc:
+        return BASE + href
+    base = urlsplit(BASE)
+    if (parts.scheme, parts.hostname) == (base.scheme, base.hostname):
+        return href
+    return None
+
+
 def discovercard_download(page, ctx, account: str, date: str, out_path,
                    occurrence: int = 0, document_id: str = "",
                    title: str = "") -> bool:
@@ -1057,9 +986,9 @@ def discovercard_download(page, ctx, account: str, date: str, out_path,
         log.info("no statement URL for %s", date)
         return False
 
-    # The URL must still be one of Discover's own statement URLs, and must
-    # still name the date we want. A stored href from an earlier run cannot
-    # send this anywhere else.
+    # The URL must still be one of Discover's own statement URLs, on
+    # Discover's own host, and must still name the date we want. A stored
+    # href from an earlier run cannot send this anywhere else.
     if not STMT_PDF_RE.search(href):
         log.warning("refusing a non-statement URL for %s: %s", date, href[:80])
         return False
@@ -1068,7 +997,11 @@ def discovercard_download(page, ctx, account: str, date: str, out_path,
         log.warning("MISMATCH: %s does not name %s - refusing", href[:80], want)
         return False
 
-    url = href if href.startswith("http") else BASE + href
+    url = resolve_statement_url(href)
+    if not url:
+        log.warning("refusing an off-host statement URL for %s: %s",
+                    date, href[:80])
+        return False
     try:
         resp = ctx.request.get(url, timeout=90000)
     except Exception as e:

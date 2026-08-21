@@ -13,8 +13,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **Discover credit cards — the seventeenth provider** (`apps/discovercard`,
   CDP port 9237). Card statements only, read-only and delete-safe, in a **real
   Edge/Chrome** window. Verified against a live account: 24 statements
-  (about two years, about two years of history), downloaded and
-  checked, with a delete-safe re-run confirmed.
+  (about two years of history), downloaded and checked, with a delete-safe
+  re-run confirmed.
 
   Discover is the simplest bank-style provider so far, and the app is
   correspondingly small:
@@ -46,18 +46,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   of a long run) is not established and is documented as open.
 
 ### Fixed
-- **The read-only guard did not cover sign-in forms.** Found by running the new
-  Discover app against the live site: every guessed URL missed, the app landed
-  on Discover's public 404, and the account-picker lookup matched the marketing
-  site's "what do you want to log into" dropdown - then called `select_option`
-  on it. Nothing was submitted and no credential was touched, but selecting
-  inside a login form is not read-only behaviour, and the enclosing form's id
-  was already in the identity string the guard reads. A control is now refused
-  for any of three independent reasons - money-movement widget, sign-in or
-  registration form, or options describing products rather than documents - and
-  still fails closed on an unreadable identity. `--diagnose` additionally
-  refuses to inspect any control unless the page is a signed-in application
-  page, and reverts a wrong URL guess instead of stranding the user on a 404.
+- **The statement-URL guard checks the host, not just the path.** The
+  download fetch carries the signed-in session's cookies, and the old check
+  accepted any absolute href (`startswith("http")`) so long as the path
+  pattern and the date matched - review demonstrated a fetch from
+  `evil.test` walking straight through it. The URL is now parsed and its
+  scheme and host compared against Discover's own, which also refuses a
+  suffix host (`card.discover.com.evil.test`) and a userinfo host
+  (`card.discover.com@evil.test`), the two shapes that once walked through
+  the UKG app's prefix-compared tenant guard. Found in review.
+
+### Changed
+- The Discover app's control guard - written for this app, backported to
+  Ally and Chase as 0.7.2, then generalised into `paperpull_core.controls`
+  in 0.8.0 - is deleted here in favour of delegating to that core module.
+  The app keeps only its own vocabulary: `FORBIDDEN_CONTROL_RE`, and
+  `PRODUCT_PICKER_RE` passed as an extra rule with the picker's options
+  checked against it. The sign-in-form hole the local copy fixed is recorded
+  under 0.7.2 and 0.8.0 below.
 
 ## [0.8.1] — 2026-08-21
 
