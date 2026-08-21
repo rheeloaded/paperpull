@@ -74,6 +74,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import controls as _controls
+
 log = logging.getLogger("ally_docs.site")
 
 BASE = "https://secure.ally.com"
@@ -570,133 +572,38 @@ _ACCOUNT_HINT_RE = re.compile(
 # own identity (id/name/aria-label/placeholder/data-testid/allytmfn) AND its
 # enclosing form/section, so a picker inside a transfer card is refused even
 # when its own attributes look innocent.
-MONEY_CONTROL_RE = re.compile(
-    r"(from|to|source|destination|target)\s*_?-?account|"
-    r"transfer|payment|pay\b|bill|deposit|withdraw|zelle|wire|remit|"
-    r"send\s*money|move\s*money|recipient|payee|amount|frequency|schedule", re.I)
-
-# A control inside a sign-in or registration form. Refused outright, and NOT
-# because it moves money - it does not. Selecting inside a login form is
-# simply not reading, and this app only reads.
+# The guard that decides whether a control may be touched now lives in
+# paperpull_core.controls, so every app inherits it instead of keeping its own
+# copy. Two apps kept their own, and only the third one written considered
+# that a control might belong to a sign-in form rather than a money widget.
 #
-# This exists because of a real defect found on the Discover app. A first
-# probe missed every guessed URL, landed on that provider's PUBLIC site, and
-# the account-picker lookup matched the marketing page's "what do you want to
-# log into" dropdown - then set a value on it. Nothing was submitted and no
-# credential was touched, but the enclosing form's id was already sitting in
-# the identity string the guard reads, and nothing was asking about it.
-AUTH_CONTROL_RE = re.compile(
-    r"log[\s_-]?(in|on)|sign[\s_-]?(in|on|up)|signin|logon|"
-    r"authenticat|credential|register|enroll(ment)?\b|"
-    r"username|user[\s_-]?id|password|passcode|remember\s*me", re.I)
+# What stays here is this provider's own vocabulary, in FORBIDDEN_CONTROL_RE
+# above. The names below are re-exported because the tests and the rest of
+# this module refer to them.
+MONEY_CONTROL_RE = _controls.MONEY_CONTROL_RE
+AUTH_CONTROL_RE = _controls.AUTH_CONTROL_RE
+control_identity = _controls.control_identity
 
 
 def is_forbidden_control_context(identity: str) -> bool:
-    """True when a control must not be read OR written, for any reason.
-
-    Fails CLOSED: an identity that could not be read at all is unsafe.
-    Two independent reasons, either of which disqualifies:
-      * it belongs to a money-movement widget   (MONEY_CONTROL_RE)
-      * it belongs to a sign-in or registration form (AUTH_CONTROL_RE)
-    """
-    if not identity:
-        return True
-    return bool(MONEY_CONTROL_RE.search(identity)
-                or AUTH_CONTROL_RE.search(identity)
-                or FORBIDDEN_CONTROL_RE.search(identity))
-
-
-# What the element identity JS returns for a control inside a money widget.
-_IDENTITY_JS = r"""el => {
-  const attrs = ['id','name','aria-label','placeholder','data-testid',
-                 'allytmfn','data-allytmfn','data-track-name'];
-  const bits = attrs.map(a => el.getAttribute(a) || '');
-  const form = el.closest('form');
-  if (form) bits.push(form.id || '', form.getAttribute('name') || '',
-                      form.getAttribute('aria-label') || '');
-  // the nearest labelled section/card this control lives in
-  const sect = el.closest("section, [role='region'], [class*='card'], [class*='Card'], " +
-                          "[class*='widget'], [class*='Widget'], [class*='module']");
-  if (sect) {
-    bits.push(sect.getAttribute('aria-label') || '', sect.className || '');
-    const h = sect.querySelector('h1,h2,h3,h4,legend');
-    if (h) bits.push((h.innerText || '').slice(0, 60));
-  }
-  const lbl = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
-  if (lbl) bits.push((lbl.innerText || '').slice(0, 60));
-  return bits.filter(Boolean).join(' | ');
-}"""
-
-
-def control_identity(loc) -> str:
-    """Every name this control answers to: its own attributes, its label, its
-    form, and the card it sits in."""
-    try:
-        return loc.evaluate(_IDENTITY_JS) or ""
-    except Exception:
-        return ""
+    """This provider's controls, judged by the shared rules."""
+    return _controls.is_forbidden_context(identity, FORBIDDEN_CONTROL_RE)
 
 
 def is_money_control(identity: str) -> bool:
-    """True if this control belongs to anything that moves money. Fails
-    CLOSED: an identity we could not read at all is treated as unsafe."""
-    if not identity:
-        return True
-    return bool(MONEY_CONTROL_RE.search(identity)
-                or FORBIDDEN_CONTROL_RE.search(identity))
+    """Kept for callers that only ask the narrower question. Still fails
+    closed, and still refuses anything the full check would refuse."""
+    return is_forbidden_control_context(identity)
 
 
 def _safe_selects(page, limit: int = 12):
-    """Yield (locator, identity) for the <select> elements that are safe to
-    touch, meaning part of neither a money widget nor a sign-in form."""
-    # Page-level gate first. If a password field is on screen we are not on an
-    # application page at all, and no control here should be read or written,
-    # whatever it calls itself. A wrong URL guess is expected on a first probe.
-    # Treating whatever it lands on as if it were the app is what turns an
-    # ordinary miss into a safety problem.
-    try:
-        if looks_signed_out(page):
-            log.info("refusing every control: this is not a signed-in page")
-            return
-    except Exception:
-        return
-    try:
-        loc = page.locator("select")
-        n = min(loc.count(), limit)
-    except Exception:
-        return
-    for i in range(n):
-        s = loc.nth(i)
-        identity = control_identity(s)
-        if is_forbidden_control_context(identity):
-            log.info("refusing dropdown: %s", identity[:120])
-            continue
-        yield s, identity
+    return _controls.safe_selects(page, FORBIDDEN_CONTROL_RE,
+                                  signed_out=looks_signed_out, limit=limit)
 
 
-def describe_selects(page, limit: int = 12) -> List[dict]:
-    """Every <select> on the page with its identity and the guard's verdict.
-    Diagnostic only - it reads, and never sets, anything. If a real statements
-    picker is ever refused, this is where you will see why."""
-    out: List[dict] = []
-    try:
-        loc = page.locator("select")
-        n = min(loc.count(), limit)
-    except Exception:
-        return out
-    for i in range(n):
-        s = loc.nth(i)
-        identity = control_identity(s)
-        try:
-            opts = [o.strip() for o in s.locator("option").all_inner_texts()][:12]
-        except Exception:
-            opts = []
-        out.append({"identity": identity[:200],
-                    "refused_as_money_control": is_money_control(identity),
-                    "option_count": len(opts),
-                    # option labels can carry balances - keep only their shape
-                    "option_sample": [re.sub(r"\$[\d,.]+", "$…", o)[:60] for o in opts[:6]]})
-    return out
+def describe_selects(page, limit: int = 12):
+    return _controls.describe_selects(page, FORBIDDEN_CONTROL_RE, limit=limit)
+
 
 
 def account_select(page):
