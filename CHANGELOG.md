@@ -7,6 +7,31 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.7.2] — 2026-08-21
+
+### Fixed
+- **Ally and Chase could read and write a control inside a sign-in form.**
+  Both apps refused a dropdown only when it looked like part of a
+  money-movement widget, so a control whose identity said `login-form` or
+  `signin-form` was treated as ordinary and could be selected. Nothing was
+  ever submitted and no credential was touched, but setting a value inside a
+  login form is not reading, and reading is all these tools do.
+
+  It was reachable. Both apps navigate to guessed document URLs, and
+  `--diagnose` recorded whether that navigation succeeded and then carried on
+  regardless, inspecting whatever page it had landed on. A missed guess lands
+  on a public or sign-in page.
+
+  A control is now refused for belonging to a sign-in or registration form as
+  well as for moving money, every control is refused outright while a password
+  field is on screen, and `--diagnose` no longer inspects controls unless it
+  is on a signed-in documents page. All four cases are pinned by tests in both
+  apps.
+
+  Found by David Rudnick while building the Discover provider, where the same
+  defect had the app select inside a marketing site's login dropdown after a
+  wrong URL guess. Backported here rather than left to land with that app.
+
 ## [0.7.1] — 2026-08-21
 
 ### Fixed
