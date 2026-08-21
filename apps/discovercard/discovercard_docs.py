@@ -769,9 +769,9 @@ class App:
         print(f"Wrote {out}")
         print(f"Rows collected (generic scraper): {info.get('collected', '?')}")
         refused = [s for s in info.get("selects", [])
-                   if s.get("refused_as_money_control")]
+                   if s.get("refused")]
         if refused:
-            print(f"Dropdowns refused as money controls: {len(refused)}")
+            print(f"Dropdowns refused by the control guard: {len(refused)}")
             for s in refused[:4]:
                 print(f"  refused: {s['identity'][:70]}")
         if info.get("account_options"):
