@@ -7,6 +7,36 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.8.0] — 2026-08-21
+
+### Added
+- **The control guard moved into `paperpull_core.controls`**, so an app no
+  longer decides for itself whether a control on the page may be touched. It
+  declares its own provider vocabulary and inherits everything that is true of
+  every provider.
+
+  This is the fix behind 0.7.2 rather than another patch of it. The judgement
+  had been written three times, in three apps, and only the third one written
+  considered that a control might belong to a sign-in form rather than a
+  money-movement widget. A shared rule means the next provider inherits that
+  lesson instead of rediscovering it, which is how it was found in the first
+  place.
+
+  The module is deliberately opinionated about two things. It fails closed, so
+  an identity that could not be read is unsafe rather than safe, because that
+  is what a detached or mid-navigation element looks like. And it is tested in
+  both directions, because a guard that refuses the year picker does not
+  announce itself, it just makes discovery return nothing and an empty run
+  looks like an empty account.
+
+  Ally and Chase now delegate to it. Core is 0.1.5.
+
+### Changed
+- Core tests include a check that no shared pattern contains a control
+  character. Writing a regex through a shell heredoc has twice turned a
+  word-boundary escape into a literal backspace in this repo, which still
+  compiles and then matches nothing.
+
 ## [0.7.2] — 2026-08-21
 
 ### Fixed
