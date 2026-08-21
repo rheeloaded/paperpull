@@ -7,6 +7,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.7.1] — 2026-08-21
+
+### Fixed
+- **A run started from the control panel could hang showing nothing at all.**
+  App subprocesses inherited the panel server's stdin, so `sys.stdin.isatty()`
+  was true and an app on its first run asked for the account holder's name,
+  waiting for input into a terminal nobody was looking at. Because `input()`
+  writes its prompt without a newline, and the panel reads whole lines, the
+  prompt was never shown either. The page displayed the command and then
+  nothing, with every button disabled. Apps now get no stdin, so the prompt
+  cannot happen and the run ends instead of hanging. Contributed by David
+  Rudnick in #7.
+
+### Changed
+- The control panel's README records that an app run from the panel cannot ask
+  for the account holder's name, so that column stays blank until it is set
+  from a terminal or in `config.json`.
+
 ## [0.7.0] — 2026-08-21
 
 ### Added
