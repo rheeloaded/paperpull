@@ -10,13 +10,14 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (15)
+## Supported (16)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
+| [`chase`](apps/chase) | Chase (credit cards) | Card statements | Card |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
