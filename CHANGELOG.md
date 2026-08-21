@@ -7,6 +7,31 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.6.4] — 2026-08-19
+
+### Fixed
+- **The control panel's Login button never finished, leaving every button
+  disabled.** The sign-in browser inherited the launcher's stdout, and since
+  the user is told to keep that window open, the panel's stream never reached
+  end-of-file. The browser is now started with its stdio detached (which also
+  stops its updater/crash-handler chatter flooding the console). On Windows it
+  is additionally detached from the launcher's process group, so closing the
+  launching console no longer takes the sign-in window with it.
+- **On macOS, no app could find the bundled Chromium.** Playwright renamed its
+  macOS bundle from `Chromium.app/Contents/MacOS/Chromium` to `Google Chrome
+  for Testing.app/Contents/MacOS/Google Chrome for Testing`; only the old name
+  was matched. On an up-to-date install every app silently launched Edge or
+  Chrome instead — and on a Mac with neither, reported that no browser was
+  installed while Playwright's Chromium sat right there. The tests missed it
+  because they only ever constructed the old layout. Both are matched now, and
+  the new one is covered by tests. Core is 0.1.4 so `check_installs.py` can
+  tell an install still running the old lookup.
+- **`.gitignore` did not cover hand-made copies of the state files.** A file
+  such as `discovery.json.pre-fix` or `progress.json.bak` holds the same real
+  account data as the original, but only the exact names were ignored — one
+  such copy was nearly committed while building a new app. Suffixed copies
+  and `*.json.bak` / `*.json.orig` / `*.csv.bak` are now ignored too.
+
 ## [0.6.3] — 2026-08-19
 
 ### Fixed
@@ -34,6 +59,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - The control panel states the project's Python floor (3.11+) and checks it at
   startup, failing with one sentence rather than something obscure. Nothing
   under `gui/` had recorded which Python version it targets.
+
 
 ## [0.6.2] — 2026-08-18
 
