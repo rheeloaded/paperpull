@@ -261,16 +261,42 @@ def is_safe_control(name: str) -> bool:
 # Documents page
 # ---------------------------------------------------------------------------
 
+def looks_like_missing_page(page) -> bool:
+    """AAFMAA answers an unknown .aspx with a styled 'does not exist' page and
+    an HTTP 200, so nothing about the response says it failed."""
+    try:
+        body = page.locator("body").inner_text(timeout=4000).lower()
+    except Exception:
+        return False
+    return any(m in body for m in (
+        "page you are trying to access does not exist",
+        "does not exist. to access the member center",
+        "page cannot be found", "page not found"))
+
+
 def goto_documents(page) -> bool:
-    """Navigate to a document area. Tries known URLs; if none render a
-    document list, keeps whatever page is currently open (so you can navigate
-    to the right place manually and the tool reads it)."""
+    """Find the document area, without losing a good page you already have.
+
+    Order matters. The URLs below are guesses, and a wrong guess on AAFMAA
+    lands on a 'does not exist' page that still returns HTTP 200. If we
+    navigated first and only then looked around, we would throw away the very
+    page you had opened for us. So the page in front of us is checked first,
+    and if nothing works we navigate back to it.
+    """
+    started_at = page.url
+    if page.locator(FALLBACK["doc_row"]).count() > 1:
+        log.info("using the page already open: %s", started_at)
+        return True
+
     for url in DOCUMENT_URL_CANDIDATES:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3500)
             if looks_signed_out(page):
                 return False
+            if looks_like_missing_page(page):
+                log.info("no such page: %s", url)
+                continue
             try:
                 page.wait_for_selector(FALLBACK["page_ready"], timeout=12000)
             except Exception:
@@ -291,8 +317,21 @@ def goto_documents(page) -> bool:
                 return page.locator(FALLBACK["doc_row"]).count() > 1
     except Exception:
         pass
-    # fall back to the current page
-    return page.locator(FALLBACK["doc_row"]).count() > 1
+    # Nothing worked. Go back to whatever you had open, rather than leaving
+    # you stranded on a guessed URL's error page, and read that instead.
+    try:
+        if page.url != started_at:
+            page.goto(started_at, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(2500)
+    except Exception:
+        pass
+    found = page.locator(FALLBACK["doc_row"]).count() > 1
+    if not found:
+        log.warning(
+            "No document list found. None of the guessed URLs exist on this "
+            "tenant. Open your documents page in the signed-in browser, leave "
+            "it there, and run --diagnose so the real URL can be recorded.")
+    return found
 
 
 def scroll_full_page(page, rounds: int = 6, delay_ms: int = 700) -> None:
