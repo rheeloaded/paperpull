@@ -14,7 +14,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   disabled.** The sign-in browser inherited the launcher's stdout, and since
   the user is told to keep that window open, the panel's stream never reached
   end-of-file. The browser is now started with its stdio detached (which also
-  stops its updater/crash-handler chatter flooding the console).
+  stops its updater/crash-handler chatter flooding the console). On Windows it
+  is additionally detached from the launcher's process group, so closing the
+  launching console no longer takes the sign-in window with it.
 - **On macOS, no app could find the bundled Chromium.** Playwright renamed its
   macOS bundle from `Chromium.app/Contents/MacOS/Chromium` to `Google Chrome
   for Testing.app/Contents/MacOS/Google Chrome for Testing`; only the old name

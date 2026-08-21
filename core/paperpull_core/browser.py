@@ -158,9 +158,17 @@ def open_signin_browser(profile_dir, port: str, url: str,
     # window to close before it considers the login step finished, with every
     # button disabled meanwhile. It also spares the console the browser's own
     # updater/crash-handler chatter.
+    # start_new_session detaches it on POSIX; on Windows it is a no-op, so
+    # detach explicitly there - otherwise the browser stays in the launcher's
+    # process group and closing that console can take the sign-in window down.
+    detach = {}
+    if sys.platform == "win32":
+        detach["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
+                                   | subprocess.DETACHED_PROCESS)
     subprocess.Popen([exe, f"--user-data-dir={profile_dir}",
                       f"--remote-debugging-port={port}", "--no-first-run",
                       "--no-default-browser-check", url],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+                     stderr=subprocess.DEVNULL, start_new_session=True,
+                     **detach)
     return name
