@@ -176,7 +176,20 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
         try:
             proc = subprocess.Popen(
-                cmd, cwd=meta["dir"], stdout=subprocess.PIPE,
+                cmd, cwd=meta["dir"],
+                # No stdin. The panel cannot answer a prompt, so an app must
+                # not be able to ask: inheriting this server's terminal makes
+                # sys.stdin.isatty() true, and the app then asks "Whose
+                # account is this?" on a first run and waits forever for input
+                # nobody can give. Worse, input() writes its prompt without a
+                # newline, so the line-reader below never yields it - the page
+                # shows a run that started and then nothing at all.
+                # With no stdin, input() raises EOFError, the apps report that
+                # no interactive console is available, and the run ends. That
+                # matches what the panel already promises: a run that needs an
+                # answer ends rather than hanging.
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                 errors="replace", bufsize=1, env=env)
         except Exception as e:
