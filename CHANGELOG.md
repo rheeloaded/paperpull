@@ -7,6 +7,37 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.7.0] — 2026-08-21
+
+### Added
+- **Ally Bank — the fifteenth provider** (`apps/ally`, CDP port 9235). Account
+  statements and tax forms, read-only and delete-safe. Verified against a live
+  account: 198 statements across 2020–2026 and 12 tax forms.
+
+  Ally needed two things no earlier app did:
+
+  - **Statements cannot be told apart by their metadata.** Ally posts several
+    on the same date — one per account grouping, plus a copy of each joint
+    statement addressed to each accountholder — and describes them
+    identically: same `documentName`, same row label, no account information.
+    Only `documentId` differs. So a downloaded statement is named from **its
+    own first page**, whose account table and addressee are parsed
+    structurally (by Ally's template text and the masked account-number
+    column, never by a list of expected account nicknames — those are chosen
+    by each customer). Unrecognised layout keeps the metadata name and says
+    so; nothing is guessed.
+  - **Every download is verified.** Because several rows look identical, the
+    row clicked is an inference — so the app watches which `documentId` Ally
+    actually serves and discards the file if it is not the one requested. This
+    caught two real mismatches during development that would otherwise have
+    filed one document under another's name.
+
+  Tax forms come from the same endpoint with `docType=TAXFORMS`, found by
+  opening the page's own tax tab and capturing the request rather than
+  assuming the parameter. They file by **tax year, not posting date** (the
+  2025 1099-INT is issued in January 2026), and a `corrected` form is flagged
+  so it cannot be mistaken for the original.
+
 ## [0.6.4] — 2026-08-19
 
 ### Fixed
