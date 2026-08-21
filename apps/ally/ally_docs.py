@@ -796,7 +796,17 @@ class App:
                     "text": (d.text or "").replace("\n", " | ")[:160],
                     "category": cat, "summary": summ, "date": date, "period": period})
             controls = []
-            for role in ("button", "link"):
+            # Only inspect controls on a signed-in application page. A wrong
+            # URL guess lands on a public or sign-in page, and interrogating
+            # whatever is there is how the Discover app ended up reading a
+            # marketing site's login dropdown.
+            if info["signed_out"] or not found:
+                info["controls_skipped"] = (
+                    "not a signed-in documents page, so no control was read")
+                loc_roles = ()
+            else:
+                loc_roles = ("button", "link")
+            for role in loc_roles:
                 loc = page.get_by_role(role)
                 for i in range(min(loc.count(), 60)):
                     try:

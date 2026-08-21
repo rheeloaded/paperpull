@@ -449,3 +449,51 @@ def test_tax_tab_label_clears_the_readonly_guard():
     for label in ("Tax Forms", "Tax Documents", "Tax Information"):
         assert site.TAX_TAB_RE.match(label), label
         assert site.is_safe_control(label), label
+
+
+# -- SAFETY: controls inside a sign-in form ------------------------------
+#
+# Found on the Discover app and backported here. A first probe missed every
+# guessed URL, landed on the provider's PUBLIC site, and the account-picker
+# lookup matched the marketing page's "what do you want to log into" dropdown
+# and set a value on it. Nothing was submitted and no credential was touched,
+# but selecting inside a login form is not reading, and this app only reads.
+# The enclosing form's id was already in the identity string the guard reads.
+
+SIGNIN_IDENTITIES = [
+    "whatDoYouWantToLogInto | login-form | Log in",
+    "signin-form | Register | Create an account",
+    "loginType | universalLogin | Sign On",
+    "username | login | Password",
+    "enrollment-form | Enroll now",
+    "remember me | sign-up",
+]
+
+DOCUMENT_IDENTITIES = [
+    "year | statement-year | Statements | Select year",
+    "documentYear | Documents | View",
+    "stmt-period | Statement period",
+]
+
+
+def test_a_control_in_a_signin_form_is_never_touched():
+    for identity in SIGNIN_IDENTITIES:
+        assert site.is_forbidden_control_context(identity), identity
+
+
+def test_a_real_document_picker_still_works():
+    """The guard must not be so broad that it refuses the pickers this app
+    needs, or discovery quietly returns nothing."""
+    for identity in DOCUMENT_IDENTITIES:
+        assert not site.is_forbidden_control_context(identity), identity
+
+
+def test_an_unreadable_identity_fails_closed():
+    assert site.is_forbidden_control_context("")
+    assert site.is_forbidden_control_context(None or "")
+
+
+def test_money_widgets_are_still_refused():
+    for identity in ("fromAccount | transfer-form | Transfer money",
+                     "payee | billpay", "amount | send money"):
+        assert site.is_forbidden_control_context(identity), identity

@@ -575,6 +575,37 @@ MONEY_CONTROL_RE = re.compile(
     r"transfer|payment|pay\b|bill|deposit|withdraw|zelle|wire|remit|"
     r"send\s*money|move\s*money|recipient|payee|amount|frequency|schedule", re.I)
 
+# A control inside a sign-in or registration form. Refused outright, and NOT
+# because it moves money - it does not. Selecting inside a login form is
+# simply not reading, and this app only reads.
+#
+# This exists because of a real defect found on the Discover app. A first
+# probe missed every guessed URL, landed on that provider's PUBLIC site, and
+# the account-picker lookup matched the marketing page's "what do you want to
+# log into" dropdown - then set a value on it. Nothing was submitted and no
+# credential was touched, but the enclosing form's id was already sitting in
+# the identity string the guard reads, and nothing was asking about it.
+AUTH_CONTROL_RE = re.compile(
+    r"log[\s_-]?(in|on)|sign[\s_-]?(in|on|up)|signin|logon|"
+    r"authenticat|credential|register|enroll(ment)?\b|"
+    r"username|user[\s_-]?id|password|passcode|remember\s*me", re.I)
+
+
+def is_forbidden_control_context(identity: str) -> bool:
+    """True when a control must not be read OR written, for any reason.
+
+    Fails CLOSED: an identity that could not be read at all is unsafe.
+    Two independent reasons, either of which disqualifies:
+      * it belongs to a money-movement widget   (MONEY_CONTROL_RE)
+      * it belongs to a sign-in or registration form (AUTH_CONTROL_RE)
+    """
+    if not identity:
+        return True
+    return bool(MONEY_CONTROL_RE.search(identity)
+                or AUTH_CONTROL_RE.search(identity)
+                or FORBIDDEN_CONTROL_RE.search(identity))
+
+
 # What the element identity JS returns for a control inside a money widget.
 _IDENTITY_JS = r"""el => {
   const attrs = ['id','name','aria-label','placeholder','data-testid',
@@ -616,8 +647,19 @@ def is_money_control(identity: str) -> bool:
 
 
 def _safe_selects(page, limit: int = 12):
-    """Yield (locator, identity) for the <select> elements that are NOT part of
-    a money-movement widget."""
+    """Yield (locator, identity) for the <select> elements that are safe to
+    touch, meaning part of neither a money widget nor a sign-in form."""
+    # Page-level gate first. If a password field is on screen we are not on an
+    # application page at all, and no control here should be read or written,
+    # whatever it calls itself. A wrong URL guess is expected on a first probe.
+    # Treating whatever it lands on as if it were the app is what turns an
+    # ordinary miss into a safety problem.
+    try:
+        if looks_signed_out(page):
+            log.info("refusing every control: this is not a signed-in page")
+            return
+    except Exception:
+        return
     try:
         loc = page.locator("select")
         n = min(loc.count(), limit)
@@ -626,8 +668,8 @@ def _safe_selects(page, limit: int = 12):
     for i in range(n):
         s = loc.nth(i)
         identity = control_identity(s)
-        if is_money_control(identity):
-            log.info("refusing dropdown (money control): %s", identity[:120])
+        if is_forbidden_control_context(identity):
+            log.info("refusing dropdown: %s", identity[:120])
             continue
         yield s, identity
 
