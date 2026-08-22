@@ -32,8 +32,8 @@ then:
 
 1. Rewrite `*_site.py` for the new site (navigation + document collection +
    download). This is the only file with real work in it.
-2. Point `config.example.json` at a **unique** CDP port (9222–9238 are taken;
-   use 9239+) and this app's output folders.
+2. Point `config.example.json` at a **unique** CDP port (9222–9239 are taken;
+   use 9240+) and this app's output folders.
 3. Update `document_rules.json` (classification) if the app uses it.
 4. Tune `FORBIDDEN_CONTROL_RE` for the provider, and keep the tests green
    (`python -m pytest tests`).
