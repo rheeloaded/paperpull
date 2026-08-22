@@ -7,6 +7,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.8.1] — 2026-08-21
+
+### Fixed
+- **Ally's and Chase's `--diagnose` never reported a refused dropdown.** When
+  the control guard moved into `paperpull_core.controls` in 0.8.0, the
+  verdict key in `describe_selects` became `refused`, but both apps' diagnose
+  summaries still filtered on the old per-app key
+  (`refused_as_money_control`), which the core never sets - so the "dropdowns
+  refused" line could not appear, however many were refused. The JSON report
+  itself was always right; only the printed summary read the dead key. Found
+  while delegating the Discover app's guard to the core in #8.
+
 ## [0.8.0] — 2026-08-21
 
 ### Added
