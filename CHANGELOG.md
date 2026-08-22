@@ -7,6 +7,33 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.11.0] — 2026-08-22
+
+### Added
+- **Paylocity, the nineteenth provider** (`apps/paylocity`, CDP port 9239).
+  Pay statements from the Paylocity Pay History area, read-only and
+  delete-safe. The second payroll app after UKG, and the opposite kind of
+  site: one fixed public address (access.paylocity.com), not a per-employer
+  tenant. The employer is identified by the Company ID typed at sign-in, which
+  the app never handles or stores.
+
+  Nothing on the page is clicked. Discovery and download are plain GETs to the
+  JSON endpoints Paylocity's own Pay History screen uses. A statement PDF is
+  generated on demand, so download is a three-step flow the site itself
+  follows: enqueue a report, poll until a download URL comes back, then fetch
+  the PDF from it. On a site that can change direct deposit and withholding,
+  not activating a control at all is the strongest guarantee available.
+
+  A statement is identified by companyId, employeeId and history id, packed
+  together rather than as a URL, so a query-string change cannot silently
+  fetch the wrong file. The index CSV records no amounts, and the identity
+  (which carries the employee id) is kept in discovery/progress only, never
+  written to the CSV. Both are pinned by tests, alongside the payroll guard
+  that refuses direct deposit, withholding, W-4, beneficiary and the rest.
+
+  W-2s are not fetched yet: Paylocity returns W-2 data as JSON rather than a
+  PDF, so that path needs its own work. The routing and folder are in place.
+
 ## [0.10.0] — 2026-08-22
 
 ### Added
