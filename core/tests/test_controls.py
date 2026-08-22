@@ -113,3 +113,39 @@ def test_identity_of_a_detached_element_is_empty_and_therefore_unsafe():
 def test_identity_passes_through_what_the_page_reports():
     loc = _FakeLocator("year | Statements")
     assert controls.control_identity(loc) == "year | Statements"
+
+
+class _FakeSelects:
+    """The smallest thing describe_selects will walk."""
+    def __init__(self, identities):
+        self._ids = identities
+
+    def locator(self, _sel):
+        return self
+
+    def count(self):
+        return len(self._ids)
+
+    def nth(self, i):
+        return _FakeLocator(self._ids[i])
+
+
+def test_describe_selects_key_names_are_a_contract():
+    """Apps read these keys BY NAME out of the diagnose report.
+
+    When the guard moved into the core the verdict key was renamed from
+    `refused_as_money_control` to `refused`, and the Ally and Chase diagnose
+    summaries kept filtering on the old one. Nothing failed. The line that
+    reports refused dropdowns simply stopped appearing, which is the one
+    output that would reveal a document picker refused by mistake.
+
+    So the names are pinned here. Renaming one should fail this test and send
+    whoever did it to look at the callers.
+    """
+    rows = controls.describe_selects(
+        _FakeSelects(["fromAccount | transfer-form", "year | Statements"]))
+    assert len(rows) == 2
+    for row in rows:
+        assert set(row) == {"identity", "refused"}, sorted(row)
+    assert rows[0]["refused"] is True
+    assert rows[1]["refused"] is False
