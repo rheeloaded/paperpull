@@ -187,15 +187,28 @@ class App:
         ctx = self.browser()
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
-        self._work_page = ctx.new_page() if self._cdp_mode else (
-            ctx.pages[0] if ctx.pages else ctx.new_page())
+        if self._cdp_mode:
+            # Reuse the tab you signed in on, rather than opening a blank one.
+            # The session itself would survive a fresh tab, since ASP.NET keeps
+            # it in a cookie. The reason this matters is that a new blank tab
+            # means the app never sees the page you left open for it, so a
+            # wrong URL guess has nothing to fall back to and diagnose reports
+            # about:blank, which is exactly what happened on the first run.
+            live = [p for p in ctx.pages if not p.is_closed()]
+            mine = [p for p in live if "aafmaa.com" in (p.url or "")]
+            self._work_page = mine[0] if mine else (
+                live[0] if live else ctx.new_page())
+        else:
+            self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         return self._work_page
 
     def close(self):
         try:
             if self._cdp_mode:
-                if self._work_page is not None and not self._work_page.is_closed():
-                    self._work_page.close()
+                # Never close it. Now that the signed-in tab is reused rather
+                # than a throwaway being opened, closing the work page would
+                # close the window you were told to keep open.
+                pass
             elif self._context:
                 self._context.close()
         except Exception:
