@@ -778,18 +778,37 @@ def _answer_view_disclosure(page) -> bool:
         log.warning("a dialog appeared that is NOT the view disclosure; "
                     "refusing to touch it: %r", " ".join(text.split())[:120])
         return False
+    # Short timeouts on everything. check() waits 30 seconds by default for
+    # an input to be actionable, and this checkbox is often a hidden input
+    # behind a styled label, so the default made each attempt look like a
+    # freeze. If the input cannot be checked, its label is the clickable
+    # thing, and clicking the label IS ticking the same box.
     try:
         box = pop.first.locator("input[type='checkbox']")
         if box.count() > 0:
-            box.first.check()
+            try:
+                box.first.check(timeout=2500)
+            except Exception:
+                lbl = pop.first.get_by_text("I confirm that I have read",
+                                            exact=False)
+                if lbl.count() > 0:
+                    lbl.first.click(timeout=2500)
         for role in ("button", "link"):
             btn = pop.first.get_by_role(role, name="View", exact=True)
             if btn.count() > 0:
-                btn.first.click()
+                btn.first.click(timeout=2500)
                 log.info("answered the view disclosure")
                 return True
+        btn = pop.first.locator("input[type='button'][value='View'], "
+                                "input[type='submit'][value='View']")
+        if btn.count() > 0:
+            btn.first.click(timeout=2500)
+            log.info("answered the view disclosure")
+            return True
+        log.info("disclosure is open but its View button was not found")
     except Exception as e:
-        log.info("could not answer the disclosure: %s", e)
+        log.info("could not answer the disclosure: %s",
+                 str(e).splitlines()[0][:90])
     return False
 
 
@@ -874,6 +893,7 @@ def download_document_row(page, title: str, date_text: str, account: str,
     page.on("response", on_response)
     saved = False
     answered = False
+    answer_tries = 0
     try:
         try:
             link.first.click(timeout=15000)
@@ -912,7 +932,8 @@ def download_document_row(page, title: str, date_text: str, account: str,
                     log.warning("response called itself a PDF and was not")
                     break
             else:
-                if not answered:
+                if not answered and answer_tries < 3:
+                    answer_tries += 1
                     answered = _answer_view_disclosure(page)
                 page.wait_for_timeout(500)
                 deadline -= 0.5
