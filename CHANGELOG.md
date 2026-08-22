@@ -19,6 +19,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   itself was always right; only the printed summary read the dead key. Found
   while delegating the Discover app's guard to the core in #8.
 
+- Core tests pin the key names `describe_selects` returns. Apps read them by
+  name, so a rename deletes a caller's output without failing anything, which
+  is exactly what happened above.
+
 ## [0.8.0] — 2026-08-21
 
 ### Added
