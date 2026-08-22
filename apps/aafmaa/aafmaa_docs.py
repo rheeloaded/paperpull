@@ -754,6 +754,48 @@ class App:
                                          "href": href[:160],
                                          "safe": site.is_safe_control(t)})
             info["controls"] = controls
+
+            # The rows themselves. Counting them says a list exists; only the
+            # text says what a document is called and when it is dated, which
+            # is what the classification rules and the date parser need. On a
+            # WebForms page the row is also where the postback target lives,
+            # since the View and Download links carry no usable href.
+            rows = []
+            try:
+                loc = page.locator(site.FALLBACK["doc_row"])
+                for i in range(min(loc.count(), 10)):
+                    el = loc.nth(i)
+                    try:
+                        text = " | ".join(
+                            x.strip() for x in (el.inner_text(timeout=800) or "").splitlines()
+                            if x.strip())
+                    except Exception:
+                        text = ""
+                    targets = []
+                    try:
+                        targets = el.evaluate(r"""e => [...e.querySelectorAll('a')]
+                            .map(a => (a.innerText || '').trim() + ' -> ' +
+                                 ((a.getAttribute('href') || '').match(/PostBackOptions\("([^"]+)"/)?.[1]
+                                  || a.getAttribute('href') || ''))
+                            .slice(0, 6)""") or []
+                    except Exception:
+                        pass
+                    if text or targets:
+                        rows.append({"text": text[:300], "links": targets})
+                info["row_samples"] = rows
+            except Exception as e:
+                info["row_samples"] = f"ERR {e}"
+
+            # Which sub-sections exist. MY DOCUMENTS, Insurance Documents and
+            # Digital Vault are all postbacks, so each is a separate view of
+            # this one page rather than a URL of its own.
+            try:
+                info["sections"] = [
+                    c["text"] for c in controls
+                    if c.get("text") and "PostBack" in (c.get("href") or "")
+                    and len(c["text"]) < 40]
+            except Exception:
+                pass
             page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
                             full_page=True)
         except Exception as e:

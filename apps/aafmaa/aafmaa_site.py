@@ -46,8 +46,23 @@ HOW THIS SITE IS BUILT
     and dies on navigation.) Navigating by URL is safe here.
   * Many "links" are not links. They are javascript:__doPostBack(...) on an
     <a>, so the href tells you nothing and the control has to be clicked.
-    Where a real handler URL with a document id exists, prefer it - that is
-    what download_by_id() is for. Clicking the row is the fallback.
+    Confirmed for this page: every View and Download control is a postback,
+    and no handler URL with a document id exists anywhere. The postback
+    target name is therefore the document's identity.
+
+THE TABLE, confirmed 2026-08-22
+  Date | Document | Policy | Name of Insured | View in Browser | Download a Copy
+
+  Two controls per row, and the choice between them matters. "Download a
+  Copy" posts back to lnkShowDownloadConfirmation, which opens a confirmation
+  panel, and answering one is a thing this project does not do anywhere. "View
+  in Browser" renders the document directly, so that is the control used.
+
+  Above the member's own rows sit three static PDFs that every member sees, a
+  president's letter, a benefits brochure and the privacy policy. They are
+  dropped by WHERE they live, under /Resources/PDFFiles/, not by their titles.
+  Only one of the three matches any skip rule, so title matching would have
+  quietly archived the other two as though they were somebody's records.
 """
 from __future__ import annotations
 
@@ -414,10 +429,9 @@ class RawDoc:
     kind: str = "doc"
 
 
-# Armed Forces Mutual "My Documents" is a table: Document title | Date delivered | Account |
-# Options. Each document row has a title <button data-testid="readDocument-N">
-# (clicking it renders the PDF inline in a blob: iframe) and an Options
-# <button data-testid="actions-N">. Verified 2026-07-23.
+# NOTE: the data-testid selectors this app was cloned with belong to USAA and
+# match nothing here. AAFMAA is WebForms and has no test ids at all. The real
+# structure is the table described in the module docstring above.
 _ROW_JS = r"""() => {
   const out = [];
   for (const tr of document.querySelectorAll('table tr')) {
@@ -469,75 +483,122 @@ _BLOB_FETCH_JS = r"""async () => {
 }"""
 
 
+# The membership boilerplate AAFMAA shows every member, above their own
+# documents: a president's letter, a benefits brochure, the privacy policy.
+# Recognised by WHERE they live rather than by what they are called, so a
+# rename cannot start them being archived as somebody's insurance records.
+RESOURCE_PDF_RE = re.compile(r"/Resources/PDFFiles/", re.I)
+
+# Each row's links, as (label, href, postback target). WebForms writes the
+# target inside a WebForm_PostBackOptions(...) call or a plain __doPostBack,
+# so the href is javascript and the name inside it is the real handle.
+_ROW_LINKS_JS = r"""e => [...e.querySelectorAll('a')].map(a => {
+  const href = a.getAttribute('href') || '';
+  const m = href.match(/PostBackOptions\("([^"]+)"/) ||
+            href.match(/__doPostBack\('([^']+)'/);
+  return [(a.innerText || '').trim(), m ? '' : href, m ? m[1] : ''];
+}).slice(0, 8)"""
+
+
+def _iso_from_us_date(text: str) -> str:
+    """AAFMAA prints M/D/YYYY. Returns an ISO date, or an empty string."""
+    m = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", text or "")
+    if not m:
+        return ""
+    month, day, year = (int(x) for x in m.groups())
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return ""
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
 def collect_document_index(page) -> List[dict]:
-    """Enumerate EVERY document by capturing the Armed Forces Mutual documents JSON API as the
-    page loads/pages, rather than scraping the visible table.
+    """Every document row in the table, read structurally.
 
-    The SPA calls
-      GET .../my-documents/experience/individuals/<id>/documents?limit=100
-    returning {"documents":[{title, displayDate, accountName, category,
-    subCategory, documentId, documentDate, ...}]} newest-first, in pages. We
-    capture every such response while scrolling + clicking through the pager,
-    then de-duplicate by documentId. Returns the raw document dicts.
+    The table is confirmed 2026-08-22 and its header reads:
+
+        Date | Document | Policy | Name of Insured | View in Browser | Download a Copy
+
+    So the columns are positional and there is no need to guess at labels.
+    A row without that many cells is not a document row.
+
+    Two kinds of row are deliberately dropped:
+
+    * The membership boilerplate at the top (a president's letter, a benefits
+      brochure, the privacy policy). Those are recognised by their link being
+      a REAL href under /Resources/PDFFiles/, which is structural. Matching
+      their titles instead would break the first time AAFMAA renames one, and
+      would quietly start archiving marketing material.
+    * The header row itself.
+
+    Each real row's View control is a __doPostBack target rather than a URL,
+    so the postback name is the document's identity. It is stable across a
+    reload in a way a row index is not.
     """
-    batches: List[list] = []
-
-    def on_resp(r):
-        try:
-            u = r.url
-            if "/documents" not in u or "?" not in u:
-                return
-            if "json" not in (r.headers.get("content-type", "") or "").lower():
-                return
-            data = json.loads(r.text())
-            if isinstance(data, dict) and isinstance(data.get("documents"), list):
-                batches.append(data["documents"])
-        except Exception:
-            pass
-
-    page.on("response", on_resp)
+    docs: List[dict] = []
     try:
-        goto_documents(page)
-        page.wait_for_timeout(3500)
-        last_total = -1
-        stagnant = 0
-        for _ in range(150):  # generous cap
-            for _ in range(3):
-                page.mouse.wheel(0, 5000)
-                page.wait_for_timeout(700)
-            advanced = False
-            try:
-                nxt = page.get_by_role("button", name=re.compile(r"^\s*next page\s*$", re.I))
-                if nxt.count() == 0:
-                    nxt = page.get_by_role("link", name=re.compile(r"^\s*next page\s*$", re.I))
-                if nxt.count() and nxt.first.is_visible() and nxt.first.is_enabled():
-                    nxt.first.click()
-                    page.wait_for_timeout(1800)
-                    advanced = True
-            except Exception:
-                pass
-            total = sum(len(b) for b in batches)
-            if total == last_total and not advanced:
-                stagnant += 1
-                if stagnant >= 3:
-                    break
-            else:
-                stagnant = 0
-                last_total = total
-    finally:
+        rows = page.locator("table tr")
+        n = min(rows.count(), 400)
+    except Exception as e:
+        log.info("could not read the documents table: %s", e)
+        return docs
+
+    for i in range(n):
+        row = rows.nth(i)
         try:
-            page.remove_listener("response", on_resp)
+            cells = row.locator("td")
+            if cells.count() < 4:
+                continue
+            values = [" ".join((cells.nth(c).inner_text(timeout=800) or "").split())
+                      for c in range(4)]
         except Exception:
-            pass
+            continue
+        date_text, title, policy, insured = values
+        if not title or not date_text:
+            continue
+        # the header row names its own columns
+        if date_text.lower() == "date" and title.lower() == "document":
+            continue
 
-    docs: dict = {}
-    for batch in batches:
-        for d in batch:
-            did = d.get("documentId")
-            if did and did not in docs:
-                docs[did] = d
-    return list(docs.values())
+        view_target, static_href = "", ""
+        try:
+            found = row.evaluate(_ROW_LINKS_JS) or []
+        except Exception:
+            found = []
+        for label, href, postback in found:
+            if not SAFE_DOC_CONTROL_RE.search(label or ""):
+                continue
+            if FORBIDDEN_CONTROL_RE.search(label or ""):
+                continue
+            # "Download a Copy" opens a confirmation panel, and answering one
+            # is a thing this project never does. "View in Browser" renders
+            # the PDF directly, so that is the control used.
+            if "view" in (label or "").lower():
+                if postback:
+                    view_target = postback
+                elif href:
+                    static_href = href
+                break
 
+        if static_href and RESOURCE_PDF_RE.search(static_href):
+            log.info("skipping membership boilerplate: %s", title[:60])
+            continue
+        if not view_target:
+            log.info("no usable View control on row %r", title[:60])
+            continue
+
+        docs.append({
+            "title": title,
+            "documentDate": _iso_from_us_date(date_text),
+            "displayDate": date_text,
+            # The policy this document belongs to. Kept because a member can
+            # hold several and the filename has to tell them apart.
+            "accountName": policy,
+            "documentId": view_target,
+            "category": "",
+            "insured": insured,
+        })
+    log.info("documents table: %d row(s)", len(docs))
+    return docs
 
 def document_deeplink(document_id: str, document_date: str) -> str:
     return f"{BASE}/my/documents?documentId={document_id}&documentDate={document_date}"
