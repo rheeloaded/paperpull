@@ -460,6 +460,13 @@ def collect_all_pages(page, max_pages: int = 20) -> List[dict]:
         log.warning("refusing to collect: this is not the documents page (%s)",
                     (page.url or "")[:80])
         return []
+    # Normalise to page 1 before reading anything. Discovery reads whatever
+    # page the table was left showing, and a previous walk leaves it on the
+    # LAST page - a run then read page 3 twice, never saw page 1, and five
+    # documents quietly went missing. If "1" is not a link, this is already
+    # page 1 and the click is a no-op by construction.
+    goto_table_page(page, 1)
+
     seen_keys = set()
     out: List[dict] = []
 
