@@ -1,0 +1,70 @@
+{
+  "_comment": "Editable rules mapping Paylocity document titles to filename summaries. Checked in order: tax, then insurance, then statement. At Paylocity a 'statement' IS a pay statement, so statement_rules carry the payroll wording. Repair after running diagnose.bat against your real Pay area.",
+  "tax_rules": [
+    {
+      "pattern": "\\bW-?2\\b",
+      "summary": "W-2 Tax Form"
+    },
+    {
+      "pattern": "\\bW-?2c\\b",
+      "summary": "W-2c Corrected Tax Form"
+    },
+    {
+      "pattern": "\\b1095-?[ABC]\\b",
+      "summary": "1095 Health Coverage Form"
+    },
+    {
+      "pattern": "\\b1099-?NEC\\b",
+      "summary": "1099-NEC Tax Form"
+    },
+    {
+      "pattern": "\\b1099-?MISC\\b",
+      "summary": "1099-MISC Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement|package)",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "year[-\\s]?end\\s+(pay|earnings)",
+      "summary": "Year-End Pay Summary"
+    },
+    {
+      "pattern": "pay\\s*statement",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "pay\\s*stub|paystub",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "earnings\\s+statement",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "direct\\s+deposit\\s+(advice|notice)",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "payslip|pay\\s+slip",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Pay Statement"
+    }
+  ],
+  "skip_patterns": [
+    "marketing",
+    "newsletter",
+    "terms\\s+and\\s+conditions",
+    "privacy\\s+notice"
+  ]
+}

@@ -39,7 +39,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
   elsewhere depends on
   how the provider exposes its documents:
 
-  - **The statement apps** (AAFMAA, Amex, Dominion, Navy Federal, RedCard,
+  - **The statement apps** (AAFMAA, Amex, Dominion, Navy Federal, Paylocity, RedCard,
     Robinhood, T-Mobile, USAA, Verizon, Wealthfront) click a download control, and gate it
     with `is_safe_control()`: a hard blocklist (`FORBIDDEN_CONTROL_RE` —
     buy/sell/transfer/pay/delete/change-setting/…) **plus** a document
