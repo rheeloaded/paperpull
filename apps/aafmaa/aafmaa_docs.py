@@ -487,15 +487,12 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Armed Forces Mutual renders each document as an inline PDF at its deep link
-        # (?documentId=...). Navigate there and capture the blob bytes. Falls
-        # back to clicking the row if no documentId was captured.
-        extra_hrefs: List[str] = []
-        if doc.document_id:
-            saved = site.download_by_id(page, doc.document_id, doc.date, out_path)
-        else:
-            saved = site.download_document_row(
-                page, doc.title, doc.date_text, doc.account, out_path)
+        # The stored postback target is never used to click. WebForms names
+        # repeater controls by row position, so the same name exists on every
+        # pager page and a stale target would view a DIFFERENT document under
+        # this one's filename. The row is re-found by content instead.
+        saved = site.download_document_row(
+            page, doc.title, doc.date_text, doc.account, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -541,36 +538,6 @@ class App:
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
-
-        # A form set can include corrected versions (idx=1, ...). Save those
-        # alongside the primary file so nothing is silently dropped.
-        for n, href in enumerate(extra_hrefs, start=2):
-            try:
-                url = href if href.startswith("http") else site.BASE + href
-                with page.expect_download(timeout=45000) as dl:
-                    try:
-                        page.goto(url)
-                    except Exception:
-                        pass
-                download = dl.value
-                # Companion files in a 1099 set are often spreadsheets, not
-                # PDFs. Keep Armed Forces Mutual's own extension so the file is
-                # openable instead of a .pdf that nothing can read.
-                suggested = getattr(download, "suggested_filename", "") or ""
-                ext = Path(suggested).suffix.lower() or ".pdf"
-                stem = f"{out_path.stem} ({n} of {len(extra_hrefs) + 1})"
-                extra_path = unique_path(folder, stem + ext,
-                                         self.config["max_path_length"])
-                receipt_pdf.save_download(download, extra_path)
-                if receipt_pdf.is_zip(extra_path) and ext not in (".zip", ".xlsx"):
-                    inner = receipt_pdf.extract_pdfs_from_zip(extra_path, extra_path)
-                    if inner:
-                        extra_path = inner[0]
-                print(f"  + additional file: {extra_path.name}")
-                doc.notes = (doc.notes + "; " if doc.notes else "") + \
-                    f"form set has {len(extra_hrefs) + 1} files"
-            except Exception as e:
-                log.warning("Extra tax file %s failed: %s", href, e)
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
