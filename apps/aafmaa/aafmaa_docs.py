@@ -739,8 +739,19 @@ class App:
                         t = (loc.nth(i).inner_text(timeout=400) or "").strip()[:60]
                     except Exception:
                         t = ""
-                    if t:
+                    href = ""
+                    if role == "link":
+                        try:
+                            href = loc.nth(i).get_attribute("href") or ""
+                        except Exception:
+                            href = ""
+                    if t or href:
+                        # The href is the point of this. A label tells you what
+                        # a link is called; only the target tells you the URL
+                        # of the documents area, which is the one thing a first
+                        # probe against an unknown tenant needs.
                         controls.append({"role": role, "text": t,
+                                         "href": href[:160],
                                          "safe": site.is_safe_control(t)})
             info["controls"] = controls
             page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
