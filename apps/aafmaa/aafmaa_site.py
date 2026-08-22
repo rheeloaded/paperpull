@@ -402,20 +402,63 @@ def expand_all(page) -> None:
             break
 
 
-def next_page(page) -> bool:
+def goto_table_page(page, number: int) -> bool:
+    """Click the pager link for a page number, and only for a page number.
+
+    The pager is two rows of postback links reading "1 2 3". A link is clicked
+    only if its entire text is the number asked for, so nothing else on the
+    page can be mistaken for it. Numbers are the one control class on this
+    page that is safe by construction, but the forbidden check runs anyway.
+    """
+    label = str(number)
     try:
-        loc = page.locator(FALLBACK["next_page"])
-        if loc.count() > 0 and loc.first.is_visible() and loc.first.is_enabled():
-            label = (loc.first.inner_text(timeout=800) or "") + \
-                (loc.first.get_attribute("aria-label") or "")
-            if FORBIDDEN_CONTROL_RE.search(label):
-                return False
-            loc.first.click()
-            page.wait_for_timeout(2500)
-            return True
+        loc = page.get_by_role("link", name=label, exact=True)
+        if loc.count() == 0:
+            return False
+        el = loc.first
+        text = " ".join((el.inner_text(timeout=800) or "").split())
+        if text != label or FORBIDDEN_CONTROL_RE.search(text):
+            return False
+        el.click()
+        page.wait_for_timeout(2500)
+        return True
     except Exception:
-        pass
-    return False
+        return False
+
+
+def collect_all_pages(page, max_pages: int = 20) -> List[dict]:
+    """Walk the pager and collect every page's rows.
+
+    Page 1 is read as it stands. Then numbered pager links are clicked in
+    order until one is missing. Identity comes from title, policy and date
+    rather than the postback name, because WebForms regenerates control ids
+    per page, so the same document could carry a different postback target on
+    a different visit. max_pages is a hard stop against a pager that loops.
+    """
+    seen_keys = set()
+    out: List[dict] = []
+
+    def take(rows):
+        added = 0
+        for r in rows:
+            key = (r["title"], r["accountName"], r["documentDate"])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            out.append(r)
+            added += 1
+        return added
+
+    take(collect_document_index(page))
+    for number in range(2, max_pages + 1):
+        if not goto_table_page(page, number):
+            break
+        added = take(collect_document_index(page))
+        log.info("table page %d: %d new document(s)", number, added)
+        if added == 0:
+            break
+    log.info("documents table: %d document(s) across the pager", len(out))
+    return out
 
 
 @dataclass
@@ -511,76 +554,82 @@ def _iso_from_us_date(text: str) -> str:
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
+_TABLE_JS = """() => [...document.querySelectorAll('tr')].map(tr => {
+  const own = [...tr.children].filter(c => c.tagName === 'TD');
+  const links = [...tr.querySelectorAll('a')].map(a => {
+    const h = a.getAttribute('href') || '';
+    let pb = '';
+    const i1 = h.indexOf('PostBackOptions("');
+    if (i1 >= 0) {
+      const rest = h.slice(i1 + 17);
+      pb = rest.slice(0, rest.indexOf('"'));
+    } else {
+      const i2 = h.indexOf("__doPostBack('");
+      if (i2 >= 0) {
+        const rest = h.slice(i2 + 14);
+        pb = rest.slice(0, rest.indexOf("'"));
+      }
+    }
+    return {label: a.innerText || '', href: pb ? '' : h, postback: pb};
+  });
+  return {cells: own.map(c => c.innerText || ''), links: links};
+})"""
+
+
+def _clean(text: str) -> str:
+    return " ".join((text or "").split())
+
 def collect_document_index(page) -> List[dict]:
-    """Every document row in the table, read structurally.
+    """Every document row on the current page of the table.
 
-    The table is confirmed 2026-08-22 and its header reads:
+    Read in ONE page.evaluate rather than by walking cells with Playwright.
+    The first attempt made four locator calls per row and every real row threw,
+    so twenty documents vanished and only a pagination cell survived. One
+    round trip has no per-cell timeout to lose, and returns the row's links
+    with their postback targets in the same pass.
 
-        Date | Document | Policy | Name of Insured | View in Browser | Download a Copy
+    Confirmed layout, 2026-08-22. A document row owns SEVEN cells:
 
-    So the columns are positional and there is no need to guess at labels.
-    A row without that many cells is not a document row.
+        Date | Document | Policy | Name of Insured | View | Download | (spacer)
 
-    Two kinds of row are deliberately dropped:
-
-    * The membership boilerplate at the top (a president's letter, a benefits
-      brochure, the privacy policy). Those are recognised by their link being
-      a REAL href under /Resources/PDFFiles/, which is structural. Matching
-      their titles instead would break the first time AAFMAA renames one, and
-      would quietly start archiving marketing material.
-    * The header row itself.
-
-    Each real row's View control is a __doPostBack target rather than a URL,
-    so the postback name is the document's identity. It is stable across a
-    reload in a way a row index is not.
+    Boilerplate rows own three and are dropped by their link living under
+    /Resources/PDFFiles/. The pager owns one or three and has no date.
     """
-    docs: List[dict] = []
     try:
-        rows = page.locator("table tr")
-        n = min(rows.count(), 400)
+        rows = page.evaluate(_TABLE_JS) or []
     except Exception as e:
         log.info("could not read the documents table: %s", e)
-        return docs
+        return []
 
-    for i in range(n):
-        row = rows.nth(i)
-        try:
-            cells = row.locator("td")
-            if cells.count() < 4:
-                continue
-            values = [" ".join((cells.nth(c).inner_text(timeout=800) or "").split())
-                      for c in range(4)]
-        except Exception:
+    docs: List[dict] = []
+    for row in rows:
+        cells = [_clean(c) for c in (row.get("cells") or [])]
+        if len(cells) < 6:
             continue
-        date_text, title, policy, insured = values
-        if not title or not date_text:
+        date_text, title, policy, insured = cells[0], cells[1], cells[2], cells[3]
+        if not title:
             continue
-        # the header row names its own columns
         if date_text.lower() == "date" and title.lower() == "document":
             continue
+        iso = _iso_from_us_date(date_text)
+        if not iso:
+            continue                      # a row without a real date is not a document
 
         view_target, static_href = "", ""
-        try:
-            found = row.evaluate(_ROW_LINKS_JS) or []
-        except Exception:
-            found = []
-        for label, href, postback in found:
-            if not SAFE_DOC_CONTROL_RE.search(label or ""):
+        for link in row.get("links") or []:
+            label = _clean(link.get("label"))
+            if not label or "view" not in label.lower():
                 continue
-            if FORBIDDEN_CONTROL_RE.search(label or ""):
+            if FORBIDDEN_CONTROL_RE.search(label) or not SAFE_DOC_CONTROL_RE.search(label):
                 continue
-            # "Download a Copy" opens a confirmation panel, and answering one
-            # is a thing this project never does. "View in Browser" renders
-            # the PDF directly, so that is the control used.
-            if "view" in (label or "").lower():
-                if postback:
-                    view_target = postback
-                elif href:
-                    static_href = href
-                break
+            # "Download a Copy" posts back to a confirmation panel, and this
+            # project answers no confirmations anywhere. "View in Browser"
+            # renders the document, so that is the control taken.
+            view_target = link.get("postback") or ""
+            static_href = link.get("href") or ""
+            break
 
         if static_href and RESOURCE_PDF_RE.search(static_href):
-            log.info("skipping membership boilerplate: %s", title[:60])
             continue
         if not view_target:
             log.info("no usable View control on row %r", title[:60])
@@ -588,16 +637,15 @@ def collect_document_index(page) -> List[dict]:
 
         docs.append({
             "title": title,
-            "documentDate": _iso_from_us_date(date_text),
+            "documentDate": iso,
             "displayDate": date_text,
-            # The policy this document belongs to. Kept because a member can
-            # hold several and the filename has to tell them apart.
-            "accountName": policy,
+            # A member can hold several policies, and several people can be
+            # insured under one login, so both are needed to tell two
+            # identically titled statements apart.
+            "accountName": _clean(f"{policy} {insured}"),
             "documentId": view_target,
             "category": "",
-            "insured": insured,
         })
-    log.info("documents table: %d row(s)", len(docs))
     return docs
 
 def document_deeplink(document_id: str, document_date: str) -> str:
