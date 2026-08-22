@@ -26,8 +26,17 @@ applies for or cancels coverage, or changes any setting. A control must pass
 **two** checks before it may be clicked: it must look like a document action
 (`SAFE_DOC_CONTROL_RE`) *and* match nothing in the blocklist
 (`FORBIDDEN_CONTROL_RE`). Both live in `aafmaa_site.py` and are covered by
-tests in `tests/test_doc_types.py`. There is no code path that submits a form
-or confirms a dialog.
+tests in `tests/test_doc_types.py`.
+
+One dialog is answered, and it is the only one in this whole project. AAFMAA
+shows a disclosure before serving some documents, a checkbox reading "I
+confirm that I have read the message above and understand the potential
+risk" and a View button. Answering it changes nothing on the account, and
+refusing it would mean the archive cannot be built. The app answers it only
+when the dialog's id matches, its text contains that sentence, and not one
+money-related word appears in it, and a dialog left over from an earlier
+document is cleared by reloading rather than answered, since its View button
+belongs to a different document. The gate is tested.
 
 ## How it connects
 

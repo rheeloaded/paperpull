@@ -26,8 +26,17 @@ The `.gitignore` already blocks all of the following. Do not override it.
 
 ## Design safety (what the tools themselves do)
 
-- **Read-only.** There is no code anywhere that submits a form, confirms a
-  dialog, moves money, or changes a setting. How that is enforced depends on
+- **Read-only.** There is no code anywhere that moves money or changes a
+  setting, and with one documented exception, none that submits a form or
+  confirms a dialog. The exception: AAFMAA interposes a disclosure dialog
+  ("I confirm that I have read the message above") before serving some
+  documents, and the AAFMAA app may tick that checkbox and click View. The
+  dialog changes nothing on the account, and the app checks the dialog's id,
+  requires the disclosure's own sentence in its text, and refuses it if a
+  single money-related word appears. A dialog left over from an earlier
+  document is cleared by reloading, never answered, because its View button
+  belongs to a different document. How the read-only rule is enforced
+  elsewhere depends on
   how the provider exposes its documents:
 
   - **The statement apps** (AAFMAA, Amex, Dominion, Navy Federal, RedCard,

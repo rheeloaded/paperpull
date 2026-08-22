@@ -123,3 +123,31 @@ def test_deny_by_default():
     for label in ["", "More", "Continue", "Next", "Options", "Help",
                   "Go", "Select", "Details"]:
         assert not site.is_safe_control(label), label
+
+
+# -- SAFETY: the one dialog this project answers --------------------------
+
+REAL_DISCLOSURE = (
+    "Please Confirm Downloading X.pdf The document that you are accessing "
+    "contains personal and confidential information. If you are using a "
+    "private computer and would like to view your document on the Member "
+    "Center, please click on the Download button. I confirm that I have read "
+    "the message above and understand the potential risk. View Cancel")
+
+
+def test_the_real_disclosure_is_recognised():
+    assert site.is_view_disclosure(REAL_DISCLOSURE)
+
+
+def test_any_money_word_disqualifies_the_dialog():
+    for word in ("payment", "premium", "transfer", "beneficiary",
+                 "surrender", "withdraw", "loan", "autopay"):
+        assert not site.is_view_disclosure(REAL_DISCLOSURE + " " + word), word
+
+
+def test_other_dialogs_are_never_the_disclosure():
+    for text in ("Are you sure you want to log out?",
+                 "Confirm your changes", "Session expiring, stay signed in?",
+                 ""):
+        assert not site.is_view_disclosure(text), text
+
