@@ -66,7 +66,7 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # Armed Forces Mutual's stable per-document UUID
+        self.document_id = document_id  # today's postback target, NOT identity
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -84,11 +84,14 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. Armed Forces Mutual's API gives each document a durable
-        documentId (UUID) - use it. Fall back to category:date:title:account
-        for anything discovered without one."""
-        if self.document_id:
-            return f"id:{self.document_id}"
+        """Stable identity: category, date, title and policy.
+
+        Deliberately NOT the postback target stored in document_id. WebForms
+        regenerates control names per page render, so the same statement can
+        carry a different target on a different visit. Keying on it would make
+        every rediscovery look like new documents, and the sticky downloaded_ok
+        marker would never match again. The postback name is a means of
+        clicking the row today, never a name for the document."""
         acct = sanitize_component(self.account or "")[:40]
         return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
 
@@ -383,7 +386,7 @@ class App:
 
         # Enumerate EVERY document via Armed Forces Mutual's documents JSON API (stable
         # documentIds, full history), not by scraping the visible table.
-        api_docs = site.collect_document_index(page)
+        api_docs = site.collect_all_pages(page)
         log.info("Armed Forces Mutual documents API returned %d unique documents", len(api_docs))
         n_new = 0
         for d in api_docs:
@@ -785,6 +788,24 @@ class App:
                 info["row_samples"] = rows
             except Exception as e:
                 info["row_samples"] = f"ERR {e}"
+
+            # Why a row was or was not treated as a document row. The
+            # collector filters on "at least four <td> cells", and on this
+            # page that let exactly one row through, a pagination cell reading
+            # "1". WebForms nests tables inside tables for layout, so a <tr>
+            # can own six cells or six hundred depending which one it is.
+            try:
+                shape = page.evaluate(r"""() => [...document.querySelectorAll('tr')]
+                    .slice(0, 60).map((tr, i) => ({
+                        i,
+                        own_td: [...tr.children].filter(c => c.tagName === 'TD').length,
+                        any_td: tr.querySelectorAll('td').length,
+                        links: tr.querySelectorAll('a').length,
+                        text: (tr.innerText || '').replace(/\s+/g, ' ').slice(0, 70),
+                    }))""") or []
+                info["table_shape"] = shape
+            except Exception as e:
+                info["table_shape"] = f"ERR {e}"
 
             # Which sub-sections exist. MY DOCUMENTS, Insurance Documents and
             # Digital Vault are all postbacks, so each is a separate view of
