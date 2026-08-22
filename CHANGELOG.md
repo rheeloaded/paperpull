@@ -7,6 +7,64 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.9.0] — 2026-08-21
+
+### Added
+- **Discover credit cards — the seventeenth provider** (`apps/discovercard`,
+  CDP port 9237). Card statements only, read-only and delete-safe, in a **real
+  Edge/Chrome** window. Verified against a live account: 24 statements
+  (about two years of history), downloaded and checked, with a delete-safe
+  re-run confirmed.
+
+  Discover is the simplest bank-style provider so far, and the app is
+  correspondingly small:
+
+  - **Discovery is one read.** Every statement period's row, each with its own
+    PDF link, is already in the DOM on plain page load - 24 links before any
+    interaction, the same 24 after opening the period chooser. Nothing is
+    clicked, no accordion expanded, no year swept. The Chase app's machinery
+    exists because its rows only exist while one card's accordion is open on
+    one year; none of it was carried over.
+  - **A statement is served directly** at `stmtPDF?view=true&date=YYYYMMDD`, so
+    the bytes are fetched with the signed-in context's own cookies using the
+    href *read from the page* - never a URL built from a template, so a change
+    to the query string cannot silently fetch the wrong period.
+  - There is **no `<select>`** on the page: the period chooser is a link-based
+    dropdown, which is why a select-based lookup finds nothing.
+
+  The app slug is `discovercard` rather than `discover` because `--discover` is
+  the CLI's own verb and the control panel has a **Discover** button; `redcard`
+  sets the precedent of naming by the card product.
+
+  A login with more than one Discover card is **unverified** and documented as
+  such: the account this was built against has one card, so the page names none.
+
+  On a full run, 22 of 24 listed periods downloaded and the two oldest returned
+  `text/html` instead of a PDF. The app refuses to write a non-PDF body, so
+  those are flagged for manual review rather than saved broken; the cause (a
+  retention limit shorter than the listed periods, or rate limiting at the tail
+  of a long run) is not established and is documented as open.
+
+### Fixed
+- **The statement-URL guard checks the host, not just the path.** The
+  download fetch carries the signed-in session's cookies, and the old check
+  accepted any absolute href (`startswith("http")`) so long as the path
+  pattern and the date matched - review demonstrated a fetch from
+  `evil.test` walking straight through it. The URL is now parsed and its
+  scheme and host compared against Discover's own, which also refuses a
+  suffix host (`card.discover.com.evil.test`) and a userinfo host
+  (`card.discover.com@evil.test`), the two shapes that once walked through
+  the UKG app's prefix-compared tenant guard. Found in review.
+
+### Changed
+- The Discover app's control guard - written for this app, backported to
+  Ally and Chase as 0.7.2, then generalised into `paperpull_core.controls`
+  in 0.8.0 - is deleted here in favour of delegating to that core module.
+  The app keeps only its own vocabulary: `FORBIDDEN_CONTROL_RE`, and
+  `PRODUCT_PICKER_RE` passed as an extra rule with the picker's options
+  checked against it. The sign-in-form hole the local copy fixed is recorded
+  under 0.7.2 and 0.8.0 below.
+
 ## [0.8.1] — 2026-08-21
 
 ### Fixed
