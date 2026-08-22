@@ -56,6 +56,12 @@ Filenames: `YYYY-MM-DD Paylocity Pay Statement.pdf`. A statement sharing a date
 with another (a regular plus an off-cycle) is disambiguated by its document
 number so nothing collapses into one file.
 
+**Current year only, for now.** Paylocity's Pay History defaults to a
+"YTD" (year-to-date) view, and this app reads that default, so a run
+collects the current calendar year's statements. Older years sit behind
+the page's year filter, which is not wired up yet. Verified: the 2026
+run found and downloaded all 12 of that year's statements.
+
 W-2s and other tax forms are **not** fetched yet. The routing and the folder
 are in place, so adding them is a change to `paylocity_site.py` alone. Paylocity
 returns W-2 data as JSON rather than a PDF, so that path needs its own work.
@@ -73,7 +79,8 @@ returns W-2 data as JSON rather than a PDF, so that path needs its own work.
 | any time | `resume.bat` | Continue after an interruption; never redoes finished work |
 | any time | `verify_documents.bat` | Re-validate every saved PDF |
 
-Filters: `--year 2025`, `--start-date 2025-01-01`.
+Filters narrow what was discovered (the current year), so `--start-date`
+and `--year` only apply within it until the year filter is wired up.
 
 ## Sensitive files
 
