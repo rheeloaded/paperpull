@@ -56,15 +56,19 @@ Filenames: `YYYY-MM-DD Paylocity Pay Statement.pdf`. A statement sharing a date
 with another (a regular plus an off-cycle) is disambiguated by its document
 number so nothing collapses into one file.
 
-**Current year only, for now.** Paylocity's Pay History defaults to a
-"YTD" (year-to-date) view, and this app reads that default, so a run
-collects the current calendar year's statements. Older years sit behind
-the page's year filter, which is not wired up yet. Verified: the 2026
-run found and downloaded all 12 of that year's statements.
+**Full history.** Paylocity's Pay History defaults to a year-to-date view,
+but the underlying list endpoint takes a start date, so this app asks for the
+whole history rather than just the current year. Verified live: an account
+with statements back to 2022 returned all 81. `--year` and `--start-date`
+narrow the result afterwards.
 
-W-2s and other tax forms are **not** fetched yet. The routing and the folder
-are in place, so adding them is a change to `paylocity_site.py` alone. Paylocity
-returns W-2 data as JSON rather than a PDF, so that path needs its own work.
+W-2s and other tax forms are **not** fetched. Paylocity does not serve the
+W-2 PDF from its own API: the form's link is a SAML single-sign-on redirect
+(`access.paylocity.com/SAML/InitiateSso`) into a separate content system.
+Following it would mean automating an SSO handshake into a third-party host on
+a payroll account, which this project does not do. Pay statements are served
+directly and are the scope here. The Tax Documents folder and routing stay in
+place in case that ever changes.
 
 ## Setup / workflow
 

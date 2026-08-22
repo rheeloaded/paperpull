@@ -213,7 +213,7 @@ def goto_documents(page) -> bool:
 #
 #   GET  {API}/GetPayAssignments
 #          -> {payAssignments:[{assignmentId, company:{name,...}}]}
-#   GET  {API}/GetCheckDatesForPayAssignment?endDate=MM/DD/YYYY&showNoCalc=false
+#   GET  {API}/GetCheckDatesForPayAssignment?startDate=..&endDate=..&showNoCalc=false
 #          -> {success, data:[{id, documentNumber, date, type, displayText,
 #                              amount, companyId, employeeId}]}
 #
@@ -267,16 +267,21 @@ def pay_assignments(page) -> List[dict]:
 def collect_documents(page) -> List[RawDoc]:
     """Every pay statement the account can see, newest first.
 
-    The list endpoint is bounded by endDate only, so a far-future endDate asks
-    for the whole history. Whether Escher caps how far back it returns is not
-    established, so the count is logged for a human to sanity-check against the
+    The list endpoint takes startDate and endDate. Without startDate it
+    returns a year-to-date view; with a far-past startDate it returns the whole
+    history. The count is logged so a human can sanity-check it against the
     portal.
     """
     docs: List[RawDoc] = []
     seen = set()
-    # A far-future end date so the whole history comes back. A fixed literal,
-    # never today's date, so the request is reproducible.
-    params = {"endDate": "12/31/2099", "showNoCalc": "false"}
+    # Both bounds, fixed literals so the request is reproducible. The endpoint
+    # defaults to a year-to-date view when startDate is omitted, which is why
+    # an early run only saw the current year; a far-past startDate asks for the
+    # whole history instead. Confirmed live: startDate widens the list from the
+    # current year to every statement the account holds. --year and
+    # --start-date still narrow the result afterwards.
+    params = {"startDate": "01/01/2000", "endDate": "12/31/2099",
+              "showNoCalc": "false"}
     data = _get_json(page, f"{API}/GetCheckDatesForPayAssignment", params) or {}
     rows = data.get("data") or []
     log.info("pay statements returned: %d", len(rows))
