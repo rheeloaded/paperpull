@@ -7,6 +7,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.12.0] — 2026-08-22
+
+### Changed
+- **Paylocity now fetches the whole pay-statement history, not just the
+  current year.** The Pay History list endpoint defaults to a year-to-date
+  view, but it takes a start date; the app now passes a far-past one and asks
+  for everything. Confirmed live: an account with statements back to 2022
+  returned all 81 where before it saw 12. `--year` and `--start-date` still
+  narrow the result.
+
+### Notes
+- **W-2 PDFs remain out of scope, and now the reason is precise.** Paylocity
+  does not serve the W-2 as a PDF from its API. The form's link is a SAML
+  single-sign-on redirect into a separate content system, and automating an
+  SSO handshake into a third-party host on a payroll account is not something
+  this project does. The finding is recorded in the app README so it is not
+  re-investigated from scratch.
+
 ## [0.11.0] — 2026-08-22
 
 ### Added
