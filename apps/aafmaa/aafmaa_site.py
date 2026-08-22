@@ -627,18 +627,28 @@ def collect_document_index(page) -> List[dict]:
         return []
 
     docs: List[dict] = []
+    skipped_no_date = skipped_no_view = 0
+    sample_cells = None
     for row in rows:
         cells = [_clean(c) for c in (row.get("cells") or [])]
-        if len(cells) < 6:
+        if len(cells) < 4:
             continue
-        date_text, title, policy, insured = cells[0], cells[1], cells[2], cells[3]
+        # The header claims six columns and a document row owns seven cells,
+        # so positions are NOT trusted. The date column is found by looking
+        # for the date, and the three cells after it are Document, Policy and
+        # Name of Insured, matching the header's own order.
+        date_idx = next((i for i, c in enumerate(cells)
+                         if _iso_from_us_date(c)), None)
+        if date_idx is None or date_idx + 3 >= len(cells):
+            if any(cells):
+                skipped_no_date += 1
+                if sample_cells is None:
+                    sample_cells = cells
+            continue
+        date_text = cells[date_idx]
+        title, policy, insured = cells[date_idx + 1:date_idx + 4]
         if not title:
             continue
-        if date_text.lower() == "date" and title.lower() == "document":
-            continue
-        iso = _iso_from_us_date(date_text)
-        if not iso:
-            continue                      # a row without a real date is not a document
 
         view_target, static_href = "", ""
         for link in row.get("links") or []:
@@ -657,12 +667,13 @@ def collect_document_index(page) -> List[dict]:
         if static_href and RESOURCE_PDF_RE.search(static_href):
             continue
         if not view_target:
+            skipped_no_view += 1
             log.info("no usable View control on row %r", title[:60])
             continue
 
         docs.append({
             "title": title,
-            "documentDate": iso,
+            "documentDate": _iso_from_us_date(date_text),
             "displayDate": date_text,
             # A member can hold several policies, and several people can be
             # insured under one login, so both are needed to tell two
@@ -671,6 +682,14 @@ def collect_document_index(page) -> List[dict]:
             "documentId": view_target,
             "category": "",
         })
+    # Silence here cost a whole debugging round: every row was filtered by a
+    # positional assumption and nothing said so. If rows existed and none
+    # survived, say what one looked like.
+    if not docs and (skipped_no_date or skipped_no_view):
+        log.warning("table had %d row(s) with no recognisable date and %d "
+                    "with no View control; first unmatched row's cells: %r",
+                    skipped_no_date, skipped_no_view,
+                    [c[:30] for c in (sample_cells or [])])
     return docs
 
 def document_deeplink(document_id: str, document_date: str) -> str:
