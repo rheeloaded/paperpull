@@ -473,6 +473,36 @@ class App:
                 self.stats["failed"] += 1
             self._delay()
 
+    @staticmethod
+    def _policy_inside_pdf(pdf_path, account: str):
+        """Does this PDF actually belong to this row? (ok, note)
+
+        The archive briefly held a file named for one insured that contained
+        another's statement: a manual click during a broken run released one
+        document while a different document's capture was listening, and the
+        listener saved whichever PDF arrived first. The filename, the byte
+        count and the validation all looked perfect.
+
+        AAFMAA prints the policy number inside every statement, and the row's
+        Policy column carries the same number, so the file can be made to
+        prove it is the one that was asked for. No match, no archive entry.
+        """
+        m = re.search(r"(\d{5,7}-\d)", account or "")
+        if not m:
+            return True, "no policy number on the row to check against"
+        want = m.group(1)
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(pdf_path))
+            text = ""
+            for pg in reader.pages[:2]:
+                text += pg.extract_text() or ""
+        except Exception as e:
+            return False, f"could not read the PDF back: {e}"
+        if want in text:
+            return True, ""
+        return False, f"PDF does not contain this row's policy number {want}"
+
     def download_one(self, page, doc: Document, filename: str):
         """Download one document PDF straight to its final path.
 
@@ -538,6 +568,25 @@ class App:
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
+
+        ok, why = self._policy_inside_pdf(out_path, doc.account)
+        if not ok:
+            self.stats["validation_failures"] += 1
+            quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                     self.config["max_path_length"])
+            try:
+                out_path.replace(quarantine)
+            except OSError:
+                quarantine = out_path
+            doc.pdf_path, doc.pdf_filename = str(quarantine), quarantine.name
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes=f"identity check failed: {why}")
+            self._write_row(doc, "Identity check failed", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print(f"  !! {why}; moved to Manual Review.")
+            return
+        if why:
+            log.info("identity check skipped: %s", why)
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
