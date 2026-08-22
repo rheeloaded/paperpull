@@ -4,23 +4,25 @@ When AAFMAA changes its site, repair this file only.
 
 STATUS, and read this before trusting anything below.
 
-  CONFIRMED against a signed-in account on 2026-08-22:
-    * the documents area is /Documents/default.aspx
-    * the app is organised as /<Area>/default.aspx
-    * the session survives page.goto, being an ordinary ASP.NET cookie
+  CONFIRMED against a signed-in account, 2026-08-22, by a full 60-document
+  run that completed clean:
+    * /Documents/default.aspx is the documents area, /<Area>/default.aspx
+      the app's shape, and the session an ordinary ASP.NET cookie
+    * the table layout, the pager (numeric postback links), the View
+      disclosure dialog, and the postback download flow
+    * the identity check: every saved statement contained its own row's
+      policy number
 
   STILL UNVERIFIED:
-    * every selector in FALLBACK, which has never been matched against a
-      real document list
-    * every rule in document_rules.json, which was written from what AAFMAA
-      is known to issue rather than from titles anyone has seen
-    * whether the list paginates, or splits by policy, or by year
-
-  So discovery and download are not finished. Run `diagnose.bat` on the
-  documents page and repair FALLBACK against what lands in Diagnostics/.
-  Update these two lists as things move from one to the other, rather than
-  deleting the block wholesale, because a file that claims more than it has
-  earned is worse than one that admits what it does not know.
+    * the Insurance Documents and Digital Vault SECTIONS. They are postback
+      views of this same page, and only the default MY DOCUMENTS view has
+      been read. Documents held only in those sections are not discovered
+      yet. The section links are visible in diagnose output when someone
+      wants to add them.
+    * any account shaped differently: one policy, no family members, or a
+      table long enough to page past 3
+    * document_rules.json against titles other than the ones this account
+      shows (Annual Statement, plus the 2019 insurance letters)
 
   The safety guard does not depend on any of this and applies from the start.
 
