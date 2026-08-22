@@ -754,8 +754,8 @@ def _clear_leftover_dialog(page) -> None:
     reload dismisses it without answering anything.
     """
     try:
-        pop = page.locator(CONFIRM_POPUP_SEL)
-        if pop.count() > 0 and pop.first.is_visible():
+        pop, _text = _find_disclosure(page)
+        if pop is not None:
             log.info("clearing a leftover confirmation dialog by reloading")
             page.goto(URLS["documents"], wait_until="domcontentloaded",
                       timeout=60000)
@@ -764,43 +764,65 @@ def _clear_leftover_dialog(page) -> None:
         pass
 
 
+def _find_disclosure(page):
+    """The visible confirmation dialog, or None.
+
+    Every section of this WebForms page carries its OWN divConfirmationPopup,
+    most of them empty and hidden, so taking the first match found a hidden
+    one and silently gave up while the real dialog sat on screen. And the
+    outer wrapper often reports itself invisible because its children are
+    positioned absolutely, so visibility of the wrapper proves nothing.
+    A dialog is "the one" if it has readable text in it.
+    """
+    try:
+        cands = page.locator(CONFIRM_POPUP_SEL)
+        for i in range(min(cands.count(), 8)):
+            el = cands.nth(i)
+            try:
+                text = el.inner_text(timeout=1000) or ""
+            except Exception:
+                continue
+            if text.strip():
+                return el, text
+    except Exception:
+        pass
+    return None, ""
+
+
 def _answer_view_disclosure(page) -> bool:
     """Tick the disclosure's checkbox and click its View button, if and only
     if every part of the gate holds. Returns True if answered."""
-    try:
-        pop = page.locator(CONFIRM_POPUP_SEL)
-        if pop.count() == 0 or not pop.first.is_visible():
-            return False
-        text = pop.first.inner_text(timeout=2000) or ""
-    except Exception:
+    pop, text = _find_disclosure(page)
+    if pop is None:
         return False
     if not is_view_disclosure(text):
         log.warning("a dialog appeared that is NOT the view disclosure; "
                     "refusing to touch it: %r", " ".join(text.split())[:120])
         return False
+    log.info("view disclosure located; answering it")
     # Short timeouts on everything. check() waits 30 seconds by default for
     # an input to be actionable, and this checkbox is often a hidden input
     # behind a styled label, so the default made each attempt look like a
     # freeze. If the input cannot be checked, its label is the clickable
     # thing, and clicking the label IS ticking the same box.
     try:
-        box = pop.first.locator("input[type='checkbox']")
+        box = pop.locator("input[type='checkbox']")
         if box.count() > 0:
             try:
                 box.first.check(timeout=2500)
             except Exception:
-                lbl = pop.first.get_by_text("I confirm that I have read",
-                                            exact=False)
+                lbl = pop.get_by_text("I confirm that I have read",
+                                      exact=False)
                 if lbl.count() > 0:
                     lbl.first.click(timeout=2500)
         for role in ("button", "link"):
-            btn = pop.first.get_by_role(role, name="View", exact=True)
+            btn = pop.get_by_role(role, name="View", exact=True)
             if btn.count() > 0:
                 btn.first.click(timeout=2500)
                 log.info("answered the view disclosure")
                 return True
-        btn = pop.first.locator("input[type='button'][value='View'], "
-                                "input[type='submit'][value='View']")
+        btn = pop.locator("input[type='button'][value='View'], "
+                          "input[type='submit'][value='View']")
         if btn.count() > 0:
             btn.first.click(timeout=2500)
             log.info("answered the view disclosure")
@@ -810,7 +832,6 @@ def _answer_view_disclosure(page) -> bool:
         log.info("could not answer the disclosure: %s",
                  str(e).splitlines()[0][:90])
     return False
-
 
 def _row_matches(row_doc: dict, title: str, date_text: str, account: str) -> bool:
     if _clean(row_doc.get("title")) != _clean(title):
