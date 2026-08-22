@@ -34,7 +34,11 @@ SAFETY (this portal can move money):
   surrenders or withdraws value, changes a beneficiary, edits contact or
   family details, applies for or cancels coverage, or changes any setting.
   A control must clear FORBIDDEN_CONTROL_RE *and* match SAFE_DOC_CONTROL_RE.
-  There is deliberately no code here that submits a form or confirms a dialog.
+
+  One dialog is answered, the only one in the project: AAFMAA's disclosure
+  ("I confirm that I have read the message above") that stands between the
+  View control and some documents. See the block above is_view_disclosure()
+  for the gate and the reasoning. Nothing else is ever confirmed.
 
 HOW THIS SITE IS BUILT
   connect.aafmaa.com is classic ASP.NET WebForms - __VIEWSTATE, __EVENTTARGET,
@@ -703,6 +707,92 @@ def document_deeplink(document_id: str, document_date: str) -> str:
     return f"{BASE}/my/documents?documentId={document_id}&documentDate={document_date}"
 
 
+# ---------------------------------------------------------------------------
+# The view-confirmation disclosure - THE one dialog this app may answer
+# ---------------------------------------------------------------------------
+# AAFMAA interposes a disclosure before serving some documents: "I confirm
+# that I have read the message above and understand the potential risk", a
+# checkbox, and a View button. Answering it changes nothing on the account,
+# and refusing it means the archive cannot be built at all.
+#
+# This is a DELIBERATE, DOCUMENTED exception to the project rule that no code
+# confirms a dialog, agreed with the project owner on 2026-08-22 and recorded
+# in SECURITY.md and this app's README. The gate is meant to be hard to
+# loosen by accident:
+#   * only a dialog whose id ends divConfirmationPopup
+#   * whose text contains the disclosure's own sentence
+#   * and mentions viewing or downloading a document
+#   * and contains NOT ONE word from the money list below
+# Anything else is refused, and a leftover dialog from a previous document is
+# cleared by reloading the page, never answered, because its View button
+# belongs to a different document and would file the wrong PDF under this
+# one's name.
+CONFIRM_POPUP_SEL = "div[id$='divConfirmationPopup']"
+
+_DISCLOSURE_MUST_CONTAIN = "confirm that i have read"
+_DISCLOSURE_MONEY_WORDS = (
+    "payment", "premium", "transfer", "beneficiar", "surrender", "withdraw",
+    "loan", "routing", "autopay", "bank account", "authorize", "enroll",
+)
+
+
+def is_view_disclosure(text: str) -> bool:
+    """Is this dialog text the harmless view disclosure, and nothing more?"""
+    t = " ".join((text or "").lower().split())
+    if _DISCLOSURE_MUST_CONTAIN not in t:
+        return False
+    if "download" not in t and "view" not in t:
+        return False
+    return not any(w in t for w in _DISCLOSURE_MONEY_WORDS)
+
+
+def _clear_leftover_dialog(page) -> None:
+    """A dialog left over from an earlier document is never answered.
+
+    Its View button belongs to whichever document opened it, so answering it
+    now would save the WRONG member document under this one's filename. A
+    reload dismisses it without answering anything.
+    """
+    try:
+        pop = page.locator(CONFIRM_POPUP_SEL)
+        if pop.count() > 0 and pop.first.is_visible():
+            log.info("clearing a leftover confirmation dialog by reloading")
+            page.goto(URLS["documents"], wait_until="domcontentloaded",
+                      timeout=60000)
+            page.wait_for_timeout(2500)
+    except Exception:
+        pass
+
+
+def _answer_view_disclosure(page) -> bool:
+    """Tick the disclosure's checkbox and click its View button, if and only
+    if every part of the gate holds. Returns True if answered."""
+    try:
+        pop = page.locator(CONFIRM_POPUP_SEL)
+        if pop.count() == 0 or not pop.first.is_visible():
+            return False
+        text = pop.first.inner_text(timeout=2000) or ""
+    except Exception:
+        return False
+    if not is_view_disclosure(text):
+        log.warning("a dialog appeared that is NOT the view disclosure; "
+                    "refusing to touch it: %r", " ".join(text.split())[:120])
+        return False
+    try:
+        box = pop.first.locator("input[type='checkbox']")
+        if box.count() > 0:
+            box.first.check()
+        for role in ("button", "link"):
+            btn = pop.first.get_by_role(role, name="View", exact=True)
+            if btn.count() > 0:
+                btn.first.click()
+                log.info("answered the view disclosure")
+                return True
+    except Exception as e:
+        log.info("could not answer the disclosure: %s", e)
+    return False
+
+
 def _row_matches(row_doc: dict, title: str, date_text: str, account: str) -> bool:
     if _clean(row_doc.get("title")) != _clean(title):
         return False
@@ -740,6 +830,7 @@ def download_document_row(page, title: str, date_text: str, account: str,
     response is a PDF, and a PDF response in the page itself. Whichever
     happens first wins. Bytes are written only if they begin %PDF.
     """
+    _clear_leftover_dialog(page)
     target = _fresh_view_target(page, title, date_text, account)
     if not target:
         log.info("could not re-find the row for %r %s", title[:50], date_text)
@@ -782,8 +873,14 @@ def download_document_row(page, title: str, date_text: str, account: str,
     page.on("popup", on_popup)
     page.on("response", on_response)
     saved = False
+    answered = False
     try:
-        link.first.click()
+        try:
+            link.first.click(timeout=15000)
+        except Exception as e:
+            log.info("click on the View control did not go through: %s",
+                     str(e).splitlines()[0][:90])
+            return False
         deadline = 30.0
         while deadline > 0 and not saved:
             if state["download"] is not None:
@@ -815,6 +912,8 @@ def download_document_row(page, title: str, date_text: str, account: str,
                     log.warning("response called itself a PDF and was not")
                     break
             else:
+                if not answered:
+                    answered = _answer_view_disclosure(page)
                 page.wait_for_timeout(500)
                 deadline -= 0.5
         if not saved and deadline <= 0:
