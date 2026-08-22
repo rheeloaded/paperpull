@@ -23,7 +23,7 @@ PROJECTS = [
     Path(r"C:\path\to\Receipt and Statement Downloader\Amazon Receipts"),
     Path(r"C:\path\to\Receipt and Statement Downloader\Wealthfront Receipts"),
     Path(r"C:\path\to\Receipt and Statement Downloader\USAA Statements"),
-    Path(r"C:\path\to\Receipt and Statement Downloader\Paylocity Statements"),
+    Path(r"C:\path\to\Receipt and Statement Downloader\Paylocity Pay Statements"),
     Path(r"C:\path\to\Receipt and Statement Downloader\American Express Statements"),
 ]
 
