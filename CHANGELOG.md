@@ -31,8 +31,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   written to the CSV. Both are pinned by tests, alongside the payroll guard
   that refuses direct deposit, withholding, W-4, beneficiary and the rest.
 
-  W-2s are not fetched yet: Paylocity returns W-2 data as JSON rather than a
-  PDF, so that path needs its own work. The routing and folder are in place.
+  A run collects the current calendar year: Paylocity's Pay History
+  defaults to a year-to-date view and this app reads that default. Older
+  years sit behind the page's year filter, not wired up yet. W-2s are not
+  fetched either, since Paylocity returns W-2 data as JSON rather than a
+  PDF; the routing and folder are in place for both.
 
 ## [0.10.0] — 2026-08-22
 
