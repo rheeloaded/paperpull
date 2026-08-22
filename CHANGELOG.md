@@ -7,6 +7,46 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.10.0] — 2026-08-22
+
+### Added
+- **AAFMAA (Armed Forces Mutual), the eighteenth provider** (`apps/aafmaa`,
+  CDP port 9238). Annual statements and policy documents from the Member
+  Center, read-only and delete-safe. Verified against a live account with a
+  full 60-document run spanning 2010 to 2026.
+
+  The Member Center is classic ASP.NET WebForms, and it taught this repo
+  three lessons the hard way:
+
+  - **A postback name is not an identity.** WebForms names repeater controls
+    by row position, so the same control name exists on every pager page and
+    means "row 2 of whatever is showing". Documents are identified by title,
+    date and policy, the pager is normalised to page 1 before every walk, and
+    each download re-finds its row by content before clicking anything.
+  - **Every saved statement must prove who it belongs to.** During a broken
+    early run, a manually released PDF was captured under a different
+    insured's filename, with a correct name, plausible size, and a clean
+    validation pass. After download the file is read back and must contain
+    its own row's policy number, or it goes to Manual Review with the reason
+    stated.
+  - **One dialog is answered, the only one in the project.** AAFMAA
+    interposes a disclosure ("I confirm that I have read the message above")
+    between the View control and some documents. The app answers it under a
+    hard gate: matching dialog id, the disclosure's own sentence in the text,
+    and not one money-related word, or it refuses. A dialog left over from an
+    earlier document is cleared by reloading, never answered, because its
+    View button belongs to a different document. SECURITY.md states the
+    exception plainly.
+
+  Only the default MY DOCUMENTS section is read so far. The Insurance
+  Documents and Digital Vault sections are separate postback views, recorded
+  as unimplemented in the app README.
+
+### Fixed
+- The build-a-provider issue template still told contributors ports 9237 and
+  up were free while Discover holds 9237. It now says 9239+, matching the
+  other three port documents.
+
 ## [0.9.0] — 2026-08-21
 
 ### Added

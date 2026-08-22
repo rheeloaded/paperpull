@@ -7,10 +7,11 @@ Everything runs **locally**. Nothing is sent to any external AI API or
 third-party service. You sign in **manually**; the tool never touches your
 credentials and never bypasses AAFMAA's 2FA or security checks.
 
-> **Status: the site layer is not verified yet.** The URLs and selectors in
-> `aafmaa_site.py` are starting guesses. Run `login.bat`, then `diagnose.bat`,
-> and repair them against what lands in `Diagnostics\`. The safety guard does
-> not depend on any of that and applies from the first run.
+> **Status: verified against a live account (2026-08-22)** by a full
+> 60-document run. One caveat: only the default MY DOCUMENTS section is read.
+> The Insurance Documents and Digital Vault sections are separate postback
+> views and are not discovered yet, so anything held only there will not be
+> archived. `diagnose.bat` shows the section links for whoever adds them.
 
 ## Read-only by design (this portal can move money)
 
@@ -40,13 +41,13 @@ belongs to a different document. The gate is tested.
 
 ## How it connects
 
-`login.bat` opens an ordinary Chromium (debugging port **9236**) that **you**
+`login.bat` opens an ordinary Chromium (debugging port **9238**) that **you**
 sign into. The tool then connects to that already-signed-in browser and reads
 only the pages you are authorised to see. No stealth, no evasion.
 
 **The signed-in browser window must stay OPEN while the tool runs.**
 
-Port 9236 is this app's alone, so several signed-in browsers can be open at
+Port 9238 is this app's alone, so several signed-in browsers can be open at
 once without two apps sharing a profile.
 
 ## How the site is built
@@ -85,7 +86,7 @@ you have seen what your account actually calls things.
 | Step | Command | What it does |
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
-| 2 | `login.bat` | Opens Chromium (port 9236); sign in, open your documents area, **leave open** |
+| 2 | `login.bat` | Opens Chromium (port 9238); sign in, open your documents area, **leave open** |
 | 3 | `diagnose.bat` | Read-only look at the page structure; downloads nothing |
 | 4 | `run_pilot.bat` | 5 newest documents, then **stops** for your inspection |
 | 5 | inspect the PDFs/CSV | You approve before anything bigger runs |
