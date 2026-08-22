@@ -20,8 +20,8 @@ body:
     id: slug
     attributes:
       label: Planned app slug + CDP port
-      description: A short folder name, and the next free debugging port (9222–9234 are taken; use 9235+).
-      placeholder: e.g. fidelity / 9235
+      description: A short folder name, and the next free debugging port (9222–9238 are taken; use 9239+).
+      placeholder: e.g. fidelity / 9239
   - type: checkboxes
     id: rules
     attributes:

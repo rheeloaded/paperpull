@@ -10,10 +10,11 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (17)
+## Supported (18)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
+| [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
