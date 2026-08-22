@@ -312,17 +312,27 @@ def looks_like_missing_page(page) -> bool:
         "page cannot be found", "page not found"))
 
 
+def on_documents_page(page) -> bool:
+    """Actually on /Documents/, not merely on some page that has a table.
+
+    The generic more-rows-than-one test once accepted a post-login landing
+    page, and the collector then walked a pager on it. The URL for this
+    tenant is confirmed, so it is the positive check everywhere below.
+    """
+    return "/documents/" in (page.url or "").lower()
+
+
 def goto_documents(page) -> bool:
     """Find the document area, without losing a good page you already have.
 
-    Order matters. The URLs below are guesses, and a wrong guess on AAFMAA
-    lands on a 'does not exist' page that still returns HTTP 200. If we
-    navigated first and only then looked around, we would throw away the very
-    page you had opened for us. So the page in front of us is checked first,
-    and if nothing works we navigate back to it.
+    The page in front of us is checked first, then the one confirmed URL,
+    then the site's own nav link. Every success path requires BOTH a document
+    list and the /Documents/ URL, because right after a re-login the site
+    redirects on its own schedule and a table on the landing page is not the
+    documents table.
     """
     started_at = page.url
-    if page.locator(FALLBACK["doc_row"]).count() > 1:
+    if on_documents_page(page) and page.locator(FALLBACK["doc_row"]).count() > 1:
         log.info("using the page already open: %s", started_at)
         return True
 
@@ -330,20 +340,31 @@ def goto_documents(page) -> bool:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3500)
-            if looks_signed_out(page):
-                return False
-            if looks_like_missing_page(page):
-                log.info("no such page: %s", url)
-                continue
+        except Exception as e:
+            # "interrupted by another navigation" is not a failure, it is a
+            # race: the page was already on its way somewhere, usually the
+            # site's own redirect just after a re-login. Let it land, then
+            # judge where it ended up like any other outcome.
+            log.info("navigation raced (%s); letting the page settle",
+                     str(e).splitlines()[0][:90])
             try:
-                page.wait_for_selector(FALLBACK["page_ready"], timeout=12000)
+                page.wait_for_load_state("domcontentloaded", timeout=15000)
             except Exception:
                 pass
-            if page.locator(FALLBACK["doc_row"]).count() > 1:
-                return True
-        except Exception as e:
-            log.info("documents URL %s failed: %s", url, e)
-    # in-page nav link
+            page.wait_for_timeout(2500)
+        if looks_signed_out(page):
+            return False
+        if looks_like_missing_page(page):
+            log.info("no such page: %s", url)
+            continue
+        try:
+            page.wait_for_selector(FALLBACK["page_ready"], timeout=12000)
+        except Exception:
+            pass
+        if on_documents_page(page) and page.locator(FALLBACK["doc_row"]).count() > 1:
+            return True
+
+    # the site's own nav link
     try:
         link = page.get_by_role("link", name=re.compile(
             r"(documents?|statements?|tax\s+forms?)", re.I))
@@ -352,25 +373,25 @@ def goto_documents(page) -> bool:
             if not FORBIDDEN_CONTROL_RE.search(label):
                 link.first.click()
                 page.wait_for_timeout(3000)
-                return page.locator(FALLBACK["doc_row"]).count() > 1
+                if on_documents_page(page) and                         page.locator(FALLBACK["doc_row"]).count() > 1:
+                    return True
     except Exception:
         pass
-    # Nothing worked. Go back to whatever you had open, rather than leaving
-    # you stranded on a guessed URL's error page, and read that instead.
+
+    # Nothing worked. Go back to whatever was open rather than stranding the
+    # user on an error page, but do NOT call that page a success.
     try:
         if page.url != started_at:
             page.goto(started_at, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(2500)
     except Exception:
         pass
-    found = page.locator(FALLBACK["doc_row"]).count() > 1
+    found = on_documents_page(page) and page.locator(FALLBACK["doc_row"]).count() > 1
     if not found:
         log.warning(
-            "No document list found. None of the guessed URLs exist on this "
-            "tenant. Open your documents page in the signed-in browser, leave "
-            "it there, and run --diagnose so the real URL can be recorded.")
+            "No document list found. Open %s in the signed-in browser, leave "
+            "it there, and run --diagnose.", URLS["documents"])
     return found
-
 
 def scroll_full_page(page, rounds: int = 6, delay_ms: int = 700) -> None:
     try:
@@ -435,6 +456,10 @@ def collect_all_pages(page, max_pages: int = 20) -> List[dict]:
     per page, so the same document could carry a different postback target on
     a different visit. max_pages is a hard stop against a pager that loops.
     """
+    if not on_documents_page(page):
+        log.warning("refusing to collect: this is not the documents page (%s)",
+                    (page.url or "")[:80])
+        return []
     seen_keys = set()
     out: List[dict] = []
 
