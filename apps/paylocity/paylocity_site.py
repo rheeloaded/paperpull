@@ -51,6 +51,15 @@ log = logging.getLogger("paylocity_docs.site")
 # nothing about this URL is private.
 BASE = "https://access.paylocity.com"
 
+# Paylocity spans hosts. Sign-in is on access.paylocity.com, but the signed-in
+# Pay History screen, its JSON endpoints, and the statement PDFs are all served
+# from login.paylocity.com/Escher/. The session cookie is shared across them.
+APP_HOST = "https://login.paylocity.com"
+
+# Every host this app will talk to, and no others. is_safe_url() checks
+# against this exact set, so a request can only ever go to Paylocity.
+ALLOWED_HOSTS = {"access.paylocity.com", "login.paylocity.com"}
+
 URLS = {
     "home": f"{BASE}/",
     # The root IS the login page, so a URL alone cannot say whether you are
@@ -63,9 +72,14 @@ URLS = {
 # open and the site's own navigation.
 DOCUMENT_URL_CANDIDATES: list = []
 
-LOGIN_URL_MARKERS = ["/login", "signin", "sign-in", "/auth", "/sso",
-                     "okta.com", "microsoftonline.com", "pingidentity",
-                     "samlsso", "forgotpassword"]
+# Markers of a genuine sign-in redirect. Deliberately NONE of these is a
+# substring of the app host login.paylocity.com - an earlier "/login" marker
+# matched that host and made the pilot believe a signed-in user was signed
+# out. Being ON login.paylocity.com is normal; the real login form is at
+# access.paylocity.com and is detected by its Company ID / password fields.
+LOGIN_URL_MARKERS = ["/sso", "okta.com", "microsoftonline.com",
+                     "pingidentity", "samlsso", "forgotpassword",
+                     "returnurl=", "/oauth/authorize"]
 
 SECURITY_CHALLENGE_MARKERS = [
     "verify your identity", "enter the code we sent", "one-time passcode",
@@ -108,15 +122,12 @@ def is_safe_url(url: str) -> bool:
     compare, and refuse embedded credentials outright.
     """
     try:
-        want = urlparse(BASE)
         got = urlparse(url or "")
     except ValueError:
         return False
-    if got.scheme != want.scheme or not got.hostname:
+    if got.scheme != "https" or not got.hostname:
         return False
-    if (got.hostname or "").lower() != (want.hostname or "").lower():
-        return False
-    if got.port != want.port:
+    if (got.hostname or "").lower() not in ALLOWED_HOSTS:
         return False
     if got.username or got.password:
         return False
@@ -127,13 +138,17 @@ def looks_signed_out(page) -> bool:
     url = (page.url or "").lower()
     if any(m in url for m in LOGIN_URL_MARKERS):
         return True
+    # The sign-in form lives on access.paylocity.com. Its Company ID field is
+    # the surest signal. A password field anywhere also means a login form is
+    # on screen. The app host (login.paylocity.com) on its own is NOT a signal.
     try:
-        # the login page's own fields: Company ID, Username, Password
         if page.locator("#CompanyId, input[name='CompanyId']").count() > 0:
             return True
-        return page.locator("input[type='password']").count() > 0
+        if page.locator("input[type='password']").count() > 0:
+            return True
     except Exception:
         return False
+    return False
 
 
 def detect_security_challenge(page) -> Optional[str]:
@@ -174,24 +189,21 @@ def parse_period_date(title: str):
 
 
 def goto_documents(page) -> bool:
-    """Reach the pay area, starting from wherever the user is.
+    """Load the Pay History screen so its host's session is established.
 
-    No URL guesses. The page already open is judged first, then the site's
-    own navigation is tried, one guarded click on a link that names pay
-    statements. If neither works, the answer is --diagnose, not a guess.
+    This is a navigation, not a guess and not a click. The confirmed URL for
+    Pay History is loaded directly, which both gives the user something
+    recognisable to look at and, more importantly, sets the login.paylocity.com
+    session the JSON endpoints require. Without it the endpoints answer 200
+    with an empty body, which reads as an empty account rather than an error.
     """
     if looks_signed_out(page):
         return False
     try:
-        link = page.get_by_role("link", name=re.compile(
-            r"(pay\s*(stubs?|checks?|statements?)|paystubs?)", re.I))
-        if link.count() > 0:
-            label = link.first.inner_text(timeout=1500) or ""
-            if not FORBIDDEN_CONTROL_RE.search(label):
-                link.first.click()
-                page.wait_for_timeout(3500)
-    except Exception:
-        pass
+        page.goto(PAY_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(4000)
+    except Exception as e:
+        log.info("could not open Pay History: %s", str(e).splitlines()[0][:90])
     return not looks_signed_out(page)
 
 
@@ -217,8 +229,13 @@ def goto_documents(page) -> bool:
 # available. `amount` is deliberately read and thrown away: the index records
 # what a file IS, never what it says.
 # ---------------------------------------------------------------------------
-API = f"{BASE}/Escher/Escher_WebUI/EmployeeInformation/PaycheckHistory"
-REPORT_BASE = f"{BASE}/Escher/Escher_WebUI/views"
+API = f"{APP_HOST}/Escher/Escher_WebUI/EmployeeInformation/PaycheckHistory"
+# The signed-in Pay History screen. Loading it establishes the
+# login.paylocity.com session the JSON endpoints below need. A member who
+# only reached the access.paylocity.com landing page has not set those
+# cookies yet, and the endpoints then answer 200 with nothing.
+PAY_HISTORY_URL = f"{APP_HOST}/Escher/Escher_WebUI/EmployeeInformation/PayHistory/Index/"
+REPORT_BASE = f"{APP_HOST}/Escher/Escher_WebUI/views"
 
 
 def _get_json(page, url, params=None):

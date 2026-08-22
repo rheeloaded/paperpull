@@ -108,6 +108,7 @@ def test_every_request_is_a_GET():
 def test_report_urls_must_stay_on_paylocitys_host():
     assert site.is_safe_url(site.REPORT_BASE + "/companyfiles/DocStream.aspx?r=X&att=true")
     assert not site.is_safe_url("https://evil.test/companyfiles/DocStream.aspx?r=X")
+    assert site.REPORT_BASE.startswith("https://login.paylocity.com/")
 
 
 def _collect(rows):

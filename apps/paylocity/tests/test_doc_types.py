@@ -76,13 +76,15 @@ def test_deny_by_default():
 
 # -- SAFETY: every requested URL stays on Paylocity's host ----------------
 
-def test_off_host_urls_are_refused():
-    good = "https://access.paylocity.com/Escher/Escher_WebUI/x"
-    assert site.is_safe_url(good)
+def test_only_paylocity_hosts_are_allowed():
+    # sign-in host AND the app host that serves Escher and the PDFs
+    assert site.is_safe_url("https://access.paylocity.com/home")
+    assert site.is_safe_url("https://login.paylocity.com/Escher/Escher_WebUI/x")
     for bad in [
-            "https://access.paylocity.com.evil.test/x",       # suffix host
-            "https://access.paylocity.com@evil.test/x",       # userinfo host
-            "http://access.paylocity.com/x",                  # scheme downgrade
+            "https://login.paylocity.com.evil.test/x",        # suffix host
+            "https://login.paylocity.com@evil.test/x",        # userinfo host
+            "http://login.paylocity.com/x",                   # scheme downgrade
+            "https://paylocity.com/x",                        # not in the set
             "https://evil.test/Escher/x",
             "//evil.test/x",
             "javascript:alert(1)"]:
