@@ -54,12 +54,18 @@ URLS = {
     # and the sign-in page. That means a URL alone cannot tell you whether you
     # are signed in - looks_signed_out() checks for the password field instead.
     "login": f"{BASE}/",
-    # GUESSES until diagnose runs. The public site calls the document area the
-    # "Digital Vault"; WebForms apps of this vintage use .aspx page names.
-    "documents": f"{BASE}/DigitalVault.aspx",
-    "documents_alt": f"{BASE}/Documents.aspx",
-    "documents_alt2": f"{BASE}/MyDocuments.aspx",
-    "statements": f"{BASE}/Statements.aspx",
+    # The signed-in app lives under /Home/. Confirmed 2026-08-22 from the tab
+    # left open after sign-in, which sat on /Home/default.aspx. The first set
+    # of guesses omitted that prefix entirely and every one of them 404'd.
+    #
+    # The page names below are still guesses. The public site calls the
+    # document area the "Digital Vault", and WebForms apps of this vintage use
+    # .aspx page names, so these are the shapes worth trying.
+    "home_app": f"{BASE}/Home/default.aspx",
+    "documents": f"{BASE}/Home/DigitalVault.aspx",
+    "documents_alt": f"{BASE}/Home/Documents.aspx",
+    "documents_alt2": f"{BASE}/Home/MyDocuments.aspx",
+    "statements": f"{BASE}/Home/Statements.aspx",
 }
 DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["documents_alt"],
                            URLS["documents_alt2"], URLS["statements"]]
