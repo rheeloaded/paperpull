@@ -703,97 +703,142 @@ def document_deeplink(document_id: str, document_date: str) -> str:
     return f"{BASE}/my/documents?documentId={document_id}&documentDate={document_date}"
 
 
-def download_by_id(page, document_id: str, document_date: str, out_path) -> bool:
-    """Download a document by navigating straight to its deep link, which
-    renders the PDF inline as a blob iframe, then fetching the blob bytes.
-    Stateless - needs no filter/pagination state."""
-    if not document_id:
+def _row_matches(row_doc: dict, title: str, date_text: str, account: str) -> bool:
+    if _clean(row_doc.get("title")) != _clean(title):
         return False
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        page.goto(document_deeplink(document_id, document_date),
-                  wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_selector("iframe[src^='blob:']", timeout=30000)
-        page.wait_for_timeout(1500)
-        b64 = page.evaluate(_BLOB_FETCH_JS)
-        if b64:
-            data = base64.b64decode(b64)
-            if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
-                return True
-            log.info("deep-link blob for %s not a PDF (%d bytes)", document_id, len(data))
-    except Exception as e:
-        log.info("download_by_id failed for %s: %s", document_id, e)
-    return False
+    if _clean(row_doc.get("displayDate")) != _clean(date_text):
+        return False
+    # account is "policy insured" joined at discovery time
+    return _clean(row_doc.get("accountName")) == _clean(account)
 
 
-def _find_doc_row(page, title: str, date_text: str, account: str):
-    """Return the readDocument (title) button for the row matching this
-    document, or None. Matched by content because row indexes are unstable."""
-    try:
-        rows = page.locator("table tr")
-        for i in range(rows.count()):
-            row = rows.nth(i)
-            try:
-                text = row.inner_text(timeout=800) or ""
-            except Exception:
-                continue
-            if title and title[:40] not in text:
-                continue
-            if date_text and date_text not in text:
-                continue
-            if account and account[:18] and account[:18] not in text:
-                continue
-            rd = row.locator("[data-testid^='readDocument-']")
-            if rd.count() > 0:
-                return rd.first
-    except Exception:
-        pass
-    return None
+def _fresh_view_target(page, title: str, date_text: str, account: str) -> str:
+    """Walk the pager and return TODAY'S postback target for this document.
+
+    Never the stored one. WebForms names repeater controls by row position,
+    so ctl02$lnkViewDocument means "row 2 of whichever page is showing", and
+    the same name exists on every pager page. A stored target clicked on the
+    wrong page would view a different member document under this one's
+    filename, which is the worst quiet failure this app could have.
+    """
+    goto_table_page(page, 1)
+    for number in range(1, 21):
+        if number > 1 and not goto_table_page(page, number):
+            break
+        for row_doc in collect_document_index(page):
+            if _row_matches(row_doc, title, date_text, account):
+                return row_doc.get("documentId") or ""
+    return ""
 
 
 def download_document_row(page, title: str, date_text: str, account: str,
                           out_path) -> bool:
-    """Reload a fresh document list, click this document's title, and capture
-    the PDF it renders inline.
+    """Click the row's View control and capture the PDF it produces.
 
-    Armed Forces Mutual shows the PDF as a blob: iframe (no download event, no direct link).
-    We ALWAYS reload the list first so no previous document's iframe lingers -
-    that stale iframe was the cause of every capture returning the same file.
-    After the click we wait for a fresh blob iframe, then fetch its bytes in
-    the page context.
+    How the PDF arrives after the postback is not knowable in advance, so
+    three channels are watched at once: a download event, a popup whose
+    response is a PDF, and a PDF response in the page itself. Whichever
+    happens first wins. Bytes are written only if they begin %PDF.
     """
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # fresh list -> guarantees no leftover PDF iframe from the previous doc
-    goto_documents(page)
-    scroll_full_page(page, rounds=2)
-    rd = _find_doc_row(page, title, date_text, account)
-    if rd is None:
-        log.info("row not found for %r %r %r", title, date_text, account)
+    target = _fresh_view_target(page, title, date_text, account)
+    if not target:
+        log.info("could not re-find the row for %r %s", title[:50], date_text)
         return False
 
+    link = page.locator(f'a[href*="{target}"]')
     try:
-        rd.click()
-        # the inline PDF renders into a blob: iframe once the click resolves
-        page.wait_for_selector("iframe[src^='blob:']", timeout=30000)
-        page.wait_for_timeout(1800)
-        b64 = page.evaluate(r"""async () => {
-            const f = document.querySelector("iframe[src^='blob:']");
-            if (!f || !f.src) return null;
-            const r = await fetch(f.src);
-            const buf = new Uint8Array(await r.arrayBuffer());
-            let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-            return btoa(s);
-        }""")
-        if b64:
-            data = base64.b64decode(b64)
-            if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
-                return True
-            log.info("blob for %r was not a PDF (%d bytes)", title, len(data))
+        if link.count() != 1:
+            log.info("expected exactly one link for %s, found %d",
+                     target[-40:], link.count())
+            return False
+        label = _clean(link.first.inner_text(timeout=1500))
     except Exception as e:
-        log.info("capture failed for %r: %s", title, e)
-    return False
+        log.info("could not read the View link: %s", e)
+        return False
+    if FORBIDDEN_CONTROL_RE.search(label) or not SAFE_DOC_CONTROL_RE.search(label):
+        log.warning("refusing control %r", label[:60])
+        return False
+
+    state = {"download": None, "popup": None, "pdf": None}
+
+    def on_download(d):
+        state["download"] = d
+
+    def on_response(r):
+        try:
+            if state["pdf"] is None and                     "pdf" in (r.headers.get("content-type") or "").lower():
+                state["pdf"] = r
+        except Exception:
+            pass
+
+    def on_popup(pop):
+        state["popup"] = pop
+        try:
+            pop.on("response", on_response)
+        except Exception:
+            pass
+
+    page.on("download", on_download)
+    page.on("popup", on_popup)
+    page.on("response", on_response)
+    saved = False
+    try:
+        link.first.click()
+        deadline = 30.0
+        while deadline > 0 and not saved:
+            if state["download"] is not None:
+                try:
+                    state["download"].save_as(str(out_path))
+                    data = Path(out_path).read_bytes()
+                    if data.startswith(b"%PDF"):
+                        saved = True
+                    else:
+                        Path(out_path).unlink(missing_ok=True)
+                        log.warning("download event delivered a non-PDF")
+                        break
+                except Exception as e:
+                    log.info("saving the download failed: %s", e)
+                    break
+            elif state["pdf"] is not None:
+                try:
+                    data = state["pdf"].body()
+                except Exception as e:
+                    log.info("could not read the PDF response body: %s", e)
+                    state["pdf"] = None
+                    continue
+                if data.startswith(b"%PDF"):
+                    out = Path(out_path)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_bytes(data)
+                    saved = True
+                else:
+                    log.warning("response called itself a PDF and was not")
+                    break
+            else:
+                page.wait_for_timeout(500)
+                deadline -= 0.5
+        if not saved and deadline <= 0:
+            log.info("no PDF arrived within 30s for %r", title[:50])
+    finally:
+        for event, fn in (("download", on_download), ("popup", on_popup),
+                          ("response", on_response)):
+            try:
+                page.remove_listener(event, fn)
+            except Exception:
+                pass
+        # a popup is the app's own doing, never the user's tab
+        if state["popup"] is not None:
+            try:
+                state["popup"].close()
+            except Exception:
+                pass
+        # a full postback can leave the main frame on the rendered document,
+        # so put the table back before the next row is looked for
+        try:
+            if not on_documents_page(page):
+                page.goto(URLS["documents"], wait_until="domcontentloaded",
+                          timeout=60000)
+                page.wait_for_timeout(2500)
+        except Exception:
+            pass
+    return saved
