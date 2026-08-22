@@ -2,12 +2,27 @@
 
 When AAFMAA changes its site, repair this file only.
 
-STATUS: the URLs and selectors below are NOT yet verified against a signed-in
-        Member Center - they are starting guesses. Run `login.bat`, then
-        `diagnose.bat`, and repair DOCUMENT_URL_CANDIDATES and the FALLBACK
-        entries against what Diagnostics/ captures. Replace this paragraph
-        with the verification date once that has actually happened. The safety
-        guard below does not depend on any of that and applies from the start.
+STATUS, and read this before trusting anything below.
+
+  CONFIRMED against a signed-in account on 2026-08-22:
+    * the documents area is /Documents/default.aspx
+    * the app is organised as /<Area>/default.aspx
+    * the session survives page.goto, being an ordinary ASP.NET cookie
+
+  STILL UNVERIFIED:
+    * every selector in FALLBACK, which has never been matched against a
+      real document list
+    * every rule in document_rules.json, which was written from what AAFMAA
+      is known to issue rather than from titles anyone has seen
+    * whether the list paginates, or splits by policy, or by year
+
+  So discovery and download are not finished. Run `diagnose.bat` on the
+  documents page and repair FALLBACK against what lands in Diagnostics/.
+  Update these two lists as things move from one to the other, rather than
+  deleting the block wholesale, because a file that claims more than it has
+  earned is worse than one that admits what it does not know.
+
+  The safety guard does not depend on any of this and applies from the start.
 
 SAFETY (this portal can move money):
   The Member Center's own front page advertises Pay Premiums, Check Loan
@@ -54,21 +69,23 @@ URLS = {
     # and the sign-in page. That means a URL alone cannot tell you whether you
     # are signed in - looks_signed_out() checks for the password field instead.
     "login": f"{BASE}/",
-    # The signed-in app lives under /Home/. Confirmed 2026-08-22 from the tab
-    # left open after sign-in, which sat on /Home/default.aspx. The first set
-    # of guesses omitted that prefix entirely and every one of them 404'd.
-    #
-    # The page names below are still guesses. The public site calls the
-    # document area the "Digital Vault", and WebForms apps of this vintage use
-    # .aspx page names, so these are the shapes worth trying.
+    # CONFIRMED against a signed-in account, 2026-08-22. The app is organised
+    # as /<Area>/default.aspx, so the documents area is /Documents/default.aspx
+    # and the landing page is /Home/default.aspx.
     "home_app": f"{BASE}/Home/default.aspx",
-    "documents": f"{BASE}/Home/DigitalVault.aspx",
-    "documents_alt": f"{BASE}/Home/Documents.aspx",
-    "documents_alt2": f"{BASE}/Home/MyDocuments.aspx",
-    "statements": f"{BASE}/Home/Statements.aspx",
+    "documents": f"{BASE}/Documents/default.aspx",
 }
-DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["documents_alt"],
-                           URLS["documents_alt2"], URLS["statements"]]
+
+# Deliberately ONE confirmed URL rather than a list of guesses.
+#
+# The first probe here tried four invented .aspx names, every one of them
+# missed, and the app sat on a styled 404 that still returns HTTP 200. On the
+# Discover app the same habit ended a live session on a logoff page, and it
+# could not afterwards be established whether a bad path or an inactivity
+# timeout did it. Guessing paths on a financial site while signed in is not
+# worth that doubt. If this URL ever stops working, the in-page nav link is
+# the fallback, and diagnose records where every link points.
+DOCUMENT_URL_CANDIDATES = [URLS["documents"]]
 
 LOGIN_URL_MARKERS = ["/login", "/logon", "/signin", "/auth",
                      "returnurl=", "sessionexpired", "timeout.aspx"]
