@@ -337,7 +337,7 @@ class App:
             date, _ = site.parse_period_date(d.get("displayDate") or title)
             date = date or ""
         # Honor the date floor at discovery so discovery.json holds only what
-        # is in scope (You wants 2024-01-01 onward).
+        # is in scope, honouring default_start_date from config.
         floor = self.args.start_date or self.config.get("default_start_date")
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
