@@ -1,20 +1,20 @@
-"""Navy Federal statement & tax-document downloader (local, supervised).
+"""Armed Forces Mutual statement & tax-document downloader (local, supervised).
 
 Usage:
-    python navyfederal_docs.py --login       verify connection to your browser
-    python navyfederal_docs.py --discover    list available documents
-    python navyfederal_docs.py --pilot       download the 5 newest, then stop
-    python navyfederal_docs.py --all         download everything in scope
-    python navyfederal_docs.py --resume      continue an interrupted run
-    python navyfederal_docs.py --verify      re-validate every saved PDF
-    python navyfederal_docs.py --diagnose    dump page structure (no downloads)
-    python navyfederal_docs.py --dry-run     plan filenames, save nothing
+    python aafmaa_docs.py --login       verify connection to your browser
+    python aafmaa_docs.py --discover    list available documents
+    python aafmaa_docs.py --pilot       download the 5 newest, then stop
+    python aafmaa_docs.py --all         download everything in scope
+    python aafmaa_docs.py --resume      continue an interrupted run
+    python aafmaa_docs.py --verify      re-validate every saved PDF
+    python aafmaa_docs.py --diagnose    dump page structure (no downloads)
+    python aafmaa_docs.py --dry-run     plan filenames, save nothing
 
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N  --type Statement|"Tax Document"
 
 READ-ONLY: this tool only reads the Documents area and downloads PDFs that
-Navy Federal already generated. It never transfers funds, trades, rebalances,
+Armed Forces Mutual already generated. It never transfers funds, trades, rebalances,
 or changes any account setting. Everything stays on this machine; nothing is
 sent to any external service.
 """
@@ -32,14 +32,14 @@ from typing import List, Optional
 
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
-import navyfederal_site as site
+import aafmaa_site as site
 from paperpull_core.models import State
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
-log = logging.getLogger("navyfederal_docs")
+log = logging.getLogger("aafmaa_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 
@@ -54,7 +54,7 @@ def ask(prompt: str) -> str:
 
 
 class Document:
-    """One Navy Federal document."""
+    """One Armed Forces Mutual document."""
 
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
@@ -66,7 +66,7 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # Navy Federal's stable per-document UUID
+        self.document_id = document_id  # today's postback target, NOT identity
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -84,11 +84,14 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. Navy Federal's API gives each document a durable
-        documentId (UUID) - use it. Fall back to category:date:title:account
-        for anything discovered without one."""
-        if self.document_id:
-            return f"id:{self.document_id}"
+        """Stable identity: category, date, title and policy.
+
+        Deliberately NOT the postback target stored in document_id. WebForms
+        regenerates control names per page render, so the same statement can
+        carry a different target on a different visit. Keying on it would make
+        every rediscovery look like new documents, and the sticky downloaded_ok
+        marker would never match again. The postback name is a means of
+        clicking the row today, never a name for the document."""
         acct = sanitize_component(self.account or "")[:40]
         return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
 
@@ -188,11 +191,16 @@ class App:
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
         if self._cdp_mode:
-            # Reuse the user's signed-in Navy Federal tab (the digitalomni portal
-            # keeps its session there; a fresh tab is unauthenticated).
+            # Reuse the tab you signed in on, rather than opening a blank one.
+            # The session itself would survive a fresh tab, since ASP.NET keeps
+            # it in a cookie. The reason this matters is that a new blank tab
+            # means the app never sees the page you left open for it, so a
+            # wrong URL guess has nothing to fall back to and diagnose reports
+            # about:blank, which is exactly what happened on the first run.
             live = [p for p in ctx.pages if not p.is_closed()]
-            nfcu = [p for p in live if "navyfederal" in (p.url or "")]
-            self._work_page = nfcu[0] if nfcu else (live[0] if live else ctx.new_page())
+            mine = [p for p in live if "aafmaa.com" in (p.url or "")]
+            self._work_page = mine[0] if mine else (
+                live[0] if live else ctx.new_page())
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         return self._work_page
@@ -200,7 +208,10 @@ class App:
     def close(self):
         try:
             if self._cdp_mode:
-                pass  # never close the user's own signed-in tab
+                # Never close it. Now that the signed-in tab is reused rather
+                # than a throwaway being opened, closing the work page would
+                # close the window you were told to keep open.
+                pass
             elif self._context:
                 self._context.close()
         except Exception:
@@ -224,7 +235,7 @@ class App:
             ask("Press Enter once the page looks normal (or Ctrl+C to quit)... ")
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
-            print("\n!! Navy Federal appears to have signed you out.")
+            print("\n!! Armed Forces Mutual appears to have signed you out.")
             print("Please sign in again in the open browser window.")
             ask("Press Enter after you are signed in... ")
             site.goto_documents(page)
@@ -249,14 +260,14 @@ class App:
         print("Sign in, keep the window OPEN, then run the pilot.")
 
     def cmd_login(self):
-        print("Checking the connection to your signed-in Navy Federal browser...\n")
+        print("Checking the connection to your signed-in Armed Forces Mutual browser...\n")
         page = self.page()
         ok = site.goto_documents(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
-            print("Connected, but Navy Federal shows a signed-out page.")
+            print("Connected, but Armed Forces Mutual shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
             print("Success: connected and the Documents page is visible.")
@@ -275,7 +286,7 @@ class App:
         if a.year and not (doc.date or "").startswith(str(a.year)):
             return False
         # Hard floor: never process documents before the configured start date
-        # (You already has Navy Federal documents from 2023 and earlier).
+        # (You already has Armed Forces Mutual documents from 2023 and earlier).
         floor = a.start_date or self.config.get("default_start_date")
         if floor and (not doc.date or doc.date < floor):
             return False
@@ -318,39 +329,8 @@ class App:
                                         "href": r.href}, save=False)
         return 0
 
-    def _record_nfcu_doc(self, d: dict) -> int:
-        """Record one collected row {account,date,title}. Returns 1 if new."""
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
-        if doc_types.should_skip(title, self.rules):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        category, summary, confidence = doc_types.classify_document(title, self.rules)
-        if category == doc_types.OTHER and re.search(r"statement", title, re.I):
-            category = doc_types.STATEMENT
-        if not doc_types.wanted(category, self.config):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        date = (d.get("date") or "").strip()
-        floor = self.args.start_date or self.config.get("default_start_date")
-        if floor and (not date or date < floor):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
-        acct_short = re.sub(r"\b(COMBINED|ACCOUNTS?)\b", "", account, flags=re.I)
-        acct_short = re.sub(r"\s+", " ", acct_short).strip().title()
-        full_summary = f"{summary} - {acct_short}" if acct_short else summary
-        doc = Document(title=title, category=category, summary=full_summary,
-                       date=date, confidence=confidence, account=account,
-                       date_text=date, document_id="")
-        if self.discovery.get(doc.key) is None:
-            rec = doc.to_dict()
-            rec["state"] = State.DISCOVERED.value
-            self.discovery.update(doc.key, rec, save=False)
-            return 1
-        return 0
-
-    def _record_api_doc(self, d: dict) -> int:
-        """Record one document dict from Navy Federal's documents API. Returns 1 if new."""
+    def _record_indexed_doc(self, d: dict) -> int:
+        """Record one document dict from Armed Forces Mutual's documents API. Returns 1 if new."""
         title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()
         if not title:
             return 0
@@ -358,12 +338,15 @@ class App:
             self.stats["skipped_out_of_scope"] += 1
             return 0
         category, summary, confidence = doc_types.classify_document(title, self.rules)
-        # The API's own category is a reliable backstop for routing.
-        api_cat = (d.get("category") or "").lower()
+        # Whatever section or Type column the document was listed under is a
+        # useful backstop when the title alone is ambiguous.
+        listed_cat = (d.get("category") or "").lower()
         if category == doc_types.OTHER:
-            if "insur" in api_cat:
+            if any(w in listed_cat for w in ("insur", "polic", "certificate", "coverage")):
                 category = doc_types.INSURANCE
-            elif "bank" in api_cat and re.search(r"statement", title, re.I):
+            elif "tax" in listed_cat:
+                category = doc_types.TAX
+            elif any(w in listed_cat for w in ("statement", "premium", "billing", "loan")):
                 category = doc_types.STATEMENT
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
@@ -393,21 +376,21 @@ class App:
 
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
-        if not site.ensure_statements(page):
+        if not site.goto_documents(page):
             self.check_session(page)
-            if not site.ensure_statements(page):
-                print("Could not open your Navy Federal statements. Sign in and open")
-                print("Statements & Documents in the browser, then try again.")
+            if not site.goto_documents(page):
+                print("Could not open your Armed Forces Mutual documents. Sign in and open your")
+                print("Documents page in the browser, then try again.")
                 return 0
         self.check_session(page)
 
-        # Statements are grouped by account into expandable accordions; each
-        # group's rows carry a date + a "View" button (no documents API).
-        raw = site.nfcu_collect(page)
-        log.info("Navy Federal: collected %d document rows across accounts", len(raw))
+        # Enumerate EVERY document via Armed Forces Mutual's documents JSON API (stable
+        # documentIds, full history), not by scraping the visible table.
+        api_docs = site.collect_all_pages(page)
+        log.info("Armed Forces Mutual documents API returned %d unique documents", len(api_docs))
         n_new = 0
-        for d in raw:
-            n_new += self._record_nfcu_doc(d)
+        for d in api_docs:
+            n_new += self._record_indexed_doc(d)
         self.discovery.save()
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -490,6 +473,36 @@ class App:
                 self.stats["failed"] += 1
             self._delay()
 
+    @staticmethod
+    def _policy_inside_pdf(pdf_path, account: str):
+        """Does this PDF actually belong to this row? (ok, note)
+
+        The archive briefly held a file named for one insured that contained
+        another's statement: a manual click during a broken run released one
+        document while a different document's capture was listening, and the
+        listener saved whichever PDF arrived first. The filename, the byte
+        count and the validation all looked perfect.
+
+        AAFMAA prints the policy number inside every statement, and the row's
+        Policy column carries the same number, so the file can be made to
+        prove it is the one that was asked for. No match, no archive entry.
+        """
+        m = re.search(r"(\d{5,7}-\d)", account or "")
+        if not m:
+            return True, "no policy number on the row to check against"
+        want = m.group(1)
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(pdf_path))
+            text = ""
+            for pg in reader.pages[:2]:
+                text += pg.extract_text() or ""
+        except Exception as e:
+            return False, f"could not read the PDF back: {e}"
+        if want in text:
+            return True, ""
+        return False, f"PDF does not contain this row's policy number {want}"
+
     def download_one(self, page, doc: Document, filename: str):
         """Download one document PDF straight to its final path.
 
@@ -504,13 +517,12 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Reach the statements page (reuse the signed-in tab), then expand this
-        # document's account group and click its "View" button; the PDF opens as
-        # a blob in a new tab, whose bytes we fetch and save.
-        if not site.ensure_statements(page):
-            self.check_session(page)
-            site.ensure_statements(page)
-        saved = site.nfcu_download(page, page.context, doc.account, doc.date, out_path)
+        # The stored postback target is never used to click. WebForms names
+        # repeater controls by row position, so the same name exists on every
+        # pager page and a stale target would view a DIFFERENT document under
+        # this one's filename. The row is re-found by content instead.
+        saved = site.download_document_row(
+            page, doc.title, doc.date_text, doc.account, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -556,6 +568,25 @@ class App:
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
+
+        ok, why = self._policy_inside_pdf(out_path, doc.account)
+        if not ok:
+            self.stats["validation_failures"] += 1
+            quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                     self.config["max_path_length"])
+            try:
+                out_path.replace(quarantine)
+            except OSError:
+                quarantine = out_path
+            doc.pdf_path, doc.pdf_filename = str(quarantine), quarantine.name
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes=f"identity check failed: {why}")
+            self._write_row(doc, "Identity check failed", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print(f"  !! {why}; moved to Manual Review.")
+            return
+        if why:
+            log.info("identity check skipped: %s", why)
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
@@ -647,7 +678,7 @@ class App:
         self.stats["mode"] = mode_name
         if mode_name == "all" and not self.args.yes:
             scope = ", ".join(self.config.get("document_types", []))
-            print(f"This downloads ALL available Navy Federal documents ({scope}).")
+            print(f"This downloads ALL available Armed Forces Mutual documents ({scope}).")
             print("Type YES to continue:")
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
@@ -727,10 +758,81 @@ class App:
                         t = (loc.nth(i).inner_text(timeout=400) or "").strip()[:60]
                     except Exception:
                         t = ""
-                    if t:
+                    href = ""
+                    if role == "link":
+                        try:
+                            href = loc.nth(i).get_attribute("href") or ""
+                        except Exception:
+                            href = ""
+                    if t or href:
+                        # The href is the point of this. A label tells you what
+                        # a link is called; only the target tells you the URL
+                        # of the documents area, which is the one thing a first
+                        # probe against an unknown tenant needs.
                         controls.append({"role": role, "text": t,
+                                         "href": href[:160],
                                          "safe": site.is_safe_control(t)})
             info["controls"] = controls
+
+            # The rows themselves. Counting them says a list exists; only the
+            # text says what a document is called and when it is dated, which
+            # is what the classification rules and the date parser need. On a
+            # WebForms page the row is also where the postback target lives,
+            # since the View and Download links carry no usable href.
+            rows = []
+            try:
+                loc = page.locator(site.FALLBACK["doc_row"])
+                for i in range(min(loc.count(), 10)):
+                    el = loc.nth(i)
+                    try:
+                        text = " | ".join(
+                            x.strip() for x in (el.inner_text(timeout=800) or "").splitlines()
+                            if x.strip())
+                    except Exception:
+                        text = ""
+                    targets = []
+                    try:
+                        targets = el.evaluate(r"""e => [...e.querySelectorAll('a')]
+                            .map(a => (a.innerText || '').trim() + ' -> ' +
+                                 ((a.getAttribute('href') || '').match(/PostBackOptions\("([^"]+)"/)?.[1]
+                                  || a.getAttribute('href') || ''))
+                            .slice(0, 6)""") or []
+                    except Exception:
+                        pass
+                    if text or targets:
+                        rows.append({"text": text[:300], "links": targets})
+                info["row_samples"] = rows
+            except Exception as e:
+                info["row_samples"] = f"ERR {e}"
+
+            # Why a row was or was not treated as a document row. The
+            # collector filters on "at least four <td> cells", and on this
+            # page that let exactly one row through, a pagination cell reading
+            # "1". WebForms nests tables inside tables for layout, so a <tr>
+            # can own six cells or six hundred depending which one it is.
+            try:
+                shape = page.evaluate(r"""() => [...document.querySelectorAll('tr')]
+                    .slice(0, 60).map((tr, i) => ({
+                        i,
+                        own_td: [...tr.children].filter(c => c.tagName === 'TD').length,
+                        any_td: tr.querySelectorAll('td').length,
+                        links: tr.querySelectorAll('a').length,
+                        text: (tr.innerText || '').replace(/\s+/g, ' ').slice(0, 70),
+                    }))""") or []
+                info["table_shape"] = shape
+            except Exception as e:
+                info["table_shape"] = f"ERR {e}"
+
+            # Which sub-sections exist. MY DOCUMENTS, Insurance Documents and
+            # Digital Vault are all postbacks, so each is a separate view of
+            # this one page rather than a URL of its own.
+            try:
+                info["sections"] = [
+                    c["text"] for c in controls
+                    if c.get("text") and "PostBack" in (c.get("href") or "")
+                    and len(c["text"]) < 40]
+            except Exception:
+                pass
             page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
                             full_page=True)
         except Exception as e:
@@ -750,7 +852,7 @@ class App:
         dates = sorted(d for d in s["dates"] if d)
         new_files = s.get("new_files", [])
         atomic_write_text(self.paths.run_summary, "\n".join([
-            "Navy Federal Documents - run summary",
+            "Armed Forces Mutual Documents - run summary",
             "=" * 40,
             f"Run start:                 {s['started']}",
             f"Run end:                   {s['ended']}",
@@ -785,7 +887,7 @@ class App:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="Local supervised Navy Federal document downloader (read-only)")
+        description="Local supervised Armed Forces Mutual document downloader (read-only)")
     for name, help_text in [
             ("login", "verify connection to your signed-in browser"),
             ("discover", "list available documents; writes discovery.json"),
