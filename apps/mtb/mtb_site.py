@@ -65,24 +65,40 @@ LOGIN_URL_MARKERS = ["/logon", "/login", "/signin", "/auth", "/idp", "/mfa",
 # ---------------------------------------------------------------------------
 # HARD SAFETY GUARD - never click anything matching this. Tuned for a bank.
 # ---------------------------------------------------------------------------
+# Word-stem note: an earlier version used \bchange\b, \bedit\b, \bupdate\b and
+# bare "remove"/"apply". A review found the plurals and tenses walked straight
+# through - "Save Changes", "Document Removal", "Loss Mitigation Application"
+# all passed. Verb families are matched with their endings now, and anything
+# that reads like a settings control is refused outright.
 FORBIDDEN_CONTROL_RE = re.compile(
     r"(transfer|deposit|withdraw|wire\b|move\s+money|send\s+money|zelle|"
-    r"pay\b|payment|pay\s+bills?|bill\s*pay|autopay|auto-?pay|schedule\s+payment|"
+    r"pay\b|payment|pay\s+bills?|bill\s*pay|autopay|auto-?pay|schedul|"
     r"buy|sell|trade|place\s+order|rebalance|reallocate|"
-    r"apply|open\s+\w*\s*account|get\s+(a\s+)?(quote|started|loan)|add\s+funds|"
-    r"cash\s+a\s+check|mobile\s+deposit|external\s+account|link\s+(bank|account)|"
+    r"appl(y|ies|ied|ication)|open\s+\w*\s*account|get\s+(a\s+)?(quote|started|loan)|"
+    r"add\s+funds|check\b|cash\s+a\s+check|mobile\s+deposit|external\s+account|"
+    r"link\s+(bank|account)|add\s+(a\s+)?(bank|account)|"
     r"dispute|report\s+(a\s+)?(problem|fraud|lost|stolen)|lock\s+card|unlock\s+card|"
-    r"activate|replace\s+card|order\s+checks|stop\s+payment|"
-    r"\bchange\b|\bedit\b|\bupdate\b|set\s+up|enable|disable|delete|remove|"
+    r"activat|replace\s+card|order\s+checks|stop\s+payment|"
+    # verb families, endings included
+    r"chang(e|es|ed|ing)|edit(s|ed|ing)?\b|updat(e|es|ed|ing)|"
+    r"set\s+up|enabl|disabl|delet|remov(e|es|ed|ing|al)|"
+    # anything that reads like a settings/preferences control
+    r"\boptions?\b|\bsettings?\b|\bpreferences?\b|\bsave\b|manage|"
+    r"enroll|consent|opt\s*(in|out)|paperless|turn\s+(on|off)|"
     r"beneficiar|payee|contact\s+info|password|username|"
-    r"file\s+a\s+claim|start\s+a\s+claim|renew|cancel|"
+    r"file\s+a\s+claim|start\s+a\s+claim|renew|cancel|close\s+account|"
     r"escrow\s+(analysis\s+)?(change|adjust)|make\s+(a\s+)?payment|"
     r"pay\s+(my\s+)?(mortgage|loan|bill)|principal[\s-]*(only)?\s*payment|"
-    r"recast|refinanc|forbearance|modif|payoff\s+(request|quote)|"
+    r"recast|refinanc|forbear|modif|\bpayoff\b|loss\s+mitigation|defer|"
+    r"skip\s+a?\s*payment|recurring|one[\s-]*time|"
     r"send\b|submit|confirm|continue|next|agree|accept|sign\b|authorize)", re.I)
 
+# "save" was deliberately REMOVED from this allowlist and added to the
+# blocklist above. On a portal that can move money a bare "Save" is far more
+# likely to commit a settings change than to save a PDF, and the real document
+# controls all say download / view / open / print / pdf.
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(download|view|open|save|print|pdf|statement|document|1099|1098|"
+    r"(download|view|open|print|pdf|statement|document|1099|1098|"
     r"declaration|policy|tax|e-?statement)", re.I)
 
 SECURITY_CHALLENGE_MARKERS = [
@@ -281,287 +297,14 @@ def goto_documents(page) -> bool:
     return not looks_signed_out(page)
 
 
-def scroll_full_page(page, rounds: int = 6, delay_ms: int = 700) -> None:
-    try:
-        for _ in range(rounds):
-            page.mouse.wheel(0, 2500)
-            page.wait_for_timeout(delay_ms)
-        page.keyboard.press("End")
-        page.wait_for_timeout(delay_ms)
-    except Exception:
-        pass
-
-
-def expand_all(page) -> None:
-    """Click only SAFE 'show more / load more / view all' controls."""
-    for _ in range(25):
-        clicked = False
-        try:
-            btn = page.get_by_role("button", name=re.compile(
-                r"(show more|load more|view more|see more|view all|older|more\s+statements)", re.I))
-            if btn.count() > 0 and btn.first.is_visible():
-                label = btn.first.inner_text(timeout=1000) or ""
-                if not FORBIDDEN_CONTROL_RE.search(label):
-                    btn.first.click()
-                    page.wait_for_timeout(1500)
-                    clicked = True
-        except Exception:
-            pass
-        if not clicked:
-            break
-
-
-def next_page(page) -> bool:
-    try:
-        loc = page.locator(FALLBACK["next_page"])
-        if loc.count() > 0 and loc.first.is_visible() and loc.first.is_enabled():
-            label = (loc.first.inner_text(timeout=800) or "") + \
-                (loc.first.get_attribute("aria-label") or "")
-            if FORBIDDEN_CONTROL_RE.search(label):
-                return False
-            loc.first.click()
-            page.wait_for_timeout(2500)
-            return True
-    except Exception:
-        pass
-    return False
-
-
-@dataclass
-class RawDoc:
-    title: str
-    account: str = ""
-    date_text: str = ""
-    href: str = ""
-    text: str = ""
-    row_index: int = -1
-    kind: str = "doc"
-
-
-# M&T Bank "My Documents" is a table: Document title | Date delivered | Account |
-# Options. Each document row has a title <button data-testid="readDocument-N">
-# (clicking it renders the PDF inline in a blob: iframe) and an Options
-# <button data-testid="actions-N">. Verified 2026-07-23.
-_ROW_JS = r"""() => {
-  const out = [];
-  for (const tr of document.querySelectorAll('table tr')) {
-    const rd = tr.querySelector("[data-testid^='readDocument-']");
-    if (!rd) continue;                       // header / non-document row
-    const tds = [...tr.querySelectorAll('td')].map(c => (c.innerText || '').trim());
-    out.push({
-      title: (tds[0] || '').replace(/\s+/g, ' ').trim(),
-      date: tds[1] || '',
-      account: (tds[2] || '').replace(/\s+/g, ' ').trim(),
-      testid: rd.getAttribute('data-testid') || ''
-    });
-  }
-  return out;
-}"""
-
-
-def collect_documents(page) -> List[RawDoc]:
-    """Collect M&T Bank document rows currently rendered in the table."""
-    docs: List[RawDoc] = []
-    seen = set()
-    try:
-        rows = page.evaluate(_ROW_JS)
-    except Exception:
-        rows = []
-    for r in rows:
-        title = _html.unescape(r.get("title", "")).strip()
-        if not title:
-            continue
-        date_text = r.get("date", "")
-        account = _html.unescape(r.get("account", "")).strip()
-        key = (title, date_text, account)
-        if key in seen:
-            continue
-        seen.add(key)
-        docs.append(RawDoc(title=title[:200], account=account, date_text=date_text,
-                           href="", row_index=-1,
-                           text=f"{title} | {date_text} | {account}"))
-    return docs
-
-
-_BLOB_FETCH_JS = r"""async () => {
-    const f = document.querySelector("iframe[src^='blob:']");
-    if (!f || !f.src) return null;
-    const r = await fetch(f.src);
-    const buf = new Uint8Array(await r.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-    return btoa(s);
-}"""
-
-
-def collect_documents_via_api(page) -> List[dict]:
-    """Enumerate EVERY document by capturing the M&T Bank documents JSON API as the
-    page loads/pages, rather than scraping the visible table.
-
-    The SPA calls
-      GET .../my-documents/experience/individuals/<id>/documents?limit=100
-    returning {"documents":[{title, displayDate, accountName, category,
-    subCategory, documentId, documentDate, ...}]} newest-first, in pages. We
-    capture every such response while scrolling + clicking through the pager,
-    then de-duplicate by documentId. Returns the raw document dicts.
-    """
-    batches: List[list] = []
-
-    def on_resp(r):
-        try:
-            u = r.url
-            if "/documents" not in u or "?" not in u:
-                return
-            if "json" not in (r.headers.get("content-type", "") or "").lower():
-                return
-            data = json.loads(r.text())
-            if isinstance(data, dict) and isinstance(data.get("documents"), list):
-                batches.append(data["documents"])
-        except Exception:
-            pass
-
-    page.on("response", on_resp)
-    try:
-        goto_documents(page)
-        page.wait_for_timeout(3500)
-        last_total = -1
-        stagnant = 0
-        for _ in range(150):  # generous cap
-            for _ in range(3):
-                page.mouse.wheel(0, 5000)
-                page.wait_for_timeout(700)
-            advanced = False
-            try:
-                nxt = page.get_by_role("button", name=re.compile(r"^\s*next page\s*$", re.I))
-                if nxt.count() == 0:
-                    nxt = page.get_by_role("link", name=re.compile(r"^\s*next page\s*$", re.I))
-                if nxt.count() and nxt.first.is_visible() and nxt.first.is_enabled():
-                    nxt.first.click()
-                    page.wait_for_timeout(1800)
-                    advanced = True
-            except Exception:
-                pass
-            total = sum(len(b) for b in batches)
-            if total == last_total and not advanced:
-                stagnant += 1
-                if stagnant >= 3:
-                    break
-            else:
-                stagnant = 0
-                last_total = total
-    finally:
-        try:
-            page.remove_listener("response", on_resp)
-        except Exception:
-            pass
-
-    docs: dict = {}
-    for batch in batches:
-        for d in batch:
-            did = d.get("documentId")
-            if did and did not in docs:
-                docs[did] = d
-    return list(docs.values())
-
-
-def document_deeplink(document_id: str, document_date: str) -> str:
-    return f"{BASE}/my/documents?documentId={document_id}&documentDate={document_date}"
-
-
-def download_by_id(page, document_id: str, document_date: str, out_path) -> bool:
-    """Download a document by navigating straight to its deep link, which
-    renders the PDF inline as a blob iframe, then fetching the blob bytes.
-    Stateless - needs no filter/pagination state."""
-    if not document_id:
-        return False
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        page.goto(document_deeplink(document_id, document_date),
-                  wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_selector("iframe[src^='blob:']", timeout=30000)
-        page.wait_for_timeout(1500)
-        b64 = page.evaluate(_BLOB_FETCH_JS)
-        if b64:
-            data = base64.b64decode(b64)
-            if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
-                return True
-            log.info("deep-link blob for %s not a PDF (%d bytes)", document_id, len(data))
-    except Exception as e:
-        log.info("download_by_id failed for %s: %s", document_id, e)
-    return False
-
-
-def _find_doc_row(page, title: str, date_text: str, account: str):
-    """Return the readDocument (title) button for the row matching this
-    document, or None. Matched by content because row indexes are unstable."""
-    try:
-        rows = page.locator("table tr")
-        for i in range(rows.count()):
-            row = rows.nth(i)
-            try:
-                text = row.inner_text(timeout=800) or ""
-            except Exception:
-                continue
-            if title and title[:40] not in text:
-                continue
-            if date_text and date_text not in text:
-                continue
-            if account and account[:18] and account[:18] not in text:
-                continue
-            rd = row.locator("[data-testid^='readDocument-']")
-            if rd.count() > 0:
-                return rd.first
-    except Exception:
-        pass
-    return None
-
-
-def download_document_row(page, title: str, date_text: str, account: str,
-                          out_path) -> bool:
-    """Reload a fresh document list, click this document's title, and capture
-    the PDF it renders inline.
-
-    M&T Bank shows the PDF as a blob: iframe (no download event, no direct link).
-    We ALWAYS reload the list first so no previous document's iframe lingers -
-    that stale iframe was the cause of every capture returning the same file.
-    After the click we wait for a fresh blob iframe, then fetch its bytes in
-    the page context.
-    """
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # fresh list -> guarantees no leftover PDF iframe from the previous doc
-    goto_documents(page)
-    scroll_full_page(page, rounds=2)
-    rd = _find_doc_row(page, title, date_text, account)
-    if rd is None:
-        log.info("row not found for %r %r %r", title, date_text, account)
-        return False
-
-    try:
-        rd.click()
-        # the inline PDF renders into a blob: iframe once the click resolves
-        page.wait_for_selector("iframe[src^='blob:']", timeout=30000)
-        page.wait_for_timeout(1800)
-        b64 = page.evaluate(r"""async () => {
-            const f = document.querySelector("iframe[src^='blob:']");
-            if (!f || !f.src) return null;
-            const r = await fetch(f.src);
-            const buf = new Uint8Array(await r.arrayBuffer());
-            let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-            return btoa(s);
-        }""")
-        if b64:
-            data = base64.b64decode(b64)
-            if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
-                return True
-            log.info("blob for %r was not a PDF (%d bytes)", title, len(data))
-    except Exception as e:
-        log.info("capture failed for %r: %s", title, e)
-    return False
-
+# NOTE: the Navy Federal scaffolding this app was cloned from once sat
+# here - a table scraper, a documents-JSON listener, a blob-iframe
+# capture, a deep-link downloader, and "show more"/"next page" clickers.
+# None of it was reachable, all of it described a DIFFERENT bank's DOM
+# (including a stale "verified" date), and four of those functions
+# clicked page controls with no safety check at all. Dead code near a
+# mortgage is a loaded gun, so it was removed rather than left to be
+# revived by a future repair. M&T's real mechanism is below.
 
 # ===========================================================================
 # M&T document collection. CONFIRMED against a live account 2026-08-22.
@@ -576,12 +319,21 @@ def download_document_row(page, title: str, date_text: str, account: str,
 #     1098 mortgage-interest statements.
 #
 # A document is identified by its own href. Downloading is a plain GET of that
-# href with the session cookie, host-checked first. Nothing is clicked.
+# href with the session cookie, host-checked first. The ONLY thing ever clicked
+# is a collapsed year section, and that click is guarded like any other.
 # ===========================================================================
 STATEMENTS_URL = f"{BASE}/Statements/StatementsAndNotices"
 TAX_URL = "https://m.mtb.com/TaxDocuments/TaxDocumentCenter"
 
 _STMT_TYPE = {"MTGSTMT": "Mortgage Statement", "YESTMT": "Year-End Statement"}
+
+# The two document endpoints, matched against the URL's PATH, never as a
+# substring of the whole URL. A review showed the old substring test accepted
+# /Payments/SchedulePayment?FetchStatementandNotices=1&dt=... - an on-host URL
+# that passes the host allowlist and would then be fetched with the live
+# session cookie. Matching the path closes that.
+_STMT_PATH = "/statements/fetchstatementandnotices"
+_TAX_PATH = "/taxdocuments/fetchtaxdocument"
 
 _COLLECT_JS = r"""() => [...document.querySelectorAll('a')]
     .map(a => ({label:(a.innerText||'').replace(/\s+/g,' ').trim(),
@@ -590,11 +342,52 @@ _COLLECT_JS = r"""() => [...document.querySelectorAll('a')]
 
 
 def _abs(href: str) -> str:
+    href = href or ""
+    if not href.strip():
+        return ""
     if href.startswith("http"):
         return href
     # tax links are relative to m.mtb.com, statement links to onlinebanking
     base = "https://m.mtb.com" if "/TaxDocument" in href else BASE
     return base + href
+
+
+def _endpoint_of(url: str) -> Optional[str]:
+    """Return "statement" or "tax" only if the URL's PATH really is one of the
+    two document endpoints on an M&T host. Anything else returns None and is
+    refused, so a crafted query string cannot smuggle another route through."""
+    if not is_safe_url(url):
+        return None
+    from urllib.parse import urlparse
+    try:
+        path = (urlparse(url).path or "").lower().rstrip("/")
+    except ValueError:
+        return None
+    if path == _STMT_PATH:
+        return "statement"
+    if path == _TAX_PATH:
+        return "tax"
+    return None
+
+
+def is_mt_frame(frame) -> bool:
+    """True only for a frame actually loaded from an M&T host.
+
+    The collector walks every frame of every tab in the attached browser, which
+    is the user's ordinary Chrome. Without this, it would read links from - and
+    click inside - whatever unrelated sites happen to be open.
+    """
+    try:
+        url = frame.url or ""
+    except Exception:
+        return False
+    if not url.startswith("https://"):
+        return False
+    from urllib.parse import urlparse
+    try:
+        return (urlparse(url).hostname or "").lower() in ALLOWED_HOSTS
+    except ValueError:
+        return False
 
 
 def _date_from_stmt_href(href: str, label: str) -> str:
@@ -625,18 +418,50 @@ _TAX_ROWS_JS = r"""() => {
     if (!a) continue;
     const text = (tr.innerText || '').replace(/\s+/g, ' ').trim();
     const ym = text.match(/(20\d{2})/);
-    out.push({href: a.getAttribute('href') || '', text: text.slice(0, 80),
+    out.push({href: a.getAttribute('href') || '', text: text.slice(0, 200),
               year: ym ? ym[1] : ''});
   }
   return out;
 }"""
 
 
+# The collapsed-year expander. Read its label first, click only if the label
+# clears the blocklist, then re-count. Kept as three tiny reads so the click is
+# a separate, guarded step rather than something buried in a bigger script.
+_OPEN_TABLE_COUNT_JS = r"""() => document.querySelectorAll('span.open-table').length"""
+_OPEN_TABLE_LABEL_JS = r"""() => {
+  const s = document.querySelector('span.open-table');
+  if (!s) return '';
+  const h = s.closest('h2') || s.parentElement;
+  return ((h ? h.innerText : s.innerText) || '').replace(/\s+/g, ' ').trim();
+}"""
+_OPEN_TABLE_CLICK_JS = r"""() => {
+  const s = document.querySelector('span.open-table');
+  if (!s) return false;
+  s.click();
+  return true;
+}"""
+
+
+def _tax_year(row_text: str, fallback: str) -> str:
+    """The tax year of a 1098 row.
+
+    Full dates are removed first. A row like "Available 01/15/2026 ... 1098 for
+    2025" was previously read as 2026 - the availability date, not the tax
+    year - which mis-titled and mis-dated the form. The bare year that is not
+    part of a date is the tax year.
+    """
+    stripped = re.sub(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", " ", row_text or "")
+    m = re.search(r"\b(19|20)\d{2}\b", stripped)
+    return m.group(0) if m else fallback
+
+
 def collect_statement_rows(page) -> List[dict]:
     """Every statement and tax document, from both pages, newest first.
 
-    Returns dicts {title, date, account, href}. The orchestrator records the
-    href as the document's identity and downloads it with a host-checked GET.
+    Returns dicts {title, date, account, href, doc_id}. The orchestrator records
+    the href as the document's identity and downloads it with a host-checked
+    GET. Only frames served by M&T are read.
     """
     rows: List[dict] = []
     seen = set()
@@ -645,13 +470,24 @@ def collect_statement_rows(page) -> List[dict]:
         added = 0
         for a in links:
             href = a.get("href") or ""
-            if not href or "FetchStatementandNotices" not in href or href in seen:
+            if not href or href in seen:
+                continue
+            full = _abs(href)
+            # Judge the PATH, not a substring of the URL. This is what stops a
+            # crafted on-host link (a payment route carrying the endpoint name
+            # as a query parameter) from being queued as a "statement".
+            if _endpoint_of(full) != "statement":
                 continue
             label = re.sub(r"\s+", " ", a.get("label") or "").strip()
             m = re.search(r"[?&]t=([A-Z]+)", href)
-            title = _STMT_TYPE.get(m.group(1) if m else "", "Mortgage Statement")
+            # An unrecognised t= is NOT assumed to be a mortgage statement. The
+            # page also offers notices and analysis statements; labelling one of
+            # those "Mortgage Statement" would file it under a name that is
+            # simply untrue. Unknown types keep the row's own text and land in
+            # Other Documents, where they are visible rather than disguised.
+            kind = m.group(1) if m else ""
+            title = _STMT_TYPE.get(kind) or (label or f"M&T Document ({kind or 'unknown'})")
             seen.add(href)
-            full = _abs(href)
             rows.append({"title": title, "date": _date_from_stmt_href(href, label),
                          "account": "", "href": full, "doc_id": _doc_id(full)})
             added += 1
@@ -660,38 +496,57 @@ def collect_statement_rows(page) -> List[dict]:
     # STATEMENTS. The list only renders after you pick the account and click
     # View, and this app does not submit that form (see SECURITY.md). So you
     # list it and the app reads it - but the listed view is transient and the
-    # tab it lives in is not predictable, so scan EVERY open tab and every
-    # frame rather than assuming one. Whichever tab holds the listed statements
-    # is found.
+    # tab it lives in is not predictable, so scan every tab. ONLY frames served
+    # by M&T are touched: this is the user's ordinary browser, and reading links
+    # out of (or clicking inside) unrelated sites would be indefensible.
     found_statements = 0
     try:
         pages = [p for p in page.context.pages if not p.is_closed()]
     except Exception:
         pages = [page]
+    mt_frames = []
     for pg in pages:
-        for fr in pg.frames:
-            # The statements page shows one collapsed section PER YEAR, and only
-            # the current year is open by default. Each collapsed year is a
-            # <span class="open-table"> whose click fires a FetchYearlyStatements
-            # GET that lists that year - read-only, no form submit. Expand them
-            # all before reading, or five-plus years of statements are silently
-            # missed (they were, until this was found). Expanding is bounded and
-            # idempotent: once open the span becomes "close-table".
-            try:
-                if fr.evaluate(r"""()=>document.querySelectorAll('span.open-table').length"""):
-                    for _ in range(15):  # at most 15 year sections
-                        opened = fr.evaluate(r"""()=>{
-                            const s=document.querySelector('span.open-table');
-                            if(!s) return false; s.click(); return true;}""")
-                        if not opened:
-                            break
-                        fr.wait_for_timeout(1200)
-            except Exception:
-                pass
-            try:
-                found_statements += harvest_statement_links(fr.evaluate(_COLLECT_JS) or [])
-            except Exception:
-                continue
+        try:
+            mt_frames.extend([fr for fr in pg.frames if is_mt_frame(fr)])
+        except Exception:
+            continue
+    for fr in mt_frames:
+        # The statements page shows one collapsed section PER YEAR, and only the
+        # current year is open by default. Each collapsed year is a
+        # <span class="open-table"> whose click fires a FetchYearlyStatements
+        # GET that lists that year - a read, not a form submit. Expand them all
+        # or five-plus years are silently missed (they were, until a user
+        # noticed). The click is guarded like any other control, and the loop
+        # stops the moment the count stops falling, so a span whose class never
+        # flips is clicked once, not fifteen times.
+        try:
+            remaining = fr.evaluate(_OPEN_TABLE_COUNT_JS)
+            for _ in range(20):
+                if not remaining:
+                    break
+                label = fr.evaluate(_OPEN_TABLE_LABEL_JS) or ""
+                if FORBIDDEN_CONTROL_RE.search(label):
+                    log.warning("refusing to expand a section labelled %r", label[:40])
+                    break
+                if not fr.evaluate(_OPEN_TABLE_CLICK_JS):
+                    break
+                fr.wait_for_timeout(1200)
+                now = fr.evaluate(_OPEN_TABLE_COUNT_JS)
+                if now >= remaining:
+                    log.warning("a year section did not open (%d left); reading "
+                                "what is on screen. Expand the years yourself "
+                                "and re-run if statements look short.", now)
+                    break
+                remaining = now
+        except Exception as e:
+            log.info("year expansion stopped: %s", str(e).splitlines()[0][:80])
+        # Harvest regardless of whether expansion worked, so a failed expand
+        # still yields the years already on screen.
+        try:
+            found_statements += harvest_statement_links(fr.evaluate(_COLLECT_JS) or [])
+        except Exception as e:
+            log.info("could not read links from a frame: %s",
+                     str(e).splitlines()[0][:80])
     if found_statements == 0:
         log.warning("No statements found in any open tab. On the Statements and "
                     "Notices page, pick your account and click View so they "
@@ -706,25 +561,26 @@ def collect_statement_rows(page) -> List[dict]:
     # page is open in any tab, its 1098s are collected; if not, they are simply
     # skipped with a hint, and statements still come through.
     found_tax = 0
-    for pg in pages:
-        for fr in pg.frames:
-            try:
-                tax_rows = fr.evaluate(_TAX_ROWS_JS) or []
-            except Exception:
+    for fr in mt_frames:
+        try:
+            tax_rows = fr.evaluate(_TAX_ROWS_JS) or []
+        except Exception:
+            continue
+        for r in tax_rows:
+            href = r.get("href") or ""
+            if not href or href in seen:
                 continue
-            for r in tax_rows:
-                href = r.get("href") or ""
-                if not href or href in seen:
-                    continue
-                seen.add(href)
-                year = r.get("year") or ""
-                title = "1098 Mortgage Interest Statement"
-                rows.append({
-                    "title": f"{year} {title}".strip() if year else title,
-                    "date": f"{year}-12-31" if year else "",
-                    "account": "", "href": _abs(href),
-                    "doc_id": _doc_id(_abs(href))})
-                found_tax += 1
+            full = _abs(href)
+            if _endpoint_of(full) != "tax":
+                continue
+            seen.add(href)
+            year = _tax_year(r.get("text") or "", r.get("year") or "")
+            title = "1098 Mortgage Interest Statement"
+            rows.append({
+                "title": f"{year} {title}".strip() if year else title,
+                "date": f"{year}-12-31" if year else "",
+                "account": "", "href": full, "doc_id": _doc_id(full)})
+            found_tax += 1
     if found_tax == 0:
         log.info("No tax documents found in an open tab. To include 1098s, open "
                  "the Tax Documents page (Statements > View Tax Documents) and "
@@ -745,24 +601,66 @@ def ensure_statements(page) -> bool:
     return not looks_signed_out(page)
 
 
+class SessionExpired(Exception):
+    """The server answered a document request with a sign-in page."""
+
+
+def _looks_like_login_html(body: bytes) -> bool:
+    """A sign-in page returned where a PDF was expected.
+
+    M&T answers an expired session with HTTP 200 and an HTML login page, not an
+    error. Without this the caller files every remaining document as "manual
+    review" and the run ends looking successful while having saved nothing.
+    """
+    head = body[:4000].lower()
+    if b"<html" not in head and b"<!doctype" not in head:
+        return False
+    return any(m in head for m in (
+        b"type=\"password\"", b"type='password'", b"sign on", b"sign in",
+        b"log in", b"log on", b"session has expired", b"please log on"))
+
+
 def download_statement(page, href: str, out_path) -> bool:
     """Save one document's PDF by a host-checked GET of its own href.
 
-    href is the identity captured at discovery. It is re-checked against M&T's
-    hosts here, so a stored value can never send the session cookie elsewhere.
+    href is the identity captured at discovery. It is re-checked here - both
+    that the host is M&T's and that the PATH really is a document endpoint - so
+    a stored or tampered value cannot send the session cookie somewhere else.
+    Raises SessionExpired if the server hands back a sign-in page.
     """
     from pathlib import Path
     url = _abs(href)
-    if not is_safe_url(url):
-        log.error("refusing a non-M&T URL")
+    if _endpoint_of(url) is None:
+        log.error("refusing a URL that is not an M&T document endpoint")
         return False
-    resp = page.context.request.get(url)
+    # Redirects are capped and the FINAL url is re-checked: "every URL this app
+    # requests is on an M&T host" has to hold for every hop, not just the first.
+    # Exceeding the cap RAISES rather than returning a response, and an expired
+    # session is exactly what produces a long redirect chain here (M&T bounces
+    # a document request towards sign-in), so that is reported as an expired
+    # session rather than as an unexplained failure.
+    try:
+        resp = page.context.request.get(url, max_redirects=3)
+    except Exception as e:
+        if "redirect" in str(e).lower():
+            raise SessionExpired(
+                "M&T redirected the document request, which means the "
+                "signed-in session is no longer valid") from None
+        log.warning("fetch failed: %s", str(e).splitlines()[0][:100])
+        return False
+    final = getattr(resp, "url", url) or url
+    if not is_safe_url(final):
+        log.error("refusing a redirect that left M&T's hosts")
+        return False
     if not resp.ok:
         log.warning("fetch returned %s", resp.status)
         return False
     body = resp.body()
     if not body.startswith(b"%PDF"):
-        log.warning("response was not a PDF")
+        if _looks_like_login_html(body):
+            raise SessionExpired(
+                "M&T returned a sign-in page instead of a document")
+        log.warning("response was not a PDF (%d bytes)", len(body))
         return False
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)

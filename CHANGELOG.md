@@ -7,6 +7,47 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.13.1] — 2026-08-23
+
+Hardening pass over the new M&T app, from a line-by-line review of it. Every
+item below is a real defect that was found and fixed, not a precaution.
+
+### Fixed (security)
+- **A crafted on-host link could be queued as a document.** The collector
+  accepted any URL merely *containing* a document endpoint name, so an on-host
+  route carrying that name as a query parameter passed the host allowlist and
+  would have been fetched with the live session cookie. Endpoints are matched
+  against the URL path now.
+- **The collector read, and clicked inside, every tab in the browser.** It
+  attaches to an ordinary browser, so that meant unrelated sites. Every frame
+  is host-checked before it is read or clicked.
+- **The one click on the live path had no guard at all**, while the README
+  claimed every click was checked. The year-expander click now checks its label
+  against the blocklist, and the claim in the README was rewritten to describe
+  what the code actually does.
+- **The blocklist let settings and payment controls through.** "Save Changes",
+  "Request Payoff Statement", "Open Escrow Options", "Loss Mitigation
+  Application", "Document Removal" and others passed, because verbs were
+  matched without their endings. Verb families and settings words are covered
+  now, and a bare "Save" is refused rather than treated as a document action.
+- **Redirects were followed unchecked.** They are capped, and the final URL is
+  re-validated before anything is written.
+- **Removed 282 lines of dead code** cloned from another provider, including
+  four functions that clicked page controls with no check, one that rebuilt a
+  stale deep link, and one whose own comment described a wrong-document bug it
+  would have re-armed.
+
+### Fixed (correctness and honesty)
+- **An expired session produced a run that looked successful.** M&T answers
+  with a sign-in page at HTTP 200, so every document was filed as "needs manual
+  review" and the tool exited 0 having saved nothing. It now recognises that
+  response, stops, explains what happened, and exits non-zero.
+- **A run that saves nothing no longer exits 0.**
+- **1098 tax forms took their year from the availability date**, so a form for
+  one year could be titled and dated as the next.
+- An empty href resolved to M&T's home page and was downloaded as a document.
+- The work tab was chosen by substring, which could select an unrelated tab.
+
 ## [0.13.0] — 2026-08-23
 
 ### Added

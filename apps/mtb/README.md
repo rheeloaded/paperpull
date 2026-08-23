@@ -11,14 +11,31 @@ online banking (`onlinebanking.mtb.com`). Read-only, delete-safe, part of
 
 ## Read-only by design (a mortgage can move real money)
 
-This tool only opens the document area and downloads PDFs M&T has already
+This tool only reads the document area and downloads PDFs M&T has already
 generated. It **never** pays the mortgage, sets up or edits autopay, moves
 money, transfers, sends a wire or Zelle, changes escrow, requests a payoff,
-refinances, or changes any setting. A control must pass **two** checks before
-it may be clicked: it must look like a document action (`SAFE_DOC_CONTROL_RE`)
-*and* match nothing in the blocklist (`FORBIDDEN_CONTROL_RE`), which is tuned
-for a mortgage servicer. Every URL the app requests must be on an M&T host.
-All of it is covered by tests.
+refinances, or changes any setting.
+
+Concretely, and stated as what the code actually does:
+
+- **Exactly one thing is ever clicked**: a collapsed year section on the
+  statements page, so the older years can be read. Its label is checked against
+  the blocklist (`FORBIDDEN_CONTROL_RE`) first, and the click is skipped if
+  anything about it reads like a payment or settings control.
+- **Only pages served by M&T are touched.** This attaches to your ordinary
+  browser, so every frame is host-checked before it is read or clicked. Other
+  tabs you have open are ignored entirely.
+- **Downloads are checked twice**: the host must be M&T's *and* the URL path
+  must be one of the two real document endpoints. A link that merely mentions
+  those endpoint names in a query string is refused, redirects are capped, and
+  the final URL is re-checked before anything is written to disk.
+- **No form is ever submitted and no dialog is ever confirmed.**
+- If M&T hands back a sign-in page instead of a document, the run **stops and
+  says so** rather than filing everything as "needs manual review" and exiting
+  as though it worked.
+
+All of it is covered by tests, including regression tests for each of the
+weaknesses a security review of this app actually found.
 
 ## Setup
 
