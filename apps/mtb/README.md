@@ -4,12 +4,10 @@ Downloads your M&T mortgage **statements and documents** as PDFs from M&T's
 online banking (`onlinebanking.mtb.com`). Read-only, delete-safe, part of
 [PaperPull](../../README.md).
 
-> **Status: the site layer is not verified yet.** M&T services its mortgages
-> inside its own online banking (confirmed), but where the mortgage statements
-> and documents live once signed in, and how a PDF is delivered, are not mapped
-> yet. There are no guessed document URLs. Run `login.bat`, then `diagnose.bat`,
-> and the real routes get written in from what it captures. The safety guard
-> applies from the first run.
+> **Status: verified against a live account (2026-08-23).** A full run pulled
+> 93 documents spanning 2020 to 2026, all valid PDFs. Statements and year-end
+> statements download directly; 1098 tax forms are included when the Tax
+> Documents page is open (see below).
 
 ## Read-only by design (a mortgage can move real money)
 
@@ -36,6 +34,22 @@ Sign in at `www.mtb.com/log-in` the way you normally do, get to your mortgage's
 documents/statements area, and **leave the browser window open**. The tool
 attaches to that already-signed-in browser and reads only what you can see. It
 never handles your credentials or 2FA.
+
+## Listing your statements first
+
+M&T only shows your statements after you pick the mortgage account and click
+**View**, which is a form submit this app deliberately does not perform (see
+the read-only note above). So you do that once, and the app reads the result:
+
+1. Open **Statements & Notices**, select the mortgage account, click **View**.
+2. Leave that tab open. The app then expands every year section itself (each
+   is a read-only request that lists that year) so the whole history is read,
+   not just the current year.
+3. For 1098 tax forms, also open **Statements > View Tax Documents** in another
+   tab and leave it open. The app reads the 1098s from there.
+
+The app scans whatever tabs you have open, so the order does not matter and it
+never navigates or resets those pages.
 
 ## Documents captured
 

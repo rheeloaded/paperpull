@@ -50,7 +50,7 @@ BASE = "https://onlinebanking.mtb.com"
 LOGIN_START = "https://www.mtb.com/log-in"
 # Every host this app will talk to, and no others. is_safe_url() checks this
 # exact set, parsed, so a request can only ever go to M&T.
-ALLOWED_HOSTS = {"onlinebanking.mtb.com", "www.mtb.com", "mtb.com"}
+ALLOWED_HOSTS = {"onlinebanking.mtb.com", "m.mtb.com", "www.mtb.com", "mtb.com"}
 
 URLS = {
     "home": f"{BASE}/",
@@ -268,37 +268,17 @@ def is_safe_url(url: str) -> bool:
 
 
 def goto_documents(page) -> bool:
-    """Navigate to a document area. Tries known URLs; if none render a
-    document list, keeps whatever page is currently open (so you can navigate
-    to the right place manually and the tool reads it)."""
-    for url in DOCUMENT_URL_CANDIDATES:
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(3500)
-            if looks_signed_out(page):
-                return False
-            try:
-                page.wait_for_selector(FALLBACK["page_ready"], timeout=12000)
-            except Exception:
-                pass
-            if page.locator(FALLBACK["doc_row"]).count() > 1:
-                return True
-        except Exception as e:
-            log.info("documents URL %s failed: %s", url, e)
-    # in-page nav link
-    try:
-        link = page.get_by_role("link", name=re.compile(
-            r"(documents?|statements?|tax\s+forms?)", re.I))
-        if link.count() > 0:
-            label = link.first.inner_text(timeout=1500) or ""
-            if not FORBIDDEN_CONTROL_RE.search(label):
-                link.first.click()
-                page.wait_for_timeout(3000)
-                return page.locator(FALLBACK["doc_row"]).count() > 1
-    except Exception:
-        pass
-    # fall back to the current page
-    return page.locator(FALLBACK["doc_row"]).count() > 1
+    """Deliberately does NOT navigate.
+
+    M&T's statement list only appears after you select the account and click
+    View, and this app never submits that form (see SECURITY.md). An earlier
+    version navigated here and clicked a "Statements" nav link, which reloaded
+    the page and WIPED the very list the user had created, so discovery always
+    read zero. So this only confirms you are still signed in. The actual
+    reading is collect_statement_rows, which scans every open tab and frame for
+    the statements you listed and the tax page it can open itself.
+    """
+    return not looks_signed_out(page)
 
 
 def scroll_full_page(page, rounds: int = 6, delay_ms: int = 700) -> None:
@@ -584,245 +564,207 @@ def download_document_row(page, title: str, date_text: str, account: str,
 
 
 # ===========================================================================
-# M&T Bank document center - NOT YET MAPPED. The functions below are the
-# Navy Federal scaffolding this app was cloned from (accordion groups, blob
-# View buttons). They are kept as a plausible starting shape for another
-# bank SPA, but every selector and the statements URL must be confirmed with
-# diagnose before use. No guessed URL is navigated to automatically.
+# M&T document collection. CONFIRMED against a live account 2026-08-22.
+#
+# Two server-rendered pages, both with real download URLs (no SPA, no blob):
+#   Statements: onlinebanking.mtb.com/Statements/StatementsAndNotices
+#     rows are <a href="/Statements/FetchStatementandNotices?t=<TYPE>&a=..&
+#     dt=MM/DD/YYYY&stmtId=..">. t=MTGSTMT is a mortgage statement, t=YESTMT a
+#     year-end statement.
+#   Tax:        m.mtb.com/TaxDocuments/TaxDocumentCenter
+#     rows are <a href="/TaxDocuments/FetchTaxDocument?documentkey=..">, the
+#     1098 mortgage-interest statements.
+#
+# A document is identified by its own href. Downloading is a plain GET of that
+# href with the session cookie, host-checked first. Nothing is clicked.
 # ===========================================================================
-STATEMENTS_URL = ""  # filled in from diagnose evidence
-GROUP_SEL = "[class*='product-kind-description-row']"
+STATEMENTS_URL = f"{BASE}/Statements/StatementsAndNotices"
+TAX_URL = "https://m.mtb.com/TaxDocuments/TaxDocumentCenter"
 
-_BLOB_FETCH = r"""async (u) => {
-    const r = await fetch(u);
-    const buf = new Uint8Array(await r.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-    return btoa(s);
+_STMT_TYPE = {"MTGSTMT": "Mortgage Statement", "YESTMT": "Year-End Statement"}
+
+_COLLECT_JS = r"""() => [...document.querySelectorAll('a')]
+    .map(a => ({label:(a.innerText||'').replace(/\s+/g,' ').trim(),
+                href:a.getAttribute('href')||''}))
+    .filter(x => /FetchStatementandNotices|FetchTaxDocument/i.test(x.href))"""
+
+
+def _abs(href: str) -> str:
+    if href.startswith("http"):
+        return href
+    # tax links are relative to m.mtb.com, statement links to onlinebanking
+    base = "https://m.mtb.com" if "/TaxDocument" in href else BASE
+    return base + href
+
+
+def _date_from_stmt_href(href: str, label: str) -> str:
+    m = re.search(r"[?&]dt=(\d{1,2})/(\d{1,2})/(\d{4})", href)
+    if m:
+        mo, dy, yr = (int(x) for x in m.groups())
+        if 1 <= mo <= 12 and 1 <= dy <= 31:
+            return f"{yr:04d}-{mo:02d}-{dy:02d}"
+    d = parse_date(label) or ""
+    if d:
+        return d
+    dd, _ = parse_period_date(label)
+    return dd or ""
+
+
+def _doc_id(href: str) -> str:
+    """A stable identity from the href: the stmtId or documentkey token. Two
+    statements in one month, or two 1098s, differ here even when their titles
+    and dates match, so neither collapses into one record."""
+    m = re.search(r"[?&](?:stmtId|documentkey)=([^&]+)", href, re.I)
+    return m.group(1)[:60] if m else href[-60:]
+
+
+_TAX_ROWS_JS = r"""() => {
+  const out = [];
+  for (const tr of document.querySelectorAll('tr')) {
+    const a = tr.querySelector('a[href*="FetchTaxDocument"]');
+    if (!a) continue;
+    const text = (tr.innerText || '').replace(/\s+/g, ' ').trim();
+    const ym = text.match(/(20\d{2})/);
+    out.push({href: a.getAttribute('href') || '', text: text.slice(0, 80),
+              year: ym ? ym[1] : ''});
+  }
+  return out;
 }"""
 
 
-def dismiss_timeout(page) -> None:
-    """Click the 'Continue Session' keep-alive if the inactivity modal is up."""
+def collect_statement_rows(page) -> List[dict]:
+    """Every statement and tax document, from both pages, newest first.
+
+    Returns dicts {title, date, account, href}. The orchestrator records the
+    href as the document's identity and downloads it with a host-checked GET.
+    """
+    rows: List[dict] = []
+    seen = set()
+
+    def harvest_statement_links(links):
+        added = 0
+        for a in links:
+            href = a.get("href") or ""
+            if not href or "FetchStatementandNotices" not in href or href in seen:
+                continue
+            label = re.sub(r"\s+", " ", a.get("label") or "").strip()
+            m = re.search(r"[?&]t=([A-Z]+)", href)
+            title = _STMT_TYPE.get(m.group(1) if m else "", "Mortgage Statement")
+            seen.add(href)
+            full = _abs(href)
+            rows.append({"title": title, "date": _date_from_stmt_href(href, label),
+                         "account": "", "href": full, "doc_id": _doc_id(full)})
+            added += 1
+        return added
+
+    # STATEMENTS. The list only renders after you pick the account and click
+    # View, and this app does not submit that form (see SECURITY.md). So you
+    # list it and the app reads it - but the listed view is transient and the
+    # tab it lives in is not predictable, so scan EVERY open tab and every
+    # frame rather than assuming one. Whichever tab holds the listed statements
+    # is found.
+    found_statements = 0
     try:
-        c = page.get_by_role("button", name=re.compile(r"continue session", re.I))
-        if c.count() and c.first.is_visible():
-            c.first.click()
-            page.wait_for_timeout(1000)
+        pages = [p for p in page.context.pages if not p.is_closed()]
     except Exception:
-        pass
+        pages = [page]
+    for pg in pages:
+        for fr in pg.frames:
+            # The statements page shows one collapsed section PER YEAR, and only
+            # the current year is open by default. Each collapsed year is a
+            # <span class="open-table"> whose click fires a FetchYearlyStatements
+            # GET that lists that year - read-only, no form submit. Expand them
+            # all before reading, or five-plus years of statements are silently
+            # missed (they were, until this was found). Expanding is bounded and
+            # idempotent: once open the span becomes "close-table".
+            try:
+                if fr.evaluate(r"""()=>document.querySelectorAll('span.open-table').length"""):
+                    for _ in range(15):  # at most 15 year sections
+                        opened = fr.evaluate(r"""()=>{
+                            const s=document.querySelector('span.open-table');
+                            if(!s) return false; s.click(); return true;}""")
+                        if not opened:
+                            break
+                        fr.wait_for_timeout(1200)
+            except Exception:
+                pass
+            try:
+                found_statements += harvest_statement_links(fr.evaluate(_COLLECT_JS) or [])
+            except Exception:
+                continue
+    if found_statements == 0:
+        log.warning("No statements found in any open tab. On the Statements and "
+                    "Notices page, pick your account and click View so they "
+                    "show, LEAVE that tab open, then re-run.")
+
+    # TAX documents auto-list on their own page (a plain GET). Read them by
+    # table ROW, not by bare anchor: the tax YEAR sits in a separate cell from
+    # the link, and a row can carry more than one link, so anchor-only
+    # collection loses the year and double-counts. One record per row.
+    # Read the tax page the same way as statements: from an open tab, not by
+    # navigating (which would hijack the statements tab). If the Tax Documents
+    # page is open in any tab, its 1098s are collected; if not, they are simply
+    # skipped with a hint, and statements still come through.
+    found_tax = 0
+    for pg in pages:
+        for fr in pg.frames:
+            try:
+                tax_rows = fr.evaluate(_TAX_ROWS_JS) or []
+            except Exception:
+                continue
+            for r in tax_rows:
+                href = r.get("href") or ""
+                if not href or href in seen:
+                    continue
+                seen.add(href)
+                year = r.get("year") or ""
+                title = "1098 Mortgage Interest Statement"
+                rows.append({
+                    "title": f"{year} {title}".strip() if year else title,
+                    "date": f"{year}-12-31" if year else "",
+                    "account": "", "href": _abs(href),
+                    "doc_id": _doc_id(_abs(href))})
+                found_tax += 1
+    if found_tax == 0:
+        log.info("No tax documents found in an open tab. To include 1098s, open "
+                 "the Tax Documents page (Statements > View Tax Documents) and "
+                 "re-run.")
+
+    rows.sort(key=lambda r: r["date"] or "", reverse=True)
+    log.info("M&T: %d document(s) collected", len(rows))
+    return rows
 
 
 def ensure_statements(page) -> bool:
-    """Reuse the signed-in tab and make sure the Statements page is showing."""
-    dismiss_timeout(page)
-    try:
-        if "statement" not in (page.url or "").lower():
-            lk = page.get_by_role("link", name=re.compile(r"^\s*statements\s*$", re.I))
-            if lk.count() and lk.first.is_visible():
-                lk.first.click()
-                page.wait_for_timeout(3000)
-        try:
-            page.wait_for_selector(GROUP_SEL, timeout=15000)
-        except Exception:
-            pass
-        dismiss_timeout(page)
-    except Exception as e:
-        log.info("ensure_statements failed: %s", e)
-    return page.locator(GROUP_SEL).count() > 0
+    """Only confirms you are still signed in, and never navigates.
+
+    Download does not need the statements page at all: it GETs each document's
+    own href (host-checked). Navigating here would reload and wipe the listed
+    statements, so this leaves the page exactly as you left it.
+    """
+    return not looks_signed_out(page)
 
 
-def group_names(page) -> List[str]:
-    out = []
-    loc = page.locator(GROUP_SEL)
-    for i in range(loc.count()):
-        try:
-            t = re.sub(r"\s+", " ", loc.nth(i).inner_text(timeout=800) or "").strip()
-        except Exception:
-            t = ""
-        if t:
-            out.append(t)
-    return out
+def download_statement(page, href: str, out_path) -> bool:
+    """Save one document's PDF by a host-checked GET of its own href.
 
-
-def expand_only(page, name_needle: str) -> bool:
-    """Expand the group whose header contains name_needle; collapse the others
-    so the visible rows belong to only that group."""
-    dismiss_timeout(page)
-    loc = page.locator(GROUP_SEL)
-    n = loc.count()
-    opened = False
-    for i in range(n):
-        g = loc.nth(i)
-        try:
-            txt = g.inner_text(timeout=800) or ""
-            exp = (g.get_attribute("aria-expanded") or "").lower()
-        except Exception:
-            continue
-        want = name_needle.lower() in txt.lower()
-        if want:
-            if exp != "true":
-                try:
-                    g.click(); page.wait_for_timeout(1800)
-                except Exception:
-                    pass
-            opened = True
-        elif exp == "true":
-            try:
-                g.click(); page.wait_for_timeout(700)
-            except Exception:
-                pass
-    dismiss_timeout(page)
-    return opened
-
-
-_STATEMENT_ROW_JS = r"""() => {
-    const out = [];
-    for (const tr of document.querySelectorAll('tr')) {
-        const t = (tr.innerText || '').replace(/\s+/g, ' ').trim();
-        const m = t.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-        if (!m) continue;
-        const btn = tr.querySelector("button[id*='statement-link'], button[aria-label*='View'], a[aria-label*='View']");
-        if (!btn) continue;
-        const title = t.replace(m[0], '').replace(/\s+/g, ' ').trim();
-        out.push({date: `${m[3]}-${String(m[1]).padStart(2,'0')}-${String(m[2]).padStart(2,'0')}`,
-                  title: title.slice(0, 80)});
-    }
-    return out;
-}"""
-
-
-def collect_group_rows(page):
-    try:
-        return page.main_frame.evaluate(_STATEMENT_ROW_JS)
-    except Exception:
-        return []
-
-
-def year_select(page):
-    """The 'Previous Statements' archive has a year dropdown (2021..2026).
-    Return (locator, [years]) if such a <select> is present, else (None, [])."""
-    loc = page.locator("select")
-    for i in range(min(loc.count(), 12)):
-        s = loc.nth(i)
-        try:
-            opts = [o.strip() for o in s.locator("option").all_inner_texts()]
-        except Exception:
-            opts = []
-        years = [o for o in opts if re.fullmatch(r"20\d{2}", o)]
-        if years:
-            return s, years
-    return None, []
-
-
-def collect_statement_rows(page):
-    """Every document across all account groups: list of {account,date,title}.
-    For the 'Previous Statements' archive, iterate its year dropdown so the full
-    history (not just the default year) is captured."""
-    docs, seen = [], set()
-
-    def grab(acct):
-        for r in collect_group_rows(page):
-            key = (acct, r["date"], r["title"])
-            if key in seen:
-                continue
-            seen.add(key)
-            docs.append({"account": acct, "date": r["date"], "title": r["title"] or "Statement"})
-
-    for name in group_names(page):
-        acct = re.sub(r"\s+", " ", name).strip()
-        if not expand_only(page, name):
-            continue
-        sel, years = year_select(page)
-        if sel is not None and years:
-            for y in years:
-                try:
-                    sel.select_option(label=y)
-                    page.wait_for_timeout(2500)
-                    dismiss_timeout(page)
-                except Exception:
-                    continue
-                grab(acct)
-        else:
-            grab(acct)
-    return docs
-
-
-def download_statement(page, ctx, account: str, date: str, out_path) -> bool:
-    """Expand the account group, click the View button on the row dated `date`,
-    capture the blob PDF that opens in a new tab, and save it."""
-    import base64
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    if not expand_only(page, account):
-        expand_only(page, account.split()[0] if account else account)
-    dismiss_timeout(page)
-
-    # In the 'Previous Statements' archive, the rows for a given year only show
-    # once that year is picked, so select the target year first.
-    sel, years = year_select(page)
-    if sel is not None and date[:4] in years:
-        try:
-            sel.select_option(label=date[:4])
-            page.wait_for_timeout(2500)
-            dismiss_timeout(page)
-        except Exception:
-            pass
-
-    us_date = f"{date[5:7]}/{date[8:10]}/{date[:4]}"   # 2026-07-24 -> 07/24/2026
-    btn = None
-    try:
-        rows = page.locator("tr").filter(has_text=us_date)
-        for i in range(rows.count()):
-            b = rows.nth(i).locator("button[id*='statement-link'], button[aria-label*='View']")
-            if b.count():
-                btn = b.first
-                break
-    except Exception:
-        pass
-    if btn is None:
-        log.info("statement row not found for %s %s", account, date)
+    href is the identity captured at discovery. It is re-checked against M&T's
+    hosts here, so a stored value can never send the session cookie elsewhere.
+    """
+    from pathlib import Path
+    url = _abs(href)
+    if not is_safe_url(url):
+        log.error("refusing a non-M&T URL")
         return False
-
-    # close any stale blob tab so we capture THIS statement's blob, not a prior one
-    for p in list(ctx.pages):
-        if (p.url or "").startswith("blob:"):
-            try:
-                p.close()
-            except Exception:
-                pass
-
-    try:
-        btn.click()
-    except Exception as e:
-        log.info("view click failed for %s %s: %s", account, date, e)
+    resp = page.context.request.get(url)
+    if not resp.ok:
+        log.warning("fetch returned %s", resp.status)
         return False
-
-    # the PDF opens as a blob in a new tab; poll for it (dismissing the
-    # inactivity modal while we wait, which can otherwise delay the open)
-    blob_page = None
-    for _ in range(24):                 # up to ~12s
-        page.wait_for_timeout(500)
-        dismiss_timeout(page)
-        for p in ctx.pages:
-            if (p.url or "").startswith("blob:"):
-                blob_page = p
-                break
-        if blob_page:
-            break
-    if blob_page is None:
-        log.info("no blob tab opened for %s %s", account, date)
+    body = resp.body()
+    if not body.startswith(b"%PDF"):
+        log.warning("response was not a PDF")
         return False
-
-    ok = False
-    try:
-        data = base64.b64decode(page.evaluate(_BLOB_FETCH, blob_page.url))
-        ok = data[:5] == b"%PDF-"
-        if ok:
-            out_path.write_bytes(data)
-    except Exception as e:
-        log.info("blob fetch failed for %s %s: %s", account, date, e)
-    try:
-        blob_page.close()
-    except Exception:
-        pass
-    return ok
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(body)
+    return True
