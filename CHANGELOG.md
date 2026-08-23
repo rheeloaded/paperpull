@@ -7,6 +7,33 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.13.0] — 2026-08-23
+
+### Added
+- **M&T Bank mortgage documents (20th provider)** (`apps/mtb`, CDP port 9240).
+  Mortgage statements, year-end statements and 1098 tax forms from M&T's own
+  online banking. Read-only and delete-safe. Verified live: 93 documents
+  across 2020 to 2026, all valid PDFs.
+
+  M&T services its mortgages in-house (onlinebanking.mtb.com), not a
+  subservicer. Documents are server-rendered with real per-document download
+  URLs, so downloading is a plain host-checked GET of each document's own href
+  and nothing on the page is clicked. Tax forms live on a second M&T host
+  (m.mtb.com); both are allowlisted, parsed, never by prefix.
+
+  Two things a mortgage portal forced, both handled read-only. The statement
+  list only appears after you select the account and click View, a form submit
+  this app does not perform, so you list it and the app reads whatever tab
+  holds it. And the statements are split into collapsed year sections, only
+  the current year open by default; the app expands each one (a read-only
+  request that lists that year) so the full history is read. An earlier build
+  silently captured only the current year, which is exactly the failure the
+  pilot-then-inspect step exists to catch.
+
+  The safety guard is tuned for a mortgage: it refuses paying the loan,
+  autopay, payoff requests, escrow changes, refinance, recast and the rest,
+  and a bare Edit/Update/Change too. The index records no balances or amounts.
+
 ## [0.12.0] — 2026-08-22
 
 ### Changed

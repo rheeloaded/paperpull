@@ -340,7 +340,8 @@ class App:
         full_summary = f"{summary} - {acct_short}" if acct_short else summary
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, account=account,
-                       date_text=date, document_id="")
+                       date_text=date, document_id=d.get("doc_id", ""),
+                       href=d.get("href", ""))
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -503,13 +504,13 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Reach the statements page (reuse the signed-in tab), then expand this
-        # document's account group and click its "View" button; the PDF opens as
-        # a blob in a new tab, whose bytes we fetch and save.
+        # M&T serves each document at its own URL, captured at discovery. The
+        # session must be live, so warm it, then GET the href (host-checked in
+        # download_statement). Nothing is clicked.
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
-        saved = site.download_statement(page, page.context, doc.account, doc.date, out_path)
+        saved = site.download_statement(page, doc.href, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -691,45 +692,20 @@ class App:
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
-            found = site.goto_documents(page)
-            info["documents_page_found"] = found
-            info["url"] = page.url
-            info["title"] = page.title()
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            site.expand_all(page)
-            site.scroll_full_page(page)
-            info["row_counts"] = {}
-            for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
-                              ("table rows", "table tbody tr"),
-                              ("pdf links", "a[href*='.pdf']"),
-                              ("download attrs", "a[download]")]:
-                try:
-                    info["row_counts"][name] = page.locator(sel).count()
-                except Exception as e:
-                    info["row_counts"][name] = f"ERR {e}"
-            docs = site.collect_documents(page)
+            # Same non-destructive path as discover: read the statements you
+            # listed across any open tab, then the tax page. Never navigates or
+            # resets the statements list.
+            docs = site.collect_statement_rows(page)
             info["collected"] = len(docs)
             info["samples"] = []
-            for d in docs[:8]:
-                cat, summ, conf = doc_types.classify_document(d.title, self.rules)
-                date, period = site.parse_period_date(d.text or d.title)
+            for d in docs[:12]:
+                cat, summ, _ = doc_types.classify_document(d.get("title", ""), self.rules)
                 info["samples"].append({
-                    "title": d.title[:90], "href": (d.href or "")[:100],
-                    "text": (d.text or "").replace("\n", " | ")[:160],
-                    "category": cat, "summary": summ, "date": date, "period": period})
-            controls = []
-            for role in ("button", "link"):
-                loc = page.get_by_role(role)
-                for i in range(min(loc.count(), 60)):
-                    try:
-                        t = (loc.nth(i).inner_text(timeout=400) or "").strip()[:60]
-                    except Exception:
-                        t = ""
-                    if t:
-                        controls.append({"role": role, "text": t,
-                                         "safe": site.is_safe_control(t)})
-            info["controls"] = controls
+                    "title": (d.get("title") or "")[:90],
+                    "date": d.get("date", ""),
+                    "category": cat, "summary": summ})
             page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
                             full_page=True)
         except Exception as e:

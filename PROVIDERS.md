@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (19)
+## Supported (20)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -22,6 +22,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
+| [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Mortgage servicing |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |
