@@ -1,0 +1,43 @@
+{
+  "_comment": "Editable rules mapping M&T mortgage document titles to filename summaries. Case-insensitive regexes matched against the title/row text, checked in order: tax, then year-end, then insurance/escrow, then statement. These are STARTING GUESSES for a mortgage servicing account and MUST be repaired after diagnose.bat shows the real titles. A mortgage's core documents are the monthly mortgage statement, the annual escrow analysis, and the year-end 1098.",
+  "tax_rules": [
+    {"pattern": "1098-?E\\b", "summary": "1098-E Tax Form"},
+    {"pattern": "\\b1098\\b", "summary": "1098 Mortgage Interest Statement"},
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?C\\b", "summary": "1099-C Tax Form"},
+    {"pattern": "1099-?A\\b", "summary": "1099-A Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package|information)", "summary": "Tax Document"}
+  ],
+  "year_end_rules": [
+    {"pattern": "year.?end\\s+(statement|summary|tax)", "summary": "Year-End Statement"},
+    {"pattern": "annual\\s+(mortgage\\s+)?statement", "summary": "Annual Statement"}
+  ],
+  "insurance_rules": [
+    {"pattern": "escrow\\s+analysis", "summary": "Escrow Analysis"},
+    {"pattern": "escrow\\s+(statement|disclosure|account)", "summary": "Escrow Statement"},
+    {"pattern": "\\bescrow\\b", "summary": "Escrow Document"},
+    {"pattern": "hazard\\s+insurance|homeowner.?s?\\s+insurance", "summary": "Hazard Insurance Notice"},
+    {"pattern": "flood\\s+insurance", "summary": "Flood Insurance Notice"},
+    {"pattern": "insurance\\s+(disbursement|notice|renewal|letter)", "summary": "Insurance Notice"},
+    {"pattern": "property\\s+tax|tax\\s+disbursement", "summary": "Property Tax Notice"},
+    {"pattern": "pmi|private\\s+mortgage\\s+insurance", "summary": "PMI Notice"}
+  ],
+  "statement_rules": [
+    {"pattern": "mortgage\\s+statement|statement.*mortgage", "summary": "Mortgage Statement"},
+    {"pattern": "monthly\\s+(billing\\s+)?statement", "summary": "Monthly Statement"},
+    {"pattern": "billing\\s+statement", "summary": "Billing Statement"},
+    {"pattern": "e-?statement", "summary": "Mortgage Statement"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Mortgage Statement"}
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+use|and\\s+conditions)",
+    "marketing",
+    "promotional",
+    "newsletter",
+    "electronic\\s+communication\\s+consent"
+  ]
+}
