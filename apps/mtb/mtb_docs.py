@@ -189,9 +189,17 @@ class App:
             return self._work_page
         if self._cdp_mode:
             # Reuse the user's signed-in M&T tab; a fresh one is unauthenticated.
+            # Matched by parsed host, not by substring: "mtb.com" in the URL
+            # would also accept notmtb.com.example, and would have picked an
+            # unrelated tab as the work page when no M&T tab was open.
             live = [p for p in ctx.pages if not p.is_closed()]
-            mine = [p for p in live if "mtb.com" in (p.url or "")]
-            self._work_page = mine[0] if mine else (live[0] if live else ctx.new_page())
+            mine = [p for p in live if site.is_safe_url(p.url or "")]
+            if mine:
+                self._work_page = mine[0]
+            else:
+                log.warning("No M&T tab is open. Sign in with login.bat and "
+                            "leave the statements page open.")
+                self._work_page = live[0] if live else ctx.new_page()
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         return self._work_page
@@ -484,6 +492,11 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
+            except site.SessionExpired:
+                # Already explained by download_one. Stop rather than grind
+                # through the rest producing empty "manual review" entries.
+                print("Stopped. Everything downloaded so far is saved.")
+                return
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -510,7 +523,17 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
-        saved = site.download_statement(page, doc.href, out_path)
+        try:
+            saved = site.download_statement(page, doc.href, out_path)
+        except site.SessionExpired:
+            # Stop the whole run. Continuing would file every remaining
+            # document as "manual review" and finish looking successful while
+            # having saved nothing.
+            print("\n  !! M&T returned a sign-in page instead of a document.")
+            print("     Your session has expired. Sign in again in the open")
+            print("     browser, re-list your statements, then run resume.bat.")
+            self.stats["session_expired"] = 1
+            raise
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -825,6 +848,13 @@ def main(argv=None):
         if app.stats["mode"]:
             app.write_run_summary()
         app.close()
+    # A run that saved nothing must not look like a clean run. Previously any
+    # outcome returned 0, so an expired session or a failed discovery ended
+    # with a success code and only a log line to show for it.
+    if app.stats.get("session_expired"):
+        return 2
+    if app.stats.get("failed") or app.stats.get("manual_review"):
+        return 1
     return 0
 
 

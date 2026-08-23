@@ -100,10 +100,19 @@ def test_money_and_mortgage_actions_are_never_safe():
 
 
 def test_document_actions_are_safe():
-    for label in ["Download", "View Statement", "Open PDF", "Save", "Print",
+    for label in ["Download", "View Statement", "Open PDF", "Print",
                   "1098 Tax Form", "eStatement", "View Document",
-                  "Escrow Statement", "Year-End Statement"]:
+                  "Escrow Statement", "Year-End Statement", "Download PDF"]:
         assert site.is_safe_control(label), label
+
+
+def test_bare_save_is_refused_on_purpose():
+    """"Save" used to be an allowed document action. On a portal that can move
+    money a bare "Save" is far more likely to commit a settings change than to
+    save a PDF, and "Save Changes" slipped through because of it. The real
+    document controls all say download / view / open / print / pdf."""
+    for label in ["Save", "Save Changes", "Save Settings"]:
+        assert not site.is_safe_control(label), label
 
 
 def test_deny_by_default():
@@ -124,3 +133,108 @@ def test_urls_must_stay_on_an_mt_host():
                 "//evil.test/x",
                 "javascript:alert(1)"]:
         assert not site.is_safe_url(bad), bad
+
+
+# -- SAFETY: what a review of the live code actually found --------------------
+# Each test below pins a real defect that existed and was fixed. They are the
+# regression net for the ways this app could quietly hurt someone.
+
+def test_a_crafted_on_host_url_is_not_treated_as_a_document():
+    """The endpoint used to be matched as a SUBSTRING of the whole URL, so a
+    payment route carrying the endpoint name as a query parameter passed the
+    host allowlist and would have been fetched with the live session cookie.
+    The path is what decides now."""
+    evil = ("https://onlinebanking.mtb.com/Payments/SchedulePayment"
+            "?FetchStatementandNotices=1&dt=06/01/2026&amount=5000")
+    assert site.is_safe_url(evil)          # it IS on an M&T host
+    assert site._endpoint_of(evil) is None  # but it is NOT a document endpoint
+    for other in ["https://onlinebanking.mtb.com/redirect?url=https://evil.test",
+                  "https://onlinebanking.mtb.com/Session/Logoff?FetchTaxDocument=1",
+                  "https://evil.test/Statements/FetchStatementandNotices",
+                  ""]:
+        assert site._endpoint_of(other) is None, other
+
+
+def test_the_real_document_endpoints_still_resolve():
+    assert site._endpoint_of(
+        "https://onlinebanking.mtb.com/Statements/FetchStatementandNotices"
+        "?t=MTGSTMT&a=1&dt=07/31/2026&stmtId=abc") == "statement"
+    assert site._endpoint_of(
+        "https://m.mtb.com/TaxDocuments/FetchTaxDocument?documentkey=abc") == "tax"
+
+
+def test_only_mt_frames_are_read_or_clicked():
+    """The collector walks every tab in the user's ordinary browser. Reading
+    links out of - or clicking inside - an unrelated site is not acceptable."""
+    class F:
+        def __init__(self, url): self.url = url
+    assert site.is_mt_frame(F("https://onlinebanking.mtb.com/Statements/x"))
+    assert site.is_mt_frame(F("https://m.mtb.com/TaxDocuments/x"))
+    for bad in ["https://mail.google.com/", "about:blank", "",
+                "http://onlinebanking.mtb.com/x",
+                "https://onlinebanking.mtb.com.evil.test/x"]:
+        assert not site.is_mt_frame(F(bad)), bad
+
+
+def test_settings_and_money_labels_that_once_slipped_through():
+    """Every one of these passed is_safe_control before the verb families and
+    settings words were added."""
+    for label in ["Save Changes", "Request Payoff Statement", "Payoff Statement",
+                  "Download Loss Mitigation Application", "Open Escrow Options",
+                  "Save Paperless Settings", "Print check",
+                  "Document Removal - save", "Statement Delivery Changes - Save",
+                  "Enroll", "Consent", "Opt In", "Opt Out", "Turn off",
+                  "Defer", "Close Account", "Add Bank Account",
+                  "One-Time Payment", "Schedule a payment", "Manage AutoPay"]:
+        assert not site.is_safe_control(label), label
+
+
+def test_a_signin_page_returned_instead_of_a_pdf_is_recognised():
+    """M&T answers an expired session with HTTP 200 and an HTML login page. If
+    that is not spotted, every remaining document is filed as 'manual review'
+    and the run ends looking successful with nothing saved."""
+    assert site._looks_like_login_html(
+        b"<!DOCTYPE html><html><body><form><input type=\"password\"></form>")
+    assert site._looks_like_login_html(b"<html>Your session has expired</html>")
+    assert not site._looks_like_login_html(b"%PDF-1.7 real document")
+    assert not site._looks_like_login_html(b"")
+
+
+def test_empty_href_does_not_fetch_the_home_page():
+    """_abs('') used to return the bare host, which passed the host check and
+    silently downloaded M&T's home page."""
+    assert site._abs("") == ""
+    assert site._endpoint_of(site._abs("")) is None
+
+
+def test_tax_year_is_the_tax_year_not_the_availability_date():
+    assert site._tax_year(
+        "Available 01/15/2026 1098 Mortgage Interest Statement for 2025", "") == "2025"
+    # account suffix here is a placeholder, never a real one
+    assert site._tax_year("2025 1098 Mortgage Interest Statement (1234)", "") == "2025"
+    assert site._tax_year("no year here", "2024") == "2024"
+
+
+def test_the_cloned_navy_federal_machinery_is_gone():
+    """Four of those functions clicked page controls with no safety check, one
+    rebuilt a stale deep link, and one would have re-armed a wrong-document
+    bug. Dead code near a mortgage is a loaded gun."""
+    src = (Path(__file__).resolve().parents[1] / "mtb_site.py").read_text(encoding="utf-8")
+    for gone in ("def collect_documents", "def collect_documents_via_api",
+                 "def download_by_id", "def download_document_row",
+                 "def _find_doc_row", "def document_deeplink",
+                 "def next_page", "def expand_all", "def scroll_full_page",
+                 "readDocument-", "blob:"):
+        assert gone not in src, gone
+
+
+def test_unknown_statement_types_are_not_called_mortgage_statements():
+    """The page also lists notices and analysis statements. An unrecognised
+    t= used to be labelled "Mortgage Statement", which would file a notice
+    under a name that is not true."""
+    import mtb_site
+    assert mtb_site._STMT_TYPE.get("MTGSTMT") == "Mortgage Statement"
+    assert mtb_site._STMT_TYPE.get("YESTMT") == "Year-End Statement"
+    assert mtb_site._STMT_TYPE.get("NOTICE") is None
+    src = (Path(__file__).resolve().parents[1] / "mtb_site.py").read_text(encoding="utf-8")
+    assert '_STMT_TYPE.get(kind) or' in src, "unknown types must not default to a statement"
