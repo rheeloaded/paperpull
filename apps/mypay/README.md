@@ -4,11 +4,9 @@ Downloads your **Retiree Account Statements (eRAS)**, **CRSC pay statements**
 and tax forms from DFAS myPay as PDFs. Read-only, delete-safe, part of
 [PaperPull](../../README.md).
 
-> **Status: not mapped yet.** The public sign-in page is confirmed, but where
-> the documents live once signed in has not been established, and nothing here
-> is guessed. `DOCUMENT_PATHS` is empty, which means the app **refuses to
-> download anything at all** until the real endpoints are written in from what
-> `diagnose.bat` records. The safety guard applies from the first run.
+> **Status: verified against a live account (2026-08-29).** A full run pulled
+> 35 documents spanning 2023 to 2026: monthly eRAS, CRSC pay statements,
+> annual RAS, 1099-R and IRS 1095 forms. All valid, all byte-unique.
 
 ## Read this first, because it is a government system
 
@@ -39,9 +37,10 @@ elections. This tool does none of it. Concretely:
   "start", "stop", "consent", "agree", "submit" and "certify" variant.
 - **The SSN field on the sign-in page is only ever detected**, as a signal that
   you are signed out. It is never read from and never typed into.
-- **Downloads are checked twice**: the host must be myPay's *and* the URL path
-  must be a known document endpoint. Redirects are capped and the final address
-  re-checked.
+- **A document is fetched by a validated (type, date) pair, never a URL.** The
+  type must be one of myPay's own document types and the date a real calendar
+  date, so the request is built from values this app recognises rather than
+  from any stored string.
 - **A short session that expires stops the run** and says so, rather than
   filing everything as "needs manual review" and exiting as though it worked.
 

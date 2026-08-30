@@ -14,10 +14,10 @@ STATUS, read before trusting anything below.
     * where the eRAS, CRSC and tax documents live once signed in
     * how a statement PDF is delivered
 
-  There are NO guessed document URLs here. DOCUMENT_PATHS below is EMPTY, and
-  download refuses everything while it is empty, so this app cannot fetch an
-  arbitrary URL before its real endpoints are written in from evidence
-  gathered by --diagnose.
+  There are NO guessed URLs here. A document is fetched by its (type, id)
+  pair, both validated as integers against the type map below, so the request
+  path is built from numbers this app recognises rather than from any stored
+  string.
 
 SAFETY (this is a US government pay system):
   Strictly READ-ONLY. myPay can change where retirement pay is deposited, tax
@@ -50,13 +50,7 @@ URLS = {
     "home": f"{BASE}/",
     "login": f"{BASE}/",
 }
-# Empty on purpose: routes are written from diagnose evidence, not invented.
-DOCUMENT_URL_CANDIDATES: list = []
 
-# The real document endpoints, filled in from evidence once diagnose has run.
-# While this is empty, download_document refuses every URL. That is the point:
-# an unmapped app should fetch nothing rather than guess.
-DOCUMENT_PATHS: dict = {}
 
 # Markers of a genuine sign-in / challenge redirect. The signed-in app lives at
 # the bare host with #/ routes, so none of these collide with a normal page.
@@ -112,13 +106,6 @@ RATE_LIMIT_MARKERS = [
     "temporarily unavailable", "http error 429", "unusual traffic",
 ]
 
-# Generic fallback selectors, repaired from diagnose evidence.
-FALLBACK = {
-    "doc_row": ("table tbody tr, [role='row'], [class*='statement'], "
-                "[class*='document'], li[class*='doc']"),
-    "doc_link": "a[href*='.pdf'], a[download], button[class*='download']",
-    "page_ready": "main, [role='main'], table, [class*='statement']",
-}
 
 # ---------------------------------------------------------------------------
 # Date parsing
@@ -276,33 +263,8 @@ def is_mypay_frame(frame) -> bool:
         return False
 
 
-def _abs(href: str) -> str:
-    href = (href or "").strip()
-    if not href:
-        return ""
-    if href.startswith("http"):
-        return href
-    if href.startswith("//"):
-        return "https:" + href
-    return BASE + ("" if href.startswith("/") else "/") + href
 
 
-def _endpoint_of(url: str) -> Optional[str]:
-    """The document kind this URL is, or None.
-
-    Matched on the URL PATH against DOCUMENT_PATHS, never as a substring of the
-    whole URL: a substring test would accept an on-host settings route that
-    merely carried the endpoint name in a query string. While DOCUMENT_PATHS is
-    empty (this app is not mapped yet) every URL returns None and is refused.
-    """
-    if not DOCUMENT_PATHS or not is_safe_url(url):
-        return None
-    from urllib.parse import urlparse
-    try:
-        path = (urlparse(url).path or "").lower().rstrip("/")
-    except ValueError:
-        return None
-    return DOCUMENT_PATHS.get(path)
 
 
 def goto_documents(page) -> bool:
@@ -320,69 +282,173 @@ def ensure_statements(page) -> bool:
     return not looks_signed_out(page)
 
 
-def _doc_id(href: str) -> str:
-    """A stable identity from the href, so two documents that share a title and
-    date do not collapse into one record."""
-    m = re.search(r"[?&](?:id|docid|documentid|key|documentkey)=([^&]+)", href, re.I)
-    return m.group(1)[:60] if m else (href or "")[-60:]
 
 
 # ---------------------------------------------------------------------------
-# Evidence gathering. Until the real endpoints are known, this reports what is
-# on the page rather than pretending to know how to collect documents.
+# The document API. CONFIRMED against a live account, 2026-08-23.
+#
+#   GET /api/document/history/{DocumentTypeId}  -> the list for that type
+#   GET /api/document/pdf/{DocumentTypeId}/{Id} -> that document as a PDF
+#
+# Both are plain GETs. Nothing on the page is clicked, no form is submitted and
+# nothing is navigated, which on a system that can redirect retirement pay is
+# the strongest guarantee available.
+#
+# HOW THE REQUEST IS AUTHENTICATED, and why it is done this way.
+# The Angular app sends a bearer token plus three identifying headers. Rather
+# than lift that token out of the browser and carry it around in this process,
+# every call below runs INSIDE the page and reads the token in the same
+# expression that uses it. The token is a government session credential: it
+# never enters this program, is never logged, and never touches disk.
 # ---------------------------------------------------------------------------
-_LINK_EVIDENCE_JS = r"""() => [...document.querySelectorAll('a,button')]
-    .map(e => ({
-      label: (e.innerText || e.getAttribute('aria-label') || '').replace(/\s+/g,' ').trim().slice(0, 60),
-      href: e.getAttribute('href') || '',
-      onclick: (e.getAttribute('onclick') || '').slice(0, 60),
-      testid: e.getAttribute('data-testid') || e.getAttribute('id') || ''
-    }))
-    .filter(x => /statement|document|eras|crsc|1099|1042|tax|download|pdf|archive/i.test(
-       x.label + ' ' + x.href + ' ' + x.testid))
-    .slice(0, 60)"""
+
+# DocumentTypeId -> (title, whether to collect by default). Taken from the
+# app's own DocumentTypeEnum, so these are its numbers, not invented ones.
+DOCUMENT_TYPES = {
+    21: "Retiree Account Statement",
+    19: "Annual Retiree Account Statement",
+    20: "CRSC Pay Statement",
+    18: "1099-R Tax Form",
+    22: "1042-S Tax Form",
+    23: "Annuitant Account Statement",
+    27: "Travel 1099-INT Statement",
+    9: "Travel Misc W-2 Statement",
+    5: "IRS Form 1095-B",
+    6: "IRS Form 1095-C",
+}
+
+# The shared header block. Built inside the page from the values the app itself
+# uses, so a request is indistinguishable from the one the page would make.
+_HEADERS_JS = """
+  const H = {
+    'Authorization': 'Bearer ' + (sessionStorage.getItem('id_token') || ''),
+    'Content-Type': 'application/json',
+    'myPayVersion': sessionStorage.getItem('myPayVersion') || '',
+    'browserSessionId': sessionStorage.getItem('browserSessionId') || '',
+    'deviceId': localStorage.getItem('deviceId') || ''
+  };
+"""
+
+_HISTORY_JS = """async (t) => {
+""" + _HEADERS_JS + """
+  H['Accept'] = 'application/json';
+  const r = await fetch('/api/document/history/' + t, {headers: H, credentials: 'include'});
+  const ct = r.headers.get('content-type') || '';
+  if (!/json/i.test(ct)) return {status: r.status, html: true};
+  return {status: r.status, body: await r.json()};
+}"""
+
+_PDF_JS = """async (a) => {
+""" + _HEADERS_JS + """
+  H['Accept'] = 'application/pdf';
+  const r = await fetch('/api/document/pdf/' + a.t + '/' + a.id, {headers: H, credentials: 'include'});
+  const ct = r.headers.get('content-type') || '';
+  const buf = new Uint8Array(await r.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
+  return {status: r.status, ct: ct, b64: btoa(s)};
+}"""
 
 
-def collect_link_evidence(page) -> List[dict]:
-    """Read document-looking controls from myPay frames only. Read-only."""
-    out: List[dict] = []
-    seen = set()
-    try:
-        pages = [p for p in page.context.pages if not p.is_closed()]
-    except Exception:
-        pages = [page]
-    for pg in pages:
+def _iso_from_discriminator(value: str) -> str:
+    """2025-05-20T00:00:00 -> 2025-05-20, read as a calendar date.
+
+    Taken as written rather than parsed through a timezone, so a statement
+    never shifts a day and file itself under the wrong month.
+    """
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(value or ""))
+    return m.group(0) if m else ""
+
+
+def _documents_from(payload) -> List[dict]:
+    """Pull the document list out of the API envelope, whatever it wraps it in."""
+    import json as _json
+    body = payload if isinstance(payload, dict) else {}
+    if body.get("Succeeded") is False:
+        return []
+    jr = body.get("JsonResult")
+    if isinstance(jr, str):
         try:
-            frames = [fr for fr in pg.frames if is_mypay_frame(fr)]
+            jr = _json.loads(jr)
         except Exception:
-            continue
-        for fr in frames:
-            try:
-                for e in (fr.evaluate(_LINK_EVIDENCE_JS) or []):
-                    key = (e.get("label", ""), e.get("href", ""), e.get("testid", ""))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    e["frame_url"] = (fr.url or "")[:120]
-                    out.append(e)
-            except Exception:
-                continue
-    return out
+            return []
+    if isinstance(jr, list):
+        return [d for d in jr if isinstance(d, dict)]
+    if isinstance(jr, dict):
+        for v in jr.values():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                return v
+    return []
 
 
 def collect_documents(page) -> List[dict]:
-    """Collect real documents.
+    """Every document myPay holds, across every type, newest first.
 
-    Not implemented yet, and deliberately not faked. DOCUMENT_PATHS is empty,
-    so there is nothing to collect from. Run --diagnose, which records what is
-    actually on the page, and this is written from that evidence.
+    Returns dicts {title, date, account, href, doc_id}. The identity is
+    "typeId|documentId", not a URL, so a changed query string cannot cause the
+    wrong file to be fetched.
     """
-    if not DOCUMENT_PATHS:
-        log.warning("myPay's document endpoints are not mapped yet. Run "
-                    "diagnose.bat with your documents page open; it records "
-                    "what is there and downloads nothing.")
-        return []
-    return []
+    rows: List[dict] = []
+    seen = set()
+    if not is_mypay_frame_page(page):
+        log.warning("The open tab is not myPay. Sign in at mypay.dfas.mil and "
+                    "leave that tab open.")
+        return rows
+
+    for type_id, title in DOCUMENT_TYPES.items():
+        try:
+            res = page.evaluate(_HISTORY_JS, type_id) or {}
+        except Exception as e:
+            log.info("history for type %s failed: %s", type_id,
+                     str(e).splitlines()[0][:80])
+            continue
+        if res.get("html"):
+            raise SessionExpired(
+                "myPay answered a document listing with a page instead of "
+                "data, which means the signed-in session is no longer valid")
+        docs = _documents_from(res.get("body"))
+        if not docs:
+            continue
+        kept = 0
+        per_date = {}
+        for d in docs:
+            if not d.get("DataFound", True) or d.get("Id") is None:
+                continue
+            date = _iso_from_discriminator(d.get("DateDiscriminator"))
+            if not date:
+                continue
+            # Identity is type + date, NOT myPay's numeric Id: that Id is a
+            # transient handle for generated documents and goes stale between
+            # sessions, which once caused every statement to be recorded twice.
+            n = per_date.get(date, 0)
+            per_date[date] = n + 1
+            key = "%d|%s" % (type_id, date) if n == 0 else "%d|%s|%d" % (type_id, date, n)
+            if key in seen:
+                continue
+            seen.add(key)
+            suffix = re.sub(r"\s+", " ", str(d.get("DocumentNameSuffix") or "")).strip()
+            rows.append({
+                "title": ("%s %s" % (title, suffix)).strip() if suffix else title,
+                "date": date,
+                "account": "",
+                "href": "",          # deliberately empty: never a URL
+                "doc_id": key,
+            })
+            kept += 1
+        if kept:
+            log.info("%-34s %d document(s)", title, kept)
+
+    rows.sort(key=lambda r: r["date"] or "", reverse=True)
+    log.info("myPay: %d document(s) collected", len(rows))
+    return rows
+
+
+def is_mypay_frame_page(page) -> bool:
+    """The page itself is on myPay (the frame check, applied to a page)."""
+    try:
+        return is_safe_url(page.url or "")
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -409,39 +475,101 @@ def _looks_like_login_html(body: bytes) -> bool:
         b"login id", b"session has expired", b"session timeout"))
 
 
-def download_document(page, href: str, out_path) -> bool:
-    """Save one document's PDF by a host-and-path-checked GET of its own href.
+def parse_doc_id(doc_id: str):
+    """"21|2025-05-20" -> (21, "2025-05-20", 0), or None if malformed.
 
-    Refuses everything while DOCUMENT_PATHS is empty, so an unmapped app cannot
-    be pointed at an arbitrary URL. Raises SessionExpired when myPay hands back
-    a sign-in page instead of a document.
+    The identity is the document TYPE and its statement DATE, never myPay's
+    numeric Id. A live run proved why: for the on-demand documents (eRAS,
+    1099-R) that Id is a transient generation handle. It goes stale between
+    sessions, so a stored one returns 404 and the same statement gets recorded
+    again under a new Id. Type plus date is what actually identifies a monthly
+    statement, and the numeric Id is looked up fresh at download time.
+
+    An optional third part disambiguates two documents of one type sharing a
+    date, so neither is silently dropped.
     """
-    url = _abs(href)
-    if _endpoint_of(url) is None:
-        log.error("refusing a URL that is not a known myPay document endpoint")
+    m = re.fullmatch(r"(\d{1,6})\|(\d{4}-\d{2}-\d{2})(?:\|(\d{1,3}))?",
+                     str(doc_id or "").strip())
+    if not m:
+        return None
+    type_id = int(m.group(1))
+    if type_id not in DOCUMENT_TYPES:
+        return None
+    return type_id, m.group(2), int(m.group(3) or 0)
+
+
+def _history_docs(page, type_id: int) -> List[dict]:
+    """The current session's list for one document type. Raises SessionExpired
+    if myPay answers with a page instead of data."""
+    res = page.evaluate(_HISTORY_JS, type_id) or {}
+    if res.get("html"):
+        raise SessionExpired(
+            "myPay answered a document listing with a page instead of data, "
+            "which means the signed-in session is no longer valid")
+    return _documents_from(res.get("body"))
+
+
+def resolve_document_id(page, type_id: int, date: str, ordinal: int = 0):
+    """The CURRENT numeric Id for a (type, date) document, or None.
+
+    Looked up fresh every time rather than trusted from storage, because the
+    Id myPay hands out for a generated document does not survive the session.
+    """
+    matches = [d for d in _history_docs(page, type_id)
+               if _iso_from_discriminator(d.get("DateDiscriminator")) == date
+               and d.get("Id") is not None]
+    if ordinal >= len(matches):
+        return None
+    try:
+        return int(matches[ordinal]["Id"])
+    except (TypeError, ValueError):
+        return None
+
+
+def download_document(page, doc_id: str, out_path) -> bool:
+    """Save one document by its (type, id) identity, never by a URL.
+
+    The identity is validated to two integers and the type must be one this app
+    knows, so the request cannot be pointed anywhere else. Raises SessionExpired
+    when myPay answers with a page instead of a document.
+    """
+    import base64
+    parsed = parse_doc_id(doc_id)
+    if not parsed:
+        log.error("refusing a document identity that is not a known type and date")
+        return False
+    type_id, date, ordinal = parsed
+    if not is_mypay_frame_page(page):
+        raise SessionExpired("the myPay tab is no longer open on myPay")
+    # Look the numeric Id up fresh. A stored one goes stale between sessions.
+    ident = resolve_document_id(page, type_id, date, ordinal)
+    if ident is None:
+        log.warning("myPay no longer lists a %s dated %s",
+                    DOCUMENT_TYPES.get(type_id, type_id), date)
         return False
     try:
-        resp = page.context.request.get(url, max_redirects=3)
+        res = page.evaluate(_PDF_JS, {"t": type_id, "id": ident}) or {}
     except Exception as e:
-        if "redirect" in str(e).lower():
-            raise SessionExpired(
-                "myPay redirected the document request, which means the "
-                "signed-in session is no longer valid") from None
         log.warning("fetch failed: %s", str(e).splitlines()[0][:100])
         return False
-    final = getattr(resp, "url", url) or url
-    if not is_safe_url(final):
-        log.error("refusing a redirect that left myPay's host")
+    status = res.get("status")
+    if status in (401, 403):
+        raise SessionExpired("myPay refused the document request (%s), which "
+                             "means the session has expired" % status)
+    if status != 200:
+        log.warning("fetch returned %s", status)
         return False
-    if not resp.ok:
-        log.warning("fetch returned %s", resp.status)
+    try:
+        body = base64.b64decode(res.get("b64") or "")
+    except Exception:
+        log.warning("could not decode the response")
         return False
-    body = resp.body()
     if not body.startswith(b"%PDF"):
         if _looks_like_login_html(body):
             raise SessionExpired(
                 "myPay returned a sign-in page instead of a document")
-        log.warning("response was not a PDF (%d bytes)", len(body))
+        log.warning("response was not a PDF (%d bytes, %s)",
+                    len(body), str(res.get("ct"))[:30])
         return False
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)

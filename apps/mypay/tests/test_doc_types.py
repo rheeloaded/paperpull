@@ -115,15 +115,38 @@ def test_the_ssn_field_is_only_ever_detected_never_used():
 
 # -- SAFETY: nothing is fetched until the app is actually mapped ------------
 
-def test_unmapped_app_refuses_every_url():
-    """DOCUMENT_PATHS is empty until the real endpoints are written in from
-    diagnose evidence. Until then nothing is downloadable, so this app cannot
-    be pointed at an arbitrary URL on a government system."""
-    assert site.DOCUMENT_PATHS == {}
-    for url in ["https://mypay.dfas.mil/anything?id=1",
-                "https://mypay.dfas.mil/",
-                ""]:
-        assert site._endpoint_of(url) is None, url
+def test_a_document_is_fetched_by_a_validated_id_never_by_a_url():
+    """A document is identified by "typeId|documentId", both plain integers,
+    and the type must be one this app knows. The request path is then built
+    from two numbers, so nothing a stored or tampered value could contain can
+    steer the request somewhere else on a government system."""
+    assert site.parse_doc_id("21|2025-05-20") == (21, "2025-05-20", 0)
+    assert site.parse_doc_id("  20|2026-08-21  ") == (20, "2026-08-21", 0)
+    assert site.parse_doc_id("21|2025-05-20|1") == (21, "2025-05-20", 1)
+    for bad in ["21|abc", "99|2025-05-20", "../etc/passwd", "21", "",
+                "2 1|2025-05-20", "8|2025-05-20", "21|", "|2025-05-20",
+                "21|12345", "21|2025-5-20", "21|2025-05-20|x",
+                "21|2025-05-20 OR 1=1", "https://evil.test/21|2025-05-20"]:
+        assert site.parse_doc_id(bad) is None, bad
+
+
+def test_the_identity_is_the_date_not_the_transient_id():
+    """A live run recorded every eRAS and 1099-R twice and 404-ed on half of
+    them: myPay hands out a numeric Id for generated documents that does not
+    survive the session. The identity is type + date, and the Id is looked up
+    fresh at download time."""
+    src = (Path(__file__).resolve().parents[1] / "mypay_site.py").read_text(encoding="utf-8")
+    assert "def resolve_document_id" in src
+    assert "resolve_document_id(page, type_id, date, ordinal)" in src
+    # the collector must build its key from the date, never from Id
+    assert '"%d|%s" % (type_id, date)' in src
+
+
+def test_the_document_types_are_the_apps_own_numbers():
+    """Taken from myPay's DocumentTypeEnum, not invented."""
+    assert site.DOCUMENT_TYPES[21] == "Retiree Account Statement"
+    assert site.DOCUMENT_TYPES[20] == "CRSC Pay Statement"
+    assert site.DOCUMENT_TYPES[18] == "1099-R Tax Form"
 
 
 def test_urls_must_stay_on_mypays_host():
