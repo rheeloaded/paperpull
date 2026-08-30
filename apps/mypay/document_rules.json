@@ -1,0 +1,41 @@
+{
+  "_comment": "Editable rules mapping DFAS myPay document titles to filename summaries. Case-insensitive regexes matched against the title/row text, checked in order: tax, then year-end, then insurance, then statement. A military retiree account issues a monthly Retiree Account Statement (eRAS), a CRSC pay statement, an annual 1099-R, and IRS 1095 health-coverage forms.",
+  "tax_rules": [
+    {"pattern": "1095-?B\\b", "summary": "1095-B Health Coverage Form"},
+    {"pattern": "1095-?C\\b", "summary": "1095-C Health Coverage Form"},
+    {"pattern": "\\b1095\\b", "summary": "1095 Health Coverage Form"},
+    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "1042-?S\\b", "summary": "1042-S Tax Form"},
+    {"pattern": "\\bW-?2C?\\b", "summary": "W-2 Tax Form"},
+    {"pattern": "tax\\s+(statement|document|form|package|information)", "summary": "Tax Statement"}
+  ],
+  "year_end_rules": [
+    {"pattern": "year.?end\\s+(statement|summary)", "summary": "Year-End Statement"}
+  ],
+  "insurance_rules": [
+    {"pattern": "\\bsgli\\b|servicemem.*group\\s+life", "summary": "SGLI Document"},
+    {"pattern": "\\bfegli\\b", "summary": "FEGLI Document"}
+  ],
+  "statement_rules": [
+    {"pattern": "\\bcrsc\\b|combat.?related\\s+special\\s+compensation", "summary": "CRSC Pay Statement"},
+    {"pattern": "\\bcrdp\\b|concurrent\\s+retirement", "summary": "CRDP Pay Statement"},
+    {"pattern": "annual\\s+retiree\\s+account\\s+statement", "summary": "Annual Retiree Account Statement"},
+    {"pattern": "\\beras\\b|retiree\\s+account\\s+statement", "summary": "Retiree Account Statement"},
+    {"pattern": "annuitant\\s+account\\s+statement|\\beaas\\b", "summary": "Annuitant Account Statement"},
+    {"pattern": "leave\\s+and\\s+earnings|\\bles\\b", "summary": "Leave and Earnings Statement"},
+    {"pattern": "net\\s+pay\\s+advice", "summary": "Net Pay Advice"},
+    {"pattern": "travel\\s+misc", "summary": "Travel Misc Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Account Statement"}
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+use|and\\s+conditions)",
+    "accessibility\\s+statement",
+    "marketing",
+    "newsletter\\s+signup",
+    "electronic\\s+communication\\s+consent"
+  ]
+}

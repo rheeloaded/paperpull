@@ -14,7 +14,7 @@ if [ ! -x "$PY" ]; then
     exit 1
 fi
 
-echo 'Read-only inspection of the M&T Bank documents page. Downloads NOTHING'
+echo 'Read-only inspection of the M^&T Bank documents page. Downloads NOTHING'
 echo 'Make sure you are signed in and your documents page is open'
 
 "$PY" mtb_docs.py --diagnose $CFG

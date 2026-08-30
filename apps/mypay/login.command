@@ -15,11 +15,11 @@ if [ ! -x "$PY" ]; then
 fi
 
 echo '============================================================'
-echo 'M^&T Bank Documents - sign in'
+echo 'DFAS myPay Documents - sign in'
 echo '============================================================'
 echo 'A normal Chromium window will open. Then:'
-echo '1. Sign in to M^&T Bank (do all the 2FA / verification yourself)'
+echo '1. Sign in to DFAS myPay (do all the 2FA / verification yourself)'
 echo '2. Go to your Documents / Statements area and open it'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
 
-"$PY" mtb_docs.py --open-browser $CFG
+"$PY" mypay_docs.py --open-browser $CFG
