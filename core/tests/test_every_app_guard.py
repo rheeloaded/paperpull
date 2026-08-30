@@ -96,3 +96,34 @@ def test_a_guard_that_exists_is_actually_reachable(app):
         assert 'is_safe_control("' not in call.replace(" ", ""), \
             "%s calls its guard with a literal, so it gates nothing: %s" % (
                 app.name, call)
+
+
+# -- a failed capture must not leave a convincing empty file ----------------
+
+SAVE_AS_APPS = [d for d in APPS
+                if "save_as" in (d / ("%s_site.py" % d.name)).read_text(encoding="utf-8")]
+
+
+@pytest.mark.parametrize("app", SAVE_AS_APPS, ids=lambda d: d.name)
+def test_a_failed_capture_removes_the_file_it_could_not_fill(app):
+    """Playwright's save_as creates the target before the bytes arrive, so a
+    capture that fails leaves a ZERO BYTE file carrying a perfectly convincing
+    statement name. Five of those sat in a real Statements folder looking like
+    downloads until they were opened, and the run had already reported them as
+    needing review rather than as absent."""
+    src = (app / ("%s_docs.py" % app.name)).read_text(encoding="utf-8")
+    assert "st_size == 0" in src, (
+        "%s uses save_as but never removes an unfilled file" % app.name)
+    assert "out_path.unlink()" in src
+
+
+def test_the_cleanup_actually_removes_an_empty_file(tmp_path):
+    """The condition itself, exercised rather than asserted."""
+    f = tmp_path / "2026-01-01 Statement.pdf"
+    for content, should_go in ((b"", True), (b"<html>nope", True), (b"%PDF-1.7 ok", False)):
+        f.write_bytes(content)
+        if f.exists() and (f.stat().st_size == 0 or f.read_bytes()[:5] != b"%PDF-"):
+            f.unlink()
+        assert f.exists() != should_go
+        if f.exists():
+            f.unlink()
