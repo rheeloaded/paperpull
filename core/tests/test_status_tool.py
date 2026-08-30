@@ -178,3 +178,96 @@ def test_set_up_but_never_downloaded_says_so(tmp_path):
     out = tmp_path / "status.html"
     status.write_html([row], out)
     assert "never downloaded" in out.read_text(encoding="utf-8")
+
+
+# -- gaps in the MIDDLE of a history -----------------------------------------
+# The failure this project keeps hitting: an archive looks current by its
+# newest document while quietly missing whole periods behind it.
+
+def _series(dates, account="", summary="Statement"):
+    return [{"date": d.isoformat(), "downloaded_ok": True, "account": account,
+             "summary": summary, "updated_at": "2026-01-01T00:00:00"}
+            for d in dates]
+
+
+def _months(n, skip=(), start=None, step=30):
+    start = start or date(2020, 1, 15)
+    return [start + timedelta(days=step * i) for i in range(n) if i not in skip]
+
+
+def test_a_missing_month_in_a_monthly_series_is_found():
+    recs = _series(_months(24, skip={10}))
+    gaps = status.find_gaps(recs, "DOCUMENT")
+    assert len(gaps) == 1
+    assert gaps[0]["missing"] == 1
+
+
+def test_several_consecutive_missing_months_are_counted():
+    recs = _series(_months(24, skip={10, 11, 12}))
+    gaps = status.find_gaps(recs, "DOCUMENT")
+    assert len(gaps) == 1 and gaps[0]["missing"] == 3
+
+
+def test_a_complete_series_reports_nothing():
+    assert status.find_gaps(_series(_months(24)), "DOCUMENT") == []
+
+
+def test_normal_jitter_is_not_a_gap():
+    """Real statements drift by a few days either side of the cycle. Treating
+    that as missing would make the report useless."""
+    base = date(2020, 1, 10)
+    drift = [0, 29, 62, 90, 121, 152, 179, 213, 240, 272, 301, 335, 365, 394]
+    recs = _series([base + timedelta(days=d) for d in drift])
+    assert status.find_gaps(recs, "DOCUMENT") == []
+
+
+def test_an_irregular_series_is_left_alone():
+    """Insurance ID cards and policy renewals arrive when they arrive. A long
+    quiet stretch there means nothing was issued, not that something is
+    missing, and flagging it would train you to ignore the report."""
+    base = date(2020, 1, 1)
+    irregular = [0, 16, 42, 119, 207, 365, 545, 731]
+    recs = _series([base + timedelta(days=d) for d in irregular])
+    assert status.find_gaps(recs, "DOCUMENT") == []
+
+
+def test_receipts_are_never_gap_checked():
+    recs = [{"purchase_date": d.isoformat(), "downloaded_ok": True, "account": "",
+             "summary": "Groceries", "updated_at": "2026-01-01T00:00:00"}
+            for d in _months(24, skip={5, 6, 7})]
+    assert status.find_gaps(recs, "RECEIPT") == []
+
+
+def test_a_short_history_is_not_judged():
+    assert status.find_gaps(_series(_months(5)), "DOCUMENT") == []
+
+
+def test_each_series_is_judged_separately():
+    """One install can hold monthly statements and yearly tax forms at once.
+    Pooling them would invent gaps in both."""
+    recs = (_series(_months(24), summary="Monthly Statement")
+            + _series(_months(4, step=365), summary="Yearly Tax Form"))
+    assert status.find_gaps(recs, "DOCUMENT") == []
+
+
+def test_only_downloaded_documents_count_towards_gaps():
+    recs = _series(_months(24))
+    for r in recs[8:12]:
+        r["downloaded_ok"] = False
+        r["state"] = "Discovered"
+    gaps = status.find_gaps(recs, "DOCUMENT")
+    assert gaps and gaps[0]["missing"] == 4, gaps
+
+
+def test_the_same_window_across_accounts_is_reported_once():
+    """One account missing a month is usually a quiet month. The same window
+    missing across several accounts is a run that failed part way, and reads
+    far better as one finding than as five."""
+    recs = []
+    for acct in ("A", "B", "C"):
+        recs += _series(_months(24, skip={10}), account=acct)
+    gaps = status.find_gaps(recs, "DOCUMENT")
+    assert len(gaps) == 3
+    grouped = status.group_gaps(gaps)
+    assert len(grouped) == 1
+    assert grouped[0]["count"] == 3 and grouped[0]["missing"] == 1
