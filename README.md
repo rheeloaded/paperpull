@@ -194,6 +194,37 @@ several accounts, and pooling their dates makes a monthly cycle look weekly.
 Receipt archives are shown without a due date, because purchases arrive
 irregularly and "40 days overdue" would be noise.
 
+### It also looks for holes in the middle
+
+Being up to date is not the same as being complete. An archive can hold a
+document from last week and still be missing whole years behind it, which is
+exactly what happened twice while building this: one mortgage archive held a
+single year of a seven year history, and a payroll archive quietly defaulted to
+year to date. Both looked healthy by their newest document.
+
+So each series is also checked for periods that look missing from the middle:
+
+```
+Possible gaps. A run that looks current can still be missing
+periods in the middle, so these are worth a look.
+  A Bank
+     2025-03-18 to 2025-05-17   1 missing   3 series, including Savings
+     2026-01-01 to 2026-04-02   2 missing   3 series, including Savings
+```
+
+The hard part is not finding gaps, it is not inventing them. Plenty of real
+documents arrive irregularly, insurance ID cards and policy renewals among
+them, where a long quiet stretch means nothing was issued rather than something
+was missed. Flagging those would train you to ignore the report, so a series
+has to earn an opinion first: at least six documents, a median interval of ten
+days or more, and at least 65 percent of its intervals close to that median.
+Only then is an interval roughly twice the usual one reported, and it is
+reported as possible rather than certain.
+
+Windows shared by several series are grouped, because one account missing a
+month is usually a quiet month, while the same window missing across several at
+once is what a run that failed part way looks like.
+
 `--html` also writes a `status.html` dashboard you can bookmark, and `--quiet`
 prints only what needs attention. The dashboard reads no document contents and
 carries no amounts or account numbers, but it does list which providers you

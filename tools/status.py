@@ -21,10 +21,16 @@ Usage:
     python status.py --html          also write status.html next to the installs
     python status.py --quiet         only show what needs attention
 
-PRIVACY: this reads your local install folders and reports which providers you
-hold accounts with, plus dates. It writes status.html into the SAME folder as
-the installs, never into the source repo. It reads no document contents and
-reports no amounts, account numbers or names.
+It also reports periods that look missing from the MIDDLE of a history, which
+a "are you up to date" check cannot see. See find_gaps for why that matters and
+how false alarms are kept out.
+
+PRIVACY: this reads local state files only, never document contents, and
+reports no amounts or balances. It does name which providers you hold accounts
+with, and the gap report names the account labels the apps recorded, which can
+include an account nickname and its last four digits. status.html is written
+beside the archives, where the documents themselves already live, and never
+into the source repo.
 """
 from __future__ import annotations
 
@@ -141,6 +147,90 @@ def _cadence_days(dates_by_account):
     return statistics.median(per)
 
 
+def find_gaps(records, kind):
+    """Periods that look missing from the MIDDLE of a history.
+
+    This is the failure this project keeps hitting. An archive can look
+    perfectly healthy by its newest document while quietly missing whole years
+    in the middle: one mortgage archive held a single year of a seven year
+    history, and a payroll archive silently defaulted to year to date. Both had
+    a recent newest document, so no "are you up to date" check would notice.
+
+    The hard part is not finding gaps, it is not inventing them. Real archives
+    contain series that are genuinely irregular, insurance ID cards and policy
+    renewals among them, where a long gap means nothing was issued rather than
+    something was missed. Flagging those would train you to ignore the report.
+
+    So each series has to earn an opinion first:
+      * it is a statement archive, not receipts, whose timing is meaningless
+      * at least six documents, so there is a rhythm to compare against
+      * a median interval of ten days or more
+      * at least 65 percent of its intervals close to that median, which is
+        what separates a monthly statement from an occasional notice
+
+    Only then is an interval roughly twice the usual one reported, and it is
+    reported as possible rather than certain. A month with no activity can
+    legitimately produce no statement.
+    """
+    if kind == "RECEIPT":
+        return []
+    series = {}
+    for rec in records:
+        got = rec.get("downloaded_ok") or str(rec.get("state", "")).lower() == "completed"
+        if not got:
+            continue
+        d = _record_date(rec)
+        if not d:
+            continue
+        key = (str(rec.get("account") or ""), str(rec.get("summary") or "") or "documents")
+        series.setdefault(key, []).append(d)
+
+    found = []
+    for (account, summary), dates in series.items():
+        uniq = sorted(set(dates))
+        if len(uniq) < 6:
+            continue
+        gaps = [(b - a).days for a, b in zip(uniq, uniq[1:])]
+        med = statistics.median(gaps)
+        if med < 10:
+            continue
+        regular = sum(1 for g in gaps if abs(g - med) <= med * 0.35) / len(gaps)
+        if regular < 0.65:
+            continue
+        for a, b in zip(uniq, uniq[1:]):
+            g = (b - a).days
+            if g >= med * 1.9 and g - med >= 10:
+                found.append({
+                    "account": account, "summary": summary,
+                    "after": a, "before": b,
+                    "missing": max(1, int(round(g / med)) - 1),
+                    "every_days": med,
+                })
+    found.sort(key=lambda f: f["after"])
+    return found
+
+
+def group_gaps(gaps):
+    """Collapse gaps that share a window.
+
+    One account missing a month usually means no activity that month. The SAME
+    window missing across several accounts at once is a different thing
+    entirely: that is what a failed or partial run looks like, and it is worth
+    seeing as one finding rather than as five.
+    """
+    windows = {}
+    for g in gaps:
+        key = (g["after"], g["before"], g["missing"])
+        windows.setdefault(key, []).append(g)
+    out = []
+    for (after, before, missing), members in sorted(windows.items()):
+        labels = [((m["account"] + " ") if m["account"] else "") + m["summary"]
+                  for m in members]
+        out.append({"after": after, "before": before, "missing": missing,
+                    "count": len(members), "labels": labels})
+    return out
+
+
 def scan_install(install: Path):
     # Nobody holds an account with every provider, so this reports the archives
     # that EXIST rather than the providers that could exist. A folder with no
@@ -193,12 +283,15 @@ def scan_install(install: Path):
     else:
         status = OVERDUE
 
+    gaps = find_gaps(records, kind)
+
     run_at, run_mode = _last_run(install)
     return {
         "folder": install.name, "provider": provider, "kind": kind,
         "documents": done, "newest": newest, "age_days": age,
         "cadence_days": cadence, "status": status,
         "last_download": last_download, "last_run": run_at, "last_run_mode": run_mode,
+        "gaps": gaps, "missing": sum(g["missing"] for g in gaps),
     }
 
 
@@ -244,15 +337,16 @@ def print_table(rows, quiet=False):
               else "No installs found.")
         return
     print()
-    print("%-32s %5s  %-12s %6s  %-10s %s" % (
-        "PROVIDER", "DOCS", "NEWEST", "AGE", "ISSUES", "STATUS"))
-    print("-" * 84)
+    print("%-30s %5s %5s  %-12s %6s  %-9s %s" % (
+        "PROVIDER", "DOCS", "GAPS", "NEWEST", "AGE", "ISSUES", "STATUS"))
+    print("-" * 88)
     for r in shown:
         age = ("%d d" % r["age_days"]) if r["age_days"] is not None else "-"
         mark = "!!" if r["status"] == OVERDUE else (
             "*" if r["status"] in (DUE, NEVER) else "  ")
-        print("%-32s %5d  %-12s %6s  %-10s %s %s" % (
-            r["folder"][:32], r["documents"],
+        print("%-30s %5d %5s  %-12s %6s  %-9s %s %s" % (
+            r["folder"][:30], r["documents"],
+            (str(r["missing"]) if r["missing"] else "-"),
             r["newest"].isoformat() if r["newest"] else "-",
             age, _fmt_cadence(r["cadence_days"]), mark, LABEL[r["status"]]))
     print()
@@ -264,6 +358,23 @@ def print_table(rows, quiet=False):
     unknown = [r for r in rows if r["status"] == UNKNOWN]
     if unknown:
         print("Not enough history to judge: " + ", ".join(r["folder"] for r in unknown))
+    holed = [r for r in rows if r["missing"]]
+    if holed:
+        print()
+        print("Possible gaps. A run that looks current can still be missing")
+        print("periods in the middle, so these are worth a look.")
+        for r in holed:
+            print("  %s" % r["folder"])
+            groups = group_gaps(r["gaps"])
+            for g in groups[:8]:
+                if g["count"] > 1:
+                    who = "%d series, including %s" % (g["count"], g["labels"][0][:34])
+                else:
+                    who = g["labels"][0][:52]
+                print("     %s to %s   %d missing   %s" % (
+                    g["after"], g["before"], g["missing"], who))
+            if len(groups) > 8:
+                print("     ... and %d more windows" % (len(groups) - 8))
 
 
 HTML_HEAD = """<!doctype html>
@@ -331,12 +442,36 @@ def write_html(rows, out: Path):
                 _fmt_cadence(r["cadence_days"]), r["status"], LABEL[r["status"]],
                 last))
     parts.append("</tbody></table>")
+    holed = [r for r in rows if r["missing"]]
+    if holed:
+        parts.append("<h2>Possible gaps</h2>")
+        parts.append('<p class="sub">An archive can look current and still be '
+                     "missing periods in the middle. The same window missing "
+                     "across several series at once is usually a run that "
+                     "failed part way rather than a quiet month.</p>")
+        parts.append("<table><thead><tr><th>Provider</th><th>Window</th>"
+                     "<th class='num'>Missing</th><th>Series</th></tr>"
+                     "</thead><tbody>")
+        for r in holed:
+            for g in group_gaps(r["gaps"])[:12]:
+                who = ("%d series, including %s" % (g["count"], g["labels"][0])
+                       if g["count"] > 1 else g["labels"][0])
+                parts.append(
+                    "<tr><td>%s</td><td>%s to %s</td><td class='num'>%d</td>"
+                    "<td class='muted'>%s</td></tr>" % (
+                        escape(r["folder"]), g["after"], g["before"],
+                        g["missing"], escape(who)))
+        parts.append("</tbody></table>")
     parts.append("<footer>Receipt archives are shown as ongoing rather than due, "
-                 "because purchases arrive irregularly. A provider with fewer than "
-                 "three documents has too little history to judge.<br>"
-                 "This file lists which providers you hold accounts with. It stays "
-                 "in this folder and is never copied into the source repository."
-                 "</footer></main>")
+                 "because purchases arrive irregularly, and a series has to keep a "
+                 "steady rhythm before a gap in it is reported at all.<br><br>"
+                 "<strong>What is in this file.</strong> Which providers you hold "
+                 "accounts with, the account labels those apps recorded (which can "
+                 "include an account nickname and its last four digits), document "
+                 "dates and counts. No amounts, no balances and no document "
+                 "contents. It is written beside your archives, where the documents "
+                 "themselves already live, and is never copied into the source "
+                 "repository.</footer></main>")
     out.write_text("\n".join(parts), encoding="utf-8")
 
 
