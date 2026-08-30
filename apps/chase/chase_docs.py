@@ -95,7 +95,14 @@ class Document:
         for anything discovered without one."""
         if self.document_id:
             return f"id:{self.document_id}"
-        acct = sanitize_component(self.account or "")[:40]
+        # Keep the last four in the key. Truncating to 40 characters made
+        # two cards of the same product collide ("MARRIOTT BONVOY
+        # BOUNDLESS CREDIT CARD (...1234)" and "(...5678)" share a
+        # prefix), and the second card's whole history was dropped as a
+        # duplicate without a word.
+        raw = sanitize_component(self.account or "")
+        last4 = re.search(r"(\d{4})\s*\)?\s*$", raw)
+        acct = raw[:40] + ("-" + last4.group(1) if last4 else "")
         return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
 
     def to_dict(self) -> dict:
