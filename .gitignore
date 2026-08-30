@@ -28,6 +28,11 @@ run-summary.txt
 # building a new app.
 discovery.json.*
 progress.json.*
+# Same reasoning for config: a "config.json.save" or "config.json.bak" holds
+# the owner name and local output paths just as the original does. The
+# example stays allowed by the rule above.
+config.json.*
+!config.example.json
 *.json.bak
 *.json.orig
 *.csv.bak
