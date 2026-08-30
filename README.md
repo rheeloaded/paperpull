@@ -175,6 +175,12 @@ A Mortgage                     93  2026-07-31     29 d  monthly       current
 A Shop                        667  2026-08-13     16 d  -             ongoing
 ```
 
+It reports the archives you **have**. Nobody holds an account with every
+provider, so a folder you never set up, or one left behind by a closed account,
+is left out entirely rather than listed as missing or overdue. An archive that
+was set up but never downloaded anything is called out by name, since that is
+the one state a single run fixes.
+
 It answers "is something new probably waiting" rather than "when did I last run
 this", which are different questions. A run that only verified existing files
 still updates a timestamp while telling you nothing about whether a new

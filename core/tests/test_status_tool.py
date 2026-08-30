@@ -139,3 +139,42 @@ def test_the_dashboard_is_self_contained_and_leaks_no_figures(tmp_path):
     assert "<script" not in html.lower()
     assert "prefers-color-scheme" in html
     assert "Bank" in html
+
+
+# -- only report archives that actually exist --------------------------------
+
+def test_a_provider_you_do_not_use_is_not_listed(tmp_path):
+    """Nobody holds an account with every provider. The report covers the
+    archives that EXIST, not the providers that could exist, so an unused or
+    closed-account folder is left out rather than shown as missing or overdue."""
+    (tmp_path / "Never Set Up").mkdir()
+    (tmp_path / "Closed Account" / ".").mkdir(parents=True)
+    (tmp_path / "Closed Account" / "progress.json").write_text("{}", encoding="utf-8")
+    used = _install(tmp_path, "In Use", _monthly(12),
+                    "SPEC = AppSpec(\n    kind=DOCUMENT,\n)")
+    assert status.scan_install(tmp_path / "Never Set Up") is None
+    assert status.scan_install(tmp_path / "Closed Account") is None
+    rows = status.scan_all(tmp_path)
+    assert [r["folder"] for r in rows] == ["In Use"]
+
+
+def test_unreadable_state_is_skipped_rather_than_crashing(tmp_path):
+    d = tmp_path / "Corrupt"
+    d.mkdir()
+    (d / "progress.json").write_text("{not json", encoding="utf-8")
+    assert status.scan_install(d) is None
+
+
+def test_set_up_but_never_downloaded_says_so(tmp_path):
+    """Documents were discovered but none fetched. That is the one state a
+    single run fixes, so it is named rather than lumped in with unknown."""
+    recs = {"a": {"date": date.today().isoformat(), "downloaded_ok": False,
+                  "state": "Discovered"}}
+    d = _install(tmp_path, "Fresh", recs, "SPEC = AppSpec(\n    kind=DOCUMENT,\n)")
+    row = status.scan_install(d)
+    assert row["status"] == status.NEVER
+    assert row["documents"] == 0
+    # and it is surfaced by --quiet, because it needs attention
+    out = tmp_path / "status.html"
+    status.write_html([row], out)
+    assert "never downloaded" in out.read_text(encoding="utf-8")
