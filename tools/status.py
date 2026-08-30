@@ -41,6 +41,7 @@ KIND_RE = re.compile(r"kind\s*=\s*([A-Z_]+)")
 PROVIDER_RE = re.compile(r"provider\s*=\s*[\"']([^\"']+)[\"']")
 
 CURRENT, DUE, OVERDUE, UNKNOWN, ONGOING = "current", "due", "overdue", "unknown", "ongoing"
+NEVER = "never"
 
 
 def _iso(value):
@@ -141,10 +142,17 @@ def _cadence_days(dates_by_account):
 
 
 def scan_install(install: Path):
+    # Nobody holds an account with every provider, so this reports the archives
+    # that EXIST rather than the providers that could exist. A folder with no
+    # progress.json, or one that has never recorded anything, is a provider
+    # this person does not use (or a leftover from a closed account) and is
+    # left out entirely rather than listed as missing or overdue.
     progress = _read_json(install / "progress.json")
     if not progress:
         return None
     records = [r for r in progress.values() if isinstance(r, dict)]
+    if not records:
+        return None
     kind, provider = _kind_and_provider(install, records)
 
     done, doc_dates, last_download = 0, [], None
@@ -169,7 +177,12 @@ def scan_install(install: Path):
     cadence = _cadence_days(by_account) if kind == "DOCUMENT" else None
     age = (date.today() - newest).days if newest else None
 
-    if kind == "RECEIPT":
+    if done == 0:
+        # Set up and discovered documents, but never actually downloaded any.
+        # That is worth saying out loud rather than calling it unknown, because
+        # it is the one state a single run would fix.
+        status = NEVER
+    elif kind == "RECEIPT":
         status = ONGOING
     elif newest is None or cadence is None:
         status = UNKNOWN
@@ -197,7 +210,7 @@ def scan_all(root: Path):
         row = scan_install(child)
         if row:
             rows.append(row)
-    order = {OVERDUE: 0, DUE: 1, UNKNOWN: 2, CURRENT: 3, ONGOING: 4}
+    order = {OVERDUE: 0, NEVER: 1, DUE: 2, UNKNOWN: 3, CURRENT: 4, ONGOING: 5}
     rows.sort(key=lambda r: (order.get(r["status"], 9), -(r["age_days"] or 0)))
     return rows
 
@@ -205,7 +218,7 @@ def scan_all(root: Path):
 # -- rendering ---------------------------------------------------------------
 
 LABEL = {CURRENT: "current", DUE: "due", OVERDUE: "OVERDUE",
-         UNKNOWN: "unknown", ONGOING: "ongoing"}
+         UNKNOWN: "unknown", ONGOING: "ongoing", NEVER: "never downloaded"}
 
 
 def _fmt_cadence(days):
@@ -225,7 +238,7 @@ def _fmt_cadence(days):
 
 
 def print_table(rows, quiet=False):
-    shown = [r for r in rows if not quiet or r["status"] in (DUE, OVERDUE)]
+    shown = [r for r in rows if not quiet or r["status"] in (DUE, OVERDUE, NEVER)]
     if not shown:
         print("Nothing needs attention. Every provider is current." if quiet
               else "No installs found.")
@@ -236,13 +249,14 @@ def print_table(rows, quiet=False):
     print("-" * 84)
     for r in shown:
         age = ("%d d" % r["age_days"]) if r["age_days"] is not None else "-"
-        mark = "!!" if r["status"] == OVERDUE else ("*" if r["status"] == DUE else "  ")
+        mark = "!!" if r["status"] == OVERDUE else (
+            "*" if r["status"] in (DUE, NEVER) else "  ")
         print("%-32s %5d  %-12s %6s  %-10s %s %s" % (
             r["folder"][:32], r["documents"],
             r["newest"].isoformat() if r["newest"] else "-",
             age, _fmt_cadence(r["cadence_days"]), mark, LABEL[r["status"]]))
     print()
-    due = [r for r in rows if r["status"] in (DUE, OVERDUE)]
+    due = [r for r in rows if r["status"] in (DUE, OVERDUE, NEVER)]
     if due:
         print("Probably worth running: " + ", ".join(r["folder"] for r in due))
     else:
@@ -280,7 +294,7 @@ HTML_HEAD = """<!doctype html>
   .pill { display:inline-block; padding:.12rem .5rem; border-radius:999px;
           font-size:.75rem; font-weight:600; }
   .s-current{color:var(--ok)} .s-due{color:var(--due)} .s-overdue{color:var(--over)}
-  .s-unknown,.s-ongoing{color:var(--mut)}
+  .s-unknown,.s-ongoing{color:var(--mut)} .s-never{color:var(--due)}
   .muted { color:var(--mut); }
   footer { color:var(--mut); font-size:.8rem; margin-top:1.5rem; }
 </style>
@@ -290,7 +304,7 @@ HTML_HEAD = """<!doctype html>
 
 def write_html(rows, out: Path):
     from html import escape
-    due = [r for r in rows if r["status"] in (DUE, OVERDUE)]
+    due = [r for r in rows if r["status"] in (DUE, OVERDUE, NEVER)]
     parts = [HTML_HEAD]
     parts.append("<h1>PaperPull status</h1>")
     parts.append('<p class="sub">Generated %s. Shows how current each archive is, '
@@ -340,8 +354,10 @@ def main(argv=None):
         return 2
     rows = scan_all(root)
     if not rows:
-        print("No PaperPull installs found under %s" % root)
-        print("Point it at the folder that holds them with --root.")
+        print("No PaperPull archives found under %s" % root)
+        print("This reports the archives you actually have, so it looks for")
+        print("install folders holding a progress.json. Point it at the folder")
+        print("that contains them with --root.")
         return 2
     print_table(rows, quiet=args.quiet)
     if args.html:
