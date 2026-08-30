@@ -161,6 +161,38 @@ run_all.bat               REM download everything available
 Each app also has its own README with provider-specific details and quirks.
 (Prefer to set apps up one at a time? Each has its own `setup.bat` / `setup.command`.)
 
+## Knowing when to run it again
+
+`tools/status.py` reads the state each app already keeps and reports how current
+every archive is. Copy it and `status.bat` next to your install folders and run
+it. It downloads nothing and changes nothing.
+
+```
+PROVIDER                     DOCS  NEWEST          AGE  ISSUES     STATUS
+Some Payroll                   12  2026-06-18     72 d  2x month   !! OVERDUE
+A Bank                         97  2026-06-30     60 d  monthly    *  due
+A Mortgage                     93  2026-07-31     29 d  monthly       current
+A Shop                        667  2026-08-13     16 d  -             ongoing
+```
+
+It answers "is something new probably waiting" rather than "when did I last run
+this", which are different questions. A run that only verified existing files
+still updates a timestamp while telling you nothing about whether a new
+statement exists. So the signal is the date of the newest document you actually
+hold, measured against how often that provider issues them.
+
+The cadence comes from your own history and is measured per account, so nothing
+has to be configured, and a provider that moves from monthly to quarterly
+corrects itself. Measuring per account matters: one bank folder can cover
+several accounts, and pooling their dates makes a monthly cycle look weekly.
+Receipt archives are shown without a due date, because purchases arrive
+irregularly and "40 days overdue" would be noise.
+
+`--html` also writes a `status.html` dashboard you can bookmark, and `--quiet`
+prints only what needs attention. The dashboard reads no document contents and
+carries no amounts or account numbers, but it does list which providers you
+hold accounts with, so it belongs with your installs and is gitignored here.
+
 ## Windows and macOS
 
 One download covers both. Every app ships two launchers with the same names
