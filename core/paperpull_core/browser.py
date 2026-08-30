@@ -171,4 +171,42 @@ def open_signin_browser(profile_dir, port: str, url: str,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True,
                      **detach)
+
+    # Launching is not the same as listening, and the difference used to be
+    # invisible. When Edge or Chrome is ALREADY running, a new launch can hand
+    # the URL to the existing session and drop these flags entirely. A window
+    # opens, the user signs in, and only the next command reveals that no
+    # debugging port was ever opened - by which point the sign-in was spent on
+    # the wrong browser. So the port is confirmed here, where it can still be
+    # explained.
+    if not wait_for_debug_port(port):
+        print(f"\nThe window opened, but no debugging port answered on {port}.")
+        if name in (EDGE, CHROME):
+            print(f"That usually means {name} was already running, so it handed")
+            print("the address to the existing window and ignored the settings")
+            print("this tool needs.")
+            print(f"\nClose every {name} window, then run this again. Signing in")
+            print("before that will not help, because the tool cannot see that")
+            print("window at all.")
+        else:
+            print("Try closing any other copy of the browser and running again.")
+        return None
     return name
+
+
+def wait_for_debug_port(port: str, timeout: float = 20.0) -> bool:
+    """True once the browser's debugging port accepts a connection.
+
+    Checked on 127.0.0.1 rather than "localhost": the browser binds IPv4 only,
+    while "localhost" can resolve to ::1 first and be refused.
+    """
+    import socket
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", int(port)), timeout=1):
+                return True
+        except (OSError, ValueError):
+            time.sleep(0.5)
+    return False

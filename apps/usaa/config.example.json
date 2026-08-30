@@ -3,7 +3,7 @@
   "owner_in_filename": false,
   "output_dir": ".",
   "profile_dir": "./browser-profile",
-  "cdp_url": "http://localhost:9225",
+  "cdp_url": "http://127.0.0.1:9225",
   "document_types": [
     "Statement",
     "Tax Document",

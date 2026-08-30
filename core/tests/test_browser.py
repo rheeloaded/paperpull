@@ -106,6 +106,8 @@ def test_launch_passes_the_profile_and_port(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(browser, "find_browser", lambda prefer_real=False: ("Chromium", "/x/c"))
     monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kw: seen.update(args=args))
+    # no real browser starts here, so stand in for the port coming up
+    monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0: True)
     profile = tmp_path / "profile"
     assert browser.open_signin_browser(profile, "9231", "https://example.test") == "Chromium"
     assert profile.is_dir()          # created for the user
@@ -177,3 +179,30 @@ def test_bundled_chromium_wins_when_prefer_real_is_off(monkeypatch, tmp_path):
                         lambda: [(browser.EDGE, str(edge))])
     assert browser.find_browser(prefer_real=False)[0] == browser.CHROMIUM
     assert browser.find_browser(prefer_real=True)[0] == browser.EDGE
+
+
+def test_a_window_that_opens_without_a_debugging_port_is_reported(monkeypatch, tmp_path, capsys):
+    """Launching is not the same as listening. When Edge or Chrome is already
+    running, a new launch can hand the address to the existing session and drop
+    the flags, so a window opens, the user signs in, and only the NEXT command
+    reveals that no port was ever opened. By then the sign-in was spent on a
+    browser the tool cannot see."""
+    monkeypatch.setattr(browser, "find_browser", lambda prefer_real=False: (browser.EDGE, "/x/edge"))
+    monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kw: None)
+    monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0: False)
+    assert browser.open_signin_browser(tmp_path / "p", "9231", "https://example.test") is None
+    said = capsys.readouterr().out.lower()
+    assert "no debugging port" in said
+    assert "already running" in said and "close every" in said
+
+
+def test_the_port_check_uses_ipv4_not_localhost():
+    """The browser binds 127.0.0.1 only, while "localhost" can resolve to ::1
+    first and be refused, which is how this failure first presented."""
+    import inspect
+    src = inspect.getsource(browser.wait_for_debug_port)
+    assert "127.0.0.1" in src and "localhost" not in src.split('"""')[2]
+
+
+def test_the_port_check_survives_a_nonsense_port():
+    assert browser.wait_for_debug_port("not-a-port", timeout=0.5) is False

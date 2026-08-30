@@ -3,7 +3,7 @@
   "owner_in_filename": false,
   "output_dir": ".",
   "profile_dir": "./mypay-browser-profile",
-  "cdp_url": "http://localhost:9241",
+  "cdp_url": "http://127.0.0.1:9241",
   "document_types": [
     "Statement",
     "Tax Document",
