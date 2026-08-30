@@ -1,20 +1,20 @@
-"""M&T Bank statement & tax-document downloader (local, supervised).
+"""DFAS myPay statement & tax-document downloader (local, supervised).
 
 Usage:
-    python mtb_docs.py --login       verify connection to your browser
-    python mtb_docs.py --discover    list available documents
-    python mtb_docs.py --pilot       download the 5 newest, then stop
-    python mtb_docs.py --all         download everything in scope
-    python mtb_docs.py --resume      continue an interrupted run
-    python mtb_docs.py --verify      re-validate every saved PDF
-    python mtb_docs.py --diagnose    dump page structure (no downloads)
-    python mtb_docs.py --dry-run     plan filenames, save nothing
+    python mypay_docs.py --login       verify connection to your browser
+    python mypay_docs.py --discover    list available documents
+    python mypay_docs.py --pilot       download the 5 newest, then stop
+    python mypay_docs.py --all         download everything in scope
+    python mypay_docs.py --resume      continue an interrupted run
+    python mypay_docs.py --verify      re-validate every saved PDF
+    python mypay_docs.py --diagnose    dump page structure (no downloads)
+    python mypay_docs.py --dry-run     plan filenames, save nothing
 
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N  --type Statement|"Tax Document"
 
 READ-ONLY: this tool only reads the Documents area and downloads PDFs that
-M&T Bank already generated. It never transfers funds, trades, rebalances,
+DFAS myPay already generated. It never transfers funds, trades, rebalances,
 or changes any account setting. Everything stays on this machine; nothing is
 sent to any external service.
 """
@@ -32,14 +32,14 @@ from typing import List, Optional
 
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
-import mtb_site as site
+import mypay_site as site
 from paperpull_core.models import State
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
-log = logging.getLogger("mtb_docs")
+log = logging.getLogger("mypay_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 
@@ -54,7 +54,7 @@ def ask(prompt: str) -> str:
 
 
 class Document:
-    """One M&T Bank document."""
+    """One DFAS myPay document."""
 
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
@@ -66,7 +66,7 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # M&T Bank's stable per-document UUID
+        self.document_id = document_id  # DFAS myPay's stable per-document UUID
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -84,7 +84,7 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. M&T Bank's API gives each document a durable
+        """Stable identity. DFAS myPay's API gives each document a durable
         documentId (UUID) - use it. Fall back to category:date:title:account
         for anything discovered without one."""
         if self.document_id:
@@ -188,16 +188,16 @@ class App:
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
         if self._cdp_mode:
-            # Reuse the user's signed-in M&T tab; a fresh one is unauthenticated.
-            # Matched by parsed host, not by substring: "mtb.com" in the URL
-            # would also accept notmtb.com.example, and would have picked an
-            # unrelated tab as the work page when no M&T tab was open.
+            # Reuse the user's signed-in myPay tab; a fresh one is unauthenticated.
+            # Matched by parsed host, not by substring: "mypay.com" in the URL
+            # would also accept notmypay.com.example, and would have picked an
+            # unrelated tab as the work page when no myPay tab was open.
             live = [p for p in ctx.pages if not p.is_closed()]
             mine = [p for p in live if site.is_safe_url(p.url or "")]
             if mine:
                 self._work_page = mine[0]
             else:
-                log.warning("No M&T tab is open. Sign in with login.bat and "
+                log.warning("No myPay tab is open. Sign in with login.bat and "
                             "leave the statements page open.")
                 self._work_page = live[0] if live else ctx.new_page()
         else:
@@ -231,7 +231,7 @@ class App:
             ask("Press Enter once the page looks normal (or Ctrl+C to quit)... ")
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
-            print("\n!! M&T Bank appears to have signed you out.")
+            print("\n!! DFAS myPay appears to have signed you out.")
             print("Please sign in again in the open browser window.")
             ask("Press Enter after you are signed in... ")
             site.goto_documents(page)
@@ -256,14 +256,14 @@ class App:
         print("Sign in, keep the window OPEN, then run the pilot.")
 
     def cmd_login(self):
-        print("Checking the connection to your signed-in M&T Bank browser...\n")
+        print("Checking the connection to your signed-in DFAS myPay browser...\n")
         page = self.page()
         ok = site.goto_documents(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
-            print("Connected, but M&T Bank shows a signed-out page.")
+            print("Connected, but DFAS myPay shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
             print("Success: connected and the Documents page is visible.")
@@ -282,7 +282,7 @@ class App:
         if a.year and not (doc.date or "").startswith(str(a.year)):
             return False
         # Hard floor: never process documents before the configured start date
-        # (You already has M&T Bank documents from 2023 and earlier).
+        # (You already has DFAS myPay documents from 2023 and earlier).
         floor = a.start_date or self.config.get("default_start_date")
         if floor and (not doc.date or doc.date < floor):
             return False
@@ -329,15 +329,15 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
-                print("Could not open your M&T Bank statements. Sign in and open")
+                print("Could not open your DFAS myPay statements. Sign in and open")
                 print("Statements & Documents in the browser, then try again.")
                 return 0
         self.check_session(page)
 
         # Statements are grouped by account into expandable accordions; each
         # group's rows carry a date + a "View" button (no documents API).
-        raw = site.collect_statement_rows(page)
-        log.info("M&T Bank: collected %d document rows across accounts", len(raw))
+        raw = site.collect_documents(page)
+        log.info("DFAS myPay: collected %d document rows across accounts", len(raw))
         n_new = 0
         for d in raw:
             n_new += self._record_statement_doc(d)
@@ -442,19 +442,19 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # M&T serves each document at its own URL, captured at discovery. The
+        # myPay serves each document at its own URL, captured at discovery. The
         # session must be live, so warm it, then GET the href (host-checked in
         # download_statement). Nothing is clicked.
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
         try:
-            saved = site.download_statement(page, doc.href, out_path)
+            saved = site.download_document(page, doc.document_id, out_path)
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as "manual review" and finish looking successful while
             # having saved nothing.
-            print("\n  !! M&T returned a sign-in page instead of a document.")
+            print("\n  !! myPay returned a sign-in page instead of a document.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, re-list your statements, then run resume.bat.")
             self.stats["session_expired"] = 1
@@ -544,7 +544,11 @@ class App:
             "PDF Full Path": doc.pdf_path,
             "PDF File Size": doc.pdf_size,
             "PDF Page Count": doc.pdf_pages,
-            "Source URL": doc.href,
+            # No URL exists for a myPay document: it is fetched by a
+            # (type, id) pair. The id is account-specific, so the CSV
+            # records only which KIND of document this was.
+            "Source URL": site.DOCUMENT_TYPES.get(
+                (site.parse_doc_id(doc.document_id) or (0, 0))[0], ""),
             "Classification Confidence": doc.confidence,
             "Downloaded At": now_iso() if doc.pdf_filename else "",
             "Verified At": now_iso() if doc.pdf_pages else "",
@@ -595,7 +599,7 @@ class App:
         self.stats["mode"] = mode_name
         if mode_name == "all" and not self.args.yes:
             scope = ", ".join(self.config.get("document_types", []))
-            print(f"This downloads ALL available M&T Bank documents ({scope}).")
+            print(f"This downloads ALL available DFAS myPay documents ({scope}).")
             print("Type YES to continue:")
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
@@ -642,10 +646,15 @@ class App:
         try:
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            # Same non-destructive path as discover: read the statements you
-            # listed across any open tab, then the tax page. Never navigates or
-            # resets the statements list.
-            docs = site.collect_statement_rows(page)
+            info["mapped"] = bool(site.DOCUMENT_TYPES)
+            # This app is not mapped yet, so diagnose gathers EVIDENCE of what
+            # is actually on the page rather than pretending to collect. Read
+            # only, from myPay frames only, and it navigates nothing.
+            info["frames"] = [
+                (fr.url or "")[:120]
+                for pg in page.context.pages if not pg.is_closed()
+                for fr in pg.frames if site.is_mypay_frame(fr)]
+            docs = site.collect_documents(page)
             info["collected"] = len(docs)
             info["samples"] = []
             for d in docs[:12]:
@@ -654,8 +663,9 @@ class App:
                     "title": (d.get("title") or "")[:90],
                     "date": d.get("date", ""),
                     "category": cat, "summary": summ})
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            # No screenshot. On a payroll system the page on screen shows pay
+            # amounts and identifiers, and a PNG of it would sit in Diagnostics
+            # where it is easy to attach to a bug report by accident.
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
@@ -673,7 +683,7 @@ class App:
         dates = sorted(d for d in s["dates"] if d)
         new_files = s.get("new_files", [])
         atomic_write_text(self.paths.run_summary, "\n".join([
-            "M&T Bank Documents - run summary",
+            "DFAS myPay Documents - run summary",
             "=" * 40,
             f"Run start:                 {s['started']}",
             f"Run end:                   {s['ended']}",
@@ -708,7 +718,7 @@ class App:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="Local supervised M&T Bank document downloader (read-only)")
+        description="Local supervised DFAS myPay document downloader (read-only)")
     for name, help_text in [
             ("login", "verify connection to your signed-in browser"),
             ("discover", "list available documents; writes discovery.json"),

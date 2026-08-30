@@ -7,6 +7,40 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.14.0] — 2026-08-29
+
+### Added
+- **DFAS myPay retiree documents (21st provider)** (`apps/mypay`, CDP port
+  9241). Monthly Retiree Account Statements (eRAS), CRSC pay statements, annual
+  RAS, 1099-R and IRS 1095 forms. Read-only and delete-safe. Verified live: 35
+  documents across 2023 to 2026, every one a valid and byte-unique PDF.
+
+  myPay exposes a clean JSON API, so **nothing on the page is ever clicked,
+  no form is submitted and nothing is navigated** - enforced by a test. On a
+  system where direct deposit, federal and state withholding, allotments and
+  SBP elections sit one nav click from the documents, not activating a control
+  at all is the strongest guarantee available.
+
+  **The session token never leaves the browser.** myPay authenticates with a
+  bearer token plus three identifying headers. Rather than lift that
+  government credential into this process, every call runs inside the page and
+  reads the token in the same expression that uses it. It is never logged and
+  never written to disk.
+
+  **A document is identified by its type and date, not by myPay's numeric Id.**
+  The first live run proved why: for generated documents that Id is a transient
+  handle that does not survive the session, so stored ones returned 404 and
+  every eRAS and 1099-R was recorded a second time under a new Id. The numeric
+  Id is now looked up fresh at download time.
+
+  The guard is built for a military pay account: direct deposit, routing and
+  account numbers, allotments, withholding and W-4, SBP, SGLI, TSP,
+  beneficiary, address, login ID and password, and every change / update /
+  start / stop / consent / agree / submit / certify variant. The SSN field on
+  the sign-in page is only ever detected as a signed-out signal, never read
+  from and never typed into. `diagnose` writes no screenshot here, because a
+  myPay page shows pay figures and identifiers.
+
 ## [0.13.1] — 2026-08-23
 
 Hardening pass over the new M&T app, from a line-by-line review of it. Every
