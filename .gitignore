@@ -74,3 +74,8 @@ Thumbs.db
 
 # Verizon browser download temp dir
 **/.vz-downloads/
+
+# The status dashboard lists which providers you hold accounts with, plus how
+# current each archive is. It belongs next to your installs, never in the repo.
+status.html
+**/status.html
