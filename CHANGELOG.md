@@ -7,6 +7,51 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.17.0] — 2026-08-30
+
+### Security
+- **Every app now has a parsed host allowlist**, up from two out of
+  twenty-one. A review found the rest would fetch or navigate to whatever URL
+  a stored record or a page attribute contained, using the live signed-in
+  session. One bank app accepted any href containing ".pdf" or "statement",
+  including a fully off-host one. Four apps ran `page.goto` on a stored value
+  unchecked. Twelve chose which browser tab to drive with a substring test, so
+  "provider.com" also matched "provider.com.phish.example". Each allowlist is
+  derived from that app's own base URL, and every app was checked to confirm
+  the hosts it genuinely uses still pass.
+- **Guards that existed but never ran.** Six apps defined a control guard and
+  never called it in production. One called it with a hardcoded string, so it
+  always returned true and gated nothing; it reads the control's real label
+  now.
+- **Settings controls could be clicked in every app.** Only bare verb stems
+  were matched, so "Save Changes", "Document Removal" and "Loss Mitigation
+  Application" all passed. The shared core now carries a verb-led pattern and
+  every app consults it, so the next improvement lands everywhere at once.
+- **One repo-wide test** now checks all of this across every app together.
+  Testing it per app is what allowed the drift, since each app's tests only
+  ever knew about that app.
+
+### Changed
+- The documentation no longer publishes account facts. It stated not just that
+  a provider is supported but that a real person holds an account there, with
+  document counts and date spans. The "verified against a live account" claim
+  stays, because that is about the code. The tallies, spans and account
+  inventories are gone, along with two real statement dates that revealed a
+  billing cycle day, two real document identifiers, a personal default date
+  shipped in a shared example config, and example paths naming private folders.
+
+### Notes
+- Two mistakes made and caught while doing the guard work, recorded because
+  the shape of them matters. Folding money NOUNS into the label guard refused
+  real documents in five apps ("Detailed Bill PDF", "Pay Statement"), so the
+  guard is verb-led and holds none. Blocking a bare "save" also refused
+  "Save PDF", so the rule was narrowed to the commit-shaped forms. Both were
+  found by re-checking each app against its own document labels rather than
+  trusting the change.
+- Receipt apps keep a blocklist used inline rather than an allowlist, on
+  purpose: they must still click "Load more", which a document-word allowlist
+  would refuse.
+
 ## [0.16.0] — 2026-08-30
 
 ### Added
