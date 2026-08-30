@@ -7,6 +7,58 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.16.0] — 2026-08-30
+
+### Added
+- **A status tracker** (`tools/status.py`, `tools/status.bat`). Reads the state
+  each app already keeps and reports how current every archive is. Prints a
+  table, and with `--html` writes a self-contained dashboard. Pure stdlib,
+  reads local state only, downloads nothing and changes nothing.
+
+  It answers "is something new probably waiting" rather than "when did I last
+  run this". A run that only verified existing files still updates a timestamp
+  while saying nothing about whether a new statement exists, so the signal is
+  the date of the newest document actually held, measured against how often
+  that provider issues them. The cadence comes from the archive's own history,
+  measured per account, so nothing needs configuring.
+
+  It reports the archives that EXIST. Nobody holds an account with every
+  provider, so an unused folder or one left by a closed account is left out
+  rather than shown as missing.
+
+- **Gap detection.** Being up to date is not the same as being complete. An
+  archive can hold a document from last week and still be missing whole years
+  behind it, which happened twice in this project. Each series is now checked
+  for periods missing from the middle. A series must earn an opinion before it
+  gets one, because plenty of real documents arrive irregularly and flagging
+  those would train you to ignore the report.
+
+### Fixed
+- **Six ways the status tool could report all-clear over a damaged archive**,
+  found by red-teaming it. `--quiet` hid the gap report entirely, so the mode
+  meant for routine checking printed "everything is current" over an archive
+  missing a whole year. A single future-dated record masked a stale archive. A
+  truncated state file made a provider vanish from the report rather than be
+  flagged. One record carrying a timezone offset beside one without raised an
+  error that destroyed the report for every provider. Text the console cannot
+  encode killed the run before the dashboard was written. Each was reproduced
+  first, re-attacked after, and pinned by a test.
+- **Two code-execution vectors in the launcher**, both demonstrated working
+  first. It is documented to live in a data folder, which is a plausible place
+  for other software to drop a file, so a planted `py.bat` could run instead of
+  Python and a planted `statistics.py` could be imported instead of the real
+  module. The launcher now blocks both.
+- A `.gitignore` gap: `config.json.save` and similar backup copies were not
+  ignored, though they hold the owner name and local paths exactly as
+  `config.json` does.
+
+### Security
+- **A personal name has been removed from the repository and its history.** A
+  test fixture and a matching comment carried a real given name inside an
+  account nickname, present since the first commit. It is gone from the working
+  tree and from all 110 commits. See the release notes for what this means if
+  you have an existing clone.
+
 ## [0.15.0] — 2026-08-29
 
 ### Added
