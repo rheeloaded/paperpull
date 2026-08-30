@@ -39,7 +39,7 @@ import json
 import re
 import statistics
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
@@ -48,6 +48,7 @@ PROVIDER_RE = re.compile(r"provider\s*=\s*[\"']([^\"']+)[\"']")
 
 CURRENT, DUE, OVERDUE, UNKNOWN, ONGOING = "current", "due", "overdue", "unknown", "ongoing"
 NEVER = "never"
+UNREADABLE = "unreadable"
 
 
 def _iso(value):
@@ -180,7 +181,11 @@ def find_gaps(records, kind):
         if not got:
             continue
         d = _record_date(rec)
-        if not d:
+        # Same sanity window the rest of the report uses. A single record dated
+        # year 0001 otherwise produced a "24,000 documents missing" finding,
+        # and noise on that scale trains you to skip the gap section entirely,
+        # which has the same effect as hiding it.
+        if not d or not (date(1990, 1, 1) <= d <= date.today() + timedelta(days=2)):
             continue
         key = (str(rec.get("account") or ""), str(rec.get("summary") or "") or "documents")
         series.setdefault(key, []).append(d)
@@ -237,8 +242,21 @@ def scan_install(install: Path):
     # progress.json, or one that has never recorded anything, is a provider
     # this person does not use (or a leftover from a closed account) and is
     # left out entirely rather than listed as missing or overdue.
-    progress = _read_json(install / "progress.json")
+    state = install / "progress.json"
+    if not state.exists():
+        return None
+    progress = _read_json(state)
     if not progress:
+        # The file is there but unreadable or empty. An unreadable one used to
+        # make the whole provider disappear from the report, which turns a
+        # half-written state file into a silent blind spot. An empty one is a
+        # provider that was never used, and is genuinely not applicable.
+        if state.stat().st_size > 2:
+            return {"folder": install.name, "provider": install.name,
+                    "kind": "DOCUMENT", "documents": 0, "newest": None,
+                    "age_days": None, "cadence_days": None, "status": UNREADABLE,
+                    "last_download": None, "last_run": None, "last_run_mode": "",
+                    "gaps": [], "missing": 0, "odd_dates": 0}
         return None
     records = [r for r in progress.values() if isinstance(r, dict)]
     if not records:
@@ -260,9 +278,24 @@ def scan_install(install: Path):
             stamp = datetime.fromisoformat(str(rec.get("updated_at") or ""))
             if last_download is None or stamp > last_download:
                 last_download = stamp
-        except ValueError:
+        except (ValueError, TypeError):
+            # TypeError happens when one record carries a timezone offset and
+            # another does not. Comparing those raises, and it used to escape
+            # scan_install and kill the report for EVERY provider, not just
+            # the one holding the odd record.
             pass
 
+    # Dates outside a sane window are ignored rather than trusted. A single
+    # record dated in the future made a five year hole report as current, and
+    # one dated year 0001 invented a gap of 23,000 missing documents. Both
+    # values can come from a provider page, so neither is trusted.
+    horizon = date.today() + timedelta(days=2)
+    sane = [d for d in doc_dates if date(1990, 1, 1) <= d <= horizon]
+    odd_dates = len(doc_dates) - len(sane)
+    doc_dates = sane
+    by_account = {k: [d for d in v if date(1990, 1, 1) <= d <= horizon]
+                  for k, v in by_account.items()}
+    by_account = {k: v for k, v in by_account.items() if v}
     newest = max(doc_dates) if doc_dates else None
     cadence = _cadence_days(by_account) if kind == "DOCUMENT" else None
     age = (date.today() - newest).days if newest else None
@@ -292,6 +325,7 @@ def scan_install(install: Path):
         "cadence_days": cadence, "status": status,
         "last_download": last_download, "last_run": run_at, "last_run_mode": run_mode,
         "gaps": gaps, "missing": sum(g["missing"] for g in gaps),
+        "odd_dates": odd_dates,
     }
 
 
@@ -303,7 +337,8 @@ def scan_all(root: Path):
         row = scan_install(child)
         if row:
             rows.append(row)
-    order = {OVERDUE: 0, NEVER: 1, DUE: 2, UNKNOWN: 3, CURRENT: 4, ONGOING: 5}
+    order = {UNREADABLE: 0, OVERDUE: 1, NEVER: 2, DUE: 3, UNKNOWN: 4,
+             CURRENT: 5, ONGOING: 6}
     rows.sort(key=lambda r: (order.get(r["status"], 9), -(r["age_days"] or 0)))
     return rows
 
@@ -311,7 +346,8 @@ def scan_all(root: Path):
 # -- rendering ---------------------------------------------------------------
 
 LABEL = {CURRENT: "current", DUE: "due", OVERDUE: "OVERDUE",
-         UNKNOWN: "unknown", ONGOING: "ongoing", NEVER: "never downloaded"}
+         UNKNOWN: "unknown", ONGOING: "ongoing", NEVER: "never downloaded",
+         UNREADABLE: "STATE FILE UNREADABLE"}
 
 
 def _fmt_cadence(days):
@@ -330,51 +366,71 @@ def _fmt_cadence(days):
     return "yearly"
 
 
+def _say(line=""):
+    """Print without letting one unencodable character kill the report.
+
+    Scraped account labels can hold characters the Windows console codepage
+    cannot represent. Printing one raised UnicodeEncodeError part way through,
+    which killed the run before status.html was written - a neat way for a
+    hostile page to silence the whole check.
+    """
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        enc = (sys.stdout.encoding or "utf-8")
+        print(str(line).encode(enc, "replace").decode(enc, "replace"))
+
+
 def print_table(rows, quiet=False):
-    shown = [r for r in rows if not quiet or r["status"] in (DUE, OVERDUE, NEVER)]
+    # A gap counts as needing attention. Without this, --quiet reported
+    # "everything is current" over an archive missing a whole year, which is
+    # precisely the loss this tool exists to surface.
+    def _wants_eyes(r):
+        return r["status"] in (DUE, OVERDUE, NEVER, UNREADABLE) or r["missing"]
+    shown = [r for r in rows if not quiet or _wants_eyes(r)]
     if not shown:
-        print("Nothing needs attention. Every provider is current." if quiet
-              else "No installs found.")
+        _say("Nothing needs attention. Every archive is current and complete."
+              if quiet else "No archives found.")
         return
-    print()
-    print("%-30s %5s %5s  %-12s %6s  %-9s %s" % (
+    _say()
+    _say("%-30s %5s %5s  %-12s %6s  %-9s %s" % (
         "PROVIDER", "DOCS", "GAPS", "NEWEST", "AGE", "ISSUES", "STATUS"))
-    print("-" * 88)
+    _say("-" * 88)
     for r in shown:
         age = ("%d d" % r["age_days"]) if r["age_days"] is not None else "-"
         mark = "!!" if r["status"] == OVERDUE else (
             "*" if r["status"] in (DUE, NEVER) else "  ")
-        print("%-30s %5d %5s  %-12s %6s  %-9s %s %s" % (
+        _say("%-30s %5d %5s  %-12s %6s  %-9s %s %s" % (
             r["folder"][:30], r["documents"],
             (str(r["missing"]) if r["missing"] else "-"),
             r["newest"].isoformat() if r["newest"] else "-",
             age, _fmt_cadence(r["cadence_days"]), mark, LABEL[r["status"]]))
-    print()
+    _say()
     due = [r for r in rows if r["status"] in (DUE, OVERDUE, NEVER)]
     if due:
-        print("Probably worth running: " + ", ".join(r["folder"] for r in due))
+        _say("Probably worth running: " + ", ".join(r["folder"] for r in due))
     else:
-        print("Everything with a predictable schedule looks current.")
+        _say("Everything with a predictable schedule looks current.")
     unknown = [r for r in rows if r["status"] == UNKNOWN]
     if unknown:
-        print("Not enough history to judge: " + ", ".join(r["folder"] for r in unknown))
+        _say("Not enough history to judge: " + ", ".join(r["folder"] for r in unknown))
     holed = [r for r in rows if r["missing"]]
     if holed:
-        print()
-        print("Possible gaps. A run that looks current can still be missing")
-        print("periods in the middle, so these are worth a look.")
+        _say()
+        _say("Possible gaps. A run that looks current can still be missing")
+        _say("periods in the middle, so these are worth a look.")
         for r in holed:
-            print("  %s" % r["folder"])
+            _say("  %s" % r["folder"])
             groups = group_gaps(r["gaps"])
             for g in groups[:8]:
                 if g["count"] > 1:
                     who = "%d series, including %s" % (g["count"], g["labels"][0][:34])
                 else:
                     who = g["labels"][0][:52]
-                print("     %s to %s   %d missing   %s" % (
+                _say("     %s to %s   %d missing   %s" % (
                     g["after"], g["before"], g["missing"], who))
             if len(groups) > 8:
-                print("     ... and %d more windows" % (len(groups) - 8))
+                _say("     ... and %d more windows" % (len(groups) - 8))
 
 
 HTML_HEAD = """<!doctype html>

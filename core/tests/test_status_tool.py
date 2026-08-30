@@ -158,11 +158,17 @@ def test_a_provider_you_do_not_use_is_not_listed(tmp_path):
     assert [r["folder"] for r in rows] == ["In Use"]
 
 
-def test_unreadable_state_is_skipped_rather_than_crashing(tmp_path):
+def test_an_unreadable_state_file_is_reported_not_silently_dropped(tmp_path):
+    """A truncated or corrupt progress.json used to make the whole provider
+    vanish from the report. A run killed mid-write, a disk error or a partial
+    sync would quietly remove an archive from oversight, which is the same
+    silent loss this tool exists to catch."""
     d = tmp_path / "Corrupt"
     d.mkdir()
-    (d / "progress.json").write_text("{not json", encoding="utf-8")
-    assert status.scan_install(d) is None
+    (d / "progress.json").write_text('{"k": {"date": "2019-01-15", "downl',
+                                     encoding="utf-8")
+    row = status.scan_install(d)
+    assert row is not None and row["status"] == status.UNREADABLE
 
 
 def test_set_up_but_never_downloaded_says_so(tmp_path):
@@ -271,3 +277,91 @@ def test_the_same_window_across_accounts_is_reported_once():
     grouped = status.group_gaps(gaps)
     assert len(grouped) == 1
     assert grouped[0]["count"] == 3 and grouped[0]["missing"] == 1
+
+
+# -- what a red team found, each pinned so it cannot come back ---------------
+
+def test_quiet_never_hides_a_gap(tmp_path):
+    """--quiet is the mode meant for routine checking, and it was printing
+    "everything is current" over an archive missing a whole year, because the
+    gap section sat behind an early return."""
+    import contextlib, io
+    recs = {}
+    for i, d in enumerate(_months(72)):
+        if d.year == date.today().year - 4:
+            continue
+        recs[str(i)] = {"date": d.isoformat(), "downloaded_ok": True,
+                        "account": "", "summary": "Statement",
+                        "updated_at": "2026-01-01T00:00:00"}
+    d = _install(tmp_path, "Bank", recs, "SPEC = AppSpec(kind=DOCUMENT)")
+    rows = status.scan_all(tmp_path)
+    assert rows[0]["missing"] > 0
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        status.print_table(rows, quiet=True)
+    out = buf.getvalue()
+    assert "Possible gaps" in out
+    assert "Nothing needs attention" not in out
+
+
+def test_a_future_dated_record_cannot_mask_a_stale_archive(tmp_path):
+    """One record dated in the future made a five year hole report as current,
+    and that date can come straight off a provider page."""
+    recs = {str(i): {"date": d.isoformat(), "downloaded_ok": True, "account": "",
+                     "summary": "S", "updated_at": "2026-01-01T00:00:00"}
+            for i, d in enumerate(_months(30, start=date.today() - timedelta(days=2000)))}
+    recs["evil"] = {"date": (date.today() + timedelta(days=95)).isoformat(),
+                    "downloaded_ok": True, "account": "", "summary": "S",
+                    "updated_at": "2026-01-01T00:00:00"}
+    d = _install(tmp_path, "Stale", recs, "SPEC = AppSpec(kind=DOCUMENT)")
+    assert status.scan_install(d)["status"] == status.OVERDUE
+
+
+def test_one_odd_timestamp_does_not_kill_every_provider(tmp_path):
+    """A record with a timezone offset next to one without raised TypeError,
+    and it escaped scan_install to destroy the report for ALL providers."""
+    recs = {"a": {"date": "2026-01-01", "downloaded_ok": True,
+                  "updated_at": "2026-01-01T10:00:00"},
+            "b": {"date": "2026-02-01", "downloaded_ok": True,
+                  "updated_at": "2026-02-01T10:00:00+00:00"}}
+    _install(tmp_path, "Poisoned", recs, "SPEC = AppSpec(kind=DOCUMENT)")
+    _install(tmp_path, "Healthy", _monthly(12), "SPEC = AppSpec(kind=DOCUMENT)")
+    assert len(status.scan_all(tmp_path)) == 2
+
+
+def test_an_absurd_date_cannot_invent_thousands_of_missing_documents(tmp_path):
+    """A single record dated year 0001 produced a finding of 24,000 missing
+    documents. Noise on that scale trains you to skip the section, which has
+    the same effect as hiding it."""
+    recs = dict(_monthly(30))
+    recs["ancient"] = {"date": "0001-01-01", "downloaded_ok": True, "account": "",
+                       "summary": "S", "updated_at": "2026-01-01T00:00:00"}
+    d = _install(tmp_path, "Bank", recs, "SPEC = AppSpec(kind=DOCUMENT)")
+    assert status.scan_install(d)["missing"] == 0
+
+
+def test_output_survives_text_the_console_cannot_encode(tmp_path):
+    """Account labels are scraped, so they can hold characters the Windows
+    console codepage cannot represent. Printing one killed the run before
+    status.html was written."""
+    import contextlib, io
+    recs = dict(_monthly(12))
+    for k in list(recs)[:2]:
+        recs[k]["account"] = "Checking 中国 1234"
+    _install(tmp_path, "Bank", recs, "SPEC = AppSpec(kind=DOCUMENT)")
+    rows = status.scan_all(tmp_path)
+    buf = io.BytesIO()
+    stream = io.TextIOWrapper(buf, encoding="cp1252", errors="strict")
+    with contextlib.redirect_stdout(stream):
+        status.print_table(rows, quiet=False)
+    stream.flush()
+
+
+def test_the_launcher_blocks_both_execution_vectors():
+    """status.bat is meant to live in a DATA folder, which is a plausible place
+    for something else to drop a file. Without these, a planted py.bat runs
+    instead of Python, and a planted statistics.py is imported instead of the
+    real module."""
+    bat = (REPO / "tools" / "status.bat").read_text(encoding="utf-8")
+    assert "NoDefaultCurrentDirectoryInExePath=1" in bat
+    assert "-P status.py" in bat
