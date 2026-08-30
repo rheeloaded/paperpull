@@ -3,7 +3,7 @@
   "owner_in_filename": false,
   "output_dir": ".",
   "profile_dir": "./browser-profile",
-  "cdp_url": "http://localhost:9233",
+  "cdp_url": "http://127.0.0.1:9233",
   "min_pdf_bytes": 3000,
   "max_path_length": 240,
   "delay_min_seconds": 2.0,
