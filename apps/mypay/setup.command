@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "=== M^&T Bank Documents setup ==="
+echo "=== DFAS myPay Documents setup ==="
 
 PY3="$(command -v python3 || true)"
 if [ -z "$PY3" ]; then
@@ -28,4 +28,4 @@ fi
 .venv/bin/python -m playwright install chromium
 
 echo
-echo "Setup complete. Next step: ./login.command and sign in to M^&T Bank Documents."
+echo "Setup complete. Next step: ./login.command and sign in to DFAS myPay Documents."
