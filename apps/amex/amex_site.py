@@ -62,7 +62,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"apply|apply\s+now|add\s+card|add\s+account|link\s+(bank|account)|"
     r"dispute|report\s+(fraud|lost|stolen)|book\b|travel\b|reservation|"
     r"cancel|close\s+account|activate|replace\s+card|lock\b|freeze\b|"
-    r"enable|disable|change\s+|edit\s+|update\s+|set\s+up|manage\b|"
+    r"enable|disable|\bchange\s+|\bedit\s+|\bupdate\s+|set\s+up|manage\b|"
     r"delete|remove|beneficiar|password|username|"
     r"enroll|subscribe|upgrade|offer\b|refer\b|"
     r"confirm|continue|next\b|agree|accept|authorize|submit)", re.I)

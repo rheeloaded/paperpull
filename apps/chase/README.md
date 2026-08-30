@@ -10,10 +10,10 @@ summaries have their own tabs in Chase and are deliberately not collected —
 than half-filed. Deposit accounts, mortgages, auto loans and J.P. Morgan
 investment accounts are not covered either.
 
-Verified end to end against a live account on 2026-08-18
-and 2019–2026, downloaded and checked against the account number printed
-inside each PDF; delete-safe re-run confirmed, from the launchers and from
-the control panel.
+Verified end to end against a live account on 2026-08-18. Statements were
+downloaded and checked against the account number printed inside each PDF, and
+a delete-safe re-run was confirmed, both from the launchers and from the
+control panel.
 
 ## A real browser, always
 
