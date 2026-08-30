@@ -449,7 +449,7 @@ class App:
             self.check_session(page)
             site.ensure_statements(page)
         try:
-            saved = site.download_document(page, doc.href, out_path)
+            saved = site.download_document(page, doc.document_id, out_path)
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as "manual review" and finish looking successful while
@@ -544,7 +544,11 @@ class App:
             "PDF Full Path": doc.pdf_path,
             "PDF File Size": doc.pdf_size,
             "PDF Page Count": doc.pdf_pages,
-            "Source URL": doc.href,
+            # No URL exists for a myPay document: it is fetched by a
+            # (type, id) pair. The id is account-specific, so the CSV
+            # records only which KIND of document this was.
+            "Source URL": site.DOCUMENT_TYPES.get(
+                (site.parse_doc_id(doc.document_id) or (0, 0))[0], ""),
             "Classification Confidence": doc.confidence,
             "Downloaded At": now_iso() if doc.pdf_filename else "",
             "Verified At": now_iso() if doc.pdf_pages else "",
@@ -642,7 +646,7 @@ class App:
         try:
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            info["mapped"] = bool(site.DOCUMENT_PATHS)
+            info["mapped"] = bool(site.DOCUMENT_TYPES)
             # This app is not mapped yet, so diagnose gathers EVIDENCE of what
             # is actually on the page rather than pretending to collect. Read
             # only, from myPay frames only, and it navigates nothing.
@@ -650,7 +654,6 @@ class App:
                 (fr.url or "")[:120]
                 for pg in page.context.pages if not pg.is_closed()
                 for fr in pg.frames if site.is_mypay_frame(fr)]
-            info["controls"] = site.collect_link_evidence(page)
             docs = site.collect_documents(page)
             info["collected"] = len(docs)
             info["samples"] = []
