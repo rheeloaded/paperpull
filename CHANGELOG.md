@@ -7,6 +7,49 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.17.1] - 2026-08-30
+
+### Fixed
+- **A failed download no longer leaves an empty file wearing a real
+  statement's name.** Playwright creates the target file before the bytes
+  arrive, so a capture that failed left a zero byte PDF sitting in the output
+  folder looking exactly like a genuine download. Five of those turned up in a
+  real archive. The run had reported them as needing review, but the folder
+  said otherwise, and the folder is what people look at. All seven apps that
+  download this way now remove the file they could not fill. The check also
+  rejects a file that exists but does not start with the PDF marker, which
+  catches an error page saved under a PDF name. It runs only on the failure
+  path, so a tax archive that legitimately arrives as a ZIP is untouched.
+- **Chase skipped every card whose name contains "rewards".** The card header
+  was judged against the general control blocklist, which refuses "rewards"
+  because "Redeem rewards" is a real button on a card page. Amazon Prime
+  Rewards, Southwest Rapid Rewards and IHG One Rewards were dropped along with
+  every statement they held, leaving one line in the log while the run still
+  reported success. A card is now judged on action verbs instead, so a product
+  name is not mistaken for a button.
+- **The word "edit" matched inside "Credit".** The settings guard would have
+  refused to open a document titled "Credit Card Statement". The pattern now
+  requires a word boundary.
+- **Signing in no longer fails silently when the browser is already open.**
+  Launching Edge or Chrome while a copy is already running hands the address to
+  the existing window and drops the settings the tool needs. A window opened,
+  the sign-in was spent, and nothing revealed the problem until the next
+  command. The debugging port is now confirmed at login, where it can still be
+  explained.
+- Chase kept only the first 40 characters of a card name as its key, so two
+  cards of the same product collided and the second card's whole history was
+  discarded as a duplicate. The last four digits are kept in the key now.
+- Chase could click an unlabelled pagination element, because a selector
+  matched any element whose class contained "next" and an empty label passed
+  the blocklist trivially. It now requires a readable label.
+- Chase host-checks the address before fetching a document with the signed-in
+  session, rather than trusting whatever a click opened.
+
+### Testing
+- Guard coverage runs across every app at once rather than per app. Per-app
+  tests are how these problems drifted into separate copies in the first place.
+  765 tests.
+
 ## [0.17.0] — 2026-08-30
 
 ### Security
