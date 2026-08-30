@@ -63,7 +63,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"exercise|close\s+position|sell\s+all|liquidate|"
     r"options?\b|margin\b|borrow\b|gold\b|subscribe|"
     r"apply|open\s+\w*\s*account|fund\b|add\s+money|link\s+(bank|account)|"
-    r"enable|disable|activate|change\s+|edit\s+|update\s+|set\s+up|"
+    r"enable|disable|activate|\bchange\s+|\bedit\s+|\bupdate\s+|set\s+up|"
     r"delete|remove|close\s+account|beneficiar|password|"
     r"generate\s+report|create\s+report|generate\b|"
     r"confirm|continue|next\b|agree|accept|authorize)", re.I)

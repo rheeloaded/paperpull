@@ -79,7 +79,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"address|phone|e-?mail|password|login\s*id|\bpin\b|security\s+question|"
     r"correspondence|mailing|contact\s+info|"
     # verb families, endings included
-    r"chang(e|es|ed|ing)|edit(s|ed|ing)?\b|updat(e|es|ed|ing)|"
+    r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
     r"set\s+up|enabl|disabl|delet|remov(e|es|ed|ing|al)|start|stop|restart|"
     r"\boptions?\b|\bsettings?\b|\bpreferences?\b|^\s*save\s*$|save\s+(changes?|settings?|preferences?|profile)|manage|"
     r"enroll|consent|agree|accept|opt\s*(in|out)|turn\s+(on|off)|"

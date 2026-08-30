@@ -118,8 +118,12 @@ FORBIDDEN_CONTROL_RE = re.compile(
     # settings
     # Verb families with their endings. The stem-only version this replaces
     # let "Save Changes", "Document Removal" and "Updates" walk through.
-    r"chang(e|es|ed|ing)|edit(s|ed|ing)?\b|updat(e|es|ed|ing)|"
-    r"set\s+up|enabl|disabl|delet|remov(e|es|ed|ing|al)|^\s*save\s*$|save\s+(changes?|settings?|preferences?|profile)|"
+    # Leading \b matters as much as the trailing one: without it "edit"
+    # matches inside "Credit" and "chang" inside "Exchange", which
+    # refused "Credit Card Statement", a document rather than a control.
+    r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
+    r"\bset\s+up\b|\benabl|\bdisabl|\bdelet|\bremov(e|es|ed|ing|al)\b|"
+    r"^\s*save\s*$|\bsave\s+(changes?|settings?|preferences?|profile)\b|"
     r"appl(y|ies|ied|ication)|\boptions?\b|\bsettings?\b|"
     r"\bpreferences?\b|manage|turn\s+(on|off)|opt\s*(in|out)|"
     r"beneficiar|payee|contact\s+info|password|username|"

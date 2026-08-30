@@ -80,7 +80,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"dispute|report\s+(a\s+)?(problem|fraud|lost|stolen)|lock\s+card|unlock\s+card|"
     r"activat|replace\s+card|order\s+checks|stop\s+payment|"
     # verb families, endings included
-    r"chang(e|es|ed|ing)|edit(s|ed|ing)?\b|updat(e|es|ed|ing)|"
+    r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
     r"set\s+up|enabl|disabl|delet|remov(e|es|ed|ing|al)|"
     # anything that reads like a settings/preferences control
     r"\boptions?\b|\bsettings?\b|\bpreferences?\b|^\s*save\s*$|save\s+(changes?|settings?|preferences?|profile)|manage|"
