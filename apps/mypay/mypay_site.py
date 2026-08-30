@@ -305,6 +305,7 @@ def ensure_statements(page) -> bool:
 # DocumentTypeId -> (title, whether to collect by default). Taken from the
 # app's own DocumentTypeEnum, so these are its numbers, not invented ones.
 DOCUMENT_TYPES = {
+    # Retiree and annuitant accounts (verified live against a retiree account)
     21: "Retiree Account Statement",
     19: "Annual Retiree Account Statement",
     20: "CRSC Pay Statement",
@@ -315,6 +316,15 @@ DOCUMENT_TYPES = {
     9: "Travel Misc W-2 Statement",
     5: "IRS Form 1095-B",
     6: "IRS Form 1095-C",
+    # Active-duty accounts. NOT YET VERIFIED against a live active-duty
+    # account: the numbers are myPay's own DocumentTypeEnum values and the API
+    # is the same one the retiree types are proven on, but nobody has run this
+    # against an active-duty member's account. A type that does not apply to an
+    # account simply returns nothing and is skipped, so listing these here is
+    # harmless for a retiree and is what makes one app serve both.
+    2: "Leave and Earnings Statement",
+    3: "W-2 Tax Form",
+    4: "W-2C Corrected Tax Form",
 }
 
 # The shared header block. Built inside the page from the values the app itself

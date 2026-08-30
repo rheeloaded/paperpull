@@ -4,9 +4,15 @@ Downloads your **Retiree Account Statements (eRAS)**, **CRSC pay statements**
 and tax forms from DFAS myPay as PDFs. Read-only, delete-safe, part of
 [PaperPull](../../README.md).
 
-> **Status: verified against a live account (2026-08-29).** A full run pulled
-> 35 documents spanning 2023 to 2026: monthly eRAS, CRSC pay statements,
-> annual RAS, 1099-R and IRS 1095 forms. All valid, all byte-unique.
+> **Retiree accounts: verified against a live account (2026-08-29).** A full
+> run pulled 35 documents spanning 2023 to 2026, all valid and byte-unique.
+>
+> **Active-duty accounts: supported but untested.** Leave and Earnings
+> Statements and W-2s are enumerated using myPay's own document-type numbers,
+> over the same API the retiree documents are proven on, but this has **not
+> been tested against a real active-duty account**. It should work and may
+> not. Run `diagnose.bat` first, then `run_pilot.bat`, and check the PDFs
+> before trusting a full run.
 
 ## Read this first, because it is a government system
 
@@ -67,8 +73,8 @@ sign in again and use `resume.bat` — finished documents are never re-fetched.
 
 | Folder | Contents |
 |---|---|
-| `Statements\` | Retiree Account Statements (eRAS) and CRSC pay statements |
-| `Tax Documents\` | 1099-R and other tax forms |
+| `Statements\` | Retiree Account Statements (eRAS), CRSC pay statements, and Leave and Earnings Statements (LES) |
+| `Tax Documents\` | 1099-R, W-2, W-2C and IRS 1095 forms |
 | `Year-End Summaries\` | Year-end statements (created on demand) |
 | `Other Documents\` | Anything else (created on demand) |
 | `Manual Review\` | Files that failed PDF validation |

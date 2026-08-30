@@ -196,3 +196,45 @@ def test_a_signin_page_returned_instead_of_a_pdf_is_recognised():
     assert site._looks_like_login_html(b"<html>Your session has expired</html>")
     assert not site._looks_like_login_html(b"%PDF-1.7 real document")
     assert not site._looks_like_login_html(b"")
+
+
+# -- ACTIVE DUTY: added but NOT verified against a real account --------------
+
+def test_active_duty_document_types_are_enumerated():
+    """One app serves retirees and active duty. A type that does not apply to
+    an account returns nothing and is skipped, so listing the active-duty types
+    costs a retiree nothing."""
+    assert site.DOCUMENT_TYPES[2] == "Leave and Earnings Statement"
+    assert site.DOCUMENT_TYPES[3] == "W-2 Tax Form"
+    assert site.DOCUMENT_TYPES[4] == "W-2C Corrected Tax Form"
+
+
+def test_leave_and_earnings_statements_classify_and_file_correctly():
+    for title in ["Leave and Earnings Statement", "LES for 15 Aug 2026"]:
+        cat, summary, _ = doc_types.classify_document(title, RULES)
+        assert cat == doc_types.STATEMENT, title
+        assert summary == "Leave and Earnings Statement", (title, summary)
+    storage.set_filename_owner("")
+    assert build_pdf_filename("2026-08-15", "Leave and Earnings Statement", "") == \
+        "2026-08-15 DFAS myPay Leave and Earnings Statement.pdf"
+
+
+def test_a_corrected_w2_is_not_filed_as_an_ordinary_one():
+    """W-2C must be matched before the generic W-2 rule, or a correction and
+    the original become indistinguishable on disk."""
+    for title in ["W-2C Corrected Tax Form", "W2C 2025", "W-2-C 2025"]:
+        cat, summary, _ = doc_types.classify_document(title, RULES)
+        assert cat == doc_types.TAX, title
+        assert summary == "W-2C Corrected Tax Form", (title, summary)
+    cat, summary, _ = doc_types.classify_document("W-2 Tax Form", RULES)
+    assert summary == "W-2 Tax Form"
+
+
+def test_active_duty_support_is_labelled_as_untested():
+    """It was written from myPay's own type numbers against an API proven on a
+    retiree account, but nobody has run it on an active-duty account. Saying so
+    is the difference between a caveat and a false claim."""
+    src = (Path(__file__).resolve().parents[1] / "mypay_site.py").read_text(encoding="utf-8")
+    assert "NOT YET VERIFIED" in src
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "not been tested" in readme.lower() or "untested" in readme.lower()

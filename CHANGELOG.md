@@ -7,6 +7,33 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.15.0] — 2026-08-29
+
+### Added
+- **DFAS myPay now serves active-duty accounts too**, not just retirees.
+  Leave and Earnings Statements (LES), W-2s and corrected W-2Cs are enumerated
+  using myPay's own document-type numbers, over the same API the retiree
+  documents are proven on. One app covers both: a document type that does not
+  apply to an account returns nothing and is skipped, so a retiree run is
+  unchanged (re-verified live, still exactly 35 documents).
+
+  **This is untested against a real active-duty account** and is labelled that
+  way in the app README and in the code. It should work and it may not. Run
+  `diagnose.bat`, then `run_pilot.bat`, and check the PDFs before a full run.
+
+### Fixed
+- A corrected **W-2C would have been filed as an ordinary W-2**, making the
+  correction and the original indistinguishable on disk. The W-2C rule is now
+  matched first.
+- **A regex corruption check that could not see the corruption.** Rules files
+  have repeatedly been written with one backslash level eaten, leaving a
+  literal control character where a word boundary belongs, so the pattern
+  silently matches nothing. The existing check read the file's bytes, but JSON
+  escapes a control character as two ordinary characters, so a corrupted file
+  looked clean. The new check reads the PARSED values, confirms every pattern
+  compiles, and runs across all 21 apps. It was verified by deliberately
+  reintroducing the corruption and watching it fail.
+
 ## [0.14.0] — 2026-08-29
 
 ### Added
