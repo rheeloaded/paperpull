@@ -165,8 +165,12 @@ FALLBACK = {
     "page_ready": ("table, [role='row'], [class*='statement'], [class*='document'], "
                    "main, [role='main']"),
     "account_select": "select, [role='combobox'], [role='listbox']",
+    # [class*='next'] was removed: it matched ANY element whose class
+    # contained "next", and .first then clicked it. An icon-only chevron
+    # has no text and no aria-label, so the blocklist could not judge it
+    # and it was clicked blind on a bank page.
     "next_page": ("a[aria-label*='Next' i], button[aria-label*='Next' i], "
-                  ".pagination-next, [class*='next']"),
+                  ".pagination-next"),
     "show_more": "button, a",
 }
 
@@ -487,7 +491,9 @@ def next_page(page) -> bool:
         if loc.count() > 0 and loc.first.is_visible() and loc.first.is_enabled():
             label = (loc.first.inner_text(timeout=800) or "") + \
                 (loc.first.get_attribute("aria-label") or "")
-            if FORBIDDEN_CONTROL_RE.search(label):
+            # An unreadable control is not clicked. Previously an empty label
+            # passed the blocklist trivially and was clicked anyway.
+            if not label.strip() or FORBIDDEN_CONTROL_RE.search(label):
                 return False
             loc.first.click()
             page.wait_for_timeout(2500)
@@ -873,7 +879,7 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
             loc = page.get_by_role("link", name=row_label_re(date, account, action))
             if loc.count():
                 label = " ".join((loc.first.inner_text(timeout=1500) or "").split())
-                if not is_safe_control(label or action):
+                if not is_safe_row_control(label or action):
                     log.info("row control %r did not clear the guard", label[:60])
                     continue
                 link = loc.first
@@ -914,6 +920,12 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
     try:
         new_page.wait_for_load_state("domcontentloaded", timeout=20000)
         url = new_page.url or ""
+        # The tab a click opened could be anywhere. This fetch carries the
+        # signed-in session, so the address is host-checked first. A blob: URL
+        # is minted by the page itself and has no host to check.
+        if not url.startswith("blob:") and not is_safe_url(url):
+            log.error("refusing to fetch a document from outside Chase")
+            return False
         b64 = page.evaluate(_FETCH_AS_B64, url) if url.startswith("blob:") \
             else new_page.evaluate(_FETCH_AS_B64, url)
         if b64:
@@ -1094,6 +1106,41 @@ CARD_RE = re.compile(r"\(\s*\.{2,}\s*\d{4}\s*\)")
 YEAR_PICKER_SEL = "input[id*='filterstyledselect']"
 
 
+# A card's NAME is not an action. Chase sells "SOUTHWEST RAPID REWARDS PLUS",
+# "AMAZON PRIME REWARDS" and "IHG ONE REWARDS PREMIER", and the general
+# blocklist refuses "rewards" because "Redeem rewards" is a real control on a
+# card page. Judging the card HEADER by that list silently skipped every such
+# card and every statement it held, leaving one info line behind while the run
+# still reported success.
+#
+# So a card-shaped label is judged on ACTION VERBS instead. "Pay card" and
+# "Activate card" stay refused because they carry a verb, and they never had a
+# (...1234) suffix to look like a card in the first place.
+CARD_ACTION_RE = re.compile(
+    r"\bpay\b|\bpayment\b|transfer|redeem|activat|\block\b|unlock|replace|"
+    r"dispute|\bclose\b|appl(y|ies|ied|ication)\b|request|increase|advance|"
+    r"authorized\s+user|set\s+up|\bchang(e|es|ed|ing)\b|\bupdat(e|es|ed|ing)\b|"
+    r"\bmanage\b|autopay|auto-?pay|zelle|\bwire\b|deposit|withdraw|\bsend\b|"
+    r"enroll|\bopen\b|\bcancel\b|\bsettings?\b|\bpreferences?\b",
+    re.I)
+
+
+def is_safe_row_control(label: str) -> bool:
+    """A statement ROW's link, whose accessible name embeds the card name.
+
+    Same reasoning as is_card_control. The row reads "Aug 09, 2026 Statement
+    SOUTHWEST RAPID REWARDS PLUS (...1234) Saves document", so the general
+    blocklist refused it for the word in the card's name. It must still name a
+    document action and carry no action verb.
+    """
+    label = (label or "").strip()
+    if not label:
+        return False
+    if CARD_ACTION_RE.search(label):
+        return False
+    return bool(SAFE_DOC_CONTROL_RE.search(label))
+
+
 def is_card_control(label: str) -> bool:
     """A card accordion header may be expanded, though it is not a document
     control.
@@ -1107,7 +1154,7 @@ def is_card_control(label: str) -> bool:
     label = (label or "").strip()
     if not label or not CARD_RE.search(label):
         return False
-    return not FORBIDDEN_CONTROL_RE.search(label)
+    return not CARD_ACTION_RE.search(label)
 
 
 def card_accordions(page) -> List[Tuple[object, str]]:
