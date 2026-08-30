@@ -58,9 +58,8 @@ number so nothing collapses into one file.
 
 **Full history.** Paylocity's Pay History defaults to a year-to-date view,
 but the underlying list endpoint takes a start date, so this app asks for the
-whole history rather than just the current year. Verified live: an account
-with statements back to 2022 returned all 81. `--year` and `--start-date`
-narrow the result afterwards.
+whole history rather than just the current year. Verified against a live
+account. `--year` and `--start-date` narrow the result afterwards.
 
 W-2s and other tax forms are **not** fetched. Paylocity does not serve the
 W-2 PDF from its own API: the form's link is a SAML single-sign-on redirect

@@ -53,11 +53,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   `config.json` does.
 
 ### Security
-- **A personal name has been removed from the repository and its history.** A
-  test fixture and a matching comment carried a real given name inside an
-  account nickname, present since the first commit. It is gone from the working
-  tree and from all 110 commits. See the release notes for what this means if
-  you have an existing clone.
+- **Repository history was rewritten** to remove a value that should never
+  have been committed. An existing clone will not fast-forward, so re-clone
+  rather than pull.
 
 ## [0.15.0] — 2026-08-29
 
@@ -67,7 +65,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   using myPay's own document-type numbers, over the same API the retiree
   documents are proven on. One app covers both: a document type that does not
   apply to an account returns nothing and is skipped, so a retiree run is
-  unchanged (re-verified live, still exactly 35 documents).
+  unchanged (re-verified against a live account).
 
   **This is untested against a real active-duty account** and is labelled that
   way in the app README and in the code. It should work and it may not. Run
@@ -91,8 +89,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ### Added
 - **DFAS myPay retiree documents (21st provider)** (`apps/mypay`, CDP port
   9241). Monthly Retiree Account Statements (eRAS), CRSC pay statements, annual
-  RAS, 1099-R and IRS 1095 forms. Read-only and delete-safe. Verified live: 35
-  documents across 2023 to 2026, every one a valid and byte-unique PDF.
+  RAS, 1099-R and IRS 1095 forms. Read-only and delete-safe. Verified end to end
+  against a live account, every document a valid and byte-unique PDF.
 
   myPay exposes a clean JSON API, so **nothing on the page is ever clicked,
   no form is submitted and nothing is navigated** - enforced by a test. On a
@@ -166,8 +164,8 @@ item below is a real defect that was found and fixed, not a precaution.
 ### Added
 - **M&T Bank mortgage documents (20th provider)** (`apps/mtb`, CDP port 9240).
   Mortgage statements, year-end statements and 1098 tax forms from M&T's own
-  online banking. Read-only and delete-safe. Verified live: 93 documents
-  across 2020 to 2026, all valid PDFs.
+  online banking. Read-only and delete-safe. Verified end to end against a live
+  account, all documents valid PDFs.
 
   M&T services its mortgages in-house (onlinebanking.mtb.com), not a
   subservicer. Documents are server-rendered with real per-document download
@@ -194,7 +192,7 @@ item below is a real defect that was found and fixed, not a precaution.
 - **Paylocity now fetches the whole pay-statement history, not just the
   current year.** The Pay History list endpoint defaults to a year-to-date
   view, but it takes a start date; the app now passes a far-past one and asks
-  for everything. Confirmed live: an account with statements back to 2022
+  for everything. Confirmed against a live account.
   returned all 81 where before it saw 12. `--year` and `--start-date` still
   narrow the result.
 
@@ -242,7 +240,7 @@ item below is a real defect that was found and fixed, not a precaution.
 - **AAFMAA (Armed Forces Mutual), the eighteenth provider** (`apps/aafmaa`,
   CDP port 9238). Annual statements and policy documents from the Member
   Center, read-only and delete-safe. Verified against a live account with a
-  full 60-document run spanning 2010 to 2026.
+  full run against a live account.
 
   The Member Center is classic ASP.NET WebForms, and it taught this repo
   three lessons the hard way:
@@ -281,7 +279,7 @@ item below is a real defect that was found and fixed, not a precaution.
 ### Added
 - **Discover credit cards — the seventeenth provider** (`apps/discovercard`,
   CDP port 9237). Card statements only, read-only and delete-safe, in a **real
-  Edge/Chrome** window. Verified against a live account: 24 statements
+  Edge/Chrome** window. Verified end to end against a live account
   (about two years of history), downloaded and checked, with a delete-safe
   re-run confirmed.
 
@@ -427,8 +425,8 @@ item below is a real defect that was found and fixed, not a precaution.
 
 ### Added
 - **Ally Bank — the fifteenth provider** (`apps/ally`, CDP port 9235). Account
-  statements and tax forms, read-only and delete-safe. Verified against a live
-  account: 198 statements across 2020–2026 and 12 tax forms.
+  statements and tax forms, read-only and delete-safe. Verified end to end against a
+  live account.
 
   Ally needed two things no earlier app did:
 
@@ -457,9 +455,8 @@ item below is a real defect that was found and fixed, not a precaution.
 - **Chase credit cards — the sixteenth provider** (`apps/chase`, CDP port
   9236). Card statements only, read-only and delete-safe, in a **real
   Edge/Chrome** window (the `verizon`/`walmart` pattern) rather than the
-  bundled Chromium. Verified against a live account: 333 statements across 6
-  cards, 2019–2026, each filename checked against the account number printed
-  inside the PDF.
+  bundled Chromium. Verified end to end against a live account.
+  
 
   Chase's document centre is one accordion per card with a styled "View:"
   year picker. Two things it taught:

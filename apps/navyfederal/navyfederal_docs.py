@@ -190,8 +190,10 @@ class App:
         if self._cdp_mode:
             # Reuse the user's signed-in Navy Federal tab (the digitalomni portal
             # keeps its session there; a fresh tab is unauthenticated).
+            # Matched on parsed host, not substring: "provider.com" in the
+            # URL also matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
-            nfcu = [p for p in live if "navyfederal" in (p.url or "")]
+            nfcu = [p for p in live if site.is_safe_url(p.url or "")]
             self._work_page = nfcu[0] if nfcu else (live[0] if live else ctx.new_page())
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()

@@ -67,7 +67,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"confirm|submit|agree|accept|authorize|enroll)", re.I)
 
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(download|view|open|save|print|pdf|statement|document|bill|invoice|"
+    r"(download|view|open|print|pdf|statement|document|bill|invoice|"
     r"report|history)", re.I)
 
 SECURITY_CHALLENGE_MARKERS = [
@@ -214,6 +214,17 @@ def is_safe_control(name: str) -> bool:
         return False
     if FORBIDDEN_CONTROL_RE.search(name):
         return False
+    # The shared core guard is consulted as well as this app's own blocklist.
+    # A repo-wide review found each app had drifted its own way and every one
+    # of them let settings controls through ("Save Changes", "Document
+    # Removal", "Turn off"). Centralising it means the next gap is fixed once
+    # rather than nineteen times.
+    try:
+        from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+        if SETTINGS_CONTROL_RE.search(name) or AUTH_CONTROL_RE.search(name):
+            return False
+    except Exception:
+        pass
     return bool(SAFE_DOC_CONTROL_RE.search(name))
 
 
@@ -498,6 +509,12 @@ def download_by_url(page, url: str, out_path) -> bool:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     full = url if url.startswith("http") else BASE + url
+    # A stored record must not be able to steer this anywhere but the
+    # provider's own site. Before this check the value went straight to
+    # page.goto in the signed-in tab.
+    if not is_safe_url(full):
+        log.error("refusing a URL that is not on this provider's host")
+        return False
     # try a genuine download first
     try:
         with page.expect_download(timeout=20000) as dl:
@@ -788,3 +805,27 @@ def find_row_download(page, title: str, date_text: str = ""):
     except Exception:
         pass
     return None
+
+
+# ---------------------------------------------------------------------------
+# Host allowlist. Added repo-wide after a review found this app would fetch or
+# navigate to whatever URL a stored record or a page attribute contained, using
+# the live signed-in session. Parsed, never a string prefix, so a lookalike
+# host cannot walk through.
+# ---------------------------------------------------------------------------
+ALLOWED_HOSTS = {'verizon.com'}
+
+
+def is_safe_url(url: str) -> bool:
+    """True only for an https URL on one of this provider's own hosts."""
+    from urllib.parse import urlparse
+    try:
+        got = urlparse(url or "")
+    except ValueError:
+        return False
+    if got.scheme != "https" or not got.hostname:
+        return False
+    if got.username or got.password:
+        return False
+    host = got.hostname.lower().rstrip(".")
+    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)

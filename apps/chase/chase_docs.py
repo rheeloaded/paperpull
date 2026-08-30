@@ -196,8 +196,10 @@ class App:
         if self._cdp_mode:
             # Reuse the user's signed-in Chase tab (secure.chase.com keeps the
             # session there; a fresh tab may be unauthenticated).
+            # Matched on parsed host, not substring: "provider.com" in the
+            # URL also matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
-            chase = [p for p in live if "chase.com" in (p.url or "")]
+            chase = [p for p in live if site.is_safe_url(p.url or "")]
             self._work_page = chase[0] if chase else (live[0] if live else ctx.new_page())
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()

@@ -193,8 +193,10 @@ class App:
             # Reuse the user's already-signed-in tab. Amex keeps its session in
             # an in-memory token tied to THAT tab, so a fresh tab (or any
             # page.goto) would be unauthenticated and bounce to login.
+            # Matched on parsed host, not substring: "provider.com" in the
+            # URL also matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
-            amex = [p for p in live if "americanexpress.com" in (p.url or "")]
+            amex = [p for p in live if site.is_safe_url(p.url or "")]
             self._work_page = amex[0] if amex else (live[0] if live else ctx.new_page())
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()

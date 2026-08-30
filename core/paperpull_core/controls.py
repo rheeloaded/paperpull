@@ -169,3 +169,30 @@ def describe_selects(page, forbidden_re: Optional[Pattern] = None,
             "refused": is_forbidden_context(identity, forbidden_re, extra_res),
         })
     return out
+
+
+# Control labels that COMMIT something, as opposed to naming a document.
+# Deliberately verb-led. A review found each app matching only bare verb stems,
+# so "Save Changes", "Document Removal" and "Loss Mitigation Application"
+# walked through every one of them.
+#
+# Equally deliberately this holds no money NOUNS. "Pay Statement", "Detailed
+# Bill PDF" and "Trade Confirmation" are documents, and an earlier attempt that
+# included those words refused real downloads in five apps.
+#
+# The word boundaries are load-bearing. Without the \b on "edit" this also
+# matches "credit", and "Credit Card Statement" must stay downloadable.
+SETTINGS_CONTROL_RE = re.compile(
+    r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
+    r"\bremov(e|es|ed|ing|al)\b|\bdelet(e|es|ed|ing|ion)\b|"
+    r"^\s*save\s*$|\bsave\s+(changes?|settings?|preferences?|profile)\b|"
+    r"\bsettings?\b|\bpreferences?\b|\bmanage\b|"
+    r"\bset\s+up\b|\benabl(e|es|ed|ing)\b|\bdisabl(e|es|ed|ing)\b|"
+    r"\bturn\s+(on|off)\b|\bopt\s*(in|out)\b|"
+    r"\bconsent\b|\bauthoriz(e|es|ed|ing|ation)\b|"
+    r"\bcertif(y|ies|ied|ication)\b|\bbeneficiar(y|ies)\b|"
+    r"\bwithholding\b|\bautopay\b|\bauto-pay\b|"
+    r"\bappl(y|ies|ied|ication)\b|\bplace\s+order\b|\brebalance\b|"
+    r"\breallocate\b|\bliquidat(e|es|ed|ing|ion)\b|"
+    r"\bbuy\b|\bsell\b|\bschedule\s+(a\s+)?(payment|transfer)\b",
+    re.I)

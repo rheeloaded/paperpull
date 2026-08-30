@@ -7,7 +7,7 @@ online banking portal (`secure.ally.com`). Read-only, delete-safe, part of
 **Scope:** Ally *Bank* only — checking, savings, money market, CDs, IRAs.
 Ally Invest and Ally Auto are separate portals and are not covered.
 
-Verified end to end against a live account on 2026-08-18: discovery (198
+Verified end to end against a live account on 2026-08-18. Discovery (all
 statements over 7 years, 12 tax forms), download, per-document verification,
 content-based naming, and a delete-safe re-run.
 

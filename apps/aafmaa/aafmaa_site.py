@@ -140,7 +140,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"\bedit\b|delete|remove)", re.I)
 
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(download|view|open|save|print|pdf|"
+    r"(download|view|open|print|pdf|"
     r"statement|document|certificate|policy|vault|correspondence|"
     r"1099|1098|tax\s+(form|document)|annual|year.?end|e-?statement|"
     r"premium\s+(statement|notice))", re.I)
@@ -298,6 +298,17 @@ def is_safe_control(name: str) -> bool:
         return False
     if FORBIDDEN_CONTROL_RE.search(name):
         return False
+    # The shared core guard is consulted as well as this app's own blocklist.
+    # A repo-wide review found each app had drifted its own way and every one
+    # of them let settings controls through ("Save Changes", "Document
+    # Removal", "Turn off"). Centralising it means the next gap is fixed once
+    # rather than nineteen times.
+    try:
+        from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+        if SETTINGS_CONTROL_RE.search(name) or AUTH_CONTROL_RE.search(name):
+            return False
+    except Exception:
+        pass
     return bool(SAFE_DOC_CONTROL_RE.search(name))
 
 
@@ -985,3 +996,27 @@ def download_document_row(page, title: str, date_text: str, account: str,
         except Exception:
             pass
     return saved
+
+
+# ---------------------------------------------------------------------------
+# Host allowlist. Added repo-wide after a review found this app would fetch or
+# navigate to whatever URL a stored record or a page attribute contained, using
+# the live signed-in session. Parsed, never a string prefix, so a lookalike
+# host cannot walk through.
+# ---------------------------------------------------------------------------
+ALLOWED_HOSTS = {'aafmaa.com'}
+
+
+def is_safe_url(url: str) -> bool:
+    """True only for an https URL on one of this provider's own hosts."""
+    from urllib.parse import urlparse
+    try:
+        got = urlparse(url or "")
+    except ValueError:
+        return False
+    if got.scheme != "https" or not got.hostname:
+        return False
+    if got.username or got.password:
+        return False
+    host = got.hostname.lower().rstrip(".")
+    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)

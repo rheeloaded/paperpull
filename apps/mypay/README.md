@@ -4,15 +4,15 @@ Downloads your **Retiree Account Statements (eRAS)**, **CRSC pay statements**
 and tax forms from DFAS myPay as PDFs. Read-only, delete-safe, part of
 [PaperPull](../../README.md).
 
-> **Retiree accounts: verified against a live account (2026-08-29).** A full
-> run pulled 35 documents spanning 2023 to 2026, all valid and byte-unique.
+> **Verified end to end against a live account (2026-08-29)**, for the
+> retiree document types.
 >
-> **Active-duty accounts: supported but untested.** Leave and Earnings
+> **Active-duty document types are supported but untested.** Leave and Earnings
 > Statements and W-2s are enumerated using myPay's own document-type numbers,
-> over the same API the retiree documents are proven on, but this has **not
-> been tested against a real active-duty account**. It should work and may
-> not. Run `diagnose.bat` first, then `run_pilot.bat`, and check the PDFs
-> before trusting a full run.
+> over the same API the other types are proven on, but this has **not been
+> tested against a real active-duty account**. It should work and may not. Run
+> `diagnose.bat` first, then `run_pilot.bat`, and check the PDFs before
+> trusting a full run.
 
 ## Read this first, because it is a government system
 
@@ -88,9 +88,9 @@ actually calls things.
 ## Sensitive files
 
 These are the most sensitive documents this project handles. A retiree account
-statement carries your DoD ID, gross and net pay, VA waiver, SBP election and
-address. CRSC relates to a combat-related disability determination. A 1099-R
-carries your taxpayer identification.
+statement carries a DoD ID, gross and net pay, VA waiver, SBP election and
+address. A CRSC statement relates to a disability determination. A 1099-R
+carries a taxpayer identification number.
 
 They are saved to the folder you set as `output_dir` in `config.json`. Keep it
 somewhere safe, and if that folder syncs to a cloud drive, know these documents
