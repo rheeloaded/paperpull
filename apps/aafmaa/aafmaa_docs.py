@@ -197,8 +197,10 @@ class App:
             # means the app never sees the page you left open for it, so a
             # wrong URL guess has nothing to fall back to and diagnose reports
             # about:blank, which is exactly what happened on the first run.
+            # Matched on parsed host, not substring: "provider.com" in the
+            # URL also matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
-            mine = [p for p in live if "aafmaa.com" in (p.url or "")]
+            mine = [p for p in live if site.is_safe_url(p.url or "")]
             self._work_page = mine[0] if mine else (
                 live[0] if live else ctx.new_page())
         else:

@@ -71,7 +71,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"confirm|continue|submit|agree|accept|authorize)", re.I)
 
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(download|view|open|save|print|pdf|statement|document|e?statement|"
+    r"(download|view|open|print|pdf|statement|document|e?statement|"
     r"summary|year.?end)", re.I)
 
 SECURITY_CHALLENGE_MARKERS = [
@@ -249,6 +249,17 @@ def is_safe_control(name: str) -> bool:
         return False
     if FORBIDDEN_CONTROL_RE.search(name):
         return False
+    # The shared core guard is consulted as well as this app's own blocklist.
+    # A repo-wide review found each app had drifted its own way and every one
+    # of them let settings controls through ("Save Changes", "Document
+    # Removal", "Turn off"). Centralising it means the next gap is fixed once
+    # rather than nineteen times.
+    try:
+        from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+        if SETTINGS_CONTROL_RE.search(name) or AUTH_CONTROL_RE.search(name):
+            return False
+    except Exception:
+        pass
     return bool(SAFE_DOC_CONTROL_RE.search(name))
 
 
@@ -428,10 +439,28 @@ def _attempt_download(page, iso_date: str, out_path) -> Optional[bool]:
         log.info("statement row not found for %s (%s)", iso_date, mdy)
         return False
 
-    # safety: this is the row's dedicated "Download pdf" control (the portal's
-    # own aria-label is a buggy un-interpolated template, so guard on the known
-    # action word rather than that string).
-    if not is_safe_control("Download PDF statement"):
+    # Safety. This used to read is_safe_control("Download PDF statement") with
+    # that string hardcoded, which always returned True and therefore gated
+    # nothing at all. The control's REAL label is checked now.
+    #
+    # The portal's own aria-label is a buggy un-interpolated template
+    # ("{{...}}"), so when that is what comes back there is no label to judge.
+    # In that case the element still has to be the row's dedicated download
+    # link, which is how _row_download_link found it, and that is stated here
+    # rather than hidden behind a constant that looked like a check.
+    label = ""
+    for how in ("inner_text", "get_attribute"):
+        try:
+            label = (link.inner_text(timeout=1500) if how == "inner_text"
+                     else link.get_attribute("aria-label")) or ""
+            label = label.strip()
+            if label:
+                break
+        except Exception:
+            label = ""
+    templated = ("{{" in label) or ("}}" in label)
+    if label and not templated and not is_safe_control(label):
+        log.error("refusing a control labelled %r", label[:60])
         return False
 
     from receipt_pdf import save_download
@@ -505,3 +534,27 @@ def collect_documents(page) -> List[RawDoc]:
                            text=_html.unescape(text)[:200], row_index=i,
                            kind="statement"))
     return docs
+
+
+# ---------------------------------------------------------------------------
+# Host allowlist. Added repo-wide after a review found this app would fetch or
+# navigate to whatever URL a stored record or a page attribute contained, using
+# the live signed-in session. Parsed, never a string prefix, so a lookalike
+# host cannot walk through.
+# ---------------------------------------------------------------------------
+ALLOWED_HOSTS = {'target.com'}
+
+
+def is_safe_url(url: str) -> bool:
+    """True only for an https URL on one of this provider's own hosts."""
+    from urllib.parse import urlparse
+    try:
+        got = urlparse(url or "")
+    except ValueError:
+        return False
+    if got.scheme != "https" or not got.hostname:
+        return False
+    if got.username or got.password:
+        return False
+    host = got.hostname.lower().rstrip(".")
+    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)

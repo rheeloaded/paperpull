@@ -110,7 +110,7 @@ def test_money_moving_controls_are_never_safe():
 
 def test_document_controls_are_safe():
     for label in ["Download", "Download PDF", "View Statement", "Open PDF",
-                  "Save", "Print", "View Policy Document",
+                  "Print", "View Policy Document",
                   "Certificate of Insurance", "Premium Statement",
                   "Annual Statement", "1099-INT", "Digital Vault",
                   "View Correspondence", "Download e-Statement"]:
@@ -151,3 +151,11 @@ def test_other_dialogs_are_never_the_disclosure():
                  ""):
         assert not site.is_view_disclosure(text), text
 
+
+def test_a_bare_save_is_refused_on_purpose():
+    """"Save" used to count as a document action here. On a site that can move
+    money it is far more likely to commit a settings change, and allowing it
+    was why "Save Changes" passed the guard. "Save PDF" still passes, because
+    that one names the document."""
+    for label in ["Save", "Save Changes", "Save Settings"]:
+        assert not site.is_safe_control(label), label

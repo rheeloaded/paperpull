@@ -104,8 +104,7 @@ def test_card_specific_actions_are_never_safe():
 
 def test_document_actions_are_safe():
     for label in ["Download", "Download PDF", "View statement",
-                  "Download statement", "View document", "Open PDF", "Save",
-                  "View 1099", "Statement PDF", "View tax form"]:
+                  "Download statement", "View document", "Open PDF", "View 1099", "Statement PDF", "View tax form"]:
         assert site.is_safe_control(label), label
 
 
@@ -219,3 +218,12 @@ def test_money_widgets_are_still_refused():
     for identity in ("fromAccount | transfer-form | Transfer money",
                      "payee | billpay", "amount | send money"):
         assert site.is_forbidden_control_context(identity), identity
+
+
+def test_a_bare_save_is_refused_on_purpose():
+    """"Save" used to count as a document action here. On a site that can move
+    money it is far more likely to commit a settings change, and allowing it
+    was why "Save Changes" passed the guard. "Save PDF" still passes, because
+    that one names the document."""
+    for label in ["Save", "Save Changes", "Save Settings"]:
+        assert not site.is_safe_control(label), label

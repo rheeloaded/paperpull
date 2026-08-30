@@ -4,10 +4,9 @@ Downloads your M&T mortgage **statements and documents** as PDFs from M&T's
 online banking (`onlinebanking.mtb.com`). Read-only, delete-safe, part of
 [PaperPull](../../README.md).
 
-> **Status: verified against a live account (2026-08-23).** A full run pulled
-> 93 documents spanning 2020 to 2026, all valid PDFs. Statements and year-end
-> statements download directly; 1098 tax forms are included when the Tax
-> Documents page is open (see below).
+> **Status: verified end to end against a live account (2026-08-23).**
+> Statements and year-end statements download directly. 1098 tax forms are
+> included when the Tax Documents page is open (see below).
 
 ## Read-only by design (a mortgage can move real money)
 

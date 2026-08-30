@@ -83,7 +83,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"chang(e|es|ed|ing)|edit(s|ed|ing)?\b|updat(e|es|ed|ing)|"
     r"set\s+up|enabl|disabl|delet|remov(e|es|ed|ing|al)|"
     # anything that reads like a settings/preferences control
-    r"\boptions?\b|\bsettings?\b|\bpreferences?\b|\bsave\b|manage|"
+    r"\boptions?\b|\bsettings?\b|\bpreferences?\b|^\s*save\s*$|save\s+(changes?|settings?|preferences?|profile)|manage|"
     r"enroll|consent|opt\s*(in|out)|paperless|turn\s+(on|off)|"
     r"beneficiar|payee|contact\s+info|password|username|"
     r"file\s+a\s+claim|start\s+a\s+claim|renew|cancel|close\s+account|"
@@ -254,6 +254,17 @@ def is_safe_control(name: str) -> bool:
         return False
     if FORBIDDEN_CONTROL_RE.search(name):
         return False
+    # The shared core guard is consulted as well as this app's own blocklist.
+    # A repo-wide review found each app had drifted its own way and every one
+    # of them let settings controls through ("Save Changes", "Document
+    # Removal", "Turn off"). Centralising it means the next gap is fixed once
+    # rather than nineteen times.
+    try:
+        from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+        if SETTINGS_CONTROL_RE.search(name) or AUTH_CONTROL_RE.search(name):
+            return False
+    except Exception:
+        pass
     return bool(SAFE_DOC_CONTROL_RE.search(name))
 
 

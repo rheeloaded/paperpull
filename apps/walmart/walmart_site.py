@@ -91,6 +91,21 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"check\s*out|place\s+order|substitutions|tip\s+your|edit\s+order|"
     r"gift\s+receipt|chat\s+with|start\s+a\s+chat)", re.I)
 
+
+# Fold in the shared settings vocabulary. These apps guard with this pattern
+# used inline rather than through an allowlist, which is correct for them:
+# they click pagination controls like "Load more", and a document-word
+# allowlist would refuse those and break the run. Composing the pattern keeps
+# every existing call site working and means the next improvement to the
+# shared list reaches this app without another edit.
+try:
+    from paperpull_core.controls import SETTINGS_CONTROL_RE as _SHARED_SETTINGS
+    FORBIDDEN_CONTROL_RE = re.compile(
+        "(?:%s)|(?:%s)" % (FORBIDDEN_CONTROL_RE.pattern, _SHARED_SETTINGS.pattern),
+        re.I)
+except Exception:  # the shared core is optional at import time
+    pass
+
 SECURITY_CHALLENGE_MARKERS = [
     "robot or human", "press & hold", "press and hold", "are you a robot",
     "verify your identity", "unusual activity", "suspicious activity",
@@ -868,3 +883,27 @@ def count_store_receipts(page) -> int:
     except Exception:
         pass
     return 1
+
+
+# ---------------------------------------------------------------------------
+# Host allowlist. Added repo-wide after a review found this app would fetch or
+# navigate to whatever URL a stored record or a page attribute contained, using
+# the live signed-in session. Parsed, never a string prefix, so a lookalike
+# host cannot walk through.
+# ---------------------------------------------------------------------------
+ALLOWED_HOSTS = {'walmart.com'}
+
+
+def is_safe_url(url: str) -> bool:
+    """True only for an https URL on one of this provider's own hosts."""
+    from urllib.parse import urlparse
+    try:
+        got = urlparse(url or "")
+    except ValueError:
+        return False
+    if got.scheme != "https" or not got.hostname:
+        return False
+    if got.username or got.password:
+        return False
+    host = got.hostname.lower().rstrip(".")
+    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)

@@ -23,7 +23,7 @@ if not defined PYEXE where python >nul 2>&1 && set "PYEXE=python"
 if not defined PYEXE (
     echo Could not find Python on PATH.
     echo Run it from any app folder instead, for example:
-    echo     "Some Provider\.venv\Scripts\python.exe" -P status.py --html
+    echo     "<a provider folder>\.venv\Scripts\python.exe" -P status.py --html
     pause
     exit /b 1
 )

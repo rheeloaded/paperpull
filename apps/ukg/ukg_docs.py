@@ -194,8 +194,10 @@ class App:
         if self._cdp_mode:
             # Reuse the user's already-signed-in UKG tab. A fresh tab would
             # be unauthenticated (UKG keeps the session in that tab).
+            # Matched on parsed host, not substring: "provider.com" in the
+            # URL also matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
-            dom = [p for p in live if "ukg.com" in (p.url or "")]
+            dom = [p for p in live if site.is_safe_url(p.url or "")]
             self._work_page = dom[0] if dom else (live[0] if live else ctx.new_page())
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()

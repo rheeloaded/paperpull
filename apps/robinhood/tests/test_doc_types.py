@@ -100,10 +100,19 @@ def test_trading_and_money_controls_are_never_safe():
 
 def test_document_controls_are_safe():
     for label in ["Download", "Download PDF", "View statement", "View document",
-                  "Open PDF", "Save", "View 1099", "Export", "Download report"]:
+                  "Open PDF", "View 1099", "Export", "Download report"]:
         assert site.is_safe_control(label), label
 
 
 def test_empty_or_ambiguous_not_safe():
     assert not site.is_safe_control("")
     assert not site.is_safe_control("More")
+
+
+def test_a_bare_save_is_refused_on_purpose():
+    """"Save" used to count as a document action here. On a site that can move
+    money it is far more likely to commit a settings change, and allowing it
+    was why "Save Changes" passed the guard. "Save PDF" still passes, because
+    that one names the document."""
+    for label in ["Save", "Save Changes", "Save Settings"]:
+        assert not site.is_safe_control(label), label

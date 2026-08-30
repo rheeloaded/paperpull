@@ -4,10 +4,10 @@ Downloads your Discover **credit-card** statements as PDFs from
 `card.discover.com`. Read-only, delete-safe, part of
 [PaperPull](../../README.md).
 
-Verified end to end against a live account on 2026-08-19: `--discover` found
-24 statements (about two years), `--pilot` downloaded valid PDFs each
-containing its own closing date, a re-run after deleting one skipped it, and
-`--verify` reported it missing without re-fetching it.
+Verified end to end against a live account on 2026-08-19. `--discover` listed
+the available statements, `--pilot` downloaded valid PDFs each containing its
+own closing date, a re-run after deleting one skipped it, and `--verify`
+reported it missing without re-fetching it.
 
 **Scope:** Discover credit-card **statements** only — Discover it, Discover it
 Miles / Chrome / Cash Back / Student, Discover More. Discover Bank deposit
@@ -81,8 +81,8 @@ is correspondingly small.
 
 ## History available
 
-24 statements — about two years. Older ones are not reachable from this page and
-are not guessed at. Statements are named by **closing date**, and the human
+Discover exposes roughly the last two years here. Older statements are not
+reachable from this page and are not guessed at. Statements are named by **closing date**, and the human
 period label ("Mar 16 - Apr 15, 2025") goes in the index CSV's Period column.
 
 ## What the read-only guard learned here
@@ -142,7 +142,7 @@ Discover does not serve. If you see it, the log line to look for is
 
 ## Known limitation
 
-**A login with more than one Discover card is unverified.** The account this was
+**A login with more than one Discover card is unverified.** The account it was
 built against has one card, so the page names none and no card chooser exists to
 code against. If you have two, the card's last four arrives only *with the
 download* (Discover puts it in the served filename), not from the page — so two

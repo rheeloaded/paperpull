@@ -7,7 +7,7 @@ Everything runs **locally**. Nothing is sent to any external AI API or
 third-party service. You sign in **manually**; the tool never touches your
 credentials and never bypasses AAFMAA's 2FA or security checks.
 
-> **Status: verified against a live account (2026-08-22)** by a full
+> **Status: verified end to end against a live account (2026-08-22)** by a full
 > 60-document run. One caveat: only the default MY DOCUMENTS section is read.
 > The Insurance Documents and Digital Vault sections are separate postback
 > views and are not discovered yet, so anything held only there will not be
