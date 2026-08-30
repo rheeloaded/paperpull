@@ -514,6 +514,17 @@ class App:
             site.ensure_statements(page)
         saved = site.nfcu_download(page, page.context, doc.account, doc.date, out_path)
         if not saved:
+            # A failed capture must not leave a file behind. Playwright's
+            # save_as creates the target before the bytes arrive, so a
+            # capture that fails leaves a ZERO BYTE file with a convincing
+            # statement name in the output folder, indistinguishable from a
+            # real download until it is opened.
+            try:
+                if out_path.exists() and (out_path.stat().st_size == 0
+                                          or out_path.read_bytes()[:5] != b"%PDF-"):
+                    out_path.unlink()
+            except OSError:
+                pass
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
             self._write_row(doc, "Capture failed", "Needs Manual Review")

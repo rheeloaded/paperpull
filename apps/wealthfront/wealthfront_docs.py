@@ -481,6 +481,17 @@ class App:
 
         # --- fallback: the row's own Download button ----------------------
         if not saved:
+            # A failed capture must not leave a file behind. Playwright's
+            # save_as creates the target before the bytes arrive, so a
+            # capture that fails leaves a ZERO BYTE file with a convincing
+            # statement name in the output folder, indistinguishable from a
+            # real download until it is opened.
+            try:
+                if out_path.exists() and (out_path.stat().st_size == 0
+                                          or out_path.read_bytes()[:5] != b"%PDF-"):
+                    out_path.unlink()
+            except OSError:
+                pass
             if page.locator(site.FALLBACK["doc_row"]).count() == 0:
                 site.goto_documents(page)
                 site.scroll_full_page(page)
@@ -501,6 +512,14 @@ class App:
             except Exception as e:
                 log.warning("Row-button download failed: %s", e)
         if not saved:
+            # Both attempts are spent, so anything sitting at out_path is the
+            # empty shell save_as created and never filled. It must not be left
+            # behind wearing a real statement's name.
+            try:
+                if out_path.exists() and out_path.stat().st_size == 0:
+                    out_path.unlink()
+            except OSError:
+                pass
             self._record(doc, State.FAILED, notes="Download did not start")
             self._write_row(doc, "Download failed", "Failed")
             self.stats["failed"] += 1
