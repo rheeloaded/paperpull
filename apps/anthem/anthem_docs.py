@@ -1,0 +1,1003 @@
+"""Anthem statement & tax-document downloader (local, supervised).
+
+Usage:
+    python anthem_docs.py --login       verify connection to your browser
+    python anthem_docs.py --discover    list available documents
+    python anthem_docs.py --pilot       download the 5 newest, then stop
+    python anthem_docs.py --all         download everything in scope
+    python anthem_docs.py --resume      continue an interrupted run
+    python anthem_docs.py --verify      re-validate every saved PDF
+    python anthem_docs.py --diagnose    dump page structure (no downloads)
+    python anthem_docs.py --dry-run     plan filenames, save nothing
+
+Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
+         --max-docs N  --type Statement|"Tax Document"
+
+READ-ONLY: this tool only reads the Documents area and downloads PDFs that
+Anthem already generated. It never transfers funds, trades, rebalances,
+or changes any account setting. Everything stays on this machine; nothing is
+sent to any external service.
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import random
+import re
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+
+from paperpull_core import doc_types, receipt_pdf
+from paperpull_core import browser as browser_launcher
+import anthem_site as site
+from paperpull_core.models import State
+from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
+                     atomic_write_text, build_pdf_filename, load_config,
+                     now_iso, sanitize_component, unique_path)
+
+from storage import ensure_owner, PROJECT_DIR, set_filename_owner
+log = logging.getLogger("anthem_docs")
+
+DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
+
+
+def ask(prompt: str) -> str:
+    try:
+        return input(prompt)
+    except EOFError:
+        print("\nNo interactive console available to answer a required prompt.")
+        print("Run this from a real console window (use the .bat files).")
+        raise SystemExit(3)
+
+
+class Document:
+    """One Anthem document."""
+
+    def __init__(self, title="", category="", summary="", date="", period="",
+                 href="", row_index=-1, confidence="", account="",
+                 date_text="", document_id="", **kw):
+        self.title = title
+        self.account = account
+        self.category = category
+        self.summary = summary
+        self.date = date
+        self.period = period
+        self.date_text = date_text  # the row's raw date string, for re-matching
+        # Anthem's stable identity: "claimType|claimId|docKind" (never the
+        # opaque, session-transient eobId, which is resolved fresh at download).
+        self.document_id = document_id
+        # Sticky "was successfully downloaded at least once" marker. Once set,
+        # the document is never re-downloaded even if you delete the PDF (e.g.
+        # after importing it into paperless-ngx).
+        self.downloaded_ok = kw.get("downloaded_ok", False)
+        self.href = href
+        self.row_index = row_index
+        self.confidence = confidence
+        self.state = kw.get("state", State.DISCOVERED.value)
+        self.pdf_filename = kw.get("pdf_filename", "")
+        self.pdf_path = kw.get("pdf_path", "")
+        self.pdf_size = kw.get("pdf_size", "")
+        self.pdf_pages = kw.get("pdf_pages", "")
+        self.notes = kw.get("notes", "")
+        self.discovered_at = kw.get("discovered_at", now_iso())
+
+    @property
+    def key(self) -> str:
+        """Stable identity. Anthem identifies an EOB by "claimType|claimId|
+        docKind" - use it. Fall back to category:date:title:account for
+        anything discovered without one."""
+        if self.document_id:
+            return f"id:{self.document_id}"
+        acct = sanitize_component(self.account or "")[:40]
+        return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
+
+    def to_dict(self) -> dict:
+        return dict(self.__dict__)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Document":
+        return cls(**d)
+
+
+class App:
+    def __init__(self, args):
+        self.args = args
+        # --config lets one copy of the code serve several people/accounts:
+        # each config points at its own output_dir, profile_dir and port, so
+        # progress.json, the index CSV, the PDFs and the browser session are
+        # all kept separate. Nothing is ever re-downloaded across accounts.
+        cfg_path = Path(args.config) if getattr(args, "config", None) \
+            else (PROJECT_DIR / "config.json")
+        self.config = load_config(cfg_path)
+        ensure_owner(self.config, cfg_path)
+        set_filename_owner(self.config.get("owner", "") if self.config.get("owner_in_filename") else "")
+        self.paths = Paths(Path(self.config["output_dir"]))
+        self.paths.ensure()
+        self._setup_logging()
+
+        self.progress = JsonStore(self.paths.progress_json, self.paths.backups)
+        self.discovery = JsonStore(self.paths.discovery_json, self.paths.backups)
+        self.progress.load()
+        self.discovery.load()
+        self.index_csv = CsvFile(self.paths.document_index_csv,
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+        self.rules = doc_types.load_rules()
+
+        self._pw = None
+        self._browser = None
+        self._context = None
+        self._work_page = None
+        self._cdp_mode = False
+        self.stats = {
+            "mode": "", "started": now_iso(), "ended": "",
+            "discovered": 0, "statements": 0, "tax_documents": 0,
+            "insurance_documents": 0,
+            "other": 0, "skipped_completed": 0, "skipped_out_of_scope": 0,
+            "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
+            "validation_failures": 0, "dates": [], "new_files": [],
+        }
+
+    # -- infrastructure ----------------------------------------------------
+
+    def _setup_logging(self):
+        logfile = self.paths.logs / f"run-{datetime.now():%Y%m%d-%H%M%S}.log"
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+            handlers=[logging.FileHandler(logfile, encoding="utf-8"),
+                      logging.StreamHandler(sys.stdout)])
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
+
+    def _delay(self, factor: float = 1.0):
+        time.sleep(random.uniform(
+            float(self.config["delay_min_seconds"]) * factor,
+            float(self.config["delay_max_seconds"]) * factor))
+
+    def browser(self):
+        if self._context is not None:
+            return self._context
+        from playwright.sync_api import sync_playwright
+        self._pw = sync_playwright().start()
+        cdp_url = self.config.get("cdp_url")
+        if cdp_url:
+            try:
+                self._browser = self._pw.chromium.connect_over_cdp(cdp_url)
+            except Exception as e:
+                self._pw.stop()
+                self._pw = None
+                raise SystemExit(
+                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
+                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+            if not self._browser.contexts:
+                raise SystemExit("Connected browser has no context; open a tab and retry.")
+            self._context = self._browser.contexts[0]
+            self._cdp_mode = True
+        else:
+            profile = Path(self.config["profile_dir"])
+            profile.mkdir(parents=True, exist_ok=True)
+            self._context = self._pw.chromium.launch_persistent_context(
+                str(profile), headless=False, accept_downloads=True,
+                viewport={"width": 1400, "height": 950})
+            self._cdp_mode = False
+        self._context.set_default_timeout(30000)
+        return self._context
+
+    def page(self):
+        ctx = self.browser()
+        if self._work_page is not None and not self._work_page.is_closed():
+            return self._work_page
+        if self._cdp_mode:
+            # Reuse the user's signed-in Anthem tab; a fresh one is unauthenticated.
+            # Prefer a member-portal (data-host) tab, but accept any Anthem-owned
+            # tab (e.g. a www.anthem.com landing tab) - the site layer steers it to
+            # the member EOB center to capture the session. Matched by parsed host,
+            # not by substring, so a lookalike cannot be picked.
+            live = [p for p in ctx.pages if not p.is_closed()]
+            member = [p for p in live if site.is_safe_url(p.url or "")]
+            owned = [p for p in live if site.is_anthem_owned(p.url or "")]
+            if member:
+                self._work_page = member[0]
+            elif owned:
+                self._work_page = owned[0]
+            else:
+                log.warning("No Anthem tab is open. Sign in with login.bat and "
+                            "leave the member portal tab open.")
+                self._work_page = live[0] if live else ctx.new_page()
+        else:
+            self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        return self._work_page
+
+    def close(self):
+        try:
+            if self._cdp_mode:
+                pass  # never close the user's own signed-in tab
+            elif self._context:
+                self._context.close()
+        except Exception:
+            pass
+        try:
+            if self._pw:
+                self._pw.stop()
+        except Exception:
+            pass
+        self._pw = self._browser = self._context = self._work_page = None
+
+    # -- session safety ----------------------------------------------------
+
+    def check_session(self, page) -> None:
+        challenge = site.detect_security_challenge(page)
+        if challenge:
+            self.progress.save(backup=True)
+            print(f"\n!! {challenge}")
+            print("Stopped. Please resolve it yourself in the browser window.")
+            print("I will NOT attempt to bypass any security check.")
+            ask("Press Enter once the page looks normal (or Ctrl+C to quit)... ")
+        if site.looks_signed_out(page):
+            self.progress.save(backup=True)
+            print("\n!! Anthem appears to have signed you out.")
+            print("Please sign in again in the open browser window.")
+            ask("Press Enter after you are signed in... ")
+            site.goto_documents(page)
+
+    # -- commands ----------------------------------------------------------
+
+    def cmd_open_browser(self):
+        """Open a sign-in window on THIS config's own port and profile.
+
+        A second account opens its own browser, on its own port, with its own
+        saved session - so nothing is duplicated in the launcher scripts. You
+        sign in; the tool attaches afterwards.
+        """
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9242")
+        profile = self.config["profile_dir"]
+        url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
+        # prefer_real=True: anthem.com runs Akamai Bot Manager, which fingerprints
+        # the bundled Playwright Chromium. A real branded Chrome/Edge with a
+        # persistent profile (where the MFA remember-device cookie lives) is the
+        # posture that passes; the app only ever attaches to it passively.
+        name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=True)
+        if not name:
+            return
+        print(f"Opened a sign-in browser on port {port} ({name}).")
+        print(f"Profile: {profile}")
+        print("Sign in, keep the window OPEN, then run the pilot.")
+
+    def cmd_login(self):
+        print("Checking the connection to your signed-in Anthem browser...\n")
+        page = self.page()
+        ok = site.goto_documents(page)
+        challenge = site.detect_security_challenge(page)
+        if challenge:
+            print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
+        elif site.looks_signed_out(page):
+            print("Connected, but Anthem shows a signed-out page.")
+            print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
+        elif ok:
+            print("Success: connected and the Documents page is visible.")
+            print("Keep that browser window OPEN, then run run_pilot.bat.")
+        else:
+            print("Connected and signed in, but I could not find the Documents list.")
+            print("Open your Documents/Statements page in that browser, then run --diagnose.")
+        self.close()
+
+    def _in_scope(self, doc: Document) -> bool:
+        a = self.args
+        if not doc_types.wanted(doc.category, self.config):
+            return False
+        if a.type and doc.category.lower() != a.type.lower():
+            return False
+        if a.year and not (doc.date or "").startswith(str(a.year)):
+            return False
+        # Hard floor: never process documents before the configured start date
+        # (You already has Anthem documents from 2023 and earlier).
+        floor = a.start_date or self.config.get("default_start_date")
+        if floor and (not doc.date or doc.date < floor):
+            return False
+        if a.end_date and (not doc.date or doc.date > a.end_date):
+            return False
+        return True
+
+
+    def _record_statement_doc(self, d: dict) -> int:
+        """Record one collected row {account,date,title}. Returns 1 if new."""
+        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
+        if doc_types.should_skip(title, self.rules):
+            self.stats["skipped_out_of_scope"] += 1
+            return 0
+        category, summary, confidence = doc_types.classify_document(title, self.rules)
+        if category == doc_types.OTHER and re.search(r"statement", title, re.I):
+            category = doc_types.STATEMENT
+        if not doc_types.wanted(category, self.config):
+            self.stats["skipped_out_of_scope"] += 1
+            return 0
+        date = (d.get("date") or "").strip()
+        floor = self.args.start_date or self.config.get("default_start_date")
+        if floor and (not date or date < floor):
+            self.stats["skipped_out_of_scope"] += 1
+            return 0
+        account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
+        # NOT title-cased: the account carries the exact claim number (e.g.
+        # 1234500BC0089), whose interior letters .title() would corrupt to
+        # 1234500Bc0089. Anthem returns patient names already properly cased, so
+        # the filename keeps both the readable patient and the verbatim claim.
+        acct_short = re.sub(r"\b(COMBINED|ACCOUNTS?)\b", "", account, flags=re.I)
+        acct_short = re.sub(r"\s+", " ", acct_short).strip()
+        full_summary = f"{summary} - {acct_short}" if acct_short else summary
+        doc = Document(title=title, category=category, summary=full_summary,
+                       date=date, confidence=confidence, account=account,
+                       date_text=date, document_id=d.get("doc_id", ""),
+                       href=d.get("href", ""))
+        if self.discovery.get(doc.key) is None:
+            rec = doc.to_dict()
+            rec["state"] = State.DISCOVERED.value
+            self.discovery.update(doc.key, rec, save=False)
+            return 1
+        return 0
+
+
+    def cmd_discover(self, quiet: bool = False) -> int:
+        page = self.page()
+        if not site.ensure_statements(page):
+            self.check_session(page)
+            if not site.ensure_statements(page):
+                print("Could not open your Anthem statements. Sign in and open")
+                print("Statements & Documents in the browser, then try again.")
+                return 0
+        self.check_session(page)
+
+        # Statements are grouped by account into expandable accordions; each
+        # group's rows carry a date + a "View" button (no documents API).
+        raw = site.collect_documents(page)
+        log.info("Anthem: collected %d document rows across accounts", len(raw))
+        n_new = 0
+        for d in raw:
+            n_new += self._record_statement_doc(d)
+        self.discovery.save()
+        self.stats["discovered"] = len(self.discovery.data)
+
+        if not quiet:
+            docs = [Document.from_dict(v) for v in self.discovery.data.values()]
+            print(f"\nDiscovery complete. Documents known: {len(docs)}")
+            by_cat = {}
+            for d in docs:
+                by_cat.setdefault(d.category, []).append(d)
+            for cat, group in sorted(by_cat.items()):
+                years = {}
+                for d in group:
+                    y = (d.date or "?")[:4]
+                    years[y] = years.get(y, 0) + 1
+                spread = ", ".join(f"{y}: {c}" for y, c in sorted(years.items(), reverse=True))
+                print(f"  {cat}: {len(group)}  ({spread})")
+            dates = sorted(d.date for d in docs if d.date)
+            if dates:
+                print(f"  Date range: {dates[0]} .. {dates[-1]}")
+            if self.stats["skipped_out_of_scope"]:
+                print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
+        return n_new
+
+    def _select(self, limit: Optional[int] = None) -> List[Document]:
+        docs = [Document.from_dict(v) for v in self.discovery.data.values()]
+        docs = [d for d in docs if self._in_scope(d)]
+        docs.sort(key=lambda d: d.date or "0000", reverse=True)
+        limit = limit if limit is not None else self.args.max_docs
+        return docs[:limit] if limit else docs
+
+    def _already_done(self, doc: Document) -> bool:
+        """Skip documents already handled. A document that was successfully
+        downloaded once is done FOR GOOD - it is not re-downloaded even if you
+        later delete the PDF (e.g. after importing it into paperless-ngx). Use
+        --redownload to override and fetch everything in scope again."""
+        if getattr(self.args, "redownload", False):
+            return False
+        rec = self.progress.get(doc.key)
+        if not rec:
+            return False
+        if rec.get("downloaded_ok"):
+            return True
+        state = rec.get("state")
+        # terminal / already-completed (incl. records from before the
+        # downloaded_ok marker existed): done, do not re-download.
+        if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
+                     State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
+            return True
+        # a review copy counts only if its PDF is still present and valid;
+        # a quarantined / failed one should be retried.
+        if state == State.NEEDS_MANUAL_REVIEW.value:
+            p = rec.get("pdf_path", "")
+            return bool(p and Path(p).exists()
+                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+        return False
+
+    # -- processing --------------------------------------------------------
+
+    def process(self, docs: List[Document], dry_run: bool = False):
+        page = self.page()
+        for i, doc in enumerate(docs, 1):
+            print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
+                  f"{doc.category}  {doc.summary}")
+            if self._already_done(doc):
+                print("  Already downloaded and verified - skipping.")
+                self.stats["skipped_completed"] += 1
+                continue
+            filename = build_pdf_filename(doc.date, doc.summary, "")
+            if dry_run:
+                print(f"  DRY RUN - would save: {filename}")
+                continue
+            try:
+                self.download_one(page, doc, filename)
+            except KeyboardInterrupt:
+                print("\nInterrupted. Progress saved; run --resume to continue.")
+                raise
+            except site.SessionExpired:
+                # Already explained by download_one. Stop rather than grind
+                # through the rest producing empty "manual review" entries.
+                print("Stopped. Everything downloaded so far is saved.")
+                return
+            except Exception as e:
+                log.exception("Failed on %s", doc.key)
+                self._record(doc, State.FAILED, notes=str(e))
+                self.stats["failed"] += 1
+            self._delay()
+
+    def download_one(self, page, doc: Document, filename: str):
+        """Download one document PDF straight to its final path.
+
+        Dated documents (statements) expose a direct document URL, which is
+        the most reliable route. Tax-table rows have only a Download button,
+        so that row is re-found by its account + form text (row indexes shift
+        whenever a filter or page changes).
+        """
+        self.check_session(page)
+        folder = self.paths.folder_for(doc.category)
+        out_path = unique_path(folder, filename, self.config["max_path_length"])
+        if out_path.name != filename:
+            self.stats["duplicate_filenames"] += 1
+
+        # Anthem serves each document at its own URL, captured at discovery. The
+        # session must be live, so warm it, then GET the href (host-checked in
+        # download_statement). Nothing is clicked.
+        if not site.ensure_statements(page):
+            self.check_session(page)
+            site.ensure_statements(page)
+        try:
+            saved = site.download_document(page, doc.document_id, out_path)
+        except site.SessionExpired:
+            # Stop the whole run. Continuing would file every remaining
+            # document as "manual review" and finish looking successful while
+            # having saved nothing.
+            print("\n  !! Anthem returned a sign-in page instead of a document.")
+            print("     Your session has expired. Sign in again in the open")
+            print("     browser, re-list your statements, then run resume.bat.")
+            self.stats["session_expired"] = 1
+            raise
+        if not saved:
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="Could not capture the document PDF")
+            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print("  Could not capture this document - marked for manual review.")
+            return
+
+        # Some tax forms arrive as a ZIP containing the PDF(s).
+        if receipt_pdf.is_zip(out_path):
+            extracted = receipt_pdf.extract_pdfs_from_zip(out_path, out_path)
+            if not extracted:
+                self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                             notes="Downloaded archive contained no PDF")
+                self._write_row(doc, "Archive with no PDF", "Needs Manual Review")
+                self.stats["manual_review"] += 1
+                print("  !! Download was an archive with no PDF - manual review.")
+                return
+            out_path = extracted[0]
+            if len(extracted) > 1:
+                doc.notes = (doc.notes + "; " if doc.notes else "") + \
+                    f"archive contained {len(extracted)} PDFs"
+                for extra in extracted[1:]:
+                    print(f"  + extracted: {extra.name}")
+            log.info("Extracted %d PDF(s) from ZIP for %s", len(extracted), doc.title)
+
+        doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
+        self._record(doc, State.PDF_SAVED)
+
+        result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"])
+        if not result.ok:
+            self.stats["validation_failures"] += 1
+            quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                     self.config["max_path_length"])
+            try:
+                out_path.replace(quarantine)
+            except OSError:
+                quarantine = out_path
+            doc.pdf_path, doc.pdf_filename = str(quarantine), quarantine.name
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes=f"PDF validation failed: {result.reason}")
+            self._write_row(doc, "Validation failed", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
+            return
+
+        doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
+        doc.downloaded_ok = True   # done for good, even if the file is deleted later
+        self._record(doc, State.COMPLETED)
+        self._write_row(doc, "Downloaded", "Completed")
+        self.stats["new_files"].append(str(out_path))
+        if doc.date:
+            self.stats["dates"].append(doc.date)
+        if doc.category == doc_types.TAX:
+            self.stats["tax_documents"] += 1
+        elif doc.category == doc_types.INSURANCE:
+            self.stats["insurance_documents"] += 1
+        elif doc.category == doc_types.STATEMENT:
+            self.stats["statements"] += 1
+        else:
+            self.stats["other"] += 1
+        print(f"  Saved: {out_path.name}")
+
+    # -- records -----------------------------------------------------------
+
+    def _record(self, doc: Document, state: State, notes: str = ""):
+        doc.state = state.value
+        if notes:
+            doc.notes = (doc.notes + "; " if doc.notes else "") + notes
+        self.progress.update(doc.key, doc.to_dict())
+        self.discovery.update(doc.key, {"state": state.value})
+
+    def _write_row(self, doc: Document, status: str, processing: str):
+        notes = "; ".join(x for x in (doc.notes, status) if x)
+        self.index_csv.append_rows([{
+            "Account Holder": self.config.get("owner", ""),
+            "Document Date": doc.date,
+            "Category": doc.category,
+            "Document Summary": doc.summary,
+            "Document Title": doc.title,
+            "Period": doc.period,
+            "PDF Filename": doc.pdf_filename,
+            "PDF Full Path": doc.pdf_path,
+            "PDF File Size": doc.pdf_size,
+            "PDF Page Count": doc.pdf_pages,
+            # No URL exists for a Anthem document: it is fetched by a
+            # (type, id) pair. The id is account-specific, so the CSV
+            # records only which KIND of document this was.
+            "Source URL": site.DOCUMENT_TYPES.get(
+                (site.parse_doc_id(doc.document_id) or (0, 0))[0], ""),
+            "Classification Confidence": doc.confidence,
+            "Downloaded At": now_iso() if doc.pdf_filename else "",
+            "Verified At": now_iso() if doc.pdf_pages else "",
+            "Processing Status": processing,
+            "Notes": notes,
+        }])
+
+    # -- modes -------------------------------------------------------------
+
+    def cmd_pilot(self):
+        self.stats["mode"] = "pilot"
+        print("PILOT MODE - limited supervised test run.\n")
+        self.cmd_discover()
+        docs = self._select(limit=self.config.get("pilot_count", 5))
+        if not docs:
+            print("\nNo documents in scope to pilot. Run --diagnose.")
+            return
+        print(f"\nDownloading {len(docs)} document(s)...")
+        self.process(docs, dry_run=self.args.dry_run)
+        self._pilot_report(docs)
+
+    def _pilot_report(self, docs: List[Document]):
+        print("\n" + "=" * 70)
+        print("PILOT RESULTS - inspect these before approving a full run")
+        print("=" * 70)
+        problems = []
+        for d in docs:
+            rec = self.progress.get(d.key) or {}
+            state = rec.get("state", "?")
+            print(f"\n  {rec.get('date', d.date)}  {rec.get('category', d.category)}")
+            print(f"    Title:  {rec.get('title', d.title)[:70]}")
+            print(f"    State:  {state}   [{rec.get('confidence', '')}]")
+            print(f"    PDF:    {rec.get('pdf_filename', '(none)')}"
+                  f"  ({rec.get('pdf_size', '?')} bytes, {rec.get('pdf_pages', '?')} pages)")
+            if state != State.COMPLETED.value:
+                problems.append(f"{d.key}: {state} - {rec.get('notes', '')}")
+        print("\n" + "-" * 70)
+        if problems:
+            print("Needs attention:")
+            for p in problems:
+                print(f"  ! {p}")
+        else:
+            print("No problems detected in the pilot.")
+        print(f"\nFiles are in:\n  {self.paths.root}")
+        print("Nothing further runs until you explicitly start a full command.")
+
+    def cmd_run(self, mode_name: str):
+        self.stats["mode"] = mode_name
+        if mode_name == "all" and not self.args.yes:
+            scope = ", ".join(self.config.get("document_types", []))
+            print(f"This downloads ALL available Anthem documents ({scope}).")
+            print("Type YES to continue:")
+            if ask("> ").strip().upper() != "YES":
+                print("Aborted. (Run the pilot first if you haven't: --pilot)")
+                return
+        self.cmd_discover()
+        docs = self._select()
+        print(f"\nDownloading {len(docs)} document(s)...")
+        self.process(docs, dry_run=self.args.dry_run)
+        # "Fetch everything" also pulls the other document surfaces - member
+        # documents across all coverage years, the ID cards, and the Letters -
+        # each its own read-only member API.
+        if mode_name == "all" and not self.args.dry_run:
+            self.cmd_documents()
+            self.cmd_id_cards()
+            self.cmd_letters()
+
+    def _session_expired(self) -> None:
+        print("  !! Anthem session expired. Sign in again, then run resume.bat.")
+        self.stats["session_expired"] = 1
+
+    def _listing_incomplete(self, err: Exception) -> None:
+        """A listing failed with a server/rate-limit error (not auth). Report it
+        and count it as failed so the run exits nonzero instead of looking clean
+        while a document is silently missing from the archive."""
+        print(f"  !! {err}. The archive may be incomplete - try again shortly, "
+              f"then run resume.bat.")
+        self.stats["failed"] += 1
+
+    def _save_collected(self, kind: str, rows: List[dict], fetch_fn) -> None:
+        """Shared save loop for the API-fetched surfaces (member documents, ID
+        cards, letters). Each row is filing metadata; `fetch_fn(page, row)`
+        returns the PDF bytes on demand. Dedupe by the row's delete-safe key,
+        validate the PDF, file it in its folder and index it. A document already
+        downloaded once is never re-fetched (the sticky downloaded_ok marker),
+        so this hooks straight into fetch-only-new."""
+        from datetime import date
+        if not rows:
+            print(f"  No {kind} to download.")
+            return
+        for r in rows:
+            label, key = r["label"], r["key"]
+            if not getattr(self.args, "redownload", False):
+                rec = self.progress.get(key)
+                if rec and (rec.get("downloaded_ok")
+                            or rec.get("state") == State.COMPLETED.value):
+                    print(f"  Already downloaded - skipping: {label}")
+                    self.stats["skipped_completed"] += 1
+                    continue
+            fdate = r.get("date") or date.today().isoformat()
+            if getattr(self.args, "dry_run", False):
+                print(f"  DRY RUN - would save: {build_pdf_filename(fdate, label, '')}")
+                continue
+            try:
+                pdf = fetch_fn(self.page(), r)
+            except site.SessionExpired:
+                self._session_expired()
+                return
+            except Exception as e:
+                log.warning("could not fetch %s: %s", label, e)
+                self.stats["failed"] += 1
+                continue
+            if not pdf:
+                self.progress.update(key, {
+                    "state": State.NEEDS_MANUAL_REVIEW.value, "title": label,
+                    "notes": "Could not fetch the document"})
+                self.stats["manual_review"] += 1
+                print(f"  Could not fetch - marked for manual review: {label}")
+                continue
+            folder = getattr(self.paths, r["folder_attr"])
+            folder.mkdir(parents=True, exist_ok=True)
+            out_path = unique_path(folder, build_pdf_filename(fdate, label, ""),
+                                   self.config["max_path_length"])
+            try:
+                out_path.write_bytes(pdf)
+            except Exception as e:
+                log.warning("could not write %s: %s", label, e)
+                self.stats["failed"] += 1
+                continue
+            result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"])
+            if not result.ok:
+                quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                         self.config["max_path_length"])
+                try:
+                    out_path.replace(quarantine)
+                except OSError:
+                    quarantine = out_path
+                self.progress.update(key, {
+                    "state": State.NEEDS_MANUAL_REVIEW.value,
+                    "pdf_path": str(quarantine), "title": label,
+                    "notes": f"PDF validation failed: {result.reason}"})
+                self.stats["manual_review"] += 1
+                print(f"  !! Validation failed for {label}; moved to Manual Review.")
+                continue
+            self.progress.update(key, {
+                "state": State.COMPLETED.value, "downloaded_ok": True,
+                "pdf_path": str(out_path), "pdf_filename": out_path.name,
+                "title": label, "date": fdate, "document_id": r.get("doc_id", "")})
+            self.index_csv.append_rows([{
+                "Account Holder": self.config.get("owner", ""),
+                "Document Date": fdate,
+                "Category": r["folder_attr"].replace("_", " ").title(),
+                "Document Summary": label, "Document Title": label,
+                "PDF Filename": out_path.name, "PDF Full Path": str(out_path),
+                "PDF File Size": result.size_bytes, "PDF Page Count": result.page_count,
+                "Downloaded At": now_iso(), "Verified At": now_iso(),
+                "Processing Status": "Completed"}])
+            self.stats["new_files"].append(str(out_path))
+            # A 1095-B member document files into the Tax Documents folder, so
+            # count it as tax in the run summary; everything else is "other".
+            self.stats["tax_documents" if r["folder_attr"] == "tax_documents"
+                       else "other"] += 1
+            if fdate:
+                self.stats["dates"].append(fdate)
+            print(f"  Saved: {out_path.name}")
+
+    def cmd_documents(self):
+        """Download member documents (plan / authorization / tax) across ALL
+        coverage periods - this year and prior years. Fetched by the portal's own
+        member API (nothing is clicked): the coverage periods are enumerated, and
+        each document is downloaded by a URL built from its validated coverage
+        period and type."""
+        print("\nMember documents (all coverage years)...")
+        page = self.page()
+        self.check_session(page)
+        try:
+            rows = site.list_member_documents(page)
+        except site.SessionExpired:
+            self._session_expired()
+            return
+        except site.ListingIncomplete as e:
+            self._listing_incomplete(e)
+            return
+        self._save_collected(
+            "member documents", rows,
+            lambda pg, r: site.download_member_document(
+                pg, r["coverage_key"], r["document_type"]))
+
+    def cmd_id_cards(self):
+        """Download each member's digital insurance / ID card as a PDF (front and
+        back). Fetched by the idcard microapp API; nothing is clicked or ordered.
+        The patient name rides into the filename so a family's cards stay apart."""
+        print("\nID / insurance cards...")
+        page = self.page()
+        self.check_session(page)
+        try:
+            rows = site.list_id_cards(page)
+        except site.SessionExpired:
+            self._session_expired()
+            return
+        except site.ListingIncomplete as e:
+            self._listing_incomplete(e)
+            return
+        self._save_collected(
+            "ID cards", rows,
+            lambda pg, r: site.download_id_card(
+                pg, r["patient"], r["card_type"], r.get("ordinal", 0)))
+
+    def cmd_letters(self):
+        """Download secure Message Center letters, one PDF per message. READ-SAFE:
+        the message list already carries each body, so no message is opened and no
+        read flag is ever changed - the tool never marks a message read."""
+        print("\nLetters (Message Center)...")
+        page = self.page()
+        self.check_session(page)
+        try:
+            rows = site.list_letters(page)
+        except site.SessionExpired:
+            self._session_expired()
+            return
+        except site.ListingIncomplete as e:
+            self._listing_incomplete(e)
+            return
+        unread = sum(1 for r in rows if not r.get("is_read"))
+        if unread:
+            print(f"  ({unread} of {len(rows)} are unread; reading them here does "
+                  f"NOT mark them read in the portal.)")
+        self._save_collected(
+            "letters", rows,
+            lambda pg, r: site.render_letter(pg, r["label"], r.get("body", ""), r.get("date", "")))
+
+    def cmd_resume(self):
+        self.stats["mode"] = "resume"
+        docs = [d for d in self._select() if not self._already_done(d)]
+        if docs:
+            print(f"Resuming: {len(docs)} EOB document(s) remaining.")
+            self.process(docs, dry_run=self.args.dry_run)
+        else:
+            print("EOBs: nothing to resume.")
+        # A run that stopped after the EOBs must still finish the other surfaces.
+        # They are idempotent - each already-downloaded document is skipped - so
+        # resume simply re-lists and retries any member document, ID card or
+        # letter that is not yet complete.
+        if not self.args.dry_run:
+            self.cmd_documents()
+            self.cmd_id_cards()
+            self.cmd_letters()
+
+    def cmd_verify(self):
+        self.stats["mode"] = "verify"
+        rows = self.index_csv.read_all()
+        if not rows:
+            print("Document index is empty - nothing to verify.")
+            return
+        bad = 0
+        for row in rows:
+            p = row.get("PDF Full Path", "")
+            if not p:
+                continue
+            r = receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"])
+            if not r.ok:
+                bad += 1
+                print(f"  BAD {row.get('PDF Filename', '')}: {r.reason}")
+            else:
+                row["Verified At"] = now_iso()
+        self.index_csv.rewrite(rows)
+        print(f"\nVerified {len(rows)} index rows; {bad} problem(s).")
+
+    def cmd_diagnose(self):
+        self.stats["mode"] = "diagnose"
+        import json as _json
+        page = self.page()
+        info = {"timestamp": now_iso()}
+        try:
+            info["signed_out"] = site.looks_signed_out(page)
+            info["challenge"] = site.detect_security_challenge(page)
+            info["mapped"] = bool(site.DOCUMENT_TYPES)
+            # This app is not mapped yet, so diagnose gathers EVIDENCE of what
+            # is actually on the page rather than pretending to collect. Read
+            # only, from Anthem frames only, and it navigates nothing.
+            info["frames"] = [
+                (fr.url or "")[:120]
+                for pg in page.context.pages if not pg.is_closed()
+                for fr in pg.frames if site.is_anthem_frame(fr)]
+            docs = site.collect_documents(page)
+            info["collected"] = len(docs)
+            info["samples"] = []
+            for d in docs[:12]:
+                cat, summ, _ = doc_types.classify_document(d.get("title", ""), self.rules)
+                info["samples"].append({
+                    "title": (d.get("title") or "")[:90],
+                    "date": d.get("date", ""),
+                    "category": cat, "summary": summ})
+            # No screenshot. This is a health portal: the page on screen shows
+            # claims, providers, diagnoses and member identifiers (PHI), and a
+            # PNG of it would sit in Diagnostics where it is easy to attach to a
+            # bug report by accident.
+        except Exception as e:
+            info["error"] = str(e)
+        out = self.paths.diagnostics / "diagnose-documents.json"
+        atomic_write_text(out, _json.dumps(info, indent=2))
+        print(f"Wrote {out}")
+        print(f"Rows collected: {info.get('collected', '?')}")
+        for s in info.get("samples", [])[:5]:
+            print(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}")
+
+    # -- summary -----------------------------------------------------------
+
+    def write_run_summary(self):
+        s = self.stats
+        s["ended"] = now_iso()
+        dates = sorted(d for d in s["dates"] if d)
+        new_files = s.get("new_files", [])
+        atomic_write_text(self.paths.run_summary, "\n".join([
+            "Anthem Documents - run summary",
+            "=" * 40,
+            f"Run start:                 {s['started']}",
+            f"Run end:                   {s['ended']}",
+            f"Mode:                      {s['mode'] or '(none)'}",
+            f"Documents known:           {s['discovered']}",
+            f"NEW files this run:        {len(new_files)}",
+            f"Statements downloaded:     {s['statements']}",
+            f"Tax documents downloaded:  {s['tax_documents']}",
+            f"Insurance docs downloaded: {s['insurance_documents']}",
+            f"Other documents:           {s['other']}",
+            f"Skipped (already done):    {s['skipped_completed']}",
+            f"Skipped (out of scope):    {s['skipped_out_of_scope']}",
+            f"Needs manual review:       {s['manual_review']}",
+            f"Failed:                    {s['failed']}",
+            f"Duplicate filenames (#'d): {s['duplicate_filenames']}",
+            f"PDF validation failures:   {s['validation_failures']}",
+            f"Earliest date processed:   {dates[0] if dates else '-'}",
+            f"Latest date processed:     {dates[-1] if dates else '-'}",
+            "",
+        ]))
+        # A plain list of exactly the files downloaded THIS run (all new,
+        # since already-downloaded documents are skipped). Handy for knowing
+        # what to import into paperless-ngx, and safe to ignore/delete.
+        if new_files:
+            atomic_write_text(
+                self.paths.root / "new-this-run.txt",
+                f"# {len(new_files)} file(s) downloaded on this run "
+                f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
+            print(f"\n{len(new_files)} NEW file(s) downloaded this run "
+                  f"(listed in new-this-run.txt).")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        description="Local supervised Anthem document downloader (read-only)")
+    for name, help_text in [
+            ("login", "verify connection to your signed-in browser"),
+            ("discover", "list available documents; writes discovery.json"),
+            ("pilot", "download the 5 newest in-scope documents, then stop"),
+            ("all", "download everything in scope (asks for confirmation)"),
+            ("documents", "download member plan / authorization / tax documents (all years)"),
+            ("id-cards", "download each member's digital ID / insurance card as a PDF"),
+            ("letters", "download secure Message Center letters (read-safe)"),
+            ("resume", "continue an interrupted run"),
+            ("verify", "re-validate every saved PDF"),
+            ("diagnose", "dump the Documents page structure (no downloads)")]:
+        ap.add_argument(f"--{name}", action="store_true", help=help_text)
+    ap.add_argument("--dry-run", action="store_true",
+                    help="plan filenames but download nothing")
+    ap.add_argument("--year", type=int)
+    ap.add_argument("--start-date")
+    ap.add_argument("--end-date")
+    ap.add_argument("--max-docs", type=int)
+    ap.add_argument("--type", help="'Insurance Document' (EOBs) or 'Tax Document'")
+    ap.add_argument("--yes", action="store_true", help="skip the --all confirmation")
+    ap.add_argument("--redownload", action="store_true",
+                    help="re-download everything in scope, ignoring the "
+                         "'already downloaded' memory (rebuilds deleted files)")
+    ap.add_argument("--config", help="use an alternate config file, e.g. "
+                                     "config.spouse.json (separate account)")
+    ap.add_argument("--open-browser", action="store_true",
+                    help="launch a sign-in browser using this config's profile/port")
+    return ap
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    for d in (args.start_date, args.end_date):
+        if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            print(f"Bad date '{d}': use YYYY-MM-DD")
+            return 2
+    app = App(args)
+    try:
+        if getattr(args, "open_browser", False):
+            app.cmd_open_browser()
+        elif args.login:
+            app.cmd_login()
+        elif args.discover:
+            app.cmd_discover()
+        elif args.pilot:
+            app.cmd_pilot()
+        elif args.all:
+            app.cmd_run("all")
+        elif args.documents:
+            app.stats["mode"] = "documents"
+            app.cmd_documents()
+        elif args.id_cards:
+            app.stats["mode"] = "id-cards"
+            app.cmd_id_cards()
+        elif args.letters:
+            app.stats["mode"] = "letters"
+            app.cmd_letters()
+        elif args.resume:
+            app.cmd_resume()
+        elif args.verify:
+            app.cmd_verify()
+        elif args.diagnose:
+            app.cmd_diagnose()
+        elif args.dry_run:
+            app.cmd_run("dry-run")
+        else:
+            build_parser().print_help()
+            return 0
+    except KeyboardInterrupt:
+        print("\nStopped by user. Progress saved.")
+    finally:
+        app.progress.save()
+        app.discovery.save()
+        if app.stats["mode"]:
+            app.write_run_summary()
+        app.close()
+    # A run that saved nothing must not look like a clean run. Previously any
+    # outcome returned 0, so an expired session or a failed discovery ended
+    # with a success code and only a log line to show for it.
+    if app.stats.get("session_expired"):
+        return 2
+    if app.stats.get("failed") or app.stats.get("manual_review"):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (21)
+## Supported (22)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -18,6 +18,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
+| [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, member/plan documents (all coverage years), digital ID cards, secure-message letters; tRPC API, nothing clicked | Health insurance (PHI) |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Card |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
