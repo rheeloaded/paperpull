@@ -1,0 +1,30 @@
+ANTHEM BCBS EOBs  -  commands   (READ-ONLY)
+============================================================
+YOUR account = just the batch name.  SPOUSE = add "spouse".
+
+  Task            You                    Spouse
+  --------------  ---------------------  --------------------------
+  Sign in         login.bat              login.bat spouse
+  Look (no d/l)   diagnose.bat           diagnose.bat spouse
+  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
+  Full run        run_all.bat            run_all.bat spouse
+  Continue        resume.bat             resume.bat spouse
+  Re-check PDFs   verify_documents.bat   verify_documents.bat spouse
+
+FLOW:  login.bat  ->  diagnose.bat  ->  run_pilot.bat  ->  run_all.bat
+login.bat opens www.anthem.com/account-login. Sign in, do the 2FA
+yourself (check "remember this device"); Anthem sends you to
+membersecure.anthem.com - open the EOB Center there, keep it OPEN.
+
+READ-ONLY: downloads Explanation of Benefits (EOB) PDFs only. It NEVER
+changes a PCP, refills a prescription, appeals a claim, enrolls in
+paperless, pays a premium, messages care teams, or changes any setting.
+Every EOB is fetched by the portal's own API - nothing on the page is
+clicked.
+
+Scope: Medical, Pharmacy and Chiropractic EOBs (and EOB Checks), plus a
+1095-B tax form if the account has one. EOBs are Protected Health
+Information - handle accordingly.
+
+Your files: this folder (EOBs\, Tax Documents\).
+Full command reference: COMMANDS.txt in the parent folder.
