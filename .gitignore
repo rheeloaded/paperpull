@@ -47,6 +47,11 @@ config.json.*
 **/Manual Review/
 **/Trade Confirmations/
 **/Insurance Documents/
+**/EOBs/
+**/Plan Documents/
+**/Authorizations/
+**/Letters/
+**/ID Cards/
 **/Other Documents/
 **/Receipts/
 **/Orders/
