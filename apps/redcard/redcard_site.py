@@ -463,7 +463,7 @@ def _attempt_download(page, iso_date: str, out_path) -> Optional[bool]:
         log.error("refusing a control labelled %r", label[:60])
         return False
 
-    from receipt_pdf import save_download
+    from paperpull_core.receipt_pdf import save_download
     try:
         link.scroll_into_view_if_needed(timeout=4000)
     except Exception:

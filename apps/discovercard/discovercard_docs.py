@@ -359,6 +359,18 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                if site.looks_moved_to_capital_one(page):
+                    print("Your Discover account has moved to Capital One.")
+                    print()
+                    print("Capital One acquired Discover and is moving card servicing")
+                    print("onto its own site. Once an account has moved, the Discover")
+                    print("pages this app reads no longer exist, and there is nothing")
+                    print("to fix on your end.")
+                    print()
+                    print("This app cannot download from Capital One yet. Anything you")
+                    print("already downloaded is untouched, and your history is kept, so")
+                    print("nothing is re-fetched if support arrives later.")
+                    return 0
                 print("Could not open your Discover statements. Sign in and open")
                 print("Statements & Documents in the browser, then try again.")
                 return 0

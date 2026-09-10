@@ -523,7 +523,7 @@ def download_by_url(page, url: str, out_path) -> bool:
             except Exception as e:
                 if "download is starting" not in str(e).lower():
                     raise
-        from receipt_pdf import save_download
+        from paperpull_core.receipt_pdf import save_download
         save_download(dl.value, out_path)
         return True
     except Exception:
@@ -750,7 +750,7 @@ def download_statement(page, iso_date: str, out_path) -> bool:
         log.info("refusing unsafe control %r for %s", label, iso_date)
         return False
 
-    from receipt_pdf import save_download
+    from paperpull_core.receipt_pdf import save_download
     try:
         with page.expect_download(timeout=45000) as dl:
             btn.first.click()
