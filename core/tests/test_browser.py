@@ -206,3 +206,33 @@ def test_the_port_check_uses_ipv4_not_localhost():
 
 def test_the_port_check_survives_a_nonsense_port():
     assert browser.wait_for_debug_port("not-a-port", timeout=0.5) is False
+
+
+# -- the profile the browser opens must be the one Python created -----------
+
+def test_a_relative_profile_dir_reaches_the_browser_as_an_absolute_path(tmp_path, monkeypatch):
+    """Configs carry this as "./x-browser-profile". A relative --user-data-dir
+    is resolved by the BROWSER, from wherever the browser thinks it is, not
+    from where Python just created the folder. That split made two profiles out
+    of one setting and left four of them holding live signed-in session cookies
+    inside the shared Playwright browser cache."""
+    
+
+    seen = {}
+
+    class FakePopen:
+        def __init__(self, argv, *a, **kw):
+            seen["argv"] = argv
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(browser.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(browser, "find_browser", lambda prefer_real=False: ("Chromium", "chrome"))
+    monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0: True)
+
+    browser.open_signin_browser("./demo-browser-profile", "9222", "https://example.test")
+
+    flag = [a for a in seen["argv"] if a.startswith("--user-data-dir=")][0]
+    got = Path(flag.split("=", 1)[1])
+    assert got.is_absolute(), "the browser was handed a relative profile path: %s" % got
+    assert got == (tmp_path / "demo-browser-profile").resolve()
+    assert got.is_dir(), "the folder Python created is not the one the browser was given"
