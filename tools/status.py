@@ -265,8 +265,15 @@ def group_gaps(gaps):
         windows.setdefault(key, []).append(g)
     out = []
     for (after, before, missing), members in sorted(windows.items()):
-        labels = [((m["account"] + " ") if m["account"] else "") + m["summary"]
-                  for m in members]
+        # The account is prefixed only when the summary does not already name
+        # it. Some apps record a summary that repeats the account, which read
+        # as "CHECKING *6269 Checking Statement CHECKING *6269". The console
+        # report truncates and hid it, the control panel does not.
+        labels = []
+        for m in members:
+            acct, summary = m["account"] or "", m["summary"] or ""
+            labels.append(summary if (not acct or acct in summary)
+                          else (acct + " " + summary).strip())
         out.append({"after": after, "before": before, "missing": missing,
                     "count": len(members), "labels": labels})
     return out

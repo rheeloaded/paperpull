@@ -425,3 +425,22 @@ def test_a_steady_tail_at_the_SAME_speed_excuses_nothing():
     recs = _add(recs, "2025-02-10", [30 * i for i in range(1, 13)])
     gaps = status.find_gaps(recs, "STATEMENT")
     assert gaps, "a same-speed tail was treated as a schedule change"
+
+
+def test_a_gap_label_does_not_repeat_the_account_name():
+    """Some apps record a summary that already names the account, so prefixing
+    it produced "CHECKING *6269 Checking Statement CHECKING *6269". The console
+    report truncated the line and hid it. The control panel shows it in full."""
+    gaps = [{"account": "CHECKING *6269",
+             "summary": "Checking Statement CHECKING *6269",
+             "after": date(2025, 3, 15), "before": date(2025, 5, 16),
+             "missing": 1, "every_days": 31}]
+    label = status.group_gaps(gaps)[0]["labels"][0]
+    assert label.count("CHECKING *6269") == 1, label
+
+
+def test_a_gap_label_still_names_the_account_when_the_summary_does_not():
+    gaps = [{"account": "Savings *1083", "summary": "Savings Statement",
+             "after": date(2025, 3, 18), "before": date(2025, 5, 17),
+             "missing": 1, "every_days": 30}]
+    assert status.group_gaps(gaps)[0]["labels"][0] == "Savings *1083 Savings Statement"

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date, datetime
 import re
 import subprocess
 import sys
@@ -41,6 +42,9 @@ try:
 except Exception:
     VERSION = "0.1.0"
 APPS_ROOT = Path(os.environ.get("APPS_ROOT", str(HERE.parent / "apps")))
+# Resolved once. Importing by path is not free and the panel can be
+# refreshed repeatedly. False means looked for and not found.
+_STATUS_MOD = None
 
 # action -> argparse flags. run_all / resume get --yes so they don't block on a
 # confirmation prompt. Login is resolved per-app (open-browser vs login).
@@ -144,6 +148,89 @@ def api_apps():
     apps = discover_apps()
     return {"apps_root": str(APPS_ROOT), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "apps": apps}
+
+
+# -- how current each archive is ---------------------------------------------
+
+def _status_module():
+    """tools/status.py, imported from wherever this deployment keeps it.
+
+    The control panel can be run from the repo or from the folder holding the
+    installs, and the reporter does not sit in the same place relative to both.
+    If it cannot be found the panel says so and everything else carries on,
+    because a missing report is no reason to lose the buttons that actually
+    download things.
+    """
+    global _STATUS_MOD
+    if _STATUS_MOD is not None:
+        return _STATUS_MOD or None
+    import importlib.util
+    for cand in (HERE.parent / "tools" / "status.py",
+                 APPS_ROOT / "status.py",
+                 APPS_ROOT.parent / "status.py",
+                 HERE.parent / "status.py"):
+        try:
+            if not cand.is_file():
+                continue
+            spec = importlib.util.spec_from_file_location("paperpull_status", cand)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _STATUS_MOD = mod
+            return mod
+        except Exception:
+            continue
+    _STATUS_MOD = False
+    return None
+
+
+def _jsonable(value):
+    """Dates arrive as date/datetime objects, which JSON cannot carry."""
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="seconds")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return value
+
+
+@app.get("/api/status", dependencies=[Depends(_same_origin_only)])
+def api_status():
+    """How current each archive is, and which periods look missing.
+
+    Deliberately a plain def rather than async. The scan walks every install
+    and reads each state file, which takes seconds across a full set, and a
+    sync endpoint is handed to a worker thread instead of stalling the event
+    loop while somebody is watching a download stream.
+    """
+    mod = _status_module()
+    if mod is None:
+        return {"available": False, "rows": [], "gaps": [],
+                "reason": "status.py was not found next to this control panel.",
+                "root": str(APPS_ROOT)}
+    try:
+        rows = mod.scan_all(APPS_ROOT)
+    except Exception as e:
+        return {"available": False, "rows": [], "gaps": [],
+                "reason": "the scan failed, %s" % str(e).splitlines()[0][:120],
+                "root": str(APPS_ROOT)}
+
+    out, gaps = [], []
+    for row in rows:
+        try:
+            grouped = [_jsonable(g) for g in mod.group_gaps(row.get("gaps") or [])]
+        except Exception:
+            grouped = []
+        if grouped:
+            gaps.append({"provider": row.get("provider") or row.get("folder"),
+                         "windows": grouped})
+        item = {k: _jsonable(v) for k, v in row.items() if k != "gaps"}
+        item["label"] = mod.LABEL.get(row.get("status"), str(row.get("status")))
+        item["cadence"] = mod._fmt_cadence(row.get("cadence_days"))
+        out.append(item)
+    return {"available": True, "root": str(APPS_ROOT), "rows": out, "gaps": gaps}
 
 
 def _build_cmd(app_meta: dict, account: str, action: str):
@@ -256,6 +343,26 @@ HTML = r"""<!doctype html>
   footer a { color:var(--accent); text-decoration:none; }
   footer a:hover { text-decoration:underline; }
   .controls { padding:20px 22px; border-right:1px solid var(--line); overflow:auto; }
+  .tabs { display:flex; gap:2px; padding:0 22px; border-bottom:1px solid var(--line); }
+  .tabs button { background:none; border:0; border-bottom:2px solid transparent;
+                 color:var(--muted); padding:10px 14px; font:inherit; cursor:pointer; }
+  .tabs button.on { color:var(--fg); border-bottom-color:var(--accent); }
+  .stwrap { flex:1; overflow:auto; padding:16px 22px; }
+  .stwrap button { background:var(--panel); color:var(--fg); border:1px solid var(--line);
+                   border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  table.st { border-collapse:collapse; width:100%; font-size:13px; }
+  table.st th { text-align:left; color:var(--muted); font-weight:500;
+                border-bottom:1px solid var(--line); padding:6px 10px 6px 0; }
+  table.st td { padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
+  table.st td.num { text-align:right; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; }
+  .pill.overdue { background:#4a1d1d; color:#ff9a9a; }
+  .pill.due { background:#4a3a1d; color:#ffd08a; }
+  .pill.current { background:#1d4a35; color:var(--ok); }
+  .pill.other { background:var(--line); color:var(--muted); }
+  .gapbox { margin-top:18px; border-left:3px solid var(--accent); padding:2px 0 2px 12px; }
+  .gapbox h3 { margin:0 0 4px; font-size:14px; }
+  .gapbox p { color:var(--muted); font-size:13px; margin:2px 0; }
   label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em;
           color:var(--muted); margin:16px 0 6px; }
   select { width:100%; padding:9px 10px; background:var(--panel); color:var(--fg);
@@ -299,8 +406,19 @@ HTML = r"""<!doctype html>
     <p class="hint warn" id="venvwarn" style="display:none"></p>
   </div>
   <div style="display:flex; flex-direction:column; min-width:0;">
+  <div class="tabs">
+    <button id="tabout" class="on" onclick="showTab('out')">Output</button>
+    <button id="tabst" onclick="showTab('st')">Status</button>
+  </div>
+  <div id="paneout" style="display:flex; flex-direction:column; min-height:0; flex:1;">
     <div class="status"><span class="dot" id="dot"></span><span id="statustext">idle</span></div>
     <pre class="console" id="console"></pre>
+  </div>
+  <div id="panest" class="stwrap" style="display:none;">
+    <p><button onclick="loadStatus()">Refresh</button>
+       <span class="hint" id="stnote"></span></p>
+    <div id="stbody">not loaded yet</div>
+  </div>
   </div>
 </main>
 <footer>
@@ -308,6 +426,68 @@ HTML = r"""<!doctype html>
   <span>☕ <a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">Support this project on Ko-fi</a></span>
 </footer>
 <script>
+let STATUS_LOADED = false;
+
+function showTab(which) {
+  const isSt = which === 'st';
+  $('paneout').style.display = isSt ? 'none' : 'flex';
+  $('panest').style.display  = isSt ? 'block' : 'none';
+  $('tabout').className = isSt ? '' : 'on';
+  $('tabst').className  = isSt ? 'on' : '';
+  if (isSt && !STATUS_LOADED) loadStatus();
+}
+
+function pillClass(s) {
+  if (s === 'OVERDUE') return 'overdue';
+  if (s === 'due') return 'due';
+  if (s === 'current') return 'current';
+  return 'other';
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadStatus() {
+  $('stbody').textContent = 'scanning...';
+  $('stnote').textContent = '';
+  let d;
+  try { d = await (await fetch('/api/status')).json(); }
+  catch (e) { $('stbody').textContent = 'could not reach the control panel'; return; }
+  STATUS_LOADED = true;
+  if (!d.available) { $('stbody').textContent = d.reason || 'status is unavailable'; return; }
+  if (!d.rows.length) { $('stbody').textContent = 'no archives found under ' + d.root; return; }
+  const body = d.rows.map(r =>
+    '<tr><td>' + esc(r.provider || r.folder) + '</td>' +
+    '<td class="num">' + (r.documents == null ? '' : r.documents) + '</td>' +
+    '<td>' + esc(r.newest || '') + '</td>' +
+    '<td class="num">' + (r.age_days == null ? '' : r.age_days + ' d') + '</td>' +
+    '<td>' + esc(r.cadence || '') + '</td>' +
+    '<td><span class="pill ' + pillClass(r.label) + '">' + esc(r.label) + '</span></td></tr>'
+  ).join('');
+  let html = '<table class="st"><thead><tr><th>Provider</th><th class="num">Docs</th>' +
+    '<th>Newest</th><th class="num">Age</th><th>Every</th><th>Status</th></tr></thead><tbody>' +
+    body + '</tbody></table>';
+  if (d.gaps.length) {
+    html += '<div class="gapbox"><h3>Possible gaps</h3>' +
+      '<p>A run that looks current can still be missing periods in the middle.</p>';
+    for (const g of d.gaps) {
+      html += '<p style="margin-top:8px"><b>' + esc(g.provider) + '</b></p>';
+      for (const w of g.windows) {
+        const who = w.count > 1
+          ? (w.count + ' series, including ' + (w.labels[0] || ''))
+          : (w.labels[0] || '');
+        html += '<p>' + esc(w.after) + ' to ' + esc(w.before) + ' &middot; ' +
+                esc(String(w.missing)) + ' missing &middot; ' + esc(who) + '</p>';
+      }
+    }
+    html += '</div>';
+  }
+  $('stbody').innerHTML = html;
+  $('stnote').textContent = 'scanned ' + d.root;
+}
+
 let META = null, es = null;
 const $ = id => document.getElementById(id);
 
