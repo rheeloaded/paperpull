@@ -333,6 +333,28 @@ def looks_public_or_error(page) -> bool:
     return False
 
 
+# Capital One acquired Discover, and card servicing is being moved onto
+# Capital One's own site account by account. Once an account has moved, nothing
+# this app knows how to read still exists, and the honest answer is to say so.
+# Without this the run reported "could not open your Discover statements, sign
+# in and try again", which sends someone to fix a sign-in that is not broken.
+MOVED_HOSTS = ("capitalone.com", "capitalone360.com")
+
+
+def looks_moved_to_capital_one(page) -> bool:
+    """True when the open tab has landed on Capital One.
+
+    Host equality on the parsed hostname, not a substring, for the same reason
+    every other host check here works that way.
+    """
+    from urllib.parse import urlparse
+    try:
+        host = (urlparse(page.url or "").hostname or "").lower()
+    except ValueError:
+        return False
+    return any(host == h or host.endswith("." + h) for h in MOVED_HOSTS)
+
+
 def looks_signed_out(page) -> bool:
     url = (page.url or "").lower()
     if any(m in url for m in LOGIN_URL_MARKERS):

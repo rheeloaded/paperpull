@@ -288,3 +288,36 @@ def test_a_bare_save_is_refused_on_purpose():
     that one names the document."""
     for label in ["Save", "Save Changes", "Save Settings"]:
         assert not site.is_safe_control(label), label
+
+
+# -- Capital One took the account over --------------------------------------
+
+class _Tab:
+    def __init__(self, url):
+        self.url = url
+
+
+def test_a_migrated_account_is_recognised_rather_than_blamed_on_the_user():
+    """Capital One acquired Discover and is moving card servicing onto its own
+    site. Before this, a moved account produced "could not open your Discover
+    statements, sign in and try again", which sends somebody to fix a sign-in
+    that was never broken."""
+    for url in ("https://www.capitalone.com/",
+                "https://myaccounts.capitalone.com/accountSummary",
+                "https://verified.capitalone.com/sign-in"):
+        assert site.looks_moved_to_capital_one(_Tab(url)), url
+
+
+def test_discover_itself_is_not_mistaken_for_the_migration():
+    for url in ("https://card.discover.com/cardmembersvcs/statements/app/activity",
+                "https://www.discover.com/", ""):
+        assert not site.looks_moved_to_capital_one(_Tab(url)), url
+
+
+def test_a_lookalike_host_does_not_count_as_capital_one():
+    """Host equality on the parsed hostname, not a substring, the same way
+    every other host check in this app works."""
+    for url in ("https://capitalone.com.evil.test/",
+                "https://notcapitalone.com/",
+                "https://capitalone.com@evil.test/"):
+        assert not site.looks_moved_to_capital_one(_Tab(url)), url

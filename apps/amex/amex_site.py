@@ -578,7 +578,7 @@ def download_document(page, category: str, date: str, out_path) -> bool:
     else:
         sel = f"[data-testid$='/{date}/download-button']"
 
-    from receipt_pdf import save_download
+    from paperpull_core.receipt_pdf import save_download
     for attempt in range(2):
         _dismiss_dialog(page)       # clear any stale/prior dialog
         expand_sections(page)       # Older Statements / Year End Summary open
@@ -661,7 +661,7 @@ def download_by_url(page, url: str, out_path) -> bool:
             except Exception as e:
                 if "download is starting" not in str(e).lower():
                     raise
-        from receipt_pdf import save_download
+        from paperpull_core.receipt_pdf import save_download
         save_download(dl.value, out_path)
         return True
     except Exception:
@@ -735,7 +735,7 @@ def download_named(page, title: str, out_path) -> bool:
         log.info("download control not found for %r", title)
         return False
 
-    from receipt_pdf import save_download
+    from paperpull_core.receipt_pdf import save_download
     try:
         with page.expect_download(timeout=45000) as dl:
             control.click()

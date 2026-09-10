@@ -412,7 +412,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
         log.info("refusing unsafe control %r for %s", label, iso_date)
         return False
 
-    from receipt_pdf import save_download
+    from paperpull_core.receipt_pdf import save_download
     try:
         btn.first.scroll_into_view_if_needed(timeout=4000)
     except Exception:

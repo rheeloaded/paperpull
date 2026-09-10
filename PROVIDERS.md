@@ -20,7 +20,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, member/plan documents (all coverage years), digital ID cards, secure-message letters; tRPC API, nothing clicked | Health insurance (PHI) |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Card |
-| [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card |
+| [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card, **moving to Capital One** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
