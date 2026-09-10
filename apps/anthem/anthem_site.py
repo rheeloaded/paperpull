@@ -113,7 +113,17 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"set\s+up|enabl|disabl|delet|remov(e|es|ed|ing|al)|start|stop|restart|"
     r"\boptions?\b|\bsettings?\b|\bpreferences?\b|^\s*save\s*$|save\s+(changes?|settings?|preferences?|profile)|manage|"
     r"consent|agree|accept|opt\s*(in|out)|turn\s+(on|off)|"
-    r"elect(ion)?\b|authoriz|certif|"
+    # Word boundaries on all three. Without the leading \b, "elect"
+    # matches inside "Select" ("Blue Select PPO Plan Document"),
+    # "certif" inside "Certificate of Coverage" and "authoriz"
+    # inside "Authorization Letter" - all three are real member
+    # documents, and this app files an authorizations category of
+    # its own. Same shape as the verb "edit" matching the noun
+    # "Credit", fixed in 0.17.1.
+    # Only the VERB forms. "Authorization" and "Certificate" are document
+    # nouns, and "Prior Authorization" is already refused by name higher
+    # up, so the noun does not need blocking here as well.
+    r"\belect(ion)?\b|\bauthoriz(e|es|ed|ing)\b|\bcertif(y|ies|ied)\b|"
     # generic commit verbs
     r"submit|confirm|continue|\bnext\b|sign\s+(in|out|up)|appl(y|ies|ied|ication)|"
     r"cancel|activat)", re.I)
@@ -125,7 +135,13 @@ FORBIDDEN_CONTROL_RE = re.compile(
 SAFE_DOC_CONTROL_RE = re.compile(
     r"(download|view|open|print|pdf|statement|document|"
     r"explanation\s+of\s+benefits|\beob\b|eob\s+check|claim\s+summary|"
-    r"1095|tax\s+(form|statement|document))", re.I)
+    r"1095|tax\s+(form|statement|document)|"
+    # A health plan issues these by name. Without them the allowlist
+    # refused "Summary of Benefits and Coverage", "Evidence of
+    # Coverage" and "Certificate of Coverage" outright.
+    r"summary\s+of\s+benefits|evidence\s+of\s+coverage|"
+    r"certificate\s+of\s+coverage|authorization|benefit\s+summary|"
+    r"id\s+card|insurance\s+card|letter)", re.I)
 
 SECURITY_CHALLENGE_MARKERS = [
     # OTP / MFA (specific phrasings - a bare "one-time" matched marketing copy)
@@ -1323,8 +1339,17 @@ def render_html_to_pdf(page, html: str) -> Optional[bytes]:
     try:
         try:
             scratch.route(re.compile(r"^https?://"), lambda r: r.abort())
-        except Exception:
-            pass
+        except Exception as e:
+            # FAIL CLOSED. The content below is a secure-message body, which
+            # anyone able to send the member a message can influence, and this
+            # scratch page shares the signed-in browser context. If the block
+            # could not be installed, the promise in this docstring is not one
+            # this function can keep, so it renders nothing rather than
+            # rendering untrusted markup with the network wide open.
+            log.warning("could not block network for the PDF render (%s); "
+                        "skipping rather than rendering unguarded",
+                        str(e).splitlines()[0][:80])
+            return None
         scratch.set_content(html, wait_until="load")
         sess = ctx.new_cdp_session(scratch)
         res = sess.send("Page.printToPDF", dict(PRINT_TO_PDF_OPTIONS))

@@ -276,3 +276,47 @@ def test_resume_also_retries_the_member_documents_id_cards_and_letters():
     body = m.group(0)
     for call in ("self.cmd_documents()", "self.cmd_id_cards()", "self.cmd_letters()"):
         assert call in body, call
+
+
+# -- the render's network block must be a guarantee, not an attempt ---------
+
+def test_the_pdf_render_fails_closed_when_it_cannot_block_the_network():
+    """A letter body is a secure message, which anyone able to send the member
+    a message can influence, and the scratch page shares the signed-in browser
+    context. The block used to sit in a bare except that swallowed the failure
+    and rendered anyway, so the docstring promised a guarantee the code only
+    attempted.
+
+    The call is RECORDED rather than raised on. An exception here would be
+    caught by the function's own outer handler, which still returns None, so a
+    test that only checked the return value passed either way and proved
+    nothing.
+    """
+    calls = {"set_content": 0, "cdp": 0}
+
+    class Scratch:
+        def route(self, *a, **kw):
+            raise RuntimeError("route unavailable")
+
+        def set_content(self, *a, **kw):
+            calls["set_content"] += 1
+
+        def close(self):
+            pass
+
+    class Ctx:
+        def new_page(self):
+            return Scratch()
+
+        def new_cdp_session(self, page):
+            calls["cdp"] += 1
+            raise RuntimeError("should never get here")
+
+    class Page:
+        context = Ctx()
+
+    out = site.render_html_to_pdf(Page(), "<p>hello</p>")
+
+    assert calls["set_content"] == 0,         "untrusted markup was rendered with no network block installed"
+    assert calls["cdp"] == 0, "reached printToPDF with no network block"
+    assert out is None
