@@ -233,7 +233,9 @@ class App:
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9223")
         profile = self.config["profile_dir"]
         url = site.URLS.get("orders") or site.URLS.get("login") or site.URLS["home"]
-        name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=False)
+        name = browser_launcher.open_signin_browser(profile, port, url,
+            prefer_real=False,
+            mode=self.config.get("browser", "auto"))
         if not name:
             return
         print(f"Opened a sign-in browser on port {port} ({name}).")

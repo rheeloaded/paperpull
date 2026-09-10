@@ -170,3 +170,59 @@ def test_a_browser_profile_could_never_be_committed(app):
             assert r.returncode == 0, (
                 "%s is NOT gitignored, so a signed-in profile could be "
                 "committed to a public repo" % rel)
+
+
+# -- the big download is offered, not assumed -------------------------------
+
+def test_no_setup_script_downloads_a_browser():
+    """The bundled Chromium is 416 MB against roughly 60 MB for everything
+    else, and almost nobody needs it, because any Chromium-based browser can be
+    driven the same way. Downloading it during setup made every install pay for
+    something most people already have, and made setup fail on a bad connection
+    at the worst possible moment."""
+    offenders = []
+    for pattern in ("setup-all.bat", "setup-all.command",
+                    "apps/*/setup.bat", "apps/*/setup.command",
+                    "tools/make_unix_launchers.py"):
+        for f in sorted(REPO.glob(pattern)):
+            text = f.read_text(encoding="utf-8", errors="replace")
+            for i, line in enumerate(text.splitlines(), 1):
+                if "playwright install" in line and not line.lstrip().startswith(
+                        ("#", "rem ", "REM ", "::")):
+                    offenders.append("%s:%d" % (f.relative_to(REPO), i))
+    assert not offenders, "setup still downloads a browser: " + ", ".join(offenders)
+
+
+@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
+def test_this_app_lets_the_user_choose_which_browser(app):
+    """The choice is a config setting, so somebody on a managed machine can
+    keep this away from their own browser and somebody on a slow connection can
+    refuse the download. An app that ignores it silently overrides them."""
+    import ast
+    calls = 0
+    for py in sorted(app.glob("*.py")):
+        if "test" in py.name:
+            continue
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8-sig"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+            if name != "open_signin_browser":
+                continue
+            calls += 1
+            assert "mode" in {k.arg for k in node.keywords}, (
+                "%s:%d ignores the browser setting" % (py.name, node.lineno))
+    if calls == 0:
+        # target drives Playwright's own Chromium directly rather than
+        # attaching to a browser the user launched, so it has no choice to
+        # offer. It must still ask before a 400 MB download.
+        src = "\n".join(p.read_text(encoding="utf-8-sig")
+                        for p in app.glob("*.py") if "test" not in p.name)
+        assert "fetch_bundled_chromium" in src, (
+            "%s neither offers the browser choice nor asks before downloading"
+            % app.name)

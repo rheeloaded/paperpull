@@ -258,7 +258,9 @@ class App:
         # the bundled Playwright Chromium. A real branded Chrome/Edge with a
         # persistent profile (where the MFA remember-device cookie lives) is the
         # posture that passes; the app only ever attaches to it passively.
-        name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=True)
+        name = browser_launcher.open_signin_browser(profile, port, url,
+            prefer_real=True,
+            mode=self.config.get("browser", "auto"))
         if not name:
             return
         print(f"Opened a sign-in browser on port {port} ({name}).")

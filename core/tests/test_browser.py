@@ -82,7 +82,12 @@ def test_open_signin_browser_reports_failure_instead_of_raising(monkeypatch, tmp
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
     monkeypatch.setattr(browser, "_real_browsers", lambda: [])
     assert browser.open_signin_browser(tmp_path / "profile", "9222", "https://x") is None
-    assert "Could not find" in capsys.readouterr().out
+    # The intent is unchanged, that it returns rather than raising and explains
+    # itself. The wording moved when the download became something offered at
+    # sign-in rather than done during setup.
+    out = capsys.readouterr().out
+    assert "No browser this tool can drive" in out
+    assert "Chrome, Edge" in out
 
 
 def test_setup_hint_matches_the_platform(monkeypatch):
@@ -236,3 +241,83 @@ def test_a_relative_profile_dir_reaches_the_browser_as_an_absolute_path(tmp_path
     assert got.is_absolute(), "the browser was handed a relative profile path: %s" % got
     assert got == (tmp_path / "demo-browser-profile").resolve()
     assert got.is_dir(), "the folder Python created is not the one the browser was given"
+
+
+# -- the 400 MB download is a last resort, not part of setup ----------------
+
+def test_an_installed_browser_is_preferred_so_nothing_is_downloaded(monkeypatch):
+    """The bundled Chromium is 416 MB on disk against roughly 60 MB for
+    everything else. Almost nobody needs it, because any Chromium-based
+    browser can be driven the same way and Windows always has Edge."""
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: ["bundled"])
+    names = [n for n, _ in browser.browser_candidates(prefer_real=True)]
+    assert names[0] == browser.EDGE
+
+
+def test_installed_mode_never_reaches_for_the_bundled_copy(monkeypatch):
+    """Somebody on a managed machine may not want this near their own browser,
+    and somebody else may not want a 400 MB download. Both are honoured."""
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: ["bundled"])
+    assert browser.browser_candidates(mode=browser.INSTALLED) == [(browser.EDGE, "edge")]
+    assert browser.browser_candidates(mode=browser.BUNDLED) == [(browser.CHROMIUM, "bundled")]
+
+
+def test_a_browser_that_will_not_open_a_port_is_passed_over(monkeypatch, tmp_path):
+    """Installed is not the same as usable. Edge can be present and still
+    refuse a debugging port, and only launching it can tell the difference, so
+    the next candidate is tried rather than giving up."""
+    tried = []
+
+    def fake_launch(exe, name, profile_dir, port, url, explain_failure=True):
+        tried.append(name)
+        return name if name == browser.CHROMIUM else None
+
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: ["bundled"])
+    monkeypatch.setattr(browser, "_launch", fake_launch)
+
+    got = browser.open_signin_browser(tmp_path / "p", "9222", "https://x.test",
+                                      prefer_real=True)
+    assert tried == [browser.EDGE, browser.CHROMIUM]
+    assert got == browser.CHROMIUM
+
+
+def test_the_download_is_only_offered_when_there_is_nothing_at_all(monkeypatch, tmp_path):
+    asked = []
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: [])
+    monkeypatch.setattr(browser, "fetch_bundled_chromium",
+                        lambda *a, **k: asked.append(1) or True)
+    monkeypatch.setattr(browser, "_launch",
+                        lambda *a, **k: browser.EDGE)
+    browser.open_signin_browser(tmp_path / "p", "9222", "https://x.test")
+    assert asked == [], "a download was offered while a usable browser existed"
+
+
+def test_nothing_is_downloaded_behind_a_closed_stdin(monkeypatch, capsys):
+    """The control panel runs apps with stdin closed so a stray prompt cannot
+    hang a run. A question nobody can answer must not start a 400 MB download
+    or block waiting for a reply."""
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: [])
+    monkeypatch.setattr(browser, "can_ask", lambda: False)
+    called = []
+    monkeypatch.setattr(browser.subprocess, "call", lambda *a, **k: called.append(1) or 0)
+    assert browser.fetch_bundled_chromium() is False
+    assert called == []
+    assert "install Chrome or Edge" in capsys.readouterr().out
+
+
+def test_the_wording_says_their_own_profile_is_not_used():
+    """Someone is about to look at a browser they recognise which knows none of
+    their accounts. Both halves have to be said, that their real profile is
+    untouched AND that they are therefore not signed in."""
+    note = browser.profile_note("Microsoft Edge")
+    # Whitespace-normalised, because the note is hard-wrapped for a console and
+    # a phrase can straddle a line break.
+    flat = " ".join(note.split()).lower()
+    assert "separate profile" in flat
+    assert "untouched" in flat
+    assert "not signed in" in flat
+    assert "microsoft edge" in flat

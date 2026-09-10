@@ -27,7 +27,10 @@ if exist "..\..\core\pyproject.toml" (
 ) else (
     for %%W in ("core\paperpull_core-*.whl") do pip install "%%W" || goto :fail
 )
-python -m playwright install chromium || goto :fail
+rem The 400 MB browser download is NOT part of setup. Any Chromium-based
+rem browser already on this computer can be used, and on Windows Edge
+rem always is. If none is found, login.bat offers the download then, when
+rem somebody is present to agree to it.
 
 echo.
 echo Setup complete. Next step: double-click login.bat and sign in to Gap.

@@ -50,7 +50,8 @@ for /d %%A in (apps\*) do (
 
     rem  Chromium is a single shared download - fetch it once, not per app.
     if not defined BROWSER_DONE (
-      .venv\Scripts\python.exe -m playwright install chromium && set "BROWSER_DONE=1"
+rem The browser download is no longer part of setup. login.bat offers it
+rem only if no Chromium-based browser is found on this computer.
     )
     popd
     set /a COUNT+=1

@@ -263,7 +263,9 @@ class App:
         first_run = not site.is_configured()
         url = site.URLS["home"] if not first_run else "https://www.ukg.com/login"
 
-        name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=False)
+        name = browser_launcher.open_signin_browser(profile, port, url,
+            prefer_real=False,
+            mode=self.config.get("browser", "auto"))
         if not name:
             return
         print(f"Opened a sign-in browser on port {port} ({name}).")
