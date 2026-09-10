@@ -120,8 +120,19 @@ class App:
         if self._context is not None:
             return self._context
         from playwright.sync_api import sync_playwright
+        # This app drives Playwright's own Chromium directly rather than
+        # attaching to a browser the user launched, so an installed Edge or
+        # Chrome is no substitute here. Ask before Playwright raises its own
+        # error, which tells somebody to run a command rather than explaining
+        # what is missing or how large the download is.
+        from paperpull_core import browser as browser_launcher
+        if not browser_launcher.bundled_chromium_present():
+            if not browser_launcher.fetch_bundled_chromium():
+                raise SystemExit(
+                    "This app needs its own copy of Chromium and one is not "
+                    "installed.")
         self._pw = sync_playwright().start()
-        profile = Path(self.config["profile_dir"])
+        profile = Path(self.config["profile_dir"]).expanduser().resolve()
         profile.mkdir(parents=True, exist_ok=True)
         self._context = self._pw.chromium.launch_persistent_context(
             str(profile),

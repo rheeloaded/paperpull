@@ -46,7 +46,8 @@ for app in apps/*/; do
     fi
     # Chromium is downloaded once and reused by every later app.
     if [ $first -eq 1 ]; then
-        "$app/.venv/bin/python" -m playwright install chromium >/dev/null 2>&1 && first=0
+# The browser download is no longer part of setup. login offers it only
+# if no Chromium-based browser is found on this Mac.
     fi
     echo "ok"
 done

@@ -74,6 +74,14 @@ def load_config(path: Optional[Path] = None) -> dict:
     cfg.setdefault("profile_dir", str(sp.project_dir / f"{sp.slug}-browser-profile"))
     cfg.setdefault("owner", "")
     cfg.setdefault("owner_in_filename", False)
+    # Which browser to sign in with.
+    #   auto      use a Chromium-based browser you already have, and offer to
+    #             download a private copy only if there is none
+    #   installed only one you already have, never download anything
+    #   bundled   only this tool's own private copy, never touch yours
+    # Whichever is used gets its OWN profile folder, so an everyday browser's
+    # history, extensions and logins are never read or altered.
+    cfg.setdefault("browser", "auto")
     for key, value in sp.config_defaults.items():
         cfg.setdefault(key, value)
     return cfg

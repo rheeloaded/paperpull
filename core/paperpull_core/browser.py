@@ -132,25 +132,185 @@ def setup_hint() -> str:
     return "setup.bat" if sys.platform == "win32" else "./setup.command"
 
 
+# -- choosing a browser, and fetching one only if there is no choice ---------
+#
+# The bundled Chromium is by far the largest thing this project would ever ask
+# anyone to download. Measured on a real install it is 416 MB on disk and 184 MB
+# compressed, against roughly 60 MB for everything else put together.
+#
+# Almost nobody needs it. Any Chromium-family browser can be driven the same
+# way, and on Windows Edge is always present. The case it genuinely exists for
+# is a Mac with only Safari, because Safari does not speak the DevTools
+# protocol at all and neither does Firefox.
+#
+# So the download is not part of setup. It is offered at the moment somebody
+# tries to sign in and nothing suitable answers, which is the first point where
+# it is actually needed and where the person is present to agree to it.
+
+AUTO = "auto"           # use what is installed, fall back to bundled
+INSTALLED = "installed"  # only a browser they already have
+BUNDLED = "bundled"     # only the Playwright build, never touch their own
+
+
+def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
+    """Browsers to try, best first, as (name, path).
+
+    Ordered rather than singular because "installed" is not the same as
+    "usable". Edge can be present and still refuse to open a debugging port,
+    which is only discoverable by launching it, so the caller works down this
+    list until one actually answers.
+    """
+    real = _real_browsers()
+    # Only the newest bundled build. Playwright leaves older ones behind, and
+    # retrying the same browser at a different revision opens a second window
+    # to fail the same way, since the usual cause is the port rather than the
+    # build.
+    bundled = [(CHROMIUM, p) for p in _bundled_chromium()[:1]]
+    if mode == INSTALLED:
+        return real
+    if mode == BUNDLED:
+        return bundled
+    # With a bundled copy already present it stays first unless an app asks for
+    # a real browser. Reordering that would move existing users onto a
+    # different browser, and a profile built by one is not guaranteed to open
+    # cleanly in another, which would cost them a sign-in for no benefit.
+    return (real + bundled) if prefer_real else (bundled + real)
+
+
+def bundled_chromium_present() -> bool:
+    return bool(_bundled_chromium())
+
+
+def profile_note(name: str) -> str:
+    """What to tell someone whose own browser is about to open.
+
+    This wording matters and is easy to get wrong. The tool launches their
+    browser with its OWN --user-data-dir, so their everyday profile, history,
+    extensions and existing logins are untouched and unreadable by it. The flip
+    side is the one people get caught by: they are NOT already signed in, and
+    a window that looks like their browser but knows none of their accounts is
+    alarming if nobody warned them.
+    """
+    return (
+        "This is the copy of %s already on this computer, opened with a\n"
+        "separate profile of its own. Your normal browsing is untouched, and\n"
+        "this tool cannot see your usual history, extensions or saved logins.\n"
+        "\n"
+        "It also means you are NOT signed in here yet. Sign in as you would on\n"
+        "a new computer, and leave the window open." % name
+    )
+
+
+def can_ask() -> bool:
+    """Whether there is a person on the other end of stdin.
+
+    The control panel runs these as subprocesses with stdin closed, precisely
+    so a stray prompt cannot hang a run. Asking a question nobody can answer
+    would reintroduce that, so when there is no console the answer is to
+    explain instead of prompt.
+    """
+    try:
+        return bool(sys.stdin) and sys.stdin.isatty()
+    except (ValueError, AttributeError):
+        return False
+
+
+def fetch_bundled_chromium(assume_yes: bool = False) -> bool:
+    """Offer to download Playwright's Chromium, and do it if agreed.
+
+    Returns True only if a browser is present afterwards.
+    """
+    if bundled_chromium_present():
+        return True
+
+    print()
+    print("No browser this tool can drive was found on this computer.")
+    print()
+    print("It can drive Chrome, Edge, Brave or any other Chromium-based")
+    print("browser. Safari and Firefox cannot be driven this way, so having")
+    print("those does not help.")
+    print()
+    print("The alternative is to download a private copy of Chromium, about")
+    print("400 MB. It is used only by this tool and does not become your")
+    print("default browser or touch anything else.")
+    print()
+    print("Installing Chrome or Edge yourself and running this again works")
+    print("just as well, and downloads far less.")
+    print()
+
+    if not assume_yes:
+        if not can_ask():
+            print("Run this from a terminal to be offered the download, or")
+            print("install Chrome or Edge and try again.")
+            return False
+        try:
+            answer = input("Download the private copy now? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if answer not in ("y", "yes"):
+            print("Nothing was downloaded.")
+            return False
+
+    print()
+    print("Downloading. This takes a few minutes on a slow connection.")
+    try:
+        rc = subprocess.call([sys.executable, "-m", "playwright",
+                              "install", "chromium"])
+    except OSError as e:
+        print("Could not start the download (%s)." % e)
+        return False
+    if rc != 0 or not bundled_chromium_present():
+        print()
+        print("The download did not finish. You can retry, or install Chrome")
+        print("or Edge instead, which this tool will then use.")
+        return False
+    print()
+    print("Done.")
+    return True
+
+
 def open_signin_browser(profile_dir, port: str, url: str,
-                        prefer_real: bool = False) -> Optional[str]:
+                        prefer_real: bool = False, mode: str = AUTO,
+                        allow_fetch: bool = True) -> Optional[str]:
     """Open a sign-in window and return the browser's name, or None.
 
     The window belongs to the user: they sign in, leave it open, and the tool
     attaches to it afterwards.
+
+    Each candidate is tried in turn, because a launch is the only honest test.
+    A browser can be installed and still fail to open a debugging port, and
+    checking for the file on disk cannot tell the difference. Only when nothing
+    answers, and only then, is the 400 MB download offered.
     """
-    name, exe = find_browser(prefer_real=prefer_real)
-    if not exe:
-        wanted = "Microsoft Edge, Google Chrome, or the Playwright Chromium" \
-            if prefer_real else "the Playwright Chromium"
-        print(f"Could not find {wanted}.")
-        if prefer_real:
-            print("Install Edge or Chrome, or run "
-                  f"{setup_hint()} to fetch the bundled browser.")
+    candidates = browser_candidates(prefer_real=prefer_real, mode=mode)
+
+    if not candidates and allow_fetch and mode != INSTALLED:
+        if fetch_bundled_chromium():
+            candidates = browser_candidates(prefer_real=prefer_real, mode=mode)
+    if not candidates:
+        if mode == INSTALLED:
+            print("No Chrome, Edge or other Chromium-based browser was found,")
+            print("and this app is set to use only a browser you already have.")
         else:
-            print(f"Run {setup_hint()} first.")
+            print("No browser this tool can drive is available.")
         return None
 
+    for index, (name, exe) in enumerate(candidates):
+        last = index == len(candidates) - 1
+        opened = _launch(exe, name, profile_dir, port, url,
+                         explain_failure=last)
+        if opened:
+            return opened
+        if not last:
+            nxt = candidates[index + 1][0]
+            print("Trying %s instead." % nxt)
+    return None
+
+
+def _launch(exe: str, name: str, profile_dir, port: str,
+            url: str, explain_failure: bool = True) -> Optional[str]:
+    """One attempt. Returns the browser name if its debugging port answered."""
     # Resolved to an ABSOLUTE path before the browser ever sees it. A config
     # carries this as "./x-browser-profile", and a relative --user-data-dir is
     # resolved by the BROWSER, from wherever the browser thinks it is, which is
@@ -193,12 +353,18 @@ def open_signin_browser(profile_dir, port: str, url: str,
             print(f"That usually means {name} was already running, so it handed")
             print("the address to the existing window and ignored the settings")
             print("this tool needs.")
-            print(f"\nClose every {name} window, then run this again. Signing in")
-            print("before that will not help, because the tool cannot see that")
-            print("window at all.")
-        else:
+            if explain_failure:
+                print(f"\nClose every {name} window, then run this again. Signing")
+                print("in before that will not help, because the tool cannot see")
+                print("that window at all.")
+        elif explain_failure:
             print("Try closing any other copy of the browser and running again.")
         return None
+
+    # Said once the window is actually up, because that is when somebody is
+    # looking at a browser they recognise which knows none of their accounts.
+    print()
+    print(profile_note(name))
     return name
 
 

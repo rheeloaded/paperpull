@@ -25,7 +25,9 @@ else
     .venv/bin/pip install core/paperpull_core-*.whl
 fi
 
-.venv/bin/python -m playwright install chromium
+# The 400 MB browser download is NOT part of setup. Any Chromium-based
+# browser already on this Mac can be used. If none is found, login
+# offers the download then, when somebody is present to agree to it.
 
 echo
 echo "Setup complete. Next step: ./login.command and sign in to Navy Federal Documents."
