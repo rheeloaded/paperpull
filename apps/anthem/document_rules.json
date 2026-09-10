@@ -1,0 +1,27 @@
+{
+  "_comment": "Editable rules mapping Anthem BCBS document titles to filename summaries. Case-insensitive regexes matched against the title, checked in order: tax, then year-end, then insurance, then statement. An Explanation of Benefits (EOB) is classified as an Insurance Document so it routes to the EOBs folder; the reimbursement EOB Check is told apart in its summary. The 1095-B health-coverage form routes to Tax Documents. Claims summaries and plan/letter documents are not collected yet (separate future collectors); rules for them are left for when those land.",
+  "tax_rules": [
+    {"pattern": "1095-?B\\b", "summary": "1095-B Health Coverage Form"},
+    {"pattern": "1095-?C\\b", "summary": "1095-C Health Coverage Form"},
+    {"pattern": "\\b1095\\b", "summary": "1095 Health Coverage Form"},
+    {"pattern": "tax\\s+(statement|document|form)", "summary": "Tax Statement"}
+  ],
+  "year_end_rules": [],
+  "insurance_rules": [
+    {"pattern": "explanation\\s+of\\s+benefits\\s+check|\\beob\\s+check\\b", "summary": "Explanation of Benefits Check"},
+    {"pattern": "explanation\\s+of\\s+benefits|\\beob\\b", "summary": "Explanation of Benefits"}
+  ],
+  "statement_rules": [
+    {"pattern": "claim\\s+summary|claim\\s+detail", "summary": "Claim Summary"}
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+use|and\\s+conditions)",
+    "accessibility\\s+statement",
+    "nondiscrimination",
+    "marketing",
+    "newsletter",
+    "go\\s+paperless",
+    "paperless\\s+(enrollment|setup)"
+  ]
+}
