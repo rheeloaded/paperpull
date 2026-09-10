@@ -317,3 +317,44 @@ def test_minimal_does_not_pretend_to_be_anonymous(tmp_path):
     doc = migrate.__doc__ or ""
     assert "not an anonymous one" in doc, \
         "the docstring must say plainly what --minimal does not remove"
+
+
+def test_the_plan_does_not_apply_itself(tmp_path, capsys):
+    """dict(records) copies only the outer mapping, so the record objects were
+    shared and the plan pass edited them in place. The apply pass that followed
+    then found nothing left to do and reported zero changes against a plan that
+    had just promised several."""
+    old = tmp_path / "old"
+    _install(old, "Bank Statements", "Bank",
+             {"id:1": {"state": TERMINAL, "downloaded_ok": True, "pdf_path": ""}})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+
+    new = tmp_path / "new"
+    _install(new, "Bank Statements", "Bank",
+             {"id:1": {"state": "Failed", "downloaded_ok": False, "pdf_path": ""}})
+
+    capsys.readouterr()
+    migrate.do_import(archive, new, assume_yes=True)
+    lines = [l for l in capsys.readouterr().out.splitlines() if "marked done" in l]
+    assert len(lines) == 2, lines
+    planned = lines[0].split("new,")[1].split("marked")[0].strip()
+    applied = lines[1].split("new,")[1].split("marked")[0].strip()
+    assert planned == applied == "1", (planned, applied)
+
+
+def test_a_dry_run_leaves_the_records_in_memory_alone(tmp_path):
+    """It writes nothing to disk either way, but a preview that edits what it
+    is previewing is a bug waiting to escape into the apply path."""
+    old = tmp_path / "old"
+    _install(old, "Bank Statements", "Bank",
+             {"id:1": {"state": TERMINAL, "downloaded_ok": True, "pdf_path": ""}})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+
+    new = tmp_path / "new"
+    inst = _install(new, "Bank Statements", "Bank",
+                    {"id:1": {"state": "Failed", "downloaded_ok": False, "pdf_path": ""}})
+    before = (inst / "progress.json").read_text(encoding="utf-8")
+    migrate.do_import(archive, new, dry_run=True, assume_yes=True)
+    assert (inst / "progress.json").read_text(encoding="utf-8") == before

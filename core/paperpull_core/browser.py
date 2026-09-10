@@ -29,6 +29,13 @@ from typing import List, Optional, Tuple
 CHROMIUM = "Chromium"
 EDGE = "Microsoft Edge"
 CHROME = "Google Chrome"
+# Also Chromium underneath, so all of them speak the DevTools protocol and can
+# be driven exactly like Chrome. They are listed because the alternative for
+# somebody who runs one of these is a 400 MB download of a browser they
+# effectively already have.
+BRAVE = "Brave"
+VIVALDI = "Vivaldi"
+OPERA = "Opera"
 
 
 def _playwright_root() -> Path:
@@ -88,21 +95,47 @@ def _real_browsers() -> List[Tuple[str, str]]:
             (CHROME, os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe")),
             (CHROME, os.path.join(pfx, "Google", "Chrome", "Application", "chrome.exe")),
             (CHROME, os.path.join(local, "Google", "Chrome", "Application", "chrome.exe")),
+            (BRAVE, os.path.join(pf, "BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
+            (BRAVE, os.path.join(pfx, "BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
+            (BRAVE, os.path.join(local, "BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
+            (VIVALDI, os.path.join(local, "Vivaldi", "Application", "vivaldi.exe")),
+            (VIVALDI, os.path.join(pf, "Vivaldi", "Application", "vivaldi.exe")),
+            (OPERA, os.path.join(local, "Programs", "Opera", "opera.exe")),
         ]
     elif sys.platform == "darwin":
+        home = Path.home()
         candidates = [
             (EDGE, "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-            (EDGE, str(Path.home() / "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")),
+            (EDGE, str(home / "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")),
             (CHROME, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-            (CHROME, str(Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome")),
+            (CHROME, str(home / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome")),
+            (BRAVE, "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+            (BRAVE, str(home / "Applications/Brave Browser.app/Contents/MacOS/Brave Browser")),
+            (VIVALDI, "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"),
+            (OPERA, "/Applications/Opera.app/Contents/MacOS/Opera"),
         ]
     else:
         candidates = [
             (EDGE, "/usr/bin/microsoft-edge"), (EDGE, "/usr/bin/microsoft-edge-stable"),
             (CHROME, "/usr/bin/google-chrome"), (CHROME, "/usr/bin/google-chrome-stable"),
-            (CHROME, "/usr/bin/chromium-browser"),
+            (CHROME, "/usr/bin/chromium-browser"), (CHROME, "/usr/bin/chromium"),
+            (BRAVE, "/usr/bin/brave-browser"), (BRAVE, "/usr/bin/brave"),
+            (VIVALDI, "/usr/bin/vivaldi"), (VIVALDI, "/usr/bin/vivaldi-stable"),
+            (OPERA, "/usr/bin/opera"),
         ]
-    return [(name, path) for name, path in candidates if path and os.path.exists(path)]
+    # Deduplicated by resolved path. Several of these entries can point at the
+    # same install, and offering the same browser twice would launch a second
+    # window to fail in exactly the same way.
+    out, seen = [], set()
+    for name, path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        key = os.path.normcase(os.path.realpath(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((name, path))
+    return out
 
 
 def find_browser(prefer_real: bool = False) -> Tuple[Optional[str], Optional[str]]:
@@ -215,6 +248,27 @@ def can_ask() -> bool:
         return False
 
 
+def browser_install_command():
+    """The command that downloads a browser, or None if this build cannot.
+
+    "sys.executable -m playwright" is right when running from a normal Python
+    install, and WRONG in a packaged build, where sys.executable is the
+    application itself. That would re-launch the app rather than install
+    anything. Playwright ships its own Node driver, whose path does not depend
+    on how this process was started, so a frozen build uses that instead.
+    """
+    if not getattr(sys, "frozen", False):
+        return [sys.executable, "-m", "playwright", "install", "chromium"]
+    try:
+        # Private API, hence the guard. If it moves, saying so plainly beats
+        # running a command that silently does the wrong thing.
+        from playwright._impl._driver import compute_driver_executable
+        node, cli = compute_driver_executable()
+        return [str(node), str(cli), "install", "chromium"]
+    except Exception:
+        return None
+
+
 def fetch_bundled_chromium(assume_yes: bool = False) -> bool:
     """Offer to download Playwright's Chromium, and do it if agreed.
 
@@ -252,11 +306,16 @@ def fetch_bundled_chromium(assume_yes: bool = False) -> bool:
             print("Nothing was downloaded.")
             return False
 
+    cmd = browser_install_command()
+    if cmd is None:
+        print("This build cannot download a browser for you.")
+        print("Install Chrome or Edge and run this again.")
+        return False
+
     print()
     print("Downloading. This takes a few minutes on a slow connection.")
     try:
-        rc = subprocess.call([sys.executable, "-m", "playwright",
-                              "install", "chromium"])
+        rc = subprocess.call(cmd)
     except OSError as e:
         print("Could not start the download (%s)." % e)
         return False
@@ -296,15 +355,44 @@ def open_signin_browser(profile_dir, port: str, url: str,
             print("No browser this tool can drive is available.")
         return None
 
+    opened = _try_each(candidates, profile_dir, port, url)
+    if opened:
+        return opened
+
+    # Nothing ANSWERED, which is not the same as nothing being installed. A
+    # browser can be present and refuse a debugging port every time, and until
+    # this point that ended the run with no way forward even though a download
+    # would have fixed it.
+    if allow_fetch and mode != INSTALLED and not bundled_chromium_present():
+        print()
+        print("None of the browsers on this computer would open a debugging")
+        print("port, which is what this tool needs to attach to.")
+        if fetch_bundled_chromium():
+            fresh = [c for c in browser_candidates(prefer_real=prefer_real, mode=mode)
+                     if c not in candidates]
+            if fresh:
+                return _try_each(fresh, profile_dir, port, url, fallback=True)
+    return None
+
+
+def _try_each(candidates, profile_dir, port, url, fallback: bool = False):
+    """Launch each in turn until a debugging port answers."""
     for index, (name, exe) in enumerate(candidates):
         last = index == len(candidates) - 1
-        opened = _launch(exe, name, profile_dir, port, url,
-                         explain_failure=last)
+        # The FIRST candidate keeps the configured profile folder, so an
+        # existing install carries on using the profile it is already signed
+        # into. A fallback gets its own, because a profile written by one
+        # browser brand is not guaranteed to open cleanly in another, and two
+        # brands sharing one folder can leave it locked or damaged.
+        target = Path(profile_dir)
+        if fallback or index > 0:
+            target = target.with_name(
+                target.name + "-" + re.sub(r"[^a-z0-9]+", "", name.lower()))
+        opened = _launch(exe, name, target, port, url, explain_failure=last)
         if opened:
             return opened
         if not last:
-            nxt = candidates[index + 1][0]
-            print("Trying %s instead." % nxt)
+            print("Trying %s instead." % candidates[index + 1][0])
     return None
 
 

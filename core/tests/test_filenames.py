@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 
 from paperpull_core.storage import (build_pdf_filename, sanitize_component,
                                     title_case, unique_path)
@@ -91,3 +93,53 @@ def test_long_path_trimmed(tmp_path):
     p = unique_path(tmp_path, ("Very " * 60) + "Long Receipt.pdf", max_path_length=200)
     assert len(str(p)) <= 200
     assert p.suffix == ".pdf"
+
+
+# -- filing into awkward folders --------------------------------------------
+
+def test_an_empty_name_does_not_resolve_to_the_folder_itself(tmp_path):
+    """"dir / ''" is just "dir", so an empty name handed the caller its own
+    output folder to write a PDF over. Reachable whenever a scraped title
+    sanitises away to nothing."""
+    got = unique_path(tmp_path, "", max_path_length=240)
+    assert got != tmp_path
+    assert got.parent == tmp_path
+    assert got.suffix == ".pdf"
+
+
+def test_a_folder_too_deep_to_file_into_says_so(tmp_path):
+    """It used to return a path longer than the limit it was given, and the
+    failure then surfaced as an unexplained OS error at the write."""
+    deep = tmp_path
+    while len(str(deep)) < 250:
+        deep = deep / "a-reasonably-long-folder-name"
+    deep.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(ValueError) as e:
+        unique_path(deep, "2026-08-18 Statement.pdf", max_path_length=240)
+    assert "too deep" in str(e.value)
+    assert "max_path_length" in str(e.value), "the message must say what to change"
+
+
+def test_a_returned_path_always_respects_the_limit(tmp_path):
+    """Including once collision suffixes start being added."""
+    folder = tmp_path / ("d" * 60)
+    folder.mkdir()
+    limit = len(str(folder)) + 40
+    for _ in range(6):
+        p = unique_path(folder, "A Very Long Statement Name Indeed.pdf",
+                                max_path_length=limit)
+        assert len(str(p)) <= limit, "%d > %d for %s" % (len(str(p)), limit, p.name)
+        p.write_bytes(b"x")
+
+
+def test_collision_suffixes_stay_unique_even_when_truncated(tmp_path):
+    folder = tmp_path / ("d" * 60)
+    folder.mkdir()
+    limit = len(str(folder)) + 40
+    names = []
+    for _ in range(5):
+        p = unique_path(folder, "A Very Long Statement Name Indeed.pdf",
+                                max_path_length=limit)
+        p.write_bytes(b"x")
+        names.append(p.name)
+    assert len(set(names)) == len(names), names
