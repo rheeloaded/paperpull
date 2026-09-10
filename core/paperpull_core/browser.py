@@ -151,7 +151,15 @@ def open_signin_browser(profile_dir, port: str, url: str,
             print(f"Run {setup_hint()} first.")
         return None
 
-    Path(profile_dir).mkdir(parents=True, exist_ok=True)
+    # Resolved to an ABSOLUTE path before the browser ever sees it. A config
+    # carries this as "./x-browser-profile", and a relative --user-data-dir is
+    # resolved by the BROWSER, from wherever the browser thinks it is, which is
+    # not necessarily where Python just created the folder. That split produced
+    # two profiles from one setting, and left four of them holding live signed-in
+    # session cookies inside the shared Playwright browser cache, where an app
+    # update would have deleted them without warning.
+    profile_path = Path(profile_dir).expanduser().resolve()
+    profile_path.mkdir(parents=True, exist_ok=True)
     # The browser must not inherit our stdio. It outlives this process by
     # design (the user keeps it open), so if it holds our stdout, whoever is
     # reading that pipe - the control panel's Login action - waits for the
@@ -165,7 +173,7 @@ def open_signin_browser(profile_dir, port: str, url: str,
     if sys.platform == "win32":
         detach["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
                                    | subprocess.DETACHED_PROCESS)
-    subprocess.Popen([exe, f"--user-data-dir={profile_dir}",
+    subprocess.Popen([exe, f"--user-data-dir={profile_path}",
                       f"--remote-debugging-port={port}", "--no-first-run",
                       "--no-default-browser-check", url],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
