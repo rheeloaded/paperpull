@@ -365,3 +365,63 @@ def test_the_launcher_blocks_both_execution_vectors():
     bat = (REPO / "tools" / "status.bat").read_text(encoding="utf-8")
     assert "NoDefaultCurrentDirectoryInExePath=1" in bat
     assert "-P status.py" in bat
+
+
+# -- a change of schedule is not a run of missing documents ------------------
+
+def _spaced(start, n, step=30):
+    """n records spaced `step` days apart, shaped like the real ones."""
+    d = date.fromisoformat(start)
+    out = []
+    for i in range(n):
+        out.append({"account": "Savings *1234", "summary": "Savings Statement",
+                    "state": "Completed", "downloaded_ok": True,
+                    "date": (d + timedelta(days=step * i)).isoformat()})
+    return out
+
+
+def _add(recs, start, offsets, account="Savings *1234"):
+    d = date.fromisoformat(start)
+    return recs + [{"account": account, "summary": "Savings Statement",
+                    "state": "Completed", "downloaded_ok": True,
+                    "date": (d + timedelta(days=o)).isoformat()} for o in offsets]
+
+
+def test_monthly_going_quarterly_is_not_reported_as_gaps():
+    """USAA moved three savings accounts to quarterly statements. A median over
+    the whole history stays near monthly, so every quarter afterwards read as
+    two missing documents. Nothing was missing."""
+    recs = _spaced("2024-01-15", 24)                      # two years monthly
+    recs = _add(recs, "2025-12-10", [90, 180, 270])          # then quarterly
+    gaps = status.find_gaps(recs, "STATEMENT")
+    assert gaps == [], "a change of schedule was reported as missing documents"
+
+
+def test_a_real_hole_before_a_cadence_change_is_still_reported():
+    """Only the tail is ever excused. A hole in the middle must survive it."""
+    recs = _spaced("2024-01-15", 12)
+    recs = _add(recs, "2024-12-10", [60, 90, 120, 150])      # 60 = a skipped month
+    recs = _add(recs, "2025-06-10", [90, 180, 270])          # then quarterly
+    gaps = status.find_gaps(recs, "STATEMENT")
+    assert gaps, "the hole before the schedule change was swallowed"
+
+
+def test_an_irregular_START_still_reports_its_gaps():
+    """An earlier attempt split the series into regimes and judged each alone,
+    which silently stopped reporting anything in a stretch too short to judge.
+    Robinhood's 2018 gaps disappeared that way. A tracker that quietly reports
+    less is worse than one that occasionally reports too much."""
+    recs = _add([], "2018-04-30", [0, 61, 153, 214])          # irregular opening
+    recs = _add(recs, "2019-01-31", [30 * i for i in range(24)])   # then monthly
+    gaps = status.find_gaps(recs, "STATEMENT")
+    assert gaps, "gaps at the start of a history were dropped"
+
+
+def test_a_steady_tail_at_the_SAME_speed_excuses_nothing():
+    """The tail is only a cadence change when it is materially slower. An
+    ordinary monthly ending must not become a blanket excuse."""
+    recs = _spaced("2024-01-15", 12)
+    recs = _add(recs, "2024-12-10", [60])                     # skipped month
+    recs = _add(recs, "2025-02-10", [30 * i for i in range(1, 13)])
+    gaps = status.find_gaps(recs, "STATEMENT")
+    assert gaps, "a same-speed tail was treated as a schedule change"

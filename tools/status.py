@@ -148,6 +148,32 @@ def _cadence_days(dates_by_account):
     return statistics.median(per)
 
 
+def _tail_cadence_len(gaps):
+    """How many intervals at the END of a series form a slower, steady rhythm.
+
+    A statement series can CHANGE cadence. USAA moved three savings accounts
+    from monthly to quarterly, and a median taken over the whole history stays
+    near monthly, so every quarterly period after the change reads as two
+    missing documents. Nothing was missing. The bank changed its schedule.
+
+    Only a TRAILING run counts, and only one at least two intervals long. That
+    is deliberately narrow. An earlier attempt at this split the whole series
+    into regimes and judged each separately, which silently stopped reporting
+    anything in a stretch too short or too irregular to judge, and a tracker
+    that quietly reports less is worse than one that occasionally reports too
+    much. This can only ever suppress the tail, never the middle or the start.
+    """
+    best = 0
+    for k in range(2, len(gaps) + 1):
+        tail = gaps[-k:]
+        med = statistics.median(tail)
+        if med and all(abs(g - med) <= med * 0.35 for g in tail):
+            best = k
+        else:
+            break
+    return best
+
+
 def find_gaps(records, kind):
     """Periods that look missing from the MIDDLE of a history.
 
@@ -202,7 +228,17 @@ def find_gaps(records, kind):
         regular = sum(1 for g in gaps if abs(g - med) <= med * 0.35) / len(gaps)
         if regular < 0.65:
             continue
-        for a, b in zip(uniq, uniq[1:]):
+        # A trailing run at a slower steady rhythm is a cadence change, not a
+        # run of holes. Only the tail is ever excused, and only when it is both
+        # consistent and materially slower than the history before it.
+        tail = _tail_cadence_len(gaps)
+        changed_from = len(gaps)
+        if tail >= 2 and statistics.median(gaps[-tail:]) > med * 1.5:
+            changed_from = len(gaps) - tail
+
+        for i, (a, b) in enumerate(zip(uniq, uniq[1:])):
+            if i >= changed_from:
+                continue
             g = (b - a).days
             if g >= med * 1.9 and g - med >= 10:
                 found.append({
