@@ -127,3 +127,46 @@ def test_the_cleanup_actually_removes_an_empty_file(tmp_path):
         assert f.exists() != should_go
         if f.exists():
             f.unlink()
+
+
+# -- a signed-in browser profile must never be committable ------------------
+
+def _configured_profile_dir(app):
+    """The profile folder this app's own config names, not a guessed one. An
+    app that picks a different name still has to be covered."""
+    cfg = app / "config.example.json"
+    if not cfg.exists():
+        return None
+    import json
+    try:
+        return (json.loads(cfg.read_text(encoding="utf-8")) or {}).get("profile_dir")
+    except ValueError:
+        return None
+
+
+@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
+def test_a_browser_profile_could_never_be_committed(app):
+    """A browser profile holds live session cookies for whatever the user
+    signed into, which here means banks, an insurer, a payroll system and a
+    government pay system. The repo is public.
+
+    Three lines in .gitignore are the only thing standing between that and a
+    public commit, and nothing checked they still covered every app. A new
+    provider's author has no reason to know the convention exists, so the
+    build checks it instead of trusting them to.
+    """
+    import subprocess
+    configured = _configured_profile_dir(app)
+    names = {"%s-browser-profile" % app.name}
+    if configured:
+        names.add(configured.strip("./").strip("/"))
+
+    for name in names:
+        for leaf in ("Default/Cookies", "Local State",
+                     "Default/Network/Cookies", "Default/Login Data"):
+            rel = "apps/%s/%s/%s" % (app.name, name, leaf)
+            r = subprocess.run(["git", "check-ignore", "-q", rel],
+                               cwd=REPO, capture_output=True)
+            assert r.returncode == 0, (
+                "%s is NOT gitignored, so a signed-in profile could be "
+                "committed to a public repo" % rel)
