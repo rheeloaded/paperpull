@@ -269,23 +269,41 @@ def unique_path(directory: Path, filename: str, max_path_length: int = 240) -> P
     existing = {p.name.lower() for p in directory.iterdir()} if directory.exists() else set()
     stem, ext = os.path.splitext(filename)
 
-    def fits(name: str) -> bool:
-        return len(str(directory / name)) <= max_path_length
+    # An empty stem used to return the DIRECTORY itself, because "dir / ''" is
+    # just "dir". The caller then tried to write a PDF over its own folder. It
+    # is reachable whenever a scraped title sanitises away to nothing.
+    if not stem.strip(" ."):
+        stem = "document"
+        if not ext:
+            ext = ".pdf"
 
-    candidate = filename
-    if not fits(candidate):
-        overhead = len(str(directory)) + 1 + len(ext)
-        stem = stem[: max(10, max_path_length - overhead)].rstrip(" .")
-        candidate = stem + ext
+    # The room a name has is what is left after the folder and the separator.
+    # A folder deep enough to leave nothing is not something a shorter filename
+    # can rescue, and returning an over-long path anyway only moved the failure
+    # to the write, where it surfaced as an unexplained OS error.
+    room = max_path_length - len(str(directory)) - 1
+    if room < len(ext) + 8:
+        raise ValueError(
+            "%s is too deep to file into. The full path would exceed the %d "
+            "character limit before a filename is added. Move the output "
+            "folder somewhere shorter, or raise max_path_length in config.json."
+            % (directory, max_path_length))
+
+    def shorten(base: str, suffix: str) -> str:
+        keep = room - len(ext) - len(suffix)
+        return base[:max(1, keep)].rstrip(" .") + suffix + ext
+
+    candidate = stem + ext
+    if len(candidate) > room:
+        candidate = shorten(stem, "")
 
     n = 1
     while candidate.lower() in existing:
         n += 1
-        candidate = f"{stem} ({n}){ext}"
-        if not fits(candidate):
-            trim = len(str(directory / candidate)) - max_path_length
-            stem2 = stem[: max(10, len(stem) - trim)].rstrip(" .")
-            candidate = f"{stem2} ({n}){ext}"
+        suffix = " (%d)" % n
+        candidate = stem + suffix + ext
+        if len(candidate) > room:
+            candidate = shorten(stem, suffix)
     return directory / candidate
 
 

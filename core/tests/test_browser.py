@@ -321,3 +321,88 @@ def test_the_wording_says_their_own_profile_is_not_used():
     assert "untouched" in flat
     assert "not signed in" in flat
     assert "microsoft edge" in flat
+
+
+# -- bugs found in review, before 1.0 ---------------------------------------
+
+def test_other_chromium_browsers_are_recognised(monkeypatch):
+    """The message offered to drive "Chrome, Edge, Brave or any other
+    Chromium-based browser" while the detector only ever looked for Chrome and
+    Edge. Somebody running Brave was pushed into a 400 MB download of a browser
+    they effectively already had."""
+    import inspect
+    src = inspect.getsource(browser._real_browsers)
+    for family in ("brave", "vivaldi", "opera"):
+        assert family in src.lower(), family
+
+
+def test_the_same_install_is_never_offered_twice(monkeypatch, tmp_path):
+    """Several candidate paths can point at one install. Trying it again opens
+    a second window to fail in exactly the same way.
+
+    Forced by pointing both Program Files variables at one folder, which makes
+    two of Edge's candidate paths identical. An earlier version of this test
+    asserted against an empty list and so proved nothing.
+    """
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setenv("PROGRAMFILES", str(tmp_path))
+    monkeypatch.setenv("PROGRAMFILES(X86)", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    edge = tmp_path / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+    edge.parent.mkdir(parents=True)
+    edge.write_bytes(b"")
+
+    found = browser._real_browsers()
+    assert found, "the fixture browser was not detected at all"
+    assert len(found) == 1, "the same install was offered %d times: %s" % (
+        len(found), found)
+
+
+def test_a_fallback_browser_gets_its_own_profile_folder(monkeypatch, tmp_path):
+    """Two browser brands sharing one profile folder can leave it locked or
+    damaged, and a profile written by one is not guaranteed to open in another.
+    The first candidate keeps the configured folder so existing installs stay
+    signed in."""
+    seen = []
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: ["bundled"])
+    monkeypatch.setattr(browser, "_launch",
+                        lambda exe, name, prof, port, url, explain_failure=True:
+                        seen.append((name, str(prof))) or None)
+    browser.open_signin_browser(tmp_path / "app-browser-profile", "9222",
+                                "https://x.test", prefer_real=True)
+    assert len({p for _, p in seen}) == len(seen), seen
+    assert seen[0][1] == str(tmp_path / "app-browser-profile"), \
+        "the first candidate must keep the configured folder"
+
+
+def test_the_download_is_offered_when_a_browser_exists_but_never_answers(monkeypatch, tmp_path):
+    """Installed is not the same as usable. A browser that refuses a debugging
+    port every time left the run with no way forward, even though downloading
+    one would have fixed it."""
+    offered = []
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: [])
+    monkeypatch.setattr(browser, "_launch", lambda *a, **k: None)
+    monkeypatch.setattr(browser, "fetch_bundled_chromium",
+                        lambda *a, **k: offered.append(1) or False)
+    browser.open_signin_browser(tmp_path / "p", "9222", "https://x.test")
+    assert offered == [1]
+
+
+def test_a_packaged_build_does_not_try_to_run_itself(monkeypatch):
+    """sys.executable is the application in a frozen build, so
+    "sys.executable -m playwright install" would re-launch the app instead of
+    installing anything. This is the one that would have broken the installer."""
+    monkeypatch.setattr(browser.sys, "frozen", True, raising=False)
+    cmd = browser.browser_install_command()
+    if cmd is not None:
+        assert "-m" not in cmd
+        assert cmd[0] != browser.sys.executable
+        assert any("cli.js" in str(c) for c in cmd)
+
+
+def test_a_normal_build_uses_the_documented_command(monkeypatch):
+    monkeypatch.delattr(browser.sys, "frozen", raising=False)
+    assert browser.browser_install_command()[1:] == \
+        ["-m", "playwright", "install", "chromium"]

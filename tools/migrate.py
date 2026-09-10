@@ -51,6 +51,7 @@ that the new machine starts with no history to report on until it runs.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -230,7 +231,14 @@ def _rewrite_path(old: str, old_root: str, new_install: Path, old_folder: str) -
 
 def _merge(target: dict, incoming: dict, old_root: str,
            install: Path, old_folder: str):
-    """Fold incoming records into target. Never deletes, never downgrades."""
+    """Fold incoming records into target. Never deletes, never downgrades.
+
+    The caller must hand over a DEEP copy. dict(records) copies only the outer
+    mapping, so the record objects stay shared, and this function edits them in
+    place. The plan pass then silently applied itself, and the apply pass that
+    followed found nothing left to do and reported zero changes against a plan
+    that had promised several.
+    """
     added = updated = 0
     for key, inc in incoming.items():
         cur = target.get(key)
@@ -301,7 +309,7 @@ def do_import(archive: Path, root: Path, dry_run: bool = False,
         _say("  into %s" % root)
         _say()
         for entry, match, incoming in plan:
-            preview = dict(match["records"])
+            preview = copy.deepcopy(match["records"])
             added, updated = _merge(preview, incoming,
                                     manifest.get("source_root", ""),
                                     match["path"], entry["folder"])
@@ -339,7 +347,7 @@ def do_import(archive: Path, root: Path, dry_run: bool = False,
             except OSError as e:
                 _say("  could not back up %s (%s), skipping it" % (match["provider"], e))
                 continue
-            merged = dict(match["records"])
+            merged = copy.deepcopy(match["records"])
             added, updated = _merge(merged, incoming,
                                     manifest.get("source_root", ""),
                                     match["path"], entry["folder"])
