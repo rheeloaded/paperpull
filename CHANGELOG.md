@@ -7,6 +7,59 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.18.0] - 2026-09-09
+
+### Added
+- **Anthem BCBS**, the 22nd provider and the first health insurer. EOBs,
+  member and plan documents across all coverage years, digital ID cards, and
+  secure-message letters. Contributed by David Riordan. The app clicks
+  nothing, reading instead from the same authenticated endpoints the member
+  app itself calls, with the bearer captured and replayed inside the page so
+  it never reaches this process. Letters are read without being opened,
+  because the list response already carries the body, so no message is marked
+  read.
+- **Move your download history to another computer.** `tools/migrate.py`
+  exports what has already been downloaded and imports it into a fresh set of
+  installs, so a new machine skips everything the old one had without copying
+  a single PDF. Installs are matched by provider, so a renamed folder still
+  lines up. An import never deletes, never downgrades, backs up first, and
+  changes nothing when run twice.
+- **Status inside the control panel.** A Status tab beside Output lists every
+  archive with its document count, newest document, age, cadence and state,
+  followed by the same possible-gaps section the console report prints.
+
+### Fixed
+- **Six apps crashed the moment a download started.** amex, dominion,
+  redcard, robinhood, tmobile and verizon still imported `receipt_pdf`, which
+  moved into the shared core weeks ago. Eleven dead imports, every one fatal.
+  Reported by a user, because the imports sit inside functions where nothing
+  in a test suite ever reaches them.
+- **A browser profile could be written to the wrong folder.** Every config
+  carries the profile as a relative path, so the app created it in one place
+  and the browser resolved it to another. Four profiles holding live
+  signed-in session cookies were found sitting inside the shared Playwright
+  browser cache, which a browser update would have deleted without warning.
+- **A change of statement schedule was reported as missing documents.** One
+  bank moved three savings accounts from monthly to quarterly, and a single
+  median across the whole history made every quarter afterwards read as two
+  missing statements. Only a trailing run at a slower steady rhythm is
+  excused now, so a genuine hole in the middle is still reported.
+- **Discover is moving to Capital One.** A moved account was told to fix a
+  sign-in that was never broken. It now says what actually happened, and the
+  provider tables flag it. There is no Capital One support yet.
+- Gap labels no longer repeat the account name when a summary already carries
+  it.
+
+### Security
+- A test now proves a signed-in browser profile can never be committed. Three
+  lines in `.gitignore` were the only thing standing between live session
+  cookies and a public repo, and nothing checked they still covered every app.
+- A test now walks every file in every app for imports at any depth, including
+  the ones inside functions that a green test suite never touches.
+- Anthem's PDF render fails closed. Its network block sat inside a bare except
+  that swallowed failures and rendered anyway, on content an outsider can
+  influence, in a page sharing the signed-in session.
+
 ## [0.17.1] - 2026-08-30
 
 ### Fixed
