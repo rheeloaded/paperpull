@@ -260,10 +260,10 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 link = pdf_links[idx]
 
         if not link:
-            log.warning(f"No download link found for doc index {idx}")
+            log.info(f"No download link found for doc index {idx}")
             return False
 
-        # Check for direct href attribute
+        # Direct href check
         try:
             href = link.get_attribute("href") or ""
             if href and ("http" in href or ".pdf" in href or "download" in href or "view" in href):
@@ -272,11 +272,12 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                     res = page.request.get(target_url)
                     if res.ok and res.body()[:5] == b"%PDF-":
                         out_path.write_bytes(res.body())
+                        log.info(f"Successfully fetched PDF via direct href: {target_url}")
                         return True
         except Exception as e_href:
-            log.debug(f"Direct href fetch attempt: {e_href}")
+            log.info(f"Direct href fetch attempt info: {e_href}")
 
-        # Non-blocking event listeners for download and popup
+        existing_pages = set(page.context.pages)
         captured_download = [None]
         captured_popup = [None]
 
@@ -290,22 +291,33 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
         page.on("popup", handle_popup)
 
         try:
-            link.click(timeout=5000)
+            try:
+                link.scroll_into_view_if_needed(timeout=3000)
+            except Exception:
+                pass
+            link.click(force=True, timeout=5000)
             time_start = time.time()
-            while time.time() - time_start < 10.0:
+            while time.time() - time_start < 12.0:
                 if captured_download[0] or captured_popup[0]:
                     break
-                time.sleep(0.3)
+                # Check for new tabs opened in context
+                new_pages = [p for p in page.context.pages if p not in existing_pages and not p.is_closed()]
+                if new_pages:
+                    captured_popup[0] = new_pages[0]
+                    break
+                time.sleep(0.4)
         except Exception as e_click:
-            log.debug(f"Link click warning: {e_click}")
+            log.info(f"Link click note: {e_click}")
         finally:
             page.remove_listener("download", handle_download)
             page.remove_listener("popup", handle_popup)
 
         if captured_download[0]:
+            log.info("Download event captured!")
             captured_download[0].save_as(str(out_path))
         elif captured_popup[0]:
             popup = captured_popup[0]
+            log.info(f"Popup tab detected: {popup.url}")
             try:
                 popup.wait_for_load_state("domcontentloaded", timeout=10000)
                 pdf_url = popup.url
@@ -313,16 +325,27 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                     res = page.request.get(pdf_url)
                     if res.ok and res.body()[:5] == b"%PDF-":
                         out_path.write_bytes(res.body())
+                        log.info("Captured PDF from popup URL request!")
+                if not out_path.exists() or out_path.stat().st_size == 0:
+                    # Check for embed/iframe in popup
+                    embed = popup.query_selector("iframe, embed, object")
+                    if embed:
+                        src = embed.get_attribute("src") or embed.get_attribute("data") or ""
+                        if src and is_safe_url(src):
+                            res = page.request.get(src)
+                            if res.ok and res.body()[:5] == b"%PDF-":
+                                out_path.write_bytes(res.body())
+                                log.info("Captured PDF from popup embed/iframe src!")
                 popup.close()
             except Exception as e_p:
-                log.debug(f"Popup resolution failed: {e_p}")
+                log.info(f"Popup handling note: {e_p}")
 
         if out_path.exists() and (out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):
             out_path.unlink()
             return False
         return out_path.exists()
     except Exception as e:
-        log.debug(f"Download failed: {e}")
+        log.info(f"Download bill exception: {e}")
         if out_path.exists() and out_path.stat().st_size == 0:
             out_path.unlink()
         return False
