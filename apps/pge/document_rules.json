@@ -1,0 +1,23 @@
+{
+  "_comment": "Editable rules mapping PG&E document titles to filename summaries. Checked in order: tax, then insurance (unused for a utility), then statement. PG&E is a residential electric/gas utility: what it posts are monthly bills.",
+  "tax_rules": [
+    {"pattern": "tax\\s+(document|form|statement)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "energy\\s+statement", "summary": "Energy Statement"},
+    {"pattern": "detailed\\s+bill", "summary": "Detailed Bill"},
+    {"pattern": "monthly\\s+(bill|(account\\s+)?statement)", "summary": "Monthly Statement"},
+    {"pattern": "annual\\s+(usage|summary)|year.?end\\s+summary", "summary": "Annual Summary"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "\\bbill\\b", "summary": "Bill"},
+    {"pattern": "\\bstatement\\b", "summary": "Account Statement"}
+  ],
+  "skip_patterns": [
+    "disclosure",
+    "privacy\\s+(notice|policy)",
+    "terms\\s+of\\s+service",
+    "marketing",
+    "regulatory\\s+communication"
+  ]
+}
