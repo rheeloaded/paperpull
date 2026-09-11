@@ -26,15 +26,19 @@ from urllib.parse import urlsplit
 
 log = logging.getLogger("pge_docs.site")
 
-BASE = "https://www.pge.com"
+BASE = "https://myaccount.pge.com"
 URLS = {
-    "home": BASE,
-    "login": f"{BASE}/en/site-signin.html",
-    "documents": f"{BASE}/en/myaccount/billing-and-payments.html",
-    "statements": f"{BASE}/en/myaccount/billing-and-payments.html",
-    "documents_alt": f"{BASE}/en/myaccount.html",
+    "home": f"{BASE}/myaccount/s/",
+    "login": f"{BASE}/myaccount/s/",
+    "documents": f"{BASE}/myaccount/s/bill-and-payment-history",
+    "statements": f"{BASE}/myaccount/s/bill-and-payment-history",
+    "documents_alt": f"{BASE}/myaccount/s/",
 }
-DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["statements"], URLS["documents_alt"]]
+DOCUMENT_URL_CANDIDATES = [
+    URLS["documents"],
+    URLS["statements"],
+    URLS["home"],
+]
 
 LOGIN_URL_MARKERS = [
     "/login", "/signin", "/sign-in", "/site-signin", "/auth", "/mfa",
@@ -116,7 +120,8 @@ FALLBACK = {
                 "[data-testid*='document'], li[class*='document']"),
     "doc_link": ("a[href*='.pdf'], a[href*='document'], a[href*='statement'], "
                  "a[download], button[class*='download']"),
-    "download_control": "a[download], a[href$='.pdf'], button:has-text('Download')",
+    "download_control": ("a:has-text('View Bill PDF'), a:has-text('View PDF'), "
+                        "button:has-text('View Bill PDF'), a[href$='.pdf'], a[download]"),
     "page_ready": ("table, [role='row'], [class*='document'], [class*='statement'], "
                    "main, [role='main']"),
     "next_page": ("a[aria-label*='Next' i], button[aria-label*='Next' i], "
