@@ -328,11 +328,65 @@ class App:
             print("All saved PDFs verified OK.")
 
     def cmd_diagnose(self):
+        import json as _json
         print("Dumping page structure...")
         page = self.page()
         site.goto_documents(page)
         print(f"Current URL: {page.url}")
         print(f"Page title: {page.title()}")
+
+        info = {
+            "url": page.url,
+            "title": page.title(),
+            "timestamp": now_iso(),
+            "row_counts": {},
+        }
+        for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
+                          ("doc_link", site.FALLBACK["doc_link"]),
+                          ("pdf links", "a[href*='.pdf']"),
+                          ("all links", "a"),
+                          ("all buttons", "button")]:
+            try:
+                info["row_counts"][name] = page.locator(sel).count()
+            except Exception as e:
+                info["row_counts"][name] = f"ERR {e}"
+
+        docs = site.collect_download_docs(page)
+        info["collected"] = len(docs)
+        info["samples"] = docs[:8]
+
+        controls = []
+        for role in ("button", "link"):
+            try:
+                loc = page.get_by_role(role)
+                for i in range(min(loc.count(), 60)):
+                    try:
+                        t = (loc.nth(i).inner_text(timeout=400) or "").strip()[:60]
+                    except Exception:
+                        t = ""
+                    if t:
+                        controls.append({"role": role, "text": t, "safe": site.is_safe_control(t)})
+            except Exception:
+                pass
+        info["controls"] = controls
+
+        try:
+            self.paths.diagnostics.mkdir(parents=True, exist_ok=True)
+            shot_path = self.paths.diagnostics / "diagnose-documents.png"
+            page.screenshot(path=str(shot_path), full_page=True)
+            info["screenshot"] = str(shot_path)
+        except Exception as e:
+            info["screenshot_error"] = str(e)
+
+        out = self.paths.diagnostics / "diagnose-documents.json"
+        atomic_write_text(out, _json.dumps(info, indent=2))
+        print(f"Wrote diagnostic report: {out}")
+        print(f"Counts: {info['row_counts']}")
+        print(f"Statements collected: {info['collected']}")
+        if controls:
+            print("Found clickable controls:")
+            for c in controls[:10]:
+                print(f"  [{'SAFE' if c['safe'] else 'BLOCK'}] {c['role']}: {c['text']}")
 
 
 def main():
