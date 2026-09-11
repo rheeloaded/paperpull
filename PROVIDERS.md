@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (22)
+## Supported (23)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -27,6 +27,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Mortgage servicing |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
+| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Utility |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
