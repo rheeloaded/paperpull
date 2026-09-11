@@ -38,9 +38,23 @@ python -m uvicorn app:app --port 8765
 
 ## Which apps does it drive?
 
-By default it discovers the apps in `../apps`. To drive your **existing working
-copies** instead (with their venvs, configs, and signed-in profiles already set
-up), set `APPS_ROOT` first:
+The first time it runs with nothing to show, the page asks for the folder that
+holds your downloaders, the one with `Chase Statements`, `Amazon Receipts` and
+so on inside it. Paste the full path and it remembers the choice. Nothing is
+moved or copied. It works on the installs you already have, with their venvs,
+configs and signed-in profiles exactly as they are, and the old way of running
+them keeps working alongside.
+
+To change it later, click **change** next to the folder name at the top of
+the page.
+
+The choice is saved outside the program folder, so upgrading the panel does
+not lose it. On Windows that is `%LOCALAPPDATA%\PaperPull\settings.json`, on
+macOS `~/Library/Application Support/PaperPull/settings.json`.
+
+Running from a checkout of the repo, it uses `../apps` unless told otherwise.
+The `APPS_ROOT` environment variable overrides both of the above, which is
+handy for development:
 
 ```bat
 set APPS_ROOT=C:\path\to\Receipt and Statement Downloader
