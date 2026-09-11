@@ -146,31 +146,42 @@ class App:
     def browser(self):
         if self._context is not None:
             return self._context
-        cdp_url = self.config.get("cdp_url", "http://127.0.0.1:9242")
-        profile = Path(self.config.get("profile_dir", "./browser-profile")).resolve()
-        port = browser_launcher.port_from_cdp_url(cdp_url, "9242")
-        url = site.URLS.get("login") or site.URLS["home"]
-        self._pw, self._browser, self._context, self._cdp_mode = (
-            browser_launcher.acquire_browser(
-                cdp_url=cdp_url,
-                profile_dir=profile,
-                port=port,
-                initial_url=url,
-                browser_mode=self.config.get("browser", "auto"),
-            )
-        )
+        from playwright.sync_api import sync_playwright
+        self._pw = sync_playwright().start()
+        cdp_url = self.config.get("cdp_url")
+        if cdp_url:
+            try:
+                self._browser = self._pw.chromium.connect_over_cdp(cdp_url)
+            except Exception as e:
+                self._pw.stop()
+                self._pw = None
+                raise SystemExit(
+                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
+                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+            if not self._browser.contexts:
+                raise SystemExit("Connected browser has no context; open a tab and retry.")
+            self._context = self._browser.contexts[0]
+            self._cdp_mode = True
+        else:
+            profile = Path(self.config["profile_dir"])
+            profile.mkdir(parents=True, exist_ok=True)
+            self._context = self._pw.chromium.launch_persistent_context(
+                str(profile), headless=False, accept_downloads=True,
+                viewport={"width": 1400, "height": 950})
+            self._cdp_mode = False
+        self._context.set_default_timeout(30000)
         return self._context
 
     def page(self):
+        ctx = self.browser()
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
-        ctx = self.browser()
-        pages = [p for p in ctx.pages if not p.is_closed()]
-        for p in pages:
-            if any(u in p.url for u in ("pge.com", "billing")):
-                self._work_page = p
-                return p
-        self._work_page = pages[0] if pages else ctx.new_page()
+        if self._cdp_mode:
+            live = [p for p in ctx.pages if not p.is_closed()]
+            pge_tabs = [p for p in live if site.is_safe_url(p.url or "")]
+            self._work_page = pge_tabs[0] if pge_tabs else (live[0] if live else ctx.new_page())
+        else:
+            self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         return self._work_page
 
     def close(self):
