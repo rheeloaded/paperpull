@@ -135,7 +135,8 @@ class App:
             level=logging.INFO,
             format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
             handlers=[logging.FileHandler(logfile, encoding="utf-8"),
-                      logging.StreamHandler(sys.stdout)])
+                      logging.StreamHandler(sys.stdout)],
+            force=True)
         logging.getLogger("pypdf").setLevel(logging.ERROR)
 
     def _delay(self, factor: float = 1.0):
@@ -178,8 +179,10 @@ class App:
             return self._work_page
         if self._cdp_mode:
             live = [p for p in ctx.pages if not p.is_closed()]
-            pge_tabs = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = pge_tabs[0] if pge_tabs else (live[0] if live else ctx.new_page())
+            portal_tabs = [p for p in live if (p.url or "").startswith("https://") and "bill-and-payment-history" in (p.url or "")]
+            if not portal_tabs:
+                portal_tabs = [p for p in live if (p.url or "").startswith("https://") and site.is_safe_url(p.url or "")]
+            self._work_page = portal_tabs[0] if portal_tabs else (live[0] if live else ctx.new_page())
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         return self._work_page
