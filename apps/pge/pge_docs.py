@@ -281,8 +281,7 @@ class App:
             if doc.key in self.progress.data and self.progress.data[doc.key].get("state") in DONE_STATES:
                 print(f"Skipping already completed document: {doc.title}")
                 continue
-            folder_key = self.paths.folder_for(doc.category)
-            dest_dir = getattr(self.paths, folder_key, self.paths.other_documents)
+            dest_dir = self.paths.folder_for(doc.category)
             pdf_name = build_pdf_filename(doc.date, doc.summary, "PG&E", doc.account)
             out_path = dest_dir / pdf_name
             if out_path.exists() and out_path.stat().st_size > 0:

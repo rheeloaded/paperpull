@@ -245,13 +245,20 @@ def collect_download_docs(page) -> List[dict]:
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
     """Download a bill PDF for specified doc dictionary."""
     try:
-        with page.expect_download(timeout=15000) as download_info:
+        with page.expect_download(timeout=20000) as download_info:
             rows = page.query_selector_all(FALLBACK["doc_row"])
-            idx = doc.get("row_index", 0)
+            idx = doc.get("row_index", -1)
+            link = None
             if 0 <= idx < len(rows):
                 link = rows[idx].query_selector(FALLBACK["download_control"])
-                if link:
-                    link.click()
+            if not link:
+                pdf_links = page.query_selector_all(FALLBACK["download_control"])
+                if 0 <= idx < len(pdf_links):
+                    link = pdf_links[idx]
+            if link:
+                link.click()
+            else:
+                return False
         download = download_info.value
         download.save_as(str(out_path))
         if out_path.exists() and (out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):
