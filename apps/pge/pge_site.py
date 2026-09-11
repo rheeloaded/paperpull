@@ -243,24 +243,51 @@ def collect_download_docs(page) -> List[dict]:
 
 
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
-    """Download a bill PDF for specified doc dictionary."""
+    """Download a bill PDF for specified doc dictionary handling downloads, popups, and fetches."""
     try:
-        with page.expect_download(timeout=20000) as download_info:
-            rows = page.query_selector_all(FALLBACK["doc_row"])
-            idx = doc.get("row_index", -1)
-            link = None
-            if 0 <= idx < len(rows):
-                link = rows[idx].query_selector(FALLBACK["download_control"])
-            if not link:
-                pdf_links = page.query_selector_all(FALLBACK["download_control"])
-                if 0 <= idx < len(pdf_links):
-                    link = pdf_links[idx]
-            if link:
+        idx = doc.get("row_index", -1)
+        link = None
+        rows = page.query_selector_all(FALLBACK["doc_row"])
+        if 0 <= idx < len(rows):
+            link = rows[idx].query_selector(FALLBACK["download_control"])
+        if not link:
+            pdf_links = page.query_selector_all(FALLBACK["download_control"])
+            if 0 <= idx < len(pdf_links):
+                link = pdf_links[idx]
+        if not link:
+            # Fallback: query all links containing "View Bill PDF" or "PDF"
+            pdf_links = page.query_selector_all("a:has-text('View Bill PDF'), a:has-text('PDF'), button:has-text('View Bill PDF')")
+            if 0 <= idx < len(pdf_links):
+                link = pdf_links[idx]
+            elif pdf_links:
+                link = pdf_links[0]
+
+        if not link:
+            log.warning(f"No download link found for doc index {idx}")
+            return False
+
+        # Attempt 1: Standard browser download event
+        try:
+            with page.expect_download(timeout=10000) as download_info:
                 link.click()
-            else:
-                return False
-        download = download_info.value
-        download.save_as(str(out_path))
+            download = download_info.value
+            download.save_as(str(out_path))
+        except Exception:
+            # Attempt 2: Popup window (new tab) opening the PDF
+            try:
+                with page.expect_popup(timeout=8000) as popup_info:
+                    link.click()
+                popup = popup_info.value
+                popup.wait_for_load_state("domcontentloaded")
+                pdf_url = popup.url
+                if pdf_url and is_safe_url(pdf_url):
+                    response = page.request.get(pdf_url)
+                    if response.ok and response.body()[:5] == b"%PDF-":
+                        out_path.write_bytes(response.body())
+                popup.close()
+            except Exception as e_popup:
+                log.debug(f"Popup fallback failed: {e_popup}")
+
         if out_path.exists() and (out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):
             out_path.unlink()
             return False
