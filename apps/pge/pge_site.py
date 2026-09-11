@@ -19,6 +19,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -87,10 +88,13 @@ def is_safe_control(label: str) -> bool:
 
 
 def is_safe_url(url: str) -> bool:
-    """Returns True ONLY if url is an HTTPS URL on an allowed PG&E domain."""
+    """Returns True ONLY if url is an HTTPS URL (or blob:https URL) on an allowed PG&E domain."""
     from urllib.parse import urlparse
     try:
-        got = urlparse(url or "")
+        raw = url or ""
+        if raw.startswith("blob:"):
+            raw = raw[5:]
+        got = urlparse(raw)
     except ValueError:
         return False
     if got.scheme != "https" or not got.hostname:
@@ -281,14 +285,10 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
 
         existing_pages = set(page.context.pages)
         captured_download = [None]
-        captured_popup = [None]
         captured_response_bytes = [None]
 
         def handle_download(dl):
             captured_download[0] = dl
-
-        def handle_popup(p):
-            captured_popup[0] = p
 
         def handle_response(res):
             try:
@@ -301,9 +301,9 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 pass
 
         page.on("download", handle_download)
-        page.on("popup", handle_popup)
         page.on("response", handle_response)
 
+        popup = None
         try:
             try:
                 link.scroll_into_view_if_needed(timeout=3000)
@@ -311,25 +311,39 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 pass
             print("  [site] Clicking 'View Bill PDF' link...")
             try:
-                link.click(force=True, timeout=4000)
+                with page.expect_popup(timeout=6000) as popup_info:
+                    link.click(force=True, timeout=4000)
+                popup = popup_info.value
             except Exception:
-                # Native JS click fallback for LWC / shadow DOM elements
-                link.evaluate("el => el.click()")
+                # Fallback if popup didn't trigger via click
+                try:
+                    with page.expect_popup(timeout=6000) as popup_info:
+                        link.evaluate("el => el.click()")
+                    popup = popup_info.value
+                except Exception:
+                    pass
 
-            time_start = time.time()
-            while time.time() - time_start < 12.0:
-                if captured_download[0] or captured_popup[0] or captured_response_bytes[0]:
-                    break
-                new_pages = [p for p in page.context.pages if p not in existing_pages and not p.is_closed()]
-                if new_pages:
-                    captured_popup[0] = new_pages[0]
-                    break
-                time.sleep(0.4)
+            blob_url = None
+            if popup:
+                try:
+                    popup.wait_for_url(lambda u: u.startswith("blob:") or ("http" in u and ".pdf" in u), timeout=15000)
+                    blob_url = popup.url
+                except Exception as e_wait:
+                    print(f"  [site] Popup wait note: {e_wait}")
+                    if popup.url and popup.url != "about:blank":
+                        blob_url = popup.url
+
+            # Wait briefly if direct download or response happened instead
+            if not blob_url:
+                t_start = time.time()
+                while time.time() - t_start < 5.0:
+                    if captured_download[0] or captured_response_bytes[0]:
+                        break
+                    time.sleep(0.3)
         except Exception as e_click:
             print(f"  [site] Link click warning: {e_click}")
         finally:
             page.remove_listener("download", handle_download)
-            page.remove_listener("popup", handle_popup)
             page.remove_listener("response", handle_response)
 
         if captured_response_bytes[0]:
@@ -338,43 +352,31 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
         elif captured_download[0]:
             print("  [site] Download event captured!")
             captured_download[0].save_as(str(out_path))
-        elif captured_popup[0]:
-            popup = captured_popup[0]
-            print(f"  [site] Popup tab detected: {popup.url}")
+        elif blob_url and is_safe_url(blob_url):
+            print(f"  [site] Statement blob ready: {blob_url}. Capturing download...")
             try:
-                popup.wait_for_load_state("domcontentloaded", timeout=10000)
-                pdf_url = popup.url
-                if pdf_url and is_safe_url(pdf_url):
-                    if pdf_url.startswith("blob:"):
-                        import base64
-                        blob_js = r"""async (url) => {
-                            const r = await fetch(url);
-                            const buf = new Uint8Array(await r.arrayBuffer());
-                            let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-                            return btoa(s);
-                        }"""
-                        b64_data = popup.evaluate(blob_js, pdf_url)
-                        data = base64.b64decode(b64_data)
-                        if data[:5] == b"%PDF-":
-                            out_path.write_bytes(data)
-                            print("  [site] Captured PDF from popup blob evaluation!")
-                    else:
-                        res = page.request.get(pdf_url)
-                        if res.ok and res.body()[:5] == b"%PDF-":
-                            out_path.write_bytes(res.body())
-                            print("  [site] Captured PDF from popup URL request!")
-                if not out_path.exists() or out_path.stat().st_size == 0:
-                    embed = popup.query_selector("iframe, embed, object")
-                    if embed:
-                        src = embed.get_attribute("src") or embed.get_attribute("data") or ""
-                        if src and is_safe_url(src):
-                            res = page.request.get(src)
-                            if res.ok and res.body()[:5] == b"%PDF-":
-                                out_path.write_bytes(res.body())
-                                print("  [site] Captured PDF from popup embed/iframe src!")
-                popup.close()
-            except Exception as e_p:
-                print(f"  [site] Popup handling note: {e_p}")
+                with page.expect_download(timeout=10000) as dl_info:
+                    page.evaluate("""(url) => {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'statement.pdf';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    }""", blob_url)
+                dl = dl_info.value
+                dl.save_as(str(out_path))
+                print("  [site] Statement PDF downloaded and saved!")
+            except Exception as e_dl:
+                print(f"  [site] Error saving blob download: {e_dl}")
+
+        # Clean up any popup tabs opened by PG&E
+        for p in list(page.context.pages):
+            if p not in existing_pages and not p.is_closed():
+                try:
+                    p.close()
+                except Exception:
+                    pass
 
         if out_path.exists() and (out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):
             out_path.unlink()
