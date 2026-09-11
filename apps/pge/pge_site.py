@@ -226,21 +226,69 @@ def goto_documents(page) -> bool:
     return is_safe_url(page.url or "") and not looks_signed_out(page)
 
 
+def get_pagination_pages(page) -> List[int]:
+    """Get list of available page numbers from Jump to combobox."""
+    try:
+        cb = page.query_selector("lightning-combobox[aria-label='Jump to'], .pagination-block lightning-combobox")
+        if cb:
+            opts = cb.evaluate("el => (el.options || []).map(o => o.value)")
+            if opts:
+                return sorted([int(v) for v in opts if str(v).isdigit()])
+    except Exception as e:
+        log.debug(f"Error getting pagination pages: {e}")
+    return [1]
+
+
+def goto_page_number(page, target_page: int) -> bool:
+    """Navigate table to specified page number via Jump to combobox."""
+    try:
+        cb = page.query_selector("lightning-combobox[aria-label='Jump to'], .pagination-block lightning-combobox")
+        if not cb:
+            return False
+        curr_val = cb.evaluate("el => el.value")
+        if curr_val == target_page or str(curr_val) == str(target_page):
+            return True
+        cb.click()
+        time.sleep(0.4)
+        opt = page.query_selector(f"lightning-base-combobox-item[data-value='{target_page}']")
+        if not opt:
+            opts = page.query_selector_all("[role='option'], lightning-base-combobox-item")
+            for o in opts:
+                if (o.inner_text() or "").strip() == str(target_page):
+                    opt = o
+                    break
+        if opt:
+            opt.click()
+            time.sleep(1.5)
+            return True
+    except Exception as e:
+        log.debug(f"goto_page_number {target_page} failed: {e}")
+    return False
+
+
 def collect_download_docs(page) -> List[dict]:
-    """Collect available billing statements from page DOM."""
+    """Collect available billing statements across all pages from page DOM."""
     results = []
     try:
-        rows = page.query_selector_all(FALLBACK["doc_row"])
-        for idx, row in enumerate(rows):
-            text = row.inner_text() or ""
-            date_str = parse_date(text)
-            if date_str:
-                results.append({
-                    "date_text": date_str,
-                    "title": f"Energy Statement - {date_str}",
-                    "row_index": idx,
-                    "summary": "Energy Statement",
-                })
+        pages = get_pagination_pages(page)
+        for p_num in pages:
+            if len(pages) > 1:
+                goto_page_number(page, p_num)
+            rows = page.query_selector_all(FALLBACK["doc_row"])
+            for idx, row in enumerate(rows):
+                text = row.inner_text() or ""
+                if "View Bill PDF" in text:
+                    date_str = parse_date(text)
+                    if date_str:
+                        results.append({
+                            "date_text": date_str,
+                            "title": f"Energy Statement - {date_str}",
+                            "page_number": p_num,
+                            "row_index": idx,
+                            "summary": "Energy Statement",
+                        })
+        if len(pages) > 1:
+            goto_page_number(page, 1)
     except Exception as e:
         log.debug(f"Error collecting docs: {e}")
     return results
@@ -250,24 +298,27 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
     """Download a bill PDF for specified doc dictionary handling downloads, popups, fetches, and network responses."""
     try:
         idx = doc.get("row_index", -1)
+        target_page = int(doc.get("page_number", 1))
+        if target_page > 1:
+            goto_page_number(page, target_page)
         link = None
 
-        # 1. Query all View Bill PDF links on the page directly
-        pdf_links = page.query_selector_all("a:has-text('View Bill PDF'), button:has-text('View Bill PDF'), a:has-text('View PDF')")
-        if 0 <= idx < len(pdf_links):
-            link = pdf_links[idx]
+        # 1. First check row by row_index
+        rows = page.query_selector_all(FALLBACK["doc_row"])
+        if 0 <= idx < len(rows):
+            link = rows[idx].query_selector("a:has-text('View Bill PDF'), button:has-text('View Bill PDF'), a, button")
 
-        # 2. Fallback to row querying if needed
+        # 2. Fallback to direct pdf_links index if row query did not find link
         if not link:
-            rows = page.query_selector_all(FALLBACK["doc_row"])
-            if 0 <= idx < len(rows):
-                link = rows[idx].query_selector("a:has-text('View Bill PDF'), button:has-text('View Bill PDF'), a, button")
+            pdf_links = page.query_selector_all("a:has-text('View Bill PDF'), button:has-text('View Bill PDF'), a:has-text('View PDF')")
+            if 0 <= idx < len(pdf_links):
+                link = pdf_links[idx]
 
         if not link:
-            print(f"  [site] No download link found for doc index {idx}")
+            print(f"  [site] No download link found for doc index {idx} on page {target_page}")
             return False
 
-        print(f"  [site] Found link for index {idx}. Preparing capture...")
+        print(f"  [site] Found link for index {idx} (page {target_page}). Preparing capture...")
 
         # Direct href check if present
         try:

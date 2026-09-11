@@ -57,7 +57,7 @@ class Document:
     """One PG&E document."""
 
     def __init__(self, title="", category="", summary="", date="", period="",
-                 href="", row_index=-1, confidence="", account="",
+                 href="", row_index=-1, page_number=1, confidence="", account="",
                  date_text="", document_id="", **kw):
         self.title = title
         self.account = account
@@ -71,6 +71,7 @@ class Document:
         self.downloaded_ok = kw.get("downloaded_ok", False)
         self.href = href
         self.row_index = row_index
+        self.page_number = int(page_number or kw.get("page_number", 1))
         self.confidence = confidence
         self.state = kw.get("state", State.DISCOVERED.value)
         self.pdf_filename = kw.get("pdf_filename", "")
@@ -230,6 +231,21 @@ class App:
             print("Success: connected and the Documents page is visible.")
             print("Keep that browser window OPEN, then run run_pilot.bat.")
 
+    def _in_scope(self, doc: Document) -> bool:
+        a = self.args
+        if not doc_types.wanted(doc.category, self.config):
+            return False
+        if getattr(a, "type", None) and doc.category.lower() != a.type.lower():
+            return False
+        if getattr(a, "year", None) and not (doc.date or "").startswith(str(a.year)):
+            return False
+        floor = getattr(a, "start_date", None) or self.config.get("default_start_date")
+        if floor and (not doc.date or doc.date < floor):
+            return False
+        if getattr(a, "end_date", None) and (not doc.date or doc.date > a.end_date):
+            return False
+        return True
+
     def cmd_discover(self) -> List[Document]:
         print("Discovering PG&E documents...")
         page = self.page()
@@ -247,6 +263,7 @@ class App:
                 date=rd["date_text"],
                 period=rd["date_text"],
                 row_index=rd.get("row_index", -1),
+                page_number=rd.get("page_number", 1),
                 confidence=conf,
                 date_text=rd["date_text"],
             )
@@ -257,16 +274,19 @@ class App:
         return documents
 
     def cmd_pilot(self):
-        count = self.config.get("pilot_count", 5)
+        count = getattr(self.args, "max_docs", None) or self.config.get("pilot_count", 5)
         print(f"Running pilot mode (downloading up to {count} newest documents)...")
-        docs = self.cmd_discover()
+        docs = [d for d in self.cmd_discover() if self._in_scope(d)]
         docs.sort(key=lambda d: d.date, reverse=True)
         to_download = docs[:count]
         self._download_batch(to_download)
 
     def cmd_all(self):
-        print("Downloading all discovered PG&E documents...")
-        docs = self.cmd_discover()
+        print("Downloading all in-scope discovered PG&E documents...")
+        docs = [d for d in self.cmd_discover() if self._in_scope(d)]
+        docs.sort(key=lambda d: d.date, reverse=True)
+        if getattr(self.args, "max_docs", None):
+            docs = docs[:self.args.max_docs]
         self._download_batch(docs)
 
     def cmd_resume(self):
@@ -274,19 +294,27 @@ class App:
         pending = []
         for k, v in self.discovery.data.items():
             doc = Document.from_dict(v)
-            if doc.state not in DONE_STATES:
+            if self._in_scope(doc) and doc.state not in DONE_STATES:
                 pending.append(doc)
+        pending.sort(key=lambda d: d.date, reverse=True)
+        if getattr(self.args, "max_docs", None):
+            pending = pending[:self.args.max_docs]
         self._download_batch(pending)
 
     def _download_batch(self, docs: List[Document]):
         page = self.page()
         for doc in docs:
-            if doc.key in self.progress.data and self.progress.data[doc.key].get("state") in DONE_STATES:
+            if not self._in_scope(doc):
+                continue
+            if not getattr(self.args, "redownload", False) and doc.key in self.progress.data and self.progress.data[doc.key].get("state") in DONE_STATES:
                 print(f"Skipping already completed document: {doc.title}")
                 continue
             dest_dir = self.paths.folder_for(doc.category)
             pdf_name = build_pdf_filename(doc.date, doc.summary, "PG&E", doc.account)
             out_path = dest_dir / pdf_name
+            if getattr(self.args, "dry_run", False):
+                print(f"  [dry-run] Plan: {doc.title} -> {pdf_name}")
+                continue
             if out_path.exists() and out_path.stat().st_size > 0:
                 doc.state = State.COMPLETED.value
                 doc.pdf_filename = pdf_name
@@ -391,7 +419,7 @@ class App:
                 print(f"  [{'SAFE' if c['safe'] else 'BLOCK'}] {c['role']}: {c['text']}")
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PG&E bill-statement downloader")
     parser.add_argument("--config", help="Path to config.json")
     parser.add_argument("--open-browser", action="store_true", help="Launch sign-in browser")
@@ -403,7 +431,30 @@ def main():
     parser.add_argument("--verify", action="store_true", help="Verify saved PDFs")
     parser.add_argument("--diagnose", action="store_true", help="Diagnose page layout")
     parser.add_argument("--dry-run", action="store_true", help="Plan actions without downloading")
-    args = parser.parse_args()
+    parser.add_argument("--year", type=int, help="Filter downloads by statement year (e.g. 2025)")
+    parser.add_argument("--start-date", help="Earliest statement date YYYY-MM-DD")
+    parser.add_argument("--end-date", help="Latest statement date YYYY-MM-DD")
+    parser.add_argument("--max-docs", type=int, help="Maximum number of documents to download")
+    parser.add_argument("--type", help="Statement or category filter")
+    parser.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
+    parser.add_argument("--redownload", action="store_true", help="Re-download documents even if already completed")
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    for d in (args.start_date, args.end_date):
+        if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            print(f"Bad date '{d}': use YYYY-MM-DD")
+            return 2
+
+    # If filter flags were passed without an explicit action, default to --all
+    if not (args.open_browser or args.login or args.discover or args.pilot or
+            args.all or args.resume or args.verify or args.diagnose):
+        if args.year or args.start_date or args.end_date or args.type or args.max_docs:
+            args.all = True
 
     app = App(args)
     try:
