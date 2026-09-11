@@ -199,14 +199,22 @@ def detect_security_challenge(page) -> bool:
 
 def goto_documents(page) -> bool:
     """Navigate to PG&E billing/statements area."""
+    # Re-use the active tab if already signed in and not on a 404 page
+    current_url = page.url or ""
+    current_title = (page.title() or "").lower()
+    if is_safe_url(current_url) and not looks_signed_out(page):
+        if "page not found" not in current_title and "404" not in current_title:
+            return True
+
     for url in DOCUMENT_URL_CANDIDATES:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            if not looks_signed_out(page):
+            title = (page.title() or "").lower()
+            if not looks_signed_out(page) and "page not found" not in title and "404" not in title:
                 return True
         except Exception:
             continue
-    return False
+    return is_safe_url(page.url or "") and not looks_signed_out(page)
 
 
 def collect_download_docs(page) -> List[dict]:
