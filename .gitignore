@@ -89,3 +89,6 @@ Thumbs.db
 # current each archive is. It belongs next to your installs, never in the repo.
 status.html
 **/status.html
+
+# build output
+dist/
