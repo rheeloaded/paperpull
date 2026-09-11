@@ -255,38 +255,67 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
             if 0 <= idx < len(pdf_links):
                 link = pdf_links[idx]
         if not link:
-            # Fallback: query all links containing "View Bill PDF" or "PDF"
             pdf_links = page.query_selector_all("a:has-text('View Bill PDF'), a:has-text('PDF'), button:has-text('View Bill PDF')")
             if 0 <= idx < len(pdf_links):
                 link = pdf_links[idx]
-            elif pdf_links:
-                link = pdf_links[0]
 
         if not link:
             log.warning(f"No download link found for doc index {idx}")
             return False
 
-        # Attempt 1: Standard browser download event
+        # Check for direct href attribute
         try:
-            with page.expect_download(timeout=10000) as download_info:
-                link.click()
-            download = download_info.value
-            download.save_as(str(out_path))
-        except Exception:
-            # Attempt 2: Popup window (new tab) opening the PDF
+            href = link.get_attribute("href") or ""
+            if href and ("http" in href or ".pdf" in href or "download" in href or "view" in href):
+                target_url = href if href.startswith("http") else (BASE.rstrip("/") + "/" + href.lstrip("/"))
+                if is_safe_url(target_url):
+                    res = page.request.get(target_url)
+                    if res.ok and res.body()[:5] == b"%PDF-":
+                        out_path.write_bytes(res.body())
+                        return True
+        except Exception as e_href:
+            log.debug(f"Direct href fetch attempt: {e_href}")
+
+        # Non-blocking event listeners for download and popup
+        captured_download = [None]
+        captured_popup = [None]
+
+        def handle_download(dl):
+            captured_download[0] = dl
+
+        def handle_popup(p):
+            captured_popup[0] = p
+
+        page.on("download", handle_download)
+        page.on("popup", handle_popup)
+
+        try:
+            link.click(timeout=5000)
+            time_start = time.time()
+            while time.time() - time_start < 10.0:
+                if captured_download[0] or captured_popup[0]:
+                    break
+                time.sleep(0.3)
+        except Exception as e_click:
+            log.debug(f"Link click warning: {e_click}")
+        finally:
+            page.remove_listener("download", handle_download)
+            page.remove_listener("popup", handle_popup)
+
+        if captured_download[0]:
+            captured_download[0].save_as(str(out_path))
+        elif captured_popup[0]:
+            popup = captured_popup[0]
             try:
-                with page.expect_popup(timeout=8000) as popup_info:
-                    link.click()
-                popup = popup_info.value
-                popup.wait_for_load_state("domcontentloaded")
+                popup.wait_for_load_state("domcontentloaded", timeout=10000)
                 pdf_url = popup.url
                 if pdf_url and is_safe_url(pdf_url):
-                    response = page.request.get(pdf_url)
-                    if response.ok and response.body()[:5] == b"%PDF-":
-                        out_path.write_bytes(response.body())
+                    res = page.request.get(pdf_url)
+                    if res.ok and res.body()[:5] == b"%PDF-":
+                        out_path.write_bytes(res.body())
                 popup.close()
-            except Exception as e_popup:
-                log.debug(f"Popup fallback failed: {e_popup}")
+            except Exception as e_p:
+                log.debug(f"Popup resolution failed: {e_p}")
 
         if out_path.exists() and (out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):
             out_path.unlink()
