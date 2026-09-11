@@ -8,8 +8,17 @@ per-app commands - nothing from user input is passed to a shell.
 Run it:  python -m uvicorn app:app --port 8765   (or use run_gui.bat)
 Then open http://127.0.0.1:8765
 
-By default it drives the apps in ../apps. Point it at your existing working
-copies instead with the APPS_ROOT environment variable, e.g.:
+Where it looks for the downloaders, most specific first:
+
+  APPS_ROOT environment variable   the override, for running from the repo
+  the settings file                 what you chose the first time it ran,
+                                    changeable from the page
+  ../apps                           the repo layout
+
+An installed copy has no ../apps, so the first time it runs the page asks for
+the folder that already holds your downloaders and remembers it. Nothing is
+moved or copied, and the old way of running them keeps working alongside.
+
   set APPS_ROOT=C:\path\to\Receipt and Statement Downloader
 """
 from __future__ import annotations
@@ -41,7 +50,84 @@ try:
     VERSION = (HERE.parent / "VERSION").read_text(encoding="utf-8").strip()
 except Exception:
     VERSION = "0.1.0"
-APPS_ROOT = Path(os.environ.get("APPS_ROOT", str(HERE.parent / "apps")))
+# -- where the downloaders live ----------------------------------------------
+#
+# Three sources, most specific first.
+#
+#   APPS_ROOT environment variable   the override, for running from the repo
+#   the settings file                 what the person chose the first time the
+#                                     panel ran, and can change from the page
+#   apps/ beside this file            the repo layout, for a checkout
+#
+# An installed copy of this panel has no apps/ beside it, so without the
+# settings file it would show an empty list and a hint to set an environment
+# variable, which is not something to ask of somebody who just ran an
+# installer. The page asks for the folder instead, once, and remembers it.
+# Pointing at the folder they already have means nothing moves, nothing is
+# migrated, and the old way of running things keeps working alongside.
+
+_DEFAULT_ROOT = HERE.parent / "apps"
+
+
+def _settings_path() -> Path:
+    """Per-user, per-platform, and never inside the install folder, so an
+    upgrade that replaces the program does not lose the choice."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        return base / "PaperPull" / "settings.json"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "PaperPull" / "settings.json"
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") \
+        / "paperpull" / "settings.json"
+
+
+def _read_settings() -> dict:
+    try:
+        raw = json.loads(_settings_path().read_text(encoding="utf-8-sig"))
+        return raw if isinstance(raw, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_settings(data: dict) -> None:
+    p = _settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
+def apps_root() -> Path:
+    env = os.environ.get("APPS_ROOT")
+    if env:
+        return Path(env).expanduser()
+    saved = _read_settings().get("apps_root")
+    if saved:
+        return Path(saved).expanduser()
+    return _DEFAULT_ROOT
+
+
+def root_source() -> str:
+    if os.environ.get("APPS_ROOT"):
+        return "environment"
+    if _read_settings().get("apps_root"):
+        return "settings"
+    return "default"
+
+
+def _looks_like_installs(root: Path) -> int:
+    """How many app folders sit directly under root. Zero means this is not
+    the folder, or not yet."""
+    if not root.is_dir():
+        return 0
+    n = 0
+    try:
+        for d in root.iterdir():
+            if d.is_dir() and _entry_script(d):
+                n += 1
+    except OSError:
+        return 0
+    return n
 # Resolved once. Importing by path is not free and the panel can be
 # refreshed repeatedly. False means looked for and not found.
 _STATUS_MOD = None
@@ -123,9 +209,9 @@ def _accounts(app_dir: Path):
 
 def discover_apps():
     apps = {}
-    if not APPS_ROOT.exists():
+    if not apps_root().exists():
         return apps
-    for d in sorted(APPS_ROOT.iterdir()):
+    for d in sorted(apps_root().iterdir()):
         if not d.is_dir():
             continue
         script = _entry_script(d)
@@ -146,7 +232,7 @@ def discover_apps():
 @app.get("/api/apps", dependencies=[Depends(_same_origin_only)])
 def api_apps():
     apps = discover_apps()
-    return {"apps_root": str(APPS_ROOT), "actions": {k: v["label"] for k, v in ACTIONS.items()},
+    return {"apps_root": str(apps_root()), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "apps": apps}
 
 
@@ -166,8 +252,8 @@ def _status_module():
         return _STATUS_MOD or None
     import importlib.util
     for cand in (HERE.parent / "tools" / "status.py",
-                 APPS_ROOT / "status.py",
-                 APPS_ROOT.parent / "status.py",
+                 apps_root() / "status.py",
+                 apps_root().parent / "status.py",
                  HERE.parent / "status.py"):
         try:
             if not cand.is_file():
@@ -209,13 +295,13 @@ def api_status():
     if mod is None:
         return {"available": False, "rows": [], "gaps": [],
                 "reason": "status.py was not found next to this control panel.",
-                "root": str(APPS_ROOT)}
+                "root": str(apps_root())}
     try:
-        rows = mod.scan_all(APPS_ROOT)
+        rows = mod.scan_all(apps_root())
     except Exception as e:
         return {"available": False, "rows": [], "gaps": [],
                 "reason": "the scan failed, %s" % str(e).splitlines()[0][:120],
-                "root": str(APPS_ROOT)}
+                "root": str(apps_root())}
 
     out, gaps = [], []
     for row in rows:
@@ -230,7 +316,55 @@ def api_status():
         item["label"] = mod.LABEL.get(row.get("status"), str(row.get("status")))
         item["cadence"] = mod._fmt_cadence(row.get("cadence_days"))
         out.append(item)
-    return {"available": True, "root": str(APPS_ROOT), "rows": out, "gaps": gaps}
+    return {"available": True, "root": str(apps_root()), "rows": out, "gaps": gaps}
+
+
+
+@app.get("/api/root", dependencies=[Depends(_same_origin_only)])
+def api_root_get():
+    root = apps_root()
+    return {"root": str(root), "exists": root.is_dir(),
+            "apps": _looks_like_installs(root), "source": root_source(),
+            "settings_file": str(_settings_path())}
+
+
+@app.post("/api/root", dependencies=[Depends(_same_origin_only)])
+async def api_root_set(request: Request):
+    """Remember where the downloaders live.
+
+    Takes a folder path typed into the page. It must exist and it must be a
+    folder, and the response says how many apps were found there so the
+    person can tell at once whether they pointed at the right place. It does
+    not refuse an empty folder outright, because pointing at a folder before
+    moving the installs into it is a reasonable order of operations.
+    """
+    if os.environ.get("APPS_ROOT"):
+        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
+                                 "overrides any saved choice. Unset it first.")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    raw = str((body or {}).get("root") or "").strip().strip('"')
+    if not raw:
+        raise HTTPException(400, "no folder given")
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        raise HTTPException(400, "give the full path, starting from the drive "
+                                 "or from /")
+    if not root.is_dir():
+        raise HTTPException(400, "that folder does not exist")
+    data = _read_settings()
+    data["apps_root"] = str(root.resolve())
+    try:
+        _write_settings(data)
+    except OSError as e:
+        raise HTTPException(500, "could not save the choice: %s" % e)
+    global _STATUS_MOD
+    _STATUS_MOD = None      # the status report is looked for relative to root
+    return {"root": str(root.resolve()), "exists": True,
+            "apps": _looks_like_installs(root), "source": "settings",
+            "settings_file": str(_settings_path())}
 
 
 def _build_cmd(app_meta: dict, account: str, action: str):
@@ -391,6 +525,22 @@ HTML = r"""<!doctype html>
 </header>
 <main>
   <div class="controls">
+    <div id="setup" style="display:none">
+      <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
+        <b>Where are your downloaders?</b><br>
+        Paste the full path of the folder that holds them, the one with
+        <i>Chase Statements</i>, <i>Amazon Receipts</i> and so on inside it.
+        Nothing is moved or copied. This panel simply works on what is
+        already there, and your existing way of running them keeps working too.
+      </p>
+      <input id="rootinput" type="text" style="width:100%; font:inherit; padding:6px 8px;
+             background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px;"
+             placeholder="C:\\Users\\you\\Documents\\Receipt and Statement Downloader">
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+        <button onclick="saveRoot()">Use this folder</button>
+        <span class="hint" id="rootmsg"></span>
+      </div>
+    </div>
     <label for="app">App</label>
     <select id="app"></select>
     <label for="account">Account</label>
@@ -426,6 +576,32 @@ HTML = r"""<!doctype html>
   <span>☕ <a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">Support this project on Ko-fi</a></span>
 </footer>
 <script>
+async function saveRoot() {
+  const root = $('rootinput').value.trim();
+  $('rootmsg').textContent = '';
+  if (!root) { $('rootmsg').textContent = 'paste the folder path first'; return; }
+  let r;
+  try {
+    r = await fetch('/api/root', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({root})});
+  } catch (e) { $('rootmsg').textContent = 'could not reach the control panel'; return; }
+  const d = await r.json();
+  if (!r.ok) { $('rootmsg').textContent = d.detail || 'that did not work'; return; }
+  if (d.apps === 0) {
+    $('rootmsg').textContent = 'saved, but no downloaders were found there yet';
+  } else {
+    $('rootmsg').textContent = 'found ' + d.apps + ' downloader' + (d.apps === 1 ? '' : 's');
+  }
+  STATUS_LOADED = false;
+  await load();
+}
+
+function changeRoot() {
+  $('setup').style.display = 'block';
+  $('rootinput').value = META.apps_root || '';
+  $('rootinput').focus();
+}
+
 let STATUS_LOADED = false;
 
 function showTab(which) {
@@ -493,11 +669,19 @@ const $ = id => document.getElementById(id);
 
 async function load() {
   META = await (await fetch('/api/apps')).json();
-  $('root').textContent = 'apps root: ' + META.apps_root;
+  $('root').innerHTML = 'apps root: ' + esc(META.apps_root) +
+    (META.root_source === 'environment' ? ' <span class="hint">(from APPS_ROOT)</span>'
+     : ' <a href="#" onclick="changeRoot(); return false;" style="color:var(--accent)">change</a>');
   const appSel = $('app');
   appSel.innerHTML = '';
   const keys = Object.keys(META.apps);
-  if (!keys.length) { $('console').textContent = 'No apps found under ' + META.apps_root + '.\nSet APPS_ROOT to your downloaders folder.'; return; }
+  if (!keys.length) {
+    $('setup').style.display = 'block';
+    $('console').textContent = 'No downloaders found under ' + META.apps_root + '.';
+    if (META.root_source !== 'environment') $('rootinput').focus();
+    return;
+  }
+  $('setup').style.display = 'none';
   for (const k of keys) appSel.append(new Option(META.apps[k].name, k));
   appSel.onchange = onApp;
   const acts = $('actions'); acts.innerHTML = '';
