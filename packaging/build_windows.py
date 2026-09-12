@@ -377,11 +377,16 @@ def main(argv=None) -> int:
     iss = write_inno_script()
 
     if args.installer:
+        # Any major version, wherever it landed. A hardcoded "Inno Setup 6"
+        # missed a fresh install of 7 on the very first try.
         iscc = None
-        for c in (r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-                  r"C:\Program Files\Inno Setup 6\ISCC.exe"):
-            if Path(c).exists():
-                iscc = c
+        for base in (r"C:\Program Files", r"C:\Program Files (x86)",
+                     str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs")):
+            for c in sorted(Path(base).glob("Inno Setup */ISCC.exe"), reverse=True):
+                iscc = str(c)
+                break
+            if iscc:
+                break
         if not iscc:
             say("Inno Setup is not installed, so no .exe installer was built.")
             say("Install it from https://jrsoftware.org/isinfo.php and re-run with --installer.")
