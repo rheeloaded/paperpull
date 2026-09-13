@@ -1103,7 +1103,7 @@ function run(action) {
   const app = $('app').value, account = $('account').value;
   $('console').textContent = '';
   setStatus('run', `running ${action} — ${app} / ${account}`);
-  document.querySelectorAll('button').forEach(b => b.disabled = true);
+  document.querySelectorAll('button:not(#tabout):not(#tabst)').forEach(b => b.disabled = true);
   es = new EventSource(`/api/run?app=${encodeURIComponent(app)}&account=${encodeURIComponent(account)}&action=${action}`);
   const con = $('console');
   es.onmessage = e => { con.textContent += e.data + '\n'; con.scrollTop = con.scrollHeight; };
