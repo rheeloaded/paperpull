@@ -604,16 +604,138 @@ def download_named(page, title: str, out_path) -> bool:
     if control is None:
         log.info("download control not found for %r", title)
         return False
+    return _click_and_capture(page, control, title, out_path)
 
-    from paperpull_core.receipt_pdf import save_download
+
+# Robinhood changed how a statement is served, some time between August and
+# September 2026. The "Download PDF" control is now an <a href="#"> whose
+# click handler calls
+#     https://api.robinhood.com/documents/<id>/download/?redirect=false
+# which answers with JSON, {"download_url": "https://mountain-storage.s3
+# .amazonaws.com/...?response-content-type=application/pdf&..."}, a pre-signed
+# link. The page then opens that link in a NEW TAB. No browser download event
+# is ever fired, so a 45 second wait for one timed out on every new statement
+# while the older ones skipped as already done, which is exactly how it looked
+# in the panel.
+#
+# So both are watched. A download event, if Robinhood ever goes back to one,
+# and that JSON response, from which the PDF is fetched directly. Any tab the
+# site opens is closed again, because three of them were left behind per run.
+#
+# The pre-signed link points at Amazon S3, not robinhood.com, so it fails the
+# app's own host check by design. It is allowed through a separate, narrower
+# check that matches ONE exact host, the bucket Robinhood's own API names, and
+# only for a URL that arrived inside that API's response. A wildcard on
+# amazonaws.com would let any bucket anyone controls through.
+DOCUMENT_STORE_HOSTS = {"mountain-storage.s3.amazonaws.com"}
+_DOWNLOAD_API_RE = re.compile(r"^https://api\.robinhood\.com/documents/[^/]+/download/")
+
+
+def is_document_store_url(url: str) -> bool:
+    """True only for an https URL on the exact bucket host Robinhood's own
+    API hands back. Exact equality, never a suffix, never a wildcard."""
+    from urllib.parse import urlparse
     try:
-        with page.expect_download(timeout=45000) as dl:
-            control.click()
-        save_download(dl.value, out_path)
-        return True
+        got = urlparse(url or "")
+    except ValueError:
+        return False
+    if got.scheme != "https" or not got.hostname:
+        return False
+    if got.username or got.password:
+        return False
+    return got.hostname.lower().rstrip(".") in DOCUMENT_STORE_HOSTS
+
+
+def _click_and_capture(page, control, title: str, out_path) -> bool:
+    """Click a download control and take the PDF however Robinhood serves it."""
+    import json as _json
+    import time as _time
+    from paperpull_core.receipt_pdf import save_download
+
+    got = {"download": None, "response": None}
+    popups = []
+
+    def on_download(d):
+        got["download"] = d
+
+    def on_response(r):
+        try:
+            if r.status == 200 and _DOWNLOAD_API_RE.match(r.url):
+                got["response"] = r
+        except Exception:
+            pass
+
+    def on_page(p):
+        # A plain function, not list.append. Playwright tags the handler it
+        # is given with an attribute, and a bound builtin cannot carry one.
+        popups.append(p)
+
+    ctx = page.context
+    page.on("download", on_download)
+    page.on("response", on_response)
+    ctx.on("page", on_page)
+    try:
+        control.click()
+        deadline = _time.time() + 45
+        while _time.time() < deadline and not (got["download"] or got["response"]):
+            page.wait_for_timeout(250)
     except Exception as e:
         log.info("download click failed for %r: %s", title, e)
         return False
+    finally:
+        try:
+            page.remove_listener("download", on_download)
+            page.remove_listener("response", on_response)
+            ctx.remove_listener("page", on_page)
+        except Exception:
+            pass
+        # The site opens the PDF in a new tab. It is not the tab we work in
+        # and it must not pile up.
+        for p in popups:
+            try:
+                p.close()
+            except Exception:
+                pass
+
+    if got["download"] is not None:
+        try:
+            save_download(got["download"], out_path)
+            return True
+        except Exception as e:
+            log.info("saving the download for %r failed: %s", title, e)
+            return False
+
+    if got["response"] is None:
+        log.info("no download event and no document response for %r within 45s",
+                 title)
+        return False
+
+    try:
+        body = _json.loads(got["response"].text() or "{}")
+    except Exception as e:
+        log.info("document response for %r was not JSON: %s", title, e)
+        return False
+    url = str((body or {}).get("download_url") or "")
+    if not is_document_store_url(url):
+        log.error("refusing to fetch %r from an unexpected host", title)
+        return False
+    try:
+        # page.request shares the browser's cookie jar and follows redirects.
+        # The link is pre-signed so it needs neither, but this is the one
+        # fetch path in Playwright that returns raw bytes without a download
+        # event, which is the whole point.
+        resp = page.request.get(url, timeout=60000)
+        data = resp.body() if resp.ok else b""
+    except Exception as e:
+        log.info("fetching the PDF for %r failed: %s", title, e)
+        return False
+    if not data or b"%PDF-" not in data[:1024]:
+        log.info("fetched %d bytes for %r but it is not a PDF", len(data), title)
+        return False
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(data)
+    return True
 
 
 def find_row_download(page, title: str, date_text: str = ""):
