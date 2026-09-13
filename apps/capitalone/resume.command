@@ -14,7 +14,7 @@ if [ ! -x "$PY" ]; then
     exit 1
 fi
 
-echo 'Resuming M^&T Bank document download'
+echo 'Resuming Capital One document download'
 echo 'Make sure that account'\''s signed-in browser is still OPEN'
 
 "$PY" capitalone_docs.py --resume $CFG

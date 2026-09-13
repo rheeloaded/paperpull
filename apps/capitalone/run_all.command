@@ -14,7 +14,7 @@ if [ ! -x "$PY" ]; then
     exit 1
 fi
 
-echo 'FULL download of M^&T Bank statements, tax forms, and insurance documents'
+echo 'FULL download of Capital One statements, tax forms, and letters'
 echo 'Make sure that account'\''s signed-in browser is still OPEN'
 
 "$PY" capitalone_docs.py --all $CFG

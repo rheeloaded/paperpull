@@ -7,7 +7,6 @@ from paperpull_core import storage as _core
 from paperpull_core.spec import (AppSpec, CsvSpec, DOCUMENT, Folder,
                                  INFRASTRUCTURE_FOLDERS)
 
-
 STATEMENT = "Statement"
 TAX = "Tax Document"
 LETTER = "Letter"
@@ -28,8 +27,6 @@ SPEC = AppSpec(
     folders=[
         Folder("statements", "Statements"),
 
-
-
         Folder("tax_documents", "Tax Documents", precreate=False),
         Folder("letters", "Letters", precreate=False),
         Folder("other_documents", "Other Documents", precreate=False),
@@ -49,10 +46,6 @@ SPEC = AppSpec(
         "pilot_count": 5,
         "document_types": list(ALL_CATEGORIES),
 
-
-
-
-
         "account_labels": {},
     },
     base_url="https://myaccounts.capitalone.com/",
@@ -62,7 +55,6 @@ SPEC = AppSpec(
 _core.bind(SPEC)
 
 PROJECT_DIR = SPEC.project_dir
-
 
 from paperpull_core.storage import (
     CsvFile, JsonStore, Paths, atomic_write_json, atomic_write_text,
