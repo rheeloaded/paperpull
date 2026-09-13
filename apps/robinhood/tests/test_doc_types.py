@@ -116,3 +116,31 @@ def test_a_bare_save_is_refused_on_purpose():
     that one names the document."""
     for label in ["Save", "Save Changes", "Save Settings"]:
         assert not site.is_safe_control(label), label
+
+
+# -- the pre-signed link Robinhood hands back ---------------------------------
+
+def test_the_document_store_host_is_allowed_exactly_and_nothing_else():
+    """Robinhood's API answers a download click with a pre-signed S3 link,
+    which fails the app's own host check by design. It is allowed through a
+    separate check that matches ONE exact host. A wildcard on amazonaws.com
+    would let any bucket anyone controls through."""
+    ok = "https://mountain-storage.s3.amazonaws.com/user/x/edocs/y?response-content-type=application%2Fpdf"
+    assert site.is_document_store_url(ok)
+    for bad in (
+        "https://evil.s3.amazonaws.com/x.pdf",                       # another bucket
+        "https://mountain-storage.s3.amazonaws.com.evil.test/x.pdf", # suffix trick
+        "https://mountain-storage.s3.amazonaws.com@evil.test/x.pdf", # userinfo trick
+        "http://mountain-storage.s3.amazonaws.com/x.pdf",            # not https
+        "https://robinhood.com/x.pdf",                               # wrong check for this
+        "",
+    ):
+        assert not site.is_document_store_url(bad), bad
+
+
+def test_only_robinhoods_own_download_endpoint_is_listened_for():
+    r = site._DOWNLOAD_API_RE
+    assert r.match("https://api.robinhood.com/documents/8cbb0e3c-9a22/download/?redirect=false")
+    assert not r.match("https://api.robinhood.com.evil.test/documents/x/download/")
+    assert not r.match("https://evil.test/documents/x/download/")
+    assert not r.match("https://api.robinhood.com/accounts/x/")
