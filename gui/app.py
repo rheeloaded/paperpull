@@ -695,7 +695,13 @@ HTML = r"""<!doctype html>
   table.st th { text-align:left; color:var(--muted); font-weight:500;
                 border-bottom:1px solid var(--line); padding:6px 10px 6px 0; }
   table.st td { padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
-  table.st td.num { text-align:right; }
+  /* Headers align with their columns. The .num rule used to reach only the
+     cells, so "Docs" sat at the left of a column whose numbers sat at the
+     right, a screen-width apart on a wide window. Every column except
+     Provider shrinks to its content, so labels and values stay together. */
+  table.st th.num, table.st td.num { text-align:right; }
+  table.st th:not(:first-child), table.st td:not(:first-child) {
+    width:1%; white-space:nowrap; padding-left:18px; }
   .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; }
   .pill.overdue { background:#4a1d1d; color:#ff9a9a; }
   .pill.due { background:#4a3a1d; color:#ffd08a; }
