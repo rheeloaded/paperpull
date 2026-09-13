@@ -755,7 +755,7 @@ HTML = r"""<!doctype html>
       Nothing is moved or copied. This panel works on what is already there,
       and your existing way of running them keeps working too.
     </p>
-    <input id="rootinput" type="text" placeholder="C:\\Users\\you\\Documents\\Receipt and Statement Downloader">
+    <input id="rootinput" type="text" placeholder="C:\Users\you\Documents\Receipt and Statement Downloader">
     <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
       <button onclick="saveRoot()">Use this folder</button>
       <span class="hint" style="margin:0" id="rootmsg"></span>
