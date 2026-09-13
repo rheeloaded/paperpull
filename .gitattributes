@@ -25,3 +25,4 @@
 *.gif       binary
 *.whl       binary
 *.zip       binary
+*.ico       binary
