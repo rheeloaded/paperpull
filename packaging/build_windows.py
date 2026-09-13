@@ -232,6 +232,10 @@ def stage_code() -> int:
 
 def write_launchers() -> None:
     say("Launchers")
+    icon = REPO / "packaging" / "paperpull.ico"
+    if icon.is_file():
+        shutil.copy2(icon, STAGE / "paperpull.ico")
+        say("  icon")
     (STAGE / "PaperPull.bat").write_text(
         "@echo off\r\n"
         "setlocal\r\n"
@@ -284,14 +288,15 @@ Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayIcon={app}\PaperPull.bat
+SetupIconFile=PaperPull\paperpull.ico
+UninstallDisplayIcon={app}\paperpull.ico
 
 [Files]
 Source: "PaperPull\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\PaperPull"; Filename: "{app}\PaperPull.bat"; WorkingDir: "{app}"
-Name: "{autodesktop}\PaperPull"; Filename: "{app}\PaperPull.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\PaperPull"; Filename: "{app}\PaperPull.bat"; WorkingDir: "{app}"; IconFilename: "{app}\paperpull.ico"
+Name: "{autodesktop}\PaperPull"; Filename: "{app}\PaperPull.bat"; WorkingDir: "{app}"; IconFilename: "{app}\paperpull.ico"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
