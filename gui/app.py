@@ -132,6 +132,9 @@ def _looks_like_installs(root: Path) -> int:
 # Resolved once. Importing by path is not free and the panel can be
 # refreshed repeatedly. False means looked for and not found.
 _STATUS_MOD = None
+# Apps with a downloader process alive right now. Removing one of these
+# would pull the folder out from under a run.
+_RUNNING: set = set()
 
 # action -> argparse flags. run_all / resume get --yes so they don't block on a
 # confirmation prompt. Login is resolved per-app (open-browser vs login).
@@ -540,6 +543,70 @@ async def api_create(request: Request):
             "apps": _looks_like_installs(root)}
 
 
+# -- removing a provider ------------------------------------------------------
+#
+# The one action in this panel that could destroy something, so it does not.
+# The install folder is MOVED into Removed/ beside the others, where the panel
+# no longer lists it, and nothing inside it is touched. PDFs not yet filed
+# elsewhere, the download history, the signed-in browser profile, all of it is
+# still there for whoever wants to delete it deliberately with a file manager.
+# A provider somebody stopped needing is not the same as a provider whose
+# records they want gone, and the panel should not guess which.
+
+REMOVED_DIR = "Removed"
+
+
+def _removal_summary(folder: Path) -> dict:
+    pdfs = 0
+    for p in folder.rglob("*.pdf"):
+        if ".venv" not in p.parts and "browser-profile" not in str(p):
+            pdfs += 1
+    history = 0
+    try:
+        raw = json.loads((folder / "progress.json").read_text(encoding="utf-8-sig"))
+        history = sum(1 for v in raw.values() if isinstance(v, dict)) if isinstance(raw, dict) else 0
+    except (OSError, ValueError):
+        pass
+    profile = any(d.is_dir() and "browser-profile" in d.name for d in folder.iterdir())
+    return {"pdfs": pdfs, "history": history, "profile": profile}
+
+
+@app.post("/api/remove", dependencies=[Depends(_same_origin_only)])
+async def api_remove(request: Request):
+    """Move an install out of the list. The name must be one the panel
+    itself discovered, so nothing outside the root can ever be named."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    name = str((body or {}).get("app") or "")
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "unknown app")
+    if name in _RUNNING:
+        raise HTTPException(409, "that provider is running right now. Wait for it "
+                                 "to finish, or close the tab it is running in.")
+    src = Path(apps[name]["dir"])
+    root = apps_root()
+    if src.parent.resolve() != root.resolve():
+        raise HTTPException(400, "that folder is not directly under the apps root")
+
+    summary = _removal_summary(src)
+    dest_dir = root / REMOVED_DIR
+    dest = dest_dir / name
+    if dest.exists():
+        dest = dest_dir / ("%s (%s)" % (name, datetime.now().strftime("%Y%m%d-%H%M%S")))
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+    except OSError as e:
+        raise HTTPException(500, "could not move the folder: %s. Is a file in it "
+                                 "open, or a browser still signed in there?" % e)
+    global _STATUS_MOD
+    _STATUS_MOD = None
+    return {"app": name, "moved_to": str(dest), **summary}
+
+
 def _build_cmd(app_meta: dict, account: str, action: str):
     if action not in ACTIONS:
         raise HTTPException(400, "unknown action")
@@ -569,6 +636,7 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
         yield f"data: $ {' '.join(cmd)}\n\n"
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
         try:
+            _RUNNING.add(app)
             proc = subprocess.Popen(
                 cmd, cwd=meta["dir"],
                 # No stdin. The panel cannot answer a prompt, so an app must
@@ -624,6 +692,7 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
             yield "data: \n\n"
             yield f"event: done\ndata: {code}\n\n"
         finally:
+            _RUNNING.discard(app)
             if proc.poll() is None:
                 proc.terminate()
                 try:
@@ -770,7 +839,7 @@ HTML = r"""<!doctype html>
 </section>
 <main>
   <div class="controls">
-    <label for="app">App <a href="#" id="addlink" onclick="addProvider(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a provider</a></label>
+    <label for="app">App <a href="#" id="addlink" onclick="addProvider(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a provider</a> <a href="#" id="removelink" onclick="removeProvider(); return false;" style="color:var(--muted); font-weight:400; font-size:12px; margin-left:8px;">remove</a></label>
     <select id="app"></select>
     <label for="account">Account</label>
     <select id="account"></select>
@@ -892,6 +961,36 @@ async function addProvider() {
   await loadProviders(true);
 }
 
+async function removeProvider() {
+  const name = $('app').value;
+  if (!name) return;
+  const ok = confirm(
+    'Remove "' + name + '" from PaperPull?\n\n' +
+    'Nothing is deleted. Its folder is moved into a "Removed" folder beside the ' +
+    'others, with its PDFs, download history and signed-in browser profile all ' +
+    'still inside. Delete that folder yourself whenever you are sure.\n\n' +
+    'It will no longer appear in this list.');
+  if (!ok) return;
+  let r;
+  try {
+    r = await fetch('/api/remove', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({app: name})});
+  } catch (e) { $('console').textContent = 'could not reach the control panel'; return; }
+  const d = await r.json();
+  if (!r.ok) { $('console').textContent = d.detail || 'that did not work'; return; }
+  STATUS_LOADED = false;
+  await load();
+  const kept = [];
+  if (d.pdfs) kept.push(d.pdfs + ' PDF' + (d.pdfs === 1 ? '' : 's'));
+  if (d.history) kept.push('a history of ' + d.history + ' document' + (d.history === 1 ? '' : 's'));
+  if (d.profile) kept.push('a signed-in browser profile');
+  $('console').textContent =
+    'Removed "' + d.app + '" from the list.\n\nIts folder was moved to\n' + d.moved_to +
+    (kept.length ? '\n\nStill inside it: ' + kept.join(', ') + '.' : '') +
+    '\n\nNothing was deleted. Delete that folder yourself when you are sure you no longer ' +
+    'need what is in it. Until then, moving it back restores the provider.';
+}
+
 let STATUS_LOADED = false;
 
 function showTab(which) {
@@ -970,12 +1069,14 @@ async function load() {
     $('newuser').style.display = 'block';
     $('existing').style.display = 'none';
     $('addlink').style.display = 'none';
+    $('removelink').style.display = 'none';
     loadProviders(false);
     if (META.root_source !== 'environment') $('newroot').focus();
     return;
   }
   showSetup(false);
   $('addlink').style.display = '';
+  $('removelink').style.display = '';
   for (const k of keys) appSel.append(new Option(META.apps[k].name, k));
   appSel.onchange = onApp;
   const acts = $('actions'); acts.innerHTML = '';
