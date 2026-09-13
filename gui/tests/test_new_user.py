@@ -177,3 +177,85 @@ def test_no_templates_means_an_honest_empty_list(settings, monkeypatch):
     d = app_module.api_providers()
     assert d["templates"] is False
     assert d["providers"] == []
+
+
+# -- removing a provider -----------------------------------------------------
+
+def _remove(body):
+    return asyncio.run(app_module.api_remove(_Req(body)))
+
+
+def test_removing_moves_the_folder_aside_and_deletes_nothing(templates, settings, tmp_path):
+    """The one action in the panel that could destroy something, so it does
+    not. PDFs not yet filed elsewhere, the history and the signed-in profile
+    all survive, in a Removed folder the person can delete deliberately."""
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    inst = home / "Bank Statements"
+    (inst / "Statements").mkdir()
+    (inst / "Statements" / "2026-01-31 Statement.pdf").write_bytes(b"%PDF-1.7 x")
+    (inst / "progress.json").write_text('{"id:1": {"downloaded_ok": true}}', encoding="utf-8")
+    (inst / "bank-browser-profile").mkdir()
+    (inst / "bank-browser-profile" / "Cookies").write_bytes(b"session")
+
+    got = _remove({"app": "Bank Statements"})
+
+    assert not inst.exists(), "still listed under the root"
+    moved = Path(got["moved_to"])
+    assert moved.parent == home / "Removed"
+    assert (moved / "Statements" / "2026-01-31 Statement.pdf").read_bytes() == b"%PDF-1.7 x"
+    assert "id:1" in (moved / "progress.json").read_text(encoding="utf-8")
+    assert (moved / "bank-browser-profile" / "Cookies").read_bytes() == b"session"
+    assert got["pdfs"] == 1 and got["history"] == 1 and got["profile"] is True
+
+
+def test_a_removed_provider_no_longer_appears_and_can_be_added_again(templates, settings, tmp_path):
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    _remove({"app": "Bank Statements"})
+    assert app_module._looks_like_installs(home) == 0
+    marks = {p["slug"]: p["installed"] for p in app_module.api_providers()["providers"]}
+    assert marks["bank"] is False, "still shown as installed after removal"
+    got = _create({"root": str(home), "providers": ["bank"]})
+    assert got["created"] == ["bank"], "could not be set up again after removal"
+
+
+def test_removing_twice_keeps_both_copies(templates, settings, tmp_path):
+    """Remove, set up again, remove again. The second copy must not overwrite
+    the first in Removed, because the first may hold history the second does
+    not."""
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    first = Path(_remove({"app": "Bank Statements"})["moved_to"])
+    _create({"root": str(home), "providers": ["bank"]})
+    second = Path(_remove({"app": "Bank Statements"})["moved_to"])
+    assert first.exists() and second.exists() and first != second
+
+
+def test_a_running_provider_cannot_be_removed(templates, settings, tmp_path):
+    """Pulling the folder out from under a live download would be worse than
+    any of the things removal is careful about."""
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    app_module._RUNNING.add("Bank Statements")
+    try:
+        with pytest.raises(fastapi.HTTPException) as e:
+            _remove({"app": "Bank Statements"})
+        assert e.value.status_code == 409
+        assert (home / "Bank Statements").exists()
+    finally:
+        app_module._RUNNING.discard("Bank Statements")
+
+
+def test_only_a_discovered_app_can_be_removed(templates, settings, tmp_path):
+    """The name must be one the panel found itself, so nothing outside the
+    root can ever be named, however it is spelled."""
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    (tmp_path / "elsewhere").mkdir()
+    for name in ("../elsewhere", "..\elsewhere", "elsewhere", "Removed", ""):
+        with pytest.raises(fastapi.HTTPException) as e:
+            _remove({"app": name})
+        assert e.value.status_code == 404, name
+    assert (tmp_path / "elsewhere").exists()
+    assert (home / "Bank Statements").exists()
