@@ -33,6 +33,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import run_result
+
 from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -680,6 +682,7 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
         # press Run again and put two runs on one progress.json, one CDP port
         # and one output folder. Stopping is safe: downloaded_ok is only set
         # after a document is saved, so a re-run resumes and re-fetches nothing.
+        result = None
         try:
             while True:
                 # readline blocks, so it goes to a worker thread rather than
@@ -687,8 +690,14 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
                 line = await to_thread.run_sync(proc.stdout.readline)
                 if not line:
                     break
-                yield f"data: {line.rstrip()}\n\n"
+                parsed = run_result.parse(line)
+                if parsed is not None:
+                    result = parsed
+                else:
+                    yield f"data: {line.rstrip()}\n\n"
             code = await to_thread.run_sync(proc.wait)
+            if result is not None:
+                yield f"event: result\ndata: {json.dumps(result)}\n\n"
             yield "data: \n\n"
             yield f"event: done\ndata: {code}\n\n"
         finally:
@@ -796,7 +805,7 @@ HTML = r"""<!doctype html>
   .status { padding:8px 20px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted); }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:8px; }
   .dot.run { background:var(--accent); animation:pulse 1s infinite; }
-  .dot.ok { background:var(--ok); } .dot.err { background:#ff5c5c; }
+  .dot.warn { background:#e6a23c; } .dot.ok { background:var(--ok); } .dot.err { background:#ff5c5c; }
   @keyframes pulse { 50% { opacity:.3; } }
 </style>
 </head>
@@ -1106,10 +1115,24 @@ function run(action) {
   document.querySelectorAll('button').forEach(b => b.disabled = true);
   es = new EventSource(`/api/run?app=${encodeURIComponent(app)}&account=${encodeURIComponent(account)}&action=${action}`);
   const con = $('console');
+  let result = null;
+  es.addEventListener('result', e => { result = JSON.parse(e.data); });
   es.onmessage = e => { con.textContent += e.data + '\n'; con.scrollTop = con.scrollHeight; };
   es.addEventListener('done', e => {
     const code = e.data;
-    setStatus(code === '0' ? 'ok' : 'err', code === '0' ? 'finished' : `exited (code ${code})`);
+    if (code !== '0') {
+      setStatus('err', code === '130' ? 'interrupted — progress saved' : `exited (code ${code}) — check output`);
+    } else if (result && result.attention) {
+      const details = [];
+      if (result.manual_review) details.push(`${result.manual_review} need review`);
+      if (result.failed) details.push(`${result.failed} failed`);
+      if (result.validation_failures) details.push(`${result.validation_failures} PDF validation failures`);
+      setStatus('warn', `finished — needs attention (${details.join(', ')})`);
+    } else if (result) {
+      setStatus('ok', 'finished — no issues reported');
+    } else {
+      setStatus('warn', 'finished — check output (no run summary)');
+    }
     document.querySelectorAll('button').forEach(b => b.disabled = false);
     es.close(); es = null;
   });
