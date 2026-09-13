@@ -1,0 +1,3 @@
+Capital One bank and card statements, tax forms and letters
+
+See README.md for setup and supervised pilot instructions.
