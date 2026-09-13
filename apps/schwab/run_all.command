@@ -14,7 +14,7 @@ if [ ! -x "$PY" ]; then
     exit 1
 fi
 
-echo 'FULL download of M^&T Bank statements, tax forms, and insurance documents'
+echo 'FULL download of Charles Schwab statements, tax forms, letters, trade confirmations, and reports'
 echo 'Make sure that account'\''s signed-in browser is still OPEN'
 
 "$PY" schwab_docs.py --all $CFG

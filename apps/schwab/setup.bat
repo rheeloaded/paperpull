@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-echo === M^&T Bank Documents setup ===
+echo === Charles Schwab Documents setup ===
 
 set "PYEXE="
 where py >nul 2>&1 && set "PYEXE=py -3"

@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "=== M^&T Bank Documents setup ==="
+echo "=== Charles Schwab Documents setup ==="
 
 PY3="$(command -v python3 || true)"
 if [ -z "$PY3" ]; then
@@ -30,4 +30,4 @@ fi
 # offers the download then, when somebody is present to agree to it.
 
 echo
-echo "Setup complete. Next step: ./login.command and sign in to M^&T Bank Documents."
+echo "Setup complete. Next step: ./login.command and sign in to Charles Schwab Documents."

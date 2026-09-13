@@ -16,9 +16,11 @@ Deleting a downloaded file does not reset that history.
 
 ## Validation status
 
-Ported to the current upstream core. Automated checks are recorded with the
-change; a fresh supervised live pilot of this port is still required.
-No claim is made that all account variants or document types have been tested.
+Uses current upstream core, standard launchers, a provider-local Python
+environment, and a separate browser profile on port 9245.
+Automated tests cover parsing, filing, document identity, browser configuration,
+and request/control guards. Start with a small pilot and inspect its results.
+
 
 ## Maintenance
 
