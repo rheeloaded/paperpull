@@ -807,11 +807,11 @@ class App:
             f"Latest date processed:     {dates[-1] if dates else '-'}",
             "",
         ]))
+        atomic_write_text(
+            self.paths.root / "new-this-run.txt",
+            f"# {len(new_files)} file(s) downloaded on this run "
+            f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
         if new_files:
-            atomic_write_text(
-                self.paths.root / "new-this-run.txt",
-                f"# {len(new_files)} file(s) downloaded on this run "
-                f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
             print(f"\n{len(new_files)} NEW file(s) downloaded this run "
                   f"(listed in new-this-run.txt).")
 
