@@ -19,6 +19,8 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core.run_reporting import report_run_result
+
 import argparse
 import logging
 import random
@@ -980,6 +982,7 @@ class App:
         if new_files:
             print(f"\n{len(new_files)} NEW file(s) downloaded this run "
                   f"(listed in new-this-run.txt).")
+        report_run_result(s)
 
 
 # ---------------------------------------------------------------------------
@@ -1052,6 +1055,7 @@ def main(argv=None):
             return 0
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
+        return 130
     finally:
         app.progress.save()
         app.discovery.save()
