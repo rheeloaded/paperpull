@@ -3,6 +3,13 @@
 This provider reads documents from a browser where you sign in yourself.
 Passwords and verification codes are never handled by the downloader.
 
+It clicks nothing except the "continue session" dialog. Documents are found
+by calling Capital One's own document search, which takes its parameters as
+a POST body holding only document categories, a date range and an account
+reference. That is a query, not a change to anything. The PDF itself is
+fetched with a plain GET, and every request is checked inside the browser
+against Capital One's own hosts before it is sent.
+
 ## Setup and use
 
 1. Run `setup.command` (macOS) or `setup.bat` (Windows).

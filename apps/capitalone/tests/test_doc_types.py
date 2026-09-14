@@ -296,3 +296,20 @@ def test_the_documents_url_is_not_read_as_signed_out():
     class _Q(_P):
         url = "https://verified.capitalone.com/auth/signin"
     assert site.looks_signed_out(_Q())
+
+
+# -- the verb "edit" must not match inside the noun "Credit" ------------------
+
+def test_a_credit_card_statement_is_never_refused():
+    """"edit" without a leading word boundary matched inside "Credit", so the
+    one label a credit-card provider must never refuse was refused. Same shape
+    as the core bug fixed in 0.17.1."""
+    for label in ("Credit Card Statement", "Credit Card Monthly Statement",
+                  "Notice", "Account Notice"):
+        assert site.is_safe_control(label), label
+
+
+def test_the_edit_verb_is_still_refused_on_its_own():
+    for label in ("Edit", "Edit profile", "Edit nickname", "Change address",
+                  "Update contact info"):
+        assert not site.is_safe_control(label), label

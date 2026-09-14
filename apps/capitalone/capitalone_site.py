@@ -94,7 +94,12 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"check\s+order|order\s+checks?|stop\s+(a\s+)?(payment|check)|"
 
     r"generate\b|request\b|manage\b|"
-    r"change\s+|edit\s+|update\s+|set\s+up|enroll|enable|disable|delete|remove|"
+    # Word boundaries on the verb stems. Without the leading \b, "edit"
+    # matches inside "Credit", and "Credit Card Statement" is the one label
+    # a credit-card provider must never refuse. Same shape as the core bug
+    # fixed in 0.17.1 and the "elect" inside "Select" one in anthem.
+    r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
+    r"set\s+up|enroll|enable|disable|delete|remove|"
     r"contact\s+info|\baddress\b|password|username|"
     r"paperless|delivery\s+(preference|option)|alerts?\b|nicknames?|"
 
@@ -103,7 +108,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
 
 SAFE_DOC_CONTROL_RE = re.compile(
     r"(download|\bview\b|\bopen\b|save|print|pdf|statement|document|"
-    r"1099|1098|tax\s+form|letter|search|filter|date\s+range|year\b|"
+    r"1099|1098|tax\s+form|letter|notice|search|filter|date\s+range|year\b|"
     r"still\s+here|continue\s+session)", re.I)
 
 
