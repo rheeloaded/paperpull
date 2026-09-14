@@ -18,7 +18,12 @@ def test_empty_run_replaces_previous_download_list(entry, tmp_path):
     tree = ast.parse(entry.read_text(encoding="utf-8-sig"))
     method = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
                   and n.name == "write_run_summary")
-    scope = {"atomic_write_text": atomic_write_text, "now_iso": now_iso}
+    # The method is exec'd in isolation, so every name it reaches for must be
+    # supplied here. report_run_result arrived with #19 after this test was
+    # written, and every app failed until it was stubbed. It prints a
+    # counts-only line for the panel, which this test does not care about.
+    scope = {"atomic_write_text": atomic_write_text, "now_iso": now_iso,
+             "report_run_result": lambda stats: None}
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(entry), "exec"), scope)
     stats = defaultdict(int, started="2026-01-01T00:00:00", mode="all",
                         dates=[], dates_processed=[], new_files=["Statements/synthetic.pdf"])
