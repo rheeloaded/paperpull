@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (23)
+## Supported (24)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -34,6 +34,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements | Payroll |
 | [`usaa`](apps/usaa) | USAA | Statements | Bank / insurance |
+| [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Card |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Telecom |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | Brokerage |

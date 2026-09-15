@@ -12,7 +12,7 @@ of clicking through each site by hand.
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Twenty-three providers are supported today, all built on the same pattern:
+Twenty-four providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -36,6 +36,7 @@ Twenty-three providers are supported today, all built on the same pattern:
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements** | Per-employer tenant; JSON-API, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
+| [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Ported; fresh live pilot pending |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | |
