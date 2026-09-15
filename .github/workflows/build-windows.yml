@@ -1,0 +1,93 @@
+# Builds the Windows package on a clean runner, so a release never depends on
+# something that only exists on one machine, and hands the installer to
+# SignPath for signing once the project holds a SignPath Foundation
+# certificate. Until then the signing step is skipped and the unsigned
+# installer is the artifact, same as a local build.
+#
+# Nothing here publishes. The artifacts sit on the workflow run and a person
+# attaches them to a release by hand, so a tag push cannot ship anything on
+# its own.
+
+name: Windows package
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the package and installer
+        run: python packaging/build_windows.py --installer
+
+      - name: Refuse to continue without an installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Filter "PaperPull-*-setup.exe"
+          if (-not $exe) { throw "Inno Setup produced no installer" }
+          Write-Output $exe.Name
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | Where-Object { $_.Name -like "PaperPull-*.exe" -or $_.Name -like "PaperPull-*.zip" } |
+            Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+            Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          Get-Content dist/SHA256SUMS.txt
+
+      # SignPath signs what this step uploads, so it holds the installer and
+      # nothing else. upload-artifact wraps it in a zip, which is what the
+      # SignPath artifact configuration expects (a zip holding one PE file).
+      - name: Upload the unsigned installer
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperPull-installer-unsigned
+          path: dist/PaperPull-*-setup.exe
+          if-no-files-found: error
+
+      - name: Upload the portable zip and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperPull-portable
+          path: |
+            dist/PaperPull-*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      # Runs only once the repository carries the SignPath organization id
+      # as a variable. Before that the job ends here with an unsigned build.
+      - name: Sign the installer (SignPath Foundation)
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: paperpull
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist/signed
+
+      - name: Upload the signed installer
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperPull-installer-signed
+          path: dist/signed/**
+          if-no-files-found: error
