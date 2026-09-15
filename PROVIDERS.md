@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (24)
+## Supported (25)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -30,6 +30,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
+| [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Brokerage |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements | Payroll |
