@@ -48,8 +48,9 @@ it keep whatever signature their publishers gave them.
 
 ## Privacy
 
-This program does not transfer any information to other networked systems
-unless specifically requested by the user.
+The policy is [PRIVACY.md](../PRIVACY.md). In one sentence, this program does
+not transfer any information to other networked systems unless specifically
+requested by the user.
 
 Concretely, the only sites it contacts are the providers a user signs in to
 themselves, and only when the user starts a run. It does not phone home,
