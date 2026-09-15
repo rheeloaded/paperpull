@@ -35,11 +35,10 @@ URLS = {
     "statements": f"{BASE}/myaccount/s/bill-and-payment-history",
     "documents_alt": f"{BASE}/myaccount/s/",
 }
-DOCUMENT_URL_CANDIDATES = [
-    URLS["documents"],
-    URLS["statements"],
-    URLS["home"],
-]
+# Only the history itself. The home page was on this list once, and landing
+# there counted as success, so a run could report zero bills from a page that
+# never had any.
+DOCUMENT_URL_CANDIDATES = [URLS["documents"]]
 
 LOGIN_URL_MARKERS = [
     "/login", "/signin", "/sign-in", "/site-signin", "/auth", "/mfa",
@@ -61,7 +60,11 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"enroll|unenroll|sign\s+up|start\s+service|stop\s+service|"
     r"transfer\s+service|disconnect|reconnect|new\s+service|move\s+service|"
     r"donate|contribution|round\s*up|"
-    r"enable|disable|activate|deactivate|change\b|edit\b|update\b|modify|"
+    # Word boundaries on both sides of the verb stems. "edit" with only a
+    # trailing boundary matches the end of "Credit", and a bill row that
+    # carries a credit is exactly the sort of label this must let through.
+    r"enable|disable|activate|deactivate|\bchang(e|es|ed|ing)\b|"
+    r"\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|modify|"
     r"set\s+up|delete|remove|cancel|close\s+account|"
     r"password|profile\b|settings|preferences|"
     r"confirm|submit|agree|accept|authorize|enroll|"
@@ -84,7 +87,57 @@ def is_safe_control(label: str) -> bool:
         return False
     if FORBIDDEN_CONTROL_RE.search(text):
         return False
+    # The settings and sign-in vocabulary every provider shares lives in core,
+    # so a phrasing this list never thought of is still refused.
+    from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+    if SETTINGS_CONTROL_RE.search(text) or AUTH_CONTROL_RE.search(text):
+        return False
     return bool(SAFE_DOC_CONTROL_RE.search(text))
+
+
+def control_label(el) -> str:
+    """What a person would read on this control. Inner text first, then the
+    accessible name, then the title, so a bare icon still has a label to be
+    judged by and an unlabeled one is refused."""
+    for getter in (lambda: el.inner_text(timeout=1500),
+                   lambda: el.get_attribute("aria-label"),
+                   lambda: el.get_attribute("title")):
+        try:
+            text = (getter() or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            return re.sub(r"\s+", " ", text)
+    return ""
+
+
+def all_labels(el) -> str:
+    """Every label a control carries, joined. The page picker's own text is
+    the current page number and its purpose is in the aria-label, so a guard
+    that reads only one of them cannot judge it."""
+    parts = []
+    for getter in (lambda: el.inner_text(timeout=1500),
+                   lambda: el.get_attribute("aria-label"),
+                   lambda: el.get_attribute("title"),
+                   lambda: el.get_attribute("label")):
+        try:
+            text = (getter() or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            parts.append(re.sub(r"\s+", " ", text))
+    return " | ".join(parts)
+
+
+def is_page_picker(label: str) -> bool:
+    """The history's page selector, and nothing that commits anything."""
+    label = (label or "").strip()
+    return bool(re.search(r"jump\s+to|page", label, re.I)) and not (
+        FORBIDDEN_CONTROL_RE.search(label))
+
+
+def is_page_option(label: str, target_page: int) -> bool:
+    return (label or "").strip() == str(target_page)
 
 
 def is_safe_url(url: str) -> bool:
@@ -108,7 +161,9 @@ def is_safe_url(url: str) -> bool:
 SECURITY_CHALLENGE_MARKERS = [
     "enter the code", "verification code", "6-digit", "two-factor",
     "two-step", "authenticator", "confirm your identity", "verify your identity",
-    "we sent a code", "device approval", "approve this login", "unusual",
+    # "unusual" on its own is not a marker. A utility tells you your usage
+    # is unusually high on the same page as the bills.
+    "we sent a code", "device approval", "approve this login", "unusual activity",
     "are you a robot", "captcha", "let's verify", "check your email",
     "check your phone", "your session has expired", "log back in",
 ]
@@ -197,33 +252,69 @@ def looks_signed_out(page) -> bool:
     return any(marker in url for marker in LOGIN_URL_MARKERS)
 
 
-def detect_security_challenge(page) -> bool:
-    """Return True if page presents a 2FA or CAPTCHA challenge."""
+def detect_security_challenge(page) -> Optional[str]:
+    """Name the 2FA, CAPTCHA or throttling prompt on screen, or None.
+
+    Reads the visible text rather than the page source. The source of a
+    Salesforce portal carries every string its scripts might ever show, so
+    "verification code" is in there on a perfectly normal day."""
     try:
-        content = page.content().lower()
-        return any(m in content for m in SECURITY_CHALLENGE_MARKERS)
+        title = (page.title() or "").lower()
+    except Exception:
+        title = ""
+    try:
+        body = page.locator("body").inner_text(timeout=5000).lower()
+    except Exception:
+        body = ""
+    hay = title + "\n" + body[:2000]
+    for m in SECURITY_CHALLENGE_MARKERS:
+        if m in hay:
+            return f"Security challenge detected: '{m}'"
+    for m in RATE_LIMIT_MARKERS:
+        if m in hay:
+            return f"Possible rate limiting detected: '{m}'"
+    return None
+
+
+def on_documents_page(page) -> bool:
+    """On the bill history itself, signed in, and not a 404."""
+    try:
+        url = (page.url or "").lower()
+        title = (page.title() or "").lower()
     except Exception:
         return False
+    return ("bill-and-payment-history" in url and is_safe_url(url)
+            and not looks_signed_out(page)
+            and "page not found" not in title and "404" not in title)
 
 
 def goto_documents(page) -> bool:
-    """Navigate to PG&E billing/statements area."""
-    # Re-use the active tab if already signed in and not on a 404 page
-    current_url = page.url or ""
-    current_title = (page.title() or "").lower()
-    if is_safe_url(current_url) and not looks_signed_out(page):
-        if "page not found" not in current_title and "404" not in current_title:
-            return True
+    """Land on the bill history.
 
+    The tab the user signed in on is reused. If it already shows the history
+    nothing moves. Otherwise the history URL is tried, and if the portal
+    answers that with its own 404 page (it has), the tab is left where it was
+    so the user can open the history by hand, as login.bat asks them to."""
+    if on_documents_page(page):
+        return True
+    start_url = page.url or ""
     for url in DOCUMENT_URL_CANDIDATES:
+        if not is_safe_url(url):
+            continue
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            title = (page.title() or "").lower()
-            if not looks_signed_out(page) and "page not found" not in title and "404" not in title:
-                return True
+            for _ in range(10):
+                if on_documents_page(page):
+                    return True
+                page.wait_for_timeout(500)
+        except Exception as e:
+            log.info("documents URL %s failed: %s", url, e)
+    if is_safe_url(start_url) and not looks_signed_out(page) and start_url != page.url:
+        try:
+            page.goto(start_url, wait_until="domcontentloaded", timeout=15000)
         except Exception:
-            continue
-    return is_safe_url(page.url or "") and not looks_signed_out(page)
+            pass
+    return on_documents_page(page)
 
 
 def get_pagination_pages(page) -> List[int]:
@@ -248,6 +339,12 @@ def goto_page_number(page, target_page: int) -> bool:
         curr_val = cb.evaluate("el => el.value")
         if curr_val == target_page or str(curr_val) == str(target_page):
             return True
+        # The only two clicks outside a bill row. The picker must call itself
+        # a page jump, and the option must be nothing but a page number, so a
+        # combobox that turned into something else is left alone.
+        if not is_page_picker(all_labels(cb)):
+            log.info("pagination control is not a page picker: %r", all_labels(cb))
+            return False
         cb.click()
         time.sleep(0.4)
         opt = page.query_selector(f"lightning-base-combobox-item[data-value='{target_page}']")
@@ -257,7 +354,7 @@ def goto_page_number(page, target_page: int) -> bool:
                 if (o.inner_text() or "").strip() == str(target_page):
                     opt = o
                     break
-        if opt:
+        if opt and is_page_option(control_label(opt), target_page):
             opt.click()
             time.sleep(1.5)
             return True
@@ -294,6 +391,19 @@ def collect_download_docs(page) -> List[dict]:
     return results
 
 
+def pick_document_control(candidates) -> Optional[object]:
+    """The first control in a bill row that reads as a document action and
+    nothing else. A bill row also holds Pay, and a plain "first link in the
+    row" once pointed at it. Every click on a row goes through here."""
+    for el in candidates or []:
+        label = control_label(el)
+        if is_safe_control(label):
+            return el
+        if label:
+            log.debug("skipping control %r", label)
+    return None
+
+
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
     """Download a bill PDF for specified doc dictionary handling downloads, popups, fetches, and network responses."""
     try:
@@ -302,23 +412,45 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
         if target_page > 1:
             goto_page_number(page, target_page)
         link = None
+        want_date = doc.get("date_text") or doc.get("date") or ""
 
-        # 1. First check row by row_index
+        # The row is found by its position from discovery, then checked
+        # against the bill's own date, so a row that shifted since (a new
+        # bill posted, a header row counted) cannot hand over the wrong PDF.
         rows = page.query_selector_all(FALLBACK["doc_row"])
         if 0 <= idx < len(rows):
-            link = rows[idx].query_selector("a:has-text('View Bill PDF'), button:has-text('View Bill PDF'), a, button")
+            row = rows[idx]
+            try:
+                row_text = row.inner_text() or ""
+            except Exception:
+                row_text = ""
+            if want_date and parse_date(row_text) != want_date:
+                log.info("row %d on page %d is dated %s, wanted %s",
+                         idx, target_page, parse_date(row_text) or "?", want_date)
+                row = None
+            if row is not None:
+                link = pick_document_control(row.query_selector_all("a, button"))
 
-        # 2. Fallback to direct pdf_links index if row query did not find link
+        # Fallback if the rows moved. Every View Bill PDF control on the page,
+        # kept only if the row it sits in carries this bill's date.
         if not link:
-            pdf_links = page.query_selector_all("a:has-text('View Bill PDF'), button:has-text('View Bill PDF'), a:has-text('View PDF')")
-            if 0 <= idx < len(pdf_links):
-                link = pdf_links[idx]
+            for cand in page.query_selector_all(FALLBACK["download_control"]):
+                try:
+                    around = cand.evaluate(
+                        "el => (el.closest('tr, [role=row], li') || el.parentElement || el).innerText || ''")
+                except Exception:
+                    around = ""
+                if want_date and parse_date(around) != want_date:
+                    continue
+                link = pick_document_control([cand])
+                if link:
+                    break
 
         if not link:
             print(f"  [site] No download link found for doc index {idx} on page {target_page}")
             return False
 
-        print(f"  [site] Found link for index {idx} (page {target_page}). Preparing capture...")
+        print(f"  [site] Found '{control_label(link)}' for index {idx} (page {target_page}). Preparing capture...")
 
         # Direct href check if present
         try:

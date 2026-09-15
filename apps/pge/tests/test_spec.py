@@ -66,13 +66,16 @@ def test_document_page_number_roundtrip():
 
 
 def test_in_scope_year_filtering():
+    # _in_scope reads only args and config, so the check runs on a bare App
+    # rather than one built from a config.json the repo does not ship.
     import pge_docs
-    parser = pge_docs.build_parser()
-    args = parser.parse_args(["--year", "2025"])
-    app = pge_docs.App(args)
-    
+    args = pge_docs.build_parser().parse_args(["--year", "2025"])
+    app = pge_docs.App.__new__(pge_docs.App)
+    app.args = args
+    app.config = {"document_types": ["Statement", "Tax Document"]}
+
     doc_2025 = pge_docs.Document(title="Statement", category="Statement", date="2025-06-01")
     doc_2026 = pge_docs.Document(title="Statement", category="Statement", date="2026-06-01")
-    
+
     assert app._in_scope(doc_2025) is True
     assert app._in_scope(doc_2026) is False

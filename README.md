@@ -30,7 +30,7 @@ Twenty-six providers are supported today, all built on the same pattern:
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
-| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Pending review |
+| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history, fresh live pilot pending |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported; fresh live pilot pending |
