@@ -1,0 +1,3 @@
+U.S. Bank credit-card statements
+
+See README.md for setup and supervised pilot instructions.
