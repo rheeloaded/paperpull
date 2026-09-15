@@ -335,7 +335,8 @@ signed binary can only ever come from code that is in this repository.
 This program does not transfer any information to other networked systems
 unless specifically requested by the user. The only sites it contacts are the
 providers you sign in to yourself, and the only download it ever offers is a
-browser, at sign-in, with your agreement.
+browser, at sign-in, with your agreement. The full statement is
+[PRIVACY.md](PRIVACY.md).
 
 Team roles, current status and the full policy are in
 [docs/code-signing.md](docs/code-signing.md).
