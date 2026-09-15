@@ -51,6 +51,9 @@ def templates(tmp_path, monkeypatch):
         (d / "config.json").write_text('{"owner": "Someone Real"}', encoding="utf-8")
         (d / ("%s-browser-profile" % slug)).mkdir()
         (d / ("%s-browser-profile" % slug) / "Cookies").write_bytes(b"secret")
+        # the double-click launchers a checkout ships
+        (d / "setup.bat").write_text("@echo off", encoding="utf-8")
+        (d / "login.command").write_text("#!/bin/bash", encoding="utf-8")
     monkeypatch.setattr(app_module, "_templates_root", lambda: root)
     monkeypatch.setattr(app_module, "_provider_notes",
                         lambda: {"bank": {"documents": "Statements", "category": "Bank"}})
@@ -130,6 +133,29 @@ def test_nothing_personal_from_the_template_is_copied(templates, settings, tmp_p
     assert not (d / "bank-browser-profile").exists()
     cfg = json.loads((d / "config.json").read_text(encoding="utf-8"))
     assert "Someone Real" not in json.dumps(cfg), "the template's real config leaked"
+
+
+def test_a_checkout_keeps_the_launchers_in_a_new_install(templates, settings, tmp_path):
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    d = home / "Bank Statements"
+    assert (d / "setup.bat").exists()
+    assert (d / "login.command").exists()
+
+
+def test_the_packaged_app_leaves_the_launchers_out(templates, settings, tmp_path, monkeypatch):
+    """Inside the package there is no per-app venv and no system Python, so
+    every launcher fails the moment it is double-clicked. A new user opening
+    the folder and trying setup.bat first is the exact path they would take,
+    so the files are not there to try."""
+    monkeypatch.setattr(app_module, "_is_packaged", lambda: True)
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    d = home / "Bank Statements"
+    assert not (d / "setup.bat").exists()
+    assert not (d / "login.command").exists()
+    assert (d / "bank_docs.py").exists(), "the code itself must still be copied"
+    assert (d / "config.json").exists()
 
 
 def test_an_existing_install_is_never_overwritten(templates, settings, tmp_path):

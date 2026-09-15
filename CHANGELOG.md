@@ -7,6 +7,80 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.19.0-beta.1] - 2026-09-15
+
+A beta, because it is the first release with an installer. The apps themselves
+are as tested as ever. The installer and the way it upgrades an existing set
+of downloads are new, and 1.0 waits until they have been used by people other
+than the author.
+
+### Added
+- **A Windows installer.** `PaperPull-0.19.0-beta.1-setup.exe` puts the
+  control panel, the shared core and every provider on a machine with no
+  Python on it. Nothing is frozen, it carries the official embeddable CPython
+  and the same code as this repo. A zip of the same folder is there for
+  anyone who would rather not run an installer.
+- **A first-run screen.** A brand-new user is asked where the downloads
+  should live and which providers they hold accounts with, and the panel
+  creates an install for each. Someone with an existing set of downloads
+  points the panel at that folder instead and keeps everything.
+- **Upgrade in place.** `tools/upgrade.py` brings an install from any earlier
+  version onto the current code without losing its history. It fixes the
+  `localhost` CDP address, adds the settings a newer version expects, and
+  backs up the config first. `tools/migrate.py` exports and imports the
+  download history so a fresh install never re-downloads what an old one
+  already has.
+- **Remove a provider from the panel.** The folder is moved aside, nothing
+  is deleted, and it can be added back.
+- **Use the browser you already have.** Every app looks for Edge, Chrome,
+  Brave, Vivaldi or Opera before offering the 400 MB Playwright download,
+  and offers it only at sign-in when nothing else answers. `browser` in the
+  config picks `auto`, `installed` or `bundled`.
+- **Four providers**, taking the count to 26. Capital One (bank and card
+  statements, tax forms, letters), U.S. Bank (credit-card statements) and
+  Charles Schwab (statements, tax forms, letters, trade confirmations,
+  reports, for brokerage and charitable accounts), all contributed by David
+  Rudnick. PG&E (monthly billing statements), contributed by Champ. Each is
+  marked in the provider table as ported with a fresh live pilot pending.
+- **The panel says how a run went.** Every app prints a counts line at the
+  end that the panel reads, so a run that downloaded nothing, failed
+  something, or left files for manual review is told apart from a clean one.
+  Contributed by David Rudnick, along with the Output and Status tabs staying
+  usable while a run is going and a migration for legacy Chase keys.
+- **Status tab** in the panel, showing how current each archive is and which
+  periods are missing from the middle.
+
+### Fixed
+- **Robinhood downloads.** The site changed the download link to a JSON
+  answer carrying a pre-signed storage URL. The app follows it now and
+  checks the bytes are a PDF before keeping them.
+- **Eight bugs from a line-by-line review** of the new code before 1.0,
+  among them a filename shortener that could produce an empty name, a merge
+  that shared state between the two histories it was merging, and a status
+  tracker that reported a change of statement schedule as missing documents.
+- **The `new-this-run.txt` list is replaced on every run**, so a run that
+  downloaded nothing no longer shows the previous run's files. Contributed
+  by David Rudnick.
+- **Every contributed provider had the same two gaps**, fixed on the way in.
+  The verb `edit` was matched without a leading word boundary, so it matched
+  inside `Credit` and refused `Credit Card Statement` on a credit-card
+  provider. And the run-list and run-result changes above had landed after
+  the branches were cut.
+- **PG&E** needed more. The click that fetched a bill could fall back to the
+  first link in the row, which is where Pay sits. Every row click now goes
+  through the label guard and the row is matched to the bill's date first.
+  Landing on any PG&E page counted as reaching the bill history. The port
+  collided with Anthem's. The command flow is rebuilt on the pattern the
+  other apps share.
+- The status table's numbers line up under their headings, and the example
+  path in the setup screen shows single backslashes.
+- **Installs created by the packaged app no longer carry the double-click
+  launchers.** They call a per-app venv the package does not have, so every
+  one of them failed when clicked. The panel does their job.
+
+### Changed
+- The shared core is 0.1.6.
+
 ## [0.18.0] - 2026-09-09
 
 ### Added

@@ -400,6 +400,16 @@ def _templates_root() -> Path | None:
     return None
 
 
+def _is_packaged() -> bool:
+    """True inside the built package (templates/apps and no apps/ checkout).
+    A checkout has Python and per-app venvs, the package has neither."""
+    return ((HERE.parent / "templates" / "apps").is_dir()
+            and not (HERE.parent / "apps").is_dir())
+
+
+LAUNCHER_SUFFIXES = (".bat", ".command")
+
+
 def _provider_notes() -> dict:
     """What each app downloads, from the table in PROVIDERS.md, keyed by slug.
     Best effort. A missing file or a changed table just means no note."""
@@ -462,6 +472,11 @@ def create_install(root: Path, slug: str) -> str:
     dst = root / info["folder"]
     if dst.exists():
         return "exists"
+    # The double-click launchers call .venv\Scripts\python.exe, which the
+    # packaged app never has, and setup.bat wants a system Python it cannot
+    # assume. Copied into a packaged install they are a folder of files that
+    # all fail, right where a new user goes looking. The panel does their job.
+    skip_launchers = _is_packaged()
     for item in src.rglob("*"):
         rel = item.relative_to(src)
         # Exact names, plus anything profile-shaped. A profile folder is
@@ -471,6 +486,8 @@ def create_install(root: Path, slug: str) -> str:
         if any(part in _TEMPLATE_SKIP or "browser-profile" in part.lower()
                or part.lower().endswith(".pdf")
                for part in rel.parts):
+            continue
+        if skip_launchers and item.suffix.lower() in LAUNCHER_SUFFIXES:
             continue
         if item.is_dir():
             (dst / rel).mkdir(parents=True, exist_ok=True)
