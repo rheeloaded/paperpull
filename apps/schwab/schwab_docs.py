@@ -15,6 +15,7 @@ from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import schwab_site as site
 from paperpull_core.models import State
+from paperpull_core.run_reporting import report_run_result
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -185,7 +186,6 @@ class App:
 
             live = [p for p in ctx.pages if not p.is_closed()]
             schwab = [p for p in live if site.is_safe_url(p.url or "")]
-            schwab = schwab or [p for p in live if site.is_safe_url(p.url or "")]
             self._work_page = schwab[0] if schwab else ctx.new_page()
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -742,13 +742,14 @@ class App:
 
 
 
+        atomic_write_text(
+            self.paths.root / "new-this-run.txt",
+            f"# {len(new_files)} file(s) downloaded on this run "
+            f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
         if new_files:
-            atomic_write_text(
-                self.paths.root / "new-this-run.txt",
-                f"# {len(new_files)} file(s) downloaded on this run "
-                f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
             print(f"\n{len(new_files)} NEW file(s) downloaded this run "
                   f"(listed in new-this-run.txt).")
+        report_run_result(s)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -813,6 +814,7 @@ def main(argv=None):
             return 0
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
+        return 130
     finally:
         app.progress.save()
         app.discovery.save()

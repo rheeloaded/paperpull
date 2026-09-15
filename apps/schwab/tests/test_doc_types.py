@@ -248,3 +248,15 @@ def test_the_documents_url_is_not_read_as_signed_out():
     class _Q(_P):
         url = "https://client.schwab.com/Areas/Access/Login?SessionTimeOut=y"
     assert site.looks_signed_out(_Q())
+
+
+def test_a_verb_stem_inside_another_word_is_not_a_refusal():
+    # "edit" sits inside "Credit" and "update" inside nothing common, but the
+    # unanchored stems refused any label containing them. The verbs
+    # themselves must still be refused.
+    for label in ["Line of Credit Statement", "View Credit Card Statement",
+                  "Accredited Investor Letter"]:
+        assert site.is_safe_control(label), label
+    for label in ["Edit nickname", "Change delivery option", "Update address",
+                  "Editing preferences", "Changed mind"]:
+        assert not site.is_safe_control(label), label

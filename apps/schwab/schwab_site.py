@@ -94,7 +94,11 @@ FORBIDDEN_CONTROL_RE = re.compile(
 
 
     r"generate\b|request\b|"
-    r"change\s+|edit\s+|update\s+|set\s+up|enroll|enable|disable|delete|remove|"
+    # Word boundaries on the verb stems. Without the leading \b, "edit"
+    # matches inside "Credit", and a label like "Line of Credit Statement"
+    # would be refused. Same fix as core 0.17.1 and the other providers.
+    r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
+    r"set\s+up|enroll|enable|disable|delete|remove|"
     r"beneficiar|contact\s+info|\baddress\b|password|username|"
     r"paperless|delivery\s+(preference|option)|alerts?\b|nicknames?|"
     r"cost\s+basis\s+method|lot\s+selection|tax\s+lot\s+optimizer|"
