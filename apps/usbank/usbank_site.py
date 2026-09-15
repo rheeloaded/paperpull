@@ -80,7 +80,12 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"lock\s+card|unlock\s+card|freeze|activate|replace\s+card|close\s+account|"
     r"travel\s+notification|request\b|increase\b|"
 
-    r"change\s+|edit\s+|update\s+|set\s+up|enroll|enable|disable|delete|remove|"
+    # Word boundaries on the verb stems. Without the leading \b, "edit"
+    # matches inside "Credit", and "Credit Card Statement" is the one label a
+    # credit-card provider must never refuse. Same fix as core 0.17.1, anthem
+    # and capitalone.
+    r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
+    r"set\s+up|enroll|enable|disable|delete|remove|"
     r"beneficiar|payee|contact\s+info|password|username|"
     r"paperless|delivery\s+preference|alerts?\s+settings|"
 

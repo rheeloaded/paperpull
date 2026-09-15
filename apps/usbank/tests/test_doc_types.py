@@ -325,3 +325,18 @@ def test_real_throttling_is_still_detected():
                  "We're experiencing technical difficulties",
                  "unusual traffic from your network"]:
         assert any(rx.search(text) for rx in site.RATE_LIMIT_MARKERS), text
+
+
+# -- the verb "edit" must not match inside the noun "Credit" ------------------
+
+def test_a_credit_card_statement_is_never_refused():
+    """"edit" without a leading word boundary matched inside "Credit", so the
+    one label a credit-card provider must never refuse was refused. Same fix
+    as core 0.17.1, anthem and capitalone."""
+    for label in ("Credit Card Statement", "Credit Card Monthly Statement"):
+        assert site.is_safe_control(label), label
+
+
+def test_the_edit_verb_is_still_refused_on_its_own():
+    for label in ("Edit", "Edit profile", "Change address", "Update contact info"):
+        assert not site.is_safe_control(label), label

@@ -1,6 +1,8 @@
 """U.S. Bank credit-card statements."""
 from __future__ import annotations
 
+from paperpull_core.run_reporting import report_run_result
+
 import argparse
 import logging
 import random
@@ -775,13 +777,14 @@ class App:
 
 
 
+        atomic_write_text(
+            self.paths.root / "new-this-run.txt",
+            f"# {len(new_files)} file(s) downloaded on this run "
+            f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
         if new_files:
-            atomic_write_text(
-                self.paths.root / "new-this-run.txt",
-                f"# {len(new_files)} file(s) downloaded on this run "
-                f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
             print(f"\n{len(new_files)} NEW file(s) downloaded this run "
                   f"(listed in new-this-run.txt).")
+        report_run_result(s)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -845,6 +848,7 @@ def main(argv=None):
             return 0
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
+        return 130
     finally:
         app.progress.save()
         app.discovery.save()
