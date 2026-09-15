@@ -20,6 +20,8 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core.run_reporting import report_run_result
+
 import argparse
 import logging
 import random
@@ -113,6 +115,44 @@ class Document:
         return cls(**d)
 
 
+def migrate_legacy_keys(records: dict) -> int:
+    """Upgrade pre-last-four keys using the account stored in each record.
+
+    Never infer a second card's completion from a truncated key. Only the
+    record's full identity can transfer completion, and unknown keys stay put.
+    """
+    changed = 0
+    terminal = {State.COMPLETED.value, State.PDF_VERIFIED.value,
+                State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value}
+
+    def done(record):
+        return bool(record.get("downloaded_ok") or record.get("state") in terminal)
+
+    def identity(record):
+        return tuple(record.get(field, "") for field in
+                     ("category", "date", "title", "account", "document_id"))
+
+    for old_key, record in list(records.items()):
+        doc = Document.from_dict(record)
+        if doc.document_id:
+            continue
+        legacy = (f"{doc.category}:{doc.date}:"
+                  f"{sanitize_component(doc.title)[:60]}:"
+                  f"{sanitize_component(doc.account or '')[:40]}")
+        new_key = doc.key
+        if old_key != legacy or old_key == new_key:
+            continue
+        current = records.get(new_key)
+        if current is not None and identity(current) != identity(record):
+            continue
+        # A fresh discovery or failed retry must not erase completed history.
+        winner = record if current is None or (done(record) and not done(current)) else current
+        records[new_key] = dict(winner)
+        del records[old_key]
+        changed += 1
+    return changed
+
+
 class App:
     def __init__(self, args):
         self.args = args
@@ -133,6 +173,9 @@ class App:
         self.discovery = JsonStore(self.paths.discovery_json, self.paths.backups)
         self.progress.load()
         self.discovery.load()
+        for store in (self.progress, self.discovery):
+            if migrate_legacy_keys(store.data):
+                store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups)
         self.rules = doc_types.load_rules()
@@ -831,13 +874,14 @@ class App:
         # A plain list of exactly the files downloaded THIS run (all new,
         # since already-downloaded documents are skipped). Handy for knowing
         # what to import into paperless-ngx, and safe to ignore/delete.
+        atomic_write_text(
+            self.paths.root / "new-this-run.txt",
+            f"# {len(new_files)} file(s) downloaded on this run "
+            f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
         if new_files:
-            atomic_write_text(
-                self.paths.root / "new-this-run.txt",
-                f"# {len(new_files)} file(s) downloaded on this run "
-                f"({s['ended']}):\n" + "\n".join(sorted(new_files)) + "\n")
             print(f"\n{len(new_files)} NEW file(s) downloaded this run "
                   f"(listed in new-this-run.txt).")
+        report_run_result(s)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -901,6 +945,7 @@ def main(argv=None):
             return 0
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
+        return 130
     finally:
         app.progress.save()
         app.discovery.save()

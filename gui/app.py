@@ -27,10 +27,13 @@ import json
 import os
 from datetime import date, datetime
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
+
+import run_result
 
 from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -131,6 +134,9 @@ def _looks_like_installs(root: Path) -> int:
 # Resolved once. Importing by path is not free and the panel can be
 # refreshed repeatedly. False means looked for and not found.
 _STATUS_MOD = None
+# Apps with a downloader process alive right now. Removing one of these
+# would pull the folder out from under a run.
+_RUNNING: set = set()
 
 # action -> argparse flags. run_all / resume get --yes so they don't block on a
 # confirmation prompt. Login is resolved per-app (open-browser vs login).
@@ -367,6 +373,242 @@ async def api_root_set(request: Request):
             "settings_file": str(_settings_path())}
 
 
+# -- setting up from nothing --------------------------------------------------
+#
+# A brand-new user has nothing to point at. Asking them where their
+# downloaders are is a question they cannot answer, and the first version of
+# this panel asked exactly that. What they need is to choose a folder, tick
+# the providers they hold accounts with, and have the installs made for them
+# from the templates the package already ships.
+
+_PROVIDER_RE = re.compile(r"provider\s*=\s*[\"']([^\"']+)[\"']")
+_KIND_RE = re.compile(r"kind\s*=\s*(DOCUMENT|RECEIPT)")
+
+# Never copied into a new install. A template in a repo checkout can have all
+# of these sitting beside the code.
+_TEMPLATE_SKIP = {".venv", "__pycache__", ".pytest_cache", "tests", "Backups",
+                  "Logs", "Diagnostics", "Manual Review", "config.json",
+                  "progress.json", "discovery.json"}
+
+
+def _templates_root() -> Path | None:
+    """Where the shipped app code lives. templates/apps in a package, apps/ in
+    a checkout. None when neither exists."""
+    for cand in (HERE.parent / "templates" / "apps", HERE.parent / "apps"):
+        if cand.is_dir() and any(_entry_script(d) for d in cand.iterdir() if d.is_dir()):
+            return cand
+    return None
+
+
+def _provider_notes() -> dict:
+    """What each app downloads, from the table in PROVIDERS.md, keyed by slug.
+    Best effort. A missing file or a changed table just means no note."""
+    notes = {}
+    try:
+        text = (HERE.parent / "PROVIDERS.md").read_text(encoding="utf-8")
+    except OSError:
+        return notes
+    for line in text.splitlines():
+        m = re.match(r"\|\s*\[`([a-z0-9_]+)`\][^|]*\|([^|]*)\|([^|]*)\|([^|]*)\|", line)
+        if m:
+            notes[m.group(1)] = {"documents": m.group(3).strip(),
+                                 "category": m.group(4).strip()}
+    return notes
+
+
+def install_folder_name(provider: str, kind: str) -> str:
+    """"Chase Statements", "Amazon Receipts". The same convention the existing
+    installs use, so a folder made here sits naturally beside one made by
+    hand."""
+    return "%s %s" % (provider, "Receipts" if kind == "RECEIPT" else "Statements")
+
+
+def list_providers() -> list:
+    """Every provider an install can be made for, with what it downloads."""
+    root = _templates_root()
+    if root is None:
+        return []
+    notes = _provider_notes()
+    out = []
+    for d in sorted(root.iterdir()):
+        if not d.is_dir() or not _entry_script(d):
+            continue
+        try:
+            src = (d / "storage.py").read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            src = ""
+        p = _PROVIDER_RE.search(src)
+        k = _KIND_RE.search(src)
+        provider = p.group(1) if p else d.name
+        kind = k.group(1) if k else "DOCUMENT"
+        n = notes.get(d.name, {})
+        out.append({"slug": d.name, "provider": provider, "kind": kind,
+                    "folder": install_folder_name(provider, kind),
+                    "documents": n.get("documents", ""),
+                    "category": n.get("category", "")})
+    return out
+
+
+def create_install(root: Path, slug: str) -> str:
+    """Make one install from its template. Returns "created" or "exists".
+    Never overwrites, because an existing folder may hold years of history."""
+    tmpl_root = _templates_root()
+    if tmpl_root is None:
+        raise HTTPException(500, "no templates are available to create from")
+    src = tmpl_root / slug
+    if not src.is_dir() or not _entry_script(src):
+        raise HTTPException(400, "unknown provider %r" % slug)
+    info = next(p for p in list_providers() if p["slug"] == slug)
+    dst = root / info["folder"]
+    if dst.exists():
+        return "exists"
+    for item in src.rglob("*"):
+        rel = item.relative_to(src)
+        # Exact names, plus anything profile-shaped. A profile folder is
+        # named <slug>-browser-profile, and in a repo checkout it can be
+        # sitting there signed in. The test that copies a fake one with a
+        # Cookies file inside is what caught this.
+        if any(part in _TEMPLATE_SKIP or "browser-profile" in part.lower()
+               or part.lower().endswith(".pdf")
+               for part in rel.parts):
+            continue
+        if item.is_dir():
+            (dst / rel).mkdir(parents=True, exist_ok=True)
+        else:
+            (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, dst / rel)
+    example = dst / "config.example.json"
+    if example.is_file():
+        # The example IS the config for a fresh install. Its output_dir and
+        # profile_dir are relative to the install folder, and its port is
+        # already unique to this app.
+        shutil.copy2(example, dst / "config.json")
+    return "created"
+
+
+@app.get("/api/providers", dependencies=[Depends(_same_origin_only)])
+def api_providers():
+    installed = set()
+    root = apps_root()
+    if root.is_dir():
+        installed = {d.name for d in root.iterdir() if d.is_dir() and _entry_script(d)}
+    out = list_providers()
+    for p in out:
+        p["installed"] = p["folder"] in installed
+    return {"providers": out, "templates": _templates_root() is not None,
+            "suggested_root": str(Path.home() / "Documents" / "PaperPull")}
+
+
+@app.post("/api/create", dependencies=[Depends(_same_origin_only)])
+async def api_create(request: Request):
+    """Make installs for the chosen providers under the chosen folder, and
+    remember that folder. The folder is created if it does not exist, since a
+    new user has no reason to have made one first."""
+    if os.environ.get("APPS_ROOT"):
+        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
+                                 "overrides any saved choice. Unset it first.")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    raw = str((body or {}).get("root") or "").strip().strip('"')
+    slugs = (body or {}).get("providers") or []
+    if not raw:
+        raise HTTPException(400, "no folder given")
+    if not isinstance(slugs, list) or not slugs:
+        raise HTTPException(400, "choose at least one provider")
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        raise HTTPException(400, "give the full path, starting from the drive "
+                                 "or from /")
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(400, "could not create that folder: %s" % e)
+
+    created, existed = [], []
+    for slug in slugs:
+        if not isinstance(slug, str):
+            continue
+        result = create_install(root, slug)
+        (created if result == "created" else existed).append(slug)
+
+    data = _read_settings()
+    data["apps_root"] = str(root.resolve())
+    try:
+        _write_settings(data)
+    except OSError as e:
+        raise HTTPException(500, "could not save the choice: %s" % e)
+    global _STATUS_MOD
+    _STATUS_MOD = None
+    return {"root": str(root.resolve()), "created": created, "existed": existed,
+            "apps": _looks_like_installs(root)}
+
+
+# -- removing a provider ------------------------------------------------------
+#
+# The one action in this panel that could destroy something, so it does not.
+# The install folder is MOVED into Removed/ beside the others, where the panel
+# no longer lists it, and nothing inside it is touched. PDFs not yet filed
+# elsewhere, the download history, the signed-in browser profile, all of it is
+# still there for whoever wants to delete it deliberately with a file manager.
+# A provider somebody stopped needing is not the same as a provider whose
+# records they want gone, and the panel should not guess which.
+
+REMOVED_DIR = "Removed"
+
+
+def _removal_summary(folder: Path) -> dict:
+    pdfs = 0
+    for p in folder.rglob("*.pdf"):
+        if ".venv" not in p.parts and "browser-profile" not in str(p):
+            pdfs += 1
+    history = 0
+    try:
+        raw = json.loads((folder / "progress.json").read_text(encoding="utf-8-sig"))
+        history = sum(1 for v in raw.values() if isinstance(v, dict)) if isinstance(raw, dict) else 0
+    except (OSError, ValueError):
+        pass
+    profile = any(d.is_dir() and "browser-profile" in d.name for d in folder.iterdir())
+    return {"pdfs": pdfs, "history": history, "profile": profile}
+
+
+@app.post("/api/remove", dependencies=[Depends(_same_origin_only)])
+async def api_remove(request: Request):
+    """Move an install out of the list. The name must be one the panel
+    itself discovered, so nothing outside the root can ever be named."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    name = str((body or {}).get("app") or "")
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "unknown app")
+    if name in _RUNNING:
+        raise HTTPException(409, "that provider is running right now. Wait for it "
+                                 "to finish, or close the tab it is running in.")
+    src = Path(apps[name]["dir"])
+    root = apps_root()
+    if src.parent.resolve() != root.resolve():
+        raise HTTPException(400, "that folder is not directly under the apps root")
+
+    summary = _removal_summary(src)
+    dest_dir = root / REMOVED_DIR
+    dest = dest_dir / name
+    if dest.exists():
+        dest = dest_dir / ("%s (%s)" % (name, datetime.now().strftime("%Y%m%d-%H%M%S")))
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+    except OSError as e:
+        raise HTTPException(500, "could not move the folder: %s. Is a file in it "
+                                 "open, or a browser still signed in there?" % e)
+    global _STATUS_MOD
+    _STATUS_MOD = None
+    return {"app": name, "moved_to": str(dest), **summary}
+
+
 def _build_cmd(app_meta: dict, account: str, action: str):
     if action not in ACTIONS:
         raise HTTPException(400, "unknown action")
@@ -396,6 +638,7 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
         yield f"data: $ {' '.join(cmd)}\n\n"
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
         try:
+            _RUNNING.add(app)
             proc = subprocess.Popen(
                 cmd, cwd=meta["dir"],
                 # No stdin. The panel cannot answer a prompt, so an app must
@@ -409,10 +652,25 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
                 # no interactive console is available, and the run ends. That
                 # matches what the panel already promises: a run that needs an
                 # answer ends rather than hanging.
-                stdin=subprocess.DEVNULL,
+                #
+                # A PIPE that is closed straight away, not DEVNULL. On Windows
+                # DEVNULL is the NUL device, which is a character device, so
+                # sys.stdin.isatty() reports True. Every "is anyone there?"
+                # check in the apps then passes, prints its prompt, and only
+                # learns the truth when input() hits EOF, which left "Whose
+                # account is this?" sitting in the panel output of every fresh
+                # install. A closed pipe answers isatty() honestly, so those
+                # checks skip the prompt entirely, and input() still gets EOF.
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                 errors="replace", bufsize=1, env=env)
+            # Closed at once. The child sees a pipe, so isatty() is False, and
+            # any read reaches EOF immediately.
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
         except Exception as e:
             yield f"data: [failed to start] {e}\n\n"
             yield "event: done\ndata: 1\n\n"
@@ -424,6 +682,7 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
         # press Run again and put two runs on one progress.json, one CDP port
         # and one output folder. Stopping is safe: downloaded_ok is only set
         # after a document is saved, so a re-run resumes and re-fetches nothing.
+        result = None
         try:
             while True:
                 # readline blocks, so it goes to a worker thread rather than
@@ -431,11 +690,18 @@ def api_run(app: str, account: str = "primary", action: str = "pilot"):
                 line = await to_thread.run_sync(proc.stdout.readline)
                 if not line:
                     break
-                yield f"data: {line.rstrip()}\n\n"
+                parsed = run_result.parse(line)
+                if parsed is not None:
+                    result = parsed
+                else:
+                    yield f"data: {line.rstrip()}\n\n"
             code = await to_thread.run_sync(proc.wait)
+            if result is not None:
+                yield f"event: result\ndata: {json.dumps(result)}\n\n"
             yield "data: \n\n"
             yield f"event: done\ndata: {code}\n\n"
         finally:
+            _RUNNING.discard(app)
             if proc.poll() is None:
                 proc.terminate()
                 try:
@@ -476,6 +742,25 @@ HTML = r"""<!doctype html>
            color:var(--muted); display:flex; justify-content:space-between; align-items:center; }
   footer a { color:var(--accent); text-decoration:none; }
   footer a:hover { text-decoration:underline; }
+  .setup { flex:1; overflow:auto; padding:32px 22px; }
+  .setup > * { max-width:600px; margin-left:auto; margin-right:auto; }
+  .setup h2 { font-size:22px; margin:0 0 8px; }
+  .setup p.lead { color:var(--muted); margin:0 0 22px; line-height:1.5; }
+  .setup label { text-transform:none; letter-spacing:0; font-size:14px;
+                 color:var(--fg); margin:16px 0 6px; }
+  .setup input[type=text] { width:100%; font:inherit; padding:8px 10px;
+                            background:var(--panel); color:var(--fg);
+                            border:1px solid var(--line); border-radius:6px; }
+  .setup .providers { max-height:300px; overflow:auto; border:1px solid var(--line);
+                      border-radius:6px; padding:2px 10px; }
+  .setup .providers label { display:flex; gap:10px; align-items:flex-start;
+                            margin:0; padding:8px 2px; border-bottom:1px solid var(--line);
+                            font-size:14px; cursor:pointer; }
+  .setup .providers label:last-child { border-bottom:0; }
+  .setup .providers input { margin-top:3px; flex:none; }
+  .setup .providers .hint { display:block; font-size:12px; margin:1px 0 0; }
+  .setup button { font:inherit; padding:8px 18px; }
+  .setup button.primary { grid-column:auto; }
   .controls { padding:20px 22px; border-right:1px solid var(--line); overflow:auto; }
   .tabs { display:flex; gap:2px; padding:0 22px; border-bottom:1px solid var(--line); }
   .tabs button { background:none; border:0; border-bottom:2px solid transparent;
@@ -488,7 +773,13 @@ HTML = r"""<!doctype html>
   table.st th { text-align:left; color:var(--muted); font-weight:500;
                 border-bottom:1px solid var(--line); padding:6px 10px 6px 0; }
   table.st td { padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
-  table.st td.num { text-align:right; }
+  /* Headers align with their columns. The .num rule used to reach only the
+     cells, so "Docs" sat at the left of a column whose numbers sat at the
+     right, a screen-width apart on a wide window. Every column except
+     Provider shrinks to its content, so labels and values stay together. */
+  table.st th.num, table.st td.num { text-align:right; }
+  table.st th:not(:first-child), table.st td:not(:first-child) {
+    width:1%; white-space:nowrap; padding-left:18px; }
   .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; }
   .pill.overdue { background:#4a1d1d; color:#ff9a9a; }
   .pill.due { background:#4a3a1d; color:#ffd08a; }
@@ -514,7 +805,7 @@ HTML = r"""<!doctype html>
   .status { padding:8px 20px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted); }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:8px; }
   .dot.run { background:var(--accent); animation:pulse 1s infinite; }
-  .dot.ok { background:var(--ok); } .dot.err { background:#ff5c5c; }
+  .dot.warn { background:#e6a23c; } .dot.ok { background:var(--ok); } .dot.err { background:#ff5c5c; }
   @keyframes pulse { 50% { opacity:.3; } }
 </style>
 </head>
@@ -523,25 +814,41 @@ HTML = r"""<!doctype html>
   <h1>PaperPull <span class="ver">v__VERSION__</span><span class="tag"> — Receipt &amp; Statement Downloader</span></h1>
   <p id="root">control panel</p>
 </header>
+<section id="setup" class="setup" style="display:none">
+  <div id="newuser">
+    <h2>Welcome to PaperPull</h2>
+    <p class="lead">Two steps. Choose where your downloads will live, then tick
+    the providers you have accounts with. A folder is set up for each one, and
+    nothing is downloaded until you ask.</p>
+    <label>Folder for your downloads</label>
+    <input id="newroot" type="text">
+    <label>Providers you have accounts with</label>
+    <div id="providers" class="providers"></div>
+    <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
+      <button class="primary" onclick="createInstalls()">Set up</button>
+      <span class="hint" style="margin:0" id="newmsg"></span>
+    </div>
+  </div>
+  <p class="hint" style="margin-top:26px">
+    <a href="#" onclick="toggleExisting(); return false;" style="color:var(--accent)">Already have PaperPull downloaders from before?</a>
+  </p>
+  <div id="existing" style="display:none">
+    <p class="hint" style="margin-top:6px">
+      Paste the full path of the folder that holds them, the one with
+      <i>Chase Statements</i>, <i>Amazon Receipts</i> and so on inside it.
+      Nothing is moved or copied. This panel works on what is already there,
+      and your existing way of running them keeps working too.
+    </p>
+    <input id="rootinput" type="text" placeholder="C:\Users\you\Documents\Receipt and Statement Downloader">
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+      <button onclick="saveRoot()">Use this folder</button>
+      <span class="hint" style="margin:0" id="rootmsg"></span>
+    </div>
+  </div>
+</section>
 <main>
   <div class="controls">
-    <div id="setup" style="display:none">
-      <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
-        <b>Where are your downloaders?</b><br>
-        Paste the full path of the folder that holds them, the one with
-        <i>Chase Statements</i>, <i>Amazon Receipts</i> and so on inside it.
-        Nothing is moved or copied. This panel simply works on what is
-        already there, and your existing way of running them keeps working too.
-      </p>
-      <input id="rootinput" type="text" style="width:100%; font:inherit; padding:6px 8px;
-             background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px;"
-             placeholder="C:\\Users\\you\\Documents\\Receipt and Statement Downloader">
-      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-        <button onclick="saveRoot()">Use this folder</button>
-        <span class="hint" id="rootmsg"></span>
-      </div>
-    </div>
-    <label for="app">App</label>
+    <label for="app">App <a href="#" id="addlink" onclick="addProvider(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a provider</a> <a href="#" id="removelink" onclick="removeProvider(); return false;" style="color:var(--muted); font-weight:400; font-size:12px; margin-left:8px;">remove</a></label>
     <select id="app"></select>
     <label for="account">Account</label>
     <select id="account"></select>
@@ -600,6 +907,97 @@ function changeRoot() {
   $('setup').style.display = 'block';
   $('rootinput').value = META.apps_root || '';
   $('rootinput').focus();
+}
+
+let PROVIDERS = null;
+
+function showSetup(on) {
+  $('setup').style.display = on ? 'block' : 'none';
+  document.querySelector('main').style.display = on ? 'none' : '';
+}
+
+function toggleExisting() {
+  const e = $('existing');
+  e.style.display = e.style.display === 'none' ? 'block' : 'none';
+  if (e.style.display === 'block') $('rootinput').focus();
+}
+
+async function loadProviders(onlyMissing) {
+  const d = await (await fetch('/api/providers')).json();
+  PROVIDERS = d;
+  if (!$('newroot').value) $('newroot').value = d.suggested_root || '';
+  const box = $('providers');
+  if (!d.templates) { box.textContent = 'No provider templates are available in this copy.'; return; }
+  const rows = d.providers.filter(p => !onlyMissing || !p.installed);
+  if (!rows.length) { box.textContent = 'Every provider is already set up.'; return; }
+  box.innerHTML = rows.map(p =>
+    '<label><input type="checkbox" value="' + esc(p.slug) + '"' +
+    (p.installed ? ' disabled checked' : '') + '>' +
+    '<span><b>' + esc(p.provider) + '</b>' +
+    (p.documents ? '<span class="hint">' + esc(p.documents) + '</span>' : '') +
+    (p.installed ? '<span class="hint">already set up</span>' : '') +
+    '</span></label>').join('');
+}
+
+async function createInstalls() {
+  const root = $('newroot').value.trim();
+  const picked = [...document.querySelectorAll('#providers input:checked:not(:disabled)')].map(i => i.value);
+  $('newmsg').textContent = '';
+  if (!root) { $('newmsg').textContent = 'choose a folder first'; return; }
+  if (!picked.length) { $('newmsg').textContent = 'tick at least one provider'; return; }
+  $('newmsg').textContent = 'setting up...';
+  let r;
+  try {
+    r = await fetch('/api/create', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({root, providers: picked})});
+  } catch (e) { $('newmsg').textContent = 'could not reach the control panel'; return; }
+  const d = await r.json();
+  if (!r.ok) { $('newmsg').textContent = d.detail || 'that did not work'; return; }
+  STATUS_LOADED = false;
+  await load();
+  const n = d.created.length;
+  $('console').textContent =
+    'Set up ' + n + ' provider' + (n === 1 ? '' : 's') + ' under\n' + d.root +
+    '\n\nNext: pick one above, click Login, and sign in when the browser opens.';
+}
+
+async function addProvider() {
+  showSetup(true);
+  $('newuser').style.display = 'block';
+  $('existing').style.display = 'none';
+  $('newroot').value = META.apps_root || '';
+  await loadProviders(true);
+}
+
+async function removeProvider() {
+  const name = $('app').value;
+  if (!name) return;
+  const ok = confirm(
+    'Remove "' + name + '" from PaperPull?\n\n' +
+    'Nothing is deleted. Its folder is moved into a "Removed" folder beside the ' +
+    'others, with its PDFs, download history and signed-in browser profile all ' +
+    'still inside. Delete that folder yourself whenever you are sure.\n\n' +
+    'It will no longer appear in this list.');
+  if (!ok) return;
+  let r;
+  try {
+    r = await fetch('/api/remove', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({app: name})});
+  } catch (e) { $('console').textContent = 'could not reach the control panel'; return; }
+  const d = await r.json();
+  if (!r.ok) { $('console').textContent = d.detail || 'that did not work'; return; }
+  STATUS_LOADED = false;
+  await load();
+  const kept = [];
+  if (d.pdfs) kept.push(d.pdfs + ' PDF' + (d.pdfs === 1 ? '' : 's'));
+  if (d.history) kept.push('a history of ' + d.history + ' document' + (d.history === 1 ? '' : 's'));
+  if (d.profile) kept.push('a signed-in browser profile');
+  $('console').textContent =
+    'Removed "' + d.app + '" from the list.\n\nIts folder was moved to\n' + d.moved_to +
+    (kept.length ? '\n\nStill inside it: ' + kept.join(', ') + '.' : '') +
+    '\n\nNothing was deleted. Delete that folder yourself when you are sure you no longer ' +
+    'need what is in it. Until then, moving it back restores the provider.';
 }
 
 let STATUS_LOADED = false;
@@ -676,12 +1074,18 @@ async function load() {
   appSel.innerHTML = '';
   const keys = Object.keys(META.apps);
   if (!keys.length) {
-    $('setup').style.display = 'block';
-    $('console').textContent = 'No downloaders found under ' + META.apps_root + '.';
-    if (META.root_source !== 'environment') $('rootinput').focus();
+    showSetup(true);
+    $('newuser').style.display = 'block';
+    $('existing').style.display = 'none';
+    $('addlink').style.display = 'none';
+    $('removelink').style.display = 'none';
+    loadProviders(false);
+    if (META.root_source !== 'environment') $('newroot').focus();
     return;
   }
-  $('setup').style.display = 'none';
+  showSetup(false);
+  $('addlink').style.display = '';
+  $('removelink').style.display = '';
   for (const k of keys) appSel.append(new Option(META.apps[k].name, k));
   appSel.onchange = onApp;
   const acts = $('actions'); acts.innerHTML = '';
@@ -708,13 +1112,27 @@ function run(action) {
   const app = $('app').value, account = $('account').value;
   $('console').textContent = '';
   setStatus('run', `running ${action} — ${app} / ${account}`);
-  document.querySelectorAll('button').forEach(b => b.disabled = true);
+  document.querySelectorAll('button:not(#tabout):not(#tabst)').forEach(b => b.disabled = true);
   es = new EventSource(`/api/run?app=${encodeURIComponent(app)}&account=${encodeURIComponent(account)}&action=${action}`);
   const con = $('console');
+  let result = null;
+  es.addEventListener('result', e => { result = JSON.parse(e.data); });
   es.onmessage = e => { con.textContent += e.data + '\n'; con.scrollTop = con.scrollHeight; };
   es.addEventListener('done', e => {
     const code = e.data;
-    setStatus(code === '0' ? 'ok' : 'err', code === '0' ? 'finished' : `exited (code ${code})`);
+    if (code !== '0') {
+      setStatus('err', code === '130' ? 'interrupted — progress saved' : `exited (code ${code}) — check output`);
+    } else if (result && result.attention) {
+      const details = [];
+      if (result.manual_review) details.push(`${result.manual_review} need review`);
+      if (result.failed) details.push(`${result.failed} failed`);
+      if (result.validation_failures) details.push(`${result.validation_failures} PDF validation failures`);
+      setStatus('warn', `finished — needs attention (${details.join(', ')})`);
+    } else if (result) {
+      setStatus('ok', 'finished — no issues reported');
+    } else {
+      setStatus('warn', 'finished — check output (no run summary)');
+    }
     document.querySelectorAll('button').forEach(b => b.disabled = false);
     es.close(); es = null;
   });

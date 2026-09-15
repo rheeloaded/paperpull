@@ -1,0 +1,32 @@
+{
+  "_comment": "Editable rules mapping Schwab document names to filename summaries. Schwab's own API already says WHICH KIND a document is (type: Statements / Tax Forms / Letters / Trade Confirms / Reports & Plans) and the app files by that, so these rules only choose the wording inside TAX filenames; every other kind keeps its own documentName ('Brokerage Statement', 'Confirm - VTI - Bought', 'Account Verification'). Tax names read like '1099 Composite and Year-End Summary - 2024', '1099R - 2024', '5498 - 2020'. Repair these using the titles diagnose reports.",
+  "tax_rules": [
+    {"pattern": "1099\\s+composite", "summary": "1099 Composite Tax Form"},
+    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?DIV\\b", "summary": "1099-DIV Tax Form"},
+    {"pattern": "1099-?B\\b", "summary": "1099-B Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "\\b5498\\b", "summary": "5498 Tax Form"},
+    {"pattern": "\\b1042-?S\\b", "summary": "1042-S Tax Form"},
+    {"pattern": "\\b2439\\b", "summary": "2439 Tax Form"},
+    {"pattern": "\\b8949\\b", "summary": "8949 Tax Form"},
+    {"pattern": "year.?end\\s+summary", "summary": "Year-End Summary"},
+    {"pattern": "tax\\s+(document|form|statement|package|information)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "daf\\s+account\\s+statement", "summary": "DAF Account Statement"},
+    {"pattern": "brokerage\\s+statement", "summary": "Brokerage Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Statement"}
+  ],
+  "skip_patterns": [
+    "\\bagreement\\b",
+    "disclosure",
+    "privacy\\s+(pledge|notice|policy|statement)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "promotional"
+  ]
+}
