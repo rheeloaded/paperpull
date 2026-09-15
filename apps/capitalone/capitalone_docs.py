@@ -1,23 +1,4 @@
-"""Navy Federal statement & tax-document downloader (local, supervised).
-
-Usage:
-    python navyfederal_docs.py --login       verify connection to your browser
-    python navyfederal_docs.py --discover    list available documents
-    python navyfederal_docs.py --pilot       download the 5 newest, then stop
-    python navyfederal_docs.py --all         download everything in scope
-    python navyfederal_docs.py --resume      continue an interrupted run
-    python navyfederal_docs.py --verify      re-validate every saved PDF
-    python navyfederal_docs.py --diagnose    dump page structure (no downloads)
-    python navyfederal_docs.py --dry-run     plan filenames, save nothing
-
-Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
-         --max-docs N  --type Statement|"Tax Document"
-
-READ-ONLY: this tool only reads the Documents area and downloads PDFs that
-Navy Federal already generated. It never transfers funds, trades, rebalances,
-or changes any account setting. Everything stays on this machine; nothing is
-sent to any external service.
-"""
+"""Capital One bank and card statements, tax forms and letters."""
 from __future__ import annotations
 
 from paperpull_core.run_reporting import report_run_result
@@ -34,14 +15,16 @@ from typing import List, Optional
 
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
-import navyfederal_site as site
+import capitalone_site as site
 from paperpull_core.models import State
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
-log = logging.getLogger("navyfederal_docs")
+from storage import (ALL_CATEGORIES, LETTER as CAT_LETTER,
+                     STATEMENT as CAT_STATEMENT, TAX as CAT_TAX)
+log = logging.getLogger("capitalone_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 
@@ -56,25 +39,35 @@ def ask(prompt: str) -> str:
 
 
 class Document:
-    """One Navy Federal document."""
 
     def __init__(self, title="", category="", summary="", date="", period="",
-                 href="", row_index=-1, confidence="", account="",
-                 date_text="", document_id="", **kw):
+                 href="", confidence="", account="", account_ref="",
+                 account_desc="", last4="", doc_type="", document_id="",
+                 dataset_id="", occurrence=0, **kw):
         self.title = title
         self.account = account
+        self.account_ref = account_ref
+        self.account_desc = account_desc
+        self.last4 = last4
         self.category = category
         self.summary = summary
         self.date = date
         self.period = period
-        self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # Navy Federal's stable per-document UUID
-        # Sticky "was successfully downloaded at least once" marker. Once set,
-        # the document is never re-downloaded even if you delete the PDF (e.g.
-        # after importing it into paperless-ngx).
+
+
+
+
+        self.doc_type = doc_type
+
+        self.document_id = document_id
+        self.dataset_id = dataset_id
+
+        self.occurrence = occurrence
+
+
+
         self.downloaded_ok = kw.get("downloaded_ok", False)
         self.href = href
-        self.row_index = row_index
         self.confidence = confidence
         self.state = kw.get("state", State.DISCOVERED.value)
         self.pdf_filename = kw.get("pdf_filename", "")
@@ -86,13 +79,10 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. Navy Federal's API gives each document a durable
-        documentId (UUID) - use it. Fall back to category:date:title:account
-        for anything discovered without one."""
-        if self.document_id:
-            return f"id:{self.document_id}"
         acct = sanitize_component(self.account or "")[:40]
-        return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
+        base = (f"{acct}:{self.doc_type}:{self.date}:"
+                f"{sanitize_component(self.title)[:60]}")
+        return base if not self.occurrence else f"{base}#{self.occurrence}"
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -105,10 +95,10 @@ class Document:
 class App:
     def __init__(self, args):
         self.args = args
-        # --config lets one copy of the code serve several people/accounts:
-        # each config points at its own output_dir, profile_dir and port, so
-        # progress.json, the index CSV, the PDFs and the browser session are
-        # all kept separate. Nothing is ever re-downloaded across accounts.
+
+
+
+
         cfg_path = Path(args.config) if getattr(args, "config", None) \
             else (PROJECT_DIR / "config.json")
         self.config = load_config(cfg_path)
@@ -134,13 +124,12 @@ class App:
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
-            "insurance_documents": 0,
-            "other": 0, "skipped_completed": 0, "skipped_out_of_scope": 0,
-            "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
-            "validation_failures": 0, "dates": [], "new_files": [],
+            "letters": 0, "other": 0, "skipped_completed": 0,
+            "skipped_out_of_scope": 0, "manual_review": 0, "failed": 0,
+            "duplicate_filenames": 0, "validation_failures": 0,
+            "dates": [], "new_files": [],
         }
 
-    # -- infrastructure ----------------------------------------------------
 
     def _setup_logging(self):
         logfile = self.paths.logs / f"run-{datetime.now():%Y%m%d-%H%M%S}.log"
@@ -190,13 +179,12 @@ class App:
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
         if self._cdp_mode:
-            # Reuse the user's signed-in Navy Federal tab (the digitalomni portal
-            # keeps its session there; a fresh tab is unauthenticated).
-            # Matched on parsed host, not substring: "provider.com" in the
-            # URL also matches "provider.com.phish.example".
+
+
             live = [p for p in ctx.pages if not p.is_closed()]
-            nfcu = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = nfcu[0] if nfcu else (live[0] if live else ctx.new_page())
+            c1 = [p for p in live if site.is_safe_url(p.url or "")]
+            c1 = c1 or [p for p in live if site.is_safe_url(p.url or "")]
+            self._work_page = c1[0] if c1 else ctx.new_page()
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         return self._work_page
@@ -204,7 +192,7 @@ class App:
     def close(self):
         try:
             if self._cdp_mode:
-                pass  # never close the user's own signed-in tab
+                pass
             elif self._context:
                 self._context.close()
         except Exception:
@@ -216,7 +204,6 @@ class App:
             pass
         self._pw = self._browser = self._context = self._work_page = None
 
-    # -- session safety ----------------------------------------------------
 
     def check_session(self, page) -> None:
         challenge = site.detect_security_challenge(page)
@@ -228,25 +215,17 @@ class App:
             ask("Press Enter once the page looks normal (or Ctrl+C to quit)... ")
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
-            print("\n!! Navy Federal appears to have signed you out.")
+            print("\n!! Capital One appears to have signed you out.")
             print("Please sign in again in the open browser window.")
             ask("Press Enter after you are signed in... ")
             site.goto_documents(page)
 
-    # -- commands ----------------------------------------------------------
 
     def cmd_open_browser(self):
-        """Open a sign-in window on THIS config's own port and profile.
-
-        A second account opens its own browser, on its own port, with its own
-        saved session - so nothing is duplicated in the launcher scripts. You
-        sign in; the tool attaches afterwards.
-        """
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9224")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), '9247')
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
-        name = browser_launcher.open_signin_browser(profile, port, url,
-            prefer_real=False,
+        name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=True,
             mode=self.config.get("browser", "auto"))
         if not name:
             return
@@ -255,21 +234,21 @@ class App:
         print("Sign in, keep the window OPEN, then run the pilot.")
 
     def cmd_login(self):
-        print("Checking the connection to your signed-in Navy Federal browser...\n")
+        print("Checking the connection to your signed-in Capital One browser...\n")
         page = self.page()
         ok = site.goto_documents(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
-            print("Connected, but Navy Federal shows a signed-out page.")
+            print("Connected, but Capital One shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
-            print("Success: connected and the Documents page is visible.")
-            print("Keep that browser window OPEN, then run run_pilot.bat.")
+            print("Success: connected and the signed-in portal is visible.")
+            print("Keep that browser window OPEN, then run run_pilot.")
         else:
-            print("Connected and signed in, but I could not find the Documents list.")
-            print("Open your Documents/Statements page in that browser, then run --diagnose.")
+            print("Connected and signed in, but the document center did not render.")
+            print("Open your account in that browser, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -278,10 +257,12 @@ class App:
             return False
         if a.type and doc.category.lower() != a.type.lower():
             return False
+        if getattr(a, "account", None) and (doc.last4 or "") != str(a.account).strip()[-4:]:
+            return False
         if a.year and not (doc.date or "").startswith(str(a.year)):
             return False
-        # Hard floor: never process documents before the configured start date
-        # (You already has Navy Federal documents from 2023 and earlier).
+
+
         floor = a.start_date or self.config.get("default_start_date")
         if floor and (not doc.date or doc.date < floor):
             return False
@@ -289,50 +270,30 @@ class App:
             return False
         return True
 
-    def _record_raw(self, r, tax_year: str = "") -> int:
-        """Turn one scraped row into a discovery record. Returns 1 if new."""
-        if doc_types.should_skip(r.title, self.rules):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        category, summary, confidence = doc_types.classify_document(
-            r.title, self.rules)
-        if not doc_types.wanted(category, self.config):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        if r.date_text:
-            date, period = site.parse_period_date(r.date_text)
-        elif tax_year:
-            # Tax-table rows carry no date; file them at the tax year end.
-            date, period = f"{tax_year}-12-31", f"Tax Year {tax_year}"
-        else:
-            date, period = site.parse_period_date(r.text or r.title)
-        # Keep the account in the summary so files stay distinguishable
-        # (several accounts produce the same form in the same year).
-        acct = (r.account or "").strip()
-        full_summary = f"{summary} {acct}".strip() if acct else summary
-        doc = Document(title=r.title, category=category, summary=full_summary,
-                       date=date or "", period=period, href=r.href,
-                       row_index=r.row_index, confidence=confidence,
-                       date_text=getattr(r, "date_text", ""))
-        doc.account = acct
-        if self.discovery.get(doc.key) is None:
-            rec = doc.to_dict()
-            rec["state"] = State.DISCOVERED.value
-            self.discovery.update(doc.key, rec, save=False)
-            return 1
-        self.discovery.update(doc.key, {"row_index": r.row_index,
-                                        "href": r.href}, save=False)
-        return 0
+    def _account_label(self, account: str) -> str:
+        labels = self.config.get("account_labels") or {}
+        return labels.get(account) or account
 
-    def _record_nfcu_doc(self, d: dict) -> int:
-        """Record one collected row {account,date,title}. Returns 1 if new."""
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
+    def _record_c1_doc(self, d: dict) -> int:
+        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        category, summary, confidence = doc_types.classify_document(title, self.rules)
-        if category == doc_types.OTHER and re.search(r"statement", title, re.I):
-            category = doc_types.STATEMENT
+        category = d.get("category") or ""
+
+
+        _cat, summary, confidence = doc_types.classify_document(title, self.rules)
+        if category == CAT_STATEMENT:
+
+            summary, confidence = title or "Statement", doc_types.HIGH
+        elif category == CAT_LETTER:
+            summary, confidence = title or "Letter", doc_types.HIGH
+        elif category == CAT_TAX:
+            if _cat != doc_types.TAX:
+                summary, confidence = title or "Tax Form", doc_types.MEDIUM
+        else:
+            summary = summary or title or "Document"
+            confidence = doc_types.LOW
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
             return 0
@@ -342,78 +303,57 @@ class App:
             self.stats["skipped_out_of_scope"] += 1
             return 0
         account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
-        acct_short = re.sub(r"\b(COMBINED|ACCOUNTS?)\b", "", account, flags=re.I)
-        acct_short = re.sub(r"\s+", " ", acct_short).strip().title()
-        full_summary = f"{summary} - {acct_short}" if acct_short else summary
+        self.stats.setdefault("accounts", {})
+        self.stats["accounts"][account] = self.stats["accounts"].get(account, 0) + 1
+        label = self._account_label(account)
+        full_summary = f"{summary} - {label}" if label else summary
+        if d.get("occurrence"):
+            full_summary = f"{full_summary} ({int(d['occurrence']) + 1})"
         doc = Document(title=title, category=category, summary=full_summary,
-                       date=date, confidence=confidence, account=account,
-                       date_text=date, document_id="")
-        if self.discovery.get(doc.key) is None:
+                       date=date, period=d.get("period") or "",
+                       confidence=confidence, account=account,
+                       account_ref=d.get("account_ref") or "",
+                       account_desc=d.get("account_desc") or "",
+                       last4=site.account_last4(d.get("account_desc") or ""),
+                       doc_type=d.get("doc_type") or "",
+                       document_id=d.get("document_id") or "",
+                       dataset_id=d.get("dataset_id") or "",
+                       occurrence=int(d.get("occurrence", 0) or 0),
+                       href=site.URLS["documents"])
+        existing = self.discovery.get(doc.key)
+        if existing is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
-        return 0
 
-    def _record_api_doc(self, d: dict) -> int:
-        """Record one document dict from Navy Federal's documents API. Returns 1 if new."""
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()
-        if not title:
-            return 0
-        if doc_types.should_skip(title, self.rules):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        category, summary, confidence = doc_types.classify_document(title, self.rules)
-        # The API's own category is a reliable backstop for routing.
-        api_cat = (d.get("category") or "").lower()
-        if category == doc_types.OTHER:
-            if "insur" in api_cat:
-                category = doc_types.INSURANCE
-            elif "bank" in api_cat and re.search(r"statement", title, re.I):
-                category = doc_types.STATEMENT
-        if not doc_types.wanted(category, self.config):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        date = (d.get("documentDate") or "").strip()
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
-            date, _ = site.parse_period_date(d.get("displayDate") or title)
-            date = date or ""
-        # Honor the date floor at discovery so discovery.json holds only what
-        # is in scope, honouring default_start_date from config.
-        floor = self.args.start_date or self.config.get("default_start_date")
-        if floor and (not date or date < floor):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        account = re.sub(r"\s+", " ", (d.get("accountName") or "")).strip()
-        full_summary = f"{summary} {account}".strip() if account else summary
-        doc = Document(title=title, category=category, summary=full_summary,
-                       date=date, confidence=confidence, account=account,
-                       date_text=d.get("displayDate", ""),
-                       document_id=d.get("documentId", ""))
-        if self.discovery.get(doc.key) is None:
-            rec = doc.to_dict()
-            rec["state"] = State.DISCOVERED.value
-            self.discovery.update(doc.key, rec, save=False)
-            return 1
+        if doc.document_id and existing.get("document_id") != doc.document_id:
+            self.discovery.update(doc.key, {"document_id": doc.document_id,
+                                            "dataset_id": doc.dataset_id},
+                                  save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
-        if not site.ensure_statements(page):
+        if not site.ensure_documents(page):
             self.check_session(page)
-            if not site.ensure_statements(page):
-                print("Could not open your Navy Federal statements. Sign in and open")
-                print("Statements & Documents in the browser, then try again.")
+            if not site.ensure_documents(page):
+                print("Could not open your Capital One document center. Sign in in")
+                print("the browser, then try again.")
                 return 0
         self.check_session(page)
 
-        # Statements are grouped by account into expandable accordions; each
-        # group's rows carry a date + a "View" button (no documents API).
-        raw = site.nfcu_collect(page)
-        log.info("Navy Federal: collected %d document rows across accounts", len(raw))
+
+
+
+
+
+        raw = site.collect_documents(page)
+        log.info("Capital One: %d document(s) across all accounts", len(raw))
         n_new = 0
         for d in raw:
-            n_new += self._record_nfcu_doc(d)
+            n_new += self._record_c1_doc(d)
+
         self.discovery.save()
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -433,6 +373,11 @@ class App:
             dates = sorted(d.date for d in docs if d.date)
             if dates:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
+            accounts = self.stats.get("accounts") or {}
+            if accounts:
+                print(f"\n  Accounts seen ({len(accounts)}):")
+                for name, n in sorted(accounts.items(), key=lambda kv: -kv[1]):
+                    print(f"    {n:4}  {name}")
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
@@ -445,10 +390,6 @@ class App:
         return docs[:limit] if limit else docs
 
     def _already_done(self, doc: Document) -> bool:
-        """Skip documents already handled. A document that was successfully
-        downloaded once is done FOR GOOD - it is not re-downloaded even if you
-        later delete the PDF (e.g. after importing it into paperless-ngx). Use
-        --redownload to override and fetch everything in scope again."""
         if getattr(self.args, "redownload", False):
             return False
         rec = self.progress.get(doc.key)
@@ -457,20 +398,17 @@ class App:
         if rec.get("downloaded_ok"):
             return True
         state = rec.get("state")
-        # terminal / already-completed (incl. records from before the
-        # downloaded_ok marker existed): done, do not re-download.
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
             return True
-        # a review copy counts only if its PDF is still present and valid;
-        # a quarantined / failed one should be retried.
+
+
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
             return bool(p and Path(p).exists()
                         and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
         return False
 
-    # -- processing --------------------------------------------------------
 
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
@@ -496,47 +434,31 @@ class App:
                 self.stats["failed"] += 1
             self._delay()
 
-    def download_one(self, page, doc: Document, filename: str):
-        """Download one document PDF straight to its final path.
 
-        Dated documents (statements) expose a direct document URL, which is
-        the most reliable route. Tax-table rows have only a Download button,
-        so that row is re-found by its account + form text (row indexes shift
-        whenever a filter or page changes).
-        """
+    def download_one(self, page, doc: Document, filename: str):
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         out_path = unique_path(folder, filename, self.config["max_path_length"])
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Reach the statements page (reuse the signed-in tab), then expand this
-        # document's account group and click its "View" button; the PDF opens as
-        # a blob in a new tab, whose bytes we fetch and save.
-        if not site.ensure_statements(page):
+        if not site.ensure_documents(page):
             self.check_session(page)
-            site.ensure_statements(page)
-        saved = site.nfcu_download(page, page.context, doc.account, doc.date, out_path)
+            site.ensure_documents(page)
+        saved = site.download_document(page, doc.doc_type, doc.title, doc.date,
+                                       doc.account_desc, doc.account_ref,
+                                       out_path, occurrence=doc.occurrence,
+                                       document_id_hint=doc.document_id,
+                                       dataset_id_hint=doc.dataset_id)
         if not saved:
-            # A failed capture must not leave a file behind. Playwright's
-            # save_as creates the target before the bytes arrive, so a
-            # capture that fails leaves a ZERO BYTE file with a convincing
-            # statement name in the output folder, indistinguishable from a
-            # real download until it is opened.
-            try:
-                if out_path.exists() and (out_path.stat().st_size == 0
-                                          or out_path.read_bytes()[:5] != b"%PDF-"):
-                    out_path.unlink()
-            except OSError:
-                pass
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
-                         notes="Could not capture the document PDF")
+                         notes="Could not capture the document PDF (see the log)")
             self._write_row(doc, "Capture failed", "Needs Manual Review")
             self.stats["manual_review"] += 1
             print("  Could not capture this document - marked for manual review.")
             return
 
-        # Some tax forms arrive as a ZIP containing the PDF(s).
+
         if receipt_pdf.is_zip(out_path):
             extracted = receipt_pdf.extract_pdfs_from_zip(out_path, out_path)
             if not extracted:
@@ -575,23 +497,22 @@ class App:
             return
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
-        doc.downloaded_ok = True   # done for good, even if the file is deleted later
+        doc.downloaded_ok = True
         self._record(doc, State.COMPLETED)
         self._write_row(doc, "Downloaded", "Completed")
         self.stats["new_files"].append(str(out_path))
         if doc.date:
             self.stats["dates"].append(doc.date)
-        if doc.category == doc_types.TAX:
+        if doc.category == CAT_TAX:
             self.stats["tax_documents"] += 1
-        elif doc.category == doc_types.INSURANCE:
-            self.stats["insurance_documents"] += 1
-        elif doc.category == doc_types.STATEMENT:
+        elif doc.category == CAT_LETTER:
+            self.stats["letters"] += 1
+        elif doc.category == CAT_STATEMENT:
             self.stats["statements"] += 1
         else:
             self.stats["other"] += 1
         print(f"  Saved: {out_path.name}")
 
-    # -- records -----------------------------------------------------------
 
     def _record(self, doc: Document, state: State, notes: str = ""):
         doc.state = state.value
@@ -608,6 +529,7 @@ class App:
             "Category": doc.category,
             "Document Summary": doc.summary,
             "Document Title": doc.title,
+            "Account": doc.account,
             "Period": doc.period,
             "PDF Filename": doc.pdf_filename,
             "PDF Full Path": doc.pdf_path,
@@ -621,7 +543,6 @@ class App:
             "Notes": notes,
         }])
 
-    # -- modes -------------------------------------------------------------
 
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
@@ -664,7 +585,7 @@ class App:
         self.stats["mode"] = mode_name
         if mode_name == "all" and not self.args.yes:
             scope = ", ".join(self.config.get("document_types", []))
-            print(f"This downloads ALL available Navy Federal documents ({scope}).")
+            print(f"This downloads ALL available Capital One documents ({scope}).")
             print("Type YES to continue:")
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
@@ -715,39 +636,33 @@ class App:
             info["title"] = page.title()
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            site.expand_all(page)
-            site.scroll_full_page(page)
-            info["row_counts"] = {}
-            for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
-                              ("table rows", "table tbody tr"),
-                              ("pdf links", "a[href*='.pdf']"),
-                              ("download attrs", "a[download]")]:
-                try:
-                    info["row_counts"][name] = page.locator(sel).count()
-                except Exception as e:
-                    info["row_counts"][name] = f"ERR {e}"
+
             docs = site.collect_documents(page)
-            info["collected"] = len(docs)
-            info["samples"] = []
-            for d in docs[:8]:
-                cat, summ, conf = doc_types.classify_document(d.title, self.rules)
-                date, period = site.parse_period_date(d.text or d.title)
-                info["samples"].append({
-                    "title": d.title[:90], "href": (d.href or "")[:100],
-                    "text": (d.text or "").replace("\n", " | ")[:160],
-                    "category": cat, "summary": summ, "date": date, "period": period})
-            controls = []
-            for role in ("button", "link"):
-                loc = page.get_by_role(role)
-                for i in range(min(loc.count(), 60)):
-                    try:
-                        t = (loc.nth(i).inner_text(timeout=400) or "").strip()[:60]
-                    except Exception:
-                        t = ""
-                    if t:
-                        controls.append({"role": role, "text": t,
-                                         "safe": site.is_safe_control(t)})
-            info["controls"] = controls
+            kinds = {}
+            samples = []
+            by_account = {}
+            for d in docs:
+                kinds[d["category"]] = kinds.get(d["category"], 0) + 1
+                label = site.redact_label(d["account"])
+                by_account[label] = by_account.get(label, 0) + 1
+                if len(samples) < 8:
+                    samples.append({"doc_type": d["doc_type"],
+                                    "title": d["title"][:80],
+                                    "category": d["category"],
+                                    "date": d["date"], "period": d["period"]})
+            info["documents_total"] = len(docs)
+            info["documents_by_category"] = kinds
+            info["documents_by_account"] = by_account
+            info["samples"] = samples
+
+            ui = site.read_page_ui(page) or {}
+            info["rendered"] = {
+                "headings": ui.get("headings"),
+                "rows_on_screen": len(ui.get("rows") or []),
+                "row_labels": [site.redact_label(r) for r in (ui.get("rows") or [])[:8]],
+            }
+            info["controls"] = [{"text": c[:60], "safe": site.is_safe_control(c)}
+                                for c in (ui.get("buttons") or [])[:60]]
             page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
                             full_page=True)
         except Exception as e:
@@ -755,11 +670,16 @@ class App:
         out = self.paths.diagnostics / "diagnose-documents.json"
         atomic_write_text(out, _json.dumps(info, indent=2))
         print(f"Wrote {out}")
-        print(f"Rows collected: {info.get('collected', '?')}")
-        for s in info.get("samples", [])[:5]:
-            print(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}")
+        print(f"Documents page found: {info.get('documents_page_found')}")
+        print(f"Documents (API): {info.get('documents_total')}  "
+              f"{info.get('documents_by_category')}")
+        print(f"Accounts: {info.get('documents_by_account')}")
+        r = info.get("rendered") or {}
+        print(f"Rendered: headings={r.get('headings')} "
+              f"rows on screen={r.get('rows_on_screen')}")
+        if info.get("error"):
+            print(f"Error: {info['error']}")
 
-    # -- summary -----------------------------------------------------------
 
     def write_run_summary(self):
         s = self.stats
@@ -767,7 +687,7 @@ class App:
         dates = sorted(d for d in s["dates"] if d)
         new_files = s.get("new_files", [])
         atomic_write_text(self.paths.run_summary, "\n".join([
-            "Navy Federal Documents - run summary",
+            "Capital One Documents - run summary",
             "=" * 40,
             f"Run start:                 {s['started']}",
             f"Run end:                   {s['ended']}",
@@ -776,7 +696,7 @@ class App:
             f"NEW files this run:        {len(new_files)}",
             f"Statements downloaded:     {s['statements']}",
             f"Tax documents downloaded:  {s['tax_documents']}",
-            f"Insurance docs downloaded: {s['insurance_documents']}",
+            f"Letters downloaded:        {s['letters']}",
             f"Other documents:           {s['other']}",
             f"Skipped (already done):    {s['skipped_completed']}",
             f"Skipped (out of scope):    {s['skipped_out_of_scope']}",
@@ -788,9 +708,9 @@ class App:
             f"Latest date processed:     {dates[-1] if dates else '-'}",
             "",
         ]))
-        # A plain list of exactly the files downloaded THIS run (all new,
-        # since already-downloaded documents are skipped). Handy for knowing
-        # what to import into paperless-ngx, and safe to ignore/delete.
+
+
+
         atomic_write_text(
             self.paths.root / "new-this-run.txt",
             f"# {len(new_files)} file(s) downloaded on this run "
@@ -803,7 +723,7 @@ class App:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="Local supervised Navy Federal document downloader (read-only)")
+        description="Local supervised Capital One document downloader (read-only)")
     for name, help_text in [
             ("login", "verify connection to your signed-in browser"),
             ("discover", "list available documents; writes discovery.json"),
@@ -811,7 +731,7 @@ def build_parser() -> argparse.ArgumentParser:
             ("all", "download everything in scope (asks for confirmation)"),
             ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
-            ("diagnose", "dump the Documents page structure (no downloads)")]:
+            ("diagnose", "dump the document center structure (no downloads)")]:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)
     ap.add_argument("--dry-run", action="store_true",
                     help="plan filenames but download nothing")
@@ -819,7 +739,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--start-date")
     ap.add_argument("--end-date")
     ap.add_argument("--max-docs", type=int)
-    ap.add_argument("--type", help="Statement or 'Tax Document'")
+    ap.add_argument("--type", help="one of: " + ", ".join(ALL_CATEGORIES))
+    ap.add_argument("--account", help="only this account (last four digits)")
     ap.add_argument("--yes", action="store_true", help="skip the --all confirmation")
     ap.add_argument("--redownload", action="store_true",
                     help="re-download everything in scope, ignoring the "

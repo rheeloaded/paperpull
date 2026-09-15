@@ -1,0 +1,28 @@
+{
+  "_comment": "Editable rules mapping Capital One document names to filename summaries. The portal's unified search already says WHICH KIND a document is (documentCategory: STATEMENT / TAX / LETTER) and the app files by that, so these rules only choose the wording inside TAX filenames; statements keep their own documentName ('August card statement', 'July bank statement', 'Card Yearly Statement'). Repair these using the titles diagnose reports.",
+  "tax_rules": [
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?C\\b", "summary": "1099-C Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "\\b1098\\b", "summary": "1098 Tax Form"},
+    {"pattern": "\\b5498\\b", "summary": "5498 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package|information)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "bank\\s+statement", "summary": "Bank Statement"},
+    {"pattern": "card\\s+statement", "summary": "Card Statement"},
+    {"pattern": "yearly\\s+statement", "summary": "Card Yearly Statement"},
+    {"pattern": "quarterly\\s+statement", "summary": "Card Quarterly Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Statement"}
+  ],
+  "skip_patterns": [
+    "\\bagreement\\b",
+    "disclosure",
+    "privacy\\s+(pledge|notice|policy|statement)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "promotional"
+  ]
+}
