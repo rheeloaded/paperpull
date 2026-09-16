@@ -7,7 +7,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.19.0-beta.2] - 2026-09-17
+
+Every file on this release was built by GitHub Actions from the tag, on a
+clean runner, with checksums published by the same run. That was true of the
+macOS disk image on beta.1 and not of the Windows installer, which had been
+built on the author's machine before the workflow existed.
 
 ### Added
 - **A macOS package, signed and notarized.** `PaperPull-<version>-arm64.dmg`
