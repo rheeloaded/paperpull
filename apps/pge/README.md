@@ -7,10 +7,10 @@ account portal (`myaccount.pge.com`). Read-only, delete-safe, and part of
 ## Setup
 
 ```bat
-setup.bat                 REM one-time: create the venv + install Playwright
-login.bat                 REM opens a browser on port 9244, sign in yourself
-run_pilot.bat             REM download the newest 5 bills as a test
-run_all.bat               REM download every available bill
+setup.bat                         REM one-time: create the venv + install Playwright
+login.bat                         REM opens a browser on port 9244, sign in yourself
+paperpull pge pilot               REM download the newest 5 bills as a test
+paperpull pge all                 REM download every available bill
 ```
 
 The first run asks *"Whose account is this?"* and the name you enter is saved
@@ -44,11 +44,11 @@ Ported onto the shared core and the standard command set. The bill history
 parsing, pagination and PDF capture were worked out against the live portal
 by the contributor. The rebuilt orchestration (run summary, index CSV, PDF
 validation, resume) is covered by automated tests but has not had a fresh
-live pilot. Start with `run_pilot.bat` and inspect its results.
+live pilot. Start with `paperpull pge pilot` and inspect its results.
 
 ## Maintenance
 
 Page behaviour is in `pge_site.py`, the command flow in `pge_docs.py`. When
-the portal changes, `diagnose.bat` writes what it sees (row counts, sample
+the portal changes, `paperpull pge diagnose` writes what it sees (row counts, sample
 rows, every control and whether the guard would allow it) to the Diagnostics
 folder along with a screenshot.

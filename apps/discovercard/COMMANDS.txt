@@ -1,17 +1,18 @@
 Discover DOCUMENTS  -  commands   (READ-ONLY)
 ============================================================
-YOUR account = just the batch name.  SPOUSE = add "spouse".
+Run these from the PaperPull folder (paperpull.bat on Windows,
+./paperpull on macOS). login.bat is the one double-click that stays.
 
-  Task            You                    Spouse
-  --------------  ---------------------  --------------------------
-  Sign in         login.bat              login.bat spouse
-  Look (no d/l)   diagnose.bat           diagnose.bat spouse
-  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
-  Full run        run_all.bat            run_all.bat spouse
-  Continue        resume.bat             resume.bat spouse
-  Re-check PDFs   verify_documents.bat   verify_documents.bat spouse
+  Task            You                                 Spouse
+  --------------  ----------------------------------  ----------------------------------
+  Sign in         login.bat                           login.bat spouse
+  Look (no d/l)   paperpull discovercard diagnose     paperpull discovercard diagnose --account spouse
+  Pilot (test)    paperpull discovercard pilot        paperpull discovercard pilot --account spouse
+  Full run        paperpull discovercard all          paperpull discovercard all --account spouse
+  Continue        paperpull discovercard resume       paperpull discovercard resume --account spouse
+  Re-check PDFs   paperpull discovercard verify       paperpull discovercard verify --account spouse
 
-FLOW:  login.bat  ->  diagnose.bat  ->  run_pilot.bat  ->  run_all.bat
+FLOW:  login.bat  ->  paperpull discovercard diagnose  ->  paperpull discovercard pilot  ->  paperpull discovercard all
 Sign in, open your Documents/Statements area, keep the browser OPEN,
 do the 2FA yourself.
 
@@ -23,7 +24,7 @@ credit-line increase, disputes a charge, or changes any setting.
 Scope: Discover credit-card statements only (no tax documents).
 Discover Bank, personal/student/home loans are NOT covered.
 
-STATUS: not yet verified against the live site - run diagnose.bat
+STATUS: not yet verified against the live site - run paperpull discovercard diagnose
 first and expect to repair discovercard_site.py. See README.md.
 
 Your files: this folder (Statements\).

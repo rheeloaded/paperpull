@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 PY=.venv/bin/python
 
 # No argument = your account. An argument = that named account, e.g.
-#   ./run_all.command spouse   ->  --config config.spouse.json
+#   ./login.command spouse   ->  --config config.spouse.json
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 

@@ -7,10 +7,10 @@ banking portal (`digitalomni.navyfederal.org`). Read-only, delete-safe, part of
 ## Setup
 
 ```bat
-setup.bat                 REM one-time: venv + Playwright
-login.bat                 REM opens Chromium on port 9229 — sign in yourself
-run_pilot.bat             REM download the newest 5 statements as a test
-run_all.bat               REM download every available statement
+setup.bat                         REM one-time: venv + Playwright
+login.bat                         REM opens Chromium on port 9229 — sign in yourself
+paperpull navyfederal pilot       REM download the newest 5 statements as a test
+paperpull navyfederal all         REM download every available statement
 ```
 
 The first run asks *"Whose account is this?"* — the name is saved to `config.json`

@@ -11,7 +11,7 @@ and tax forms from DFAS myPay as PDFs. Read-only, delete-safe, part of
 > Statements and W-2s are enumerated using myPay's own document-type numbers,
 > over the same API the other types are proven on, but this has **not been
 > tested against a real active-duty account**. It should work and may not. Run
-> `diagnose.bat` first, then `run_pilot.bat`, and check the PDFs before
+> `paperpull mypay diagnose` first, then `paperpull mypay pilot`, and check the PDFs before
 > trusting a full run.
 
 ## Read this first, because it is a government system
@@ -53,11 +53,11 @@ elections. This tool does none of it. Concretely:
 ## Setup
 
 ```bat
-setup.bat                 REM one-time: venv + Playwright
-login.bat                 REM opens Chromium on port 9241 - sign in yourself
-diagnose.bat              REM read-only look at what is on the page; downloads NOTHING
-run_pilot.bat             REM download the newest few as a test, then stop
-run_all.bat               REM download everything in scope (asks for YES)
+setup.bat                         REM one-time: venv + Playwright
+login.bat                         REM opens Chromium on port 9241 - sign in yourself
+paperpull mypay diagnose          REM read-only look at what is on the page; downloads NOTHING
+paperpull mypay pilot             REM download the newest few as a test, then stop
+paperpull mypay all               REM download everything in scope (asks for YES)
 ```
 
 Sign in at `mypay.dfas.mil` the way you normally do, with your Login ID and
@@ -67,7 +67,7 @@ already-signed-in browser and reads only what you can see. It never handles
 your credentials, your CAC PIN, or your 2FA.
 
 myPay sessions time out quickly. If a run stops saying the session expired,
-sign in again and use `resume.bat` — finished documents are never re-fetched.
+sign in again and use `paperpull mypay resume` — finished documents are never re-fetched.
 
 ## Documents captured
 
@@ -94,7 +94,7 @@ carries a taxpayer identification number.
 
 They are saved to the folder you set as `output_dir` in `config.json`. Keep it
 somewhere safe, and if that folder syncs to a cloud drive, know these documents
-go with it. The index CSV records **no** dollar amounts. `diagnose.bat` writes
+go with it. The index CSV records **no** dollar amounts. `paperpull mypay diagnose` writes
 no screenshot, deliberately, so a page full of pay figures does not end up in a
 file that is easy to attach to a bug report by accident.
 

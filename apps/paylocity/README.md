@@ -75,12 +75,12 @@ place in case that ever changes.
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
 | 2 | `login.bat` | Opens Chromium (port 9239); sign in, open Pay History, **leave open** |
-| 3 | `diagnose.bat` | Read-only look at what the API returns; downloads nothing |
-| 4 | `run_pilot.bat` | 3 newest statements, then **stops** for your inspection |
+| 3 | `paperpull paylocity diagnose` | Read-only look at what the API returns; downloads nothing |
+| 4 | `paperpull paylocity pilot` | 3 newest statements, then **stops** for your inspection |
 | 5 | inspect the PDFs/CSV | You approve before anything bigger runs |
-| 6 | `run_all.bat` | Everything in scope (asks for `YES`) |
-| any time | `resume.bat` | Continue after an interruption; never redoes finished work |
-| any time | `verify_documents.bat` | Re-validate every saved PDF |
+| 6 | `paperpull paylocity all` | Everything in scope (asks for `YES`) |
+| any time | `paperpull paylocity resume` | Continue after an interruption; never redoes finished work |
+| any time | `paperpull paylocity verify` | Re-validate every saved PDF |
 
 Filters narrow what was discovered (the current year), so `--start-date`
 and `--year` only apply within it until the year filter is wired up.

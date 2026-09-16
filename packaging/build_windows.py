@@ -66,7 +66,8 @@ PACKAGES = ["playwright>=1.44", "pypdf>=4.2", "fastapi>=0.110",
 # Top-level paths from the repo that belong in the package. apps/ is filtered
 # further below so only code goes, never a venv or data folder that happens to
 # be sitting in a checkout.
-INCLUDE_TOP = ("gui", "core", "apps", "tools", "VERSION", "LICENSE",
+INCLUDE_TOP = ("gui", "core", "apps", "tools", "paperpull.py", "paperpull.bat",
+               "VERSION", "LICENSE", "PRIVACY.md",
                "README.md", "PROVIDERS.md", "SECURITY.md", "CHANGELOG.md")
 EXCLUDE_PARTS = {".venv", "__pycache__", ".pytest_cache", "tests",
                  "Backups", "Logs", "Diagnostics", "Manual Review"}

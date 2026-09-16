@@ -59,12 +59,12 @@ only what's needed to locate and verify a file.
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
 | 2 | `login.bat` | Opens Chromium (port **9224**); sign in, open Documents, **leave open** |
-| 3 | `diagnose.bat` | Read-only look at the Documents page; downloads nothing |
-| 4 | `run_pilot.bat` | 5 newest documents, then **stops** for your inspection |
+| 3 | `paperpull wealthfront diagnose` | Read-only look at the Documents page; downloads nothing |
+| 4 | `paperpull wealthfront pilot` | 5 newest documents, then **stops** for your inspection |
 | 5 | inspect the PDFs/CSV | You approve before anything bigger runs |
-| 6 | `run_all.bat` | Everything in scope (asks for `YES`) |
-| any time | `resume.bat` | Continue after an interruption; never redoes finished work |
-| any time | `verify_documents.bat` | Re-validate every saved PDF |
+| 6 | `paperpull wealthfront all` | Everything in scope (asks for `YES`) |
+| any time | `paperpull wealthfront resume` | Continue after an interruption; never redoes finished work |
+| any time | `paperpull wealthfront verify` | Re-validate every saved PDF |
 
 Port 9224 keeps this separate from the Walmart (9222) and Amazon (9223)
 projects, so all of them can have a signed-in browser open at once.
@@ -80,7 +80,7 @@ python wealthfront_docs.py --all --start-date 2025-01-01
 ## When Wealthfront changes its website
 
 All selectors/URLs live in **`wealthfront_site.py`** only. Run
-`diagnose.bat` to capture the current structure into `Diagnostics\`, then
+`paperpull wealthfront diagnose` to capture the current structure into `Diagnostics\`, then
 repair that one file. Document naming rules live in `document_rules.json`
 (plain regex → summary, no code changes needed).
 

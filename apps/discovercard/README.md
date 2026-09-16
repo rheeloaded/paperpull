@@ -19,11 +19,11 @@ half-filed.
 ## Setup
 
 ```bash
-./setup.command           # one-time: venv + Playwright
-./login.command           # opens Edge/Chrome on port 9237 — sign in yourself
-./diagnose.command        # a safe look: reads the page, downloads nothing
-./run_pilot.command       # download the newest few as a test
-./run_all.command         # download everything available
+./setup.command                   # one-time: venv + Playwright
+./login.command                   # opens Edge/Chrome on port 9237 — sign in yourself
+paperpull discovercard diagnose   # a safe look: reads the page, downloads nothing
+paperpull discovercard pilot      # download the newest few as a test
+paperpull discovercard all        # download everything available
 ```
 
 (Windows: the matching `setup.bat` / `login.bat` / … . `setup` does not create
@@ -110,7 +110,7 @@ now covered by tests:
 
 Everything provider-specific is in
 [`discovercard_site.py`](discovercard_site.py). Sign in, open Activity &
-Statements, run `./diagnose.command` (it downloads nothing) and read
+Statements, run `paperpull discovercard diagnose` (it downloads nothing) and read
 `Diagnostics/diagnose-documents.json`:
 
 | Field | Tells you |

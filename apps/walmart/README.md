@@ -39,7 +39,7 @@ invoice for online orders).
    debugging port) at Walmart's sign-in page.
 3. Sign in to Walmart in that window (handle any "Robot or human?" check).
    Go to walmart.com/orders and confirm you see your orders.
-4. **Leave that browser window OPEN.** Then run `run_pilot.bat` / `run_all.bat`.
+4. **Leave that browser window OPEN.** Then run `paperpull walmart pilot` / `paperpull walmart all`.
    Verify the connection any time with `python walmart_receipts.py --login`.
 
 ## Recommended workflow
@@ -48,12 +48,12 @@ invoice for online orders).
 |------|---------|--------------|
 | 1 | `login.bat` | Manual sign-in, saved in local browser profile |
 | 2 | `python walmart_receipts.py --diagnose` | Inspects one purchase per section; writes Diagnostics |
-| 3 | `run_pilot.bat` | 5 newest Online + 3 newest In-store; then **stops** |
+| 3 | `paperpull walmart pilot` | 5 newest Online + 3 newest In-store; then **stops** |
 | 4 | inspect the PDFs/CSVs | You approve before anything bigger runs |
-| 5 | `run_all.bat` | Full history (asks for `YES` confirmation) |
-| any time | `resume.bat` | Continue after an interruption — never restarts finished work |
-| any time | `verify_receipts.bat` | Re-validate every indexed PDF |
-| any time | `review_names.bat` | Fix low-confidence filenames interactively |
+| 5 | `paperpull walmart all` | Full history (asks for `YES` confirmation) |
+| any time | `paperpull walmart resume` | Continue after an interruption — never restarts finished work |
+| any time | `paperpull walmart verify` | Re-validate every indexed PDF |
+| any time | `paperpull walmart review-names` | Fix low-confidence filenames interactively |
 
 ## All command-line options
 
@@ -86,7 +86,7 @@ Filenames: `YYYY-MM-DD Walmart <Purchase Summary> Receipt.pdf`
 
 `category_rules.json` holds editable keyword → category rules. Classification
 is deterministic and fully local. Low-confidence purchases are saved anyway,
-marked *Review Needed*, and can be renamed with `review_names.bat`.
+marked *Review Needed*, and can be renamed with `paperpull walmart review-names`.
 
 ## When Walmart changes its website
 
@@ -102,7 +102,7 @@ like now (Diagnostics folder), then adjust `walmart_site.py`.
   rate limiting. Never retries aggressively, never evades detection.
 - Sequential processing with polite randomized delays.
 - Progress written atomically after every purchase; CSV/JSON backed up to
-  `Backups\` before rewrites; interrupted runs resume with `resume.bat`.
+  `Backups\` before rewrites; interrupted runs resume with `paperpull walmart resume`.
 
 ## Tests
 

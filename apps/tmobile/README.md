@@ -6,10 +6,10 @@ Read-only, delete-safe, part of [PaperPull](../../README.md).
 ## Setup
 
 ```bat
-setup.bat                 REM one-time: venv + Playwright
-login.bat                 REM opens a browser on port 9231 — sign in yourself
-run_pilot.bat             REM download the newest 5 bills as a test
-run_all.bat               REM download every available bill
+setup.bat                         REM one-time: venv + Playwright
+login.bat                         REM opens a browser on port 9231 — sign in yourself
+paperpull tmobile pilot           REM download the newest 5 bills as a test
+paperpull tmobile all             REM download every available bill
 ```
 
 ## How it works

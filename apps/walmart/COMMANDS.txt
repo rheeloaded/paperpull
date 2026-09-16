@@ -1,19 +1,20 @@
 WALMART RECEIPTS  -  commands
 ============================================================
-YOUR account = just the batch name.  SPOUSE = add "spouse".
+Run these from the PaperPull folder (paperpull.bat on Windows,
+./paperpull on macOS). login.bat is the one double-click that stays.
 
-  Task            You                    Spouse
-  --------------  ---------------------  --------------------------
-  Sign in         login.bat              login.bat spouse
-  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
-  Full run        run_all.bat            run_all.bat spouse
-  Online only     run_online.bat         run_online.bat spouse
-  In-store only   run_instore.bat        run_instore.bat spouse
-  Continue        resume.bat             resume.bat spouse
-  Re-check PDFs   verify_receipts.bat    verify_receipts.bat spouse
-  Fix a name      review_names.bat       review_names.bat spouse
+  Task            You                                 Spouse
+  --------------  ----------------------------------  ----------------------------------
+  Sign in         login.bat                           login.bat spouse
+  Pilot (test)    paperpull walmart pilot             paperpull walmart pilot --account spouse
+  Full run        paperpull walmart all               paperpull walmart all --account spouse
+  Online only     paperpull walmart online            paperpull walmart online --account spouse
+  In-store only   paperpull walmart instore           paperpull walmart instore --account spouse
+  Continue        paperpull walmart resume            paperpull walmart resume --account spouse
+  Re-check PDFs   paperpull walmart verify            paperpull walmart verify --account spouse
+  Fix a name      paperpull walmart review-names      paperpull walmart review-names --account spouse
 
-FLOW:  login.bat  ->  run_pilot.bat  ->  run_all.bat
+FLOW:  login.bat  ->  paperpull walmart pilot  ->  paperpull walmart all
 Keep the sign-in browser OPEN during the run (Walmart signs you
 out the moment it closes). If "Robot or human?" appears, solve it
 yourself in the window, then let the tool continue.

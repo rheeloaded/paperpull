@@ -49,11 +49,11 @@ There is no login automation in this app to break or to mishandle a password.
 | 1 | `setup.bat` | `./setup.command` | Creates `.venv`, installs Playwright + the shared core |
 | 2 | edit `config.json` | same | Set `base_url` to your employer's UKG address |
 | 3 | `login.bat` | `./login.command` | Opens a browser; sign in, **leave it open** |
-| 4 | `run_pilot.bat` | `./run_pilot.command` | A few newest statements, then **stops** for your inspection |
+| 4 | `paperpull ukg pilot` | `paperpull ukg pilot` | A few newest statements, then **stops** for your inspection |
 | 5 | inspect the PDFs/CSV | same | You approve before anything bigger runs |
-| 6 | `run_all.bat` | `./run_all.command` | Everything available (asks for confirmation) |
-| any time | `resume.bat` | `./resume.command` | Continue after an interruption; never redoes finished work |
-| any time | `verify_documents.bat` | `./verify_documents.command` | Re-validate every indexed PDF |
+| 6 | `paperpull ukg all` | `paperpull ukg all` | Everything available (asks for confirmation) |
+| any time | `paperpull ukg resume` | `paperpull ukg resume` | Continue after an interruption; never redoes finished work |
+| any time | `paperpull ukg verify` | `paperpull ukg verify` | Re-validate every indexed PDF |
 
 Port **9234** keeps this separate from the other apps, so several signed-in
 browsers can be open at once.

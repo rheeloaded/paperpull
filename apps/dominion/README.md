@@ -7,10 +7,10 @@ and part of [PaperPull](../../README.md).
 ## Setup
 
 ```bat
-setup.bat                 REM one-time: create the venv + install Playwright
-login.bat                 REM opens Chromium on port 9228 — sign in yourself
-run_pilot.bat             REM download the newest 5 bills as a test
-run_all.bat               REM download every available bill
+setup.bat                         REM one-time: create the venv + install Playwright
+login.bat                         REM opens Chromium on port 9228 — sign in yourself
+paperpull dominion pilot          REM download the newest 5 bills as a test
+paperpull dominion all            REM download every available bill
 ```
 
 The first run asks *"Whose account is this?"* — the name you enter is saved to
