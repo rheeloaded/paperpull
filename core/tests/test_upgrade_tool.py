@@ -141,3 +141,86 @@ def test_it_reports_what_can_be_resumed(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "2 documents" in out
     assert "1 already downloaded" in out
+
+
+# -- the core copy inside the venv --------------------------------------------
+#
+# Every install carries its own copy of paperpull_core. Nineteen of them once
+# had a fresh entry script on top of a stale copy, and Login crashed in all of
+# them over a keyword the copy had never heard of. The version string had not
+# moved, so a check that read only the string called them current.
+
+def _fake_repo_core(tmp_path, monkeypatch, files):
+    repo = tmp_path / "repo-core" / "paperpull_core"
+    repo.mkdir(parents=True)
+    for name, body in files.items():
+        (repo / name).write_text(body, encoding="utf-8")
+    monkeypatch.setattr(upgrade, "REPO_CORE", repo)
+    return repo
+
+
+def _venv_core(install, files):
+    pkg = install / ".venv" / "Lib" / "site-packages" / "paperpull_core"
+    pkg.mkdir(parents=True)
+    for name, body in files.items():
+        (pkg / name).write_text(body, encoding="utf-8")
+    (pkg / "__pycache__").mkdir()
+    (pkg / "__pycache__" / "browser.cpython-312.pyc").write_bytes(b"x")
+    return pkg
+
+
+def test_a_stale_core_copy_is_found_by_content_not_by_version(tmp_path, monkeypatch):
+    _fake_repo_core(tmp_path, monkeypatch, {
+        "__init__.py": '__version__ = "0.1.5"\n',
+        "browser.py": "def open_signin_browser(profile, port, url, mode='auto'): ...\n"})
+    d = _install(tmp_path, "Bank", {"cdp_url": "http://127.0.0.1:9222", "browser": "auto"}, HISTORY)
+    _venv_core(d, {"__init__.py": '__version__ = "0.1.5"\n',
+                   "browser.py": "def open_signin_browser(profile, port, url): ...\n"})
+    report = upgrade.inspect(d)
+    assert report["core"]["differs"] == ["browser.py"]
+    assert report["core"]["have"] == "0.1.5" and report["core"]["want"] == "0.1.5"
+
+
+def test_a_stale_core_copy_is_refreshed_and_the_old_one_kept(tmp_path, monkeypatch):
+    new_browser = "def open_signin_browser(profile, port, url, mode='auto'): ...\n"
+    _fake_repo_core(tmp_path, monkeypatch, {
+        "__init__.py": '__version__ = "0.1.6"\n', "browser.py": new_browser})
+    d = _install(tmp_path, "Bank", {"cdp_url": "http://127.0.0.1:9222", "browser": "auto"}, HISTORY)
+    pkg = _venv_core(d, {"__init__.py": '__version__ = "0.1.5"\n',
+                         "browser.py": "def open_signin_browser(profile, port, url): ...\n"})
+    cfg_before = (d / "config.json").read_bytes()
+    assert upgrade.main(["--root", str(tmp_path), "--apply"]) == 0
+    assert (pkg / "browser.py").read_text(encoding="utf-8") == new_browser
+    assert '"0.1.6"' in (pkg / "__init__.py").read_text(encoding="utf-8")
+    assert not (pkg / "__pycache__").exists(), "stale bytecode would shadow the refresh"
+    kept = list((d / "Backups").glob("core.*.before-upgrade"))
+    assert len(kept) == 1
+    assert "mode" not in (kept[0] / "browser.py").read_text(encoding="utf-8")
+    assert not (kept[0] / "__pycache__").exists()
+    # a core-only upgrade leaves the config exactly as it was
+    assert (d / "config.json").read_bytes() == cfg_before
+    assert (d / "progress.json").exists()
+
+
+def test_a_current_core_copy_is_left_alone(tmp_path, monkeypatch):
+    files = {"__init__.py": '__version__ = "0.1.6"\n', "browser.py": "x = 1\n"}
+    _fake_repo_core(tmp_path, monkeypatch, files)
+    d = _install(tmp_path, "Bank", {"cdp_url": "http://127.0.0.1:9222", "browser": "auto"}, HISTORY)
+    _venv_core(d, files)
+    assert upgrade.inspect(d)["core"] is None
+    assert upgrade.main(["--root", str(tmp_path), "--apply"]) == 0
+    assert not (d / "Backups").exists()
+
+
+def test_an_install_without_a_venv_is_not_a_core_problem(tmp_path, monkeypatch):
+    _fake_repo_core(tmp_path, monkeypatch, {"__init__.py": '__version__ = "0.1.6"\n'})
+    d = _install(tmp_path, "Bank", {"cdp_url": "http://127.0.0.1:9222", "browser": "auto"}, HISTORY)
+    assert upgrade.inspect(d)["core"] is None
+
+
+def test_a_check_does_not_touch_the_core_copy(tmp_path, monkeypatch):
+    _fake_repo_core(tmp_path, monkeypatch, {"__init__.py": '__version__ = "0.1.6"\n'})
+    d = _install(tmp_path, "Bank", {"cdp_url": "http://127.0.0.1:9222", "browser": "auto"}, HISTORY)
+    pkg = _venv_core(d, {"__init__.py": '__version__ = "0.1.5"\n'})
+    upgrade.main(["--root", str(tmp_path)])
+    assert '"0.1.5"' in (pkg / "__init__.py").read_text(encoding="utf-8")
