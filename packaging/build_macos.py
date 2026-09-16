@@ -20,12 +20,12 @@ Apple Silicon only. The build is one architecture and one download, which is
 the machine every Mac sold since 2020 is, and an Intel build would double the
 matrix for a shrinking audience.
 
-The bundle's main executable is a shell script that opens a Terminal window
-running the panel and then opens the browser to it, the same shape as
-PaperPull.bat on Windows. Closing the Terminal window stops it. That was
-chosen over a native wrapper because it keeps the whole package free of
-compiled code of our own, so what gets signed is Python, the packages and
-scripts, all of it readable.
+The bundle's main executable opens a Terminal window running the panel and
+then opens the browser to it, the same shape as PaperPull.bat on Windows.
+Closing the Terminal window stops it. The executable itself is a dozen lines
+of C, compiled on the build machine, because notarization requires a Mach-O
+main executable with the hardened runtime. It finds its own bundle and hands
+the panel script to Terminal, and that is all it does.
 
 WHAT IS NOT IN IT
 
@@ -37,11 +37,14 @@ Anything untracked. Only files git knows about go in.
 
 SIGNING
 
---sign needs a Developer ID Application certificate in the keychain and the
-notarytool credentials in the environment. See the workflow for the names.
-Without --sign the bundle and dmg are unsigned and macOS will refuse to open
-them without a right-click, which is fine for checking a build and useless
-for handing to anyone else.
+--sign needs a Developer ID Application certificate in the keychain, its
+name in MACOS_SIGN_IDENTITY, and the notarytool credentials in
+NOTARY_KEY_PATH, NOTARY_KEY_ID and NOTARY_ISSUER_ID. Every Mach-O in the
+bundle is signed with the hardened runtime, the bundle is notarized and
+stapled, then the disk image is signed, notarized and stapled in turn.
+Without --sign the bundle and dmg are unsigned and macOS 15 will refuse to
+open them without a trip through System Settings, which is fine for checking
+a build and useless for handing to anyone else.
 """
 from __future__ import annotations
 
@@ -243,13 +246,32 @@ def write_bundle() -> None:
     os.chmod(RES / "paperpull-panel.sh", 0o755)
 
     # The bundle's executable. Opens Terminal on the script above, so the
-    # log is visible and there is an obvious way to quit.
-    (MACOS / "PaperPull").write_text(
-        '#!/bin/bash\n'
-        'DIR="$(cd "$(dirname "$0")/../Resources" && pwd)"\n'
-        'exec open -a Terminal "$DIR/paperpull-panel.sh"\n',
-        encoding="utf-8")
-    os.chmod(MACOS / "PaperPull", 0o755)
+    # log is visible and there is an obvious way to quit. It is a few lines
+    # of C rather than a shell script because notarization requires the main
+    # executable to be a Mach-O binary carrying the hardened runtime, and a
+    # script cannot carry that. It does nothing but find its own bundle and
+    # hand the script to Terminal.
+    launcher_c = DIST / "cache" / "launcher.c"
+    launcher_c.parent.mkdir(parents=True, exist_ok=True)
+    launcher_c.write_text(
+        '#include <mach-o/dyld.h>\n'
+        '#include <libgen.h>\n'
+        '#include <stdio.h>\n'
+        '#include <stdlib.h>\n'
+        '#include <string.h>\n'
+        '#include <unistd.h>\n'
+        'int main(void) {\n'
+        '    char exe[4096]; uint32_t n = sizeof exe;\n'
+        '    if (_NSGetExecutablePath(exe, &n) != 0) return 1;\n'
+        '    char real[4096];\n'
+        '    if (!realpath(exe, real)) return 1;\n'
+        '    char script[4096];\n'
+        '    snprintf(script, sizeof script, "%s/../Resources/paperpull-panel.sh", dirname(real));\n'
+        '    execl("/usr/bin/open", "open", "-a", "Terminal", script, (char *)0);\n'
+        '    perror("open"); return 1;\n'
+        '}\n', encoding="utf-8")
+    subprocess.run(["clang", "-arch", "arm64", "-O2", "-mmacosx-version-min=11.0",
+                    "-o", str(MACOS / "PaperPull"), str(launcher_c)], check=True)
 
     # The terminal command, preferring the bundled Python.
     shim = RES / "paperpull"
@@ -325,7 +347,7 @@ def audit() -> None:
 
 def smoke_test(py: Path) -> None:
     say("Smoke test")
-    env = dict(os.environ, PYTHONNOUSERSITE="1")
+    env = dict(os.environ, PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
     r = subprocess.run([str(py), "-c",
                         "import playwright, pypdf, fastapi, uvicorn, paperpull_core; print('ok')"],
                        capture_output=True, text=True, env=env)
@@ -348,15 +370,117 @@ def smoke_test(py: Path) -> None:
 
 # -- signing -------------------------------------------------------------------
 
+ENTITLEMENTS = {
+    # What a Python interpreter needs under the hardened runtime. ctypes and
+    # a few extension modules map memory they then execute, and the
+    # interpreter loads extension modules that are signed by us but not by
+    # Apple. Both are the standard pair for packaged Python (briefcase and
+    # py2app set the same two). Nothing else is opened up.
+    "com.apple.security.cs.allow-unsigned-executable-memory": True,
+    "com.apple.security.cs.disable-library-validation": True,
+}
+
+
+def _is_macho(path: Path) -> bool:
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+    except OSError:
+        return False
+    return magic in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+                     b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce")
+
+
 def sign(identity: str) -> None:
-    """Every Mach-O in the bundle, inside out, then the bundle. Placeholder
-    until the certificate is in place; see the second half of this work."""
-    raise SystemExit("--sign is not wired up yet")
+    """Every Mach-O in the bundle, deepest first, then the bundle itself.
+
+    codesign --deep is not used. It is deprecated, it skips anything not in a
+    place it expects a binary, and a Python tree is nothing but such places.
+    Walking the files and signing each one is what Apple recommends and what
+    every packaged-Python tool ends up doing."""
+    if not identity:
+        raise SystemExit("--sign needs MACOS_SIGN_IDENTITY in the environment")
+    say("Signing as %s" % identity)
+    for cache in APP.rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
+    ent = DIST / "cache" / "entitlements.plist"
+    with open(ent, "wb") as f:
+        plistlib.dump(ENTITLEMENTS, f)
+    base = ["codesign", "--force", "--timestamp", "--options", "runtime",
+            "--entitlements", str(ent), "--sign", identity]
+    binaries = sorted((p for p in APP.rglob("*") if _is_macho(p)),
+                      key=lambda p: (-len(p.parts), str(p)))
+    # The main executable is signed with the bundle, not on its own.
+    binaries = [b for b in binaries if b != MACOS / "PaperPull"]
+    for i in range(0, len(binaries), 50):
+        subprocess.run([*base, *map(str, binaries[i:i + 50])], check=True,
+                       capture_output=True)
+    say("  %d binaries" % len(binaries))
+    subprocess.run([*base, str(APP)], check=True)
+    subprocess.run(["codesign", "--verify", "--strict", "--verbose=1", str(APP)], check=True)
+    say("  bundle signed and verifies")
+
+
+def _notary_args() -> list[str]:
+    key = os.environ.get("NOTARY_KEY_PATH", "")
+    key_id = os.environ.get("NOTARY_KEY_ID", "")
+    issuer = os.environ.get("NOTARY_ISSUER_ID", "")
+    if not (key and key_id and issuer):
+        raise SystemExit("notarization needs NOTARY_KEY_PATH, NOTARY_KEY_ID and "
+                         "NOTARY_ISSUER_ID in the environment")
+    return ["--key", key, "--key-id", key_id, "--issuer", issuer]
+
+
+def _submit(path: Path, label: str) -> None:
+    """Upload and wait for Apple's verdict. A rejection prints Apple's log,
+    which names the file and the reason, then stops the build."""
+    import json
+    say("Notarizing %s" % label)
+    r = subprocess.run(["xcrun", "notarytool", "submit", str(path), *_notary_args(),
+                        "--wait", "--timeout", "30m", "--output-format", "json"],
+                       capture_output=True, text=True)
+    try:
+        result = json.loads(r.stdout)
+    except ValueError:
+        result = {}
+    say("  status: %s (id %s)" % (result.get("status", "?"), result.get("id", "?")))
+    if r.returncode != 0 or result.get("status") != "Accepted":
+        if result.get("id"):
+            log = subprocess.run(["xcrun", "notarytool", "log", result["id"], *_notary_args()],
+                                 capture_output=True, text=True)
+            say(log.stdout[-4000:])
+        else:
+            say(r.stderr[-2000:])
+        raise SystemExit("notarization was not accepted for %s" % label)
+
+
+def notarize_app() -> None:
+    """The bundle goes up as a zip, comes back accepted, and the ticket is
+    stapled to the bundle before it is copied into the disk image, so the
+    app works offline once dragged out of the dmg."""
+    z = DIST / "PaperPull-notarize.zip"
+    if z.exists():
+        z.unlink()
+    subprocess.run(["ditto", "-c", "-k", "--keepParent", str(APP), str(z)], check=True)
+    try:
+        _submit(z, APP.name)
+    finally:
+        z.unlink()
+    subprocess.run(["xcrun", "stapler", "staple", str(APP)], check=True)
+    say("  accepted and stapled")
+
+
+def notarize(path: Path) -> None:
+    _submit(path, path.name)
+    subprocess.run(["xcrun", "stapler", "staple", str(path)], check=True)
+    say("  accepted and stapled")
 
 
 # -- dmg -----------------------------------------------------------------------
 
-def make_dmg() -> Path:
+def make_dmg(identity: str = "") -> Path:
     say("Disk image")
     root = DIST / "dmg-root"
     if root.exists():
@@ -372,6 +496,13 @@ def make_dmg() -> Path:
                     "-ov", "-format", "UDZO", "-quiet", str(out)], check=True)
     shutil.rmtree(root)
     say("  %s  %.1f MB" % (out.name, out.stat().st_size / 1048576))
+    if identity:
+        subprocess.run(["codesign", "--force", "--timestamp", "--sign", identity, str(out)],
+                       check=True)
+        notarize(out)
+        subprocess.run(["spctl", "--assess", "--type", "open", "--context",
+                        "context:primary-signature", "-vv", str(out)], check=True)
+        say("  Gatekeeper accepts the disk image")
     return out
 
 
@@ -395,9 +526,11 @@ def main(argv=None) -> int:
     write_bundle()
     audit()
     smoke_test(py)
+    identity = os.environ.get("MACOS_SIGN_IDENTITY", "") if args.sign else ""
     if args.sign:
-        sign(os.environ.get("MACOS_SIGN_IDENTITY", ""))
-    make_dmg()
+        sign(identity)
+        notarize_app()
+    make_dmg(identity)
     say("\nDone. Bundle at dist/PaperPull.app, dmg beside it.")
     return 0
 

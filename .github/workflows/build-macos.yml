@@ -1,7 +1,10 @@
-# Builds the macOS bundle and disk image on a clean Apple Silicon runner.
-# Apple Silicon only, by decision. Signing and notarization arrive in a
-# second step once the Developer ID certificate is in the repository's
-# secrets, and until then the dmg is unsigned.
+# Builds the macOS bundle and disk image on a clean Apple Silicon runner,
+# signs it with the Developer ID certificate held in the repository's
+# secrets, has Apple notarize it, and staples the ticket on. Apple Silicon
+# only, by decision.
+#
+# When the certificate secret is absent the signing steps skip themselves
+# and the dmg is unsigned, so a fork without the secrets still builds.
 #
 # Nothing here publishes. The artifacts sit on the workflow run and a person
 # attaches them to a release by hand.
@@ -15,6 +18,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  HAVE_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
 
 jobs:
   build:
@@ -31,12 +37,61 @@ jobs:
           uname -m
           test "$(uname -m)" = "arm64"
 
-      - name: Build the bundle and disk image
+      # A keychain that exists only for this job. The certificate is decoded
+      # into it, the identity's name is read back out for codesign, and the
+      # decoded file is removed at once. The keychain itself is deleted in the
+      # last step, whether or not the build succeeded.
+      - name: Import the signing certificate
+        if: env.HAVE_CERT == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KC_PASS="$(openssl rand -hex 24)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PASS" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          if [ -z "$IDENTITY" ]; then
+            echo "No Developer ID Application identity in the imported certificate"
+            security find-identity -v -p codesigning "$KEYCHAIN" || true
+            exit 1
+          fi
+          echo "signing as: ${IDENTITY%% (*}"
+          echo "MACOS_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "MACOS_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Write the notarization key
+        if: env.HAVE_CERT == 'true'
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$NOTARY_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+          echo "NOTARY_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize and staple
+        if: env.HAVE_CERT == 'true'
+        env:
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: python packaging/build_macos.py --sign
+
+      - name: Build unsigned (no certificate in this repository)
+        if: env.HAVE_CERT != 'true'
         run: python packaging/build_macos.py
 
       - name: Prove the panel starts from the bundle
         run: |
-          export PYTHONNOUSERSITE=1
+          export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
           RES=dist/PaperPull.app/Contents/Resources
           "$RES/python/bin/python3" -m uvicorn app:app --host 127.0.0.1 --port 8765 --app-dir "$RES/gui" &
           for i in $(seq 1 20); do
@@ -46,6 +101,14 @@ jobs:
           python3 -c "import json; d=json.load(open('providers.json'))['providers']; print(len(d), 'providers'); assert len(d) >= 26"
           curl -fs http://127.0.0.1:8765/ | grep -o 'v0\.[0-9][^<]*' | head -1
           kill %1
+
+      - name: What Gatekeeper will say
+        if: env.HAVE_CERT == 'true'
+        run: |
+          codesign --verify --strict --verbose=2 dist/PaperPull.app
+          spctl --assess --type execute --verbose=2 dist/PaperPull.app
+          xcrun stapler validate dist/PaperPull.app
+          xcrun stapler validate dist/PaperPull-*.dmg
 
       - name: Checksums
         run: |
@@ -60,3 +123,11 @@ jobs:
             dist/PaperPull-*.dmg
             dist/SHA256SUMS.txt
           if-no-files-found: error
+
+      - name: Remove the signing keychain and key
+        if: always() && env.HAVE_CERT == 'true'
+        run: |
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          if [ -n "${MACOS_KEYCHAIN:-}" ] && [ -f "$MACOS_KEYCHAIN" ]; then
+            security delete-keychain "$MACOS_KEYCHAIN"
+          fi
