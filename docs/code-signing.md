@@ -2,14 +2,16 @@
 
 ## Status
 
-The Windows installer is **not yet signed**. An application to
+**macOS is signed and notarized.** The `.dmg` and the app inside it are
+signed with the maintainer's Developer ID, notarized by Apple, and stapled,
+so they open on any Mac with no warning. Apple Silicon only.
+
+**Windows is not yet signed.** An application to
 [SignPath Foundation](https://signpath.org), which provides free code signing
 certificates to open-source projects, is in progress. Until it is granted,
 Windows shows its SmartScreen prompt the first time the installer runs, and
-the release notes say so.
-
-When it is granted this page and the README will carry the attribution
-SignPath asks for, and every release from then on will be signed.
+the release notes say so. When it is granted this page and the README will
+carry the attribution SignPath asks for.
 
 ## How a release is built
 
@@ -29,7 +31,14 @@ Nothing that ships is built on a developer's machine.
    person listed as an Approver below reviews and approves the signing
    request. SignPath verifies the artifact came from this repository's
    workflow before it signs anything.
-5. A maintainer attaches the artifacts to the GitHub release by hand. No
+5. The [macOS package](../.github/workflows/build-macos.yml) workflow runs
+   on a clean GitHub-hosted Apple Silicon runner on the same tag. It builds
+   the bundle from the same commit, signs every binary in it with the
+   Developer ID certificate held in the repository's secrets, sends the
+   bundle to Apple for notarization, staples the ticket, then does the same
+   for the disk image. The certificate lives in a keychain that exists only
+   for that job and is deleted when it ends.
+6. A maintainer attaches the artifacts to the GitHub release by hand. No
    step in the workflow publishes on its own.
 
 Anyone can rebuild the package themselves with

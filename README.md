@@ -247,14 +247,17 @@ hold accounts with, so it belongs with your installs and is gitignored here.
 
 ## Windows and macOS
 
-**Windows has an installer.** Every release on the
+**Both have a package.** Every release on the
 [Releases page](https://github.com/rheeloaded/paperpull/releases) carries
-`PaperPull-<version>-setup.exe`, which installs the control panel, the shared
-core and every provider into your own user folder with no admin rights and no
-Python on the machine, and `PaperPull-<version>.zip`, the same folder for
-anyone who would rather not run an installer. The current release is a beta
-and the installer is not yet code-signed, so Windows shows its SmartScreen
-prompt the first time. See [Code signing policy](#code-signing-policy) below.
+`PaperPull-<version>-setup.exe` for Windows, which installs the control
+panel, the shared core and every provider into your own user folder with no
+admin rights and no Python on the machine, and `PaperPull-<version>.zip`, the
+same folder for anyone who would rather not run an installer. For macOS
+there is `PaperPull-<version>-arm64.dmg`, Apple Silicon only, signed and
+notarized, so it opens with no warning. Drag PaperPull to Applications and
+double-click it. The Windows installer is not yet code-signed, so Windows
+shows its SmartScreen prompt the first time. See
+[Code signing policy](#code-signing-policy) below.
 
 For a checkout of this repository, one download covers both. The two
 double-click files each app keeps, and the one-shot setup, come in both

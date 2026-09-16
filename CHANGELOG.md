@@ -9,6 +9,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **A macOS package, signed and notarized.** `PaperPull-<version>-arm64.dmg`
+  carries the same panel, core and providers as the Windows package, built
+  on a clean Apple Silicon runner, signed with a Developer ID, notarized by
+  Apple and stapled, so it opens on any Mac with no warning. Double-clicking
+  the app opens a Terminal window running the panel and a browser tab to it.
+  Apple Silicon only.
+
 ### Changed
 - **One command for every app.** `paperpull <app> <command>` at the repo
   root (`paperpull.bat` on Windows, `./paperpull` on macOS and Linux, or
