@@ -1,0 +1,62 @@
+# Builds the macOS bundle and disk image on a clean Apple Silicon runner.
+# Apple Silicon only, by decision. Signing and notarization arrive in a
+# second step once the Developer ID certificate is in the repository's
+# secrets, and until then the dmg is unsigned.
+#
+# Nothing here publishes. The artifacts sit on the workflow run and a person
+# attaches them to a release by hand.
+
+name: macOS package
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Confirm the runner is Apple Silicon
+        run: |
+          uname -m
+          test "$(uname -m)" = "arm64"
+
+      - name: Build the bundle and disk image
+        run: python packaging/build_macos.py
+
+      - name: Prove the panel starts from the bundle
+        run: |
+          export PYTHONNOUSERSITE=1
+          RES=dist/PaperPull.app/Contents/Resources
+          "$RES/python/bin/python3" -m uvicorn app:app --host 127.0.0.1 --port 8765 --app-dir "$RES/gui" &
+          for i in $(seq 1 20); do
+            sleep 1
+            if curl -fs -H "Origin: http://127.0.0.1:8765" http://127.0.0.1:8765/api/providers > providers.json; then break; fi
+          done
+          python3 -c "import json; d=json.load(open('providers.json'))['providers']; print(len(d), 'providers'); assert len(d) >= 26"
+          curl -fs http://127.0.0.1:8765/ | grep -o 'v0\.[0-9][^<]*' | head -1
+          kill %1
+
+      - name: Checksums
+        run: |
+          cd dist
+          shasum -a 256 PaperPull-*.dmg | tee SHA256SUMS.txt
+
+      - name: Upload the disk image and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperPull-macos-arm64
+          path: |
+            dist/PaperPull-*.dmg
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
