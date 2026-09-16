@@ -53,6 +53,22 @@ def core_version(install: Path) -> str:
     return "not installed"
 
 
+def core_differs(install: Path) -> list[str]:
+    """Core files in the install's copy that do not match the repo's.
+
+    The version string is not enough. Nineteen installs once carried a core
+    whose string matched the repo while browser.py did not, and every one of
+    them crashed on Login after their entry scripts were refreshed. This
+    check said they were in sync."""
+    found = [p.parent for p in (install / ".venv").rglob("paperpull_core/__init__.py")]
+    if not found:
+        return []
+    pkg = found[0]
+    repo = REPO / "core" / "paperpull_core"
+    return [src.name for src in sorted(repo.glob("*.py"))
+            if not (pkg / src.name).is_file() or digest(pkg / src.name) != digest(src)]
+
+
 def repo_core_version() -> str:
     m = re.search(r'__version__ = "([^"]+)"',
                   (REPO / "core" / "paperpull_core" / "__init__.py").read_text(encoding="utf-8"))
@@ -72,13 +88,15 @@ def compare(install: Path) -> dict:
             missing.append(f.name)
         elif digest(theirs) != digest(f):
             differing.append(f.name)
+    core_diff = core_differs(install)
     return {
         "install": install.name,
         "app": app.name,
-        "status": "in sync" if not (differing or missing) else "DRIFTED",
+        "status": "in sync" if not (differing or missing or core_diff) else "DRIFTED",
         "differs": differing,
         "missing": missing,
         "core": core_version(install),
+        "core_differs": core_diff,
     }
 
 
@@ -114,6 +132,8 @@ def main() -> int:
             print(f"        differs: {f}")
         for f in r["missing"]:
             print(f"        missing: {f}")
+        for f in r["core_differs"]:
+            print(f"        core differs: {f}")
         if r["status"] != "in sync" or core != want_core:
             drifted += 1
     print(f"\n{len(results) - drifted} in sync, {drifted} needing attention.")

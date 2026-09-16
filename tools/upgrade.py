@@ -36,17 +36,30 @@ WHAT IT CHANGES
         filling gaps at load time, which makes the file self-describing and
         the next upgrade easier to reason about.
 
+    the shared core inside the install's .venv
+        Each install carries its own copy of paperpull_core, and the app's
+        entry script is written against the current one. When the script is
+        refreshed and the copy is not, the first sign is a crash on Login
+        over a keyword the old copy never heard of. Nineteen installs did
+        exactly that once. The copy is compared file by file, not by version
+        string, because the string does not change every time the code does.
+
 It refuses to write anything it cannot back up first.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# The core this tool ships with. tools/ sits beside core/ in a checkout and in
+# the package alike. Missing when this file was copied somewhere on its own.
+REPO_CORE = Path(__file__).resolve().parents[1] / "core" / "paperpull_core"
 
 # Written into a config that lacks them, rather than left to load-time
 # defaults, so the file says what the app is actually doing.
@@ -78,6 +91,42 @@ def _load_json(path: Path):
         return None, str(e).splitlines()[0][:90]
 
 
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _core_version(pkg: Path) -> str:
+    try:
+        text = (pkg / "__init__.py").read_text(encoding="utf-8")
+    except OSError:
+        return "?"
+    for line in text.splitlines():
+        if line.startswith("__version__") and '"' in line:
+            return line.split('"')[1]
+    return "?"
+
+
+def core_snapshot(install: Path) -> dict | None:
+    """The install's copy of paperpull_core against the one shipped here.
+
+    None when there is no copy to compare (no venv, or the core is installed
+    editable from a checkout, which pip records as a .pth rather than a
+    folder) or nothing to compare it with."""
+    if not REPO_CORE.is_dir():
+        return None
+    found = [p.parent for p in (install / ".venv").rglob("paperpull_core/__init__.py")]
+    if not found:
+        return None
+    pkg = found[0]
+    differs = []
+    for src in sorted(REPO_CORE.glob("*.py")):
+        dst = pkg / src.name
+        if not dst.is_file() or _digest(dst) != _digest(src):
+            differs.append(src.name)
+    return {"path": pkg, "have": _core_version(pkg),
+            "want": _core_version(REPO_CORE), "differs": differs}
+
+
 def inspect(install: Path) -> dict | None:
     """What this install is, and what upgrading it would change."""
     cfg_path = install / "config.json"
@@ -100,6 +149,9 @@ def inspect(install: Path) -> dict | None:
     for key, value in ADDED_DEFAULTS.items():
         if key not in cfg:
             report["changes"].append((key, "(not set)", value))
+
+    snap = core_snapshot(install)
+    report["core"] = snap if snap and snap["differs"] else None
 
     # The history, read but never written, because the whole point is proving
     # it survives untouched.
@@ -161,18 +213,36 @@ def apply_changes(report: dict) -> bool:
     for key, _old, new in report["changes"]:
         cfg[key] = new
 
-    tmp = cfg_path.with_suffix(".json.tmp")
-    try:
-        tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n",
-                       encoding="utf-8")
-        tmp.replace(cfg_path)
-    except OSError as e:
-        _say("    could not write config.json (%s)" % e)
+    if report["changes"]:
+        tmp = cfg_path.with_suffix(".json.tmp")
         try:
-            tmp.unlink()
-        except OSError:
-            pass
-        return False
+            tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n",
+                           encoding="utf-8")
+            tmp.replace(cfg_path)
+        except OSError as e:
+            _say("    could not write config.json (%s)" % e)
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            return False
+
+    snap = report.get("core")
+    if snap:
+        keep = backups / ("core.%s.before-upgrade" % stamp)
+        try:
+            shutil.copytree(snap["path"], keep,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        except OSError as e:
+            _say("    could not back up the core copy (%s), so it was left alone" % e)
+            return False
+        try:
+            shutil.rmtree(snap["path"] / "__pycache__", ignore_errors=True)
+            for src in REPO_CORE.glob("*.py"):
+                shutil.copy2(src, snap["path"] / src.name)
+        except OSError as e:
+            _say("    could not refresh the core copy (%s)" % e)
+            return False
     return True
 
 
@@ -211,6 +281,11 @@ def main(argv=None):
         for key, old, new in r["changes"]:
             _say("      %-10s %s  ->  %s" % (key, old or "(empty)", new))
             total_changes += 1
+        if r.get("core"):
+            c = r["core"]
+            _say("      %-10s %s  ->  %s  (%s)" % (
+                "core", c["have"], c["want"], ", ".join(c["differs"])))
+            total_changes += 1
         for w in r["warnings"]:
             _say("      note: %s" % w)
             if "Do NOT upgrade" in w:
@@ -231,13 +306,13 @@ def main(argv=None):
              % blocked)
         return 1
 
-    _say("Applying. The previous config.json is copied into each Backups")
-    _say("folder first. PDFs, browser profiles and progress.json are not")
-    _say("touched.")
+    _say("Applying. The previous config.json and core copy go into each")
+    _say("Backups folder first. PDFs, browser profiles and progress.json are")
+    _say("not touched.")
     _say()
     done = 0
     for r in installs:
-        if not r["changes"]:
+        if not r["changes"] and not r.get("core"):
             continue
         if apply_changes(r):
             _say("  %-34s updated" % r["name"][:34])
