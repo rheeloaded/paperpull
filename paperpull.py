@@ -81,6 +81,9 @@ def apps_root(explicit: str | None = None) -> Path:
         saved = None
     if saved:
         return Path(saved).expanduser()
+    if (HERE / "templates" / "apps").is_dir() and not (HERE / "apps").is_dir():
+        # The packaged app. Its apps/ folder is a template set, not installs.
+        return Path.home() / "Documents" / "PaperPull"
     return HERE / "apps"
 
 

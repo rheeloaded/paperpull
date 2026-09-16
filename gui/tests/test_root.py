@@ -173,3 +173,28 @@ def test_only_folders_with_an_entry_script_count(tmp_path):
 
 def test_a_missing_root_counts_as_zero(tmp_path):
     assert app_module._looks_like_installs(tmp_path / "nope") == 0
+
+
+def test_the_packaged_app_never_defaults_inside_its_own_bundle(settings, monkeypatch):
+    """On macOS the bundle sits under /Applications, where the system blocks
+    writes, and on either platform an upgrade replaces it. The first-run
+    screen offered ~/Documents/PaperPull while the header said the bundle."""
+    monkeypatch.setattr(app_module, "_is_packaged", lambda: True)
+    assert app_module.apps_root() == Path.home() / "Documents" / "PaperPull"
+    assert app_module.root_source() == "default"
+
+
+def test_a_packaged_install_is_not_told_to_run_setup(settings, tmp_path, monkeypatch):
+    """No per-app venv is the normal state in the package, the bundled
+    interpreter carries everything. The checkout-era hint about setup.bat
+    showed on every app of a packaged install."""
+    root = tmp_path / "installs"
+    _installs(root, 1)
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"apps_root": str(root)}), encoding="utf-8")
+    monkeypatch.setattr(app_module, "_is_packaged", lambda: False)
+    checkout = app_module.discover_apps()
+    assert all(a["needs_setup"] for a in checkout.values())
+    monkeypatch.setattr(app_module, "_is_packaged", lambda: True)
+    packaged = app_module.discover_apps()
+    assert not any(a["needs_setup"] for a in packaged.values())

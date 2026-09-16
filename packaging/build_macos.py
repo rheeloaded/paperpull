@@ -228,6 +228,10 @@ def write_bundle() -> None:
         '# The PaperPull control panel. Close this window to stop it.\n'
         'DIR="$(cd "$(dirname "$0")" && pwd)"\n'
         'export PYTHONNOUSERSITE=1\n'
+        '# Bytecode goes to the user cache, never into the bundle. macOS blocks\n'
+        '# writes into an app under /Applications, and a signed bundle that\n'
+        '# grows files after signing reads as damaged.\n'
+        'export PYTHONPYCACHEPREFIX="$HOME/Library/Caches/PaperPull/pycache"\n'
         'echo "PaperPull %s"\n'
         'echo "The panel binds 127.0.0.1 only. Nothing is reachable from the network."\n'
         'echo "Close this window to stop it."\n'
@@ -254,6 +258,7 @@ def write_bundle() -> None:
         '# One command for every app. See paperpull.py for the details.\n'
         'DIR="$(cd "$(dirname "$0")" && pwd)"\n'
         'export PYTHONNOUSERSITE=1\n'
+        'export PYTHONPYCACHEPREFIX="$HOME/Library/Caches/PaperPull/pycache"\n'
         'exec "$DIR/python/bin/python3" "$DIR/paperpull.py" "$@"\n',
         encoding="utf-8")
     os.chmod(shim, 0o755)
