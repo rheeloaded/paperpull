@@ -107,6 +107,11 @@ def apps_root() -> Path:
     saved = _read_settings().get("apps_root")
     if saved:
         return Path(saved).expanduser()
+    if _is_packaged():
+        # Never inside the bundle. On macOS that is a folder under
+        # /Applications the system will not let anything write into, and on
+        # either platform an upgrade replaces it.
+        return Path.home() / "Documents" / "PaperPull"
     return _DEFAULT_ROOT
 
 
@@ -231,6 +236,10 @@ def discover_apps():
             "login_flag": _login_flag(script),
             "accounts": _accounts(d),
             "has_venv": _venv_python(d) is not None,
+            # The packaged app has no per-app venv and needs none, the
+            # interpreter it falls back to carries everything. Only a
+            # checkout should be told to run setup.
+            "needs_setup": _venv_python(d) is None and not _is_packaged(),
         }
     return apps
 
@@ -1119,7 +1128,7 @@ function onApp() {
   const accSel = $('account'); accSel.innerHTML = '';
   for (const a of m.accounts) accSel.append(new Option(a, a));
   const warn = $('venvwarn');
-  if (!m.has_venv) { warn.style.display='block';
+  if (m.needs_setup) { warn.style.display='block';
     warn.textContent = '⚠ No .venv in this app yet — run setup.bat there first, or output may show import errors.'; }
   else warn.style.display='none';
 }

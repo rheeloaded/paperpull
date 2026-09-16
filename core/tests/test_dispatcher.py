@@ -214,3 +214,12 @@ def test_no_app_doc_still_points_at_a_deleted_launcher():
             if gone.search(line):
                 stale.append("%s:%d" % (f.relative_to(REPO), i))
     assert not stale, "docs still name a deleted launcher: " + ", ".join(stale)
+
+
+def test_the_packaged_app_defaults_to_documents_not_its_templates(tmp_path, monkeypatch):
+    here = tmp_path / "PaperPull.app" / "Contents" / "Resources"
+    (here / "templates" / "apps").mkdir(parents=True)
+    monkeypatch.setattr(paperpull, "HERE", here)
+    monkeypatch.setattr(paperpull, "settings_path", lambda: tmp_path / "none.json")
+    monkeypatch.delenv("APPS_ROOT", raising=False)
+    assert paperpull.apps_root(None) == Path.home() / "Documents" / "PaperPull"
