@@ -82,7 +82,7 @@ if defined FAILED (
 echo.
 echo Next:
 echo   * Launch the control panel:  gui\run_gui.bat
-echo   * Or one app directly:       cd apps\amex  ^&  login.bat  (sign in)  ^&  run_pilot.bat
+echo   * Or one app directly:       apps\amex\login.bat  (sign in)  ^&  paperpull amex pilot
 echo.
 echo   Each app needs its own config.json first - copy config.example.json
 echo   next to it and edit the paths. UKG also needs your employer's

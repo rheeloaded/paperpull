@@ -8,8 +8,8 @@ Passwords and verification codes are never handled by the downloader.
 1. Run `setup.command` (macOS) or `setup.bat` (Windows).
 2. Copy `config.example.json` to `config.json` and set your local output folder.
 3. Run `login.command` / `login.bat` and sign in yourself.
-4. Run `diagnose.command` / `diagnose.bat`, then `run_pilot.command` / `run_pilot.bat`.
-5. Check the downloaded documents before using `run_all.command` / `run_all.bat`.
+4. Run `paperpull usbank diagnose`, then `paperpull usbank pilot`.
+5. Check the downloaded documents before using `paperpull usbank all`.
 
 Existing download history is retained in the provider's local state files.
 Deleting a downloaded file does not reset that history.

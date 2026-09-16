@@ -14,11 +14,11 @@ content-based naming, and a delete-safe re-run.
 ## Setup
 
 ```bash
-./setup.command           # one-time: venv + Playwright
-./login.command           # opens Chromium on port 9235 — sign in yourself
-./diagnose.command        # a safe look: reads the page, downloads nothing
-./run_pilot.command       # download the newest 5 statements as a test
-./run_all.command         # download every available statement
+./setup.command                   # one-time: venv + Playwright
+./login.command                   # opens Chromium on port 9235 — sign in yourself
+paperpull ally diagnose           # a safe look: reads the page, downloads nothing
+paperpull ally pilot              # download the newest 5 statements as a test
+paperpull ally all                # download every available statement
 ```
 
 (Windows: the matching `setup.bat` / `login.bat` / … .)
@@ -63,7 +63,7 @@ column).
 ## Repairing it when Ally changes the site
 
 Everything provider-specific is in [`ally_site.py`](ally_site.py). Sign in,
-run `./diagnose.command`, and read `Diagnostics/diagnose-documents.json`:
+run `paperpull ally diagnose`, and read `Diagnostics/diagnose-documents.json`:
 
 | Field | Tells you |
 |---|---|

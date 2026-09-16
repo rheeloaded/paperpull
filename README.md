@@ -153,18 +153,28 @@ gui\run_gui.bat
 
 ![PaperPull control panel](docs/control-panel.gif)
 
-…or run a single app directly (using `amex` as the example):
+…or run a single app from the terminal, with one command for all of them
+(using `amex` as the example):
 
 ```bat
-cd apps\amex
-copy config.example.json config.json    REM then edit paths as needed
-login.bat                 REM opens Chromium — sign in yourself, leave it OPEN
-run_pilot.bat             REM download the newest few as a test
-run_all.bat               REM download everything available
+copy apps\amex\config.example.json apps\amex\config.json    REM then edit paths as needed
+apps\amex\login.bat            REM opens a browser, sign in yourself, leave it OPEN
+paperpull amex pilot            REM download the newest few as a test
+paperpull amex all              REM download everything available
+paperpull amex resume           REM continue after an interruption
+paperpull list                  REM every app it can see
 ```
 
+`paperpull` is `paperpull.bat` on Windows and `./paperpull` on macOS and
+Linux, or `python paperpull.py` anywhere. It finds the app by folder name,
+slug or provider, runs it under its own environment, and passes anything else
+straight through, so `paperpull chase all --year 2025 --account spouse` works.
+The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
+`verify`, `diagnose` and `dry-run`, the same set the panel offers.
+
 Each app also has its own README with provider-specific details and quirks.
-(Prefer to set apps up one at a time? Each has its own `setup.bat` / `setup.command`.)
+(Prefer to set apps up one at a time? `paperpull <app> setup`, or the app's
+own `setup.bat` / `setup.command`.)
 
 ## Knowing when to run it again
 
@@ -246,22 +256,20 @@ anyone who would rather not run an installer. The current release is a beta
 and the installer is not yet code-signed, so Windows shows its SmartScreen
 prompt the first time. See [Code signing policy](#code-signing-policy) below.
 
-For a checkout of this repository, one download covers both. Every app ships two launchers with the same names
-and the same behaviour — `.bat` for Windows, `.command` for macOS and Linux —
-so the instructions in this README and in each app's own README apply
-wherever you are:
+For a checkout of this repository, one download covers both. The two
+double-click files each app keeps, and the one-shot setup, come in both
+flavours, and everything else is the same `paperpull` command on either:
 
 | Task | Windows | macOS / Linux |
 |------|---------|---------------|
 | One-shot setup | `setup-all.bat` | `./setup-all.command` |
 | Set up one app | `setup.bat` | `./setup.command` |
 | Sign in | `login.bat` | `./login.command` |
-| Test run | `run_pilot.bat` | `./run_pilot.command` |
-| Full run | `run_all.bat` | `./run_all.command` |
+| Test run | `paperpull amex pilot` | `./paperpull amex pilot` |
+| Full run | `paperpull amex all` | `./paperpull amex all` |
 | Control panel | `gui\run_gui.bat` | `gui/run_gui.command` |
 
-A second account is the same on both: `run_all.bat spouse` /
-`./run_all.command spouse`.
+A second account is the same on both: `paperpull amex all --account spouse`.
 
 Only one thing genuinely differs. macOS keeps Playwright's browser inside an
 app bundle and in a different cache directory, and a couple of providers need

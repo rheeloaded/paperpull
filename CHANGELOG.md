@@ -7,6 +7,32 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **One command for every app.** `paperpull <app> <command>` at the repo
+  root (`paperpull.bat` on Windows, `./paperpull` on macOS and Linux, or
+  `python paperpull.py` anywhere) finds an app by folder name, slug or
+  provider, runs it under its own environment, and passes anything else
+  through. The commands are the ones the panel offers, plus any mode an app
+  has of its own. Requested in #23.
+- **272 launcher files are gone.** Every app kept seven double-click files
+  per platform that each called one script with one flag. Each app now
+  ships `setup` and `login` only, and the docs say `paperpull <app> pilot`
+  where they said `run_pilot.bat`. A test refuses the old files coming back
+  with a provider cloned from an old checkout.
+- The dispatcher ships inside the Windows package, so the terminal works
+  there too, under the packaged Python.
+
+### Fixed
+- `tools/check_installs.py` and `tools/upgrade.py` compare an install's copy
+  of the shared core file by file, not by version string. Nineteen installs
+  carried a stale copy the string check called current, and every one of
+  them crashed on Login. `upgrade.py --apply` refreshes the copy and keeps
+  the old one in Backups.
+- A test now refuses any function that clicks what a bare selector finds
+  without consulting a guard, the shape of the PG&E fetch as it arrived.
+
 ## [0.19.0-beta.1] - 2026-09-15
 
 A beta, because it is the first release with an installer. The apps themselves

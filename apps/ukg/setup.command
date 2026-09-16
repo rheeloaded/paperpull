@@ -26,8 +26,8 @@ else
 fi
 
 # The 400 MB browser download is NOT part of setup. Any Chromium-based
-# browser already on this Mac can be used. If none is found, login
-# offers the download then, when somebody is present to agree to it.
+# browser already installed can be used. If none is found, login offers
+# the download then, when somebody is present to agree to it.
 
 echo
 echo "Setup complete. Next step: ./login.command and sign in to UKG Documents."

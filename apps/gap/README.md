@@ -52,12 +52,12 @@ signed-in browsers can be open at once.
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
 | 2 | `login.bat` | Opens Chromium; sign in, open Order History, **leave it open** |
-| 3 | `run_pilot.bat` | newest few of each kind, then **stops** for your inspection |
+| 3 | `paperpull gap pilot` | newest few of each kind, then **stops** for your inspection |
 | 4 | inspect the PDFs/CSVs | You approve before anything bigger runs |
-| 5 | `run_all.bat` | Your entire purchase history (asks for `yes`) |
-| any time | `resume.bat` | Continue after an interruption; never redoes finished work |
-| any time | `verify_receipts.bat` | Re-validate every indexed PDF |
-| any time | `review_names.bat` | Fix low-confidence filenames interactively |
+| 5 | `paperpull gap all` | Your entire purchase history (asks for `yes`) |
+| any time | `paperpull gap resume` | Continue after an interruption; never redoes finished work |
+| any time | `paperpull gap verify` | Re-validate every indexed PDF |
+| any time | `paperpull gap review-names` | Fix low-confidence filenames interactively |
 
 Useful for splitting a run:
 
@@ -93,7 +93,7 @@ into `Diagnostics\`, then repair that one file.
 - Stops and hands control to you on CAPTCHA/OTP, sign-out, or rate limiting.
 - Sequential processing with polite randomized delays.
 - Progress written atomically after every order; CSV/JSON backed up before
-  rewrites; interrupted runs continue with `resume.bat`.
+  rewrites; interrupted runs continue with `paperpull gap resume`.
 - Existing PDFs are never overwritten (collisions get ` (2)`, ` (3)`, …).
 
 ## Tests

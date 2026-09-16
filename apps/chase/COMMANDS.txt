@@ -1,17 +1,18 @@
 Chase DOCUMENTS  -  commands   (READ-ONLY)
 ============================================================
-YOUR account = just the batch name.  SPOUSE = add "spouse".
+Run these from the PaperPull folder (paperpull.bat on Windows,
+./paperpull on macOS). login.bat is the one double-click that stays.
 
-  Task            You                    Spouse
-  --------------  ---------------------  --------------------------
-  Sign in         login.bat              login.bat spouse
-  Look (no d/l)   diagnose.bat           diagnose.bat spouse
-  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
-  Full run        run_all.bat            run_all.bat spouse
-  Continue        resume.bat             resume.bat spouse
-  Re-check PDFs   verify_documents.bat   verify_documents.bat spouse
+  Task            You                                 Spouse
+  --------------  ----------------------------------  ----------------------------------
+  Sign in         login.bat                           login.bat spouse
+  Look (no d/l)   paperpull chase diagnose            paperpull chase diagnose --account spouse
+  Pilot (test)    paperpull chase pilot               paperpull chase pilot --account spouse
+  Full run        paperpull chase all                 paperpull chase all --account spouse
+  Continue        paperpull chase resume              paperpull chase resume --account spouse
+  Re-check PDFs   paperpull chase verify              paperpull chase verify --account spouse
 
-FLOW:  login.bat  ->  diagnose.bat  ->  run_pilot.bat  ->  run_all.bat
+FLOW:  login.bat  ->  paperpull chase diagnose  ->  paperpull chase pilot  ->  paperpull chase all
 Sign in, open your Documents/Statements area, keep the browser OPEN,
 do the 2FA yourself.
 

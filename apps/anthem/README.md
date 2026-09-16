@@ -21,7 +21,7 @@ confirmed.**
 > confirmed against the live site, but the API's **response field names were not
 > observed** (the recon harness blocked the replay). The collector parses them
 > defensively and will name the real fields on the first pilot. Run
-> `diagnose.bat`, then `run_pilot.bat`, and check the PDFs before a full run.
+> `paperpull anthem diagnose`, then `paperpull anthem pilot`, and check the PDFs before a full run.
 >
 > One app, many states. Anthem/Elevance operates the Blue Cross Blue Shield
 > plans in 14 states (CO, CT, GA, IN, KY, ME, MO, NV, NH, NY, OH, VA, WI); they
@@ -70,11 +70,11 @@ and message your care team. This tool does none of it. Concretely:
 ## Setup
 
 ```bat
-setup.bat                 REM one-time: venv + Playwright
-login.bat                 REM opens a real browser on port 9242 - sign in yourself
-diagnose.bat              REM read-only look at what is on the page; downloads NOTHING
-run_pilot.bat             REM download the newest few as a test, then stop
-run_all.bat               REM download everything in scope (asks for YES)
+setup.bat                         REM one-time: venv + Playwright
+login.bat                         REM opens a real browser on port 9242 - sign in yourself
+paperpull anthem diagnose         REM read-only look at what is on the page; downloads NOTHING
+paperpull anthem pilot            REM download the newest few as a test, then stop
+paperpull anthem all              REM download everything in scope (asks for YES)
 ```
 
 `login.bat` opens Anthem's sign-in page (`www.anthem.com/account-login/`). Sign
@@ -85,7 +85,7 @@ The tool attaches to that already-signed-in member tab and reads only what you
 can see. It never handles your credentials or your MFA code.
 
 If a run stops saying the session expired or was blocked, sign in again and use
-`resume.bat` — finished documents are never re-fetched.
+`paperpull anthem resume` — finished documents are never re-fetched.
 
 ## Documents captured
 
@@ -145,7 +145,7 @@ EOBs are among the most sensitive documents this project handles: they carry a
 member ID, provider names, dates of service, procedure descriptions and claim
 amounts. They are saved to the folder you set as `output_dir` in `config.json`.
 Keep it somewhere safe, and if that folder syncs to a cloud drive, know these
-documents go with it. `diagnose.bat` writes no screenshot, deliberately, so a
+documents go with it. `paperpull anthem diagnose` writes no screenshot, deliberately, so a
 page full of claims does not end up in a file that is easy to attach to a bug
 report by accident.
 

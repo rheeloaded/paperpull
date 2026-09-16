@@ -1,9 +1,9 @@
 """Generate macOS/Linux launchers alongside the Windows .bat files.
 
 The .bat files stay the source of truth for *what* each launcher does; this
-mirrors them into `.command` scripts, which macOS runs on double-click. Every
-app gets the same actions under the same names, so the docs and the muscle
-memory carry across platforms.
+mirrors them into `.command` scripts, which macOS runs on double-click. Only
+setup and login remain as launchers. Everything else is `paperpull <app>
+<command>` (see paperpull.py), the same on every platform.
 
     python tools/make_unix_launchers.py
 
@@ -25,7 +25,7 @@ cd "$(dirname "$0")"
 PY=.venv/bin/python
 
 # No argument = your account. An argument = that named account, e.g.
-#   ./run_all.command spouse   ->  --config config.spouse.json
+#   ./login.command spouse   ->  --config config.spouse.json
 CFG=""
 if [ "${1:-}" != "" ]; then CFG="--config config.$1.json"; fi
 

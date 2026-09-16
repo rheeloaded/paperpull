@@ -55,12 +55,12 @@ no code changes needed).
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
 | 2 | `login.bat` | Opens Chromium (port 9225); sign in, open your Documents area, **leave open** |
-| 3 | `diagnose.bat` | Read-only look at the page structure; downloads nothing |
-| 4 | `run_pilot.bat` | 5 newest documents, then **stops** for your inspection |
+| 3 | `paperpull usaa diagnose` | Read-only look at the page structure; downloads nothing |
+| 4 | `paperpull usaa pilot` | 5 newest documents, then **stops** for your inspection |
 | 5 | inspect the PDFs/CSV | You approve before anything bigger runs |
-| 6 | `run_all.bat` | Everything in scope (asks for `YES`) |
-| any time | `resume.bat` | Continue after an interruption; never redoes finished work |
-| any time | `verify_documents.bat` | Re-validate every saved PDF |
+| 6 | `paperpull usaa all` | Everything in scope (asks for `YES`) |
+| any time | `paperpull usaa resume` | Continue after an interruption; never redoes finished work |
+| any time | `paperpull usaa verify` | Re-validate every saved PDF |
 
 Filters: `--type "Insurance Document"`, `--year 2025`,
 `--start-date 2025-01-01`.
@@ -68,7 +68,7 @@ Filters: `--type "Insurance Document"`, `--year 2025`,
 ## If a site change breaks it
 
 All the site-specific logic lives in `usaa_site.py`. If USAA redesigns its
-pages and discovery or download stops working, run `diagnose.bat` after signing
+pages and discovery or download stops working, run `paperpull usaa diagnose` after signing
 in — it dumps the current page structure to `Diagnostics\` so the selectors in
 `usaa_site.py` can be updated to match.
 

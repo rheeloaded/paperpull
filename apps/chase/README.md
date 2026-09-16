@@ -29,11 +29,11 @@ find out whether it could.
 ## Setup
 
 ```bash
-./setup.command           # one-time: venv + Playwright
-./login.command           # opens Edge/Chrome on port 9236 — sign in yourself
-./diagnose.command        # a safe look: reads the page, downloads nothing
-./run_pilot.command       # download the newest few as a test
-./run_all.command         # download everything available
+./setup.command                   # one-time: venv + Playwright
+./login.command                   # opens Edge/Chrome on port 9236 — sign in yourself
+paperpull chase diagnose          # a safe look: reads the page, downloads nothing
+paperpull chase pilot             # download the newest few as a test
+paperpull chase all               # download everything available
 ```
 
 (Windows: the matching `setup.bat` / `login.bat` / … .)
@@ -96,7 +96,7 @@ invented.
 ## Repairing it when Chase changes the site
 
 Everything provider-specific is in [`chase_site.py`](chase_site.py). Sign in,
-open the statements area, run `./diagnose.command` (it downloads nothing) and
+open the statements area, run `paperpull chase diagnose` (it downloads nothing) and
 read `Diagnostics/diagnose-documents.json`:
 
 | Field | Tells you |

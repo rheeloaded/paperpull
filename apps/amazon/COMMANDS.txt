@@ -1,17 +1,18 @@
 AMAZON RECEIPTS  -  commands
 ============================================================
-YOUR account = just the batch name.  SPOUSE = add "spouse".
+Run these from the PaperPull folder (paperpull.bat on Windows,
+./paperpull on macOS). login.bat is the one double-click that stays.
 
-  Task            You                    Spouse
-  --------------  ---------------------  --------------------------
-  Sign in         login.bat              login.bat spouse
-  Pilot (test)    run_pilot.bat          run_pilot.bat spouse
-  Full run        run_all.bat            run_all.bat spouse
-  Continue        resume.bat             resume.bat spouse
-  Re-check PDFs   verify_receipts.bat    verify_receipts.bat spouse
-  Fix a name      review_names.bat       review_names.bat spouse
+  Task            You                                 Spouse
+  --------------  ----------------------------------  ----------------------------------
+  Sign in         login.bat                           login.bat spouse
+  Pilot (test)    paperpull amazon pilot              paperpull amazon pilot --account spouse
+  Full run        paperpull amazon all                paperpull amazon all --account spouse
+  Continue        paperpull amazon resume             paperpull amazon resume --account spouse
+  Re-check PDFs   paperpull amazon verify             paperpull amazon verify --account spouse
+  Fix a name      paperpull amazon review-names       paperpull amazon review-names --account spouse
 
-FLOW:  login.bat  ->  run_pilot.bat  ->  run_all.bat
+FLOW:  login.bat  ->  paperpull amazon pilot  ->  paperpull amazon all
 Keep the sign-in browser OPEN during the run.
 
 DATE CUTOFFS (built into each config - you never type a date):

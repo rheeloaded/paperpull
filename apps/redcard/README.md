@@ -49,7 +49,7 @@ apps).
   `Statements/` as `YYYY-MM-DD Target Circle Card Statement.pdf`.
 - **Short session:** TD's portal session is short-lived. If it expires
   mid-run, a download is retried after a fresh navigation, and a genuinely
-  expired session is reported so you can sign in again and `resume.bat`. For a
+  expired session is reported so you can sign in again and `paperpull redcard resume`. For a
   clean run, sign in and run the pilot promptly.
 
 ## Setup / workflow
@@ -58,12 +58,12 @@ apps).
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
 | 2 | `login.bat` | Opens Chromium (port 9232); sign in, open your Statements, **leave open** |
-| 3 | `run_pilot.bat` | 5 newest statements, then **stops** for your inspection |
+| 3 | `paperpull redcard pilot` | 5 newest statements, then **stops** for your inspection |
 | 4 | inspect the PDFs/CSV | You approve before anything bigger runs |
-| 5 | `run_all.bat` | Every statement in scope (asks for `YES`) |
-| any time | `resume.bat` | Continue after an interruption; never redoes finished work |
-| any time | `verify_documents.bat` | Re-validate every saved PDF |
-| any time | `diagnose.bat` | Read-only dump of the page structure; downloads nothing |
+| 5 | `paperpull redcard all` | Every statement in scope (asks for `YES`) |
+| any time | `paperpull redcard resume` | Continue after an interruption; never redoes finished work |
+| any time | `paperpull redcard verify` | Re-validate every saved PDF |
+| any time | `paperpull redcard diagnose` | Read-only dump of the page structure; downloads nothing |
 
 ## Delete-safe (paperless-ngx workflow)
 

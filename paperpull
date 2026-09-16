@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# One command for every app. See paperpull.py for the details.
+exec python3 "$(dirname "$0")/paperpull.py" "$@"

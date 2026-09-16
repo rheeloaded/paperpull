@@ -39,11 +39,11 @@ weaknesses a security review of this app actually found.
 ## Setup
 
 ```bat
-setup.bat                 REM one-time: venv + Playwright
-login.bat                 REM opens Chromium on port 9240 — sign in yourself at mtb.com
-diagnose.bat              REM read-only look at the document area; downloads nothing
-run_pilot.bat             REM download the newest few as a test, then stop
-run_all.bat               REM download everything in scope (asks for YES)
+setup.bat                         REM one-time: venv + Playwright
+login.bat                         REM opens Chromium on port 9240 — sign in yourself at mtb.com
+paperpull mtb diagnose            REM read-only look at the document area; downloads nothing
+paperpull mtb pilot               REM download the newest few as a test, then stop
+paperpull mtb all                 REM download everything in scope (asks for YES)
 ```
 
 Sign in at `www.mtb.com/log-in` the way you normally do, get to your mortgage's
@@ -84,7 +84,7 @@ have seen what M&T actually calls things.
 
 ## If a site change breaks it
 
-All the site-specific logic lives in `mtb_site.py`. Run `diagnose.bat` after
+All the site-specific logic lives in `mtb_site.py`. Run `paperpull mtb diagnose` after
 signing in; it dumps the page structure to `Diagnostics\` so the selectors can
 be repaired to match.
 

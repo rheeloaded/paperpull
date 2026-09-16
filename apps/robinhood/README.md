@@ -51,7 +51,7 @@ Filenames: `YYYY-MM-DD Robinhood <Summary>.pdf`, e.g.
 ## If a site change breaks it
 
 All the site-specific logic lives in `robinhood_site.py`. If Robinhood
-redesigns its pages and discovery or download stops working, run `diagnose.bat`
+redesigns its pages and discovery or download stops working, run `paperpull robinhood diagnose`
 after signing in — it dumps the current page structure to `Diagnostics\` so the
 selectors in `robinhood_site.py` can be updated to match.
 
@@ -61,12 +61,12 @@ selectors in `robinhood_site.py` can be updated to match.
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf, downloads Chromium |
 | 2 | `login.bat` | Opens Chromium (port 9226); sign in, open your documents area, **leave open** |
-| 3 | `diagnose.bat` | Read-only look at the page structure; downloads nothing |
-| 4 | `run_pilot.bat` | 5 newest documents, then **stops** for your inspection |
+| 3 | `paperpull robinhood diagnose` | Read-only look at the page structure; downloads nothing |
+| 4 | `paperpull robinhood pilot` | 5 newest documents, then **stops** for your inspection |
 | 5 | inspect the PDFs/CSV | You approve before anything bigger runs |
-| 6 | `run_all.bat` | Everything in scope (asks for `YES`) |
-| any time | `resume.bat` | Continue after an interruption; never redoes finished work |
-| any time | `verify_documents.bat` | Re-validate every saved PDF |
+| 6 | `paperpull robinhood all` | Everything in scope (asks for `YES`) |
+| any time | `paperpull robinhood resume` | Continue after an interruption; never redoes finished work |
+| any time | `paperpull robinhood verify` | Re-validate every saved PDF |
 
 ## Delete-safe (paperless-ngx workflow)
 
