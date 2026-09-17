@@ -223,3 +223,21 @@ def test_the_packaged_app_defaults_to_documents_not_its_templates(tmp_path, monk
     monkeypatch.setattr(paperpull, "settings_path", lambda: tmp_path / "none.json")
     monkeypatch.delenv("APPS_ROOT", raising=False)
     assert paperpull.apps_root(None) == Path.home() / "Documents" / "PaperPull"
+
+
+def test_on_windows_the_terminal_reads_the_panels_settings_from_roaming_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(paperpull.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    new = tmp_path / "Roaming" / "PaperPull" / "settings.json"
+    old = tmp_path / "Local" / "PaperPull" / "settings.json"
+    # nothing anywhere: the new location, so a later write lands there
+    assert paperpull.settings_path() == new
+    # only the old file, the panel has not run yet to move it: read it
+    old.parent.mkdir(parents=True)
+    old.write_text("{}", encoding="utf-8")
+    assert paperpull.settings_path() == old
+    # both: the new one wins
+    new.parent.mkdir(parents=True)
+    new.write_text("{}", encoding="utf-8")
+    assert paperpull.settings_path() == new

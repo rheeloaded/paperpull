@@ -74,10 +74,24 @@ _DEFAULT_ROOT = HERE.parent / "apps"
 
 def _settings_path() -> Path:
     """Per-user, per-platform, and never inside the install folder, so an
-    upgrade that replaces the program does not lose the choice."""
+    upgrade that replaces the program does not lose the choice.
+
+    On Windows that means Roaming AppData. Local AppData is where the
+    installer puts the program itself, and the file sat beside it for two
+    releases, surviving only because nothing happened to delete it. A file
+    from there is moved across the first time this runs."""
     if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        return base / "PaperPull" / "settings.json"
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+        new = base / "PaperPull" / "settings.json"
+        old = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") \
+            / "PaperPull" / "settings.json"
+        if not new.exists() and old.is_file():
+            try:
+                new.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(old), str(new))
+            except OSError:
+                return old
+        return new
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "PaperPull" / "settings.json"
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") \

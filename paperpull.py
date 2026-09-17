@@ -61,8 +61,14 @@ def settings_path() -> Path:
     """The control panel's settings file, read only, so the terminal and the
     panel agree on which folder holds the installs."""
     if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        return base / "PaperPull" / "settings.json"
+        # Roaming AppData, where the panel keeps it. The panel moves a file
+        # left in Local AppData by an earlier version, and until it has run
+        # once this falls back to reading it there.
+        new = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") \
+            / "PaperPull" / "settings.json"
+        old = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") \
+            / "PaperPull" / "settings.json"
+        return new if new.exists() or not old.exists() else old
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "PaperPull" / "settings.json"
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") \
