@@ -31,8 +31,12 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
-      - name: Build the package and installer
-        run: python packaging/build_windows.py --installer
+      - name: Build the package, installer and MSIX
+        env:
+          MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          MSIX_PUBLISHER_DISPLAY: ${{ vars.MSIX_PUBLISHER_DISPLAY }}
+        run: python packaging/build_windows.py --installer --msix
 
       - name: Refuse to continue without an installer
         shell: pwsh
@@ -41,10 +45,58 @@ jobs:
           if (-not $exe) { throw "Inno Setup produced no installer" }
           Write-Output $exe.Name
 
+      # The Store signs the real package. To prove this one installs, it is
+      # signed here with a certificate made for the job and thrown away, then
+      # sideloaded, listed, run for a moment and removed. Add-AppxPackage is
+      # the strictest manifest check there is short of the Store's own.
+      - name: Prove the MSIX installs and runs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msix = Get-ChildItem dist -Filter "PaperPull-*.msix" | Select-Object -First 1
+          if (-not $msix) { throw "no .msix was built" }
+          $publisher = ([xml](Get-Content dist/msix/AppxManifest.xml)).Package.Identity.Publisher
+          Write-Output "publisher in manifest: $publisher"
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher `
+            -KeyUsage DigitalSignature -FriendlyName "PaperPull CI sideload" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          $pfx = Join-Path $env:RUNNER_TEMP "sideload.pfx"
+          $pw = ConvertTo-SecureString -String (-join ((48..57 + 65..90) | Get-Random -Count 24 | ForEach-Object {[char]$_})) -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pw | Out-Null
+          Import-PfxCertificate -FilePath $pfx -CertStoreLocation "Cert:\LocalMachine\Root" -Password $pw | Out-Null
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          $signed = Join-Path $env:RUNNER_TEMP "sideload.msix"
+          Copy-Item $msix.FullName $signed
+          & $signtool.FullName sign /fd SHA256 /a /f $pfx /p ([System.Net.NetworkCredential]::new('', $pw).Password) $signed
+          Add-AppxPackage -Path $signed
+          $pkg = Get-AppxPackage | Where-Object { $_.Name -like "*PaperPull*" }
+          if (-not $pkg) { throw "the package did not install" }
+          Write-Output ("installed: " + $pkg.PackageFullName + " version " + $pkg.Version)
+          Write-Output ("install location: " + $pkg.InstallLocation)
+          $env:PAPERPULL_PORT = "8790"
+          $proc = Start-Process -FilePath (Join-Path $pkg.InstallLocation "PaperPull.exe") -PassThru
+          $ok = $false
+          foreach ($i in 1..30) {
+            Start-Sleep -Seconds 1
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -Headers @{Origin='http://127.0.0.1:8790'} http://127.0.0.1:8790/api/providers -TimeoutSec 2
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch {}
+          }
+          if (-not $ok) { throw "the panel did not answer from the installed package" }
+          $n = ($r.Content | ConvertFrom-Json).providers.Count
+          Write-Output "panel answered from the installed package with $n providers"
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -like '*8790*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          Remove-AppxPackage -Package $pkg.PackageFullName
+          Remove-Item $pfx, $signed -Force
+          Write-Output "removed again"
+
       - name: Checksums
         shell: pwsh
         run: |
-          Get-ChildItem dist -File | Where-Object { $_.Name -like "PaperPull-*.exe" -or $_.Name -like "PaperPull-*.zip" } |
+          Get-ChildItem dist -File | Where-Object { $_.Name -like "PaperPull-*.exe" -or $_.Name -like "PaperPull-*.zip" -or $_.Name -like "PaperPull-*.msix" } |
             Get-FileHash -Algorithm SHA256 |
             ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
             Set-Content -Encoding ascii dist/SHA256SUMS.txt
@@ -68,6 +120,14 @@ jobs:
           path: |
             dist/PaperPull-*.zip
             dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      # Unsigned, as the Store wants it. The Store signs on submission.
+      - name: Upload the MSIX for the Store
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperPull-msix-unsigned
+          path: dist/PaperPull-*.msix
           if-no-files-found: error
 
       # Runs only once the repository carries the SignPath organization id

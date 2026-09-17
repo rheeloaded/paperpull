@@ -52,6 +52,10 @@ REPO = Path(__file__).resolve().parents[1]
 DIST = REPO / "dist"
 STAGE = DIST / "PaperPull"
 
+sys.path.insert(0, str(REPO / "packaging"))
+import msix  # noqa: E402
+from icons import ico_largest_png  # noqa: E402
+
 PY_VERSION = "3.12.10"
 PY_ZIP = "python-%s-embed-amd64.zip" % PY_VERSION
 PY_URL = "https://www.python.org/ftp/python/%s/%s" % (PY_VERSION, PY_ZIP)
@@ -248,6 +252,10 @@ def write_launchers() -> None:
     if icon.is_file():
         shutil.copy2(icon, STAGE / "paperpull.ico")
         say("  icon")
+    # PaperPull.exe does what PaperPull.bat does. The MSIX needs it, since a
+    # manifest cannot name a batch file, and it is in the installer too so
+    # both packages start the same way.
+    msix.compile_launcher(STAGE, icon if icon.is_file() else None, say)
     (STAGE / "PaperPull.bat").write_text(
         "@echo off\r\n"
         "setlocal\r\n"
@@ -374,6 +382,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--installer", action="store_true",
                     help="also compile the Inno Setup installer")
+    ap.add_argument("--msix", action="store_true",
+                    help="also build the unsigned MSIX for the Microsoft Store")
     args = ap.parse_args(argv)
 
     if sys.platform != "win32":
@@ -392,6 +402,9 @@ def main(argv=None) -> int:
     audit()
     smoke_test(py)
     zip_it()
+    if args.msix:
+        icon = REPO / "packaging" / "paperpull.ico"
+        msix.pack(STAGE, DIST, version(), ico_largest_png(icon), say)
     iss = write_inno_script()
 
     if args.installer:
