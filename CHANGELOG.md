@@ -7,12 +7,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
-## [0.19.0-beta.2] - 2026-09-17
+## [0.19.0] - 2026-09-17
 
-Every file on this release was built by GitHub Actions from the tag, on a
-clean runner, with checksums published by the same run. That was true of the
-macOS disk image on beta.1 and not of the Windows installer, which had been
-built on the author's machine before the workflow existed.
+The first release with installers, and the first that ships nothing built on
+a developer's machine. Every file on the release page was built by GitHub
+Actions from this tag on a clean runner, with checksums published by the same
+run. It was 0.19.0-beta.1 and beta.2 for two days first, and the macOS build
+went through a full install and a real download run on a Mac before the beta
+label came off. The Windows installer is not yet code-signed, and the release
+notes say what that looks like.
 
 ### Added
 - **A macOS package, signed and notarized.** `PaperPull-<version>-arm64.dmg`
@@ -21,40 +24,7 @@ built on the author's machine before the workflow existed.
   Apple and stapled, so it opens on any Mac with no warning. Double-clicking
   the app opens a Terminal window running the panel and a browser tab to it.
   Apple Silicon only.
-
-### Changed
-- **One command for every app.** `paperpull <app> <command>` at the repo
-  root (`paperpull.bat` on Windows, `./paperpull` on macOS and Linux, or
-  `python paperpull.py` anywhere) finds an app by folder name, slug or
-  provider, runs it under its own environment, and passes anything else
-  through. The commands are the ones the panel offers, plus any mode an app
-  has of its own. Requested in #23.
-- **272 launcher files are gone.** Every app kept seven double-click files
-  per platform that each called one script with one flag. Each app now
-  ships `setup` and `login` only, and the docs say `paperpull <app> pilot`
-  where they said `run_pilot.bat`. A test refuses the old files coming back
-  with a provider cloned from an old checkout.
-- The dispatcher ships inside the Windows package, so the terminal works
-  there too, under the packaged Python.
-
-### Fixed
-- `tools/check_installs.py` and `tools/upgrade.py` compare an install's copy
-  of the shared core file by file, not by version string. Nineteen installs
-  carried a stale copy the string check called current, and every one of
-  them crashed on Login. `upgrade.py --apply` refreshes the copy and keeps
-  the old one in Backups.
-- A test now refuses any function that clicks what a bare selector finds
-  without consulting a guard, the shape of the PG&E fetch as it arrived.
-
-## [0.19.0-beta.1] - 2026-09-15
-
-A beta, because it is the first release with an installer. The apps themselves
-are as tested as ever. The installer and the way it upgrades an existing set
-of downloads are new, and 1.0 waits until they have been used by people other
-than the author.
-
-### Added
-- **A Windows installer.** `PaperPull-0.19.0-beta.1-setup.exe` puts the
+- **A Windows installer.** `PaperPull-<version>-setup.exe` puts the
   control panel, the shared core and every provider on a machine with no
   Python on it. Nothing is frozen, it carries the official embeddable CPython
   and the same code as this repo. A zip of the same folder is there for
@@ -89,7 +59,30 @@ than the author.
 - **Status tab** in the panel, showing how current each archive is and which
   periods are missing from the middle.
 
+### Changed
+- **One command for every app.** `paperpull <app> <command>` at the repo
+  root (`paperpull.bat` on Windows, `./paperpull` on macOS and Linux, or
+  `python paperpull.py` anywhere) finds an app by folder name, slug or
+  provider, runs it under its own environment, and passes anything else
+  through. The commands are the ones the panel offers, plus any mode an app
+  has of its own. Requested in #23.
+- **272 launcher files are gone.** Every app kept seven double-click files
+  per platform that each called one script with one flag. Each app now
+  ships `setup` and `login` only, and the docs say `paperpull <app> pilot`
+  where they said `run_pilot.bat`. A test refuses the old files coming back
+  with a provider cloned from an old checkout.
+- The dispatcher ships inside the Windows package, so the terminal works
+  there too, under the packaged Python.
+- The shared core is 0.1.6.
+
 ### Fixed
+- `tools/check_installs.py` and `tools/upgrade.py` compare an install's copy
+  of the shared core file by file, not by version string. Nineteen installs
+  carried a stale copy the string check called current, and every one of
+  them crashed on Login. `upgrade.py --apply` refreshes the copy and keeps
+  the old one in Backups.
+- A test now refuses any function that clicks what a bare selector finds
+  without consulting a guard, the shape of the PG&E fetch as it arrived.
 - **Robinhood downloads.** The site changed the download link to a JSON
   answer carrying a pre-signed storage URL. The app follows it now and
   checks the bytes are a PDF before keeping them.
@@ -116,9 +109,6 @@ than the author.
 - **Installs created by the packaged app no longer carry the double-click
   launchers.** They call a per-app venv the package does not have, so every
   one of them failed when clicked. The panel does their job.
-
-### Changed
-- The shared core is 0.1.6.
 
 ## [0.18.0] - 2026-09-09
 
