@@ -286,7 +286,7 @@ def write_bundle() -> None:
     os.chmod(shim, 0o755)
 
     (RES / "README-FIRST.txt").write_text(
-        "PaperPull %s, beta\n"
+        "PaperPull %s\n"
         "\n"
         "Double-click PaperPull. A Terminal window opens running the control panel\n"
         "and a browser tab opens to it. Close the Terminal window to stop.\n"
@@ -305,7 +305,8 @@ def write_bundle() -> None:
         "\n"
         "Everything runs on this Mac. Nothing is sent anywhere.\n"
         "\n"
-        "Beta. Keep your existing setup until you are happy with this one.\n"
+        "Your existing setup keeps working alongside this one, so there is no\n"
+        "need to remove anything until you are happy with it.\n"
         % version(), encoding="utf-8")
 
     plist = {

@@ -6,7 +6,7 @@
 WHAT IT PRODUCES
 
     dist\\PaperPull\\            a folder that runs with nothing else installed
-    dist\\PaperPull-<ver>.zip   the same, zipped, which is the beta deliverable
+    dist\\PaperPull-<ver>.zip   the same, zipped, for anyone who would rather not run an installer
     dist\\PaperPull-<ver>-setup.exe   only with --installer and Inno Setup present
 
 HOW IT IS BUILT, AND WHY THIS WAY
@@ -247,7 +247,7 @@ def write_launchers() -> None:
         encoding="utf-8")
 
     (STAGE / "README-FIRST.txt").write_text(
-        "PaperPull %s, beta\r\n"
+        "PaperPull %s\r\n"
         "\r\n"
         "Double-click PaperPull.bat. A browser tab opens with the control panel.\r\n"
         "\r\n"
@@ -262,7 +262,8 @@ def write_launchers() -> None:
         "\r\n"
         "Everything runs on this computer. Nothing is sent anywhere.\r\n"
         "\r\n"
-        "Beta. Keep your existing setup until you are happy with this one.\r\n"
+        "Your existing setup keeps working alongside this one, so there is no\r\n"
+        "need to remove anything until you are happy with it.\r\n"
         % version(), encoding="utf-8")
 
 
@@ -270,7 +271,7 @@ def write_inno_script() -> Path:
     """The installer definition. Compiled only when Inno Setup is present."""
     iss = DIST / "PaperPull.iss"
     iss.write_text(r"""; PaperPull installer. Compile with Inno Setup 6.
-; Beta: not signed. Windows will show a SmartScreen warning on first run.
+; Not yet code-signed. Windows will show a SmartScreen warning on first run.
 
 #define AppVersion "%(ver)s"
 
