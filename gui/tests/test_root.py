@@ -198,3 +198,32 @@ def test_a_packaged_install_is_not_told_to_run_setup(settings, tmp_path, monkeyp
     monkeypatch.setattr(app_module, "_is_packaged", lambda: True)
     packaged = app_module.discover_apps()
     assert not any(a["needs_setup"] for a in packaged.values())
+
+
+def test_on_windows_settings_live_in_roaming_appdata_not_beside_the_program(tmp_path, monkeypatch):
+    """The installer puts the program in Local AppData. The settings file sat
+    in the same folder for two releases and survived only because nothing
+    happened to delete it. A Store install makes that folder read-only."""
+    monkeypatch.setattr(app_module.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    p = app_module._settings_path()
+    assert p == tmp_path / "Roaming" / "PaperPull" / "settings.json"
+
+
+def test_a_settings_file_from_an_earlier_version_is_moved_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    old = tmp_path / "Local" / "PaperPull" / "settings.json"
+    old.parent.mkdir(parents=True)
+    old.write_text('{"apps_root": "D:/mine"}', encoding="utf-8")
+    p = app_module._settings_path()
+    assert p == tmp_path / "Roaming" / "PaperPull" / "settings.json"
+    assert p.read_text(encoding="utf-8") == '{"apps_root": "D:/mine"}'
+    assert not old.exists(), "the old copy must not linger to be read by mistake"
+    # the program folder beside it is untouched
+    assert (tmp_path / "Local" / "PaperPull").is_dir()
+    # and the choice survives
+    monkeypatch.delenv("APPS_ROOT", raising=False)
+    assert app_module.apps_root() == Path("D:/mine")

@@ -169,7 +169,18 @@ def stage_python() -> Path:
         'if sys.argv and sys.argv[0] and os.path.isfile(sys.argv[0]):\n'
         '    _d = os.path.dirname(os.path.abspath(sys.argv[0]))\n'
         '    if _d not in sys.path:\n'
-        '        sys.path.insert(0, _d)\n',
+        '        sys.path.insert(0, _d)\n'
+        '\n'
+        '# Bytecode goes to the user\'s temp folder, never into the package.\n'
+        '# A Store install is read-only, and even here the program folder\n'
+        '# should hold only what the installer put there.\n'
+        'if not os.environ.get("PYTHONPYCACHEPREFIX") and sys.pycache_prefix is None:\n'
+        '    _tmp = os.environ.get("LOCALAPPDATA")\n'
+        '    _tmp = os.path.join(_tmp, "Temp") if _tmp else None\n'
+        '    if _tmp is None:\n'
+        '        import tempfile\n'
+        '        _tmp = tempfile.gettempdir()\n'
+        '    sys.pycache_prefix = os.path.join(_tmp, "PaperPull", "pycache")\n',
         encoding="utf-8")
 
     py = pydir / "python.exe"
