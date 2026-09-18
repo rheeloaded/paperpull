@@ -10,6 +10,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **Amazon reads any country's store.** `marketplace` in `config.json`
+  (`amazon.co.uk`, `amazon.de`, `amazon.ca` and eleven more, default
+  `amazon.com`) points the app at that store and moves the host allowlist
+  with it. Money is found by shape, `£12.99` and `12,99 €` alike, and
+  written back in one canonical form. Dates read in the store's order,
+  including `5 January 2025` and `5. Januar 2025`. On a store whose pages
+  are not in English every URL asks for English, which Amazon remembers.
+  A store the app does not know is refused with the list, not guessed.
+  Asked for by amazon.de and amazon.co.uk users in #24.
 - **Every purchase in one spreadsheet.** `tools/export_purchases.py` and the
   panel's new Spreadsheet tab gather the order history the receipt apps
   already keep (Amazon, Target, Walmart, Gap, second accounts included) into

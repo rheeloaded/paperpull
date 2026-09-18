@@ -18,6 +18,38 @@ reaches a year with no orders). To limit how far back it goes, set
 `default_start_date` in `config.json` (e.g. `"2024-01-01"`) or pass
 `--start-date 2024-01-01` / `--year 2025` on the command line.
 
+## Which Amazon: the `marketplace` setting
+
+Amazon is one company with a separate store per country, and an order placed
+on one store is only on that store. `marketplace` in `config.json` names the
+store this install reads. The default is `amazon.com`.
+
+```json
+"marketplace": "amazon.co.uk"
+```
+
+Known stores: `amazon.com`, `amazon.ca`, `amazon.co.uk`, `amazon.ie`,
+`amazon.com.au`, `amazon.de`, `amazon.fr`, `amazon.it`, `amazon.es`,
+`amazon.nl`, `amazon.com.be`, `amazon.se`, `amazon.pl`, `amazon.com.mx`.
+Anything else is refused with that list, rather than guessed, because the
+setting also decides which host the app is allowed to read.
+
+What changes with the store. The currency (`£12.99`, `12,99 €`) and the date
+order (`5 January 2025`, `5. Januar 2025`, `05/01/2025` read day first) are
+handled. On a store whose pages are not in English, every URL asks for
+English (`language=en_GB`), which Amazon accepts and remembers, so the
+labels the parser reads stay the ones it knows. The order-history and
+printable-summary pages have the same paths on every store.
+
+What is the same. The receipt saved is Amazon's printable order summary. On
+some stores that is not a legal invoice. If you need the invoice PDFs Amazon
+offers under an order's Invoice menu, that is a different capture and not
+yet supported, say so in an issue.
+
+Tested by the maintainer on `amazon.com` only. `amazon.co.uk` was confirmed
+working by a user. The rest follow the same rules and are expected to work,
+and a `--diagnose` run is the way to show what a store does differently.
+
 ## How it connects (important)
 
 Amazon challenges automation-launched browsers, so this tool does **not**

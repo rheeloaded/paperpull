@@ -36,13 +36,72 @@ log = logging.getLogger("amazon_receipts.site")
 # URLs
 # ---------------------------------------------------------------------------
 
-BASE = "https://www.amazon.com"
-URLS = {
-    "home": f"{BASE}/",
-    "orders": f"{BASE}/gp/css/order-history",
-    "orders_alt": f"{BASE}/your-orders/orders",
-    "account": f"{BASE}/gp/css/homepage.html",
+# Amazon is one company with a separate store per country, and an order
+# placed on one store is only on that store. `marketplace` in config.json
+# names the store this install reads. The order-history and printable-summary
+# paths are the same everywhere. What differs is the currency, the date
+# order, and the language of the labels the parser reads. For a store whose
+# pages are not in English, every URL asks for English, which Amazon honors
+# and remembers in a cookie, so the labels stay the ones the parser knows.
+# Each entry: currency symbol, whether dates come day first, and the
+# language code to ask for, or None when the store is already English.
+MARKETPLACES = {
+    "amazon.com":    ("$", False, None),
+    "amazon.ca":     ("$", False, None),
+    "amazon.co.uk":  ("£", True, None),
+    "amazon.ie":     ("€", True, None),
+    "amazon.com.au": ("$", True, None),
+    "amazon.de":     ("€", True, "en_GB"),
+    "amazon.fr":     ("€", True, "en_GB"),
+    "amazon.it":     ("€", True, "en_GB"),
+    "amazon.es":     ("€", True, "en_GB"),
+    "amazon.nl":     ("€", True, "en_GB"),
+    "amazon.com.be": ("€", True, "en_GB"),
+    "amazon.se":     ("kr", True, "en_GB"),
+    "amazon.pl":     ("zł", True, "en_GB"),
+    "amazon.com.mx": ("$", True, "en_US"),
 }
+DEFAULT_MARKETPLACE = "amazon.com"
+
+MARKETPLACE = DEFAULT_MARKETPLACE
+CURRENCY = "$"
+DAY_FIRST = False
+ENGLISH = None
+BASE = "https://www.amazon.com"
+URLS: dict = {}
+ALLOWED_HOSTS: set = set()
+
+
+def set_marketplace(domain: Optional[str]) -> str:
+    """Point this module at one Amazon store. Anything not in MARKETPLACES
+    is refused rather than guessed, because the host allowlist below is the
+    thing that stops a stored URL from steering the browser somewhere else,
+    and a config value must not be able to widen it to an arbitrary host."""
+    global MARKETPLACE, CURRENCY, DAY_FIRST, ENGLISH, BASE, URLS, ALLOWED_HOSTS
+    domain = (domain or DEFAULT_MARKETPLACE).strip().lower()
+    domain = re.sub(r"^(https?://)?(www\.)?", "", domain).rstrip("/")
+    if domain not in MARKETPLACES:
+        raise ValueError(
+            f"marketplace {domain!r} is not one this app knows. Use one of: "
+            + ", ".join(sorted(MARKETPLACES)))
+    MARKETPLACE = domain
+    CURRENCY, DAY_FIRST, ENGLISH = MARKETPLACES[domain]
+    BASE = f"https://www.{domain}"
+    URLS = {
+        "home": _with_language(f"{BASE}/"),
+        "orders": _with_language(f"{BASE}/gp/css/order-history"),
+        "orders_alt": _with_language(f"{BASE}/your-orders/orders"),
+        "account": _with_language(f"{BASE}/gp/css/homepage.html"),
+    }
+    ALLOWED_HOSTS = {domain}
+    return domain
+
+
+def _with_language(url: str) -> str:
+    """The same URL asking for English, on a store that is not in English."""
+    if not ENGLISH:
+        return url
+    return url + ("&" if "?" in url else "?") + "language=" + ENGLISH
 
 LOGIN_URL_MARKERS = ["/ap/signin", "/ap/challenge", "signin", "/ap/mfa",
                      "authportal", "/ap/cvf"]
@@ -56,17 +115,18 @@ def orders_url(year: Optional[int] = None, start_index: int = 0) -> str:
         parts.append(f"timeFilter=year-{year}")
     if start_index:
         parts.append(f"startIndex={start_index}")
+    base = f"{BASE}/gp/css/order-history"
     q = ("?" + "&".join(parts)) if parts else ""
-    return f"{URLS['orders']}{q}"
+    return _with_language(f"{base}{q}")
 
 
 def print_invoice_url(order_id: str) -> str:
     """Amazon's printable order summary (the receipt we save)."""
-    return f"{BASE}/gp/css/summary/print.html?orderID={order_id}"
+    return _with_language(f"{BASE}/gp/css/summary/print.html?orderID={order_id}")
 
 
 def order_details_url(order_id: str) -> str:
-    return f"{BASE}/gp/your-account/order-details?orderID={order_id}"
+    return _with_language(f"{BASE}/gp/your-account/order-details?orderID={order_id}")
 
 
 # Amazon order ids: 111-2223333-4445555 (retail) or D01-... (digital)
@@ -152,17 +212,94 @@ FALLBACK = {
 
 CARD_CONTAINER = {ONLINE: FALLBACK["order_card"]}
 
+_MONTH_WORDS = (r"Jan(?:uary|uar)?|Feb(?:ruary|ruar)?|M(?:ar(?:ch)?|ärz)|Apr(?:il)?|"
+                r"Ma[iy]|Jun[ei]?|Jul[iy]?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|O[ck]t(?:ober)?|"
+                r"Nov(?:ember)?|De[cz](?:ember)?")
 DATE_PATTERNS = [
-    (re.compile(r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
-                r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
-                r"Dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4})", re.I), "mdY"),
-    (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"), "mdy_slash"),
+    # January 5, 2025
+    (re.compile(r"(" + _MONTH_WORDS + r")\.?\s+(\d{1,2}),?\s+(\d{4})", re.I), "mdY"),
+    # 5 January 2025, 5. Januar 2025
+    (re.compile(r"\b(\d{1,2})\.?\s+(" + _MONTH_WORDS + r")\.?\s+(\d{4})", re.I), "dMY"),
+    # 01/05/2025, which is month first or day first by store, and 05.01.2025
+    (re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b"), "slash"),
     (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "iso"),
 ]
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+_MONTHS.update({"mär": 3, "mai": 5, "okt": 10, "dez": 12})   # German, where it differs
 
-MONEY_RE = re.compile(r"\$\s*([\d,]+\.\d{2})")
+
+def _month_number(word: str) -> int:
+    return _MONTHS[word[:3].lower()]
+
+
+# Money. Every store prints two decimals. Which side the symbol sits on and
+# which mark is the decimal vary, so amounts are found by shape and turned
+# into a float, then written back in one canonical form, the store's symbol
+# in front and a dot for the decimal, so every consumer downstream reads one
+# format whatever the store prints.
+_NUM = r"\d{1,3}(?:[.,\u00a0 ]\d{3})*[.,]\d{2}|\d+[.,]\d{2}"
+_SYMBOLS = r"(?:\$|£|€|kr|zł|USD|GBP|EUR|CAD|AUD|MXN|SEK|PLN)"
+MONEY_RE = re.compile(
+    r"(-)?\s*" + _SYMBOLS + r"\s?(-)?(" + _NUM + r")(?!\d)"
+    r"|(-)?(" + _NUM + r")\s?" + _SYMBOLS + r"(?![A-Za-z])")
+
+
+def parse_amount(text: str) -> Optional[float]:
+    """'1,234.56' -> 1234.56 and '1.234,56' -> 1234.56. The mark followed by
+    exactly two digits at the end is the decimal, whichever it is."""
+    s = re.sub(r"[\s\u00a0]", "", text or "")
+    if not re.fullmatch(r"-?[\d.,]*\d", s):
+        return None
+    neg = s.startswith("-")
+    s = s.lstrip("-")
+    if re.search(r"[.,]\d{2}$", s):
+        dec = s[-3]
+        s = s[:-3].replace(".", "").replace(",", "") + "." + s[-2:]
+    else:
+        s = s.replace(".", "").replace(",", "")
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    return -v if neg else v
+
+
+def _amount_of(m) -> Optional[float]:
+    neg = bool(m.group(1) or m.group(2) or m.group(4))
+    v = parse_amount(m.group(3) or m.group(5) or "")
+    return None if v is None else (-v if neg else v)
+
+
+def find_amounts(text: str) -> List[float]:
+    """Every amount in the text, in order."""
+    out = []
+    for m in MONEY_RE.finditer(text or ""):
+        v = _amount_of(m)
+        if v is not None:
+            out.append(v)
+    return out
+
+
+def first_amount(text: str) -> Optional[float]:
+    amounts = find_amounts(text)
+    return amounts[0] if amounts else None
+
+
+def fmt_money(value: float) -> str:
+    """The one canonical form everything downstream reads."""
+    sign = "-" if value < 0 else ""
+    return f"{sign}{CURRENCY}{abs(value):,.2f}"
+
+
+def amount_after(label: str, text: str, window: int = 40) -> str:
+    """The first amount within `window` characters after a label such as
+    'grand total', as canonical money, or '' when there is none."""
+    for m in re.finditer(label, text or "", re.I):
+        v = first_amount(text[m.end(): m.end() + window])
+        if v is not None:
+            return fmt_money(v)
+    return ""
 QTY_RE = re.compile(r"\b(?:qty|quantity)\s*:?\s*(\d+)", re.I)
 STATUS_WORDS_RE = re.compile(
     r"\b(delivered|shipped|arriving|cancell?ed|returned|refunded|"
@@ -179,10 +316,17 @@ def parse_date(text: str) -> Optional[str]:
             continue
         try:
             if kind == "mdY":
-                month = _MONTHS[m.group(1)[:3].lower()]
+                month = _month_number(m.group(1))
                 return f"{int(m.group(3)):04d}-{month:02d}-{int(m.group(2)):02d}"
-            if kind == "mdy_slash":
-                return f"{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+            if kind == "dMY":
+                month = _month_number(m.group(2))
+                return f"{int(m.group(3)):04d}-{month:02d}-{int(m.group(1)):02d}"
+            if kind == "slash":
+                a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                day, month = (a, b) if DAY_FIRST else (b, a)
+                if not (1 <= month <= 12 and 1 <= day <= 31):
+                    continue
+                return f"{y:04d}-{month:02d}-{day:02d}"
             if kind == "iso":
                 return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
         except (KeyError, ValueError):
@@ -192,20 +336,20 @@ def parse_date(text: str) -> Optional[str]:
 
 def money_value(text: str) -> float:
     """'$1,234.56' -> 1234.56, anything else -> 0.0."""
-    m = MONEY_RE.search(text or "")
-    return float(m.group(1).replace(",", "")) if m else 0.0
+    v = first_amount(text)
+    return v if v is not None else 0.0
 
 
 def parse_subtotal(text: str) -> Optional[float]:
     """The item subtotal a summary prints, so a parse can be checked against
     it. None when the page does not print one."""
-    m = re.search(r"item\(?s?\)?\s+subtotal\s*:?\s*\$\s*([\d,]+\.\d{2})", text or "", re.I)
-    return float(m.group(1).replace(",", "")) if m else None
+    s = amount_after(r"item\(?s?\)?\s+subtotal\s*:?", text, 20)
+    return money_value(s) if s else None
 
 
 def parse_money(text: str) -> str:
-    m = MONEY_RE.search(text or "")
-    return f"${m.group(1)}" if m else ""
+    v = first_amount(text)
+    return fmt_money(v) if v is not None else ""
 
 
 def parse_status(text: str) -> str:
@@ -411,12 +555,7 @@ def card_to_purchase(card: RawCard, purchase_type: str,
     # "ORDER PLACED" column holds the purchase date; take the first date.
     date = parse_date(text) or ""
     # total: prefer the amount right after a TOTAL label
-    total = ""
-    m = re.search(r"total[^$]{0,20}(\$[\d,]+\.\d{2})", text, re.I)
-    if m:
-        total = m.group(1)
-    else:
-        total = parse_money(text)
+    total = amount_after(r"total", text, 20) or parse_money(text)
     return Purchase(
         purchase_type=ONLINE,
         purchase_date=date,
@@ -447,12 +586,13 @@ def goto_details(page, purchase: Purchase) -> None:
 # so only match Amazon.com/order boilerplate, never a bare leading "Amazon".
 _NON_ITEM_NAME_RE = re.compile(
     r"^(amazon\.com\b|amazon\s+order\b|amazon\s+visa\b|amazon\s+gift\s+card\b|"
-    r"qty\b|\$|-\$|item\(s\)\s+subtotal|item\s+subtotal|subtotal|shipping|tax\b|"
+    r"qty\b|[$£€]|-[$£€]|item\(s\)\s+subtotal|item\s+subtotal|subtotal|shipping|tax\b|"
     r"grand\s+total|order\s+total|total\s+before\s+tax|sold\s+by|supplied\s+by|"
     r"condition\b|payment\s+method|billing|shipping\s+address|credit\s+card|"
     r"gift\s+card|estimated|of\s+items?|order\s+placed|items?\s+ordered|"
     r"order\s+summary|ship\s+to|back\s+to\s+top|print$|view\s+related|"
-    r"return\s+window|united\s+states|english\b|order\s*#)", re.I)
+    r"return\s+window|united\s+states|united\s+kingdom|deutschland|germany|"
+    r"english\b|order\s*#)", re.I)
 
 # Address-ish lines that appear in the Ship-to block.
 _ADDRESS_LINE_RE = re.compile(
@@ -471,7 +611,7 @@ def _is_pair_title(line: str) -> bool:
     line is the evidence, so a short name like "Banana" is allowed here
     where _is_title_line would want ten characters."""
     line = (line or "").strip()
-    if len(line) < 3 or MONEY_RE.search(line) or _BARE_PRICE_RE.match(line):
+    if len(line) < 3 or first_amount(line) is not None:
         return False
     if line.endswith(":"):      # a label ("collected:" above the tax amount), not a product
         return False
@@ -506,16 +646,15 @@ def extract_details(page, purchase: Purchase) -> Purchase:
     # so the receipt index still reflects what the order was worth.
     total = ""
     for label in (r"grand\s+total", r"order\s+total"):
-        mm = re.search(label + r"[^$]{0,40}(\$[\d,]+\.\d{2})", body, re.I)
-        if mm:
-            total = mm.group(1)
+        total = amount_after(label, body, 40)
+        if total:
             break
     if not total:
-        amounts = MONEY_RE.findall(body)
+        amounts = find_amounts(body)
         if amounts:
-            total = "$" + max(amounts, key=lambda a: float(a.replace(",", "")))
+            total = fmt_money(max(amounts))
     if total:
-        is_zero = total.replace("$", "").replace(",", "") in ("0.00", "0")
+        is_zero = money_value(total) == 0
         if not (is_zero and purchase.total):
             purchase.total = total
 
@@ -537,7 +676,7 @@ def extract_details(page, purchase: Purchase) -> Purchase:
 
 def _is_title_line(line: str) -> bool:
     line = (line or "").strip()
-    if len(line) < 10 or MONEY_RE.search(line):
+    if len(line) < 10 or first_amount(line) is not None:
         return False
     if _NON_ITEM_NAME_RE.search(line) or _ADDRESS_LINE_RE.match(line):
         return False
@@ -607,9 +746,9 @@ def _parse_items_from_summary_text(body: str) -> List[Item]:
         for k in range(i + 1, min(len(lines), i + 7)):
             nxt = lines[k]
             if not price:
-                m = MONEY_RE.search(nxt)
-                if m and not nxt.startswith("-"):
-                    price = f"${m.group(1)}"
+                v = first_amount(nxt)
+                if v is not None and v >= 0:
+                    price = fmt_money(v)
             qm = re.match(r"^(?:qty|quantity)\s*:?\s*(\d+)$", nxt, re.I)
             if qm:
                 qty = qm.group(1)
@@ -623,7 +762,10 @@ def _parse_items_from_summary_text(body: str) -> List[Item]:
     return _parse_title_price_pairs(lines)
 
 
-_BARE_PRICE_RE = re.compile(r"^\$\s*([\d,]+\.\d{2})$")
+def _bare_amount(line: str) -> Optional[float]:
+    """The amount when the line is nothing but one price, else None."""
+    m = MONEY_RE.fullmatch((line or "").strip())
+    return _amount_of(m) if m else None
 
 
 def _parse_title_price_pairs(lines: List[str]) -> List[Item]:
@@ -636,22 +778,21 @@ def _parse_title_price_pairs(lines: List[str]) -> List[Item]:
     counted: "dict[tuple, int]" = {}
     order: List[tuple] = []
     for i in range(len(lines) - 1):
-        m = _BARE_PRICE_RE.match(lines[i + 1])
-        if not m or not _is_pair_title(lines[i]):
+        amount = _bare_amount(lines[i + 1])
+        if amount is None or not _is_pair_title(lines[i]):
             continue
         title = _clean_item_name(lines[i], min_len=3)
         if not title:
             continue
-        key = (title[:300], m.group(1))
+        key = (title[:300], amount)
         if key not in counted:
             order.append(key)
         counted[key] = counted.get(key, 0) + 1
     items: List[Item] = []
-    for title, price in order:
-        qty = counted[(title, price)]
-        unit = float(price.replace(",", ""))
-        items.append(Item(name=title, quantity=str(qty), unit_price=f"${price}",
-                          line_total=f"${unit * qty:,.2f}"))
+    for title, unit in order:
+        qty = counted[(title, unit)]
+        items.append(Item(name=title, quantity=str(qty), unit_price=fmt_money(unit),
+                          line_total=fmt_money(unit * qty)))
     return items
 
 
@@ -764,7 +905,7 @@ def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, 
 # the live signed-in session. Parsed, never a string prefix, so a lookalike
 # host cannot walk through.
 # ---------------------------------------------------------------------------
-ALLOWED_HOSTS = {'amazon.com'}
+set_marketplace(DEFAULT_MARKETPLACE)
 
 
 def is_safe_url(url: str) -> bool:

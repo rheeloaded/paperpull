@@ -66,6 +66,7 @@ def test_money_reads_the_shapes_the_apps_write():
     assert xp.money("") is None
     assert xp.money(None) is None
     assert xp.money("12.5") == 12.5
+    assert xp.money("£9.99") == 9.99 and xp.money("€1,234.56") == 1234.56 and xp.money("-€5.00") == -5.0
     assert xp.quantity("2") == 2
     assert xp.quantity("") is None
     assert xp.quantity("1.5") == 1.5

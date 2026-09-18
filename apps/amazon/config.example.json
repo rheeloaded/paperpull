@@ -1,6 +1,7 @@
 {
   "owner": "",
   "owner_in_filename": false,
+  "marketplace": "amazon.com",
   "output_dir": ".",
   "profile_dir": "./browser-profile",
   "cdp_url": "http://127.0.0.1:9223",
