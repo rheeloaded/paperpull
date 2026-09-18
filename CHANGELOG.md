@@ -7,6 +7,33 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [0.19.1] - 2026-09-18
+
+A patch on the Windows package. Nothing a user does changes.
+
+### Fixed
+- **The settings file no longer lives beside the program.** On Windows the
+  panel's one setting, which folder holds the downloads, sat in Local
+  AppData, the same folder the installer uses for the program, and survived
+  upgrades and uninstalls only because nothing happened to delete it. It
+  moves to Roaming AppData, where Windows expects per-user application
+  data. A file left in the old place by 0.19.0 is moved across the first
+  time the new panel runs, so the choice carries over.
+- **Nothing writes into the program folder any more.** The packaged Python
+  wrote bytecode beside every module it imported. It goes to the user's
+  temp folder now, the same arrangement as the macOS bundle. A local build
+  was run and checked, no `__pycache__` anywhere in the package after
+  running an app under it.
+
+### Added
+- **`PaperPull.exe`** beside `PaperPull.bat`, with the icon. It does the same
+  thing, start the panel, open the browser to it, wait, and honours
+  `PAPERPULL_PORT` so a second copy can run beside one that holds 8765.
+- **An MSIX for the Microsoft Store** is built on every tag and proved to
+  install and run on a clean runner. Not yet in the Store. The Store signs
+  it on submission, which is the route to a Windows package with no
+  SmartScreen prompt and no certificate of the project's own.
+
 ## [0.19.0] - 2026-09-17
 
 The first release with installers, and the first that ships nothing built on
