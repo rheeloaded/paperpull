@@ -1013,13 +1013,22 @@ def card_groups(page) -> List[Tuple[object, str]]:
     return [(None, label) for label in account_options(page)]
 
 
-def usbank_collect_structured(page) -> List[dict]:
+def usbank_collect_structured(page, keep=None) -> List[dict]:
+    """keep, when given, says which year-picker options a scoped run wants.
+    Years it refuses are not selected at all, which is the three seconds a
+    year this saves. An unscoped run passes None and walks every year."""
     if not ensure_statements(page):
         log.info("documents page not reachable")
         return []
 
     accounts = account_options(page) or [account_name(page)]
     periods = period_options(page) or [""]
+    if keep is not None:
+        wanted = [p for p in periods if keep(p)]
+        if len(wanted) < len(periods):
+            log.info("U.S. Bank: skipping %d year(s) outside the run's scope",
+                     len(periods) - len(wanted))
+        periods = wanted or [""]
     log.info("U.S. Bank: %d account(s) x %d year(s)", len(accounts), len(periods))
 
     found: List[dict] = []

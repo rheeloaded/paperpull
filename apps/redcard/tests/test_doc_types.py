@@ -118,3 +118,19 @@ def test_document_controls_are_safe():
 def test_empty_or_ambiguous_not_safe():
     assert not site.is_safe_control("")
     assert not site.is_safe_control("More")
+
+
+def test_a_scoped_run_never_clicks_a_past_year_it_will_throw_away(monkeypatch):
+    """The current year is already on screen and costs nothing. Each past
+    year is a click, and a run scoped to 2025 makes one of them."""
+    class Page:
+        url = "https://x/statements"
+    clicked = []
+    monkeypatch.setattr(site, "_row_dates", lambda page: [])
+    monkeypatch.setattr(site, "_year_buttons", lambda page: ["2025", "2024", "2023"])
+    monkeypatch.setattr(site, "_select_year", lambda page, y: (clicked.append(y), True)[1])
+    site.collect_download_docs(Page(), keep=lambda y: y == "2025")
+    assert clicked == ["2025"]
+    clicked.clear()
+    site.collect_download_docs(Page(), keep=None)
+    assert clicked == ["2025", "2024", "2023"]

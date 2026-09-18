@@ -228,6 +228,15 @@ open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Tips (hard-won across 14 apps)
 
+- **If the site has a year picker, let a scoped run skip years.** Selecting
+  a year is a round trip. Take `keep=None` in your collector, and when it
+  is given, drop the picker options it refuses before selecting any of
+  them. The orchestrator passes `scope.period_filter(self.args, self.config)`
+  from `paperpull_core`, which is `None` on an unscoped run so every year is
+  still walked and `discovery.json` stays complete. See `chase_site.py` for
+  the six lines.
+
+
 - **Download mechanisms vary — identify yours first.** Seen so far: a real
   browser **download event** (`page.expect_download`, most common); an inline
   **blob-in-new-tab** you `fetch()` from the page context (Navy Federal); CDP

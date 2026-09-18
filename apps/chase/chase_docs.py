@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from paperpull_core import doc_types, receipt_pdf
+from paperpull_core import doc_types, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import chase_site as site
 from paperpull_core.models import State
@@ -415,7 +415,8 @@ class App:
         # Read Chase's own document API by driving the page (one card at a
         # time, every year the picker offers) and capturing what it fetches.
         # Row scraping stays as the fallback if that ever answers nothing.
-        raw = site.chase_collect_via_api(page)
+        raw = site.chase_collect_via_api(
+            page, keep=scope.period_filter(self.args, self.config))
         if raw:
             log.info("Chase: %d document(s) read from the API", len(raw))
         else:

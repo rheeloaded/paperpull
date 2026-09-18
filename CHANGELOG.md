@@ -7,6 +7,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **A scoped run no longer walks every year.** On providers with a year
+  picker (U.S. Bank, Chase, Target RedCard, Wealthfront's tax years, and
+  Target's order history), selecting a year is a round trip, three seconds
+  or so on U.S. Bank, and discovery used to select every one and let
+  `--year`, `--start-date`, `--end-date` and `default_start_date` filter the
+  result afterwards. Now a scoped run skips selecting the years it would
+  throw away. An unscoped run still walks everything, and discovery only
+  ever adds to what it knows, so `discovery.json` stays complete for the
+  status tracker's gap detection either way. Suggested by a U.S. Bank
+  user.
+
 ## [0.20.0] - 2026-09-18
 
 ### Added

@@ -1,4 +1,4 @@
-﻿"""Target purchase-history & receipt downloader (local, supervised).
+"""Target purchase-history & receipt downloader (local, supervised).
 
 Usage:
     python target_receipts.py --login
@@ -35,7 +35,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from paperpull_core import classification, receipt_pdf
+from paperpull_core import classification, receipt_pdf, scope
 import target_site as site
 from paperpull_core.models import (DONE_STATES, IN_STORE, ONLINE, Item, Purchase, State)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
@@ -216,6 +216,13 @@ class App:
                 continue
             n_new = 0
             year_options = site.get_year_options(page)
+            keep = scope.period_filter(self.args, self.config)
+            if keep is not None and year_options:
+                wanted = [o for o in year_options if keep(o)]
+                if len(wanted) < len(year_options):
+                    log.info("%s: skipping %d year option(s) outside the run's scope",
+                             ptype, len(year_options) - len(wanted))
+                year_options = wanted
             option_list = year_options or [None]
             log.info("%s: url=%s year_options=%s", ptype, page.url, year_options)
             for option in option_list:

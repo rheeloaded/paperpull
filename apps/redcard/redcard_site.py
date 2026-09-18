@@ -371,7 +371,7 @@ class RawDoc:
     kind: str = "doc"
 
 
-def collect_download_docs(page) -> List[RawDoc]:
+def collect_download_docs(page, keep=None) -> List[RawDoc]:
     """Read every billing statement across all available years. The table shows
     one year at a time; harvest the current (latest) year, then click each
     past-year button and harvest again."""
@@ -390,8 +390,15 @@ def collect_download_docs(page) -> List[RawDoc]:
                                href="", text=f"Target Circle Card statement {disp}",
                                kind="statement"))
 
-    harvest()                                  # current (latest) year
-    for year in _year_buttons(page):           # each past year
+    harvest()                                  # current (latest) year, already shown
+    years = _year_buttons(page)                # each past year is a click
+    if keep is not None:
+        wanted = [y for y in years if keep(y)]
+        if len(wanted) < len(years):
+            log.info("RedCard: skipping %d year(s) outside the run's scope",
+                     len(years) - len(wanted))
+        years = wanted
+    for year in years:
         if _select_year(page, year):
             harvest()
     return docs

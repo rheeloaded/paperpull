@@ -1321,7 +1321,7 @@ def read_card_rows(page, label: str) -> List[dict]:
     return out
 
 
-def chase_collect_via_api(page) -> List[dict]:
+def chase_collect_via_api(page, keep=None) -> List[dict]:
     """Every document Chase still shows: each card, each year in the picker.
 
     Driven through the page's own accordions and year picker; this app issues
@@ -1332,6 +1332,14 @@ def chase_collect_via_api(page) -> List[dict]:
         log.info("documents page not reachable")
         return []
     years = year_options(page) or [""]
+    if keep is not None:
+        # A scoped run does not select years it will throw away. Each
+        # selection is a round trip, and the picker goes back a decade.
+        wanted = [y for y in years if keep(y)]
+        if len(wanted) < len(years):
+            log.info("Chase: skipping %d year(s) outside the run's scope",
+                     len(years) - len(wanted))
+        years = wanted or [""]
     cards = [label for _el, label in card_accordions(page)]
     if not cards:
         log.info("no card accordions found")

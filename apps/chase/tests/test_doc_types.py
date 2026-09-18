@@ -284,3 +284,20 @@ def test_the_document_fetch_is_host_checked():
     for bad in ["https://evil.test/x.pdf", "https://secure.chase.com.evil.test/x.pdf",
                 "http://secure.chase.com/x.pdf", "https://secure.chase.com@evil.test/x"]:
         assert not site.is_safe_url(bad), bad
+
+
+def test_a_scoped_run_never_selects_a_year_it_will_throw_away(monkeypatch):
+    """--year 2025 selects one year in the picker. No scope selects them all,
+    which is what keeps discovery.json complete for the status tracker."""
+    selected = []
+    monkeypatch.setattr(site, "ensure_statements", lambda page: True)
+    monkeypatch.setattr(site, "year_options", lambda page: ["2026", "2025", "2024", "2019"])
+    monkeypatch.setattr(site, "card_accordions", lambda page: [(None, "Sapphire ...1234")])
+    monkeypatch.setattr(site, "select_year", lambda page, y: (selected.append(y), True)[1])
+    monkeypatch.setattr(site, "collapse_all_cards", lambda page: None)
+    monkeypatch.setattr(site, "read_card_rows", lambda page, label: [])
+    site.chase_collect_via_api(page=None, keep=lambda y: y == "2025")
+    assert selected == ["2025"]
+    selected.clear()
+    site.chase_collect_via_api(page=None, keep=None)
+    assert selected == ["2026", "2025", "2024", "2019"]
