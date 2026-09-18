@@ -31,7 +31,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 HISTORY_SUFFIX = " Order History.csv"
-_MONEY = re.compile(r"(-)?\s*\$?\s*(-)?([\d,]*\.?\d+)")
+# The apps write money in one canonical form, an optional minus, the store's
+# symbol ($, £, €, kr, zł) and a dot for the decimal, so this reads that.
+_MONEY = re.compile(r"(-)?\s*(?:\$|£|€|kr|zł)?\s*(-)?([\d,]*\.?\d+)")
 
 # Output columns, in order. Each maps to the CSV column it comes from, or to
 # None when it is computed here.

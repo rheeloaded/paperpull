@@ -70,6 +70,9 @@ class App:
             else (PROJECT_DIR / "config.json")
         self.config = load_config(cfg_path)
         ensure_owner(self.config, cfg_path)
+        # Which Amazon store this install reads. Refused, with the list of
+        # known stores, rather than guessed, since it sets the host allowlist.
+        site.set_marketplace(self.config.get("marketplace"))
         set_filename_owner(self.config.get("owner", "") if self.config.get("owner_in_filename") else "")
         self.paths = Paths(Path(self.config["output_dir"]))
         self.paths.ensure()
