@@ -18,8 +18,8 @@ PDFs that TSP already generated. It never moves money between funds, changes
 contributions, withdraws, borrows, or changes any account setting. Everything
 stays on this machine. Nothing is sent to any external service.
 
-NOT MAPPED YET. See the STATUS block in tsp_site.py. Until it is, --discover
-finds nothing and --diagnose gathers what is needed to map it.
+Mapped 2026-09-18. See the STATUS block in tsp_site.py for the API, the
+auth, and the one side effect (a downloaded message is marked read).
 """
 from __future__ import annotations
 
@@ -63,7 +63,8 @@ class Document:
 
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
-                 date_text="", document_id="", **kw):
+                 date_text="", document_id="", item_id="", client_id="",
+                 occurrence=0, **kw):
         self.title = title
         self.account = account
         self.category = category
@@ -71,7 +72,10 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # TSP's stable per-document UUID
+        self.document_id = document_id  # unused here, identity is subject + date
+        self.item_id = item_id          # mailboxItemId, a hint only, re-resolved
+        self.client_id = client_id      # goes with it on the content call
+        self.occurrence = occurrence    # nth message with this subject and date
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -89,13 +93,11 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. TSP's API gives each document a durable
-        documentId (UUID) - use it. Fall back to category:date:title:account
-        for anything discovered without one."""
-        if self.document_id:
-            return f"id:{self.document_id}"
-        acct = sanitize_component(self.account or "")[:40]
-        return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
+        """Subject and date, never the mailbox id. The id is looked up fresh
+        at download time. myPay's ids died with the session, and there is no
+        reason to find out the hard way whether TSP's do."""
+        base = f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}"
+        return base if not self.occurrence else f"{base}#{self.occurrence}"
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -297,8 +299,8 @@ class App:
         return True
 
 
-    def _record_statement_doc(self, d: dict) -> int:
-        """Record one collected row {account,date,title}. Returns 1 if new."""
+    def _record_statement_doc(self, d: dict, occurrence: int = 0) -> int:
+        """Record one mailbox row {title, date, item_id, client_id}. Returns 1 if new."""
         title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
@@ -320,13 +322,18 @@ class App:
         full_summary = f"{summary} - {acct_short}" if acct_short else summary
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, account=account,
-                       date_text=date, document_id=d.get("doc_id", ""),
-                       href=d.get("href", ""))
-        if self.discovery.get(doc.key) is None:
+                       date_text=date, item_id=d.get("item_id", ""),
+                       client_id=d.get("client_id", ""), occurrence=occurrence,
+                       href=site.API_BASE)
+        existing = self.discovery.get(doc.key)
+        if existing is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
+        if doc.item_id and existing.get("item_id") != doc.item_id:
+            self.discovery.update(doc.key, {"item_id": doc.item_id,
+                                            "client_id": doc.client_id}, save=False)
         return 0
 
 
@@ -335,18 +342,23 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
-                print("Could not open your TSP statements. Sign in and open")
-                print("Statements & Documents in the browser, then try again.")
+                print("Could not reach My Account. Sign in in the browser (the tab")
+                print("should be on api.rk.tsp.gov), then try again.")
                 return 0
         self.check_session(page)
 
-        # Statements are grouped by account into expandable accordions; each
-        # group's rows carry a date + a "View" button (no documents API).
+        # The mailbox, read through its own API. Two messages can share a
+        # subject and a date (an annual statement and its supplement, say),
+        # so the nth such pair is keyed with its position.
         raw = site.collect_documents(page)
-        log.info("TSP: collected %d document rows across accounts", len(raw))
+        log.info("TSP: %d PDF message(s) in the mailbox", len(raw))
         n_new = 0
+        seen: dict = {}
         for d in raw:
-            n_new += self._record_statement_doc(d)
+            pair = (d.get("title"), d.get("date"))
+            occ = seen.get(pair, 0)
+            seen[pair] = occ + 1
+            n_new += self._record_statement_doc(d, occ)
         self.discovery.save()
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -448,19 +460,22 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # TSP serves each document at its own URL, captured at discovery. The
-        # session must be live, so warm it, then GET the href (host-checked in
-        # download_statement). Nothing is clicked.
+        # Each PDF is the attachment on a mailbox message, fetched through
+        # the same API the page uses, from inside the page. Nothing is
+        # clicked. The message is looked up again by subject and date first.
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
         try:
-            saved = site.download_document(page, doc.document_id, out_path)
+            saved = site.download_document(page, doc.title, doc.date, out_path,
+                                           item_hint=doc.item_id,
+                                           client_hint=doc.client_id,
+                                           occurrence=doc.occurrence)
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as "manual review" and finish looking successful while
             # having saved nothing.
-            print("\n  !! TSP returned a sign-in page instead of a document.")
+            print("\n  !! My Account answered with a sign-in error instead of a document.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, re-list your statements, then run resume.bat.")
             self.stats["session_expired"] = 1
@@ -650,11 +665,10 @@ class App:
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
             info["mapped"] = bool(site.DOCUMENT_TYPES)
-            # Not mapped yet, so diagnose gathers EVIDENCE of what a signed-in
-            # My Account looks like rather than pretending to collect. Read
-            # only, tsp.gov pages only, and the only links it follows are the
-            # few whose text is exactly a document or mailbox word. Account
-            # numbers are masked and JSON bodies are recorded as shape only.
+            # The survey stays, for the day the site changes. Read only,
+            # tsp.gov pages only, the only links it follows are the few whose
+            # text is exactly a document or mailbox word, account numbers
+            # are masked and JSON bodies are recorded as shape only.
             info["survey"] = site.survey(page)
             docs = site.collect_documents(page)
             info["collected"] = len(docs)
@@ -676,9 +690,6 @@ class App:
         sv = info.get("survey") or {}
         print(f"Pages surveyed: {len(sv.get('pages', []))}   "
               f"JSON/PDF responses seen: {len(sv.get('responses', []))}")
-        if not info.get("mapped"):
-            print("TSP is not mapped yet. Send that file to the maintainer and the")
-            print("next version will know where the statements are.")
         print(f"Rows collected: {info.get('collected', '?')}")
         for s in info.get("samples", [])[:5]:
             print(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}")

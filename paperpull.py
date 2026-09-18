@@ -76,17 +76,20 @@ def settings_path() -> Path:
 
 
 def apps_root(explicit: str | None = None) -> Path:
+    """Always absolute. The app runs with its own folder as the working
+    directory, so a relative --root like "apps" would otherwise turn every
+    path handed to it (its requirements file, for one) into nonsense."""
     if explicit:
-        return Path(explicit).expanduser()
+        return Path(explicit).expanduser().resolve()
     env = os.environ.get("APPS_ROOT")
     if env:
-        return Path(env).expanduser()
+        return Path(env).expanduser().resolve()
     try:
         saved = json.loads(settings_path().read_text(encoding="utf-8")).get("apps_root")
     except (OSError, ValueError, AttributeError):
         saved = None
     if saved:
-        return Path(saved).expanduser()
+        return Path(saved).expanduser().resolve()
     if (HERE / "templates" / "apps").is_dir() and not (HERE / "apps").is_dir():
         # The packaged app. Its apps/ folder is a template set, not installs.
         return Path.home() / "Documents" / "PaperPull"

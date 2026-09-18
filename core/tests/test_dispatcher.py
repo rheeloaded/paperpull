@@ -241,3 +241,14 @@ def test_on_windows_the_terminal_reads_the_panels_settings_from_roaming_first(tm
     new.parent.mkdir(parents=True)
     new.write_text("{}", encoding="utf-8")
     assert paperpull.settings_path() == new
+
+
+def test_a_relative_root_is_made_absolute_before_the_app_runs_in_its_own_folder(tmp_path, monkeypatch):
+    """`paperpull --root apps schwab setup` handed pip "apps/schwab/requirements.txt"
+    while running inside apps/schwab, and pip could not find it."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apps").mkdir()
+    root = paperpull.apps_root("apps")
+    assert root.is_absolute() and root == tmp_path / "apps"
+    monkeypatch.setenv("APPS_ROOT", "apps")
+    assert paperpull.apps_root(None).is_absolute()
