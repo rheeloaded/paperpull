@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.21.0] - 2026-09-18
 
 ### Changed
 - **A scoped run no longer walks every year.** On providers with a year
@@ -32,6 +32,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   except Login runs with the matching `--year`, `--start-date` and
   `--end-date`. The panel validates what the page sends before it reaches
   a command line, and remembers the choice in that browser.
+- **`MSIX_DISPLAY_NAME`** lets the Store package's display name match the
+  spelling Partner Center reserved, case included.
 
 ## [0.20.0] - 2026-09-18
 
