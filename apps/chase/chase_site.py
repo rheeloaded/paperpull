@@ -25,7 +25,7 @@ verification loop or a temporary lock on a real account, so nothing here ever
 touches Chase from an obviously-automated browser.
 
 WHAT THE LIVE PROBE ESTABLISHED (2026-08-18):
-  * The document centre is
+  * The document center is
       secure.chase.com/web/auth/dashboard#/dashboard/documents/myDocs/index
     reached by clicking the app's own nav; document types are URL segments
     (documentType=STATEMENTS / TAX_DOCUMENTS / YEAR_END_STATEMENTS).
@@ -588,7 +588,7 @@ def collect_documents(page) -> List[RawDoc]:
 # widget whose first <select> is an account list (id/allytmfn "fromAccount") -
 # indistinguishable from a statements account picker by its options alone. The
 # 2026-08-18 probe found exactly that and tried to set it. Selecting an option
-# in a transfer form is not read-only behaviour even when nothing is submitted,
+# in a transfer form is not read-only behavior even when nothing is submitted,
 # so every <select> is identity-checked before it is read OR written.
 # ---------------------------------------------------------------------------
 _ACCOUNT_HINT_RE = re.compile(
@@ -800,7 +800,7 @@ def row_label_re(date: str, account: str, action: str = "Saves document"):
     Chase names these fully - "Aug 09, 2026 Statement SAPPHIRE RESERVE
     (...1234) Saves document" - so a row is identified by date AND card AND
     action, with nothing left to position or inference. Two rows cannot be
-    confused the way Ally's identically-labelled statements could.
+    confused the way Ally's identically-labeled statements could.
     """
     month = _MONTHS_ABBR[int(date[5:7]) - 1]
     day = date[8:10]
@@ -1087,7 +1087,7 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
 
 
 # ===========================================================================
-# Discovery: the document centre, driven exactly as a person drives it
+# Discovery: the document center, driven exactly as a person drives it
 #
 # Confirmed live 2026-08-18. The page is one accordion per card. Expanding one
 # makes the SPA call

@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Navy Federal's ow
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Navy Federal's *page* behaviour, edit `navyfederal_site.py` instead.
+To repair Navy Federal's *page* behavior, edit `navyfederal_site.py` instead.
 """
 from __future__ import annotations
 

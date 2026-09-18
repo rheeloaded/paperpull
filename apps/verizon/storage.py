@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Verizon's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Verizon's *page* behaviour, edit `verizon_site.py` instead.
+To repair Verizon's *page* behavior, edit `verizon_site.py` instead.
 """
 from __future__ import annotations
 

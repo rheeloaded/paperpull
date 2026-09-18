@@ -229,8 +229,8 @@ def test_the_cloned_navy_federal_machinery_is_gone():
 
 
 def test_unknown_statement_types_are_not_called_mortgage_statements():
-    """The page also lists notices and analysis statements. An unrecognised
-    t= used to be labelled "Mortgage Statement", which would file a notice
+    """The page also lists notices and analysis statements. An unrecognized
+    t= used to be labeled "Mortgage Statement", which would file a notice
     under a name that is not true."""
     import mtb_site
     assert mtb_site._STMT_TYPE.get("MTGSTMT") == "Mortgage Statement"

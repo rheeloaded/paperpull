@@ -582,7 +582,7 @@ def collect_documents(page) -> List[RawDoc]:
 # widget whose first <select> is an account list (id/allytmfn "fromAccount") -
 # indistinguishable from a statements account picker by its options alone. The
 # 2026-08-18 probe found exactly that and tried to set it. Selecting an option
-# in a transfer form is not read-only behaviour even when nothing is submitted,
+# in a transfer form is not read-only behavior even when nothing is submitted,
 # so every <select> is identity-checked before it is read OR written.
 # ---------------------------------------------------------------------------
 _ACCOUNT_HINT_RE = re.compile(
@@ -977,7 +977,7 @@ def _find_row_control(page, date: str, account: str = "", occurrence: int = 0):
     * A TRUST statement carries the registration in its row label
       ("Download statement for: <name> Trust Statement"), so `account` picks
       it out exactly.
-    * Everything else is labelled identically ("Download statement for:
+    * Everything else is labeled identically ("Download statement for:
       Statement"), several per date, differing only by documentId. Nothing on
       the page distinguishes them, so the only handle available is position:
       the Nth such row for that date. `occurrence` selects it, and the trust
@@ -999,7 +999,7 @@ def _find_row_control(page, date: str, account: str = "", occurrence: int = 0):
         log.info("no row for registration %r on %s", account[:40], date)
         return None
 
-    # Ambiguous set: drop the registration-labelled rows, then take the Nth.
+    # Ambiguous set: drop the registration-labeled rows, then take the Nth.
     plain = [(row, text) for row, text in rows
              if not re.search(r"\btrust\b", text, re.I)]
     if occurrence < len(plain):
@@ -1351,7 +1351,7 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
 # the person who wrote it. A customer with one account yields one row.
 #
 # Everything here is plain string matching: deterministic, offline, and it
-# returns nothing rather than a guess when the layout is not recognised.
+# returns nothing rather than a guess when the layout is not recognized.
 # ===========================================================================
 STMT_TABLE_START_RE = re.compile(r"account\s+name\s+account\s+number", re.I)
 STMT_TABLE_END_RE = re.compile(r"^\s*total\s+account\s+balances", re.I)
@@ -1462,7 +1462,7 @@ def normalize_name(name: str) -> str:
 #
 # The payload shape is read tolerantly for the same reason: the list is found
 # by looking for the array in the response, and each record's id/name/date by
-# trying the key names Ally is known to use. Anything unrecognised is skipped
+# trying the key names Ally is known to use. Anything unrecognized is skipped
 # and logged rather than guessed at.
 # ===========================================================================
 # The form designation as it appears in a tax row: "1099-INT", "1098-E",
@@ -1692,7 +1692,7 @@ def _find_tax_row_control(page, title: str, account: str = "",
         return None
 
     # No registration on this record: take the Nth row that names none either,
-    # so it can never collide with a registration-labelled form.
+    # so it can never collide with a registration-labeled form.
     plain = [(row, text) for row, text in matches
              if not re.search(r"\btrust\b", text, re.I)]
     if occurrence < len(plain):

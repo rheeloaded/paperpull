@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Amazon's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Amazon's *page* behaviour, edit `amazon_site.py` instead.
+To repair Amazon's *page* behavior, edit `amazon_site.py` instead.
 """
 from __future__ import annotations
 

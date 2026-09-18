@@ -48,7 +48,7 @@ live pilot. Start with `paperpull pge pilot` and inspect its results.
 
 ## Maintenance
 
-Page behaviour is in `pge_site.py`, the command flow in `pge_docs.py`. When
+Page behavior is in `pge_site.py`, the command flow in `pge_docs.py`. When
 the portal changes, `paperpull pge diagnose` writes what it sees (row counts, sample
 rows, every control and whether the guard would allow it) to the Diagnostics
 folder along with a screenshot.

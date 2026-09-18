@@ -204,7 +204,7 @@ def goto_documents(page) -> bool:
 
     This is a navigation, not a guess and not a click. The confirmed URL for
     Pay History is loaded directly, which both gives the user something
-    recognisable to look at and, more importantly, sets the login.paylocity.com
+    recognizable to look at and, more importantly, sets the login.paylocity.com
     session the JSON endpoints require. Without it the endpoints answer 200
     with an empty body, which reads as an empty account rather than an error.
     """
@@ -330,7 +330,7 @@ def collect_documents(page) -> List[RawDoc]:
 def goto_documents_or_none(page):
     """Kept for the orchestrator's discovery call; the API works on its own,
     but loading the pay page first keeps the session warm and gives the user
-    something recognisable to look at."""
+    something recognizable to look at."""
     return goto_documents(page)
 
 

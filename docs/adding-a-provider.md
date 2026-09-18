@@ -181,7 +181,7 @@ profile" is not. Copy one from any recent app.
 
 **Every click goes through the guard, with the element's own label.** Not
 just the ones you expect to be risky. A provider once fetched each bill by
-clicking the first link or button in the row when the labelled one was not
+clicking the first link or button in the row when the labeled one was not
 found, and a bill row also holds Pay. The repo-wide test refuses any
 function that clicks what a bare selector (`a`, `button`, a wildcard, an
 unnamed role) finds without consulting the guard, and it will fail your PR

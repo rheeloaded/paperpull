@@ -11,7 +11,7 @@
 
 Every app is one Python script that takes one flag, and this finds the app,
 picks the interpreter it should run under, and passes the flag. Anything it
-does not recognise after the command goes to the app as it is, so
+does not recognize after the command goes to the app as it is, so
 `paperpull robinhood all --year 2025` works the way `--year 2025` does on the
 script itself.
 

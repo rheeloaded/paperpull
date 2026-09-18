@@ -6,7 +6,7 @@ has no "EOB" of its own, so an EOB is classified as an Insurance Document (it is
 an explanation of health-insurance benefits) and that category is routed to the
 `EOBs` folder below. The 1095 health-coverage tax form routes to Tax Documents.
 
-To repair Anthem's *page* behaviour, edit `anthem_site.py` instead.
+To repair Anthem's *page* behavior, edit `anthem_site.py` instead.
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ SPEC = AppSpec(
         Folder("id_cards", "ID Cards", precreate=False),
         # Secure Message Center letters, one PDF per message. Created on demand.
         Folder("letters", "Letters", precreate=False),
-        # Anything recognised but unrouted. Created on demand.
+        # Anything recognized but unrouted. Created on demand.
         Folder("other_documents", "Other Documents", precreate=False),
         *INFRASTRUCTURE_FOLDERS,
     ],

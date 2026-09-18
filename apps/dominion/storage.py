@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Dominion Energy's
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Dominion Energy's *page* behaviour, edit `dominion_site.py` instead.
+To repair Dominion Energy's *page* behavior, edit `dominion_site.py` instead.
 """
 from __future__ import annotations
 

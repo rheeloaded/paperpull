@@ -78,7 +78,7 @@ URLS = {
 
 
 # Markers of a genuine sign-in / challenge redirect. "account-login" is Anthem's
-# own sign-in path, so a session that expires and bounces there is recognised.
+# own sign-in path, so a session that expires and bounces there is recognized.
 LOGIN_URL_MARKERS = ["account-login", "/login", "/logon", "/signin", "/sso",
                      "samlsso", "returnurl=", "sessiontimeout", "/logout",
                      "/loggedout"]
@@ -455,7 +455,7 @@ DOCUMENT_TYPES = {t: f"{t} Explanation of Benefits" for t in CLAIM_TYPES}
 # How far back to ask for. CONFIRMED live 2026-08-31: the API returns the full
 # history at 24 months but an EMPTY list once `start` is older than ~25-27
 # months (30mo and 36mo both returned zero rows). So 24 months is both the max
-# the server honours and enough to capture everything it keeps.
+# the server honors and enough to capture everything it keeps.
 DEFAULT_LOOKBACK_DAYS = 24 * 30
 
 # Pages whose XHR/fetch we have already hooked (by id()), so add_init_script is
@@ -752,7 +752,7 @@ def parse_doc_id(doc_id: str):
     """"Medical|1234500AA0001|EOB|0" -> ("Medical","1234500AA0001","EOB",0).
 
     Returns None if malformed or if the claim type / doc kind are not ones this
-    app recognises, so a stored or tampered value cannot steer a request at a
+    app recognizes, so a stored or tampered value cannot steer a request at a
     document type the app does not serve. The claim number is validated to the
     alphanumeric shape Anthem uses, which also refuses any path or query
     metacharacter. A trailing sequence number is optional for backward
@@ -1021,7 +1021,7 @@ def document_label_for(document_type: str) -> str:
 
 def period_start(coverage_key: str) -> str:
     """The coverage period's start date as YYYY-MM-DD (the document's filing
-    date), or "" if the key is not the shape this app recognises."""
+    date), or "" if the key is not the shape this app recognizes."""
     m = _COVERAGE_KEY_RE.fullmatch((coverage_key or "").strip())
     if not m:
         return ""
@@ -1439,7 +1439,7 @@ def download_member_document(page, coverage_key: str, document_type: str) -> Opt
     coverage period is validated to its known shape so a stored value cannot be
     pointed off the member's own coverage."""
     if not valid_coverage_key(coverage_key):
-        log.error("refusing a document request for an unrecognised coverage period")
+        log.error("refusing a document request for an unrecognized coverage period")
         return None
     if not _prime_bucket(page, DOCUMENTS_URL, "ms", needs_member=True):
         raise SessionExpired("could not capture Anthem's session for a document download")

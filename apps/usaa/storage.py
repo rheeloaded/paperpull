@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is USAA's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair USAA's *page* behaviour, edit `usaa_site.py` instead.
+To repair USAA's *page* behavior, edit `usaa_site.py` instead.
 """
 from __future__ import annotations
 

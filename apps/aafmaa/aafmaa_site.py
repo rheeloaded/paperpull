@@ -1,4 +1,4 @@
-"""ALL AAFMAA (Armed Forces Mutual) selectors, URLs, and page behaviour live here.
+"""ALL AAFMAA (Armed Forces Mutual) selectors, URLs, and page behavior live here.
 
 When AAFMAA changes its site, repair this file only.
 
@@ -90,7 +90,7 @@ URLS = {
     # and the sign-in page. That means a URL alone cannot tell you whether you
     # are signed in - looks_signed_out() checks for the password field instead.
     "login": f"{BASE}/",
-    # CONFIRMED against a signed-in account, 2026-08-22. The app is organised
+    # CONFIRMED against a signed-in account, 2026-08-22. The app is organized
     # as /<Area>/default.aspx, so the documents area is /Documents/default.aspx
     # and the landing page is /Home/default.aspx.
     "home_app": f"{BASE}/Home/default.aspx",
@@ -477,7 +477,7 @@ def collect_all_pages(page, max_pages: int = 20) -> List[dict]:
         log.warning("refusing to collect: this is not the documents page (%s)",
                     (page.url or "")[:80])
         return []
-    # Normalise to page 1 before reading anything. Discovery reads whatever
+    # Normalize to page 1 before reading anything. Discovery reads whatever
     # page the table was left showing, and a previous walk leaves it on the
     # LAST page - a run then read page 3 twice, never saw page 1, and five
     # documents quietly went missing. If "1" is not a link, this is already
@@ -577,7 +577,7 @@ _BLOB_FETCH_JS = r"""async () => {
 
 # The membership boilerplate AAFMAA shows every member, above their own
 # documents: a president's letter, a benefits brochure, the privacy policy.
-# Recognised by WHERE they live rather than by what they are called, so a
+# Recognized by WHERE they live rather than by what they are called, so a
 # rename cannot start them being archived as somebody's insurance records.
 RESOURCE_PDF_RE = re.compile(r"/Resources/PDFFiles/", re.I)
 
@@ -710,7 +710,7 @@ def collect_document_index(page) -> List[dict]:
     # positional assumption and nothing said so. If rows existed and none
     # survived, say what one looked like.
     if not docs and (skipped_no_date or skipped_no_view):
-        log.warning("table had %d row(s) with no recognisable date and %d "
+        log.warning("table had %d row(s) with no recognizable date and %d "
                     "with no View control; first unmatched row's cells: %r",
                     skipped_no_date, skipped_no_view,
                     [c[:30] for c in (sample_cells or [])])

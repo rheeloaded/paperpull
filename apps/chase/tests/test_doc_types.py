@@ -26,7 +26,7 @@ def test_card_statements():
 
 
 def test_tax_forms_classify_but_are_out_of_scope():
-    """The rules still recognise a stray 1099 so it is never filed as a
+    """The rules still recognize a stray 1099 so it is never filed as a
     statement - but document_types lists Statement only, so it is skipped
     rather than half-collected. Chase tax documents are out of scope."""
     for title, summary in [

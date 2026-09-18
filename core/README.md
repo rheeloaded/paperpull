@@ -14,7 +14,7 @@ An app keeps only what is genuinely its own:
 
 | File | What it is |
 |------|------------|
-| `<provider>_site.py` | every selector, URL and page behaviour — the file you repair when a site changes |
+| `<provider>_site.py` | every selector, URL and page behavior — the file you repair when a site changes |
 | `<provider>_docs.py` / `_receipts.py` | the run orchestrator |
 | `storage.py` | a small shim declaring this provider's `AppSpec` |
 | `config.json`, rules JSON | per-install settings and tunable keywords |

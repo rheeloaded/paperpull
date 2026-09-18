@@ -58,7 +58,7 @@ and message your care team. This tool does none of it. Concretely:
 - **A document is fetched by a validated identity, never a URL.** The identity
   is `claimType|claimId|docKind`: the claim type and kind must be ones this app
   knows and the claim number is validated to Anthem's alphanumeric shape, so the
-  request is built from values this app recognises rather than any stored string.
+  request is built from values this app recognizes rather than any stored string.
 - **The opaque per-document token never leaves the page.** Anthem authorises a
   PDF fetch with a per-document `eobId` token minted into the page. It is read
   and spent inside the page in one expression and is **never stored**; the
@@ -97,7 +97,7 @@ If a run stops saying the session expired or was blocked, sign in again and use
 | `Tax Documents\` | 1095-B health-coverage form, if the account has one (created on demand) |
 | `ID Cards\` | Each covered member's digital ID / insurance card (front and back) as one PDF, named per member (created on demand) |
 | `Letters\` | Secure Message Center letters, one PDF per message (created on demand) |
-| `Other Documents\` | Anything else recognised but unrouted (created on demand) |
+| `Other Documents\` | Anything else recognized but unrouted (created on demand) |
 | `Manual Review\` | Files that failed PDF validation |
 
 Every surface is fetched the same way — by the portal's own authenticated member

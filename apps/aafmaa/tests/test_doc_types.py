@@ -118,7 +118,7 @@ def test_document_controls_are_safe():
 
 
 def test_deny_by_default():
-    """Anything unrecognised is refused - clearing the blocklist is not
+    """Anything unrecognized is refused - clearing the blocklist is not
     enough, a control must also look like a document action."""
     for label in ["", "More", "Continue", "Next", "Options", "Help",
                   "Go", "Select", "Details"]:

@@ -135,7 +135,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     re.I)
 
 # What a document control may look like. A control must match this AND not
-# match the blocklist. Message-centre words are here because TSP delivers
+# match the blocklist. Message-center words are here because TSP delivers
 # statements and tax forms to a mailbox.
 SAFE_DOC_CONTROL_RE = re.compile(
     r"(download|\bview\b|\bopen\b|\bprint\b|\bpdf\b|statement|document|"

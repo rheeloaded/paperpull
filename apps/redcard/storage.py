@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Target Circle Car
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Target Circle Card's *page* behaviour, edit `redcard_site.py` instead.
+To repair Target Circle Card's *page* behavior, edit `redcard_site.py` instead.
 """
 from __future__ import annotations
 

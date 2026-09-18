@@ -6,7 +6,7 @@ Ready, Workforce Central), so the base URL lives in `config.json` as
 `base_url` rather than being baked in here. That also keeps it out of the
 repo: the tenant address identifies your employer.
 
-To repair UKG's *page* behaviour, edit `ukg_site.py` instead.
+To repair UKG's *page* behavior, edit `ukg_site.py` instead.
 """
 from __future__ import annotations
 

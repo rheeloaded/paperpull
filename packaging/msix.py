@@ -225,7 +225,7 @@ def write_assets(dest: Path, png256: bytes, say) -> None:
     script = ["Add-Type -AssemblyName System.Drawing",
               "$src = [System.Drawing.Image]::FromFile('%s')" % src]
     for out, w, h in jobs:
-        # Square sizes scale the icon to fit. The wide tile centres it on a
+        # Square sizes scale the icon to fit. The wide tile centers it on a
         # transparent canvas, which is what the Store's wide tile expects.
         side = min(w, h)
         script.append(

@@ -233,7 +233,7 @@ def test_no_screenshot_of_a_phi_page_is_written():
     assert "page.screenshot(" not in src
 
 
-# -- SAFETY: a signed-out session must be recognised, not reported as empty --
+# -- SAFETY: a signed-out session must be recognized, not reported as empty --
 
 def test_a_signin_page_returned_instead_of_a_pdf_is_recognised():
     """An expired session answers with HTML (an Akamai block or a sign-in page),

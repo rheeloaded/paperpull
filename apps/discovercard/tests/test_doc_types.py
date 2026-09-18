@@ -26,7 +26,7 @@ def test_card_statements():
 
 
 def test_tax_forms_classify_but_are_out_of_scope():
-    """The rules still recognise a stray 1099 so it is never filed as a
+    """The rules still recognize a stray 1099 so it is never filed as a
     statement - but document_types lists Statement only, so it is skipped
     rather than half-collected. Discover tax documents are out of scope."""
     for title, summary in [
@@ -210,7 +210,7 @@ def test_served_last4_reads_the_card_from_the_filename():
 
 
 def test_the_pdf_control_clears_the_guard():
-    """The statement links are labelled just "PDF"."""
+    """The statement links are labeled just "PDF"."""
     assert site.is_safe_control("PDF")
     assert site.is_safe_control("View Billing Statement PDF")
     # ...while the neighbouring transactions-export control, which opens a

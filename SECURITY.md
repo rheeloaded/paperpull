@@ -44,7 +44,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     with `is_safe_control()`: a hard blocklist (`FORBIDDEN_CONTROL_RE` —
     buy/sell/transfer/pay/delete/change-setting/…) **plus** a document
     allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass **both**, so
-    anything unrecognised is refused — deny by default.
+    anything unrecognized is refused — deny by default.
   - **The receipt apps** (Amazon, Target, Walmart) click a print/invoice
     control matched by a narrow pattern and screened against the same
     blocklist. There is no separate allowlist in these three, so the guard is

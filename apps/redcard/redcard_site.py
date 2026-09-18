@@ -467,7 +467,7 @@ def _attempt_download(page, iso_date: str, out_path) -> Optional[bool]:
             label = ""
     templated = ("{{" in label) or ("}}" in label)
     if label and not templated and not is_safe_control(label):
-        log.error("refusing a control labelled %r", label[:60])
+        log.error("refusing a control labeled %r", label[:60])
         return False
 
     from paperpull_core.receipt_pdf import save_download
