@@ -17,11 +17,11 @@ Twenty-seven providers are supported today, all built on the same pattern:
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy docs | ASP.NET WebForms; one documented disclosure dialog |
-| [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported; fresh live pilot pending |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked |
+| [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported; fresh live pilot pending |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | **Capital One is moving these accounts onto its own site. Once yours has moved this app can no longer read it** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
@@ -35,8 +35,8 @@ Twenty-seven providers are supported today, all built on the same pattern:
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported; fresh live pilot pending |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
-| [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
+| [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements** | Per-employer tenant; JSON-API, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
 | [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Ported; fresh live pilot pending |
@@ -63,7 +63,7 @@ flowchart TB
     you(["You"]) -->|"sign in · 2FA · device approval"| br["A real browser window<br/>its own profile · its own debugging port"]
     br -.->|"attaches over CDP — reads, never authenticates"| app
     subgraph app ["One app = one provider"]
-        orch["Orchestrator<br/>discover → download → verify<br/>the same in all seventeen apps"]
+        orch["Orchestrator<br/>discover → download → verify<br/>the same in every app"]
         site["provider_site.py<br/>selectors · URLs · download quirks"]
         core["paperpull-core<br/>naming · filing · state · CSV · PDF checks"]
         orch --> site
@@ -76,15 +76,16 @@ That single choice is why there is no password anywhere in this project, why
 2FA and device approvals are never an obstacle, and why a provider tightening
 its login breaks nothing here.
 
-In practice that first step is `login.bat` (or `./login.command`), which opens
-the browser for you — a plain Chromium for most apps, or your own installed
-Edge/Chrome for the few sites whose bot detection turns a fresh Chromium away
-(Walmart, Verizon). Each app gets its own profile and its own debugging port,
-so several signed-in browsers can sit open at once without colliding.
+In practice that first step is `paperpull <app> login` (or the app's own
+`login.bat` / `login.command`), which opens the browser for you, a plain
+Chromium for most apps, or your own installed Edge/Chrome for the few sites
+whose bot detection turns a fresh Chromium away (Walmart, Verizon, Chase).
+Each app gets its own profile and its own debugging port, so several
+signed-in browsers can sit open at once without colliding.
 
 **Everything a provider knows lives in one file.** `provider_site.py` holds
 every selector, URL and download quirk for that site. The orchestrator around
-it is the same in all seventeen apps, and `paperpull-core` underneath it is
+it is the same in every app, and `paperpull-core` underneath it is
 shared. When a provider redesigns, the repair is one file — never a rewrite,
 and never a change to how documents get named, filed or tracked.
 
@@ -107,7 +108,7 @@ Three plain-text files carry the state, and you can read all of them:
 |------|-------|
 | `discovery.json` | what the provider showed us this run |
 | `progress.json` | what happened to each document — including the sticky `downloaded_ok` |
-| `<Provider> Index.csv` | one row per saved document, for humans and spreadsheets |
+| `<Provider> Document Index.csv` | one row per saved document, for humans and spreadsheets (receipt apps also keep an `Order History.csv`, one row per line item) |
 
 That last step is what makes a re-run safe. `downloaded_ok` is keyed to the
 document, not to the file on disk — so you can import everything into
@@ -118,18 +119,21 @@ fetches what is genuinely new, and lists it in `new-this-run.txt`.
 
 Nothing that buys, sells, transfers, pays, deletes, or changes a setting is
 ever clicked, and all site interaction lives in `provider_site.py` where it can
-be read in one sitting. The statement apps enforce this deny-by-default — a
+be read in one sitting. Every app that clicks enforces this deny-by-default, a
 control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
-allowlist (`SAFE_DOC_CONTROL_RE`). The receipt apps screen a narrow
-print/invoice pattern against the blocklist. Gap and UKG click nothing at all.
+allowlist (`SAFE_DOC_CONTROL_RE`), and the app's host allowlist refuses any
+stored URL that points elsewhere. Seven apps click nothing at all (Amazon,
+Anthem, Gap, myPay, Paylocity, TSP, UKG), they read a JSON API or render a
+page they navigated to. A repo-wide test checks every app's guard.
 [SECURITY.md](SECURITY.md) spells out which app does which.
 
 ### One app, more than one person
 
-A `--config config.<name>.json` flag lets one app serve a second person's
-account with its own profile, port and output folders, so no data mixes. The
-launchers take the account label as an argument (`login.bat spouse` /
-`./login.command spouse`).
+`paperpull <app> all --account spouse` runs one app against a second
+person's account, with its own profile, port and output folders, so no data
+mixes. Underneath it is a `config.spouse.json` beside the app's `config.json`,
+which the app also takes directly as `--config`, and the sign-in launcher
+takes the label too (`login.bat spouse` / `./login.command spouse`).
 
 ## Quick start
 
@@ -159,7 +163,7 @@ gui\run_gui.bat
 
 ```bat
 copy apps\amex\config.example.json apps\amex\config.json    REM then edit paths as needed
-apps\amex\login.bat            REM opens a browser, sign in yourself, leave it OPEN
+paperpull amex login            REM opens a browser, sign in yourself, leave it OPEN
 paperpull amex pilot            REM download the newest few as a test
 paperpull amex all              REM download everything available
 paperpull amex resume           REM continue after an interruption
@@ -171,7 +175,9 @@ Linux, or `python paperpull.py` anywhere. It finds the app by folder name,
 slug or provider, runs it under its own environment, and passes anything else
 straight through, so `paperpull chase all --year 2025 --account spouse` works.
 The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
-`verify`, `diagnose` and `dry-run`, the same set the panel offers.
+`verify`, `diagnose` and `dry-run`. The panel offers the six of those a
+person uses day to day, plus a Scope row (one year, or a date range) that
+becomes the same `--year`, `--start-date` and `--end-date` every app takes.
 
 Each app also has its own README with provider-specific details and quirks.
 (Prefer to set apps up one at a time? `paperpull <app> setup`, or the app's
@@ -259,9 +265,10 @@ Excel can sum them. Nothing reads a PDF and it takes about a second.
 python tools/export_purchases.py --root "C:\path\to\your\installs"
 ```
 
-The panel has the same thing on its **Spreadsheet** tab, one button. The
-file is rebuilt from scratch each time, so edit a copy, not the original.
-Statement archives have no line items and are not part of this.
+The panel has the same thing on its **Spreadsheet** tab, one button, with a
+dropdown for one provider at a time (`Amazon Purchases.xlsx`). The file is
+rebuilt from scratch each time, so edit a copy, not the original. Statement
+archives have no line items and are not offered one.
 
 ## Windows and macOS
 
@@ -297,9 +304,12 @@ app bundle and in a different cache directory, and a couple of providers need
 a branded Edge/Chrome to get past their bot protection — that lookup lives in
 `paperpull_core.browser` and is handled for you.
 
-### Getting it onto a Mac
+### Getting a checkout onto a Mac
 
-**`git clone` is the smoothest route** — it preserves the scripts' executable
+To use PaperPull, the `.dmg` above is the way. This is for a checkout of the
+repository.
+
+**`git clone` is the smoothest route**, it preserves the scripts' executable
 bit and macOS does not quarantine it.
 
 If you download a release archive instead, prefer the **`.tar.gz`**: it keeps
@@ -316,8 +326,13 @@ chmod +x setup-all.command apps/*/*.command gui/*.command
 ## Requirements
 
 - **Windows, macOS, or Linux**
-- Python 3.11+
-- Playwright (installed per app by the setup script)
+- For the Windows installer or the macOS `.dmg`, nothing else. They carry
+  their own Python.
+- For a checkout, Python 3.11+ and Playwright (installed per app by the
+  setup script)
+- A Chromium-family browser for the few providers that need a real one
+  (Chrome, Edge, Brave, Vivaldi or Opera). Safari and Firefox cannot be
+  driven this way.
 
 ## Contributing — add your provider
 
@@ -337,9 +352,15 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
 
 ## Status & roadmap
 
-- ✅ All **twenty-six** apps pass their tests. Twenty-two are in regular use by
-  the author, and the four contributed most recently are marked in the table
-  above as awaiting a fresh live pilot.
+- ✅ All **twenty-seven** apps pass their tests, more than 1,400 of them across the
+  repo. Twenty are in regular use by the author. The other seven (Ally,
+  Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
+  by people who hold those accounts, and the four marked in the table above
+  are awaiting a fresh live pilot since they were ported.
+- ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,
+  both built by GitHub Actions from the tagged commit, with checksums. A
+  Microsoft Store listing and free open-source code signing for Windows are
+  in progress.
 - 🔜 **More providers:** community-driven — see [PROVIDERS.md](PROVIDERS.md).
 - 🔜 **Scheduled/assisted runs:** a monthly "nudge + sweep" (e.g. the 1st) that
   opens the login browsers and then runs discover + resume across every app once
