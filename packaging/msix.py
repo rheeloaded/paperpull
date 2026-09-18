@@ -46,6 +46,10 @@ REPO = Path(__file__).resolve().parents[1]
 DEFAULT_IDENTITY_NAME = "RheeLoaded.PaperPull"
 DEFAULT_PUBLISHER = "CN=PaperPull Local Build"
 DEFAULT_PUBLISHER_DISPLAY = "PaperPull"
+# The app's display name must match a name reserved in Partner Center,
+# spelling and case included. MSIX_DISPLAY_NAME overrides it if the reserved
+# spelling differs.
+DEFAULT_DISPLAY_NAME = "PaperPull"
 
 # Store image assets. Name, size at scale-100. Each is also written at
 # scale-200 for high-DPI screens.
@@ -71,6 +75,7 @@ def identity() -> dict:
         "name": os.environ.get("MSIX_IDENTITY_NAME") or DEFAULT_IDENTITY_NAME,
         "publisher": os.environ.get("MSIX_PUBLISHER") or DEFAULT_PUBLISHER,
         "display": os.environ.get("MSIX_PUBLISHER_DISPLAY") or DEFAULT_PUBLISHER_DISPLAY,
+        "app": os.environ.get("MSIX_DISPLAY_NAME") or DEFAULT_DISPLAY_NAME,
     }
 
 
@@ -86,7 +91,7 @@ def manifest(version: str, ident: dict) -> str:
   <Identity Name="{name}" Publisher="{publisher}" Version="{version}" ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>PaperPull</DisplayName>
+    <DisplayName>{app}</DisplayName>
     <PublisherDisplayName>{display}</PublisherDisplayName>
     <Logo>Assets\\StoreLogo.png</Logo>
     <Description>Downloads your own receipts and statements as PDFs from the banks, utilities and stores you already use. You sign in yourself, and it can only read.</Description>
@@ -103,7 +108,7 @@ def manifest(version: str, ident: dict) -> str:
   <Applications>
     <Application Id="PaperPull" Executable="PaperPull.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="PaperPull"
+        DisplayName="{app}"
         Description="Receipt and statement downloader. Read-only, runs on this computer."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\\Square150x150Logo.png"

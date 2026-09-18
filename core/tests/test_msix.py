@@ -64,3 +64,12 @@ def test_the_launcher_source_honours_the_port_override_and_opens_the_browser():
     assert '"8765"' in src
     assert "-m uvicorn app:app --host 127.0.0.1" in src
     assert "WaitForExit" in src
+
+
+def test_the_display_name_can_follow_the_spelling_the_store_reserved(monkeypatch):
+    monkeypatch.delenv("MSIX_DISPLAY_NAME", raising=False)
+    assert "<DisplayName>PaperPull</DisplayName>" in msix.manifest("1.0.0.0", msix.identity())
+    monkeypatch.setenv("MSIX_DISPLAY_NAME", "Paperpull")
+    text = msix.manifest("1.0.0.0", msix.identity())
+    assert "<DisplayName>Paperpull</DisplayName>" in text
+    assert 'DisplayName="Paperpull"' in text
