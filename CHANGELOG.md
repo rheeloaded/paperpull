@@ -7,6 +7,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **License is now the GNU Affero General Public License, version 3.** From
+  the first release until 2026-09-18 PaperPull was MIT, and contributions
+  from that period keep their MIT permission (`LICENSE-MIT`, `NOTICE.md`).
+  A changed version that is distributed, or run as a service for other
+  people, now has to carry the same license and its source. Using PaperPull
+  to archive your own records is unchanged.
+- **The PaperPull name is reserved** under section 7(e) of the license. A
+  modified version needs its own name. `TRADEMARK.md` says what is allowed
+  without asking, which is most things, and what needs a rename.
+
 ## [0.21.0] - 2026-09-18
 
 ### Changed

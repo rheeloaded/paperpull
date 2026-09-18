@@ -71,7 +71,8 @@ PACKAGES = ["playwright>=1.44", "pypdf>=4.2", "fastapi>=0.110",
 # further below so only code goes, never a venv or data folder that happens to
 # be sitting in a checkout.
 INCLUDE_TOP = ("gui", "core", "apps", "tools", "paperpull.py", "paperpull.bat",
-               "VERSION", "LICENSE", "PRIVACY.md",
+               "VERSION", "LICENSE", "LICENSE-MIT", "NOTICE.md", "TRADEMARK.md",
+               "PRIVACY.md",
                "README.md", "PROVIDERS.md", "SECURITY.md", "CHANGELOG.md")
 EXCLUDE_PARTS = {".venv", "__pycache__", ".pytest_cache", "tests",
                  "Backups", "Logs", "Diagnostics", "Manual Review"}
