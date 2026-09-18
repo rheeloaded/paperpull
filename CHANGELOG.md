@@ -20,6 +20,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   ever adds to what it knows, so `discovery.json` stays complete for the
   status tracker's gap detection either way. Suggested by a U.S. Bank
   user.
+- **Amazon honours `--end-date` when choosing which years to load.** It
+  already skipped years before `--start-date`. Now a run scoped to 2021
+  through 2023 loads those three order-history years and not this year's
+  first, and the year range comes from the same `paperpull_core.scope`
+  rules as the other providers.
+
+### Added
+- **A Scope row on the control panel.** All years is the default and
+  changes nothing. Pick one year, or a from and to date, and every action
+  except Login runs with the matching `--year`, `--start-date` and
+  `--end-date`. The panel validates what the page sends before it reaches
+  a command line, and remembers the choice in that browser.
 
 ## [0.20.0] - 2026-09-18
 
