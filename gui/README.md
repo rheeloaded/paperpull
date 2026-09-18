@@ -92,7 +92,9 @@ in your browser, so glance at the hint under the row before a Run All.
 One button that writes `All Purchases.xlsx` beside your installs, every line
 item from every receipt archive (Amazon, Target, Walmart, Gap, and any second
 accounts), newest first, with an Orders sheet and a Summary of spend per
-provider per year. It is built from the order history the apps already keep,
+provider per year. Pick one provider in the dropdown for `Amazon Purchases.xlsx`
+and so on, both accounts in the one file. Only providers with line items are
+offered. A statement archive has documents, not purchases, so it never appears. It is built from the order history the apps already keep,
 so no PDF is opened and it takes a second. **Show in folder** opens the file
 manager on it. Rebuilt from scratch each time, so edit a copy, not this file.
 A CSV is one click away for anything that is not Excel.
