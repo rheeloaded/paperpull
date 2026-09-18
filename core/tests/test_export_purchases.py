@@ -156,3 +156,13 @@ def test_the_panel_does_not_send_a_path_to_reveal():
     src = gui.read_text(encoding="utf-8")
     assert "def api_export_reveal():" in src
     assert "fetch('/api/export/reveal', {method: 'POST'})" in src
+
+
+def test_a_workbook_open_in_excel_is_a_plain_message_not_a_traceback(root, monkeypatch):
+    def locked(path, *a, **k):
+        raise PermissionError(13, "Permission denied", str(path))
+    monkeypatch.setattr(xp, "write_csv", locked)
+    with pytest.raises(PermissionError) as e:
+        xp.export(root, as_csv=True)
+    assert "open in another program" in str(e.value) and "All Purchases.csv" in str(e.value)
+    assert xp.main(["--root", str(root), "--csv"]) == 2

@@ -410,6 +410,18 @@ def save_download(download, out_path: Path) -> None:
 # Validation
 # ---------------------------------------------------------------------------
 
+def pdf_text(path: Path) -> str:
+    """Every page's text, newline-joined. Empty on any failure, never raises,
+    because a caller reparsing hundreds of receipts wants to skip one bad
+    file rather than stop."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(str(path))
+        return "\n".join((pg.extract_text() or "") for pg in reader.pages)
+    except Exception:
+        return ""
+
+
 def validate_pdf(path: Path, min_bytes: int = 3000,
                  expect_tokens: Optional[Iterable[str]] = None) -> ValidationResult:
     """Verify a saved PDF: exists, non-trivial size, PDF signature, opens

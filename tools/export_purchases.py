@@ -222,10 +222,16 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
     elif as_csv and out.suffix.lower() == ".xlsx":
         out = out.with_suffix(".csv")
     out.parent.mkdir(parents=True, exist_ok=True)
-    if as_csv:
-        write_csv(out, purchases)
-    else:
-        write_xlsx(out, purchases, orders, summary)
+    try:
+        if as_csv:
+            write_csv(out, purchases)
+        else:
+            write_xlsx(out, purchases, orders, summary)
+    except PermissionError:
+        # Excel holds the file open with an exclusive lock, and this is the
+        # one error a person can fix in a second, so say exactly that.
+        raise PermissionError(f"{out.name} is open in another program, Excel most likely. "
+                              "Close it and build again.") from None
     return {
         "path": str(out),
         "format": "csv" if as_csv else "xlsx",
@@ -250,7 +256,11 @@ def main(argv=None) -> int:
     if not root.is_dir():
         print(f"Not a folder: {root}", file=sys.stderr)
         return 2
-    result = export(root, Path(args.out) if args.out else None, args.provider, args.csv)
+    try:
+        result = export(root, Path(args.out) if args.out else None, args.provider, args.csv)
+    except PermissionError as e:
+        print(e, file=sys.stderr)
+        return 2
     if not result["sources"]:
         print("No '<Provider> Order History.csv' found under", root)
         print("Receipt apps write one after a run. Statement apps have no line items to export.")
