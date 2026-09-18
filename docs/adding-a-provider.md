@@ -165,7 +165,27 @@ calls):
 Add provider-specific dangerous verbs to `FORBIDDEN_CONTROL_RE` (e.g. a card
 portal needs `redeem`, `balance transfer`, `cash advance`; a utility needs
 `autopay`, `budget billing`). The tests in `tests/test_doc_types.py` assert a
-long list of money/account controls are refused — keep them green.
+long list of money/account controls are refused. Keep them green.
+
+**Anchor the verb stems on both sides.** Every one of the last four
+contributed providers arrived with `edit\s+` or `edit\b` in the blocklist,
+and both match the end of "Credit", so "Credit Card Statement" was refused
+on a credit-card provider. The form that works is
+
+```
+r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
+```
+
+and a test that says a label with "Credit" in it is allowed while "Edit
+profile" is not. Copy one from any recent app.
+
+**Every click goes through the guard, with the element's own label.** Not
+just the ones you expect to be risky. A provider once fetched each bill by
+clicking the first link or button in the row when the labelled one was not
+found, and a bill row also holds Pay. The repo-wide test refuses any
+function that clicks what a bare selector (`a`, `button`, a wildcard, an
+unnamed role) finds without consulting the guard, and it will fail your PR
+until the guard is in the path.
 
 ### 7. Test it
 
@@ -174,11 +194,29 @@ From the app folder, with its venv active:
 ```
 python <slug>_docs.py --discover     # lists what it found
 python <slug>_docs.py --pilot        # downloads the newest few, then stops
-python -m pytest tests               # keep tests green
+python -m pytest tests               # your app's own tests
 ```
 
+Then, from the repository root with the same venv, the tests that run
+across every app:
+
+```
+python -m pytest core
+```
+
+These are the ones a review would otherwise send back. They check that the
+guard refuses controls that commit something, that the URL check refuses
+other hosts, that no function clicks what a bare selector finds, that a
+failed capture removes the empty file it left, that `new-this-run.txt` is
+replaced on every run (even an empty one), and that `write_run_summary`
+ends with `report_run_result(s)` and `main` returns 130 on Ctrl+C, which is
+how the control panel tells a clean run from a bad one. The last two arrived
+after most contributors had cloned their template, and every provider merged
+since needed them added on the way in. Cloning from an app on the current
+`main` gives you all of it.
+
 Verify the pilot PDFs open and look right, then re-run `--pilot` and confirm it
-reports **"already downloaded — skipping"** (delete-safe works).
+reports **"already downloaded, skipping"** (delete-safe works).
 
 ### 8. Scrub and open a PR
 
