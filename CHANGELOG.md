@@ -19,6 +19,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   rebuilt from scratch each time. A CSV is one click away, and is what you
   get when openpyxl is not installed.
 
+### Fixed
+- **Amazon, Whole Foods items now have prices and quantities.** The
+  printable summary for a Whole Foods or Amazon Fresh order lists each item
+  as a title line followed by a line that is only its price, with no
+  "Sold by" and no quantity, and an item bought twice is listed twice. The
+  parser did not know that layout, fell back to product names alone, and
+  every Whole Foods line in the order history had a name and nothing else.
+  It reads the layout now, collapses repeats into a quantity, and a new
+  `reparse-items` command backfills receipts already on disk from their
+  PDF text, offline. A parse is kept only when its lines add up to the
+  subtotal printed on the receipt, or come within 5% of it with the
+  shortfall written to Notes. Some summaries genuinely leave items out.
+
 ### Changed
 - **License is now the GNU Affero General Public License, version 3.** From
   the first release until 2026-09-18 PaperPull was MIT, and contributions

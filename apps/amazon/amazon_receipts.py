@@ -836,6 +836,95 @@ class App:
             for k, c in dups.items():
                 print(f"  {k}: {c} rows")
 
+    def cmd_reparse_items(self):
+        """Re-read the item lines from receipts already on disk, offline.
+
+        The parser learned the Whole Foods layout after many receipts had been
+        saved with item names but no prices. This walks the receipt index,
+        pulls the text out of each PDF, and where the saved record has items
+        without prices and the fresh parse has them, updates the record and
+        the order history. A parse is only trusted when its line totals add up
+        to the item subtotal printed on the receipt, so a layout the parser
+        does not really understand cannot overwrite what is there. No browser,
+        no network, nothing downloaded."""
+        self.stats["mode"] = "reparse-items"
+        rows = self.index_csv.read_all()
+        if not rows:
+            print("Receipt index is empty - nothing to reparse.")
+            return
+        history = self.order_csv.read_all()
+        updated = skipped = unchanged = missing = 0
+        for row in rows:
+            key = f"{row.get('Purchase Type')}:{row.get('Order or Receipt Number')}"
+            if self.args.order_number and row.get("Order or Receipt Number") != self.args.order_number:
+                continue
+            path = Path(row.get("PDF Full Path") or "")
+            if not path.is_file():
+                missing += 1
+                continue
+            rec = self.progress.data.get(key)
+            if not rec:
+                continue
+            purchase = Purchase.from_dict(rec)
+            if purchase.items and all(i.unit_price for i in purchase.items):
+                unchanged += 1
+                continue
+            text = receipt_pdf.pdf_text(path)
+            items = site._parse_items_from_summary_text(text)
+            priced = [i for i in items if i.unit_price]
+            if not priced:
+                skipped += 1
+                continue
+            subtotal = site.parse_subtotal(text)
+            total = round(sum(site.money_value(i.line_total) for i in priced), 2)
+            note = ""
+            if subtotal is not None and abs(total - subtotal) > 0.01:
+                # Amazon's printable summary sometimes leaves a line or two
+                # out (a bag fee, or a page that stopped short). A parse that
+                # accounts for nearly all of the subtotal is kept and says so
+                # in Notes. One that overshoots, or falls well short, is not
+                # a parse of this receipt and is refused.
+                short = subtotal - total
+                if short < 0 or short > 0.05 * subtotal:
+                    print(f"  SKIP {row.get('PDF Filename','')}: items add to ${total:,.2f}, "
+                          f"receipt says ${subtotal:,.2f}")
+                    skipped += 1
+                    continue
+                note = f"items add to ${total:,.2f}, receipt subtotal ${subtotal:,.2f}"
+            purchase.items = priced
+            if note:
+                purchase.notes = "; ".join(x for x in (purchase.notes, note) if x)
+                rec["notes"] = purchase.notes
+            rec["items"] = [i.to_dict() for i in priced]
+            self.progress.update(key, rec)
+            history = self._replace_history_rows(history, purchase)
+            updated += 1
+            print(f"  {row.get('PDF Filename','')}: {len(priced)} item(s) priced")
+        if updated:
+            self.order_csv.rewrite(history)
+        print(f"\nReparsed: {updated} updated, {unchanged} already priced, "
+              f"{skipped} skipped, {missing} PDF(s) not on disk.")
+
+    def _replace_history_rows(self, history: List[dict], purchase: Purchase) -> List[dict]:
+        """The order history has one row per item. Swap this order's rows for
+        fresh ones, keeping every column the old rows carried that an item
+        does not decide (status, summary, filename, URLs, notes)."""
+        old = [r for r in history if r.get("Order or Receipt Number") == purchase.order_number
+               and r.get("Purchase Type") == purchase.purchase_type]
+        if not old:
+            return history
+        base = dict(old[0])
+        fresh = []
+        for it in purchase.items:
+            r = dict(base)
+            r.update({"Item Name": it.name, "Quantity": it.quantity,
+                      "Unit Price": it.unit_price, "Line Item Total": it.line_total,
+                      "Notes": purchase.notes})
+            fresh.append(r)
+        keep = [r for r in history if r not in old]
+        at = history.index(old[0])
+        return keep[:at] + fresh + keep[at:]
+
     def cmd_review_names(self):
         rows = self.index_csv.read_all()
         review = [r for r in rows if r.get("Classification Confidence") == "Low"
@@ -1005,6 +1094,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("resume", "resume incomplete purchases"),
         ("verify", "re-validate every indexed PDF"),
         ("review-names", "interactively fix low-confidence names"),
+        ("reparse-items", "re-read item prices from saved receipt PDFs, offline"),
         ("diagnose", "inspect one order, write diagnostics"),
     ]
     for name, help_text in modes:
@@ -1052,6 +1142,8 @@ def main(argv=None):
             app.cmd_verify()
         elif getattr(args, "review_names"):
             app.cmd_review_names()
+        elif getattr(args, "reparse_items"):
+            app.cmd_reparse_items()
         elif args.diagnose:
             app.cmd_diagnose()
         elif args.dry_run:

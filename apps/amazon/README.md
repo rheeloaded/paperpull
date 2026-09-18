@@ -43,6 +43,7 @@ signed-in browsers can be open at once.
 | any time | `paperpull amazon resume` | Continue after an interruption; never redoes finished work |
 | any time | `paperpull amazon verify` | Re-validate every indexed PDF |
 | any time | `paperpull amazon review-names` | Fix low-confidence filenames interactively |
+| any time | `paperpull amazon reparse-items` | Re-read item prices from the saved receipt PDFs, offline. For receipts saved before the parser knew a layout (Whole Foods, September 2026). A parse is only kept when its lines add up to the receipt's subtotal, or come within 5% of it, and the shortfall is written to Notes. |
 
 Useful for splitting a large run:
 

@@ -190,6 +190,19 @@ def parse_date(text: str) -> Optional[str]:
     return None
 
 
+def money_value(text: str) -> float:
+    """'$1,234.56' -> 1234.56, anything else -> 0.0."""
+    m = MONEY_RE.search(text or "")
+    return float(m.group(1).replace(",", "")) if m else 0.0
+
+
+def parse_subtotal(text: str) -> Optional[float]:
+    """The item subtotal a summary prints, so a parse can be checked against
+    it. None when the page does not print one."""
+    m = re.search(r"item\(?s?\)?\s+subtotal\s*:?\s*\$\s*([\d,]+\.\d{2})", text or "", re.I)
+    return float(m.group(1).replace(",", "")) if m else None
+
+
 def parse_money(text: str) -> str:
     m = MONEY_RE.search(text or "")
     return f"${m.group(1)}" if m else ""
@@ -446,11 +459,23 @@ _ADDRESS_LINE_RE = re.compile(
     r"^(\d+\s+[A-Z0-9 .'-]+|[A-Z][A-Za-z .'-]+,\s*[A-Z]{2}\s*\d{5}(-\d{4})?)$")
 
 
-def _clean_item_name(name: str) -> str:
+def _clean_item_name(name: str, min_len: int = 5) -> str:
     name = _html.unescape(re.sub(r"\s+", " ", name or "")).strip()
-    if len(name) < 5 or _NON_ITEM_NAME_RE.search(name):
+    if len(name) < min_len or _NON_ITEM_NAME_RE.search(name):
         return ""
     return name
+
+
+def _is_pair_title(line: str) -> bool:
+    """A title in the title-then-price layout. The bare price on the next
+    line is the evidence, so a short name like "Banana" is allowed here
+    where _is_title_line would want ten characters."""
+    line = (line or "").strip()
+    if len(line) < 3 or MONEY_RE.search(line) or _BARE_PRICE_RE.match(line):
+        return False
+    if line.endswith(":"):      # a label ("collected:" above the tax amount), not a product
+        return False
+    return not (_NON_ITEM_NAME_RE.search(line) or _ADDRESS_LINE_RE.match(line))
 
 
 def extract_details(page, purchase: Purchase) -> Purchase:
@@ -533,6 +558,18 @@ def _parse_items_from_summary_text(body: str) -> List[Item]:
            $30.99
 
     2. Classic layout — "<qty> of: <Product Title>" then the price.
+
+    3. Whole Foods and Amazon Fresh (verified 2026-09) — no "Sold by" and no
+       quantity anywhere. After "Purchased at Whole Foods Market" every item
+       is a title line followed by a line holding only its price, and an
+       item bought twice is simply listed twice:
+
+           Whole Foods Market Sea Scallops 10/20 Count, 12 OZ
+           $24.49
+           Whole Foods Market Sea Scallops 10/20 Count, 12 OZ
+           $24.49
+
+       Repeats collapse into one item with the quantity and a line total.
     """
     body = body or ""
     items: List[Item] = []
@@ -579,6 +616,42 @@ def _parse_items_from_summary_text(body: str) -> List[Item]:
         seen.add(title.lower())
         items.append(Item(name=title[:300], quantity=qty or "1",
                           unit_price=price, line_total=price))
+    if items:
+        return items
+
+    # --- layout 3 (Whole Foods, title then a bare price) ---------------------
+    return _parse_title_price_pairs(lines)
+
+
+_BARE_PRICE_RE = re.compile(r"^\$\s*([\d,]+\.\d{2})$")
+
+
+def _parse_title_price_pairs(lines: List[str]) -> List[Item]:
+    """Items from a summary that lists each one as a title line followed by a
+    line that is only a price. A repeated title-and-price pair is the same
+    item bought again, so it becomes a quantity rather than a second row."""
+    # A page number sits between a title and its price when the item straddles
+    # a page break in the saved PDF, and it is never an item, so drop it.
+    lines = [l for l in lines if l and not re.match(r"^\d{1,3}$", l)]
+    counted: "dict[tuple, int]" = {}
+    order: List[tuple] = []
+    for i in range(len(lines) - 1):
+        m = _BARE_PRICE_RE.match(lines[i + 1])
+        if not m or not _is_pair_title(lines[i]):
+            continue
+        title = _clean_item_name(lines[i], min_len=3)
+        if not title:
+            continue
+        key = (title[:300], m.group(1))
+        if key not in counted:
+            order.append(key)
+        counted[key] = counted.get(key, 0) + 1
+    items: List[Item] = []
+    for title, price in order:
+        qty = counted[(title, price)]
+        unit = float(price.replace(",", ""))
+        items.append(Item(name=title, quantity=str(qty), unit_price=f"${price}",
+                          line_total=f"${unit * qty:,.2f}"))
     return items
 
 
