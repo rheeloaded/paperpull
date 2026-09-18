@@ -1,7 +1,7 @@
 # PaperPull
 
 ![Version](https://img.shields.io/github/v/tag/rheeloaded/paperpull?sort=semver&label=version&color=blue)
-![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rheeloaded)
 
@@ -366,4 +366,15 @@ affiliated with, endorsed by, or sponsored by any of the companies listed.
 All product names and trademarks are the property of their respective owners.
 Automating access to a website may be restricted by that site's Terms of
 Service — you are responsible for how you use these tools. Provided **as-is,
-without warranty of any kind** (see [LICENSE](LICENSE)).
+without warranty of any kind**.
+
+**License.** PaperPull is free software under the
+[GNU Affero General Public License, version 3](LICENSE). You can run it,
+read it, change it and share it. If you distribute a changed version, or run
+one as a service for other people, the same license applies to what you
+distribute, source included. Contributions before 2026-09-18 were made under
+MIT and that permission is kept, see [NOTICE.md](NOTICE.md).
+
+**Name.** The PaperPull name is not part of the license. A modified version
+needs its own name, so that anything called PaperPull is this project. What
+that allows and what it doesn't is in [TRADEMARK.md](TRADEMARK.md).

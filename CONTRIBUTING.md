@@ -467,6 +467,14 @@ change, so a fix and a new provider are two pull requests, not one. And
 keep the tests green, both the app's own and the repo-wide ones, before
 you push.
 
+**Your license.** PaperPull is under the GNU Affero General Public License,
+version 3, and a contribution is made under that same license. There is no
+separate agreement to sign. Opening a pull request is the statement that
+you wrote the change, or have the right to contribute it, and that it may be
+distributed under the AGPL. Code you paste in from elsewhere has to be
+compatible with that, so no snippets from a proprietary tool and no code of
+unknown origin. See [NOTICE.md](NOTICE.md).
+
 ---
 
 ## What happens after you send it
