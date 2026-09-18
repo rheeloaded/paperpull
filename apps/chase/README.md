@@ -63,7 +63,7 @@ paperpull chase all               # download everything available
 
 ## How documents are found
 
-Chase's document centre is **one accordion per card**. Opening one makes the
+Chase's document center is **one accordion per card**. Opening one makes the
 page fetch that card's documents; the year comes from the "View:" picker
 (2019–2026 here), which is a styled `<input>`, not a `<select>` — a
 select-based lookup finds nothing.
@@ -101,7 +101,7 @@ read `Diagnostics/diagnose-documents.json`:
 
 | Field | Tells you |
 |---|---|
-| `url`, `documents_page_found` | whether the app can still reach the document centre by clicking its nav |
+| `url`, `documents_page_found` | whether the app can still reach the document center by clicking its nav |
 | `statements_api` | the fields Chase's own `docref/list` replies carry, and how many rows the page shows per card — the two should agree for the year on screen |
 | `api_candidates` | every JSON endpoint the page called that looks like a document list |
 | `selects`, `year_options` | whether the year picker or a card picker changed shape |

@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Armed Forces Mutu
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Armed Forces Mutual's *page* behaviour, edit `aafmaa_site.py` instead.
+To repair Armed Forces Mutual's *page* behavior, edit `aafmaa_site.py` instead.
 """
 from __future__ import annotations
 

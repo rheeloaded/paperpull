@@ -248,7 +248,7 @@ def goto_documents(page) -> bool:
     """Open the pay-statements page.
 
     The API calls below work on their own, but loading the page first keeps
-    the session warm and gives the user something recognisable to look at.
+    the session warm and gives the user something recognizable to look at.
     """
     if not is_configured():
         raise SystemExit(configuration_help())

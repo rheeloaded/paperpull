@@ -257,7 +257,7 @@ def test_an_installed_browser_is_preferred_so_nothing_is_downloaded(monkeypatch)
 
 def test_installed_mode_never_reaches_for_the_bundled_copy(monkeypatch):
     """Somebody on a managed machine may not want this near their own browser,
-    and somebody else may not want a 400 MB download. Both are honoured."""
+    and somebody else may not want a 400 MB download. Both are honored."""
     monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
     monkeypatch.setattr(browser, "_bundled_chromium", lambda: ["bundled"])
     assert browser.browser_candidates(mode=browser.INSTALLED) == [(browser.EDGE, "edge")]
@@ -310,11 +310,11 @@ def test_nothing_is_downloaded_behind_a_closed_stdin(monkeypatch, capsys):
 
 
 def test_the_wording_says_their_own_profile_is_not_used():
-    """Someone is about to look at a browser they recognise which knows none of
+    """Someone is about to look at a browser they recognize which knows none of
     their accounts. Both halves have to be said, that their real profile is
     untouched AND that they are therefore not signed in."""
     note = browser.profile_note("Microsoft Edge")
-    # Whitespace-normalised, because the note is hard-wrapped for a console and
+    # Whitespace-normalized, because the note is hard-wrapped for a console and
     # a phrase can straddle a line break.
     flat = " ".join(note.split()).lower()
     assert "separate profile" in flat

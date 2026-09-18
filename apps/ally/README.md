@@ -68,7 +68,7 @@ run `paperpull ally diagnose`, and read `Diagnostics/diagnose-documents.json`:
 | Field | Tells you |
 |---|---|
 | `url`, `documents_page_found` | whether a `DOCUMENT_URL_CANDIDATES` entry still lands on the statements list |
-| `row_counts`, `collected`, `samples` | whether the row scraper still recognises statement rows |
+| `row_counts`, `collected`, `samples` | whether the row scraper still recognizes statement rows |
 | `account_options`, `year_options` | whether the history is split behind dropdowns |
 | `api_candidates` | JSON endpoints the SPA itself calls — reading one of these is usually more robust than scraping (see the `usaa` app) |
 | `controls` | every button/link with its `safe` verdict from the read-only guard |
@@ -93,13 +93,13 @@ baked in.
 ```
 
 - The parsing is plain regex: deterministic, offline, no model, no network.
-- If the layout is not recognised, the file **keeps the name discovery gave
+- If the layout is not recognized, the file **keeps the name discovery gave
   it** and a note is written — nothing is guessed.
 - Set `"addressee_in_filename": false` to leave the addressee out. Two copies
   of one statement then differ by a short `documentId` suffix instead.
 - Account nicknames come from the statement, so **renaming an account in Ally
   changes later filenames**. The masked account number is the stable handle;
-  identity is `documentId`, so re-labelling never re-downloads anything.
+  identity is `documentId`, so re-labeling never re-downloads anything.
 
 ## Ally-specific quirks (found during the live probe)
 
@@ -122,7 +122,7 @@ baked in.
 - **The dashboard carries a transfer widget whose account dropdown looks
   exactly like a statements picker** (`<select id="fromAccount">`, options are
   your accounts). The first probe matched it and tried to set it — nothing was
-  submitted, but that is not read-only behaviour. Dropdowns are now
+  submitted, but that is not read-only behavior. Dropdowns are now
   identity-checked against `MONEY_CONTROL_RE` before being read *or* written,
   and the check **fails closed** when a control's identity can't be read.
   `--diagnose` lists every dropdown with its verdict under `selects`.

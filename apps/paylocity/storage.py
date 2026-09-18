@@ -4,7 +4,7 @@ Paylocity has one fixed address (access.paylocity.com), unlike UKG's
 per-employer tenant. The employer is identified by the Company ID typed at
 sign-in, which this app never handles or stores, so nothing here is per-tenant.
 
-To repair Paylocity's *page* behaviour, edit `paylocity_site.py` instead.
+To repair Paylocity's *page* behavior, edit `paylocity_site.py` instead.
 """
 from __future__ import annotations
 

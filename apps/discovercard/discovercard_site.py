@@ -719,7 +719,7 @@ def collect_documents(page) -> List[RawDoc]:
 # was an account list (id "fromAccount"), indistinguishable from a statements
 # account picker by its options alone - and the first live probe found exactly
 # that and tried to set it. Selecting an option in a transfer form is not
-# read-only behaviour even when nothing is submitted.
+# read-only behavior even when nothing is submitted.
 #
 # A card dashboard has the same hazard in its "pay from" picker, so every
 # <select> is identity-checked before it is read OR written, and the check

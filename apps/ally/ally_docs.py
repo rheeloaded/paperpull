@@ -522,7 +522,7 @@ class App:
         who they were addressed to, the addressee) come from the document's
         own first page.
 
-        The extraction is structural and offline; if it does not recognise the
+        The extraction is structural and offline; if it does not recognize the
         layout the file KEEPS the name discovery gave it, and nothing is
         guessed. Renaming is cosmetic either way: identity is documentId, so a
         later improvement here can rename an archive without re-downloading it.
@@ -537,7 +537,7 @@ class App:
             log.info("statement facts failed for %s: %s", out_path.name, e)
             return out_path
         if not facts.ok:
-            log.info("unrecognised statement layout: %s", out_path.name)
+            log.info("unrecognized statement layout: %s", out_path.name)
             doc.notes = (doc.notes + "; " if doc.notes else "") + \
                 "could not read the account table; name is from Ally's metadata"
             return out_path

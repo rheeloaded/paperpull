@@ -45,7 +45,7 @@ elections. This tool does none of it. Concretely:
   you are signed out. It is never read from and never typed into.
 - **A document is fetched by a validated (type, date) pair, never a URL.** The
   type must be one of myPay's own document types and the date a real calendar
-  date, so the request is built from values this app recognises rather than
+  date, so the request is built from values this app recognizes rather than
   from any stored string.
 - **A short session that expires stops the run** and says so, rather than
   filing everything as "needs manual review" and exiting as though it worked.

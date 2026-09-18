@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Walmart's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Walmart's *page* behaviour, edit `walmart_site.py` instead.
+To repair Walmart's *page* behavior, edit `walmart_site.py` instead.
 """
 from __future__ import annotations
 

@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Robinhood's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Robinhood's *page* behaviour, edit `robinhood_site.py` instead.
+To repair Robinhood's *page* behavior, edit `robinhood_site.py` instead.
 """
 from __future__ import annotations
 

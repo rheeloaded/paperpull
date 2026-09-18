@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Gap's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Gap's *page* behaviour, edit `gap_site.py` instead.
+To repair Gap's *page* behavior, edit `gap_site.py` instead.
 """
 from __future__ import annotations
 

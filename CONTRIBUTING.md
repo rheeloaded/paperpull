@@ -241,7 +241,7 @@ free and knows Python and Git. Notepad works too.
 
 Which file to edit depends on what you are doing. For a provider that
 changed its site, it is almost always that app's `*_site.py`, which holds
-every selector, URL and page behaviour for that provider and nothing else.
+every selector, URL and page behavior for that provider and nothing else.
 For a new provider, see [adding a provider](#adding-a-provider). For docs,
 the `.md` file you are reading.
 
@@ -498,7 +498,7 @@ browser sign-in the first time and remembers it. On macOS, install the
 [GitHub CLI](https://cli.github.com/) and run `gh auth login`, which sets
 Git up as well.
 
-**`python` is not recognised.** On Windows, Python was installed without the
+**`python` is not recognized.** On Windows, Python was installed without the
 PATH box ticked. Reinstall and tick it, or use `py` instead of `python`. On
 macOS use `python3`.
 

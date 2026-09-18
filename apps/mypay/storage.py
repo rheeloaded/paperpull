@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is DFAS myPay's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair DFAS myPay's *page* behaviour, edit `mypay_site.py` instead.
+To repair DFAS myPay's *page* behavior, edit `mypay_site.py` instead.
 """
 from __future__ import annotations
 

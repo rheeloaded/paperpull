@@ -78,7 +78,7 @@ def repo_core_version() -> str:
 def compare(install: Path) -> dict:
     app = app_for(install)
     if app is None:
-        return {"install": install.name, "status": "unrecognised", "app": None}
+        return {"install": install.name, "status": "unrecognized", "app": None}
     differing, missing = [], []
     for f in sorted(app.glob("*.py")) + sorted(app.glob("*.bat")):
         if PRIVATE.search(f.name):
@@ -122,7 +122,7 @@ def main() -> int:
     drifted = 0
     print(f"repo core: {want_core}\n")
     for r in results:
-        if r["status"] == "unrecognised":
+        if r["status"] == "unrecognized":
             print(f"  {r['install']:34} (not a PaperPull install - skipped)")
             continue
         core = r["core"]

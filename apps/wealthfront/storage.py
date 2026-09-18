@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Wealthfront's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Wealthfront's *page* behaviour, edit `wealthfront_site.py` instead.
+To repair Wealthfront's *page* behavior, edit `wealthfront_site.py` instead.
 """
 from __future__ import annotations
 

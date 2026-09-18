@@ -5,7 +5,7 @@ carried. All that logic now lives in `paperpull_core`; what remains here is the
 declaration of T-Mobile's own facts: the folders it files into, how a document
 routes to one, its CSV columns, and its config defaults.
 
-To repair T-Mobile's *page* behaviour, edit `tmobile_site.py` instead.
+To repair T-Mobile's *page* behavior, edit `tmobile_site.py` instead.
 """
 from __future__ import annotations
 

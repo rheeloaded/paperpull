@@ -502,7 +502,7 @@ _IDENTITY_JS = r"""el => {
   const form = el.closest('form');
   if (form) bits.push(form.id || '', form.getAttribute('name') || '',
                       form.getAttribute('aria-label') || '');
-  // the nearest labelled section/card this control lives in
+  // the nearest labeled section/card this control lives in
   const sect = el.closest("section, [role='region'], [class*='card'], [class*='Card'], " +
                           "[class*='widget'], [class*='Widget'], [class*='module']");
   if (sect) {

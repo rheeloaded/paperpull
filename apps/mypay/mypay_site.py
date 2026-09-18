@@ -16,7 +16,7 @@ STATUS, read before trusting anything below.
 
   There are NO guessed URLs here. A document is fetched by its (type, id)
   pair, both validated as integers against the type map below, so the request
-  path is built from numbers this app recognises rather than from any stored
+  path is built from numbers this app recognizes rather than from any stored
   string.
 
 SAFETY (this is a US government pay system):

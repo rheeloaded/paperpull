@@ -5,7 +5,7 @@ That logic now lives in `paperpull_core`; what remains here is Ally's own
 facts: the folders it files into, how a document routes to one, its CSV
 columns, and its config defaults.
 
-To repair Ally's *page* behaviour, edit `ally_site.py` instead.
+To repair Ally's *page* behavior, edit `ally_site.py` instead.
 """
 from __future__ import annotations
 

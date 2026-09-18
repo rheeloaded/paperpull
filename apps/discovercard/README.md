@@ -100,7 +100,7 @@ now covered by tests:
   and the check still fails closed when an identity cannot be read.
   `--diagnose` will not inspect *any* control unless the page is a signed-in
   application page.
-- **A signed-out session was not recognised.** Discover signs out to
+- **A signed-out session was not recognized.** Discover signs out to
   `portal.discover.com/customersvcs/universalLogin/logoff_confirmed`, which
   matched none of the URL markers — "universalLogin" does not contain "/login".
   `--discover` ran for five minutes with an empty log instead of saying the
@@ -135,7 +135,7 @@ says exactly what came back.
 
 The cause is not established. It may be that Discover lists more periods than it
 still serves PDFs for, or that something rate-limited the tail of a 24-file run.
-Either way the behaviour is the safe one, and the fix if it turns out to be
+Either way the behavior is the safe one, and the fix if it turns out to be
 retention is a message, not a download: this app will not invent a PDF that
 Discover does not serve. If you see it, the log line to look for is
 `came back as 'text/html...', not a PDF`.

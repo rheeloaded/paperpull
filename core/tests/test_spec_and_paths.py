@@ -1,4 +1,4 @@
-"""The core's own tests: the spec contract and the folder/routing behaviour
+"""The core's own tests: the spec contract and the folder/routing behavior
 every app now depends on."""
 import sys
 from pathlib import Path

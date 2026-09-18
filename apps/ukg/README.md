@@ -76,7 +76,7 @@ appears the moment one is actually downloaded.
   blocklist matters more than anywhere else in this project: direct deposit,
   bank/routing details, W-4 withholding, address and password changes, benefit
   enrolment, time-off requests and timecard submission are all explicitly
-  refused, and anything unrecognised is refused too.
+  refused, and anything unrecognized is refused too.
 - You sign in; the tool never handles credentials, SSO, or MFA.
 - Sequential processing with polite randomized delays.
 - Progress written atomically after every document; interrupted runs continue

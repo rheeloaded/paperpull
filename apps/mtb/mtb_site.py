@@ -491,8 +491,8 @@ def collect_statement_rows(page) -> List[dict]:
                 continue
             label = re.sub(r"\s+", " ", a.get("label") or "").strip()
             m = re.search(r"[?&]t=([A-Z]+)", href)
-            # An unrecognised t= is NOT assumed to be a mortgage statement. The
-            # page also offers notices and analysis statements; labelling one of
+            # An unrecognized t= is NOT assumed to be a mortgage statement. The
+            # page also offers notices and analysis statements; labeling one of
             # those "Mortgage Statement" would file it under a name that is
             # simply untrue. Unknown types keep the row's own text and land in
             # Other Documents, where they are visible rather than disguised.
@@ -537,7 +537,7 @@ def collect_statement_rows(page) -> List[dict]:
                     break
                 label = fr.evaluate(_OPEN_TABLE_LABEL_JS) or ""
                 if FORBIDDEN_CONTROL_RE.search(label):
-                    log.warning("refusing to expand a section labelled %r", label[:40])
+                    log.warning("refusing to expand a section labeled %r", label[:40])
                     break
                 if not fr.evaluate(_OPEN_TABLE_CLICK_JS):
                     break

@@ -6,7 +6,7 @@ with the page to reach a document. A year picker has to be set. An accordion
 has to be opened. Those are the moments where a mistake stops being a bug and
 becomes something that touched the user's money.
 
-This module exists because that judgement was written three times, in three
+This module exists because that judgment was written three times, in three
 apps, and the third copy was the only one that got it right. The Ally and
 Chase apps refused a control if it belonged to a money-movement widget, which
 is the obvious danger. Neither considered that a control might belong to a

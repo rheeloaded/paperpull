@@ -20,7 +20,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   ever adds to what it knows, so `discovery.json` stays complete for the
   status tracker's gap detection either way. Suggested by a U.S. Bank
   user.
-- **Amazon honours `--end-date` when choosing which years to load.** It
+- **Amazon honors `--end-date` when choosing which years to load.** It
   already skipped years before `--start-date`. Now a run scoped to 2021
   through 2023 loads those three order-history years and not this year's
   first, and the year range comes from the same `paperpull_core.scope`
@@ -71,7 +71,7 @@ A patch on the Windows package. Nothing a user does changes.
 
 ### Added
 - **`PaperPull.exe`** beside `PaperPull.bat`, with the icon. It does the same
-  thing, start the panel, open the browser to it, wait, and honours
+  thing, start the panel, open the browser to it, wait, and honors
   `PAPERPULL_PORT` so a second copy can run beside one that holds 8765.
 - **An MSIX for the Microsoft Store** is built on every tag and proved to
   install and run on a clean runner. Not yet in the Store. The Store signs
@@ -382,7 +382,7 @@ notes say what that looks like.
   apply to an account returns nothing and is skipped, so a retiree run is
   unchanged (re-verified against a live account).
 
-  **This is untested against a real active-duty account** and is labelled that
+  **This is untested against a real active-duty account** and is labeled that
   way in the app README and in the code. It should work and it may not. Run
   `diagnose.bat`, then `run_pilot.bat`, and check the PDFs before a full run.
 
@@ -466,7 +466,7 @@ item below is a real defect that was found and fixed, not a precaution.
 ### Fixed (correctness and honesty)
 - **An expired session produced a run that looked successful.** M&T answers
   with a sign-in page at HTTP 200, so every document was filed as "needs manual
-  review" and the tool exited 0 having saved nothing. It now recognises that
+  review" and the tool exited 0 having saved nothing. It now recognizes that
   response, stops, explains what happened, and exits non-zero.
 - **A run that saves nothing no longer exits 0.**
 - **1098 tax forms took their year from the availability date**, so a form for
@@ -563,7 +563,7 @@ item below is a real defect that was found and fixed, not a precaution.
   - **A postback name is not an identity.** WebForms names repeater controls
     by row position, so the same control name exists on every pager page and
     means "row 2 of whatever is showing". Documents are identified by title,
-    date and policy, the pager is normalised to page 1 before every walk, and
+    date and policy, the pager is normalized to page 1 before every walk, and
     each download re-finds its row by content before clicking anything.
   - **Every saved statement must prove who it belongs to.** During a broken
     early run, a manually released PDF was captured under a different
@@ -671,7 +671,7 @@ item below is a real defect that was found and fixed, not a precaution.
   declares its own provider vocabulary and inherits everything that is true of
   every provider.
 
-  This is the fix behind 0.7.2 rather than another patch of it. The judgement
+  This is the fix behind 0.7.2 rather than another patch of it. The judgment
   had been written three times, in three apps, and only the third one written
   considered that a control might belong to a sign-in form rather than a
   money-movement widget. A shared rule means the next provider inherits that
@@ -753,7 +753,7 @@ item below is a real defect that was found and fixed, not a precaution.
     own first page**, whose account table and addressee are parsed
     structurally (by Ally's template text and the masked account-number
     column, never by a list of expected account nicknames — those are chosen
-    by each customer). Unrecognised layout keeps the metadata name and says
+    by each customer). Unrecognized layout keeps the metadata name and says
     so; nothing is guessed.
   - **Every download is verified.** Because several rows look identical, the
     row clicked is an inference — so the app watches which `documentId` Ally
@@ -773,7 +773,7 @@ item below is a real defect that was found and fixed, not a precaution.
   bundled Chromium. Verified end to end against a live account.
   
 
-  Chase's document centre is one accordion per card with a styled "View:"
+  Chase's document center is one accordion per card with a styled "View:"
   year picker. Two things it taught:
 
   - **Attribute a document from its row, not from the API reply.** Every row
@@ -955,7 +955,7 @@ item below is a real defect that was found and fixed, not a precaution.
 
 ### Added
 - **macOS and Linux support.** Every app ships a `.command` launcher beside
-  each `.bat`, with the same names and behaviour, plus `setup-all.command` and
+  each `.bat`, with the same names and behavior, plus `setup-all.command` and
   `gui/run_gui.command`. Browser discovery is platform-aware: Playwright keeps
   Chromium under `LOCALAPPDATA` on Windows, `~/Library/Caches` on macOS (inside
   `Chromium.app`) and `~/.cache` on Linux, and the Edge/Chrome lookup that two

@@ -76,7 +76,7 @@ message's delivery date.
 
 ## When the site changes
 
-Page behaviour is in `tsp_site.py`, the command flow in `tsp_docs.py`. The
+Page behavior is in `tsp_site.py`, the command flow in `tsp_docs.py`. The
 STATUS block at the top of `tsp_site.py` records the API, the two session
 headers it needs and where they come from. The 1099-R arrives with a
 print-stream line in front of the PDF header, which is stripped, and

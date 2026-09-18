@@ -450,7 +450,7 @@ def _launch(exe: str, name: str, profile_dir, port: str,
         return None
 
     # Said once the window is actually up, because that is when somebody is
-    # looking at a browser they recognise which knows none of their accounts.
+    # looking at a browser they recognize which knows none of their accounts.
     print()
     print(profile_note(name))
     return name

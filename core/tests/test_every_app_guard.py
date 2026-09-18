@@ -235,7 +235,7 @@ def test_this_app_lets_the_user_choose_which_browser(app):
 # stands between a data-chosen element and the click. One provider arrived
 # with a working is_safe_control, called it only in its diagnose dump, and
 # fetched each bill by clicking the first link or button in the row when the
-# labelled one was not found. A bill row also holds Pay. The reachability
+# labeled one was not found. A bill row also holds Pay. The reachability
 # test above passed it, because the guard was called with real text.
 #
 # What is caught here is the shape of that mistake, read from the source.
