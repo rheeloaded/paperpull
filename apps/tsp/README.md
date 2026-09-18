@@ -4,11 +4,9 @@ Downloads your own **participant statements** and **1099-R tax forms** from
 TSP's My Account, as PDFs, for your records. Read-only, delete-safe, and
 part of [PaperPull](../../README.md).
 
-> **Status: in discovery.** The app is scaffolded with the guards, the
-> folders and the rules in place, but the pages behind My Account have not
-> been mapped yet, so `discover` finds nothing and says so. `diagnose`
-> gathers what is needed to map them. See the STATUS block at the top of
-> `tsp_site.py` for exactly what is confirmed and what is not.
+Mapped and run against a real account on 2026-09-18. Twenty-five documents
+back to January 2022, every one valid, and the run marked nothing for
+review.
 
 ## This is a US government system
 
@@ -22,6 +20,26 @@ every other PaperPull provider, and stricter in two ways.
   banner and never sees your password or passcode.
 - An expired session stops the run loudly rather than reporting an empty
   success.
+
+## How it reads the site
+
+After sign-in the browser is on My Account, which lives at
+`api.rk.tsp.gov`, the plan's recordkeeper, not on tsp.gov's own pages.
+Statements and tax forms are messages in the **Secure Mailbox**, each with
+one PDF attached. The app reads that mailbox through the same two API calls
+the page itself makes, one for the list, one for a message's attachment,
+run from inside the signed-in page so the session token never leaves the
+browser. Nothing on the page is clicked. Every message is identified by
+its subject and delivery date, and looked up again fresh before download.
+
+**One side effect, stated plainly.** Fetching a message's attachment is
+what the site does when you open the message, and it marks the message as
+read. The unread count in your mailbox goes down as documents download.
+Nothing else changes.
+
+Notices such as Payment Confirmation, Payment Rights Notice and Rollover
+Contribution Status are filed as Other Document and skipped unless you add
+`"Other Document"` to `document_types` in `config.json`.
 
 ## What it will never do
 
@@ -37,22 +55,30 @@ exactly a document or mailbox word. A test pins each of those.
 ```bat
 setup.bat                         REM one-time: create the venv + install Playwright
 login.bat                         REM opens a browser on port 9246, sign in yourself
-paperpull tsp diagnose            REM read-only survey of what My Account shows, downloads nothing
-paperpull tsp pilot               REM once mapped, download the newest 5 as a test
-paperpull tsp all                 REM once mapped, download every statement in scope
+paperpull tsp diagnose            REM read-only survey of the mailbox, downloads nothing
+paperpull tsp pilot               REM download the newest 5 as a test
+paperpull tsp all                 REM download every statement in scope
 ```
 
-`diagnose` writes `Diagnostics/diagnose-documents.json`. It holds the page
-titles, headings and controls it saw, the guard's verdict on each control,
-and the shape (not the contents) of any JSON the site returned. Runs of six
-or more digits are masked, so an account number never reaches the file.
-There is no screenshot, because a retirement account page shows balances.
+`diagnose` writes `Diagnostics/diagnose-documents.json`, a survey of the
+page rather than a screenshot. Runs of six or more digits are masked, and
+JSON is recorded as shape only, never values.
 
 ## What it files
 
 | Folder | What |
 |---|---|
-| `Statements/` | Quarterly and annual participant statements, and letters or notices from the mailbox |
-| `Tax Documents/` | 1099-R and any other tax form |
+| `Statements/` | Annual, quarterly and online account statements, the statement supplement, and the Lifetime Income Illustration |
+| `Tax Documents/` | 1099-R |
 
-Filenames follow the usual `YYYY-MM-DD TSP <Summary>.pdf`.
+Filenames follow the usual `YYYY-MM-DD TSP <Summary>.pdf`, dated by the
+message's delivery date.
+
+## When the site changes
+
+Page behaviour is in `tsp_site.py`, the command flow in `tsp_docs.py`. The
+STATUS block at the top of `tsp_site.py` records the API, the two session
+headers it needs and where they come from. The 1099-R arrives with a
+print-stream line in front of the PDF header, which is stripped, and
+statements do not. If a download starts failing, `diagnose` shows what the
+mailbox looks like now.

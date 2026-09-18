@@ -12,7 +12,7 @@ of clicking through each site by hand.
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Twenty-six providers are supported today, all built on the same pattern:
+Twenty-seven providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -35,6 +35,7 @@ Twenty-six providers are supported today, all built on the same pattern:
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported; fresh live pilot pending |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
+| [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements** | Per-employer tenant; JSON-API, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |

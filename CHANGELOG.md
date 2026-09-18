@@ -7,6 +7,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Thrift Savings Plan**, the 27th provider and the second US government
+  system. Participant statements and the 1099-R, read from My Account's
+  Secure Mailbox through the same two API calls the page makes, from inside
+  the signed-in page so the session token never leaves the browser. Nothing
+  is clicked. Run against a real account, 25 documents back to 2022, all
+  valid. Downloading a message marks it read, and the README says so. The
+  1099-R arrives with a print-stream line in front of the PDF header, which
+  is stripped.
+
 ## [0.19.1] - 2026-09-18
 
 A patch on the Windows package. Nothing a user does changes.

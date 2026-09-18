@@ -2,34 +2,47 @@
 
 When My Account changes, repair this file only.
 
-STATUS, read before trusting anything below.
+STATUS, mapped 2026-09-18 against a signed-in My Account.
 
-  CONFIRMED from public sources, 2026-09-18:
-    * the participant site is My Account, reached from www.tsp.gov, and was
-      rebuilt on 1 June 2022 with new credentials for everyone
-    * sign-in is username + password + a one-time passcode sent by text,
-      voice or email, plus a ThriftLine PIN for phone use. No Login.gov or
-      ID.me
-    * annual participant statements and the 1099-R are delivered to a secure
-      participant mailbox inside My Account, and quarterly statements are
-      posted there too
-    * the onboarding site is a Salesforce Experience Cloud page
-      (onboarding.tsp.gov/onboarding/s/), which suggests My Account is the
-      same platform. PG&E's portal is, and its Lightning components needed
-      their own handling
-    * www.tsp.gov refuses plain HTTP fetches (403), so a real browser is
-      the only way in, and possibly a branded one
+  My Account is not on tsp.gov's own pages. After sign-in the browser lands
+  on api.rk.tsp.gov, an Angular app from the plan's recordkeeper, with
+  hash routes under /web/converge/. Statements and tax forms are messages
+  in the Secure Mailbox, each with one PDF attached. Thirty messages went
+  back to January 2022 on the account this was mapped against.
 
-  NOT YET CONFIRMED, and deliberately not guessed:
-    * the hostname and URL of My Account once signed in
-    * where the mailbox and statements live, and what the rows look like
-    * how a statement PDF is delivered (link, download event, blob, API)
-    * whether there is a JSON API behind the pages
+  THE API, all GET, nothing clicked, nothing navigated:
+    * list      /api/channel/personmessages/personMessages/spm
+                  ?subcategory=items&pgNum=N&days=0&dlvDtOrdr=DESC
+                -> spm.items[] of {mailboxItemId, mailItemSubject,
+                   deletionDate, mimeType, unread, clientId, ...} ten a
+                   page, spm.unfilteredMsgCount for the total
+    * content   the same path
+                  ?subcategory=itemContent&itemId=<mailboxItemId>&clientId=<clientId>
+                -> spm.itemContent.pdfContent, the PDF as base64
 
-  There are NO guessed document URLs here. Until the section below is
-  mapped, --discover finds nothing and says so, and --diagnose gathers the
-  evidence needed to map it, read only, from tsp.gov pages only, clicking
-  nothing that does not pass the guard.
+  AUTH: cookies alone answer 401. Two headers are needed,
+  alightpersonsessiontoken and alightrequestheader, whose values sit in
+  sessionStorage under alightPersonSessionToken and alightRequestHeader.
+  Every call runs INSIDE the page with page.evaluate(fetch(...)) and reads
+  both in the same expression, so the session token never enters this
+  process, is never logged and never touches disk. The PDF comes back as
+  base64 from the page.
+
+  IDENTITY is subject + date, never the mailboxItemId. The id is stored as
+  a hint and looked up fresh at download time, the lesson from myPay, whose
+  ids turned out to die with the session. deletionDate is the field's own
+  name and it holds the delivery date (the newest message carried today's
+  date), so it is used as the document date.
+
+  ONE SIDE EFFECT, stated plainly. Fetching a message's content is what the
+  site itself does when a message is opened, and it marks the message as
+  read. The unread count in the mailbox goes down as documents are
+  downloaded. Nothing else changes.
+
+  Not every message is a document to keep. Notices such as Payment
+  Confirmation, Payment Rights Notice and Rollover Contribution Status are
+  classified as Other Document and skipped unless "Other Document" is added
+  to document_types in config.json.
 
 SAFETY (this is a US federal retirement account):
   Strictly READ-ONLY. My Account can move money between funds, change
@@ -62,14 +75,16 @@ log = logging.getLogger("tsp_docs.site")
 ALLOWED_HOSTS = ("tsp.gov",)
 
 BASE = "https://www.tsp.gov"
+MYACCOUNT = "https://api.rk.tsp.gov"
+API_BASE = f"{MYACCOUNT}/api/channel/personmessages/personMessages/spm"
 URLS = {
     "home": f"{BASE}/",
     "login": f"{BASE}/login/",
-    # Unknown until diagnose has run against a signed-in session. Left empty
-    # on purpose, see STATUS above. goto_documents treats any signed-in
-    # tsp.gov page as "close enough" until this is filled in.
-    "documents": "",
+    # The mailbox. Any signed-in api.rk.tsp.gov page will do for the API,
+    # so this is only navigated to when the tab is somewhere else entirely.
+    "documents": f"{MYACCOUNT}/api/angularfirst-app/ah-angular-afirst-web/#/web/converge/gmc?selecttab=1",
 }
+PAGE_SIZE = 10
 
 LOGIN_URL_MARKERS = ["/login", "/logon", "/signin", "/sign-in", "/mfa",
                      "/verify", "/onboarding"]
@@ -195,10 +210,12 @@ def detect_security_challenge(page) -> Optional[str]:
 
 
 def on_documents_page(page) -> bool:
-    """Not known yet. Any signed-in tsp.gov page counts, and that is stated
-    in STATUS rather than hidden."""
+    """Any signed-in page of the My Account app. The API is reachable from
+    all of them, since the headers it needs live in sessionStorage."""
     try:
-        return is_safe_url(page.url or "") and not looks_signed_out(page)
+        url = page.url or ""
+        return (is_safe_url(url) and urlsplit(url).hostname == "api.rk.tsp.gov"
+                and not looks_signed_out(page))
     except Exception:
         return False
 
@@ -218,21 +235,155 @@ def ensure_statements(page) -> bool:
     return goto_documents(page)
 
 
-# -- what is NOT mapped yet -----------------------------------------------------
+# -- the mailbox API -----------------------------------------------------------
 
-DOCUMENT_TYPES: dict = {}   # filled in once diagnose has shown what exists
+DOCUMENT_TYPES = {"application/pdf": "PDF attachment"}
+
+_DATE_RE = re.compile(r"^([A-Z][a-z]{2}) (\d{1,2}), (\d{4})$")
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])}
+
+
+def parse_date(text: str) -> str:
+    """'Feb 9, 2026' -> '2026-02-09'. Anything else -> ''."""
+    m = _DATE_RE.match((text or "").strip())
+    if not m or m.group(1) not in _MONTHS:
+        return ""
+    return "%s-%02d-%02d" % (m.group(3), _MONTHS[m.group(1)], int(m.group(2)))
+
+
+# Runs inside the page. Reads the two session headers and makes one GET.
+# Returns status and the parsed body, or the base64 content only when asked,
+# and never the headers themselves.
+_FETCH_JS = """async ({url, want}) => {
+  const target = new URL(url, location.href);
+  if (target.protocol !== 'https:' || target.hostname !== 'api.rk.tsp.gov') {
+    throw new Error('Refusing an off-host request');
+  }
+  const h = {'Accept': 'application/json', 'Content-Type': 'application/json',
+             'alightpersonsessiontoken': sessionStorage.getItem('alightPersonSessionToken') || '',
+             'alightrequestheader': sessionStorage.getItem('alightRequestHeader') || ''};
+  const r = await fetch(url, {credentials: 'include', headers: h, redirect: 'error'});
+  let j = null;
+  try { j = await r.json(); } catch (e) {}
+  if (want === 'items') {
+    const spm = (j && j.spm) || {};
+    return {status: r.status, total: spm.unfilteredMsgCount, items: spm.items || null};
+  }
+  if (want === 'pdf') {
+    const ic = j && j.spm && j.spm.itemContent;
+    return {status: r.status, mimetype: ic ? ic.mimetype : null, b64: ic ? (ic.pdfContent || '') : ''};
+  }
+  return {status: r.status};
+}"""
+
+
+def _api(page, url: str, want: str) -> dict:
+    if not is_safe_url(url):
+        raise ValueError("refusing an off-host request")
+    res = page.evaluate(_FETCH_JS, {"url": url, "want": want})
+    if res.get("status") in (401, 403):
+        raise SessionExpired("My Account answered %s" % res["status"])
+    return res
+
+
+def list_messages(page) -> List[dict]:
+    """Every message in the mailbox, newest first, ten a page until the
+    count the first page reports is reached."""
+    out: List[dict] = []
+    page_no = 1
+    total = None
+    while True:
+        res = _api(page, "%s?subcategory=items&pgNum=%d&days=0&dlvDtOrdr=DESC"
+                   % (API_BASE, page_no), "items")
+        items = res.get("items") or []
+        if total is None:
+            total = int(res.get("total") or 0)
+        out.extend(i for i in items if isinstance(i, dict))
+        if not items or len(out) >= total or page_no > 200:
+            break
+        page_no += 1
+    return out
 
 
 def collect_documents(page) -> List[dict]:
-    """Nothing, until the site is mapped. Says so rather than guessing."""
-    log.warning("TSP My Account is not mapped yet. Run diagnose and send the "
-                "Diagnostics folder's survey to the maintainer.")
-    return []
+    """The mailbox as document rows. Only messages with a PDF attached."""
+    rows = []
+    messages = list_messages(page)
+    for m in messages:
+        if (m.get("mimeType") or "").lower() != "application/pdf":
+            continue
+        title = re.sub(r"\s+", " ", m.get("mailItemSubject") or "").strip()
+        date = parse_date(m.get("deletionDate") or "")
+        if not title or not date:
+            log.info("skipping a message with no usable subject or date")
+            continue
+        rows.append({"title": title, "date": date,
+                     "item_id": str(m.get("mailboxItemId") or ""),
+                     "client_id": str(m.get("clientId") or ""),
+                     "unread": bool(m.get("unread"))})
+    log.info("TSP mailbox: %d message(s), %d with a PDF", len(messages), len(rows))
+    return rows
 
 
-def download_document(page, document_id: str, out_path: Path) -> bool:
-    log.warning("TSP downloads are not mapped yet")
-    return False
+def resolve_item(page, title: str, date: str, occurrence: int = 0) -> Optional[dict]:
+    """Find the message by subject and date in a fresh listing."""
+    n = 0
+    for row in collect_documents(page):
+        if row["title"] == title and row["date"] == date:
+            if n == occurrence:
+                return row
+            n += 1
+    return None
+
+
+def fetch_pdf(page, item_id: str, client_id: str) -> bytes:
+    import base64
+    from urllib.parse import quote
+    if not re.fullmatch(r"[0-9a-f]{24}", item_id or ""):
+        raise ValueError("mailboxItemId does not look like one")
+    if not re.fullmatch(r"\d{1,8}", client_id or ""):
+        raise ValueError("clientId does not look like one")
+    url = "%s?subcategory=itemContent&itemId=%s&clientId=%s" % (
+        API_BASE, quote(item_id), quote(client_id))
+    res = _api(page, url, "pdf")
+    if res.get("status") != 200 or not res.get("b64"):
+        log.info("content answered %s with %d chars", res.get("status"), len(res.get("b64") or ""))
+        return b""
+    return strip_print_stream_prefix(base64.b64decode(res["b64"]))
+
+
+def strip_print_stream_prefix(data: bytes) -> bytes:
+    """The 1099-R arrives with a print-stream line in front of the PDF,
+    "%%UC_CLIENT_INPUT_FILE_NAME" then a newline, then %PDF-. Statements do
+    not. Anything before a %PDF- found in the first kilobyte is dropped.
+    Readers rebuild the cross-reference table that the shift puts out by a
+    few bytes, and the core's validator does the same. Anything with no
+    %PDF- near the front is not a PDF and is refused."""
+    if data[:5] == b"%PDF-":
+        return data
+    i = data.find(b"%PDF-", 0, 1024)
+    if i < 0:
+        return b""
+    log.info("dropping %d bytes of print-stream prefix before the PDF header", i)
+    return data[i:]
+
+
+def download_document(page, title: str, date: str, out_path: Path,
+                      item_hint: str = "", client_hint: str = "",
+                      occurrence: int = 0) -> bool:
+    row = resolve_item(page, title, date, occurrence)
+    if row is None and item_hint and client_hint:
+        log.info("%r (%s) not in the fresh list, trying the stored id", title, date)
+        row = {"item_id": item_hint, "client_id": client_hint}
+    if row is None:
+        log.info("%r (%s) could not be resolved", title, date)
+        return False
+    data = fetch_pdf(page, row["item_id"], row["client_id"])
+    if not data:
+        return False
+    Path(out_path).write_bytes(data)
+    return True
 
 
 # -- survey, the evidence diagnose gathers --------------------------------------

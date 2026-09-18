@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (26)
+## Supported (27)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -33,6 +33,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Brokerage |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
+| [`tsp`](apps/tsp) | Thrift Savings Plan (tsp.gov) | Participant statements, 1099-R | Federal retirement (government system) |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements | Payroll |
 | [`usaa`](apps/usaa) | USAA | Statements | Bank / insurance |
@@ -53,7 +54,7 @@ New to this? Look for the **`good first provider`** label — those are easy sit
 
 | Provider | Category | Requested by | Status |
 |----------|----------|--------------|--------|
-| Thrift Savings Plan (tsp.gov) | Federal retirement | rheeloaded | **claimed**, in discovery under [`apps/tsp`](apps/tsp) |
+| _(none yet, add yours)_ | | | |
 
 Status legend: **requested** → **claimed** (someone's building it) →
 **in review** (PR open) → merged (moves to Supported).
