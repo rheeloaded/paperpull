@@ -153,6 +153,8 @@ def _looks_like_installs(root: Path) -> int:
 # Resolved once. Importing by path is not free and the panel can be
 # refreshed repeatedly. False means looked for and not found.
 _STATUS_MOD = None
+_EXPORT_MOD = None
+_LAST_EXPORT = None     # path of the spreadsheet this panel wrote last, for Reveal
 # Apps with a downloader process alive right now. Removing one of these
 # would pull the folder out from under a run.
 _RUNNING: set = set()
@@ -328,6 +330,77 @@ def _status_module():
     return None
 
 
+def _export_module():
+    """tools/export_purchases.py, found the same way as the status reporter."""
+    global _EXPORT_MOD
+    if _EXPORT_MOD is not None:
+        return _EXPORT_MOD or None
+    import importlib.util
+    for cand in (HERE.parent / "tools" / "export_purchases.py",
+                 apps_root() / "export_purchases.py",
+                 apps_root().parent / "export_purchases.py",
+                 HERE.parent / "export_purchases.py"):
+        try:
+            if not cand.is_file():
+                continue
+            spec = importlib.util.spec_from_file_location("paperpull_export", cand)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _EXPORT_MOD = mod
+            return mod
+        except Exception:
+            continue
+    _EXPORT_MOD = False
+    return None
+
+
+@app.post("/api/export", dependencies=[Depends(_same_origin_only)])
+async def api_export(request: Request):
+    """Every purchase from every receipt archive under the root, as one
+    spreadsheet written beside the installs. Rebuilt from the apps' own
+    order-history CSVs each time, so nothing here reads a PDF and the file
+    is never the copy anyone edits."""
+    global _LAST_EXPORT
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    as_csv = bool(body.get("csv"))
+    mod = _export_module()
+    if mod is None:
+        return {"ok": False, "reason": "export_purchases.py was not found next to this control panel."}
+    try:
+        result = mod.export(apps_root(), None, None, as_csv)
+    except Exception as e:
+        return {"ok": False, "reason": "the export failed, %s" % str(e).splitlines()[0][:120]}
+    if not result["sources"]:
+        return {"ok": False, "reason": "no '<Provider> Order History.csv' under %s. Receipt apps "
+                "(Amazon, Target, Walmart, Gap) write one after a run." % apps_root()}
+    _LAST_EXPORT = Path(result["path"])
+    return {"ok": True, **result}
+
+
+@app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only)])
+def api_export_reveal():
+    """Show the last spreadsheet this panel wrote in the file manager. Takes no
+    path from the page on purpose, only the one the server itself wrote."""
+    p = _LAST_EXPORT
+    if not p or not p.is_file():
+        raise HTTPException(404, "nothing exported yet")
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", str(p)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(p)])
+        else:
+            subprocess.Popen(["xdg-open", str(p.parent)])
+    except Exception as e:
+        raise HTTPException(500, "could not open the folder, %s" % e)
+    return {"ok": True}
+
+
 def _jsonable(value):
     """Dates arrive as date/datetime objects, which JSON cannot carry."""
     if isinstance(value, datetime):
@@ -419,8 +492,9 @@ async def api_root_set(request: Request):
         _write_settings(data)
     except OSError as e:
         raise HTTPException(500, "could not save the choice: %s" % e)
-    global _STATUS_MOD
+    global _STATUS_MOD, _EXPORT_MOD
     _STATUS_MOD = None      # the status report is looked for relative to root
+    _EXPORT_MOD = None      # and so is the exporter
     return {"root": str(root.resolve()), "exists": True,
             "apps": _looks_like_installs(root), "source": "settings",
             "settings_file": str(_settings_path())}
@@ -951,6 +1025,7 @@ HTML = r"""<!doctype html>
   <div class="tabs">
     <button id="tabout" class="on" onclick="showTab('out')">Output</button>
     <button id="tabst" onclick="showTab('st')">Status</button>
+    <button id="tabxl" onclick="showTab('xl')">Spreadsheet</button>
   </div>
   <div id="paneout" style="display:flex; flex-direction:column; min-height:0; flex:1;">
     <div class="status"><span class="dot" id="dot"></span><span id="statustext">idle</span></div>
@@ -960,6 +1035,17 @@ HTML = r"""<!doctype html>
     <p><button onclick="loadStatus()">Refresh</button>
        <span class="hint" id="stnote"></span></p>
     <div id="stbody">not loaded yet</div>
+  </div>
+  <div id="panexl" class="stwrap" style="display:none;">
+    <p class="hint" style="margin-top:0">Every purchase from every receipt archive
+       (Amazon, Target, Walmart, Gap), one row per item, newest first, with an
+       Orders sheet and a Summary of spend per provider per year. Built from what
+       the apps already recorded while downloading, so it takes a second and no
+       PDF is opened. Rebuilt from scratch each time. Edit a copy, not this file.</p>
+    <p><button class="primary" id="xlbuild" onclick="buildSpreadsheet(false)">Build Excel workbook</button>
+       <button onclick="buildSpreadsheet(true)">Build CSV instead</button>
+       <button id="xlreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
+    <div id="xlbody"></div>
   </div>
   </div>
 </main>
@@ -1087,12 +1173,37 @@ async function removeProvider() {
 
 let STATUS_LOADED = false;
 
+async function buildSpreadsheet(asCsv) {
+  $('xlbody').textContent = 'building...';
+  $('xlreveal').style.display = 'none';
+  let d;
+  try {
+    d = await (await fetch('/api/export', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({csv: asCsv})})).json();
+  } catch (e) { $('xlbody').textContent = 'could not reach the control panel'; return; }
+  if (!d.ok) { $('xlbody').textContent = d.reason || 'the export failed'; return; }
+  let html = '<table class="st"><tr><th>Provider</th><th class="num">Line items</th></tr>';
+  for (const [p, n] of Object.entries(d.providers).sort()) {
+    html += '<tr><td>' + esc(p) + '</td><td class="num">' + n + '</td></tr>';
+  }
+  html += '</table>';
+  html += '<p style="margin-top:14px"><b>' + d.purchases + ' purchases</b> across ' + d.orders + ' orders.</p>';
+  html += '<p class="hint">Wrote <code>' + esc(d.path) + '</code></p>';
+  if (d.openpyxl_missing) html += '<p class="hint warn">openpyxl is not installed here, so this is a .csv. Run <code>pip install openpyxl</code> in the panel\'s environment for an .xlsx.</p>';
+  $('xlbody').innerHTML = html;
+  $('xlreveal').style.display = '';
+}
+async function revealSpreadsheet() {
+  try { await fetch('/api/export/reveal', {method: 'POST'}); } catch (e) {}
+}
 function showTab(which) {
-  const isSt = which === 'st';
-  $('paneout').style.display = isSt ? 'none' : 'flex';
+  const isSt = which === 'st', isXl = which === 'xl';
+  $('paneout').style.display = (isSt || isXl) ? 'none' : 'flex';
   $('panest').style.display  = isSt ? 'block' : 'none';
-  $('tabout').className = isSt ? '' : 'on';
+  $('panexl').style.display  = isXl ? 'block' : 'none';
+  $('tabout').className = (isSt || isXl) ? '' : 'on';
   $('tabst').className  = isSt ? 'on' : '';
+  $('tabxl').className  = isXl ? 'on' : '';
   if (isSt && !STATUS_LOADED) loadStatus();
 }
 
@@ -1236,7 +1347,7 @@ function run(action) {
   $('console').textContent = '';
   const scoped = s.year ? ` (${s.year})` : (s.start || s.end) ? ` (${s.start || '…'} to ${s.end || '…'})` : '';
   setStatus('run', `running ${action} on ${app} / ${account}${scoped}`);
-  document.querySelectorAll('button:not(#tabout):not(#tabst)').forEach(b => b.disabled = true);
+  document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl)').forEach(b => b.disabled = true);
   es = new EventSource(`/api/run?${q.toString()}`);
   const con = $('console');
   let result = null;
