@@ -368,11 +368,19 @@ async def api_export(request: Request):
     if not isinstance(body, dict):
         body = {}
     as_csv = bool(body.get("csv"))
+    provider = str(body.get("provider") or "").strip() or None
     mod = _export_module()
     if mod is None:
         return {"ok": False, "reason": "export_purchases.py was not found next to this control panel."}
+    if provider:
+        # Only a provider the exporter itself found may be named, so the page
+        # cannot steer the filename or the folder walk.
+        known = {p["provider"].lower(): p["provider"] for p in mod.providers(apps_root())}
+        if provider.lower() not in known:
+            return {"ok": False, "reason": f"no order history for {provider!r} under {apps_root()}"}
+        provider = known[provider.lower()]
     try:
-        result = mod.export(apps_root(), None, None, as_csv)
+        result = mod.export(apps_root(), None, provider, as_csv)
     except Exception as e:
         return {"ok": False, "reason": "the export failed, %s" % str(e).splitlines()[0][:120]}
     if not result["sources"]:
@@ -380,6 +388,20 @@ async def api_export(request: Request):
                 "(Amazon, Target, Walmart, Gap) write one after a run." % apps_root()}
     _LAST_EXPORT = Path(result["path"])
     return {"ok": True, **result}
+
+
+@app.get("/api/export/providers", dependencies=[Depends(_same_origin_only)])
+def api_export_providers():
+    """Which providers a spreadsheet makes sense for. Receipt archives have
+    line items. Statement archives do not, and are left off the list rather
+    than offered a button that would produce an empty file."""
+    mod = _export_module()
+    if mod is None:
+        return {"available": False, "providers": []}
+    try:
+        return {"available": True, "providers": mod.providers(apps_root())}
+    except Exception as e:
+        return {"available": False, "providers": [], "reason": str(e).splitlines()[0][:120]}
 
 
 @app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only)])
@@ -1037,11 +1059,13 @@ HTML = r"""<!doctype html>
     <div id="stbody">not loaded yet</div>
   </div>
   <div id="panexl" class="stwrap" style="display:none;">
-    <p class="hint" style="margin-top:0">Every purchase from every receipt archive
-       (Amazon, Target, Walmart, Gap), one row per item, newest first, with an
-       Orders sheet and a Summary of spend per provider per year. Built from what
-       the apps already recorded while downloading, so it takes a second and no
-       PDF is opened. Rebuilt from scratch each time. Edit a copy, not this file.</p>
+    <p class="hint" style="margin-top:0">Every purchase from a receipt archive, one row
+       per item, newest first, with an Orders sheet and a Summary of spend per year.
+       Built from what the apps already recorded while downloading, so it takes a
+       second and no PDF is opened. Rebuilt from scratch each time. Edit a copy, not
+       this file.</p>
+    <p><select id="xlprovider" style="width:auto; min-width:220px; display:inline-block; margin-right:8px"></select>
+       <span class="hint" id="xlnote"></span></p>
     <p><button class="primary" id="xlbuild" onclick="buildSpreadsheet(false)">Build Excel workbook</button>
        <button onclick="buildSpreadsheet(true)">Build CSV instead</button>
        <button id="xlreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
@@ -1070,7 +1094,7 @@ async function saveRoot() {
   } else {
     $('rootmsg').textContent = 'found ' + d.apps + ' downloader' + (d.apps === 1 ? '' : 's');
   }
-  STATUS_LOADED = false;
+  STATUS_LOADED = false; XL_LOADED = false;
   await load();
 }
 
@@ -1125,7 +1149,7 @@ async function createInstalls() {
   } catch (e) { $('newmsg').textContent = 'could not reach the control panel'; return; }
   const d = await r.json();
   if (!r.ok) { $('newmsg').textContent = d.detail || 'that did not work'; return; }
-  STATUS_LOADED = false;
+  STATUS_LOADED = false; XL_LOADED = false;
   await load();
   const n = d.created.length;
   $('console').textContent =
@@ -1158,7 +1182,7 @@ async function removeProvider() {
   } catch (e) { $('console').textContent = 'could not reach the control panel'; return; }
   const d = await r.json();
   if (!r.ok) { $('console').textContent = d.detail || 'that did not work'; return; }
-  STATUS_LOADED = false;
+  STATUS_LOADED = false; XL_LOADED = false;
   await load();
   const kept = [];
   if (d.pdfs) kept.push(d.pdfs + ' PDF' + (d.pdfs === 1 ? '' : 's'));
@@ -1173,13 +1197,33 @@ async function removeProvider() {
 
 let STATUS_LOADED = false;
 
+// Which providers get a spreadsheet. Receipt archives have line items, so
+// they are listed, each with its second-account folders folded in. Statement
+// archives are not offered one, since they have documents, not purchases.
+let XL_LOADED = false;
+async function loadExportProviders() {
+  const sel = $('xlprovider'); sel.innerHTML = '';
+  let d;
+  try { d = await (await fetch('/api/export/providers')).json(); }
+  catch (e) { d = {available: false, providers: []}; }
+  XL_LOADED = true;
+  const provs = (d.providers || []);
+  sel.append(new Option('All providers', ''));
+  for (const p of provs) sel.append(new Option(p.provider, p.provider));
+  const names = provs.map(p => p.provider).join(', ');
+  $('xlnote').textContent = provs.length
+    ? 'Receipt archives found, ' + names + '. Statement archives have no line items and are not offered.'
+    : 'No receipt archive found under this folder. Amazon, Target, Walmart and Gap write one after a run.';
+  $('xlbuild').disabled = !provs.length;
+}
 async function buildSpreadsheet(asCsv) {
   $('xlbody').textContent = 'building...';
   $('xlreveal').style.display = 'none';
   let d;
+  const provider = $('xlprovider').value;
   try {
     d = await (await fetch('/api/export', {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({csv: asCsv})})).json();
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({csv: asCsv, provider})})).json();
   } catch (e) { $('xlbody').textContent = 'could not reach the control panel'; return; }
   if (!d.ok) { $('xlbody').textContent = d.reason || 'the export failed'; return; }
   let html = '<table class="st"><tr><th>Provider</th><th class="num">Line items</th></tr>';
@@ -1205,6 +1249,7 @@ function showTab(which) {
   $('tabst').className  = isSt ? 'on' : '';
   $('tabxl').className  = isXl ? 'on' : '';
   if (isSt && !STATUS_LOADED) loadStatus();
+  if (isXl && !XL_LOADED) loadExportProviders();
 }
 
 function pillClass(s) {

@@ -166,3 +166,18 @@ def test_a_workbook_open_in_excel_is_a_plain_message_not_a_traceback(root, monke
         xp.export(root, as_csv=True)
     assert "open in another program" in str(e.value) and "All Purchases.csv" in str(e.value)
     assert xp.main(["--root", str(root), "--csv"]) == 2
+
+
+def test_only_providers_with_line_items_are_offered_a_spreadsheet(root):
+    offered = xp.providers(root)
+    assert [p["provider"] for p in offered] == ["Amazon", "Target"]       # Chase has documents, not purchases
+    assert offered[0]["folders"] == ["Amazon Receipts", "Amazon Receipts - jane"]
+
+
+def test_a_provider_spreadsheet_holds_both_of_its_accounts(root):
+    r = xp.export(root, provider="Amazon", as_csv=True)
+    assert Path(r["path"]).name == "Amazon Purchases.csv"
+    with open(r["path"], encoding="utf-8-sig", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert {x["Account"] for x in rows} == {"", "Jane"} and all(x["Provider"] == "Amazon" for x in rows)
+    assert len(rows) == 5

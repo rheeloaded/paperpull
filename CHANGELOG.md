@@ -17,7 +17,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   first, with an Orders sheet and a Summary of spend per provider per year.
   Amounts are numbers. No PDF is read, it takes a second, and the file is
   rebuilt from scratch each time. A CSV is one click away, and is what you
-  get when openpyxl is not installed.
+  get when openpyxl is not installed. A dropdown picks one provider for
+  `Amazon Purchases.xlsx` and the like. Only providers with line items are
+  offered, since a statement archive has documents, not purchases.
 
 ### Fixed
 - **Amazon, Whole Foods items now have prices and quantities.** The

@@ -96,6 +96,17 @@ def find_histories(root: Path) -> List[Tuple[str, Path]]:
     return found
 
 
+def providers(root: Path) -> List[dict]:
+    """The providers a spreadsheet makes sense for, which is the ones with an
+    order history, each with the folders it would draw from. A statement
+    archive has documents, not line items, and is not listed."""
+    out: "OrderedDict[str, dict]" = OrderedDict()
+    for prov, f in find_histories(root):
+        entry = out.setdefault(prov, {"provider": prov, "folders": []})
+        entry["folders"].append(f.parent.name)
+    return list(out.values())
+
+
 def load_purchases(provider: str, path: Path) -> List[dict]:
     """One dict per line item, keyed by the output column names."""
     rows = []
