@@ -76,6 +76,17 @@ It finds any subfolder containing an entry script (`*_receipts.py` /
 | **Resume** | Continue an interrupted run |
 | **Verify** | Re-check the downloaded PDFs |
 
+## Scope
+
+**All years** is the default. It walks everything, which is what keeps each
+archive's discovery complete for the Status tab. Pick one year, or a From
+and To date, and every action except Login gets the matching `--year`,
+`--start-date` and `--end-date`. On sites with a year picker (U.S. Bank,
+Chase, Target RedCard, Wealthfront, Target, Amazon) a scoped run skips the
+years outside its window, which is the difference between a three-second
+check and a minute of clicking through a decade. The choice is remembered
+in your browser, so glance at the hint under the row before a Run All.
+
 ## Notes & limits
 
 - **Login is human-driven.** The panel opens the browser; you handle sign-in and

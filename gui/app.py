@@ -169,6 +169,36 @@ ACTIONS = {
 }
 ENTRY_RE = re.compile(r".*_(receipts|docs)\.py$")
 
+# Every app takes the same three scope flags. The panel passes them through
+# on any run except Login, which has nothing to scope. A scoped run skips the
+# years outside its window on providers with a year picker (see
+# paperpull_core.scope), and the apps filter what they found by date either
+# way. Unscoped is the default and still walks everything.
+_YEAR_RE = re.compile(r"^(19|20)\d{2}$")
+_DATE_RE = re.compile(r"^(19|20)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
+
+
+def _scope_flags(year: str = "", start: str = "", end: str = "") -> list:
+    """argparse flags for the scope the page asked for, or [] for unscoped.
+    Anything that is not a plain year or an ISO date is refused rather than
+    passed on to a subprocess command line."""
+    year, start, end = (year or "").strip(), (start or "").strip(), (end or "").strip()
+    if year and not _YEAR_RE.match(year):
+        raise HTTPException(400, "year must be four digits")
+    for label, value in (("start", start), ("end", end)):
+        if value and not _DATE_RE.match(value):
+            raise HTTPException(400, f"{label} date must be YYYY-MM-DD")
+    if start and end and start > end:
+        raise HTTPException(400, "start date is after end date")
+    flags = []
+    if year:
+        flags += ["--year", year]
+    if start:
+        flags += ["--start-date", start]
+    if end:
+        flags += ["--end-date", end]
+    return flags
+
 app = FastAPI(title="PaperPull")
 
 # The panel runs the apps' commands, so its API must only answer requests that
@@ -649,7 +679,7 @@ async def api_remove(request: Request):
     return {"app": name, "moved_to": str(dest), **summary}
 
 
-def _build_cmd(app_meta: dict, account: str, action: str):
+def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=()):
     if action not in ACTIONS:
         raise HTTPException(400, "unknown action")
     if account not in app_meta["accounts"]:
@@ -657,6 +687,8 @@ def _build_cmd(app_meta: dict, account: str, action: str):
     flags = []
     for f in ACTIONS[action]["flags"]:
         flags.append(app_meta["login_flag"] if f == "__LOGIN__" else f)
+    if action != "login":
+        flags += list(scope_flags)
     cmd = [app_meta["python"], app_meta["script"], *flags]
     if account != "primary":
         cmd += ["--config", f"config.{account}.json"]
@@ -664,12 +696,13 @@ def _build_cmd(app_meta: dict, account: str, action: str):
 
 
 @app.get("/api/run", dependencies=[Depends(_same_origin_only)])
-def api_run(app: str, account: str = "primary", action: str = "pilot"):
+def api_run(app: str, account: str = "primary", action: str = "pilot",
+            year: str = "", start: str = "", end: str = ""):
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "unknown app")
     meta = apps[app]
-    cmd = _build_cmd(meta, account, action)
+    cmd = _build_cmd(meta, account, action, _scope_flags(year, start, end))
 
     # Deliberately an *async* generator. With a plain sync one, Starlette wraps
     # it in iterate_in_threadpool, which never calls .close() on it - so the
@@ -832,6 +865,11 @@ HTML = r"""<!doctype html>
           color:var(--muted); margin:16px 0 6px; }
   select { width:100%; padding:9px 10px; background:var(--panel); color:var(--fg);
            border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  .scope { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .scope input[type=date] { width:100%; padding:8px 10px; background:var(--panel); color:var(--fg);
+           border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box; }
+  .scope input[type=date]:disabled { opacity:.45; }
+  .scope .sub { font-size:11px; color:var(--muted); text-transform:none; letter-spacing:0; margin:6px 0 4px; }
   .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
   button { padding:10px; border:1px solid var(--line); border-radius:8px; cursor:pointer;
            background:var(--panel); color:var(--fg); font-size:14px; }
@@ -892,6 +930,13 @@ HTML = r"""<!doctype html>
     <select id="app"></select>
     <label for="account">Account</label>
     <select id="account"></select>
+    <label for="year">Scope</label>
+    <select id="year" onchange="onScope()"></select>
+    <div class="scope">
+      <div><div class="sub">From</div><input id="start" type="date" onchange="onScope()"></div>
+      <div><div class="sub">To</div><input id="end" type="date" onchange="onScope()"></div>
+    </div>
+    <p class="hint" id="scopehint" style="margin-top:8px"></p>
     <div class="actions" id="actions"></div>
     <p class="hint">1. <b>Login</b> opens a browser — sign in yourself and leave it open.<br>
        2. <b>Pilot</b> tests the newest few.<br>
@@ -1128,6 +1173,7 @@ async function load() {
   $('removelink').style.display = '';
   for (const k of keys) appSel.append(new Option(META.apps[k].name, k));
   appSel.onchange = onApp;
+  fillScope();
   const acts = $('actions'); acts.innerHTML = '';
   for (const [k, label] of Object.entries(META.actions)) {
     const b = document.createElement('button');
@@ -1147,13 +1193,51 @@ function onApp() {
   else warn.style.display='none';
 }
 function setStatus(cls, text) { $('dot').className = 'dot ' + cls; $('statustext').textContent = text; }
+// Scope. "All years" is the default and walks everything, which is what keeps
+// each archive's discovery complete for the Status tab. One year, or a date
+// range, makes the run skip the years outside it on sites with a year picker.
+// The choice is remembered in this browser only.
+function fillScope() {
+  const sel = $('year'); sel.innerHTML = '';
+  sel.append(new Option('All years (default)', ''));
+  const now = new Date().getFullYear();
+  for (let y = now; y >= now - 15; y--) sel.append(new Option(String(y), String(y)));
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('scope') || '{}'); } catch (e) {}
+  sel.value = saved.year || '';
+  if (sel.value !== (saved.year || '')) sel.value = '';
+  $('start').value = saved.start || '';
+  $('end').value = saved.end || '';
+  onScope();
+}
+function scopeValues() {
+  return { year: $('year').value, start: $('start').value, end: $('end').value };
+}
+function onScope() {
+  const s = scopeValues();
+  const oneYear = s.year !== '';
+  $('start').disabled = oneYear; $('end').disabled = oneYear;
+  let text;
+  if (oneYear) text = `Only ${s.year}. Years outside it are skipped where the site has a year picker.`;
+  else if (s.start || s.end) text = `${s.start || 'the beginning'} to ${s.end || 'today'}. Years outside that are skipped where the site has a year picker.`;
+  else text = 'Every year. Slower on sites with a year picker, and the only way the Status tab sees the whole archive.';
+  $('scopehint').textContent = text;
+  try { localStorage.setItem('scope', JSON.stringify(s)); } catch (e) {}
+}
 function run(action) {
   if (es) es.close();
   const app = $('app').value, account = $('account').value;
+  const s = scopeValues();
+  if (s.year === '' && s.start && s.end && s.start > s.end) {
+    setStatus('err', 'the From date is after the To date'); return;
+  }
+  const q = new URLSearchParams({ app, account, action });
+  if (s.year) q.set('year', s.year); else { if (s.start) q.set('start', s.start); if (s.end) q.set('end', s.end); }
   $('console').textContent = '';
-  setStatus('run', `running ${action} — ${app} / ${account}`);
+  const scoped = s.year ? ` (${s.year})` : (s.start || s.end) ? ` (${s.start || '…'} to ${s.end || '…'})` : '';
+  setStatus('run', `running ${action} on ${app} / ${account}${scoped}`);
   document.querySelectorAll('button:not(#tabout):not(#tabst)').forEach(b => b.disabled = true);
-  es = new EventSource(`/api/run?app=${encodeURIComponent(app)}&account=${encodeURIComponent(account)}&action=${action}`);
+  es = new EventSource(`/api/run?${q.toString()}`);
   const con = $('console');
   let result = null;
   es.addEventListener('result', e => { result = JSON.parse(e.data); });

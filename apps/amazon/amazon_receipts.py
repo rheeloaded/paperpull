@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from paperpull_core import classification, receipt_pdf
+from paperpull_core import classification, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import amazon_site as site
 from paperpull_core.models import (DONE_STATES, ONLINE, Item, Purchase, State)
@@ -278,15 +278,21 @@ class App:
         self.close()
 
     def _discover_years(self) -> List[int]:
-        """Years to scan, newest first. By default this goes all the way back to
-        Amazon's first year (the year loop stops early once it hits an order-less
-        year). Set default_start_date (or --start-date) to limit how far back."""
-        if self.args.year:
-            return [int(self.args.year)]
-        floor = self.args.start_date or self.config.get("default_start_date")
-        start_year = int(floor[:4]) if floor else 1995  # Amazon launched 1995
+        """Years to scan, newest first. Each year is its own page load, so a
+        scoped run only visits the years inside its window. --year is one
+        year, --start-date (or default_start_date in the config) sets the
+        floor, and --end-date the ceiling. Unscoped, this goes all the way back
+        to Amazon's first year, and the year loop stops early once it hits an
+        order-less year."""
+        first, last = scope.year_window(self.args, self.config)
         this_year = datetime.now().year
-        return list(range(this_year, start_year - 1, -1))
+        newest = min(last, this_year) if last is not None else this_year
+        oldest = first if first is not None else 1995  # Amazon launched 1995
+        years = list(range(newest, oldest - 1, -1))
+        if (first, last) != (None, None):
+            log.info("scoped to %s, %d year(s) to visit",
+                     scope.describe((first, last)), len(years))
+        return years
 
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
         """Discovery pass. Amazon paginates by year + startIndex (10/page)."""
