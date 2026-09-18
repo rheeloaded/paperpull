@@ -1,0 +1,27 @@
+{
+  "_comment": "Editable rules mapping TSP document titles to filename summaries. Case-insensitive regexes matched against the title or row text, checked in order: tax, then statement. A participant account issues quarterly and annual participant statements, a 1099-R for any withdrawal or taxable loan, and letters and notices to the secure mailbox. NOT yet checked against a signed-in My Account; the summaries follow TSP's own public names.",
+  "tax_rules": [
+    {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "\\b5498\\b", "summary": "5498 Tax Form"},
+    {"pattern": "tax\\s+(statement|document|form|notice)", "summary": "Tax Statement"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "annual\\s+(participant\\s+)?statement", "summary": "Annual Participant Statement"},
+    {"pattern": "quarterly\\s+(participant\\s+)?statement", "summary": "Quarterly Participant Statement"},
+    {"pattern": "participant\\s+statement", "summary": "Participant Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Account Statement"},
+    {"pattern": "loan\\s+(statement|notice|confirmation)", "summary": "Loan Notice"},
+    {"pattern": "withdrawal\\s+(statement|notice|confirmation)", "summary": "Withdrawal Notice"},
+    {"pattern": "\\b(letter|notice|correspondence)\\b", "summary": "Letter"}
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+of\\s+(use|service)",
+    "fund\\s+(fact\\s+)?sheet",
+    "newsletter",
+    "highlights",
+    "summary\\s+of\\s+the\\s+thrift"
+  ]
+}

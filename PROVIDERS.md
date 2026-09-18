@@ -53,7 +53,7 @@ New to this? Look for the **`good first provider`** label — those are easy sit
 
 | Provider | Category | Requested by | Status |
 |----------|----------|--------------|--------|
-| _(none yet — add yours)_ | | | |
+| Thrift Savings Plan (tsp.gov) | Federal retirement | rheeloaded | **claimed**, in discovery under [`apps/tsp`](apps/tsp) |
 
 Status legend: **requested** → **claimed** (someone's building it) →
 **in review** (PR open) → merged (moves to Supported).
