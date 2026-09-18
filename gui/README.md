@@ -87,6 +87,16 @@ years outside its window, which is the difference between a three-second
 check and a minute of clicking through a decade. The choice is remembered
 in your browser, so glance at the hint under the row before a Run All.
 
+## Spreadsheet
+
+One button that writes `All Purchases.xlsx` beside your installs, every line
+item from every receipt archive (Amazon, Target, Walmart, Gap, and any second
+accounts), newest first, with an Orders sheet and a Summary of spend per
+provider per year. It is built from the order history the apps already keep,
+so no PDF is opened and it takes a second. **Show in folder** opens the file
+manager on it. Rebuilt from scratch each time, so edit a copy, not this file.
+A CSV is one click away for anything that is not Excel.
+
 ## Notes & limits
 
 - **Login is human-driven.** The panel opens the browser; you handle sign-in and

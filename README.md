@@ -246,6 +246,23 @@ prints only what needs attention. The dashboard reads no document contents and
 carries no amounts or account numbers, but it does list which providers you
 hold accounts with, so it belongs with your installs and is gitignored here.
 
+## Every purchase in one spreadsheet
+
+The receipt apps (Amazon, Target, Walmart, Gap) record every line item they
+see while downloading, in an `<Provider> Order History.csv` beside the PDFs.
+`tools/export_purchases.py` gathers all of them into one workbook, one row
+per item across every provider and account, newest first, with an Orders
+sheet and a Summary of spend per provider per year. Amounts are numbers, so
+Excel can sum them. Nothing reads a PDF and it takes about a second.
+
+```
+python tools/export_purchases.py --root "C:\path\to\your\installs"
+```
+
+The panel has the same thing on its **Spreadsheet** tab, one button. The
+file is rebuilt from scratch each time, so edit a copy, not the original.
+Statement archives have no line items and are not part of this.
+
 ## Windows and macOS
 
 **Both have a package.** Every release on the

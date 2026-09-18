@@ -9,6 +9,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Every purchase in one spreadsheet.** `tools/export_purchases.py` and the
+  panel's new Spreadsheet tab gather the order history the receipt apps
+  already keep (Amazon, Target, Walmart, Gap, second accounts included) into
+  `All Purchases.xlsx` beside the installs. One row per line item, newest
+  first, with an Orders sheet and a Summary of spend per provider per year.
+  Amounts are numbers. No PDF is read, it takes a second, and the file is
+  rebuilt from scratch each time. A CSV is one click away, and is what you
+  get when openpyxl is not installed.
+
 ### Changed
 - **License is now the GNU Affero General Public License, version 3.** From
   the first release until 2026-09-18 PaperPull was MIT, and contributions
