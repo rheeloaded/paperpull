@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from paperpull_core import doc_types, receipt_pdf
+from paperpull_core import doc_types, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import wealthfront_site as site
 from paperpull_core.models import State
@@ -321,6 +321,13 @@ class App:
         if doc_types.wanted(doc_types.TAX, self.config):
             years = site.get_tax_years(page) or [""]
             log.info("Tax years offered: %s", years)
+            keep = scope.period_filter(self.args, self.config)
+            if keep is not None:
+                wanted = [y for y in years if keep(y)]
+                if len(wanted) < len(years):
+                    log.info("skipping %d tax year(s) outside the run's scope",
+                             len(years) - len(wanted))
+                years = wanted or [""]
             for year in years:
                 if year and not site.select_tax_year(page, year):
                     log.info("Could not select tax year %s", year)

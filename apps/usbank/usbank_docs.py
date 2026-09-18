@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from paperpull_core import doc_types, receipt_pdf
+from paperpull_core import doc_types, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import usbank_site as site
 from paperpull_core.models import State
@@ -333,7 +333,8 @@ class App:
 
 
 
-        raw = site.usbank_collect_structured(page)
+        raw = site.usbank_collect_structured(
+            page, keep=scope.period_filter(self.args, self.config))
         if raw:
             log.info("U.S. Bank: %d document(s) read from the page's own pickers", len(raw))
         else:

@@ -33,7 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from paperpull_core import doc_types, receipt_pdf
+from paperpull_core import doc_types, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import redcard_site as site
 from paperpull_core.models import State
@@ -371,7 +371,8 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        docs = site.collect_download_docs(
+            page, keep=scope.period_filter(self.args, self.config))
         for r in docs:
             n_new += self._record_rawdoc(r, page.url)
         self.discovery.save()
