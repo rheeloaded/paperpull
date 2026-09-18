@@ -156,13 +156,26 @@ python paperpull.py chase setup
 ```
 
 On macOS use `python3` wherever this page says `python`. This creates
-`apps/chase/.venv` and installs what the app needs. It takes a minute. Then:
+`apps/chase/.venv` and installs what the app needs. It takes a minute.
+
+Every app reads its settings from a `config.json` beside it, which is yours
+and never goes to GitHub. Make it from the example that does ship:
+
+```bash
+copy apps\chase\config.example.json apps\chase\config.json
+```
+
+On macOS, `cp apps/chase/config.example.json apps/chase/config.json`. The
+example already points at the app's own folder and a port nobody else uses,
+so it works as it is. Then:
 
 ```bash
 python paperpull.py chase login
 ```
 
-A browser window opens. Sign in to the provider yourself, including any
+The first run asks whose account this is. Type a name, it is stamped on
+the index of what gets downloaded and saved in that `config.json`. A
+browser window then opens. Sign in to the provider yourself, including any
 two-factor step, open the statements page, and leave the window open. Back
 in the terminal:
 
@@ -182,6 +195,11 @@ provider misbehaves.
 
 The control panel, the same thing with buttons, is `gui\run_gui.bat` on
 Windows or `gui/run_gui.command` on macOS. It opens in your browser.
+
+If you have also installed the packaged PaperPull and pointed its panel at
+a folder of your own downloaders, the terminal command follows that
+setting. Add `--root apps` after `paperpull.py` in the commands above so
+they act on the checkout instead.
 
 **What just landed on your disk, and why it must stay there.** `config.json`,
 the `*-browser-profile` folder (your signed-in session), the PDFs, and the
