@@ -39,22 +39,26 @@ The `.gitignore` already blocks all of the following. Do not override it.
   elsewhere depends on
   how the provider exposes its documents:
 
-  - **The statement apps** (AAFMAA, Amex, Dominion, Navy Federal, M&T, Paylocity, RedCard,
-    Robinhood, T-Mobile, USAA, Verizon, Wealthfront) click a download control, and gate it
-    with `is_safe_control()`: a hard blocklist (`FORBIDDEN_CONTROL_RE` —
-    buy/sell/transfer/pay/delete/change-setting/…) **plus** a document
-    allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass **both**, so
-    anything unrecognized is refused — deny by default.
-  - **The receipt apps** (Amazon, Target, Walmart) click a print/invoice
-    control matched by a narrow pattern and screened against the same
-    blocklist. There is no separate allowlist in these three, so the guard is
-    blocklist-only.
-  - **Gap** and **UKG** click nothing at all. Gap navigates to the order page
-    and renders it; UKG reads its pay statements and PDFs from the same JSON
-    API its own mobile app uses, over the ordinary session. On a site that can
-    also change direct deposit and tax withholding, not activating a control
-    is the strongest guarantee available - and UKG additionally refuses any
-    URL whose path says `EDIT` rather than `VIEW`.
+  - **The apps that click** (AAFMAA, Ally, Amex, Chase, Discover, Dominion,
+    M&T, Navy Federal, PG&E, RedCard, Robinhood, Schwab, T-Mobile, USAA,
+    U.S. Bank, Verizon, Wealthfront, and Target and Walmart for a print
+    control) gate every click with `is_safe_control()`: a hard blocklist
+    (`FORBIDDEN_CONTROL_RE`, buy/sell/transfer/pay/delete/change-setting)
+    **plus** a document allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass
+    **both**, so anything unrecognized is refused, deny by default. Capital
+    One clicks only its own "continue session" dialog.
+  - **Seven apps click nothing at all.** Amazon, Gap and TSP navigate to a
+    page by URL and read it. Anthem, myPay, Paylocity and UKG read their
+    documents from the same JSON API the provider's own page uses, over the
+    ordinary session. On a site that can also change direct deposit and tax
+    withholding, not activating a control is the strongest guarantee
+    available, and UKG additionally refuses any URL whose path says `EDIT`
+    rather than `VIEW`.
+  - **Every app has a host allowlist.** A stored or page-supplied URL that
+    resolves to any other host is refused before the browser goes there. A
+    repo-wide test (`core/tests/test_every_app_guard.py`) checks that every
+    app has the allowlist and a working guard, and that no broad click is
+    left unguarded.
 - **You sign in, not the tool.** The tools attach to a browser *you* logged into
   (via Chrome DevTools Protocol). They never handle your password or 2FA.
 - **Local only.** The browser's debugging port and the GUI both listen on
