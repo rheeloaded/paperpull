@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.20.0] - 2026-09-18
 
 ### Added
 - **Thrift Savings Plan**, the 27th provider and the second US government
@@ -18,6 +18,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   valid. Downloading a message marks it read, and the README says so. The
   1099-R arrives with a print-stream line in front of the PDF header, which
   is stripped.
+- **A contributing guide that assumes nothing.** CONTRIBUTING.md now walks a
+  first-time contributor from making a GitHub account to seeing a change
+  merged, with the ways to help that need no code, the rules, and what
+  happens after a pull request is opened. The provider guide gained the two
+  things every contributed provider this month needed, anchored verb stems
+  in the guard and the repo-wide tests run from the root before a PR.
 
 ## [0.19.1] - 2026-09-18
 
