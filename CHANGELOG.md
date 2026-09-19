@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Fairfax Water**, the 30th provider, for the FW Customer portal. The
+  portal is a Mendix app, so this one is driven the way a person drives
+  it, the Billing & Payment page from the left nav, the Billing History
+  grid, and a click on each bill's View, which opens the PDF in a new tab
+  on the utility's document host. The app catches that tab, reads the PDF
+  out of its own response, and closes it. Only the last year's bills have
+  a PDF, which the portal's FAQ says too, so the archive grows a bill a
+  quarter. Run against a real account, four bills saved, one the host no
+  longer held. CDP port 9250.
+
 ### Changed
 - **Amazon saves the real invoice PDF where there is one.** Each order's
   Invoice menu (Rechnung on amazon.de) is read with a plain GET, and any

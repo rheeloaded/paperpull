@@ -40,7 +40,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
   how the provider exposes its documents:
 
   - **The apps that click** (AAFMAA, Ally, Amex, Chase, Discover, Dominion,
-    M&T, Navy Federal, PG&E, RedCard, Robinhood, Schwab, T-Mobile, USAA,
+    Fairfax Water, M&T, Navy Federal, PG&E, RedCard, Robinhood, Schwab, T-Mobile, USAA,
     U.S. Bank, Verizon, Wealthfront, and Target and Walmart for a print
     control) gate every click with `is_safe_control()`: a hard blocklist
     (`FORBIDDEN_CONTROL_RE`, buy/sell/transfer/pay/delete/change-setting)
