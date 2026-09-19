@@ -1,0 +1,19 @@
+{
+  "_comment": "Editable rules mapping Fairfax Water document titles to filename summaries. The provider name already says Water, so the summary is just Bill, and the filename reads 'Fairfax Water Bill'.",
+  "tax_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "final\\s+bill",
+      "summary": "Final Bill"
+    },
+    {
+      "pattern": "\\bbill\\b|billing\\s+statement|invoice",
+      "summary": "Bill"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Statement"
+    }
+  ]
+}
