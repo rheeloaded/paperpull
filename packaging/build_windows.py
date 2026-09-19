@@ -64,7 +64,7 @@ GET_PIP = "https://bootstrap.pypa.io/get-pip.py"
 # What the panel and every app need. pytest is left out of the package because
 # a user does not run the test suite, and it is the one thing on every app's
 # requirements list that is not needed to run.
-PACKAGES = ["playwright>=1.44", "pypdf>=4.2", "fastapi>=0.110", "openpyxl>=3.1",
+PACKAGES = ["playwright>=1.44", "pypdf>=4.2", "fastapi>=0.110", "openpyxl>=3.1", "pdfplumber>=0.11",
             "uvicorn>=0.27", "anyio>=4"]
 
 # Top-level paths from the repo that belong in the package. apps/ is filtered

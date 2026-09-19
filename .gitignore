@@ -89,6 +89,12 @@ Thumbs.db
 # current each archive is. It belongs next to your installs, never in the repo.
 status.html
 **/status.html
+# spreadsheets the exporters write beside the installs, and the reader's cache
+*Purchases.xlsx
+*Purchases.csv
+*Transactions.xlsx
+*Transactions.csv
+.transactions-cache.json
 
 # build output
 dist/

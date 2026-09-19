@@ -10,6 +10,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **The transactions inside your statements, in one spreadsheet.**
+  `tools/export_transactions.py` and the panel's Statements section read
+  every statement PDF an archive holds, line by line, and keep the lines
+  with the shape of a transaction. Nothing is written for one bank. Each
+  statement is checked against its own printed balances, by the running
+  balance column where there is one, and by the signed amounts against
+  every balance pair otherwise, one account at a time on a statement that
+  covers two. A statement that does not add up is exported anyway with
+  the difference shown. Amounts are the effect on the balance, money in
+  positive. Every PDF is read once and cached beside the installs. Needs
+  `pdfplumber`, now in the panel's requirements and the packages.
 - **Amazon reads any country's store.** `marketplace` in `config.json`
   (`amazon.co.uk`, `amazon.de`, `amazon.ca` and eleven more, default
   `amazon.com`) points the app at that store and moves the host allowlist

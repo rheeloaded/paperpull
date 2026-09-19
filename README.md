@@ -267,8 +267,39 @@ python tools/export_purchases.py --root "C:\path\to\your\installs"
 
 The panel has the same thing on its **Spreadsheet** tab, one button, with a
 dropdown for one provider at a time (`Amazon Purchases.xlsx`). The file is
-rebuilt from scratch each time, so edit a copy, not the original. Statement
-archives have no line items and are not offered one.
+rebuilt from scratch each time, so edit a copy, not the original.
+
+## The transactions inside your statements
+
+A statement archive holds PDFs, and the transactions are inside them.
+`tools/export_transactions.py` opens each PDF a statement archive's index
+knows about, reads it line by line, and keeps the lines that have the shape
+of a transaction, a date, a description and an amount. Nothing in it is
+written for one bank. What makes it trustworthy is the statement itself.
+Every statement prints a beginning and an ending balance, and the
+transactions between them have to add up.
+
+```
+python tools/export_transactions.py --root "C:\path\to\your\installs"
+```
+
+Where the statement carries a running balance column, the sign of every
+amount is read off the balance and the statement reconciles to the cent by
+construction. Where it prints signed amounts, they are summed as printed and
+checked against every balance pair the statement shows, which is how a card
+statement that prints its summary three times is read right. A statement
+covering two accounts is reconciled one account at a time. A statement that
+does not add up is still exported, with the difference in the Statements
+sheet, so you know which rows to doubt. On the author's archive, every USAA
+and Navy Federal statement and 120 of 128 American Express statements
+reconcile. Brokerage statements never will, since their balances include
+market movement, and the sheet says so.
+
+Amounts are the effect on the balance. Money in is positive, money out is
+negative, for a bank account and a card alike. Each PDF is read once and
+remembered in a cache beside the installs, so the first build of a big
+archive takes minutes and the next takes seconds. The panel's Spreadsheet
+tab has this too, under Statements, streaming its progress.
 
 ## Windows and macOS
 

@@ -99,6 +99,13 @@ so no PDF is opened and it takes a second. **Show in folder** opens the file
 manager on it. Rebuilt from scratch each time, so edit a copy, not this file.
 A CSV is one click away for anything that is not Excel.
 
+**Statements** on the same tab writes `All Transactions.xlsx`, or one
+provider's, from the statement PDFs on disk. One row per transaction, and a
+Statements sheet that says whether each statement reconciles to its own
+printed balances. The first build of a big archive takes a few minutes and
+streams its progress. Each PDF is read once and remembered, so the next
+build takes seconds. Only archives with PDFs on disk are offered.
+
 ## Notes & limits
 
 - **Login is human-driven.** The panel opens the browser; you handle sign-in and
