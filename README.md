@@ -12,10 +12,11 @@ of clicking through each site by hand.
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Thirty providers are supported today, all built on the same pattern:
+Thirty-one providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
+| [`affirm`](apps/affirm) | Affirm | Loan agreements (Truth in Lending), one per loan | JSON API from inside the page, nothing clicked; no monthly statement exists for a pay-over-time account |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy docs | ASP.NET WebForms; one documented disclosure dialog |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
@@ -125,7 +126,7 @@ ever clicked, and all site interaction lives in `provider_site.py` where it can
 be read in one sitting. Every app that clicks enforces this deny-by-default, a
 control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
 allowlist (`SAFE_DOC_CONTROL_RE`), and the app's host allowlist refuses any
-stored URL that points elsewhere. Nine apps click nothing at all (Amazon,
+stored URL that points elsewhere. Ten apps click nothing at all (Affirm, Amazon,
 Anthem, Fidelity, Gap, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
 page they navigated to. A repo-wide test checks every app's guard.
 [SECURITY.md](SECURITY.md) spells out which app does which.
@@ -386,8 +387,8 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
 
 ## Status & roadmap
 
-- ✅ All **thirty** apps pass their tests, more than 1,500 of them across the
-  repo. Twenty-three are in regular use by the author. The other seven (Ally,
+- ✅ All **thirty-one** apps pass their tests, more than 1,500 of them across the
+  repo. Twenty-four are in regular use by the author. The other seven (Ally,
   Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
   by people who hold those accounts, and the four marked in the table above
   are awaiting a fresh live pilot since they were ported.

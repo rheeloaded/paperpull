@@ -1,0 +1,28 @@
+{
+  "_comment": "Editable rules mapping Affirm document titles to filename summaries. Scaffolded 2026-09-19, to be checked against the real site. Statement rules also cover the loan agreement and disclosure names, which this app files under their own category from the site's own kind.",
+  "tax_rules": [
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(form|document|statement)",
+      "summary": "Tax Statement"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "card\\s+statement",
+      "summary": "Card Statement"
+    },
+    {
+      "pattern": "loan\\s+agreement|truth\\s+in\\s+lending|disclosure|promissory",
+      "summary": "Loan Agreement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Monthly Statement"
+    }
+  ]
+}

@@ -10,6 +10,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **Affirm**, the 31st provider. One loan agreement per loan, the Truth in
+  Lending disclosure with the payment schedule, settled loans included,
+  dated the day the loan was made and named for the merchant. Three GET
+  calls the page itself makes, from inside the signed-in page, and the
+  agreement's HTML rendered to PDF. Nothing is clicked. A pay-over-time
+  account has no monthly statement, the statements Affirm's help center
+  describes belong to the Affirm Money account and Card, which are not
+  covered. Run against a real account, two agreements. CDP port 9251.
 - **Fairfax Water**, the 30th provider, for the FW Customer portal. The
   portal is a Mendix app, so this one is driven the way a person drives
   it, the Billing & Payment page from the left nav, the Billing History

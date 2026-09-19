@@ -14,6 +14,7 @@ telecoms, payroll systems, and retailers real people actually use.
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
+| [`affirm`](apps/affirm) | Affirm | Loan agreements, one per loan; Affirm Money and Card statements not covered | Lender |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
