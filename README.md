@@ -314,7 +314,12 @@ tab has this too, under Statements, streaming its progress.
 `PaperPull-<version>-setup.exe` for Windows, which installs the control
 panel, the shared core and every provider into your own user folder with no
 admin rights and no Python on the machine, and `PaperPull-<version>.zip`, the
-same folder for anyone who would rather not run an installer.
+same folder for anyone who would rather not run an installer. The package
+is x64 and runs on Windows on ARM (a Snapdragon laptop, say) under the
+emulation Windows 11 provides, where the browser it drives is your own
+native Edge or Chrome and the Python side spends its life waiting on it. A
+native ARM64 build is one flag away in `packaging/build_windows.py` and
+will be shipped when someone needs it.
 
 **Two Windows editions, one program.** The GitHub release is free. The
 Microsoft Store edition is the same package from the same build, for

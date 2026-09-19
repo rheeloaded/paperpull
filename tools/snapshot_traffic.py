@@ -38,9 +38,10 @@ def _gh() -> str:
     found = shutil.which("gh")
     if found:
         return found
-    for guess in (r"C:\Program Files\GitHub CLI\gh.exe",
-                  r"C:\Program Files (x86)\GitHub CLI\gh.exe",
-                  "/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"):
+    import os
+    roots = [os.environ.get(v) for v in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)")]
+    guesses = [str(Path(r, "GitHub CLI", "gh.exe")) for r in roots if r]
+    for guess in guesses + ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]:
         if Path(guess).exists():
             return guess
     raise SystemExit("gh was not found. Install the GitHub CLI, or put it on PATH.")
