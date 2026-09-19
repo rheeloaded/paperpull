@@ -10,6 +10,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **Fidelity Investments**, the 28th provider. Statements, trade
+  confirmations and tax forms from the Document Access Hub, read through
+  the same three API calls the page makes, from inside the signed-in page
+  so the session never leaves the browser. Nothing is clicked. One call per
+  year, since the API refuses a wider window, and a scoped run asks only
+  for its years. Identity is kind, account and period end date, never the
+  hub's id. Run against a real account, 24 documents, all valid. Tax forms
+  are mapped but unverified, the account had none. A workplace 401(k) keeps
+  its statements on NetBenefits and is not covered. Sign-in uses your own
+  Edge or Chrome, as Chase does. CDP port 9248.
 - **The transactions inside your statements, in one spreadsheet.**
   `tools/export_transactions.py` and the panel's Statements section read
   every statement PDF an archive holds, line by line, and keep the lines

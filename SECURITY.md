@@ -47,8 +47,8 @@ The `.gitignore` already blocks all of the following. Do not override it.
     **plus** a document allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass
     **both**, so anything unrecognized is refused, deny by default. Capital
     One clicks only its own "continue session" dialog.
-  - **Seven apps click nothing at all.** Amazon, Gap and TSP navigate to a
-    page by URL and read it. Anthem, myPay, Paylocity and UKG read their
+  - **Eight apps click nothing at all.** Amazon, Gap and TSP navigate to a
+    page by URL and read it. Anthem, Fidelity, myPay, Paylocity and UKG read their
     documents from the same JSON API the provider's own page uses, over the
     ordinary session. On a site that can also change direct deposit and tax
     withholding, not activating a control is the strongest guarantee
