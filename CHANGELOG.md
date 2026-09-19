@@ -10,6 +10,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **Fidelity NetBenefits**, the 29th provider, for a workplace 401(k).
+  NetBenefits keeps no archive of statements. Its Statements page makes
+  one for any period on request, so the app requests each completed
+  quarter (or month, by config) itself, through the same form request the
+  page sends with the site's token fetched and used inside the page, and
+  renders the answer to PDF the way the page's print button would.
+  Discovery stops at the first period the site refuses after a real one.
+  The site times a session out on page activity and moves its own tab
+  around, so the app reloads the Statements page every minute and retries
+  once if the tab moves mid-call. Run against a real plan, 39 quarterly
+  statements back to 2016, all valid. CDP port 9249.
 - **Fidelity Investments**, the 28th provider. Statements, trade
   confirmations and tax forms from the Document Access Hub, read through
   the same three API calls the page makes, from inside the signed-in page
