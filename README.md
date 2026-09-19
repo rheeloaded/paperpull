@@ -12,7 +12,7 @@ of clicking through each site by hand.
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Twenty-eight providers are supported today, all built on the same pattern:
+Twenty-nine providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -29,6 +29,7 @@ Twenty-eight providers are supported today, all built on the same pattern:
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Lazy-loading history; ~13-month limit |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
+| [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history, fresh live pilot pending |
@@ -123,8 +124,8 @@ ever clicked, and all site interaction lives in `provider_site.py` where it can
 be read in one sitting. Every app that clicks enforces this deny-by-default, a
 control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
 allowlist (`SAFE_DOC_CONTROL_RE`), and the app's host allowlist refuses any
-stored URL that points elsewhere. Eight apps click nothing at all (Amazon,
-Anthem, Fidelity, Gap, myPay, Paylocity, TSP, UKG), they read a JSON API or render a
+stored URL that points elsewhere. Nine apps click nothing at all (Amazon,
+Anthem, Fidelity, Gap, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
 page they navigated to. A repo-wide test checks every app's guard.
 [SECURITY.md](SECURITY.md) spells out which app does which.
 
@@ -384,8 +385,8 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
 
 ## Status & roadmap
 
-- ✅ All **twenty-eight** apps pass their tests, more than 1,400 of them across the
-  repo. Twenty-one are in regular use by the author. The other seven (Ally,
+- ✅ All **twenty-nine** apps pass their tests, more than 1,500 of them across the
+  repo. Twenty-two are in regular use by the author. The other seven (Ally,
   Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
   by people who hold those accounts, and the four marked in the table above
   are awaiting a fresh live pilot since they were ported.
