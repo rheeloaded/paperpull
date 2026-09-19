@@ -108,7 +108,7 @@ PRINT_TO_PDF_OPTIONS = {
 
 
 # Hide everything except the receipt container (and its ancestor chain) so
-# the printed PDF contains only the receipt — no page navigation or buttons.
+# the printed PDF contains only the receipt, no page navigation or buttons.
 ISOLATE_SCRIPT = """
 (sel) => {
   const el = document.querySelector(sel);

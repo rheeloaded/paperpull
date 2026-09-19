@@ -34,12 +34,8 @@ event -> download.save_as(), until diagnose shows otherwise.
 """
 from __future__ import annotations
 
-import base64
-import html as _html
-import json
 import logging
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -316,25 +312,6 @@ def goto_documents(page) -> bool:
 # clicked page controls with no safety check at all. Dead code near a
 # mortgage is a loaded gun, so it was removed rather than left to be
 # revived by a future repair. M&T's real mechanism is below.
-
-# ===========================================================================
-# M&T document collection. CONFIRMED against a live account 2026-08-22.
-#
-# Two server-rendered pages, both with real download URLs (no SPA, no blob):
-#   Statements: onlinebanking.mtb.com/Statements/StatementsAndNotices
-#     rows are <a href="/Statements/FetchStatementandNotices?t=<TYPE>&a=..&
-#     dt=MM/DD/YYYY&stmtId=..">. t=MTGSTMT is a mortgage statement, t=YESTMT a
-#     year-end statement.
-#   Tax:        m.mtb.com/TaxDocuments/TaxDocumentCenter
-#     rows are <a href="/TaxDocuments/FetchTaxDocument?documentkey=..">, the
-#     1098 mortgage-interest statements.
-#
-# A document is identified by its own href. Downloading is a plain GET of that
-# href with the session cookie, host-checked first. The ONLY thing ever clicked
-# is a collapsed year section, and that click is guarded like any other.
-# ===========================================================================
-STATEMENTS_URL = f"{BASE}/Statements/StatementsAndNotices"
-TAX_URL = "https://m.mtb.com/TaxDocuments/TaxDocumentCenter"
 
 _STMT_TYPE = {"MTGSTMT": "Mortgage Statement", "YESTMT": "Year-End Statement"}
 
@@ -639,7 +616,6 @@ def download_statement(page, href: str, out_path) -> bool:
     a stored or tampered value cannot send the session cookie somewhere else.
     Raises SessionExpired if the server hands back a sign-in page.
     """
-    from pathlib import Path
     url = _abs(href)
     if _endpoint_of(url) is None:
         log.error("refusing a URL that is not an M&T document endpoint")

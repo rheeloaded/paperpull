@@ -1,4 +1,4 @@
-# Dominion Energy (Virginia) — bill downloader
+# Dominion Energy (Virginia) bill downloader
 
 Downloads your monthly **billing statements** as PDFs from the Dominion Energy
 Virginia account portal (`myaccount.dominionenergy.com`). Read-only, delete-safe,
@@ -8,12 +8,12 @@ and part of [PaperPull](../../README.md).
 
 ```bat
 setup.bat                         REM one-time: create the venv + install Playwright
-login.bat                         REM opens Chromium on port 9228 — sign in yourself
+login.bat                         REM opens Chromium on port 9228, sign in yourself
 paperpull dominion pilot          REM download the newest 5 bills as a test
 paperpull dominion all            REM download every available bill
 ```
 
-The first run asks *"Whose account is this?"* — the name you enter is saved to
+The first run asks *"Whose account is this?"*, the name you enter is saved to
 `config.json` and stamped on every bill (the **Account Holder** column of the
 index CSV).
 
@@ -23,7 +23,7 @@ index CSV).
   own profile and port (9228). You complete sign-in and 2FA yourself; the tool
   attaches to that signed-in browser over CDP and **reuses your tab** (the portal
   keeps its session there).
-- **Discovery** reads the paginated **Billing History** table — each bill is a
+- **Discovery** reads the paginated **Billing History** table, each bill is a
   Material-UI accordion whose header shows the statement date. It walks every
   page to list all bills.
 - **Download** expands a bill's row and clicks its *"Download Your Detailed Bill
@@ -40,6 +40,6 @@ index CSV).
   placeholder. The tool detects that, deletes the junk file, and marks those
   bills **No Receipt Available** (they won't be retried). So a full run saves the
   ~18 most recent bills and records the rest as unavailable.
-- **Delete-safe.** Once a bill is downloaded it's marked done for good — delete
+- **Delete-safe.** Once a bill is downloaded it's marked done for good, delete
   the PDF after importing it elsewhere and it won't be re-downloaded.
-- **Multi-account** via `--config config.<name>.json` (see `add_account.py`).
+- **Multi-account** via `--config config.<name>.json` (`paperpull dominion add-account NAME`).

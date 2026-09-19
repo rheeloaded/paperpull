@@ -1,11 +1,11 @@
 # Providers
 
-The running list of what PaperPull supports — and what people want next. The
+The running list of what PaperPull supports, and what people want next. The
 goal is an ever-growing set covering the banks, cards, brokerages, utilities,
 telecoms, payroll systems, and retailers real people actually use.
 
 - **Have an account with a provider that's not here?** You're the ideal person
-  to add it — see **[Adding a provider](docs/adding-a-provider.md)**.
+  to add it, see **[Adding a provider](docs/adding-a-provider.md)**.
 - **Want a provider but can't build it?** Open a
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
@@ -52,7 +52,7 @@ Anyone can add a row (via a [provider request](https://github.com/rheeloaded/pap
 or a PR). Claim one by commenting on its issue so two people don't build the
 same thing. When it merges, it moves up to **Supported**.
 
-New to this? Look for the **`good first provider`** label — those are easy sites
+New to this? Look for the **`good first provider`** label, those are easy sites
 (a plain statements table + a real download link). See
 [Which provider is a good first build?](docs/adding-a-provider.md#which-provider-is-a-good-first-build)
 
@@ -65,13 +65,13 @@ Status legend: **requested** → **claimed** (someone's building it) →
 
 ## How the list grows
 
-1. **Request** — someone opens a provider request (or adds a row here).
-2. **Claim** — a contributor with that account comments to claim it.
-3. **Build** — follow [Adding a provider](docs/adding-a-provider.md): clone the
+1. **Request**, someone opens a provider request (or adds a row here).
+2. **Claim**, a contributor with that account comments to claim it.
+3. **Build**, follow [Adding a provider](docs/adding-a-provider.md): clone the
    closest app, rewrite its `*_site.py`, keep it read-only, test the pilot.
-4. **PR** — open a pull request (the template has a safety + privacy checklist).
-5. **Merge** — it graduates to the Supported table above.
+4. **PR**, open a pull request (the template has a safety + privacy checklist).
+5. **Merge**, it graduates to the Supported table above.
 
 Providers change their sites over time; a supported app that breaks is a
-**patch** fix to that app's `*_site.py`, not a rebuild — see
+**patch** fix to that app's `*_site.py`, not a rebuild, see
 [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -56,7 +56,7 @@ Filenames: `YYYY-MM-DD American Express <Summary>.pdf`, e.g.
 
 All the site-specific logic lives in `amex_site.py`. If American Express
 redesigns its pages and discovery or download stops working, run `paperpull amex diagnose`
-after signing in — it dumps the current page structure to `Diagnostics\` so the
+after signing in, it dumps the current page structure to `Diagnostics\` so the
 selectors in `amex_site.py` can be updated to match.
 
 ## Setup / workflow
@@ -81,7 +81,7 @@ downloaded that run. To rebuild deleted files, add `--redownload`.
 
 ## A second account
 
-`login.bat spouse` + `python add_account.py spouse` set up a second Amex login
+`paperpull amex add-account spouse` + `login.bat spouse` set up a second Amex login
 with its own folders, browser profile, and debugging port - no re-downloading
 and no mixing of data.
 
@@ -91,7 +91,7 @@ Statements and especially tax forms can contain your SSN and account numbers.
 They're saved to the output folder you set as `output_dir` in `config.json`
 (the default is this app's own folder). Keep it somewhere safe, and if that
 folder syncs to a cloud drive, know these documents go with it. The index CSV
-deliberately records **no** account numbers, balances, or SSN — only document
+deliberately records **no** account numbers, balances, or SSN, only document
 metadata (dates, titles, filenames).
 
 ## Tests

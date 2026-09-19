@@ -142,13 +142,6 @@ ORDER_ID_IN_URL_RE = re.compile(r"orderID=((?:D)?\d{2,3}-\d{7}-\d{7})", re.I)
 # ---------------------------------------------------------------------------
 # Accessible names / labels
 # ---------------------------------------------------------------------------
-
-TAB_NAME = {
-    ONLINE: re.compile(r"^\s*orders\s*$", re.I),
-}
-
-LOAD_MORE_RE = re.compile(r"(next|load more|show more|view more)", re.I)
-RECEIPT_SECTION_RE = re.compile(r"(invoice|receipt|order\s+summary)", re.I)
 PRINT_RECEIPT_RE = re.compile(r"(printable\s+order\s+summary|print\s+invoice|"
                               r"view\s+invoice|invoice)", re.I)
 GIFT_RECEIPT_RE = re.compile(r"gift\s+receipt", re.I)
@@ -158,7 +151,6 @@ GIFT_RECEIPT_RE = re.compile(r"gift\s+receipt", re.I)
 TOTAL_LABEL_RE = r"(grand\s+total|order\s+total|item\s+subtotal|gesamtsumme|zwischensumme)"
 ORDER_PLACED_RE = r"(order\s+placed|bestellung\s+aufgegeben)"
 SOLD_BY_RE = r"^(sold\s+by|verkauf\s+durch)\s*:"
-INVOICE_RE = re.compile(r"(view|print|download)?\s*invoice", re.I)
 SIGN_IN_RE = re.compile(r"^\s*sign\s*in\s*$", re.I)
 
 # Controls that must NEVER be activated.
@@ -222,8 +214,6 @@ FALLBACK = {
     "print_page_body": "body",
 }
 
-CARD_CONTAINER = {ONLINE: FALLBACK["order_card"]}
-
 _MONTH_WORDS = (r"Jan(?:uary|uar)?|Feb(?:ruary|ruar)?|M(?:ar(?:ch)?|ärz)|Apr(?:il)?|"
                 r"Ma[iy]|Jun[ei]?|Jul[iy]?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|O[ck]t(?:ober)?|"
                 r"Nov(?:ember)?|De[cz](?:ember)?")
@@ -266,7 +256,6 @@ def parse_amount(text: str) -> Optional[float]:
     neg = s.startswith("-")
     s = s.lstrip("-")
     if re.search(r"[.,]\d{2}$", s):
-        dec = s[-3]
         s = s[:-3].replace(".", "").replace(",", "") + "." + s[-2:]
     else:
         s = s.replace(".", "").replace(",", "")
@@ -312,7 +301,6 @@ def amount_after(label: str, text: str, window: int = 40) -> str:
         if v is not None:
             return fmt_money(v)
     return ""
-QTY_RE = re.compile(r"\b(?:qty|quantity)\s*:?\s*(\d+)", re.I)
 STATUS_WORDS_RE = re.compile(
     r"\b(delivered|shipped|arriving|cancell?ed|returned|refunded|"
     r"out\s+for\s+delivery|preparing\s+for\s+shipment|not\s+yet\s+shipped|"
@@ -367,13 +355,6 @@ def parse_money(text: str) -> str:
 def parse_status(text: str) -> str:
     m = STATUS_WORDS_RE.search(text or "")
     return m.group(1).title() if m else ""
-
-
-def parse_order_link(href: str):
-    m = ORDER_ID_IN_URL_RE.search(href or "")
-    if m:
-        return ONLINE, m.group(1)
-    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -444,11 +425,6 @@ def goto_orders(page) -> None:
     page.wait_for_timeout(2000)
 
 
-def select_history_tab(page, purchase_type: str) -> bool:
-    """Amazon has no in-store section; everything is Online."""
-    return purchase_type == ONLINE
-
-
 def goto_year_page(page, year: int, start_index: int = 0) -> bool:
     page.goto(orders_url(year, start_index), wait_until="domcontentloaded", timeout=60000)
     try:
@@ -459,46 +435,12 @@ def goto_year_page(page, year: int, start_index: int = 0) -> bool:
     return True
 
 
-def get_year_options(page) -> List[str]:
-    """Years available in the time-filter dropdown."""
-    years: List[str] = []
-    try:
-        for sel in page.locator("select#time-filter, select[name='timeFilter']").all():
-            for opt in sel.locator("option").all():
-                val = (opt.get_attribute("value") or "")
-                m = re.search(r"year-(\d{4})", val)
-                if m:
-                    years.append(m.group(1))
-            if years:
-                break
-    except Exception:
-        pass
-    return years
-
-
 def has_next_page(page) -> bool:
     try:
         loc = page.locator(FALLBACK["next_page"])
         return loc.count() > 0 and loc.first.is_visible()
     except Exception:
         return False
-
-
-def load_all_cards(page, purchase_type: str = ONLINE,
-                   delay_ms: int = 1200, max_rounds: int = 3) -> int:
-    """Amazon paginates via startIndex; nothing lazy-loads on a page, so we
-    just settle the page and count."""
-    for _ in range(2):
-        page.mouse.wheel(0, 2500)
-        page.wait_for_timeout(delay_ms)
-    return _card_count(page, purchase_type)
-
-
-def _card_count(page, purchase_type: str = ONLINE) -> int:
-    try:
-        return page.locator(FALLBACK["order_card"]).count()
-    except Exception:
-        return 0
 
 
 @dataclass
@@ -658,7 +600,7 @@ def extract_details(page, purchase: Purchase) -> Purchase:
         purchase.purchase_date = date
 
     # Grand Total. NOTE: when a gift card covers the order, Amazon's invoice
-    # shows "Grand Total: $0.00" — keep the order-history total in that case
+    # shows "Grand Total: $0.00", keep the order-history total in that case
     # so the receipt index still reflects what the order was worth.
     total = ""
     for label in (r"grand\s+total", r"order\s+total", r"gesamtsumme"):
@@ -704,7 +646,7 @@ def _parse_items_from_summary_text(body: str) -> List[Item]:
 
     Two layouts are supported:
 
-    1. Current layout (verified 2026-07) — each item is a title line followed
+    1. Current layout (verified 2026-07), each item is a title line followed
        by a "Sold by: <seller>" line, then its price(s):
 
            AXL 10mm Stem, IKEA Office Chair Wheels, ...
@@ -712,9 +654,9 @@ def _parse_items_from_summary_text(body: str) -> List[Item]:
            Return window closed on February 2, 2026
            $30.99
 
-    2. Classic layout — "<qty> of: <Product Title>" then the price.
+    2. Classic layout, "<qty> of: <Product Title>" then the price.
 
-    3. Whole Foods and Amazon Fresh (verified 2026-09) — no "Sold by" and no
+    3. Whole Foods and Amazon Fresh (verified 2026-09), no "Sold by" and no
        quantity anywhere. After "Purchased at Whole Foods Market" every item
        is a title line followed by a line holding only its price, and an
        item bought twice is simply listed twice:
@@ -839,7 +781,7 @@ def extract_items(page) -> List[Item]:
 
 
 # ---------------------------------------------------------------------------
-# Receipt access — the printable summary IS the receipt
+# Receipt access, the printable summary IS the receipt
 # ---------------------------------------------------------------------------
 
 def scroll_full_page(page, rounds: int = 3, delay_ms: int = 600) -> None:
@@ -863,7 +805,7 @@ def receipt_is_present(page) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Invoice PDFs — the legal invoice behind an order's Invoice / Rechnung menu
+# Invoice PDFs, the legal invoice behind an order's Invoice / Rechnung menu
 # ---------------------------------------------------------------------------
 
 # Verified on amazon.de 2026-09: the popover links
@@ -957,24 +899,6 @@ def find_invoice_controls(page) -> list:
 
 def find_printing_frame(page, wait_ms: int = 2000):
     return None
-
-
-def wait_for_receipt_content(page, timeout_ms: int = 15000) -> str:
-    rounds = max(1, timeout_ms // 500)
-    for _ in range(rounds):
-        if receipt_is_present(page):
-            return "order-summary"
-        page.wait_for_timeout(500)
-    return ""
-
-
-def count_store_receipts(page) -> int:
-    return 1
-
-
-def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, object]:
-    """Unused for Amazon (capture is via the print URL). Kept for API parity."""
-    return "inline", page
 
 
 # ---------------------------------------------------------------------------

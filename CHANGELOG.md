@@ -3,9 +3,9 @@
 All notable changes to PaperPull are recorded here. Versioning follows
 [Semantic Versioning](https://semver.org):
 
-- **PATCH** — bug fixes, or repairing an app after a provider changes its site
-- **MINOR** — a new app, or a cross-app feature
-- **MAJOR** — breaking changes (repo layout, config format, removing an app)
+- **PATCH**, bug fixes, or repairing an app after a provider changes its site
+- **MINOR**, a new app, or a cross-app feature
+- **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
 ## [Unreleased]
 
@@ -41,6 +41,32 @@ All notable changes to PaperPull are recorded here. Versioning follows
   than being replaced by a print of the screen. On amazon.com this means
   third-party-seller orders now save the seller's invoice PDF. Contributed
   by marecabo in #25.
+- **A second account is one command.** `paperpull <app> add-account NAME`
+  writes the `config.NAME.json` an app runs against with `--account NAME`,
+  and `python tools/add_account.py NAME` does every app under the root at
+  once. The thirty per-app copies of `add_account.py` are gone. Each one
+  carried its own hard-coded list of install paths, stale in every copy,
+  so the tool that promised to set up a second person everywhere set them
+  up in whichever seven apps its author happened to have at the time.
+- **A full audit of the code.** Every app's site module was compared
+  against what its orchestrator and tests actually call, and 96 functions
+  and constants nothing referenced were removed, nearly 1,200 lines, most
+  of it residue from the app each one was cloned from. Verizon's included four
+  functions that referenced names never defined anywhere, dead since the
+  day the app was written. Comments and docstrings that still described
+  the parent app (a brokerage guard on a phone bill, a mailbox on a
+  water utility) now describe the app they are in. Unused imports and
+  variables are gone, and `ruff.toml` at the repo root keeps them gone.
+  Spelling is American throughout, and the em dash is retired from every
+  file.
+- **Purchase classification weighs European amounts correctly.** An
+  item priced `1.234,56 EUR` was read as 1.23 when the receipt's category
+  was chosen, so a big-ticket item on a German order weighed less than a
+  banana. Amounts are now read by shape, as the Amazon parser already
+  did.
+- **The panel unlocks only the buttons a run locked.** A finished run
+  re-enabled every button on the page, including the Spreadsheet tab's
+  build buttons that are disabled when there is nothing to build from.
 
 ## [0.22.0] - 2026-09-19
 
@@ -393,7 +419,7 @@ notes say what that looks like.
   tests are how these problems drifted into separate copies in the first place.
   765 tests.
 
-## [0.17.0] — 2026-08-30
+## [0.17.0] - 2026-08-30
 
 ### Security
 - **Every app now has a parsed host allowlist**, up from two out of
@@ -438,7 +464,7 @@ notes say what that looks like.
   purpose: they must still click "Load more", which a document-word allowlist
   would refuse.
 
-## [0.16.0] — 2026-08-30
+## [0.16.0] - 2026-08-30
 
 ### Added
 - **A status tracker** (`tools/status.py`, `tools/status.bat`). Reads the state
@@ -488,7 +514,7 @@ notes say what that looks like.
   have been committed. An existing clone will not fast-forward, so re-clone
   rather than pull.
 
-## [0.15.0] — 2026-08-29
+## [0.15.0] - 2026-08-29
 
 ### Added
 - **DFAS myPay now serves active-duty accounts too**, not just retirees.
@@ -515,7 +541,7 @@ notes say what that looks like.
   compiles, and runs across all 21 apps. It was verified by deliberately
   reintroducing the corruption and watching it fail.
 
-## [0.14.0] — 2026-08-29
+## [0.14.0] - 2026-08-29
 
 ### Added
 - **DFAS myPay retiree documents (21st provider)** (`apps/mypay`, CDP port
@@ -549,7 +575,7 @@ notes say what that looks like.
   from and never typed into. `diagnose` writes no screenshot here, because a
   myPay page shows pay figures and identifiers.
 
-## [0.13.1] — 2026-08-23
+## [0.13.1] - 2026-08-23
 
 Hardening pass over the new M&T app, from a line-by-line review of it. Every
 item below is a real defect that was found and fixed, not a precaution.
@@ -590,7 +616,7 @@ item below is a real defect that was found and fixed, not a precaution.
 - An empty href resolved to M&T's home page and was downloaded as a document.
 - The work tab was chosen by substring, which could select an unrelated tab.
 
-## [0.13.0] — 2026-08-23
+## [0.13.0] - 2026-08-23
 
 ### Added
 - **M&T Bank mortgage documents (20th provider)** (`apps/mtb`, CDP port 9240).
@@ -617,7 +643,7 @@ item below is a real defect that was found and fixed, not a precaution.
   autopay, payoff requests, escrow changes, refinance, recast and the rest,
   and a bare Edit/Update/Change too. The index records no balances or amounts.
 
-## [0.12.0] — 2026-08-22
+## [0.12.0] - 2026-08-22
 
 ### Changed
 - **Paylocity now fetches the whole pay-statement history, not just the
@@ -635,7 +661,7 @@ item below is a real defect that was found and fixed, not a precaution.
   this project does. The finding is recorded in the app README so it is not
   re-investigated from scratch.
 
-## [0.11.0] — 2026-08-22
+## [0.11.0] - 2026-08-22
 
 ### Added
 - **Paylocity, the nineteenth provider** (`apps/paylocity`, CDP port 9239).
@@ -665,7 +691,7 @@ item below is a real defect that was found and fixed, not a precaution.
   fetched either, since Paylocity returns W-2 data as JSON rather than a
   PDF; the routing and folder are in place for both.
 
-## [0.10.0] — 2026-08-22
+## [0.10.0] - 2026-08-22
 
 ### Added
 - **AAFMAA (Armed Forces Mutual), the eighteenth provider** (`apps/aafmaa`,
@@ -705,10 +731,10 @@ item below is a real defect that was found and fixed, not a precaution.
   up were free while Discover holds 9237. It now says 9239+, matching the
   other three port documents.
 
-## [0.9.0] — 2026-08-21
+## [0.9.0] - 2026-08-21
 
 ### Added
-- **Discover credit cards — the seventeenth provider** (`apps/discovercard`,
+- **Discover credit cards, the seventeenth provider** (`apps/discovercard`,
   CDP port 9237). Card statements only, read-only and delete-safe, in a **real
   Edge/Chrome** window. Verified end to end against a live account
   (about two years of history), downloaded and checked, with a delete-safe
@@ -763,7 +789,7 @@ item below is a real defect that was found and fixed, not a precaution.
   checked against it. The sign-in-form hole the local copy fixed is recorded
   under 0.7.2 and 0.8.0 below.
 
-## [0.8.1] — 2026-08-21
+## [0.8.1] - 2026-08-21
 
 ### Fixed
 - **Ally's and Chase's `--diagnose` never reported a refused dropdown.** When
@@ -779,7 +805,7 @@ item below is a real defect that was found and fixed, not a precaution.
   name, so a rename deletes a caller's output without failing anything, which
   is exactly what happened above.
 
-## [0.8.0] — 2026-08-21
+## [0.8.0] - 2026-08-21
 
 ### Added
 - **The control guard moved into `paperpull_core.controls`**, so an app no
@@ -809,7 +835,7 @@ item below is a real defect that was found and fixed, not a precaution.
   word-boundary escape into a literal backspace in this repo, which still
   compiles and then matches nothing.
 
-## [0.7.2] — 2026-08-21
+## [0.7.2] - 2026-08-21
 
 ### Fixed
 - **Ally and Chase could read and write a control inside a sign-in form.**
@@ -834,7 +860,7 @@ item below is a real defect that was found and fixed, not a precaution.
   defect had the app select inside a marketing site's login dropdown after a
   wrong URL guess. Backported here rather than left to land with that app.
 
-## [0.7.1] — 2026-08-21
+## [0.7.1] - 2026-08-21
 
 ### Fixed
 - **A run started from the control panel could hang showing nothing at all.**
@@ -852,27 +878,27 @@ item below is a real defect that was found and fixed, not a precaution.
   for the account holder's name, so that column stays blank until it is set
   from a terminal or in `config.json`.
 
-## [0.7.0] — 2026-08-21
+## [0.7.0] - 2026-08-21
 
 ### Added
-- **Ally Bank — the fifteenth provider** (`apps/ally`, CDP port 9235). Account
+- **Ally Bank, the fifteenth provider** (`apps/ally`, CDP port 9235). Account
   statements and tax forms, read-only and delete-safe. Verified end to end against a
   live account.
 
   Ally needed two things no earlier app did:
 
   - **Statements cannot be told apart by their metadata.** Ally posts several
-    on the same date — one per account grouping, plus a copy of each joint
-    statement addressed to each accountholder — and describes them
+    on the same date, one per account grouping, plus a copy of each joint
+    statement addressed to each accountholder, and describes them
     identically: same `documentName`, same row label, no account information.
     Only `documentId` differs. So a downloaded statement is named from **its
     own first page**, whose account table and addressee are parsed
     structurally (by Ally's template text and the masked account-number
-    column, never by a list of expected account nicknames — those are chosen
+    column, never by a list of expected account nicknames, those are chosen
     by each customer). Unrecognized layout keeps the metadata name and says
     so; nothing is guessed.
   - **Every download is verified.** Because several rows look identical, the
-    row clicked is an inference — so the app watches which `documentId` Ally
+    row clicked is an inference, so the app watches which `documentId` Ally
     actually serves and discards the file if it is not the one requested. This
     caught two real mismatches during development that would otherwise have
     filed one document under another's name.
@@ -883,7 +909,7 @@ item below is a real defect that was found and fixed, not a precaution.
   2025 1099-INT is issued in January 2026), and a `corrected` form is flagged
   so it cannot be mistaken for the original.
 
-- **Chase credit cards — the sixteenth provider** (`apps/chase`, CDP port
+- **Chase credit cards, the sixteenth provider** (`apps/chase`, CDP port
   9236). Card statements only, read-only and delete-safe, in a **real
   Edge/Chrome** window (the `verizon`/`walmart` pattern) rather than the
   bundled Chromium. Verified end to end against a live account.
@@ -893,8 +919,8 @@ item below is a real defect that was found and fixed, not a precaution.
   year picker. Two things it taught:
 
   - **Attribute a document from its row, not from the API reply.** Every row
-    names itself in full — "Aug 09, 2026 Statement SAPPHIRE RESERVE (...1234)
-    Saves document" — while the JSON reply carries no account field, and
+    names itself in full, "Aug 09, 2026 Statement SAPPHIRE RESERVE (...1234)
+    Saves document", while the JSON reply carries no account field, and
     collapsing, expanding and changing the year all hit the same endpoint. A
     listener that tagged "the next reply" with "the current card" filed one
     card's statements under its neighbour; matching on the row cannot.
@@ -906,7 +932,7 @@ item below is a real defect that was found and fixed, not a precaution.
   Tax documents and year-end summaries are deliberately out of scope for this
   app.
 
-## [0.6.4] — 2026-08-19
+## [0.6.4] - 2026-08-19
 
 ### Fixed
 - **The control panel's Login button never finished, leaving every button
@@ -920,18 +946,18 @@ item below is a real defect that was found and fixed, not a precaution.
   macOS bundle from `Chromium.app/Contents/MacOS/Chromium` to `Google Chrome
   for Testing.app/Contents/MacOS/Google Chrome for Testing`; only the old name
   was matched. On an up-to-date install every app silently launched Edge or
-  Chrome instead — and on a Mac with neither, reported that no browser was
+  Chrome instead, and on a Mac with neither, reported that no browser was
   installed while Playwright's Chromium sat right there. The tests missed it
   because they only ever constructed the old layout. Both are matched now, and
   the new one is covered by tests. Core is 0.1.4 so `check_installs.py` can
   tell an install still running the old lookup.
 - **`.gitignore` did not cover hand-made copies of the state files.** A file
   such as `discovery.json.pre-fix` or `progress.json.bak` holds the same real
-  account data as the original, but only the exact names were ignored — one
+  account data as the original, but only the exact names were ignored, one
   such copy was nearly committed while building a new app. Suffixed copies
   and `*.json.bak` / `*.json.orig` / `*.csv.bak` are now ignored too.
 
-## [0.6.3] — 2026-08-19
+## [0.6.3] - 2026-08-19
 
 ### Fixed
 - **The control panel left a downloader running after you closed its tab.**
@@ -960,17 +986,17 @@ item below is a real defect that was found and fixed, not a precaution.
   under `gui/` had recorded which Python version it targets.
 
 
-## [0.6.2] — 2026-08-18
+## [0.6.2] - 2026-08-18
 
 ### Fixed
 - **The Dominion app was a Robinhood clone whose text and rules were never
   rewritten.** Dominion Energy is a residential utility, but the app described
   itself as "a brokerage / crypto account", and `login.bat` promised the user
-  it "NEVER buys, sells, trades, ... moves crypto" — telling them the wrong
+  it "NEVER buys, sells, trades, ... moves crypto", telling them the wrong
   thing about what it does on their account. Its `document_rules.json` was
   Robinhood's whole vocabulary (consolidated 1099, crypto 1099, 1042-S, 5498,
   480.6, prospectus, trade confirmations), and its tests asserted that a power
-  company issues "Crypto Statement" and "1099-B" — and passed. Rules, tests,
+  company issues "Crypto Statement" and "1099-B", and passed. Rules, tests,
   docstrings and the sign-in text now describe a utility that posts bills.
   This mattered beyond one app: `docs/adding-a-provider.md` recommends cloning
   `dominion` for statement providers, so every new app inherited it.
@@ -979,7 +1005,7 @@ item below is a real defect that was found and fixed, not a precaution.
   CONTRIBUTING said "9234+", but Gap is 9233 and UKG is 9234. A colliding port
   makes two apps share one browser profile, which has previously merged two
   accounts' documents. All four documents now say 9222–9234 taken, 9235+ free.
-- **`.gitignore` covered every output folder except `Pay Statements`** — the
+- **`.gitignore` covered every output folder except `Pay Statements`**, the
   UKG one, holding the most sensitive documents in the project. PDFs were
   already ignored by `*.pdf`, so nothing leaked, but the folder was the only
   one not named.
@@ -989,7 +1015,7 @@ item below is a real defect that was found and fixed, not a precaution.
   stale half is gone.
 - Dominion, RedCard, T-Mobile and Verizon each described themselves as a
   "statement & tax-document downloader" and precreated a `Tax Documents`
-  folder, though none has any tax discovery at all — the same permanently
+  folder, though none has any tax discovery at all, the same permanently
   empty folder 0.4.1 removed elsewhere and the UKG audit fixed for UKG. The
   routes remain, so a surprise tax document is still filed rather than dropped.
 
@@ -1000,10 +1026,10 @@ item below is a real defect that was found and fixed, not a precaution.
   `pilot_count` those apps actually use.
 - Removed two functions with no callers anywhere: `ensure_statements_page`
   (Amex, an alias) and `find_download_control` (Wealthfront), plus the unread
-  `tax_center` URL in Dominion and Verizon — another Robinhood leftover, in
+  `tax_center` URL in Dominion and Verizon, another Robinhood leftover, in
   both cases pointing at the billing page.
 
-## [0.6.1] — 2026-08-18
+## [0.6.1] - 2026-08-18
 
 ### Fixed
 - **`setup-all.bat` never installed the shared core, so a fresh Windows clone
@@ -1015,12 +1041,12 @@ item below is a real defect that was found and fixed, not a precaution.
   checkout and falls back to the bundled wheel in a standalone copy.
 - `setup-all.bat` downloaded Playwright's Chromium once per app. It is a
   single shared install, so thirteen of the fourteen downloads were redundant
-  — and it is by far the slowest step.
+ , and it is by far the slowest step.
 - `setup-all.bat` reported "All set - 9 apps" regardless of how many it had
   set up; the count was hardcoded when there were nine. It counts now.
 - The failure summary in `setup-all.bat` began `echo !!`, and `!` is the
   delayed-expansion escape, so `cmd` consumed the marker *and* the list of
-  failed apps with it — the one line that says what went wrong printed as a
+  failed apps with it, the one line that says what went wrong printed as a
   bare `FAILED`.
 
 ### Changed
@@ -1028,13 +1054,13 @@ item below is a real defect that was found and fixed, not a precaution.
   rebuilding it. Rebuilding one that is in use fails with a permission error,
   which is exactly the situation in which someone re-runs setup.
 
-## [0.6.0] — 2026-08-18
+## [0.6.0] - 2026-08-18
 
 ### Added
-- **UKG Pro / UltiPro — pay statements (14th provider), and a new category:
+- **UKG Pro / UltiPro, pay statements (14th provider), and a new category:
   payroll.** UKG is the first provider without a fixed address: every employer
   runs its own tenant, so the site is read from `base_url` in `config.json`
-  rather than hardcoded — which also keeps it out of the repo, since a tenant
+  rather than hardcoded, which also keeps it out of the repo, since a tenant
   address identifies the employer. Sign-in varies too (a UKG username and
   password, or corporate SSO with MFA); neither involves the tool.
 
@@ -1067,7 +1093,7 @@ item below is a real defect that was found and fixed, not a precaution.
   `progress.json` or the index CSV.
 - The provider tables no longer claim UKG downloads W-2s, which it does not.
 
-## [0.5.0] — 2026-08-17
+## [0.5.0] - 2026-08-17
 
 ### Added
 - **macOS and Linux support.** Every app ships a `.command` launcher beside
@@ -1076,13 +1102,13 @@ item below is a real defect that was found and fixed, not a precaution.
   Chromium under `LOCALAPPDATA` on Windows, `~/Library/Caches` on macOS (inside
   `Chromium.app`) and `~/.cache` on Linux, and the Edge/Chrome lookup that two
   bot-protected providers rely on knows where those live on each OS.
-- **`paperpull-core`** — the support code the apps used to duplicate now lives
+- **`paperpull-core`**, the support code the apps used to duplicate now lives
   once in `core/`. An app declares an `AppSpec` (its folders, routing, CSV
   columns and config defaults) and keeps only its orchestrator and `*_site.py`.
   About 15,400 duplicated lines became a 1,500-line core plus short
   declarations, so a fix lands once instead of thirteen times.
 - **`tools/check_installs.py`** reports whether standalone installs have
-  drifted from the repo. It reads only code — never config, state, CSVs, PDFs
+  drifted from the repo. It reads only code, never config, state, CSVs, PDFs
   or browser profiles.
 
 ### Fixed
@@ -1093,7 +1119,7 @@ item below is a real defect that was found and fixed, not a precaution.
   sorted lexicographically so `chromium-1000` ranked below `chromium-999`.
   Newest build now wins.
 - The macOS launchers referred users to `.bat` files, and their banner text was
-  interpolated into double quotes — mangling output, and executing anything
+  interpolated into double quotes, mangling output, and executing anything
   shaped like `$(...)` had a `.bat` ever contained it. Banners are now properly
   single-quoted.
 - `setup-all.command` used an empty-array expansion that errors under `set -u`
@@ -1111,10 +1137,10 @@ item below is a real defect that was found and fixed, not a precaution.
 - Test fixtures and code comments no longer carry real order numbers or a real
   carrier tracking number; they use same-shaped fakes.
 
-## [0.4.1] — 2026-08-16
+## [0.4.1] - 2026-08-16
 
 ### Fixed
-- **Gap** — in-store purchases are now separated from online orders. Gap's
+- **Gap**, in-store purchases are now separated from online orders. Gap's
   history page mixes the two; they were all being typed "Online" and filed in
   `Online\`. There is now an `In-Store\` folder (matching the Target and
   Walmart apps), online orders record the Gap Inc. brand that shipped them,
@@ -1129,21 +1155,21 @@ item below is a real defect that was found and fixed, not a precaution.
   Walmart.
 - **Amazon** drops the same dead invoice branch as Gap: `_handle_no_receipt`
   was never called, so the `Invoices\` folder and the `include_invoices` knob
-  it depended on could never be reached. What Amazon saves is unchanged — its
+  it depended on could never be reached. What Amazon saves is unchanged, its
   printable order summary is captured as the receipt, as it always was.
 - **Every app** now creates only the document folders it can actually fill.
   Each app was cloned from the nearest existing one and inherited that app's
-  whole folder list, so installs grew permanently-empty folders — `Insurance
+  whole folder list, so installs grew permanently-empty folders, `Insurance
   Documents` (real only for USAA, which is also an insurer), `Other Documents`
   (never a configurable document type), and `Invoices` (reachable only in the
   Target and Walmart apps). Routing is unchanged and now creates a folder on
   demand, so a category that is reachable but rare still gets its folder the
   moment a document lands there. Nothing that holds documents is affected.
 
-## [0.4.0] — 2026-08-16
+## [0.4.0] - 2026-08-16
 
 ### Added
-- **Gap Inc.** — order receipts (13th provider). One Gap login covers Gap, Old
+- **Gap Inc.**, order receipts (13th provider). One Gap login covers Gap, Old
   Navy, Banana Republic, Athleta and Gap Factory, and a single order history
   holds orders from all of them; the brand is recorded per order. The order
   history lazy-loads on scroll rather than paginating by year, so discovery is a
@@ -1151,52 +1177,52 @@ item below is a real defect that was found and fixed, not a precaution.
   months). Gap ships no printable invoice and no print stylesheet, so each
   order's own details page is captured: the app waits for the page to load its
   data, hides everything outside the purchase-summary block (a display-only
-  change to the local page), and renders the result with `printToPDF` — a
+  change to the local page), and renders the result with `printToPDF`, a
   receipt with the purchase header, line items and charge summary, and none of
   the site navigation.
 
-## [0.3.1] — 2026-08-16
+## [0.3.1] - 2026-08-16
 
 ### Security
 - **GUI control panel** now refuses any request whose `Origin`/`Referer` host is
   not localhost, closing a cross-site "trigger a run" vector on the command API
   (`/api/apps`, `/api/run`). The server already binds to `127.0.0.1` only and
   has no CORS; `SECURITY.md` now documents the localhost/CDP posture (close the
-  signed-in browser when you're done — while it is open, any local process could
+  signed-in browser when you're done, while it is open, any local process could
   attach to its debugging port).
 
-## [0.3.0] — 2026-08-16
+## [0.3.0] - 2026-08-16
 
 ### Added
-- **Verizon (Fios)** — Fios / Home Internet bill statements (10th provider).
+- **Verizon (Fios)**, Fios / Home Internet bill statements (10th provider).
   Uses your installed Microsoft Edge (T-Mobile-style bot protection blocks the
   bundled Chromium) and captures downloads via a controlled directory over CDP.
-- **T-Mobile** — monthly bill statements (11th provider). Reads the bill-history
+- **T-Mobile**, monthly bill statements (11th provider). Reads the bill-history
   page and downloads each period's detailed-bill PDF via a real download event.
-- **Target RedCard / Target Circle Card** — monthly billing statements (12th
+- **Target RedCard / Target Circle Card**, monthly billing statements (12th
   provider). The RedCard credit account is serviced by TD Bank USA; reads the
   statements table (per-year switcher) at mytargetcirclecard.target.com and
   downloads each row's statement PDF via a real download event.
 
-## [0.1.0] — 2026-08-15
+## [0.1.0] - 2026-08-15
 
 First tagged release.
 
 ### Apps (9 providers)
-- **Amazon** — order invoices, full order history
-- **American Express** — statements + year-end summary
-- **Dominion Energy (VA)** — billing statements
-- **Navy Federal Credit Union** — account statements
-- **Robinhood** — account statements + tax documents
-- **Target** — receipts
-- **USAA** — statements
-- **Walmart** — receipts
-- **Wealthfront** — statements + tax documents
+- **Amazon**, order invoices, full order history
+- **American Express**, statements + year-end summary
+- **Dominion Energy (VA)**, billing statements
+- **Navy Federal Credit Union**, account statements
+- **Robinhood**, account statements + tax documents
+- **Target**, receipts
+- **USAA**, statements
+- **Walmart**, receipts
+- **Wealthfront**, statements + tax documents
 
 ### Features
-- Read-only, connect-to-your-browser design — you sign in yourself; the tool
+- Read-only, connect-to-your-browser design, you sign in yourself; the tool
   never handles credentials or bypasses 2FA
-- Delete-safe skip — deleting PDFs after importing them elsewhere never causes
+- Delete-safe skip, deleting PDFs after importing them elsewhere never causes
   a re-download
 - Account-holder ("owner") tagging: a first-run prompt plus an "Account Holder"
   column in the index CSV

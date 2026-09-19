@@ -34,10 +34,9 @@ from typing import List, Optional
 from paperpull_core import classification, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import amazon_site as site
-from paperpull_core.models import (DONE_STATES, ONLINE, Item, Purchase, State)
+from paperpull_core.models import (ONLINE, Item, Purchase, State)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
-                     RECEIPT_INDEX_COLUMNS, atomic_write_text, backup_file,
-                     build_pdf_filename, load_config, now_iso, title_case,
+                     RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
@@ -172,7 +171,7 @@ class App:
         """A dedicated work page carrying the print-suppression hook.
 
         In CDP mode a fresh page in the existing (authenticated) context
-        shares the user's session AND receives our init script — existing
+        shares the user's session AND receives our init script, existing
         human-opened tabs are left untouched."""
         ctx = self.browser()
         if self._work_page is not None and not self._work_page.is_closed():
@@ -509,7 +508,6 @@ class App:
             return  # state already recorded inside
 
         # ---- CSVs + progress ----
-        status = State.NEEDS_MANUAL_REVIEW.value if review_needed else State.COMPLETED.value
         receipt_status = "Downloaded"
         self._write_csv_rows(purchase, receipt_status=receipt_status,
                              processing_status="Review Needed" if review_needed else "Completed",

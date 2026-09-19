@@ -135,7 +135,7 @@ REAL_DISCLOSURE = (
     "the message above and understand the potential risk. View Cancel")
 
 
-def test_the_real_disclosure_is_recognised():
+def test_the_real_disclosure_is_recognized():
     assert site.is_view_disclosure(REAL_DISCLOSURE)
 
 

@@ -100,7 +100,7 @@ def test_long_path_trimmed(tmp_path):
 def test_an_empty_name_does_not_resolve_to_the_folder_itself(tmp_path):
     """"dir / ''" is just "dir", so an empty name handed the caller its own
     output folder to write a PDF over. Reachable whenever a scraped title
-    sanitises away to nothing."""
+    sanitizes away to nothing."""
     got = unique_path(tmp_path, "", max_path_length=240)
     assert got != tmp_path
     assert got.parent == tmp_path

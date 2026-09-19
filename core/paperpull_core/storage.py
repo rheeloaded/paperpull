@@ -271,7 +271,7 @@ def unique_path(directory: Path, filename: str, max_path_length: int = 240) -> P
 
     # An empty stem used to return the DIRECTORY itself, because "dir / ''" is
     # just "dir". The caller then tried to write a PDF over its own folder. It
-    # is reachable whenever a scraped title sanitises away to nothing.
+    # is reachable whenever a scraped title sanitizes away to nothing.
     if not stem.strip(" ."):
         stem = "document"
         if not ext:

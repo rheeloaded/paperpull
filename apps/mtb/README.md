@@ -1,4 +1,4 @@
-# M&T Bank — mortgage document downloader (READ-ONLY)
+# M&T Bank mortgage document downloader (READ-ONLY)
 
 Downloads your M&T mortgage **statements and documents** as PDFs from M&T's
 online banking (`onlinebanking.mtb.com`). Read-only, delete-safe, part of
@@ -40,7 +40,7 @@ weaknesses a security review of this app actually found.
 
 ```bat
 setup.bat                         REM one-time: venv + Playwright
-login.bat                         REM opens Chromium on port 9240 — sign in yourself at mtb.com
+login.bat                         REM opens Chromium on port 9240, sign in yourself at mtb.com
 paperpull mtb diagnose            REM read-only look at the document area; downloads nothing
 paperpull mtb pilot               REM download the newest few as a test, then stop
 paperpull mtb all                 REM download everything in scope (asks for YES)

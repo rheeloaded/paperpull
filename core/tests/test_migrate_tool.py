@@ -163,7 +163,7 @@ def test_a_relative_path_is_left_exactly_as_it_was(tmp_path):
     assert got["id:1"]["pdf_path"] == "Statements\\2026-01-31 Statement.pdf"
 
 
-def test_a_windows_path_is_recognised_as_absolute_on_any_platform(tmp_path):
+def test_a_windows_path_is_recognized_as_absolute_on_any_platform(tmp_path):
     """An export written on Windows can be imported on a Mac, where a
     drive-letter path would otherwise look relative and be kept as-is."""
     assert migrate._is_absolute(r"C:\Users\someone\Statements\a.pdf")

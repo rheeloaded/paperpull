@@ -58,7 +58,7 @@ def test_the_identity_comes_from_the_environment_once_the_store_assigns_it(monke
     assert "<PublisherDisplayName>Rheeloaded</PublisherDisplayName>" in text
 
 
-def test_the_launcher_source_honours_the_port_override_and_opens_the_browser():
+def test_the_launcher_source_honors_the_port_override_and_opens_the_browser():
     src = msix.LAUNCHER_CS
     assert "PAPERPULL_PORT" in src
     assert '"8765"' in src

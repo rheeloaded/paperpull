@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
 from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import List, Optional
@@ -327,13 +326,6 @@ def collect_documents(page) -> List[RawDoc]:
     return docs
 
 
-def goto_documents_or_none(page):
-    """Kept for the orchestrator's discovery call; the API works on its own,
-    but loading the pay page first keeps the session warm and gives the user
-    something recognizable to look at."""
-    return goto_documents(page)
-
-
 def download_document(page, pdf_url: str, out_path) -> bool:
     """Save one pay statement's PDF via enqueue -> poll -> fetch.
 
@@ -341,7 +333,6 @@ def download_document(page, pdf_url: str, out_path) -> bool:
     is clicked; every step is a GET with the session cookie.
     """
     from pathlib import Path
-    import time as _time
     try:
         company_id, employee_id, history_id = (pdf_url or "").split("|", 2)
     except ValueError:

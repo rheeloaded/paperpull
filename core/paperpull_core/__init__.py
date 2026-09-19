@@ -1,6 +1,6 @@
 """Shared core for the PaperPull downloaders.
 
-Each app used to carry its own copy of these modules — 15,000-odd lines of
+Each app used to carry its own copy of these modules, 15,000-odd lines of
 support code duplicated thirteen times, which meant every fix had to be made
 thirteen times and copies quietly drifted apart. The logic lives here once;
 an app declares an `AppSpec` describing what makes *it* different and keeps

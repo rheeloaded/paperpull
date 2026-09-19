@@ -46,7 +46,6 @@ SAFETY (this is Protected Health Information):
 """
 from __future__ import annotations
 
-import json as _json
 import logging
 import re
 from pathlib import Path
@@ -442,11 +441,6 @@ window.__memberId = window.__memberId || null;
 # The three EOB categories the EOB Center exposes, each its own summary call. A
 # category with no EOBs simply returns an empty list and is skipped.
 CLAIM_TYPES = ["Medical", "Pharmacy", "Chiropractic"]
-
-# The two document kinds a single claim can expose. "EOB" is the statement;
-# "EOB Check" is the reimbursement-check document some claims also carry. Told
-# apart by supportingInfo.eobSubType ("HealthCareSummary" vs "Reimbursement").
-DOC_KINDS = ["EOB", "EOB Check"]
 
 # Kept for parity with the sibling apps' diagnose/CSV code, which reads a
 # provider "type map". Here the meaningful axis is the claim type.
@@ -974,10 +968,6 @@ DOCUMENTS_URL = f"{BASE}/member/documents"
 IDCARD_URL = f"{BASE}/member/idcard"
 URLS["member_documents"] = DOCUMENTS_URL
 URLS["idcard"] = IDCARD_URL
-
-_MS_API = f"{BASE}/member/secure/api/tcp"
-_FED_DOC_BASE = f"{BASE}/fed/benefits/v1/member/coveragePeriod"
-_POLARIS_IDCARD = "https://membersecure-polaris.anthem.com/api/idcard/trpc"
 
 # A coverage period id, e.g. "79CB-20260701-20261231-MED-721352C26M": a source
 # code, a start and end date (YYYYMMDD), a plan type, and a group id. Validated to

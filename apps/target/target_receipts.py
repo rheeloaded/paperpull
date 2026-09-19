@@ -37,10 +37,9 @@ from typing import List, Optional
 
 from paperpull_core import classification, receipt_pdf, scope
 import target_site as site
-from paperpull_core.models import (DONE_STATES, IN_STORE, ONLINE, Item, Purchase, State)
+from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
-                     RECEIPT_INDEX_COLUMNS, atomic_write_text, backup_file,
-                     build_pdf_filename, load_config, now_iso, title_case,
+                     RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
@@ -410,7 +409,6 @@ class App:
             return  # state already recorded inside
 
         # ---- CSVs + progress ----
-        status = State.NEEDS_MANUAL_REVIEW.value if review_needed else State.COMPLETED.value
         receipt_status = "Downloaded"
         self._write_csv_rows(purchase, receipt_status=receipt_status,
                              processing_status="Review Needed" if review_needed else "Completed",
@@ -517,7 +515,7 @@ class App:
         """Render the receipt/invoice currently presented by Target to PDF.
 
         Preference order:
-          1. The HTML snapshot stashed at the moment print() was called —
+          1. The HTML snapshot stashed at the moment print() was called,
              exactly the document the print dialog would have rendered
           2. Target's print iframe, if it still exists in the DOM
           3. In-store receipt modal, isolated

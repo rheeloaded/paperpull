@@ -72,9 +72,7 @@ THE TABLE, confirmed 2026-08-22
 """
 from __future__ import annotations
 
-import base64
 import html as _html
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -565,31 +563,11 @@ def collect_documents(page) -> List[RawDoc]:
     return docs
 
 
-_BLOB_FETCH_JS = r"""async () => {
-    const f = document.querySelector("iframe[src^='blob:']");
-    if (!f || !f.src) return null;
-    const r = await fetch(f.src);
-    const buf = new Uint8Array(await r.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-    return btoa(s);
-}"""
-
-
 # The membership boilerplate AAFMAA shows every member, above their own
 # documents: a president's letter, a benefits brochure, the privacy policy.
 # Recognized by WHERE they live rather than by what they are called, so a
 # rename cannot start them being archived as somebody's insurance records.
 RESOURCE_PDF_RE = re.compile(r"/Resources/PDFFiles/", re.I)
-
-# Each row's links, as (label, href, postback target). WebForms writes the
-# target inside a WebForm_PostBackOptions(...) call or a plain __doPostBack,
-# so the href is javascript and the name inside it is the real handle.
-_ROW_LINKS_JS = r"""e => [...e.querySelectorAll('a')].map(a => {
-  const href = a.getAttribute('href') || '';
-  const m = href.match(/PostBackOptions\("([^"]+)"/) ||
-            href.match(/__doPostBack\('([^']+)'/);
-  return [(a.innerText || '').trim(), m ? '' : href, m ? m[1] : ''];
-}).slice(0, 8)"""
 
 
 def _iso_from_us_date(text: str) -> str:
@@ -715,9 +693,6 @@ def collect_document_index(page) -> List[dict]:
                     skipped_no_date, skipped_no_view,
                     [c[:30] for c in (sample_cells or [])])
     return docs
-
-def document_deeplink(document_id: str, document_date: str) -> str:
-    return f"{BASE}/my/documents?documentId={document_id}&documentDate={document_date}"
 
 
 # ---------------------------------------------------------------------------

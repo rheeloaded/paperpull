@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import base64
 import html as _html
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -45,8 +44,6 @@ URLS = {
     "year_end": f"{BASE}/spending-report",
     "tax": f"{BASE}/activity/statements",
 }
-DOCUMENT_URL_CANDIDATES = [URLS["statements"], URLS["documents"],
-                           URLS["year_end"]]
 
 LOGIN_URL_MARKERS = ["/login", "/logon", "/signin", "/sign-in", "/auth",
                      "/mfa", "/verification", "/challenge", "myca/logon"]
@@ -766,36 +763,6 @@ def document_source_urls() -> List[Tuple[str, str]]:
     if TAX_URL not in [u for u, _ in pairs]:
         pairs.append((TAX_URL, "tax"))
     return pairs
-
-
-def find_row_download(page, title: str, date_text: str = ""):
-    """Re-find a row's safe download control by its text (diagnose helper)."""
-    try:
-        rows = page.locator(FALLBACK["doc_row"])
-        for i in range(rows.count()):
-            row = rows.nth(i)
-            try:
-                text = row.inner_text(timeout=800) or ""
-            except Exception:
-                continue
-            if title and title[:40] not in text:
-                continue
-            if date_text and date_text not in text:
-                continue
-            link = row.locator("a[download], a[href$='.pdf'], a[href*='.pdf']")
-            if link.count() > 0:
-                return link.first
-            for b in row.locator("button, a").all():
-                try:
-                    label = (b.inner_text(timeout=600) or "") + \
-                        (b.get_attribute("aria-label") or "")
-                except Exception:
-                    label = ""
-                if is_safe_control(label):
-                    return b
-    except Exception:
-        pass
-    return None
 
 
 # ---------------------------------------------------------------------------

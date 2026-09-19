@@ -44,7 +44,6 @@ URLS = {
     "statements": STATEMENTS_URL,
     "documents": STATEMENTS_URL,
 }
-DOCUMENT_URL_CANDIDATES = [STATEMENTS_URL]
 
 LOGIN_URL_MARKERS = ["/login", "/logon", "/signin", "/sign-in", "/auth",
                      "/mfa", "/verification", "/challenge"]

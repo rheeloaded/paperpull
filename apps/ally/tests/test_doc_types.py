@@ -355,7 +355,7 @@ def test_rows_outside_the_table_are_ignored():
     assert len(facts.accounts) == 2
 
 
-def test_unrecognised_layout_returns_nothing_rather_than_guessing():
+def test_unrecognized_layout_returns_nothing_rather_than_guessing():
     for junk in ("", "no table here at all", "Account Name Account Number"):
         assert not site.parse_statement_text(junk).ok
 

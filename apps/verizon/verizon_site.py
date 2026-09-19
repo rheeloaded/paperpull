@@ -2,30 +2,26 @@
 
 When Verizon changes its site, repair this file only.
 
-SAFETY (this is a brokerage / crypto account):
-  This module is strictly READ-ONLY. It navigates to the reports/statements
-  and tax areas, reads a list of documents, and downloads the PDFs Verizon
-  already generated. It must NEVER activate any control that buys, sells,
-  trades, places or cancels an order, transfers/withdraws/deposits money,
-  moves or converts crypto, exercises options, closes a position, stakes, or
-  changes any setting. FORBIDDEN_CONTROL_RE is the guard; a control must ALSO
-  look like a document action (SAFE_DOC_CONTROL_RE) before it may be clicked.
-  There is no code here that submits a form or confirms a dialog.
+SAFETY (this is a phone and internet account with a card on file):
+  This module is strictly READ-ONLY. It opens the Download Your Bill page,
+  picks a bill period from its dropdowns, and saves the PDF Verizon already
+  generated. It must NEVER activate any control that pays a bill, sets up
+  autopay, changes a plan, orders a device, or changes any setting.
+  FORBIDDEN_CONTROL_RE is the guard. A control must ALSO look like a
+  document action (SAFE_DOC_CONTROL_RE) before it may be clicked. There is
+  no code here that submits a form or confirms a dialog.
 
-Documents are genuine PDF downloads (not rendered pages). Verizon is a
-heavy React SPA backed by a JSON API, so - like the USAA project - discovery
-prefers capturing the documents API response, with table scraping as a
-fallback. The selectors are verified against the live signed-in pages (see
-the date recorded under this docstring). When the provider redesigns, run
-`diagnose.bat` and repair the FALLBACK entries + goto_documents URLs +
-collect_documents_via_api matcher against Diagnostics/.
+Bills are genuine PDF downloads (not rendered pages). Verizon blocks the
+Playwright Chromium, so the browser is launched as real Edge or Chrome and
+the download directory is set over CDP. The selectors are verified against
+the live signed-in pages (see the date recorded under this docstring). When
+the provider redesigns, run `diagnose.bat` and repair the FALLBACK entries
+and goto_documents against Diagnostics/.
 """
 # Site layer verified working against the live site: 2026-08
 from __future__ import annotations
 
-import base64
 import html as _html
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -43,8 +39,6 @@ URLS = {
     "statements": f"{BASE}/my/bill-history",
     "documents_alt": f"{BASE}/my/billing",
 }
-DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["statements"],
-                           URLS["documents_alt"]]
 
 LOGIN_URL_MARKERS = ["/login", "/signin", "/sign-in", "/auth", "/mfa",
                      "/verification", "/challenge"]
@@ -239,7 +233,6 @@ def is_safe_control(name: str) -> bool:
 # capture when attached to a user-launched browser).
 DOWNLOAD_URL = "https://www.verizon.com/downloadbill/#/download"
 BILLING_URL = DOWNLOAD_URL
-_DATE_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
 
 
 def dismiss_overlay(page) -> None:
@@ -295,36 +288,6 @@ def goto_documents(page) -> bool:
         return page.get_by_role("combobox").count() >= 2
 
 
-def _panel_dates(page) -> List[str]:
-    """ISO dates of the bills on the current page (from panel headers)."""
-    out = []
-    loc = page.locator(PANEL_HEADER)
-    for i in range(loc.count()):
-        try:
-            t = loc.nth(i).inner_text(timeout=800) or ""
-        except Exception:
-            continue
-        m = _DATE_RE.search(t)
-        if m:
-            out.append(f"{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}")
-    return out
-
-
-def _next_page(page) -> bool:
-    """Click 'next page' if it exists and is enabled; return whether it advanced."""
-    try:
-        btn = page.get_by_role("button", name=re.compile(r"^\s*next page\s*$", re.I))
-        if btn.count() == 0 or not btn.first.is_visible():
-            return False
-        if btn.first.is_disabled():
-            return False
-        btn.first.click()
-        page.wait_for_timeout(1800)
-        return True
-    except Exception:
-        return False
-
-
 def scroll_full_page(page, rounds: int = 8, delay_ms: int = 700) -> None:
     try:
         for _ in range(rounds):
@@ -357,22 +320,6 @@ def expand_all(page) -> None:
                 continue
         if not clicked:
             break
-
-
-def next_page(page) -> bool:
-    try:
-        loc = page.locator(FALLBACK["next_page"])
-        if loc.count() > 0 and loc.first.is_visible() and loc.first.is_enabled():
-            label = (loc.first.inner_text(timeout=800) or "") + \
-                (loc.first.get_attribute("aria-label") or "")
-            if FORBIDDEN_CONTROL_RE.search(label):
-                return False
-            loc.first.click()
-            page.wait_for_timeout(2500)
-            return True
-    except Exception:
-        pass
-    return False
 
 
 @dataclass
@@ -425,137 +372,6 @@ def collect_documents(page) -> List[RawDoc]:
         docs.append(RawDoc(title=re.sub(r"\s+", " ", title)[:200], date_text=date_text,
                            href=href, text=text[:400], row_index=i))
     return docs
-
-
-def collect_documents_via_api(page) -> List[dict]:
-    """Capture Verizon's documents JSON API as the page loads/pages. Repair
-    the URL/response matcher after diagnose. Returns raw document dicts."""
-    batches: List[list] = []
-
-    def on_resp(r):
-        try:
-            u = r.url
-            if not re.search(r"document|statement|report", u, re.I):
-                return
-            if "json" not in (r.headers.get("content-type", "") or "").lower():
-                return
-            data = json.loads(r.text())
-            # Verizon list endpoints usually return {"results":[...]} or a
-            # bare list. Accept either.
-            items = None
-            if isinstance(data, dict):
-                for k in ("results", "documents", "data", "items"):
-                    if isinstance(data.get(k), list):
-                        items = data[k]
-                        break
-            elif isinstance(data, list):
-                items = data
-            if items:
-                batches.append(items)
-        except Exception:
-            pass
-
-    page.on("response", on_resp)
-    try:
-        goto_documents(page)
-        page.wait_for_timeout(3500)
-        last = -1
-        stagnant = 0
-        for _ in range(150):
-            for _ in range(3):
-                page.mouse.wheel(0, 5000)
-                page.wait_for_timeout(700)
-            advanced = next_page(page)
-            total = sum(len(b) for b in batches)
-            if total == last and not advanced:
-                stagnant += 1
-                if stagnant >= 3:
-                    break
-            else:
-                stagnant = 0
-                last = total
-    finally:
-        try:
-            page.remove_listener("response", on_resp)
-        except Exception:
-            pass
-
-    docs: dict = {}
-    for batch in batches:
-        for d in batch:
-            if not isinstance(d, dict):
-                continue
-            did = d.get("id") or d.get("documentId") or d.get("url")
-            if did and did not in docs:
-                docs[did] = d
-    return list(docs.values())
-
-
-_BLOB_FETCH_JS = r"""async () => {
-    const f = document.querySelector("iframe[src^='blob:']");
-    if (!f || !f.src) return null;
-    const r = await fetch(f.src);
-    const buf = new Uint8Array(await r.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-    return btoa(s);
-}"""
-
-
-def download_by_url(page, url: str, out_path) -> bool:
-    """Download a document PDF from a direct/API URL. Handles both a real file
-    download and an inline blob-iframe render."""
-    if not url:
-        return False
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    full = url if url.startswith("http") else BASE + url
-    # A stored record must not be able to steer this anywhere but the
-    # provider's own site. Before this check the value went straight to
-    # page.goto in the signed-in tab.
-    if not is_safe_url(full):
-        log.error("refusing a URL that is not on this provider's host")
-        return False
-    # try a genuine download first
-    try:
-        with page.expect_download(timeout=20000) as dl:
-            try:
-                page.goto(full)
-            except Exception as e:
-                if "download is starting" not in str(e).lower():
-                    raise
-        from paperpull_core.receipt_pdf import save_download
-        save_download(dl.value, out_path)
-        return True
-    except Exception:
-        pass
-    # inline PDF (blob iframe) fallback
-    try:
-        page.wait_for_selector("iframe[src^='blob:']", timeout=15000)
-        page.wait_for_timeout(1200)
-        b64 = page.evaluate(_BLOB_FETCH_JS)
-        if b64:
-            data = base64.b64decode(b64)
-            if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
-                return True
-    except Exception as e:
-        log.info("download_by_url blob fallback failed for %s: %s", url, e)
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Verizon document pages (verified 2026-07). Each document is an
-# <a download href="#"> whose own text is the title (statements) or whose
-# ancestor holds the title (tax "Download PDF"). Clicking it fires a real
-# download event. Statements live on per-account pages; tax docs on the tax
-# center. Trade confirmations are intentionally not listed here (out of scope).
-def document_source_urls() -> List[Tuple[str, str]]:
-    """The single billing-history page holds every statement (paginated)."""
-    return [(BILLING_URL, "statements")]
-
-
-# How many pages of bills to walk at most (10 bills/page) - a safety bound.
-_MAX_PAGES = 40
 
 
 def _open_combobox(page, which: int):
@@ -668,143 +484,6 @@ def _human_date(iso: str) -> str:
         return f"{_MONTH_NAMES[int(m) - 1]} {int(d)}, {y}"
     except Exception:
         return iso
-
-
-def _find_panel_for(page, iso: str):
-    """Return the accordion header for the bill dated `iso` on the current
-    page, or None."""
-    try:
-        y, m, d = iso.split("-")
-    except Exception:
-        return None
-    mmddyyyy = f"{int(m)}/{int(d)}/{y}"
-    loc = page.locator(PANEL_HEADER)
-    for i in range(loc.count()):
-        h = loc.nth(i)
-        try:
-            if mmddyyyy in (h.inner_text(timeout=800) or ""):
-                return h
-        except Exception:
-            continue
-    return None
-
-
-def download_statement(page, iso_date: str, out_path) -> bool:
-    """Expand the bill dated `iso_date` (paginating to find it) and click its
-    'Download Your Detailed Bill PDF' button, capturing the download."""
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # reset the paginated table to the first page (a prior download may have
-    # paged forward); reloading the SPA is the reliable reset.
-    try:
-        page.reload(wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_selector(PANEL_HEADER, timeout=15000)
-        page.wait_for_timeout(800)
-    except Exception:
-        pass
-
-    # locate the panel, walking pages until found
-    header = None
-    for _ in range(_MAX_PAGES):
-        header = _find_panel_for(page, iso_date)
-        if header is not None:
-            break
-        if not _next_page(page):
-            break
-    if header is None:
-        log.info("bill panel not found for %s", iso_date)
-        return False
-
-    # this bill's own accordion panel (so we never click another bill's button)
-    panel = header.locator(
-        "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '),"
-        " ' MuiExpansionPanel-root ')][1]")
-
-    # expand it (accordion is single-open)
-    try:
-        if (header.get_attribute("aria-expanded") or "").lower() != "true":
-            header.scroll_into_view_if_needed(timeout=4000)
-            header.click()
-            page.wait_for_timeout(1200)
-    except Exception as e:
-        log.info("could not expand panel for %s: %s", iso_date, e)
-        return False
-
-    # the download button MUST come from this bill's now-expanded panel
-    btn = panel.get_by_role("button", name=DL_BTN_RE)
-    if btn.count() == 0:
-        btn = panel.get_by_text(DL_BTN_RE)
-    try:
-        btn.first.wait_for(state="visible", timeout=6000)
-    except Exception:
-        log.info("download button not visible in panel for %s", iso_date)
-        return False
-
-    # safety: the label must be a document action, never a forbidden one
-    try:
-        label = btn.first.inner_text(timeout=1000) or ""
-    except Exception:
-        label = ""
-    if label and not is_safe_control(label):
-        log.info("refusing unsafe control %r for %s", label, iso_date)
-        return False
-
-    from paperpull_core.receipt_pdf import save_download
-    try:
-        with page.expect_download(timeout=45000) as dl:
-            btn.first.click()
-        save_download(dl.value, out_path)
-        return True
-    except Exception as e:
-        log.info("download click failed for %s: %s", iso_date, e)
-        return False
-
-
-_UNAVAILABLE_RE = re.compile(r"older than 18 months", re.I)
-
-
-def is_unavailable_bill(out_path) -> bool:
-    """Verizon serves an identical placeholder PDF ('Images for Bills older
-    than 18 months are not available.') instead of a real bill beyond ~18
-    months. Detect it so those are marked unavailable, not saved as junk."""
-    try:
-        import pypdf
-        text = (pypdf.PdfReader(str(out_path)).pages[0].extract_text() or "")
-        return bool(_UNAVAILABLE_RE.search(text))
-    except Exception:
-        return False
-
-
-def find_row_download(page, title: str, date_text: str = ""):
-    """Re-find a row's safe download control by its text. Repair after
-    diagnose once the real row/menu structure is known."""
-    try:
-        rows = page.locator(FALLBACK["doc_row"])
-        for i in range(rows.count()):
-            row = rows.nth(i)
-            try:
-                text = row.inner_text(timeout=800) or ""
-            except Exception:
-                continue
-            if title and title[:40] not in text:
-                continue
-            if date_text and date_text not in text:
-                continue
-            link = row.locator("a[download], a[href$='.pdf'], a[href*='.pdf']")
-            if link.count() > 0:
-                return link.first
-            for b in row.locator("button, a").all():
-                try:
-                    label = (b.inner_text(timeout=600) or "") + \
-                        (b.get_attribute("aria-label") or "")
-                except Exception:
-                    label = ""
-                if is_safe_control(label):
-                    return b
-    except Exception:
-        pass
-    return None
 
 
 # ---------------------------------------------------------------------------

@@ -5,8 +5,8 @@
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rheeloaded)
 
-**Receipt & Statement Downloader** — a family of small, **read-only** tools that log in *alongside you* to your own
-accounts and download your **statements and receipts** as PDFs — so you can
+**Receipt & Statement Downloader** is a family of small, **read-only** tools that log in *alongside you* to your own
+accounts and download your **statements and receipts** as PDFs, so you can
 archive them (e.g. into [paperless-ngx](https://docs.paperless-ngx.com/)) instead
 of clicking through each site by hand.
 
@@ -51,21 +51,21 @@ Thirty-one providers are supported today, all built on the same pattern:
 > ⚠️ **Read this first:** these tools drive real, signed-in financial accounts.
 > See [SECURITY.md](SECURITY.md) before you run *or* publish anything. In short:
 > never commit your `*-browser-profile/` folder, your `config.json`, or any
-> downloaded PDF. The `.gitignore` blocks them — don't override it.
+> downloaded PDF. The `.gitignore` blocks them, don't override it.
 
 ## How it works (the shared design)
 
 ### The one decision everything follows from
 
 Your documents live on the provider's site, and it will only hand them to a
-browser that is already signed in. So PaperPull never tries to *be* you — it
+browser that is already signed in. So PaperPull never tries to *be* you, it
 works *beside* you. You sign in yourself, in a real browser window, and the
 tool attaches to that window afterwards and reads.
 
 ```mermaid
 flowchart TB
     you(["You"]) -->|"sign in · 2FA · device approval"| br["A real browser window<br/>its own profile · its own debugging port"]
-    br -.->|"attaches over CDP — reads, never authenticates"| app
+    br -.->|"attaches over CDP, reads, never authenticates"| app
     subgraph app ["One app = one provider"]
         orch["Orchestrator<br/>discover → download → verify<br/>the same in every app"]
         site["provider_site.py<br/>selectors · URLs · download quirks"]
@@ -90,7 +90,7 @@ signed-in browsers can sit open at once without colliding.
 **Everything a provider knows lives in one file.** `provider_site.py` holds
 every selector, URL and download quirk for that site. The orchestrator around
 it is the same in every app, and `paperpull-core` underneath it is
-shared. When a provider redesigns, the repair is one file — never a rewrite,
+shared. When a provider redesigns, the repair is one file, never a rewrite,
 and never a change to how documents get named, filed or tracked.
 
 ### What one run actually does
@@ -103,7 +103,7 @@ flowchart TB
     DL --> V{"Is it a real PDF?"}
     V -->|no| MR["Manual Review<br/>flagged, never silently lost"]
     V -->|yes| F["Classify, name, file<br/>+ append to the index CSV"]
-    F --> OK["Mark downloaded_ok<br/>sticky — survives deletion"]
+    F --> OK["Mark downloaded_ok<br/>sticky, survives deletion"]
 ```
 
 Three plain-text files carry the state, and you can read all of them:
@@ -111,11 +111,11 @@ Three plain-text files carry the state, and you can read all of them:
 | File | Holds |
 |------|-------|
 | `discovery.json` | what the provider showed us this run |
-| `progress.json` | what happened to each document — including the sticky `downloaded_ok` |
+| `progress.json` | what happened to each document, including the sticky `downloaded_ok` |
 | `<Provider> Document Index.csv` | one row per saved document, for humans and spreadsheets (receipt apps also keep an `Order History.csv`, one row per line item) |
 
 That last step is what makes a re-run safe. `downloaded_ok` is keyed to the
-document, not to the file on disk — so you can import everything into
+document, not to the file on disk, so you can import everything into
 paperless-ngx, delete the PDFs, and the next run still skips them. It only
 fetches what is genuinely new, and lists it in `new-this-run.txt`.
 
@@ -133,11 +133,13 @@ page they navigated to. A repo-wide test checks every app's guard.
 
 ### One app, more than one person
 
-`paperpull <app> all --account spouse` runs one app against a second
-person's account, with its own profile, port and output folders, so no data
-mixes. Underneath it is a `config.spouse.json` beside the app's `config.json`,
-which the app also takes directly as `--config`, and the sign-in launcher
-takes the label too (`login.bat spouse` / `./login.command spouse`).
+`paperpull <app> add-account spouse` makes the second person's account,
+and `paperpull <app> all --account spouse` runs the app against it, with its
+own profile, port and output folders, so no data mixes. Underneath it is a
+`config.spouse.json` beside the app's `config.json`, which the app also takes
+directly as `--config`, and the sign-in launcher takes the label too
+(`login.bat spouse` / `./login.command spouse`). `python tools/add_account.py
+spouse` does every app at once.
 
 ## Quick start
 
@@ -153,7 +155,7 @@ setup-all.bat        REM Windows
 ./setup-all.command  # macOS / Linux
 ```
 
-Then either drive everything from the **[GUI control panel](gui)** — pick an
+Then either drive everything from the **[GUI control panel](gui)**, pick an
 app and account, click an action, and watch the live output:
 
 ```bat
@@ -329,7 +331,7 @@ shows its SmartScreen prompt the first time. See
 
 For a checkout of this repository, one download covers both. The two
 double-click files each app keeps, and the one-shot setup, come in both
-flavours, and everything else is the same `paperpull` command on either:
+flavors, and everything else is the same `paperpull` command on either:
 
 | Task | Windows | macOS / Linux |
 |------|---------|---------------|
@@ -344,7 +346,7 @@ A second account is the same on both: `paperpull amex all --account spouse`.
 
 Only one thing genuinely differs. macOS keeps Playwright's browser inside an
 app bundle and in a different cache directory, and a couple of providers need
-a branded Edge/Chrome to get past their bot protection — that lookup lives in
+a branded Edge/Chrome to get past their bot protection, that lookup lives in
 `paperpull_core.browser` and is handled for you.
 
 ### Getting a checkout onto a Mac
@@ -377,20 +379,20 @@ chmod +x setup-all.command apps/*/*.command gui/*.command
   (Chrome, Edge, Brave, Vivaldi or Opera). Safari and Firefox cannot be
   driven this way.
 
-## Contributing — add your provider
+## Contributing a provider
 
 No one has accounts everywhere, so **PaperPull grows when people add the
 providers they use.** If a bank, card, brokerage, utility, telecom, or retailer
 you use isn't here yet, you're the ideal person to add it:
 
-- 📖 **[Adding a provider](docs/adding-a-provider.md)** — a step-by-step guide
+- 📖 **[Adding a provider](docs/adding-a-provider.md)**, a step-by-step guide
   (clone the closest app, rewrite one file, stay read-only, test, submit).
-- 📋 **[PROVIDERS.md](PROVIDERS.md)** — what's supported and what's requested;
+- 📋 **[PROVIDERS.md](PROVIDERS.md)**, what's supported and what's requested;
   claim one so nobody builds it twice.
 - 📥 Can't build it yourself? [Request a provider](https://github.com/rheeloaded/paperpull/issues/new/choose)
   and someone with that account may pick it up.
 
-Every contribution keeps the **read-only, local, no-credentials** design — see
+Every contribution keeps the **read-only, local, no-credentials** design, see
 [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## Status & roadmap
@@ -404,16 +406,16 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
   both built by GitHub Actions from the tagged commit, with checksums. A
   Microsoft Store listing and free open-source code signing for Windows are
   in progress.
-- 🔜 **More providers:** community-driven — see [PROVIDERS.md](PROVIDERS.md).
+- 🔜 **More providers:** community-driven, see [PROVIDERS.md](PROVIDERS.md).
 - 🔜 **Scheduled/assisted runs:** a monthly "nudge + sweep" (e.g. the 1st) that
   opens the login browsers and then runs discover + resume across every app once
-  you've signed in — delete-safe, so it only grabs what's new. Fully unattended
+  you've signed in, delete-safe, so it only grabs what's new. Fully unattended
   runs stay out of scope by design: the tools never store credentials or bypass
   2FA, so a human sign-in stays in the loop (long-session retailer apps may
   tolerate more automation than banks/cards).
 - ✅ **Shared core:** the support code the apps used to duplicate now lives once
-  in [`core/`](core) as `paperpull-core`. An app declares an `AppSpec` — its
-  folders, routing, CSV columns and config defaults — and keeps only its
+  in [`core/`](core) as `paperpull-core`. An app declares an `AppSpec`, its
+  folders, routing, CSV columns and config defaults, and keeps only its
   orchestrator and its `*_site.py`. `tools/check_installs.py` reports whether
   your installs have drifted from the repo.
 
@@ -438,7 +440,7 @@ Team roles, current status and the full policy are in
 
 If PaperPull saves you time, you can support its development on Ko-fi:
 **[ko-fi.com/rheeloaded](https://ko-fi.com/rheeloaded)** ☕. Entirely optional and
-much appreciated — it doesn't change anything below.
+much appreciated, it doesn't change anything below.
 
 ## Legal
 
@@ -446,7 +448,7 @@ This project is for **personal archival of your own records**. It is not
 affiliated with, endorsed by, or sponsored by any of the companies listed.
 All product names and trademarks are the property of their respective owners.
 Automating access to a website may be restricted by that site's Terms of
-Service — you are responsible for how you use these tools. Provided **as-is,
+Service, you are responsible for how you use these tools. Provided **as-is,
 without warranty of any kind**.
 
 **License.** PaperPull is free software under the

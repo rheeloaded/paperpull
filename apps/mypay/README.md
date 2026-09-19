@@ -1,4 +1,4 @@
-# DFAS myPay — retiree document downloader (READ-ONLY)
+# DFAS myPay retiree document downloader (READ-ONLY)
 
 Downloads your **Retiree Account Statements (eRAS)**, **CRSC pay statements**
 and tax forms from DFAS myPay as PDFs. Read-only, delete-safe, part of
@@ -67,7 +67,7 @@ already-signed-in browser and reads only what you can see. It never handles
 your credentials, your CAC PIN, or your 2FA.
 
 myPay sessions time out quickly. If a run stops saying the session expired,
-sign in again and use `paperpull mypay resume` — finished documents are never re-fetched.
+sign in again and use `paperpull mypay resume`, finished documents are never re-fetched.
 
 ## Documents captured
 

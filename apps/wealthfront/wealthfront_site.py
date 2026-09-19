@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 log = logging.getLogger("wealthfront_docs.site")
@@ -531,7 +531,6 @@ def go_older(page) -> bool:
 # ---------------------------------------------------------------------------
 
 TAX_DIALOG_TRIGGER = "[data-testid='tax-forms-account-view-dialog-trigger']"
-TAX_DIALOG = "[role='dialog'], [aria-modal='true'], dialog"
 TAX_DIALOG_DISMISS = "[data-testid='dismiss-dialog']"
 
 

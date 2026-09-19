@@ -130,7 +130,7 @@ def test_a_folder_that_is_not_an_install_is_skipped(tmp_path):
 def test_the_dashboard_is_self_contained_and_leaks_no_figures(tmp_path):
     """It is written next to the installs and lists institutions, so it must
     pull in nothing from the network and carry no amounts."""
-    d = _install(tmp_path, "Bank", _monthly(12), "SPEC = AppSpec(\n    kind=DOCUMENT,\n)")
+    _install(tmp_path, "Bank", _monthly(12), "SPEC = AppSpec(\n    kind=DOCUMENT,\n)")
     rows = status.scan_all(tmp_path)
     out = tmp_path / "status.html"
     status.write_html(rows, out)
@@ -150,8 +150,8 @@ def test_a_provider_you_do_not_use_is_not_listed(tmp_path):
     (tmp_path / "Never Set Up").mkdir()
     (tmp_path / "Closed Account" / ".").mkdir(parents=True)
     (tmp_path / "Closed Account" / "progress.json").write_text("{}", encoding="utf-8")
-    used = _install(tmp_path, "In Use", _monthly(12),
-                    "SPEC = AppSpec(\n    kind=DOCUMENT,\n)")
+    _install(tmp_path, "In Use", _monthly(12),
+             "SPEC = AppSpec(\n    kind=DOCUMENT,\n)")
     assert status.scan_install(tmp_path / "Never Set Up") is None
     assert status.scan_install(tmp_path / "Closed Account") is None
     rows = status.scan_all(tmp_path)

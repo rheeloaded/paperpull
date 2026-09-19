@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from urllib.parse import urlsplit, urljoin
+from urllib.parse import urlsplit
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 ALLOWED_HOSTS = {'www.usbank.com', 'onlinebanking.usbank.com'}
@@ -42,8 +42,6 @@ URLS = {
     "home": f"{BASE}/",
 
     "login": f"{PUBLIC}/",
-
-
 
 
     "documents": f"{BASE}/digital/servicing/shellapp/#/highvolume/edocs/statements",
@@ -134,16 +132,6 @@ FALLBACK = {
                   ".pagination-next, [class*='next']"),
     "show_more": "button, a",
 }
-
-
-ROW_CONTROL_SEL = ("a[href$='.pdf'], a[download], "
-                   "a[aria-label*='statement' i], a[aria-label*='download' i], "
-                   "button[aria-label*='statement' i], button[aria-label*='download' i], "
-                   "button[aria-label*='view' i], "
-                   "a:has-text('Download'), a:has-text('View'), "
-                   "button:has-text('Download'), button:has-text('View'), "
-                   "button:has-text('PDF'), a:has-text('PDF')")
-ROW_CONTROL_FALLBACK_SEL = "button, a"
 
 
 DATE_PATTERNS = [
@@ -468,8 +456,6 @@ def collect_documents(page) -> List[RawDoc]:
     for i, r in enumerate(rows):
         title = _html.unescape(r.get("title", "")).strip() or "Statement"
         date_text = r.get("date_text", "")
-
-
 
 
         key = (title, date_text, i)
@@ -851,8 +837,6 @@ def select_period(page, year: str) -> bool:
         page.wait_for_timeout(1000)
 
 
-
-
         opt = page.get_by_role("option", name=re.compile(rf"^\s*{year}\b"))
         if opt.count() == 0:
             page.keyboard.press("Escape")
@@ -1158,7 +1142,6 @@ def _row_download_button(row):
 def find_row_control(page, date: str, account: str = ""):
 
 
-
     rx = row_label_re(date)
     for row, heading in _statement_rows(page):
         if account and account_in_heading(heading) not in ("", account):
@@ -1272,8 +1255,6 @@ def probe_statements_api(page) -> dict:
     try:
         ensure_statements(page)
         page.wait_for_timeout(1500)
-
-
 
 
         newest = (period_options(page) or [""])[0]

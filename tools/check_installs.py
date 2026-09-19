@@ -1,15 +1,15 @@
 """Compare standalone installs against this repo, and report drift.
 
 The apps used to be thirteen independent copies of the same support code, and
-the copies quietly drifted apart — some predated features others had. The
+the copies quietly drifted apart, some predated features others had. The
 shared core removed the duplication, and this script is what keeps it removed:
 run it against a folder of installs to see, at a glance, whether any of them
 has fallen behind the repo or is running a stale core.
 
     python tools/check_installs.py "D:\\path\\to\\your\\installs"
 
-Only code is compared. Nothing that IS an install — config.json, progress and
-discovery state, the CSVs, the PDFs, the browser profile — is read or
+Only code is compared. Nothing that IS an install, config.json, progress and
+discovery state, the CSVs, the PDFs, the browser profile, is read or
 reported, so this is safe to run against a private archive and safe to paste
 the output of.
 """

@@ -81,7 +81,7 @@ def test_document_controls_are_allowed(control):
     assert site.is_safe_control(control) is True
 
 
-def test_unrecognised_controls_are_refused():
+def test_unrecognized_controls_are_refused():
     """Deny by default: not on the allowlist means not clicked."""
     for name in ("Do The Thing", "Continue", "", "   ", "Next"):
         assert site.is_safe_control(name) is False

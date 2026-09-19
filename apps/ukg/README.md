@@ -3,7 +3,7 @@
 Downloads your **pay statements** from your employer's UKG site and saves them
 as PDFs, plus an index CSV:
 
-- `UKG Document Index.csv` — one row per downloaded PDF
+- `UKG Document Index.csv`, one row per downloaded PDF
 
 Everything runs **locally**. Nothing is sent to any external AI API or
 third-party service. You sign in to UKG **yourself**; the tool never touches
@@ -12,7 +12,7 @@ your credentials, your SSO, or any verification prompt.
 > ⚠️ **Pay statements are the most sensitive documents this project handles.**
 > They typically carry your full name, home address, employer, salary, tax
 > withholding, and often the last four digits of a bank account. The index CSV
-> deliberately records none of that — only what is needed to find and verify a
+> deliberately records none of that, only what is needed to find and verify a
 > file locally. Never commit the PDFs, the CSV, or your `config.json`.
 
 ## First: tell it where your UKG lives
@@ -31,7 +31,7 @@ address you see in your browser once you are signed in. It is not in the code
 on purpose: it varies per employer, and it identifies your employer, so it
 stays out of the repo.
 
-## Signing in — however your company does it
+## Signing in, however your company does it
 
 Some companies use a UKG username and password. Others hand off to corporate
 single sign-on (Okta, Microsoft Entra/Azure AD, Ping, and so on), often with
@@ -60,13 +60,13 @@ browsers can be open at once.
 
 ## Where files land
 
-- `Pay Statements\` — the pay stubs
-- `Manual Review\` — anything that failed validation
+- `Pay Statements\`, the pay stubs
+- `Manual Review\`, anything that failed validation
 
 **Not yet: W-2s and other tax forms.** They live in a different part of UKG
 (Menu → Myself → Pay → Tax Forms / W-2), which this app does not read yet.
 The routing and the classification rules for them are already in place, so
-adding them is a change to `ukg_site.py` alone — a `Tax Documents\` folder
+adding them is a change to `ukg_site.py` alone, a `Tax Documents\` folder
 appears the moment one is actually downloaded.
 
 ## Safety
@@ -75,7 +75,7 @@ appears the moment one is actually downloaded.
   blocklist *and* matches the document allowlist. On a payroll site the
   blocklist matters more than anywhere else in this project: direct deposit,
   bank/routing details, W-4 withholding, address and password changes, benefit
-  enrolment, time-off requests and timecard submission are all explicitly
+  enrollment, time-off requests and timecard submission are all explicitly
   refused, and anything unrecognized is refused too.
 - You sign in; the tool never handles credentials, SSO, or MFA.
 - Sequential processing with polite randomized delays.

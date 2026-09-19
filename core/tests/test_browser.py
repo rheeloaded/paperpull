@@ -1,6 +1,6 @@
 """Browser discovery across platforms.
 
-The paths are faked so the same assertions run on any OS — this checks the
+The paths are faked so the same assertions run on any OS, this checks the
 lookup logic and the ordering, which is what actually differs between
 Windows, macOS and Linux.
 """
@@ -330,7 +330,7 @@ def test_the_wording_says_their_own_profile_is_not_used():
 
 # -- bugs found in review, before 1.0 ---------------------------------------
 
-def test_other_chromium_browsers_are_recognised(monkeypatch):
+def test_other_chromium_browsers_are_recognized(monkeypatch):
     """The message offered to drive "Chrome, Edge, Brave or any other
     Chromium-based browser" while the detector only ever looked for Chrome and
     Edge. Somebody running Brave was pushed into a 400 MB download of a browser

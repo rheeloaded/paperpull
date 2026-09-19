@@ -279,7 +279,7 @@ def test_only_a_discovered_app_can_be_removed(templates, settings, tmp_path):
     home = tmp_path / "home"
     _create({"root": str(home), "providers": ["bank"]})
     (tmp_path / "elsewhere").mkdir()
-    for name in ("../elsewhere", "..\elsewhere", "elsewhere", "Removed", ""):
+    for name in ("../elsewhere", r"..\elsewhere", "elsewhere", "Removed", ""):
         with pytest.raises(fastapi.HTTPException) as e:
             _remove({"app": name})
         assert e.value.status_code == 404, name

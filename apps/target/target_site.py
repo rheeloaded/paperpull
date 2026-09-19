@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
@@ -301,7 +301,7 @@ YEAR_OPTION_RE = re.compile(
 def get_year_options(page) -> List[str]:
     """Return the year / date-range options of a real <select> filter, if one
     exists. Target's current history page uses 'Load more purchases' instead,
-    so this usually returns [] — that's fine and handled by the caller."""
+    so this usually returns [], that's fine and handled by the caller."""
     try:
         for select in page.locator("select").all():
             options = [o.strip() for o in select.locator("option").all_inner_texts()]
@@ -316,7 +316,7 @@ def get_year_options(page) -> List[str]:
 
 def select_year_option(page, option_text: str) -> bool:
     """Choose a year / date-range option in the <select> filter that
-    get_year_options() found. Select elements only — never clicks buttons."""
+    get_year_options() found. Select elements only, never clicks buttons."""
     try:
         for select in page.locator("select").all():
             options = select.locator("option").all_inner_texts()
@@ -561,7 +561,7 @@ _NON_ITEM_NAME_RE = re.compile(
     r"start a return|buy it again|rate & review|get help|view your receipt|"
     r"purchased on|placed at)", re.I)
 _LOCATION_LINE_RE = re.compile(r"^[A-Z][A-Za-z .'-]+,\s*[A-Z]{2}(\s+\d{5})?$")
-# "Jul 22, 4:48 PM" / "Tue, Jul 21" — date-ish lines with no year
+# "Jul 22, 4:48 PM" / "Tue, Jul 21", date-ish lines with no year
 _MONTH_DAY_RE = re.compile(
     r"^((Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?"
     r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b", re.I)
@@ -784,7 +784,7 @@ def find_invoice_controls(page) -> list:
 
 def find_printing_frame(page, wait_ms: int = 6000):
     """Find the hidden iframe from which Target called print() (suppressed by
-    our init script — the flag is set on the iframe's own window). Falls back
+    our init script, the flag is set on the iframe's own window). Falls back
     to any iframe holding substantial receipt content."""
     rounds = max(1, wait_ms // 500)
     for _ in range(rounds):

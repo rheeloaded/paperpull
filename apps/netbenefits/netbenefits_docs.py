@@ -74,9 +74,9 @@ class Document:
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
         self.document_id = document_id  # unused here, identity is subject + date
-        self.item_id = item_id          # mailboxItemId, a hint only, re-resolved
+        self.item_id = item_id          # the statement period, a hint only, re-resolved
         self.client_id = client_id      # goes with it on the content call
-        self.occurrence = occurrence    # nth message with this subject and date
+        self.occurrence = occurrence    # nth document with this title and date
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -94,9 +94,8 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Kind, account and date, never the hub id. The id is looked up fresh
-        at download time. myPay's ids died with the session, and there is no
-        reason to find out the hard way whether Fidelity's do."""
+        """Kind, plan and period. There is no document id to store. The
+        statement is made to order from the period at download time."""
         base = f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}"
         return base if not self.occurrence else f"{base}#{self.occurrence}"
 
@@ -301,14 +300,14 @@ class App:
 
 
     def _record_statement_doc(self, d: dict, occurrence: int = 0) -> int:
-        """Record one hub row {title, date, account, category, item_id, client_id}. Returns 1 if new."""
+        """Record one statement period {title, date, account, category, item_id, client_id}. Returns 1 if new."""
         title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
             return 0
         category, summary, confidence = doc_types.classify_document(title, self.rules)
         if d.get("category"):
-            # The hub says which kind a document is. Rules only choose the
+            # The period says which kind a statement is. Rules only choose the
             # wording inside the filename.
             category = d["category"]
             if category == storage.STATEMENT and summary in ("", "Other Document"):
@@ -357,9 +356,9 @@ class App:
                 return 0
         self.check_session(page)
 
-        # The mailbox, read through its own API. Two messages can share a
-        # subject and a date (an annual statement and its supplement, say),
-        # so the nth such pair is keyed with its position.
+        # The statement periods, worked out from the plan's dates. Two can
+        # share a title and a date (a quarter and its last month, say), so
+        # the nth such pair is keyed with its position.
         raw = site.collect_documents(page, keep=scope.period_filter(self.args, self.config),
                                      config=self.config)
         log.info("NetBenefits: %d statement period(s)", len(raw))
@@ -471,9 +470,9 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Each PDF is the attachment on a mailbox message, fetched through
-        # the same API the page uses, from inside the page. Nothing is
-        # clicked. The message is looked up again by subject and date first.
+        # Each PDF is the statement the page builds to order for that
+        # period, posted from inside the page and rendered. Nothing is
+        # clicked. The period is looked up again by title and date first.
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
@@ -679,7 +678,7 @@ class App:
             info["mapped"] = not getattr(site, "NOT_MAPPED", "")
             # The survey stays, for the day the site changes. Read only,
             # fidelity.com pages only, the only links it follows are the few whose
-            # text is exactly a document or mailbox word, account numbers
+            # text is exactly a document word, account numbers
             # are masked and JSON bodies are recorded as shape only.
             info["survey"] = site.survey(page)
             try:
