@@ -41,10 +41,11 @@ English (`language=en_GB`), which Amazon accepts and remembers, so the
 labels the parser reads stay the ones it knows. The order-history and
 printable-summary pages have the same paths on every store.
 
-What is the same. The receipt saved is Amazon's printable order summary. On
-some stores that is not a legal invoice. If you need the invoice PDFs Amazon
-offers under an order's Invoice menu, that is a different capture and not
-yet supported, say so in an issue.
+What is the same. Where an order's Invoice menu (Rechnung on amazon.de)
+offers an invoice PDF, that PDF is what is saved, since on stores such as
+amazon.de it is the legal invoice. Orders without one get the printable
+order summary instead. An account whose language is set to German gets that
+summary in German whatever the URL asks for, so German labels are read too.
 
 Tested by the maintainer on `amazon.com` only. `amazon.co.uk` was confirmed
 working by a user. The rest follow the same rules and are expected to work,
@@ -87,11 +88,17 @@ python amazon_receipts.py --all --start-date 2024-01-01 --max-purchases 100
 
 ## How receipts are captured
 
-Amazon exposes a dedicated printable invoice at
-`/gp/css/summary/print.html?orderID=<id>`. The tool navigates straight there
-and renders it with Chromium's `printToPDF`. No buttons are clicked and the
-native print dialog is never involved. Files land in `Online\` as
-`YYYY-MM-DD Amazon <Category> Receipt.pdf`.
+The tool reads each order's Invoice menu (`/your-orders/invoice/popover?orderId=<id>`)
+and downloads any invoice PDF it links (`/documents/download/<id>/invoice.pdf`)
+as Amazon issued it, saved as `YYYY-MM-DD Amazon <Category> Invoice.pdf`. An
+order split across sellers can have several, saved as `(1 of 2)`, `(2 of 2)`.
+
+Orders with no invoice PDF fall back to Amazon's printable order summary at
+`/gp/css/summary/print.html?orderID=<id>`, rendered with Chromium's
+`printToPDF` and saved as `YYYY-MM-DD Amazon <Category> Receipt.pdf`.
+
+Either way no buttons are clicked and the native print dialog is never
+involved. Files land in `Online\`.
 
 Canceled orders are recorded in the CSVs with no PDF (nothing to print).
 
