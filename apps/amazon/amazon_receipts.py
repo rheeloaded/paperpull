@@ -544,6 +544,14 @@ class App:
                 self.stats["manual_review"] += 1
                 return False
 
+        # Prefer the invoice PDF(s) behind the order's Invoice / Rechnung menu:
+        # on stores such as amazon.de that is the legal invoice, where the
+        # printable summary is not. Orders without one fall through to the
+        # summary below.
+        invoices = site.find_invoice_pdf_links(page, purchase.order_number)
+        if invoices:
+            return self._save_invoices(page, purchase, invoices)
+
         # Make sure we are on the printable summary (not a details page).
         if "summary/print.html" not in (page.url or ""):
             page.goto(site.print_invoice_url(purchase.order_number),
@@ -584,6 +592,62 @@ class App:
             self.stats["failed"] += 1
             return False
 
+    def _save_invoices(self, page, purchase: Purchase, invoices: list) -> bool:
+        """Download the order's invoice PDF(s) as Amazon issued them. The
+        first is the order's document of record and goes through the full
+        validation; an order split across sellers has more than one, and the
+        others are saved beside it as "(2 of 3)" and so on."""
+        purchase.document_type = "Invoice"
+        folder = self.paths.online
+        n = len(invoices)
+
+        def target(i: int) -> Path:
+            filename = build_pdf_filename(purchase.purchase_date, purchase.summary,
+                                          purchase.document_type, part=(i, n))
+            path = unique_path(folder, filename, self.config["max_path_length"])
+            if path.name != filename:
+                self.stats["duplicate_filenames"] += 1
+            return path
+
+        self._record_state(purchase, State.RECEIPT_LOCATED)
+        purchase.receipt_url = site.invoice_popover_url(purchase.order_number)
+
+        out_path = target(1)
+        _, first_url = invoices[0]
+        if not site.download_invoice_pdf(page, first_url, out_path):
+            self._record_state(purchase, State.FAILED,
+                               notes="Invoice PDF download failed")
+            self.stats["failed"] += 1
+            print("  Invoice PDF download failed.")
+            return False
+        if not self._finish_pdf(page, purchase, out_path, reprint=False):
+            return False
+
+        extra_names = []
+        tokens = receipt_pdf.expected_tokens_for(purchase)
+        for i, (label, url) in enumerate(invoices[1:], start=2):
+            extra = target(i)
+            if not site.download_invoice_pdf(page, url, extra):
+                log.warning("Additional invoice (%s) download failed for %s",
+                            label, purchase.key)
+                continue
+            result = receipt_pdf.validate_pdf(extra, self.config["min_pdf_bytes"], tokens)
+            if not result.ok:
+                quarantine = unique_path(self.paths.manual_review, extra.name,
+                                         self.config["max_path_length"])
+                extra.replace(quarantine)
+                print(f"  !! Additional invoice failed validation ({result.reason}); "
+                      f"moved to Manual Review.")
+                continue
+            extra_names.append(extra.name)
+            self.stats["new_files"].append(str(extra))
+        if extra_names:
+            purchase.receipt_count = 1 + len(extra_names)
+            self._record_state(purchase, State.PDF_VERIFIED,
+                               notes="Also saved: " + ", ".join(extra_names),
+                               extra={"receipt_count": purchase.receipt_count})
+        return True
+
     def _capture_document(self, target_page, purchase: Purchase,
                           out_path: Path, content_kind: str = "") -> None:
         """Render the receipt/invoice Amazon presents, to PDF.
@@ -622,16 +686,19 @@ class App:
         receipt_pdf.print_page_to_pdf(target_page, out_path)
 
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
-                    popup=None, source_page=None) -> bool:
+                    popup=None, source_page=None, reprint: bool = True) -> bool:
         purchase.pdf_path = str(out_path)
         purchase.pdf_filename = out_path.name
         self._record_state(purchase, State.PDF_SAVED)
 
         tokens = receipt_pdf.expected_tokens_for(purchase)
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
+        # A downloaded invoice is not re-printed: printing the page on screen
+        # would replace Amazon's PDF with a different document.
         if not result.ok:
-            log.warning("Validation failed (%s); retrying once", result.reason)
             self.stats["validation_failures"] += 1
+        if not result.ok and reprint:
+            log.warning("Validation failed (%s); retrying once", result.reason)
             try:
                 retry_page = source_page or page
                 receipt_pdf.print_page_to_pdf(retry_page, out_path)

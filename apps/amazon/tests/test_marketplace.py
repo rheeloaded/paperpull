@@ -126,3 +126,119 @@ def test_the_config_key_reaches_the_site_module(tmp_path, monkeypatch):
     src = Path(amazon_receipts.__file__).read_text(encoding="utf-8")
     head = src.split("def __init__(self, args):")[1].split("self.paths = ")[0]
     assert 'site.set_marketplace(self.config.get("marketplace"))' in head
+
+
+# -- amazon.de: German summary and the invoice PDF -----------------------------------
+
+# A German-language amazon.de account gets the printable summary in German even
+# when English is asked for. A made-up order in that layout.
+GERMAN_SUMMARY = """Bestellübersicht
+Bestellung aufgegeben 14. März 2025  Bestellnummer 306-1234567-7654321
+Drucken
+Zahlungsart
+Bestellübersicht
+Zwischensumme:
+10,08 €
+Verpackung & Versand:
+0,00 €
+Gesamt vor USt.:
+10,08 €
+Geschätzte USt.:
+1,91 €
+Summe:
+11,99 €
+Gesamtsumme: 
+11,99 €
+Zugestellt: 18. März
+Paket wurde an einem sicheren Ort abgegeben
+Tischlampe mit Klemmhalterung, schwarz
+Verkauf durch: Amazon.de
+Widerruf, Rückgabe oder Ersatz: Berechtigt bis zum 17. April 2025
+11,99€
+11,99€
+Zurück zum Seitenanfang
+"""
+
+
+class _Body:
+    def __init__(self, text):
+        self.text = text
+
+    def inner_text(self, timeout=None):
+        return self.text
+
+
+class _Page:
+    url = "https://www.amazon.de/gp/css/summary/print.html?orderID=306-1234567-7654321"
+
+    def __init__(self, text):
+        self.body = _Body(text)
+
+    def locator(self, _sel):
+        return self.body
+
+
+def test_a_german_printable_summary_is_recognised_and_read():
+    from paperpull_core.models import ONLINE, Purchase
+    site.set_marketplace("amazon.de")
+    page = _Page(GERMAN_SUMMARY)
+    assert site.receipt_is_present(page)
+    p = site.extract_details(page, Purchase(purchase_type=ONLINE, order_number="306-1234567-7654321"))
+    assert p.purchase_date == "2025-03-14"
+    assert p.total == "€11.99"
+    assert [i.name for i in p.items] == ["Tischlampe mit Klemmhalterung, schwarz"]
+    assert p.items[0].line_total == "€11.99"
+
+
+POPOVER = ('<ul><li><a class="a-link-normal" href="/gp/css/summary/print.html?orderID=306-1&amp;ref=x">'
+           'Druckbare Bestellübersicht</a></li><li><a class="a-link-normal" '
+           'href="/documents/download/00000000-0000-4000-8000-000000000001/invoice.pdf">Rechnung</a></li></ul>')
+
+
+class _Resp:
+    def __init__(self, url, text):
+        self.url, self._text, self.ok = url, text, True
+
+    def text(self):
+        return self._text
+
+
+class _PopoverPage:
+    def __init__(self, text):
+        test = self
+
+        class _Request:
+            def get(self, url, **kw):
+                test.requested = url
+                return _Resp(url, text)
+
+        class _Context:
+            request = _Request()
+
+        self.context = _Context()
+
+
+def test_the_invoice_menu_yields_the_pdf_and_not_the_printable_summary():
+    site.set_marketplace("amazon.de")
+    page = _PopoverPage(POPOVER)
+    links = site.find_invoice_pdf_links(page, "306-1")
+    assert page.requested == "https://www.amazon.de/your-orders/invoice/popover?orderId=306-1&language=en_GB"
+    assert links == [("Rechnung", "https://www.amazon.de/documents/download/"
+                                  "00000000-0000-4000-8000-000000000001/invoice.pdf")]
+
+
+def test_an_order_with_only_the_printable_summary_has_no_invoice_links():
+    site.set_marketplace("amazon.de")
+    assert site.find_invoice_pdf_links(_PopoverPage(POPOVER.split("<li><a class=\"a-link-normal\" href=\"/documents")[0]), "306-1") == []
+
+
+def test_invoice_links_are_found_when_the_site_language_adds_a_prefix():
+    # With the amazon.de UI switched to English every link gains /-/en/.
+    site.set_marketplace("amazon.de")
+    english = ('<a class="a-link-normal" href="/-/en/gp/css/summary/print.html?orderID=303-1&amp;ref=x">'
+               'Printable Order Summary</a><a class="a-link-normal" '
+               'href="/-/en/documents/download/00000000-0000-4000-8000-000000000002/invoice.pdf">Invoice</a>'
+               '<a class="a-link-normal" href="/-/en/gp/help/contact/contact.html?orderID=303-1">Request Invoice</a>')
+    assert site.find_invoice_pdf_links(_PopoverPage(english), "303-1") == [
+        ("Invoice", "https://www.amazon.de/-/en/documents/download/"
+                    "00000000-0000-4000-8000-000000000002/invoice.pdf")]

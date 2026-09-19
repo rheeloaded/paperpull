@@ -125,6 +125,12 @@ def print_invoice_url(order_id: str) -> str:
     return _with_language(f"{BASE}/gp/css/summary/print.html?orderID={order_id}")
 
 
+def invoice_popover_url(order_id: str) -> str:
+    """The fragment behind an order's Invoice / Rechnung menu. It links the
+    printable summary and, where Amazon issued one, the invoice PDF(s)."""
+    return _with_language(f"{BASE}/your-orders/invoice/popover?orderId={order_id}")
+
+
 def order_details_url(order_id: str) -> str:
     return _with_language(f"{BASE}/gp/your-account/order-details?orderID={order_id}")
 
@@ -146,6 +152,12 @@ RECEIPT_SECTION_RE = re.compile(r"(invoice|receipt|order\s+summary)", re.I)
 PRINT_RECEIPT_RE = re.compile(r"(printable\s+order\s+summary|print\s+invoice|"
                               r"view\s+invoice|invoice)", re.I)
 GIFT_RECEIPT_RE = re.compile(r"gift\s+receipt", re.I)
+# A signed-in amazon.de account set to German gets German pages whatever
+# ?language= asks for (seen 2026-09),
+# so the labels the parser reads are matched in German as well.
+TOTAL_LABEL_RE = r"(grand\s+total|order\s+total|item\s+subtotal|gesamtsumme|zwischensumme)"
+ORDER_PLACED_RE = r"(order\s+placed|bestellung\s+aufgegeben)"
+SOLD_BY_RE = r"^(sold\s+by|verkauf\s+durch)\s*:"
 INVOICE_RE = re.compile(r"(view|print|download)?\s*invoice", re.I)
 SIGN_IN_RE = re.compile(r"^\s*sign\s*in\s*$", re.I)
 
@@ -592,7 +604,11 @@ _NON_ITEM_NAME_RE = re.compile(
     r"gift\s+card|estimated|of\s+items?|order\s+placed|items?\s+ordered|"
     r"order\s+summary|ship\s+to|back\s+to\s+top|print$|view\s+related|"
     r"return\s+window|united\s+states|united\s+kingdom|deutschland|germany|"
-    r"english\b|order\s*#)", re.I)
+    r"english\b|order\s*#|"
+    # the same boilerplate on a German summary
+    r"verkauf\s+durch|zwischensumme|verpackung\s+&|gesamt|geschätzte\s+ust|"
+    r"summe\s*:|versandadresse|zahlungsart|bestellung\s+aufgegeben|"
+    r"bestellübersicht|zugestellt|widerruf|zurück\s+zum)", re.I)
 
 # Address-ish lines that appear in the Ship-to block.
 _ADDRESS_LINE_RE = re.compile(
@@ -633,7 +649,7 @@ def extract_details(page, purchase: Purchase) -> Purchase:
     # "Order Placed: January 5, 2025"
     placed = None
     for line in body.splitlines():
-        if re.search(r"order\s+placed", line, re.I):
+        if re.search(ORDER_PLACED_RE, line, re.I):
             placed = parse_date(line)
             if placed:
                 break
@@ -645,7 +661,7 @@ def extract_details(page, purchase: Purchase) -> Purchase:
     # shows "Grand Total: $0.00" — keep the order-history total in that case
     # so the receipt index still reflects what the order was worth.
     total = ""
-    for label in (r"grand\s+total", r"order\s+total"):
+    for label in (r"grand\s+total", r"order\s+total", r"gesamtsumme"):
         total = amount_after(label, body, 40)
         if total:
             break
@@ -729,7 +745,7 @@ def _parse_items_from_summary_text(body: str) -> List[Item]:
     # --- layout 1 (current) ------------------------------------------------
     lines = [l.strip() for l in body.splitlines()]
     for i, line in enumerate(lines):
-        if not re.match(r"^sold\s+by\s*:", line, re.I):
+        if not re.match(SOLD_BY_RE, line, re.I):
             continue
         # title = nearest preceding plausible product line
         title = ""
@@ -841,10 +857,72 @@ def receipt_is_present(page) -> bool:
         body = page.locator("body").inner_text(timeout=8000)
     except Exception:
         return False
-    if ORDER_ID_RE.search(body) and re.search(
-            r"(grand\s+total|order\s+total|item\s+subtotal)", body, re.I):
+    if ORDER_ID_RE.search(body) and re.search(TOTAL_LABEL_RE, body, re.I):
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Invoice PDFs — the legal invoice behind an order's Invoice / Rechnung menu
+# ---------------------------------------------------------------------------
+
+# Verified on amazon.de 2026-09: the popover links
+#   /documents/download/<uuid>/invoice.pdf   ("Rechnung")
+# served from the store's own host as application/pdf. The uuid is minted per
+# request, so links are fetched and used right away, never stored. With the
+# site switched to another language the same links carry a prefix,
+# /-/en/documents/download/..., which is kept as served.
+INVOICE_PDF_HREF_RE = re.compile(
+    r'href="((?:/-/[a-z]{2}(?:[_-][A-Za-z]{2})?)?/documents/download/[0-9A-Za-z-]+/[^"?#]+\.pdf)"'
+    r'[^>]*>(.*?)</a>',
+    re.I | re.S)
+
+
+def find_invoice_pdf_links(page, order_id: str) -> List[Tuple[str, str]]:
+    """(label, absolute url) for each invoice PDF Amazon offers for the order.
+    A plain GET of the popover fragment with the signed-in session; nothing on
+    the page is clicked. Empty when the order has only the printable summary."""
+    try:
+        resp = page.context.request.get(invoice_popover_url(order_id),
+                                        max_redirects=3, timeout=30000)
+    except Exception as e:
+        log.warning("invoice popover fetch failed: %s", str(e).splitlines()[0][:100])
+        return []
+    if not resp.ok or not is_safe_url(resp.url):
+        return []
+    out, seen = [], set()
+    for m in INVOICE_PDF_HREF_RE.finditer(resp.text()):
+        url = BASE + _html.unescape(m.group(1))
+        if url in seen or not is_safe_url(url):
+            continue
+        seen.add(url)
+        label = _html.unescape(re.sub(r"<[^>]+>|\s+", " ", m.group(2))).strip()
+        out.append((label, url))
+    return out
+
+
+def download_invoice_pdf(page, url: str, out_path) -> bool:
+    """Fetch one invoice PDF with the signed-in session and write it. False,
+    with nothing written, unless the answer is a PDF from the store's host."""
+    from pathlib import Path
+    if not is_safe_url(url):
+        return False
+    try:
+        resp = page.context.request.get(url, max_redirects=3, timeout=90000)
+    except Exception as e:
+        log.warning("invoice download failed: %s", str(e).splitlines()[0][:100])
+        return False
+    if not resp.ok or not is_safe_url(resp.url):
+        log.warning("invoice download returned %s", resp.status)
+        return False
+    body = resp.body()
+    if not body.startswith(b"%PDF"):
+        log.warning("invoice download was not a PDF (%d bytes)", len(body))
+        return False
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(body)
+    return True
 
 
 def open_receipt_section(page) -> bool:
