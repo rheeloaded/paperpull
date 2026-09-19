@@ -29,6 +29,7 @@ from datetime import date, datetime
 import re
 import shutil
 import subprocess
+from typing import Optional
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -402,6 +403,95 @@ def api_export_providers():
         return {"available": True, "providers": mod.providers(apps_root())}
     except Exception as e:
         return {"available": False, "providers": [], "reason": str(e).splitlines()[0][:120]}
+
+
+def _transactions_tool() -> Optional[Path]:
+    """tools/export_transactions.py, wherever this deployment keeps it. It
+    runs as a subprocess rather than in-process, because reading hundreds
+    of PDFs takes minutes and the page wants to watch it happen."""
+    for cand in (HERE.parent / "tools" / "export_transactions.py",
+                 apps_root() / "export_transactions.py",
+                 apps_root().parent / "export_transactions.py",
+                 HERE.parent / "export_transactions.py"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+@app.get("/api/export/transactions/providers", dependencies=[Depends(_same_origin_only)])
+def api_export_transactions_providers():
+    """Statement archives with PDFs on disk, the ones a transactions
+    workbook can be built from."""
+    tool = _transactions_tool()
+    if tool is None:
+        return {"available": False, "providers": [], "reason": "export_transactions.py was not found next to this control panel."}
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location("paperpull_export_tx", tool)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return {"available": True, "providers": mod.providers(apps_root())}
+    except Exception as e:
+        return {"available": False, "providers": [], "reason": str(e).splitlines()[0][:120]}
+
+
+@app.get("/api/export/transactions", dependencies=[Depends(_same_origin_only)])
+def api_export_transactions(provider: str = "", csv: str = ""):
+    """Build the transactions workbook, streaming the tool's progress the
+    way a run streams. Only a provider the tool itself lists may be named."""
+    tool = _transactions_tool()
+    if tool is None:
+        raise HTTPException(404, "export_transactions.py was not found next to this control panel.")
+    provider = (provider or "").strip()
+    if provider:
+        known = {p["provider"].lower(): p["provider"]
+                 for p in api_export_transactions_providers().get("providers", [])}
+        if provider.lower() not in known:
+            raise HTTPException(400, f"no statement archive for {provider!r}")
+        provider = known[provider.lower()]
+    cmd = [sys.executable, str(tool), "--root", str(apps_root())]
+    if provider:
+        cmd += ["--provider", provider]
+    if csv in ("1", "true", "yes"):
+        cmd += ["--csv"]
+
+    async def stream():
+        global _LAST_EXPORT
+        yield f"data: $ export_transactions.py {' '.join(cmd[3:])}\n\n"
+        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+        try:
+            proc = subprocess.Popen(cmd, cwd=str(tool.parent), stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                    encoding="utf-8", errors="replace", bufsize=1, env=env)
+        except Exception as e:
+            yield f"data: [failed to start] {e}\n\n"
+            yield "event: done\ndata: 1\n\n"
+            return
+        wrote = None
+        try:
+            while True:
+                line = await to_thread.run_sync(proc.stdout.readline)
+                if not line:
+                    break
+                if line.startswith("Wrote "):
+                    wrote = line[6:].strip()
+                yield f"data: {line.rstrip()}\n\n"
+            code = await to_thread.run_sync(proc.wait)
+            if code == 0 and wrote:
+                _LAST_EXPORT = Path(wrote)
+                yield f"event: result\ndata: {json.dumps({'path': wrote})}\n\n"
+            yield f"event: done\ndata: {code}\n\n"
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            if proc.stdout:
+                proc.stdout.close()
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only)])
@@ -1070,6 +1160,19 @@ HTML = r"""<!doctype html>
        <button onclick="buildSpreadsheet(true)">Build CSV instead</button>
        <button id="xlreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
     <div id="xlbody"></div>
+    <h3 style="margin:26px 0 6px; font-size:15px">Statements</h3>
+    <p class="hint" style="margin-top:0">The transactions inside your statement PDFs, one row
+       each, with a Statements sheet that says whether every statement adds up. Each PDF is
+       read once and remembered, so the first build takes a few minutes for a big archive and
+       the next takes seconds. Money in is positive, money out is negative, for a bank account
+       and a card alike. A statement that does not reconcile is still exported, with the
+       difference shown, so you know which rows to doubt.</p>
+    <p><select id="txprovider" style="width:auto; min-width:220px; display:inline-block; margin-right:8px"></select>
+       <span class="hint" id="txnote"></span></p>
+    <p><button class="primary" id="txbuild" onclick="buildTransactions(false)">Build transactions workbook</button>
+       <button id="txcsv" onclick="buildTransactions(true)">Build CSV instead</button>
+       <button id="txreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
+    <pre class="console" id="txlog" style="max-height:220px; display:none"></pre>
   </div>
   </div>
 </main>
@@ -1216,6 +1319,36 @@ async function loadExportProviders() {
     : 'No receipt archive found under this folder. Amazon, Target, Walmart and Gap write one after a run.';
   $('xlbuild').disabled = !provs.length;
 }
+async function loadTransactionProviders() {
+  const sel = $('txprovider'); sel.innerHTML = '';
+  let d;
+  try { d = await (await fetch('/api/export/transactions/providers')).json(); }
+  catch (e) { d = {available: false, providers: []}; }
+  const provs = d.providers || [];
+  sel.append(new Option('All statement archives', ''));
+  for (const p of provs) sel.append(new Option(p.provider + ' (' + p.pdfs + ' PDFs)', p.provider));
+  $('txnote').textContent = provs.length
+    ? 'Archives with PDFs on disk, ' + provs.map(p => p.provider).join(', ') + '.'
+    : (d.reason || 'No statement PDFs on disk under this folder.');
+  $('txbuild').disabled = !provs.length; $('txcsv').disabled = !provs.length;
+}
+let txes = null;
+function buildTransactions(asCsv) {
+  if (txes) txes.close();
+  const log = $('txlog'); log.textContent = ''; log.style.display = 'block';
+  $('txreveal').style.display = 'none';
+  $('txbuild').disabled = true; $('txcsv').disabled = true;
+  const q = new URLSearchParams({provider: $('txprovider').value, csv: asCsv ? '1' : ''});
+  txes = new EventSource('/api/export/transactions?' + q.toString());
+  txes.onmessage = e => { log.textContent += e.data + '\n'; log.scrollTop = log.scrollHeight; };
+  txes.addEventListener('result', e => { $('txreveal').style.display = ''; });
+  txes.addEventListener('done', e => {
+    txes.close(); txes = null;
+    $('txbuild').disabled = false; $('txcsv').disabled = false;
+    if (e.data !== '0') log.textContent += '(ended with code ' + e.data + ')\n';
+  });
+  txes.onerror = () => { if (txes) { txes.close(); txes = null; } $('txbuild').disabled = false; $('txcsv').disabled = false; };
+}
 async function buildSpreadsheet(asCsv) {
   $('xlbody').textContent = 'building...';
   $('xlreveal').style.display = 'none';
@@ -1249,7 +1382,7 @@ function showTab(which) {
   $('tabst').className  = isSt ? 'on' : '';
   $('tabxl').className  = isXl ? 'on' : '';
   if (isSt && !STATUS_LOADED) loadStatus();
-  if (isXl && !XL_LOADED) loadExportProviders();
+  if (isXl && !XL_LOADED) { loadExportProviders(); loadTransactionProviders(); }
 }
 
 function pillClass(s) {
