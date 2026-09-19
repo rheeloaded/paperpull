@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.23.0] - 2026-09-19
 
 ### Added
 - **Affirm**, the 31st provider. One loan agreement per loan, the Truth in
@@ -27,6 +27,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a PDF, which the portal's FAQ says too, so the archive grows a bill a
   quarter. Run against a real account, four bills saved, one the host no
   longer held. CDP port 9250.
+- **The Microsoft Store playbook.** `docs/microsoft-store.md` is the
+  paint.net model applied to PaperPull, a $2.99 Store edition that is the
+  same program as the free GitHub build, signed by the Store and updated
+  through it. It covers the developer account, the name reservation, the
+  four repository variables that carry the package identity, the
+  submission section by section with the listing text and certification
+  notes ready to paste, and the policy reasoning for an individual
+  account and for charging for open source. Screenshots under
+  `docs/store/`.
 
 ### Changed
 - **Amazon saves the real invoice PDF where there is one.** Each order's
