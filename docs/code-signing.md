@@ -13,6 +13,12 @@ Windows shows its SmartScreen prompt the first time the installer runs, and
 the release notes say so. When it is granted this page and the README will
 carry the attribution SignPath asks for.
 
+**The Microsoft Store edition is signed by the Store.** The same build
+produces an unsigned `.msix`, and the Store signs it with Microsoft's
+certificate on submission, so a Store install shows no warning. That
+edition costs $2.99 and is otherwise the same program. How the listing is
+made is in [microsoft-store.md](microsoft-store.md).
+
 ## How a release is built
 
 Nothing that ships is built on a developer's machine.

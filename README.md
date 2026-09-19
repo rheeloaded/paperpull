@@ -312,7 +312,15 @@ tab has this too, under Statements, streaming its progress.
 `PaperPull-<version>-setup.exe` for Windows, which installs the control
 panel, the shared core and every provider into your own user folder with no
 admin rights and no Python on the machine, and `PaperPull-<version>.zip`, the
-same folder for anyone who would rather not run an installer. For macOS
+same folder for anyone who would rather not run an installer.
+
+**Two Windows editions, one program.** The GitHub release is free. The
+Microsoft Store edition is the same package from the same build, for
+$2.99, and what the price buys is convenience, a Store-signed package that
+installs with no warning, updates through the Store, and uninstalls
+cleanly. Nothing is held back from either edition, the same way paint.net
+does it. The AGPL permits selling copies and the source stays public. How
+the Store listing is made is in [docs/microsoft-store.md](docs/microsoft-store.md). For macOS
 there is `PaperPull-<version>-arm64.dmg`, Apple Silicon only, signed and
 notarized, so it opens with no warning. Drag PaperPull to Applications and
 double-click it. The Windows installer is not yet code-signed, so Windows
