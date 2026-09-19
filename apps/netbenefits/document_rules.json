@@ -1,0 +1,19 @@
+{
+  "_comment": "Editable rules mapping NetBenefits statement titles to filename summaries. The app makes each statement itself for a quarter or a month, so the titles are its own, Quarterly Statement and Monthly Statement.",
+  "tax_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "quarterly\\s+statement",
+      "summary": "Quarterly Statement"
+    },
+    {
+      "pattern": "monthly\\s+statement",
+      "summary": "Monthly Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Statement"
+    }
+  ]
+}
