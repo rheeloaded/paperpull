@@ -7,6 +7,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR** — a new app, or a cross-app feature
 - **MAJOR** — breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **Amazon saves the real invoice PDF where there is one.** Each order's
+  Invoice menu (Rechnung on amazon.de) is read with a plain GET, and any
+  invoice PDF it links is downloaded as Amazon issued it, saved as
+  `YYYY-MM-DD Amazon <Category> Invoice.pdf`, one per seller on a split
+  order. On amazon.de that PDF is the legal invoice, where the printable
+  summary is not. Orders without one get the printable summary as before.
+  The summary parser also reads a German-language account's labels, since
+  Amazon serves German pages to such an account whatever the URL asks for.
+  A downloaded invoice that fails validation goes to Manual Review rather
+  than being replaced by a print of the screen. On amazon.com this means
+  third-party-seller orders now save the seller's invoice PDF. Contributed
+  by marecabo in #25.
+
 ## [0.22.0] - 2026-09-19
 
 ### Added

@@ -178,7 +178,7 @@ class _Page:
         return self.body
 
 
-def test_a_german_printable_summary_is_recognised_and_read():
+def test_a_german_printable_summary_is_recognized_and_read():
     from paperpull_core.models import ONLINE, Purchase
     site.set_marketplace("amazon.de")
     page = _Page(GERMAN_SUMMARY)
