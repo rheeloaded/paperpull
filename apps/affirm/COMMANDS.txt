@@ -1,0 +1,28 @@
+Affirm STATEMENTS  -  commands   (READ-ONLY)
+============================================================
+Run these from the PaperPull folder (paperpull.bat on Windows,
+./paperpull on macOS). login.bat is the one double-click that stays.
+
+  Task            You                                 Spouse
+  --------------  ----------------------------------  ----------------------------------
+  Sign in         login.bat                           login.bat spouse
+  Look (no d/l)   paperpull affirm diagnose            paperpull affirm diagnose --account spouse
+  Pilot (test)    paperpull affirm pilot               paperpull affirm pilot --account spouse
+  Full run        paperpull affirm all                 paperpull affirm all --account spouse
+  Continue        paperpull affirm resume              paperpull affirm resume --account spouse
+  Re-check PDFs   paperpull affirm verify              paperpull affirm verify --account spouse
+
+FLOW:  login.bat  ->  paperpull affirm diagnose  ->  paperpull affirm pilot  ->  paperpull affirm all
+Sign in, open your Documents/Statements area, keep the browser OPEN,
+do the 2FA yourself.
+
+READ-ONLY: downloads participant statements and tax forms only. It
+NEVER moves money between funds, changes contributions, withdraws,
+takes a loan, changes beneficiaries, or changes any setting.
+
+Scope: quarterly and annual participant statements + 1099-R.
+Tax forms contain your SSN - handle accordingly.
+
+Your files: this folder (Statements\, Tax Documents\).
+Spouse's:  "Affirm Statements - spouse".
+Full command reference: COMMANDS.txt in the parent folder.
