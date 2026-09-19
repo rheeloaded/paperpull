@@ -12,7 +12,7 @@ of clicking through each site by hand.
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Twenty-seven providers are supported today, all built on the same pattern:
+Twenty-eight providers are supported today, all built on the same pattern:
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -25,6 +25,7 @@ Twenty-seven providers are supported today, all built on the same pattern:
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | **Capital One is moving these accounts onto its own site. Once yours has moved this app can no longer read it** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
+| [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms | Document Access Hub API from inside the page, nothing clicked; real Edge/Chrome |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Lazy-loading history; ~13-month limit |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
@@ -122,8 +123,8 @@ ever clicked, and all site interaction lives in `provider_site.py` where it can
 be read in one sitting. Every app that clicks enforces this deny-by-default, a
 control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
 allowlist (`SAFE_DOC_CONTROL_RE`), and the app's host allowlist refuses any
-stored URL that points elsewhere. Seven apps click nothing at all (Amazon,
-Anthem, Gap, myPay, Paylocity, TSP, UKG), they read a JSON API or render a
+stored URL that points elsewhere. Eight apps click nothing at all (Amazon,
+Anthem, Fidelity, Gap, myPay, Paylocity, TSP, UKG), they read a JSON API or render a
 page they navigated to. A repo-wide test checks every app's guard.
 [SECURITY.md](SECURITY.md) spells out which app does which.
 
@@ -383,8 +384,8 @@ Every contribution keeps the **read-only, local, no-credentials** design — see
 
 ## Status & roadmap
 
-- ✅ All **twenty-seven** apps pass their tests, more than 1,400 of them across the
-  repo. Twenty are in regular use by the author. The other seven (Ally,
+- ✅ All **twenty-eight** apps pass their tests, more than 1,400 of them across the
+  repo. Twenty-one are in regular use by the author. The other seven (Ally,
   Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
   by people who hold those accounts, and the four marked in the table above
   are awaiting a fresh live pilot since they were ported.

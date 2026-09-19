@@ -1,0 +1,60 @@
+{
+  "_comment": "Editable rules mapping Fidelity document titles to filename summaries. Case-insensitive regexes matched against the title, checked in order: tax, then statement. Scaffolded 2026-09-18 from the document names Fidelity is known to use; to be checked against a real documents page and corrected there. Trade confirmations are statements here, in their own folder, since the core has no confirmation category.",
+  "tax_rules": [
+    {
+      "pattern": "1099-?R\\b",
+      "summary": "1099-R Tax Form"
+    },
+    {
+      "pattern": "1099-?(B|DIV|INT|MISC|Q|SA)?\\b|consolidated\\s+1099|tax\\s+reporting\\s+statement",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "\\b5498\\b",
+      "summary": "5498 Tax Form"
+    },
+    {
+      "pattern": "\\b1042-?S\\b",
+      "summary": "1042-S Tax Form"
+    },
+    {
+      "pattern": "\\bW-?9\\b",
+      "summary": "W-9"
+    },
+    {
+      "pattern": "tax\\s+(statement|document|form|information|reporting)",
+      "summary": "Tax Statement"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "trade\\s+confirmation|confirmation\\s+of\\s+(trade|transaction)|\\bconfirm(s|ation)?\\b",
+      "summary": "Trade Confirmation"
+    },
+    {
+      "pattern": "year-?end\\s+(investment\\s+)?(report|summary)|annual\\s+(account\\s+)?statement",
+      "summary": "Annual Statement"
+    },
+    {
+      "pattern": "quarterly\\s+(account\\s+)?statement",
+      "summary": "Quarterly Statement"
+    },
+    {
+      "pattern": "monthly\\s+(account\\s+)?statement",
+      "summary": "Monthly Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Statement"
+    },
+    {
+      "pattern": "prospectus|shareholder\\s+report|proxy|fund\\s+report",
+      "summary": "Investment Report"
+    },
+    {
+      "pattern": "letter|notice|correspondence|confirmation\\s+letter",
+      "summary": "Letter"
+    }
+  ]
+}
