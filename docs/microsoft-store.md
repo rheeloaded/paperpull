@@ -25,6 +25,15 @@ it. The package identity, which the Store assigns when the name is
 reserved, comes from four repository variables so the source never
 carries it.
 
+The package is x64. The Store offers an x64 package to ARM64 devices too,
+where it runs under emulation, so one package covers every Windows 11
+machine. A native ARM64 package is `python packaging/build_windows.py
+--arch arm64 --msix` on an ARM64 machine (a `windows-11-arm` runner, if it
+ever moves into the workflow). It comes out as `PaperPull-<version>-arm64.msix`
+with `ProcessorArchitecture="arm64"`, and a submission can carry both
+packages side by side under the same identity and version, the Store
+picking per device. Nothing else changes.
+
 | Variable | What goes in it | Where it comes from |
 |----------|-----------------|---------------------|
 | `MSIX_IDENTITY_NAME` | `Package/Identity/Name`, like `12345RheeLoaded.PaperPull` | Partner Center, Product identity |
@@ -77,8 +86,8 @@ offered. Privacy policy URL,
 repository's Issues page. The product does not collect data. The product
 does not use any capability that requires an additional declaration
 beyond runFullTrust. System requirements, Windows 10 build 19041 or
-later, x64, a Chromium-based browser (Edge is always present), about 250
-MB of disk.
+later, x64 (runs on ARM64 under emulation), a Chromium-based browser
+(Edge is always present), about 250 MB of disk.
 
 **Age ratings.** The IARC questionnaire. No violence, no sexual content,
 no gambling, no user interaction with other people, no sharing of

@@ -7,6 +7,36 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Browsers are found the way Windows finds them.** The sign-in browser
+  was looked for in a fixed list of folders built from `PROGRAMFILES`,
+  which quietly points at `Program Files (x86)` when the program runs
+  under emulation on a Windows on ARM machine, so a native ARM64 Chrome
+  in the real Program Files was a coin flip and a per-user Brave a miss.
+  The registry's App Paths keys are asked first, in the 64-bit view, for
+  Edge, Chrome, Brave, Vivaldi and Opera, HKCU before HKLM, then the
+  folders under `ProgramW6432`, both Program Files and `LOCALAPPDATA`.
+  Brand order is kept whatever found the browser, and one install found
+  two ways is still offered once.
+- **Ready means DevTools answered, not that the port opened.** The
+  launcher waited for the debugging port to accept a connection, which
+  the browser does before the protocol is up, and an attach in that gap
+  failed blaming the wrong thing. It now waits for `/json/version` on
+  `127.0.0.1` to answer with the websocket address the attach will use.
+
+### Changed
+- **The Windows build takes `--arch`.** `x64` is the default and what
+  every release ships. `--arch arm64`, on an ARM64 machine, builds a
+  native Windows on ARM portable folder, installer and MSIX from the same
+  source, named `-arm64`, with the embeddable ARM64 Python from python.org
+  and every package's native wheel. Not shipped, because the x64 build
+  already runs on ARM64 Windows under emulation and would not be faster
+  native in a program that waits on a browser, but a flag away for the
+  day someone asks. The build scripts find the Windows SDK and Inno Setup
+  through the environment instead of a literal `C:\Program Files (x86)`.
+
 ## [0.23.0] - 2026-09-19
 
 ### Added

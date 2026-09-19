@@ -73,3 +73,32 @@ def test_the_display_name_can_follow_the_spelling_the_store_reserved(monkeypatch
     text = msix.manifest("1.0.0.0", msix.identity())
     assert "<DisplayName>Paperpull</DisplayName>" in text
     assert 'DisplayName="Paperpull"' in text
+
+
+def test_the_manifest_can_declare_a_native_arm64_package():
+    """One switch builds the Windows on ARM package from the same source.
+    x64 stays the default and the name every release has carried."""
+    doc = ET.fromstring(msix.manifest("0.24.0.0", msix.identity(), "arm64"))
+    assert doc.find("m:Identity", NS).get("ProcessorArchitecture") == "arm64"
+    assert ET.fromstring(msix.manifest("0.24.0.0", msix.identity())).find("m:Identity", NS).get("ProcessorArchitecture") == "x64"
+
+
+def test_sdk_tools_come_from_the_environment_not_a_literal_drive(monkeypatch, tmp_path):
+    """A build on a machine whose Program Files is not on C:, or an ARM64
+    machine whose native tools live in an arm64 folder, found nothing."""
+    real = tmp_path / "PF"
+    tool = real / "Windows Kits" / "10" / "bin" / "10.0.26100.0" / "arm64" / "makeappx.exe"
+    tool.parent.mkdir(parents=True)
+    tool.write_bytes(b"")
+    older = real / "Windows Kits" / "10" / "bin" / "10.0.22621.0" / "x64" / "makeappx.exe"
+    older.parent.mkdir(parents=True)
+    older.write_bytes(b"")
+    monkeypatch.setenv("ProgramW6432", str(real))
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "PFx86"))
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "ARM64")
+    monkeypatch.delenv("PROCESSOR_ARCHITEW6432", raising=False)
+    assert msix.find_makeappx() == tool           # the native one, on an ARM64 host
+    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "AMD64")
+    assert msix.find_makeappx() == older          # an x64 host never picks arm64 tools
+    assert msix.program_files()[0] == str(real)

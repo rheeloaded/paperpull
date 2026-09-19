@@ -83,25 +83,75 @@ def _bundled_chromium() -> List[str]:
     return sorted(found, key=build_number, reverse=True)
 
 
+# Where each brand registers its executable under App Paths, and the
+# folder it installs to under a Program Files or LOCALAPPDATA root. The
+# registry is consulted first because it is the browser's own statement of
+# where it is, and the folders are the fallback for an install that did not
+# register (a portable copy, or a per-user install on a locked-down machine).
+_WINDOWS_BROWSERS = [
+    (EDGE, "msedge.exe", ("Microsoft", "Edge", "Application", "msedge.exe")),
+    (CHROME, "chrome.exe", ("Google", "Chrome", "Application", "chrome.exe")),
+    (BRAVE, "brave.exe", ("BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
+    (VIVALDI, "vivaldi.exe", ("Vivaldi", "Application", "vivaldi.exe")),
+    (OPERA, "opera.exe", ("Programs", "Opera", "opera.exe")),
+]
+_APP_PATHS = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"
+
+
+def _registry_browsers() -> List[Tuple[str, str]]:
+    """Every browser Windows knows about, from App Paths, in preference order.
+
+    Read from the 64-bit registry view on purpose. This process can be an
+    x64 build running under emulation on an ARM64 machine, where the
+    default view is the emulated one and a native ARM64 Chrome would be
+    invisible from it. HKCU first, since a per-user install is the one the
+    person chose most recently, then HKLM.
+    """
+    try:
+        import winreg
+    except ImportError:
+        return []
+    out: List[Tuple[str, str]] = []
+    for name, exe, _ in _WINDOWS_BROWSERS:
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(hive, _APP_PATHS + "\\" + exe, 0,
+                                    winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+                    value, _kind = winreg.QueryValueEx(key, "")
+            except OSError:
+                continue
+            path = os.path.expandvars(str(value or "")).strip().strip('"')
+            if path:
+                out.append((name, path))
+    return out
+
+
+def _windows_roots() -> List[str]:
+    """The folders a browser installs under, most authoritative first.
+
+    ProgramW6432 is the real 64-bit Program Files even when this process is
+    32-bit or emulated, which is when PROGRAMFILES quietly points at the
+    (x86) folder instead. Empty and repeated values are dropped.
+    """
+    roots = []
+    for var in ("ProgramW6432", "PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+        value = os.environ.get(var, "")
+        if value and value not in roots:
+            roots.append(value)
+    return roots
+
+
 def _real_browsers() -> List[Tuple[str, str]]:
     """Installed Edge/Chrome, most-preferred first, as (name, path)."""
     if sys.platform == "win32":
-        pf = os.environ.get("PROGRAMFILES", "")
-        pfx = os.environ.get("PROGRAMFILES(X86)", "")
-        local = os.environ.get("LOCALAPPDATA", "")
-        candidates = [
-            (EDGE, os.path.join(pfx, "Microsoft", "Edge", "Application", "msedge.exe")),
-            (EDGE, os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe")),
-            (CHROME, os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe")),
-            (CHROME, os.path.join(pfx, "Google", "Chrome", "Application", "chrome.exe")),
-            (CHROME, os.path.join(local, "Google", "Chrome", "Application", "chrome.exe")),
-            (BRAVE, os.path.join(pf, "BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
-            (BRAVE, os.path.join(pfx, "BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
-            (BRAVE, os.path.join(local, "BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
-            (VIVALDI, os.path.join(local, "Vivaldi", "Application", "vivaldi.exe")),
-            (VIVALDI, os.path.join(pf, "Vivaldi", "Application", "vivaldi.exe")),
-            (OPERA, os.path.join(local, "Programs", "Opera", "opera.exe")),
-        ]
+        candidates = list(_registry_browsers())
+        for root in _windows_roots():
+            for name, _exe, parts in _WINDOWS_BROWSERS:
+                candidates.append((name, os.path.join(root, *parts)))
+        # Preference order is by brand, not by where it was found, so a
+        # Brave in the registry does not outrank an Edge found by folder.
+        rank = {name: i for i, (name, _e, _p) in enumerate(_WINDOWS_BROWSERS)}
+        candidates.sort(key=lambda c: rank.get(c[0], len(rank)))
     elif sys.platform == "darwin":
         home = Path.home()
         candidates = [
@@ -457,18 +507,32 @@ def _launch(exe: str, name: str, profile_dir, port: str,
 
 
 def wait_for_debug_port(port: str, timeout: float = 20.0) -> bool:
-    """True once the browser's debugging port accepts a connection.
+    """True once DevTools answers on the browser's debugging port.
 
     Checked on 127.0.0.1 rather than "localhost": the browser binds IPv4 only,
     while "localhost" can resolve to ::1 first and be refused.
+
+    A port that accepts a connection is not the same as DevTools being ready.
+    The browser opens the listener early and answers /json/version only once
+    the protocol is up, and an attach in that gap fails with a message that
+    blames the wrong thing. So readiness is the endpoint the attach itself
+    will use, answering with the websocket address it will connect to.
     """
-    import socket
+    import json
     import time
+    import urllib.request
+    try:
+        url = "http://127.0.0.1:%d/json/version" % int(port)
+    except (TypeError, ValueError):
+        return False
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with socket.create_connection(("127.0.0.1", int(port)), timeout=1):
+            with urllib.request.urlopen(url, timeout=2) as r:
+                info = json.loads(r.read().decode("utf-8", "replace"))
+            if isinstance(info, dict) and info.get("webSocketDebuggerUrl"):
                 return True
         except (OSError, ValueError):
-            time.sleep(0.5)
+            pass
+        time.sleep(0.5)
     return False

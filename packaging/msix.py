@@ -79,7 +79,7 @@ def identity() -> dict:
     }
 
 
-def manifest(version: str, ident: dict) -> str:
+def manifest(version: str, ident: dict, arch: str = "x64") -> str:
     return """<?xml version="1.0" encoding="utf-8"?>
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -88,7 +88,7 @@ def manifest(version: str, ident: dict) -> str:
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap uap10 rescap">
 
-  <Identity Name="{name}" Publisher="{publisher}" Version="{version}" ProcessorArchitecture="x64" />
+  <Identity Name="{name}" Publisher="{publisher}" Version="{version}" ProcessorArchitecture="{arch}" />
 
   <Properties>
     <DisplayName>{app}</DisplayName>
@@ -122,7 +122,7 @@ def manifest(version: str, ident: dict) -> str:
     <rescap:Capability Name="runFullTrust" />
   </Capabilities>
 </Package>
-""".format(version=version, **ident)
+""".format(version=version, arch=arch, **ident)
 
 
 LAUNCHER_CS = r'''// PaperPull.exe. What PaperPull.bat does, as an executable, because an
@@ -245,16 +245,38 @@ def write_assets(dest: Path, png256: bytes, say) -> None:
     say("  %d Store images" % len(jobs))
 
 
-def find_makeappx() -> Path | None:
-    for base in (r"C:\Program Files (x86)\Windows Kits\10\bin",
-                 r"C:\Program Files\Windows Kits\10\bin"):
-        cands = sorted(Path(base).glob("10.*/x64/makeappx.exe"), reverse=True)
-        if cands:
-            return cands[0]
+def program_files() -> list[str]:
+    """Every Program Files root, real one first, from the environment rather
+    than a literal C: path. ProgramW6432 is the 64-bit folder even from a
+    32-bit or emulated process."""
+    out = []
+    for var in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+        v = os.environ.get(var)
+        if v and v not in out:
+            out.append(v)
+    return out or [r"C:\Program Files", r"C:\Program Files (x86)"]
+
+
+def sdk_tool(name: str) -> Path | None:
+    """A Windows SDK tool, from the newest SDK, in the folder for the machine
+    running this. The SDK ships x64 and arm64 copies of each, and the x64 one
+    runs under emulation on ARM64 if the native one is missing."""
+    raw = (os.environ.get("PROCESSOR_ARCHITEW6432") or os.environ.get("PROCESSOR_ARCHITECTURE") or "").upper()
+    folders = ("arm64", "x64") if raw == "ARM64" else ("x64",)
+    for base in program_files():
+        for folder in folders:
+            cands = sorted(Path(base, "Windows Kits", "10", "bin").glob("10.*/%s/%s" % (folder, name)),
+                           reverse=True)
+            if cands:
+                return cands[0]
     return None
 
 
-def pack(stage: Path, dist: Path, version_str: str, png256: bytes, say) -> Path | None:
+def find_makeappx() -> Path | None:
+    return sdk_tool("makeappx.exe")
+
+
+def pack(stage: Path, dist: Path, version_str: str, png256: bytes, say, arch: str = "x64") -> Path | None:
     """Stage the folder again with a manifest and assets beside it, and pack.
     Returns the .msix path, or None when makeappx is not on this machine."""
     say("MSIX")
@@ -274,7 +296,7 @@ def pack(stage: Path, dist: Path, version_str: str, png256: bytes, say) -> Path 
         p = root / extra
         if p.exists():
             p.unlink()
-    (root / "AppxManifest.xml").write_text(manifest(ver, ident), encoding="utf-8")
+    (root / "AppxManifest.xml").write_text(manifest(ver, ident, arch), encoding="utf-8")
     write_assets(root / "Assets", png256, say)
     say("  identity %s, publisher %s" % (ident["name"], ident["publisher"]))
 
@@ -283,7 +305,7 @@ def pack(stage: Path, dist: Path, version_str: str, png256: bytes, say) -> Path 
         say("  makeappx.exe (Windows SDK) not found. The folder is ready at dist\\msix,")
         say("  the package was not built.")
         return None
-    out = dist / ("PaperPull-%s.msix" % version_str)
+    out = dist / ("PaperPull-%s%s.msix" % (version_str, "" if arch == "x64" else "-" + arch))
     if out.exists():
         out.unlink()
     r = subprocess.run([str(makeappx), "pack", "/o", "/d", str(root), "/p", str(out)],
