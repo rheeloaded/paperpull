@@ -62,7 +62,6 @@ URLS = {
     "login": f"{BASE}/",
     "documents": f"{BASE}/",
 }
-PAGE_SIZE = 10
 
 LOGIN_URL_MARKERS = ["/login", "/logon", "/signin", "/sign-in", "/mfa",
                      "/verify", "/onboarding", "login.html"]
@@ -168,8 +167,8 @@ def looks_signed_out(page) -> bool:
 
 def detect_security_challenge(page) -> Optional[str]:
     """Names the passcode, CAPTCHA or throttling prompt on screen, or None.
-    Visible text only. The page source of a Salesforce site carries every
-    string its scripts could ever show."""
+    Visible text only. A page's source can carry every string its scripts
+    could ever show, "verification code" included, on a normal day."""
     try:
         title = (page.title() or "").lower()
     except Exception:
@@ -503,14 +502,14 @@ def _page_summary(page) -> dict:
 
 
 def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
-    """What the signed-in Document Access Hub looks like, without downloading anything.
+    """What the signed-in customer portal looks like, without downloading anything.
 
     Records the page, its headings and controls with the guard's verdict on
     each, and every JSON response fwcustomer.org sends while the page settles. Then
     follows, one at a time and back again, the few links whose text is
-    exactly a document or mailbox word, recording the same for each. Bodies
+    exactly a document word, recording the same for each. Bodies
     are recorded as shape only, never values, and any run of six digits is
-    masked. No screenshot, a retirement account page shows balances."""
+    masked. No screenshot, an account page shows balances."""
     seen: list = []
 
     def on_response(res):

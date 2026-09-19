@@ -5,7 +5,7 @@ own debugging port, using this app's own profile directory, which *you* then
 sign into. The tool later attaches to it over the DevTools protocol. Nothing
 here automates a login.
 
-Two flavours:
+Two flavors:
 
 * Most providers are happy with the Chromium that Playwright installs.
 * A few (Walmart, Verizon) run bot protection that fingerprints that build as
@@ -142,7 +142,7 @@ def find_browser(prefer_real: bool = False) -> Tuple[Optional[str], Optional[str
     """Return (name, executable path) for the browser to sign in with.
 
     With prefer_real, an installed Edge/Chrome wins over the bundled Chromium
-    — that is what gets past the providers whose bot protection rejects the
+   , that is what gets past the providers whose bot protection rejects the
     Playwright build.
     """
     real = _real_browsers()

@@ -35,7 +35,7 @@ import html as _html
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
@@ -56,12 +56,6 @@ URLS = {
 
 LOGIN_URL_MARKERS = ["/sign-in", "/signin", "/login", "/my-account/sign",
                      "/authenticate", "loginredirect", "/account/sign-in"]
-
-
-def orders_url(year: Optional[int] = None, start_index: int = 0) -> str:
-    """Gap's order history takes no year/offset parameters - everything lazy
-    loads onto one page - so the arguments are accepted and ignored."""
-    return URLS["orders"]
 
 
 def order_details_url(order_id: str) -> str:
@@ -96,17 +90,6 @@ DEFAULT_BRAND = "Gap"
 # ---------------------------------------------------------------------------
 # Accessible names / labels
 # ---------------------------------------------------------------------------
-
-TAB_NAME = {
-    ONLINE: re.compile(r"^\s*order\s+history\s*$", re.I),
-    IN_STORE: re.compile(r"^\s*order\s+history\s*$", re.I),
-}
-
-LOAD_MORE_RE = re.compile(r"(load more|show more|view more|see more)", re.I)
-RECEIPT_SECTION_RE = re.compile(r"(purchase\s+summary|order\s+summary|receipt)", re.I)
-PRINT_RECEIPT_RE = re.compile(r"(print\s+receipt|print\s+invoice|view\s+invoice)", re.I)
-GIFT_RECEIPT_RE = re.compile(r"gift\s+receipt", re.I)
-INVOICE_RE = re.compile(r"(view|print|download)?\s*invoice", re.I)
 SIGN_IN_RE = re.compile(r"^\s*sign\s*in\s*$", re.I)
 
 # The block that holds the receipt on a hydrated order-details page.
@@ -182,9 +165,6 @@ FALLBACK = {
     "print_page_body": "body",
 }
 
-CARD_CONTAINER = {ONLINE: FALLBACK["order_card"],
-                  IN_STORE: FALLBACK["order_card"]}
-
 DATE_PATTERNS = [
     (re.compile(r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
                 r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
@@ -196,7 +176,6 @@ _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
 
 MONEY_RE = re.compile(r"\$\s*([\d,]+\.\d{2})")
-QTY_RE = re.compile(r"\b(?:qty|quantity)\s*:?\s*(\d+)", re.I)
 STATUS_WORDS_RE = re.compile(
     r"\b(delivered|shipped|in\s+transit|out\s+for\s+delivery|arriving|"
     r"ready\s+for\s+pickup|picked\s+up|cancell?ed|returned|refunded|"
@@ -365,42 +344,6 @@ def goto_orders(page) -> None:
         log.warning("No order links appeared on the order-history page within 30s")
     page.wait_for_timeout(1500)
     scroll_all_orders(page)
-
-
-def select_history_tab(page, purchase_type: str) -> bool:
-    """Gap has no separate tabs: one history page holds both online orders
-    and in-store purchases."""
-    return purchase_type in (ONLINE, IN_STORE)
-
-
-def goto_year_page(page, year: int, start_index: int = 0) -> bool:
-    """Gap has no per-year pages: one scrolled order-history page holds the
-    whole available history. The first call loads it; any later call (a
-    different year, or a pagination offset) reports 'nothing more here'."""
-    if start_index:
-        return False
-    goto_orders(page)
-    return True
-
-
-def get_year_options(page) -> List[str]:
-    """Gap exposes no year filter."""
-    return []
-
-
-def has_next_page(page) -> bool:
-    """Gap lazy-loads instead of paginating; goto_orders already scrolled
-    everything in."""
-    return False
-
-
-def load_all_cards(page, purchase_type: str = ONLINE,
-                   delay_ms: int = 1200, max_rounds: int = 20) -> int:
-    return scroll_all_orders(page, max_rounds=max_rounds, delay_ms=delay_ms)
-
-
-def _card_count(page, purchase_type: str = ONLINE) -> int:
-    return _order_link_count(page)
 
 
 # An in-store purchase card reads "Purchased In Store - 5 Items" followed by
@@ -888,19 +831,6 @@ def open_receipt_section(page) -> bool:
     return receipt_is_present(page)
 
 
-def wait_for_receipt_content(page, timeout_ms: int = 15000) -> str:
-    rounds = max(1, timeout_ms // 500)
-    for _ in range(rounds):
-        if receipt_is_present(page):
-            return "order-details"
-        page.wait_for_timeout(500)
-    return ""
-
-
-def count_store_receipts(page) -> int:
-    return 1
-
-
 # --- receipt-access hooks Gap does not need --------------------------------
 # The orchestrator calls these when a merchant hides its receipt behind a
 # button, a print popup or an iframe. Gap does none of that (navigate ->
@@ -926,12 +856,6 @@ def find_printing_frame(page, wait_ms: int = 2000):
 def find_receipt_iframe(page):
     """Gap never renders the receipt into an iframe."""
     return None
-
-
-def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, object]:
-    """Unused for Gap (capture is inline on the details page). Kept for API
-    parity with the other site layers."""
-    return "inline", page
 
 
 # ---------------------------------------------------------------------------

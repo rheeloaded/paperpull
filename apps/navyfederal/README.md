@@ -1,4 +1,4 @@
-# Navy Federal Credit Union — statement downloader
+# Navy Federal Credit Union statement downloader
 
 Downloads your Navy Federal **account statements** as PDFs from the online
 banking portal (`digitalomni.navyfederal.org`). Read-only, delete-safe, part of
@@ -8,12 +8,12 @@ banking portal (`digitalomni.navyfederal.org`). Read-only, delete-safe, part of
 
 ```bat
 setup.bat                         REM one-time: venv + Playwright
-login.bat                         REM opens Chromium on port 9229 — sign in yourself
+login.bat                         REM opens Chromium on port 9229, sign in yourself
 paperpull navyfederal pilot       REM download the newest 5 statements as a test
 paperpull navyfederal all         REM download every available statement
 ```
 
-The first run asks *"Whose account is this?"* — the name is saved to `config.json`
+The first run asks *"Whose account is this?"*, the name is saved to `config.json`
 and stamped on every document (the **Account Holder** index column).
 
 ## How it works
@@ -26,7 +26,7 @@ and stamped on every document (the **Account Holder** index column).
   Statements). Discovery expands each group and reads its statement rows
   (date + account).
 - **Download**: it expands the right account, clicks that statement's **View**
-  button — which opens the PDF as a `blob:` in a new tab — then fetches the blob
+  button, which opens the PDF as a `blob:` in a new tab, then fetches the blob
   bytes and saves them, closing the extra tab. Filenames include the account so
   same-dated statements from different accounts don't collide.
 - **Session timeouts.** Navy Federal shows an inactivity modal; the tool clicks
@@ -39,7 +39,7 @@ and stamped on every document (the **Account Holder** index column).
 ## Notes
 
 - **Tax documents:** the Tax Information section is scanned too, but Navy Federal
-  only posts tax forms (1099-INT etc.) seasonally — outside tax season there may
+  only posts tax forms (1099-INT etc.) seasonally, outside tax season there may
   be none to download.
 - **Delete-safe & multi-account** like every PaperPull app (`--config`,
-  `add_account.py`).
+  `paperpull navyfederal add-account NAME`).

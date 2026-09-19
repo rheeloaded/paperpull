@@ -1,0 +1,15 @@
+# Lint settings for the audit sweep (ruff check). Only the rules that find
+# real bugs. Style is not enforced.
+line-length = 200
+extend-exclude = [".venv", "build", "dist"]
+
+[lint]
+select = ["F", "E9", "W605", "B006", "B008"]
+
+[lint.per-file-ignores]
+# Each app's storage.py binds the AppSpec and then re-exports the shared
+# storage names for the app's modules. Every import there is the point.
+"apps/*/storage.py" = ["F401", "E402"]
+# Tests import storage for the side effect of binding the provider.
+"**/tests/*.py" = ["F401"]
+"gui/tests/*.py" = ["F401"]

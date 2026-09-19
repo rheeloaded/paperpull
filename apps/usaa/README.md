@@ -69,7 +69,7 @@ Filters: `--type "Insurance Document"`, `--year 2025`,
 
 All the site-specific logic lives in `usaa_site.py`. If USAA redesigns its
 pages and discovery or download stops working, run `paperpull usaa diagnose` after signing
-in — it dumps the current page structure to `Diagnostics\` so the selectors in
+in, it dumps the current page structure to `Diagnostics\` so the selectors in
 `usaa_site.py` can be updated to match.
 
 ## Sensitive files
@@ -78,7 +78,7 @@ Statements and especially tax forms can contain your SSN and account numbers.
 They're saved to the output folder you set as `output_dir` in `config.json`
 (the default is this app's own folder). Keep it somewhere safe, and if that
 folder syncs to a cloud drive, know these documents go with it. The index CSV
-deliberately records **no** account numbers, balances, or SSN — only what's
+deliberately records **no** account numbers, balances, or SSN, only what's
 needed to find and verify a file.
 
 ## Tests

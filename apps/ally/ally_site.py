@@ -626,7 +626,6 @@ def describe_selects(page, limit: int = 12):
     return _controls.describe_selects(page, FORBIDDEN_CONTROL_RE, limit=limit)
 
 
-
 def account_select(page):
     """Return (locator, [labels]) for a <select> that lists accounts, or
     (None, []). Money-movement pickers are refused outright."""
@@ -1007,18 +1006,6 @@ def _find_row_control(page, date: str, account: str = "", occurrence: int = 0):
     log.info("wanted statement #%d of %d on %s - not present",
              occurrence + 1, len(plain), date)
     return None
-
-
-# Clicking a row makes the SPA call GET /acs/v1/bank-statements/<documentId>,
-# and that response is the PDF. Fetching it ourselves does NOT work: the
-# endpoint needs the Authorization header the SPA attaches in JS, and a
-# cookie-only fetch comes back non-2xx (tried live 2026-08-18 - every id
-# returned no body). So the row still has to be clicked.
-#
-# What the endpoint DOES give us is proof. The id in that request says which
-# statement the site actually served, so a download can be checked against the
-# statement we meant to fetch instead of trusting that row N is record N.
-STATEMENT_BY_ID_RE = re.compile(r"/acs/v\d+/bank-statements/(\w+)", re.I)
 # Any /acs/ endpoint that serves ONE document by id - statements today,
 # tax forms on whatever path Ally uses for them.
 SERVED_DOC_ID_RE = re.compile(r"/acs/v\d+/[a-z-]+/(\w{6,})", re.I)

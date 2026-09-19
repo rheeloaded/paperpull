@@ -1075,7 +1075,7 @@ HTML = r"""<!doctype html>
 </head>
 <body>
 <header>
-  <h1>PaperPull <span class="ver">v__VERSION__</span><span class="tag"> — Receipt &amp; Statement Downloader</span></h1>
+  <h1>PaperPull <span class="ver">v__VERSION__</span><span class="tag"> &middot; Receipt &amp; Statement Downloader</span></h1>
   <p id="root">control panel</p>
 </header>
 <section id="setup" class="setup" style="display:none">
@@ -1124,12 +1124,12 @@ HTML = r"""<!doctype html>
     </div>
     <p class="hint" id="scopehint" style="margin-top:8px"></p>
     <div class="actions" id="actions"></div>
-    <p class="hint">1. <b>Login</b> opens a browser — sign in yourself and leave it open.<br>
+    <p class="hint">1. <b>Login</b> opens a browser. Sign in yourself and leave it open.<br>
        2. <b>Pilot</b> tests the newest few.<br>
        3. <b>Run All</b> downloads everything you don't already have.</p>
     <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
        ↻ <b>Safe to re-run.</b> Run All and Resume skip any statement or receipt
-       you've already downloaded — nothing is ever fetched twice, even if you
+       you've already downloaded. Nothing is ever fetched twice, even if you
        deleted the PDFs after importing them elsewhere.</p>
     <p class="hint warn" id="venvwarn" style="display:none"></p>
   </div>
@@ -1177,7 +1177,7 @@ HTML = r"""<!doctype html>
   </div>
 </main>
 <footer>
-  <span>PaperPull v__VERSION__ — read-only, runs locally</span>
+  <span>PaperPull v__VERSION__ &middot; read-only, runs locally</span>
   <span>☕ <a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">Support this project on Ko-fi</a></span>
 </footer>
 <script>
@@ -1478,7 +1478,7 @@ function onApp() {
   for (const a of m.accounts) accSel.append(new Option(a, a));
   const warn = $('venvwarn');
   if (m.needs_setup) { warn.style.display='block';
-    warn.textContent = '⚠ No .venv in this app yet — run setup.bat there first, or output may show import errors.'; }
+    warn.textContent = '⚠ No .venv in this app yet. Run setup.bat there first, or output may show import errors.'; }
   else warn.style.display='none';
 }
 function setStatus(cls, text) { $('dot').className = 'dot ' + cls; $('statustext').textContent = text; }
@@ -1525,7 +1525,10 @@ function run(action) {
   $('console').textContent = '';
   const scoped = s.year ? ` (${s.year})` : (s.start || s.end) ? ` (${s.start || '…'} to ${s.end || '…'})` : '';
   setStatus('run', `running ${action} on ${app} / ${account}${scoped}`);
-  document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl)').forEach(b => b.disabled = true);
+  // Only the buttons this run locked are unlocked at the end. The Spreadsheet
+  // tab's build buttons stay disabled when there is nothing to build from.
+  document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl):not(:disabled)')
+    .forEach(b => { b.disabled = true; b.dataset.runlock = '1'; });
   es = new EventSource(`/api/run?${q.toString()}`);
   const con = $('console');
   let result = null;
@@ -1534,22 +1537,25 @@ function run(action) {
   es.addEventListener('done', e => {
     const code = e.data;
     if (code !== '0') {
-      setStatus('err', code === '130' ? 'interrupted — progress saved' : `exited (code ${code}) — check output`);
+      setStatus('err', code === '130' ? 'interrupted, progress saved' : `exited (code ${code}), check output`);
     } else if (result && result.attention) {
       const details = [];
       if (result.manual_review) details.push(`${result.manual_review} need review`);
       if (result.failed) details.push(`${result.failed} failed`);
       if (result.validation_failures) details.push(`${result.validation_failures} PDF validation failures`);
-      setStatus('warn', `finished — needs attention (${details.join(', ')})`);
+      setStatus('warn', `finished, needs attention (${details.join(', ')})`);
     } else if (result) {
-      setStatus('ok', 'finished — no issues reported');
+      setStatus('ok', 'finished, no issues reported');
     } else {
-      setStatus('warn', 'finished — check output (no run summary)');
+      setStatus('warn', 'finished, check output (no run summary)');
     }
-    document.querySelectorAll('button').forEach(b => b.disabled = false);
+    unlockButtons();
     es.close(); es = null;
   });
-  es.onerror = () => { if (es) { setStatus('err','connection lost'); document.querySelectorAll('button').forEach(b=>b.disabled=false); es.close(); es=null; } };
+  es.onerror = () => { if (es) { setStatus('err','connection lost'); unlockButtons(); es.close(); es=null; } };
+}
+function unlockButtons() {
+  document.querySelectorAll('button[data-runlock]').forEach(b => { b.disabled = false; delete b.dataset.runlock; });
 }
 load();
 </script>

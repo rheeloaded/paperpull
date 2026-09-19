@@ -5,14 +5,14 @@ in the project should contain a Walmart selector.
 
 INITIAL SELECTORS: written 2026-07-23 from Walmart's known URL scheme; run
 `python walmart_receipts.py --diagnose` and `probe_orders.py` after signing
-in, then repair the FALLBACK selectors below against Diagnostics/ output —
+in, then repair the FALLBACK selectors below against Diagnostics/ output,
 the same repair workflow used for the Target project.
 
 Walmart's purchase history at walmart.com/orders mixes Online orders and
 In-store purchases in one list; cards are classified by their text/URL
 rather than by page tabs. Walmart also uses aggressive bot detection
 ("Press & Hold" / "Robot or human?" challenges). This module only detects
-those and reports them — the tool stops and asks the user to take over;
+those and reports them, the tool stops and asks the user to take over;
 it NEVER attempts a bypass.
 
 Navigation strategy priority:
@@ -29,7 +29,7 @@ import html as _html
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
@@ -62,14 +62,6 @@ STORE_MARKER_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Accessible names / labels
 # ---------------------------------------------------------------------------
-
-TAB_NAME = {
-    ONLINE: re.compile(r"^\s*online\s*$", re.I),
-    IN_STORE: re.compile(r"^\s*in[\s\-]?store\s*$", re.I),
-}
-
-LOAD_MORE_RE = re.compile(
-    r"(load more|show more|view more|more orders|more purchases|next page)", re.I)
 # A section EXPANDER only (rare). The actual print trigger "View receipt
 # details" is handled by PRINT_RECEIPT_RE, so open_receipt_section never
 # clicks it prematurely (that would fire window.print before we are ready).
@@ -134,11 +126,6 @@ FALLBACK = {
     "card_container_online": "[data-testid^='order-']",
     "card_container_instore": "[data-testid^='order-']",
     "store_receipt_container": "[data-testid*='receipt'], [data-automation-id*='receipt']",
-}
-
-CARD_CONTAINER = {
-    ONLINE: FALLBACK["order_card"],
-    IN_STORE: FALLBACK["order_card"],
 }
 
 # Card is a purchase card, not the status-tracker element that also matches.
@@ -278,38 +265,6 @@ def select_history_tab(page, purchase_type: str) -> bool:
         log.warning("%s filtered order list did not render within 30s", purchase_type)
     page.wait_for_timeout(2500)
     return True
-
-
-YEAR_OPTION_RE = re.compile(
-    r"(20\d{2}|(past|last)\s+\d+\s+(months?|years?)|all(\s+time)?)", re.I)
-
-
-def get_year_options(page) -> List[str]:
-    """Walmart's order list has a time-range <select> filter (e.g. 'Last 3
-    months', '2025'). Only trust real selects whose options look like
-    years/ranges — never header buttons."""
-    try:
-        for select in page.locator("select").all():
-            options = [o.strip() for o in select.locator("option").all_inner_texts()]
-            candidate = [o for o in options if YEAR_OPTION_RE.fullmatch(o)]
-            if candidate and len(candidate) >= max(1, len([o for o in options if o]) - 1):
-                return candidate
-    except Exception:
-        pass
-    return []
-
-
-def select_year_option(page, option_text: str) -> bool:
-    try:
-        for select in page.locator("select").all():
-            options = select.locator("option").all_inner_texts()
-            if any(option_text.strip() == o.strip() for o in options):
-                select.select_option(label=option_text.strip())
-                page.wait_for_timeout(3000)
-                return True
-    except Exception:
-        pass
-    return False
 
 
 def _go_next_page(page) -> bool:
@@ -802,87 +757,6 @@ def find_receipt_iframe(page):
     except Exception:
         pass
     return None
-
-
-def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, object]:
-    old_url = page.url
-    download_info = {}
-    popup_info = {}
-
-    def on_download(d):
-        download_info["download"] = d
-
-    def on_popup(p):
-        popup_info["page"] = p
-
-    page.on("download", on_download)
-    page.context.on("page", on_popup)
-    try:
-        try:
-            page.evaluate("() => { window.__targetReceiptsPrintHTML = null; "
-                          "window.__targetReceiptsPrintCalled = false; }")
-        except Exception:
-            pass
-        control.scroll_into_view_if_needed()
-        control.click()
-        page.wait_for_timeout(1500)
-        deadline_rounds = max(1, timeout_ms // 500)
-        for _ in range(deadline_rounds):
-            if download_info.get("download"):
-                return "download", download_info["download"]
-            if popup_info.get("page"):
-                popup = popup_info["page"]
-                try:
-                    popup.wait_for_load_state("domcontentloaded", timeout=15000)
-                except Exception:
-                    pass
-                return "popup", popup
-            try:
-                if page.evaluate("() => window.__targetReceiptsPrintCalled === true"):
-                    return "print_called", page
-            except Exception:
-                pass
-            if page.url != old_url:
-                return "navigated", page
-            page.wait_for_timeout(500)
-        return "inline", page
-    finally:
-        try:
-            page.remove_listener("download", on_download)
-        except Exception:
-            pass
-        try:
-            page.context.remove_listener("page", on_popup)
-        except Exception:
-            pass
-
-
-def wait_for_receipt_content(page, timeout_ms: int = 15000) -> str:
-    deadline_rounds = max(1, timeout_ms // 500)
-    for _ in range(deadline_rounds):
-        try:
-            if page.locator(FALLBACK["store_receipt_container"]).count() > 0:
-                return "store-receipt"
-        except Exception:
-            pass
-        try:
-            if find_print_receipt_controls(page):
-                return "print-controls"
-        except Exception:
-            pass
-        page.wait_for_timeout(500)
-    return ""
-
-
-def count_store_receipts(page) -> int:
-    try:
-        body = page.locator("body").inner_text(timeout=5000)
-        m = re.search(r"store receipt\s*\d+\s*of\s*(\d+)", body, re.I)
-        if m:
-            return max(1, int(m.group(1)))
-    except Exception:
-        pass
-    return 1
 
 
 # ---------------------------------------------------------------------------

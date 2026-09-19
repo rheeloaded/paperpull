@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import List, Optional
+from typing import List
 
 ONLINE = "Online"
 IN_STORE = "In-Store"
@@ -15,7 +15,7 @@ PURCHASE_TYPES = (ONLINE, IN_STORE)
 
 
 class State(str, Enum):
-    """Processing states a purchase moves through ."""
+    """Processing states a purchase moves through."""
 
     DISCOVERED = "Discovered"
     DETAILS_EXTRACTED = "Details Extracted"

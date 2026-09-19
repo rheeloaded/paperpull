@@ -74,9 +74,9 @@ class Document:
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
         self.document_id = document_id  # unused here, identity is subject + date
-        self.item_id = item_id          # mailboxItemId, a hint only, re-resolved
+        self.item_id = item_id          # the row's bill date, a hint only, re-resolved
         self.client_id = client_id      # goes with it on the content call
-        self.occurrence = occurrence    # nth message with this subject and date
+        self.occurrence = occurrence    # nth document with this title and date
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -357,9 +357,9 @@ class App:
                 return 0
         self.check_session(page)
 
-        # The mailbox, read through its own API. Two messages can share a
-        # subject and a date (an annual statement and its supplement, say),
-        # so the nth such pair is keyed with its position.
+        # The bill list, read from the portal's own page. Two bills can
+        # share a title and a date (a bill and its correction, say), so
+        # the nth such pair is keyed with its position.
         raw = site.collect_documents(page, keep=scope.period_filter(self.args, self.config),
                                      config=self.config)
         log.info("Fairfax Water: %d bill(s) listed", len(raw))
@@ -471,9 +471,9 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Each PDF is the attachment on a mailbox message, fetched through
-        # the same API the page uses, from inside the page. Nothing is
-        # clicked. The message is looked up again by subject and date first.
+        # Each PDF is what the row's View control opens in a new tab,
+        # caught at the browser level. That is the one click this app
+        # makes. The row is looked up again by title and date first.
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
@@ -678,8 +678,8 @@ class App:
             info["challenge"] = site.detect_security_challenge(page)
             info["mapped"] = True
             # The survey stays, for the day the site changes. Read only,
-            # fidelity.com pages only, the only links it follows are the few whose
-            # text is exactly a document or mailbox word, account numbers
+            # fwcustomer.org pages only, the only links it follows are the few whose
+            # text is exactly a document word, account numbers
             # are masked and JSON bodies are recorded as shape only.
             info["survey"] = site.survey(page)
             docs = site.collect_documents(page)
@@ -691,7 +691,7 @@ class App:
                     "title": (d.get("title") or "")[:90],
                     "date": d.get("date", ""),
                     "category": cat, "summary": summ})
-            # No screenshot. A retirement account page shows balances, and a
+            # No screenshot. An account page shows balances, and a
             # PNG of it would sit in Diagnostics where it is easy to attach to
             # a bug report by accident.
         except Exception as e:

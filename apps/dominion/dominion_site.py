@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import base64
 import html as _html
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -44,8 +43,6 @@ URLS = {
     "statements": f"{BASE}/account/billing-and-payments",
     "documents_alt": f"{BASE}/account",
 }
-DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["statements"],
-                           URLS["documents_alt"]]
 
 LOGIN_URL_MARKERS = ["/login", "/signin", "/sign-in", "/auth", "/mfa",
                      "/verification", "/challenge"]
@@ -393,70 +390,6 @@ def collect_documents(page) -> List[RawDoc]:
     return docs
 
 
-def collect_documents_via_api(page) -> List[dict]:
-    """Capture Dominion's documents JSON API as the page loads/pages. Repair
-    the URL/response matcher after diagnose. Returns raw document dicts."""
-    batches: List[list] = []
-
-    def on_resp(r):
-        try:
-            u = r.url
-            if not re.search(r"document|statement|report", u, re.I):
-                return
-            if "json" not in (r.headers.get("content-type", "") or "").lower():
-                return
-            data = json.loads(r.text())
-            # Dominion list endpoints usually return {"results":[...]} or a
-            # bare list. Accept either.
-            items = None
-            if isinstance(data, dict):
-                for k in ("results", "documents", "data", "items"):
-                    if isinstance(data.get(k), list):
-                        items = data[k]
-                        break
-            elif isinstance(data, list):
-                items = data
-            if items:
-                batches.append(items)
-        except Exception:
-            pass
-
-    page.on("response", on_resp)
-    try:
-        goto_documents(page)
-        page.wait_for_timeout(3500)
-        last = -1
-        stagnant = 0
-        for _ in range(150):
-            for _ in range(3):
-                page.mouse.wheel(0, 5000)
-                page.wait_for_timeout(700)
-            advanced = next_page(page)
-            total = sum(len(b) for b in batches)
-            if total == last and not advanced:
-                stagnant += 1
-                if stagnant >= 3:
-                    break
-            else:
-                stagnant = 0
-                last = total
-    finally:
-        try:
-            page.remove_listener("response", on_resp)
-        except Exception:
-            pass
-
-    docs: dict = {}
-    for batch in batches:
-        for d in batch:
-            if not isinstance(d, dict):
-                continue
-            did = d.get("id") or d.get("documentId") or d.get("url")
-            if did and did not in docs:
-                docs[did] = d
-    return list(docs.values())
-
-
 _BLOB_FETCH_JS = r"""async () => {
     const f = document.querySelector("iframe[src^='blob:']");
     if (!f || !f.src) return null;
@@ -507,16 +440,6 @@ def download_by_url(page, url: str, out_path) -> bool:
     except Exception as e:
         log.info("download_by_url blob fallback failed for %s: %s", url, e)
     return False
-
-
-# ---------------------------------------------------------------------------
-# Dominion document pages (verified 2026-07). Every bill lives on the one
-# paginated billing-history page as an <a download href="#"> whose own text is
-# the title; clicking it fires a real download event. There is no tax area -
-# a utility issues no tax forms.
-def document_source_urls() -> List[Tuple[str, str]]:
-    """The single billing-history page holds every statement (paginated)."""
-    return [(BILLING_URL, "statements")]
 
 
 # How many pages of bills to walk at most (10 bills/page) - a safety bound.
@@ -665,37 +588,6 @@ def is_unavailable_bill(out_path) -> bool:
         return bool(_UNAVAILABLE_RE.search(text))
     except Exception:
         return False
-
-
-def find_row_download(page, title: str, date_text: str = ""):
-    """Re-find a row's safe download control by its text. Repair after
-    diagnose once the real row/menu structure is known."""
-    try:
-        rows = page.locator(FALLBACK["doc_row"])
-        for i in range(rows.count()):
-            row = rows.nth(i)
-            try:
-                text = row.inner_text(timeout=800) or ""
-            except Exception:
-                continue
-            if title and title[:40] not in text:
-                continue
-            if date_text and date_text not in text:
-                continue
-            link = row.locator("a[download], a[href$='.pdf'], a[href*='.pdf']")
-            if link.count() > 0:
-                return link.first
-            for b in row.locator("button, a").all():
-                try:
-                    label = (b.inner_text(timeout=600) or "") + \
-                        (b.get_attribute("aria-label") or "")
-                except Exception:
-                    label = ""
-                if is_safe_control(label):
-                    return b
-    except Exception:
-        pass
-    return None
 
 
 # ---------------------------------------------------------------------------

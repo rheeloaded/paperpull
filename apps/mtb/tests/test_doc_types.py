@@ -189,7 +189,7 @@ def test_settings_and_money_labels_that_once_slipped_through():
         assert not site.is_safe_control(label), label
 
 
-def test_a_signin_page_returned_instead_of_a_pdf_is_recognised():
+def test_a_signin_page_returned_instead_of_a_pdf_is_recognized():
     """M&T answers an expired session with HTTP 200 and an HTML login page. If
     that is not spotted, every remaining document is filed as 'manual review'
     and the run ends looking successful with nothing saved."""

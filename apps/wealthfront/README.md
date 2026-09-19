@@ -50,7 +50,7 @@ in `config.json` (the default is this app's own folder). Keep it somewhere
 safe, and if that folder syncs to a cloud drive, know these documents go with
 it.
 
-The index CSV deliberately records **no** account numbers, balances, or SSN —
+The index CSV deliberately records **no** account numbers, balances, or SSN,
 only what's needed to locate and verify a file.
 
 ## Setup / workflow

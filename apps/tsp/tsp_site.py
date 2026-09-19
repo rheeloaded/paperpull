@@ -84,7 +84,6 @@ URLS = {
     # so this is only navigated to when the tab is somewhere else entirely.
     "documents": f"{MYACCOUNT}/api/angularfirst-app/ah-angular-afirst-web/#/web/converge/gmc?selecttab=1",
 }
-PAGE_SIZE = 10
 
 LOGIN_URL_MARKERS = ["/login", "/logon", "/signin", "/sign-in", "/mfa",
                      "/verify", "/onboarding"]
@@ -189,8 +188,8 @@ def looks_signed_out(page) -> bool:
 
 def detect_security_challenge(page) -> Optional[str]:
     """Names the passcode, CAPTCHA or throttling prompt on screen, or None.
-    Visible text only. The page source of a Salesforce site carries every
-    string its scripts could ever show."""
+    Visible text only. A page's source can carry every string its scripts
+    could ever show, "verification code" included, on a normal day."""
     try:
         title = (page.title() or "").lower()
     except Exception:

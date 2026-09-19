@@ -14,16 +14,12 @@ SAFETY (this is a utility billing account):
 """
 from __future__ import annotations
 
-import base64
 import html as _html
-import json
 import logging
 import re
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urlsplit
 
 log = logging.getLogger("pge_docs.site")
 
@@ -200,7 +196,6 @@ MONTH_YEAR_RE = re.compile(
     r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
     r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
     r"\s+(\d{4})", re.I)
-QUARTER_RE = re.compile(r"\bQ([1-4])\s*[' ]?\s*(\d{4})\b", re.I)
 YEAR_RE = re.compile(r"\b(19|20)(\d{2})\b")
 
 
@@ -461,7 +456,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                     res = page.request.get(target_url)
                     if res.ok and res.body()[:5] == b"%PDF-":
                         out_path.write_bytes(res.body())
-                        print(f"  [site] Successfully fetched PDF via direct href!")
+                        print("  [site] Successfully fetched PDF via direct href!")
                         return True
         except Exception as e_href:
             print(f"  [site] Direct href fetch note: {e_href}")

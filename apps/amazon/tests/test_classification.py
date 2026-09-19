@@ -174,3 +174,13 @@ def test_amazon_print_invoice_url():
     import amazon_site
     url = amazon_site.print_invoice_url("111-2223333-4445555")
     assert url.endswith("summary/print.html?orderID=111-2223333-4445555")
+
+
+def test_item_weights_read_european_amounts_by_shape():
+    """A German order prints 1.234,56 EUR. Read as a U.S. amount that is
+    1.23, which made a big-ticket item weigh less than a banana."""
+    parse = classification._parse_money
+    assert parse("1.234,56 €") == 1234.56 == parse("$1,234.56")
+    assert parse("12,99") == 12.99 == parse("£12.99")
+    assert parse("1.234") == 1234.0 == parse("1,234")
+    assert parse("-$3.50") == 3.5 and parse("") is None and parse("n/a") is None

@@ -7,13 +7,13 @@ These tools sign in to **real financial and shopping accounts** and download
 
 The `.gitignore` already blocks all of the following. Do not override it.
 
-- **Browser profile folders** (`*-browser-profile/`) — these hold live logged-in
+- **Browser profile folders** (`*-browser-profile/`), these hold live logged-in
   sessions: cookies and auth tokens for your bank, brokerage, and Amazon. This
   is the single worst thing that could leak. Anyone with them can act as you.
-- **`config.json` / `config.<account>.json`** — your real paths and account
+- **`config.json` / `config.<account>.json`**, your real paths and account
   labels. Only the sanitized `config.example.json` is tracked.
-- **Downloaded documents** (`*.pdf`, `*.zip`) — your actual financial records.
-- **Runtime state** — `discovery.json`, `progress.json`, `*.log`, `*.csv`,
+- **Downloaded documents** (`*.pdf`, `*.zip`), your actual financial records.
+- **Runtime state**, `discovery.json`, `progress.json`, `*.log`, `*.csv`,
   `Diagnostics/` (which can contain screenshots of signed-in pages), `Backups/`.
 
 ## Before your first commit
@@ -21,7 +21,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
 1. Confirm nothing sensitive is staged: `git status` should show only source,
    docs, and `config.example.json`.
 2. If you ever accidentally commit a secret, deleting it in a later commit is
-   **not enough** — it stays in git history. Scrub history (e.g. with
+   **not enough**, it stays in git history. Scrub history (e.g. with
    `git filter-repo`) or start a fresh repo.
 
 ## Design safety (what the tools themselves do)
@@ -63,7 +63,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
 - **You sign in, not the tool.** The tools attach to a browser *you* logged into
   (via Chrome DevTools Protocol). They never handle your password or 2FA.
 - **Local only.** The browser's debugging port and the GUI both listen on
-  `127.0.0.1` (localhost) — nothing is exposed to your network. Note that while
+  `127.0.0.1` (localhost), nothing is exposed to your network. Note that while
   the signed-in browser is open, any program running **on your own machine**
   could attach to that debugging port, so close the browser window when you're
   done downloading. The GUI additionally refuses any request whose `Origin`/

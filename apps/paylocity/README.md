@@ -12,7 +12,7 @@ A payroll portal can change where your wages land, your tax withholding, and
 your personal details. This tool only reads the Pay History area and downloads
 the statement PDFs Paylocity has already generated. It **never** changes a bank
 account, routing number, W-4 or withholding, address, beneficiary, benefits
-enrolment, or any setting.
+enrollment, or any setting.
 
 In fact nothing on the page is ever clicked. Discovery and download are plain
 GETs to the same JSON endpoints Paylocity's own Pay History screen uses, over
@@ -28,7 +28,7 @@ Paylocity's own host. All of it is covered by tests.
 `access.paylocity.com`. You sign in with your **Company ID**, username and
 password, or your company's single sign-on, and complete any MFA yourself. The
 tool then attaches to that already-signed-in browser and reads only what you
-are authorised to see. The Company ID identifies your employer and is typed by
+are authorized to see. The Company ID identifies your employer and is typed by
 you at sign-in; this app never handles, stores, or needs it.
 
 **The signed-in browser window must stay OPEN while the tool runs.**

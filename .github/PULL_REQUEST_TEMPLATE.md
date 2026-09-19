@@ -18,7 +18,7 @@
       provider.
 - [ ] **No credential handling.** The user signs in themselves; the app attaches
       to that session and only reads. No password/2FA code anywhere.
-- [ ] **No private data committed.** `git status` shows only source — no real
+- [ ] **No private data committed.** `git status` shows only source, no real
       `config.json`, no `*-browser-profile/`, no PDFs, CSVs, logs, or state. No
       real names, account numbers, balances, or personal paths in code,
       comments, tests, or fixtures.

@@ -35,7 +35,7 @@ class Folder:
     """One output folder.
 
     `precreate=False` means the folder is reachable through routing but is not
-    created up front — it appears the moment a document actually lands there.
+    created up front, it appears the moment a document actually lands there.
     That is what keeps an install from growing folders it can never fill (an
     `Insurance Documents` folder under a phone carrier, say).
     """

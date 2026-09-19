@@ -340,7 +340,7 @@ class App:
             # cannot say which account each belongs to, so the filename says
             # only which one it is, traceably: the last 4 of Ally's documentId.
             # Inventing "Individual"/"Joint" here is exactly the mistake that
-            # mislabelled the trust statements.
+            # mislabeled the trust statements.
             full_summary = f"{summary} - {doc_id[-4:]}" if doc_id else summary
         else:
             full_summary = summary
@@ -349,8 +349,8 @@ class App:
                 account, {"count": 0, "label": label, "ira": bool(d.get("ira"))})
             reg["count"] += 1
         else:
-            self.stats.setdefault("unlabelled", 0)
-            self.stats["unlabelled"] += 1
+            self.stats.setdefault("unlabeled", 0)
+            self.stats["unlabeled"] += 1
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, account=account,
                        date_text=date, document_id=doc_id,
@@ -430,7 +430,7 @@ class App:
             # account table once downloaded - these labels are the fallback for
             # when that cannot be read.
             regs = self.stats.get("registrations") or {}
-            un = self.stats.get("unlabelled", 0)
+            un = self.stats.get("unlabeled", 0)
             if regs or un:
                 print("\n  Statements are named from each PDF's own account list.")
                 print("  What Ally's metadata says about them:")

@@ -16,7 +16,7 @@ from datetime import date as _date
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from urllib.parse import urlsplit, urljoin
+from urllib.parse import urlsplit
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 ALLOWED_HOSTS = {'verified.capitalone.com', 'myaccounts.capitalone.com'}

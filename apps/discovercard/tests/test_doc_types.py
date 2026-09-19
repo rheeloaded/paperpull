@@ -213,7 +213,7 @@ def test_the_pdf_control_clears_the_guard():
     """The statement links are labeled just "PDF"."""
     assert site.is_safe_control("PDF")
     assert site.is_safe_control("View Billing Statement PDF")
-    # ...while the neighbouring transactions-export control, which opens a
+    # ...while the neighboring transactions-export control, which opens a
     # modal dialog, must never be treated as a document action to click.
     assert not site.is_safe_control("Set up AutoPay")
 
@@ -252,7 +252,7 @@ def test_a_real_statement_picker_still_passes():
         assert not site.is_forbidden_control_context(identity, ["2026", "2025"]), identity
 
 
-def test_signed_out_urls_are_recognised():
+def test_signed_out_urls_are_recognized():
     """A live run ended on Discover's logoff page, which matched none of the
     original markers - "universalLogin" does not contain "/login" - so the app
     kept trying instead of saying the session had ended."""
@@ -270,7 +270,7 @@ def test_signed_out_urls_are_recognised():
         FakePage("https://card.discover.com/cardmembersvcs/statements/app/activity#/recent"))
 
 
-def test_public_and_error_pages_are_recognised():
+def test_public_and_error_pages_are_recognized():
     class FakePage:
         def __init__(self, url): self.url = url
     for url in ["https://www.discover.com/discover/data/misc/error404.shtml",
@@ -297,7 +297,7 @@ class _Tab:
         self.url = url
 
 
-def test_a_migrated_account_is_recognised_rather_than_blamed_on_the_user():
+def test_a_migrated_account_is_recognized_rather_than_blamed_on_the_user():
     """Capital One acquired Discover and is moving card servicing onto its own
     site. Before this, a moved account produced "could not open your Discover
     statements, sign in and try again", which sends somebody to fix a sign-in

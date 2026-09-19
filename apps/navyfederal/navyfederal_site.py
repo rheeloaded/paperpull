@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import base64
 import html as _html
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -399,76 +398,6 @@ _BLOB_FETCH_JS = r"""async () => {
 }"""
 
 
-def collect_documents_via_api(page) -> List[dict]:
-    """Enumerate EVERY document by capturing the Navy Federal documents JSON API as the
-    page loads/pages, rather than scraping the visible table.
-
-    The SPA calls
-      GET .../my-documents/experience/individuals/<id>/documents?limit=100
-    returning {"documents":[{title, displayDate, accountName, category,
-    subCategory, documentId, documentDate, ...}]} newest-first, in pages. We
-    capture every such response while scrolling + clicking through the pager,
-    then de-duplicate by documentId. Returns the raw document dicts.
-    """
-    batches: List[list] = []
-
-    def on_resp(r):
-        try:
-            u = r.url
-            if "/documents" not in u or "?" not in u:
-                return
-            if "json" not in (r.headers.get("content-type", "") or "").lower():
-                return
-            data = json.loads(r.text())
-            if isinstance(data, dict) and isinstance(data.get("documents"), list):
-                batches.append(data["documents"])
-        except Exception:
-            pass
-
-    page.on("response", on_resp)
-    try:
-        goto_documents(page)
-        page.wait_for_timeout(3500)
-        last_total = -1
-        stagnant = 0
-        for _ in range(150):  # generous cap
-            for _ in range(3):
-                page.mouse.wheel(0, 5000)
-                page.wait_for_timeout(700)
-            advanced = False
-            try:
-                nxt = page.get_by_role("button", name=re.compile(r"^\s*next page\s*$", re.I))
-                if nxt.count() == 0:
-                    nxt = page.get_by_role("link", name=re.compile(r"^\s*next page\s*$", re.I))
-                if nxt.count() and nxt.first.is_visible() and nxt.first.is_enabled():
-                    nxt.first.click()
-                    page.wait_for_timeout(1800)
-                    advanced = True
-            except Exception:
-                pass
-            total = sum(len(b) for b in batches)
-            if total == last_total and not advanced:
-                stagnant += 1
-                if stagnant >= 3:
-                    break
-            else:
-                stagnant = 0
-                last_total = total
-    finally:
-        try:
-            page.remove_listener("response", on_resp)
-        except Exception:
-            pass
-
-    docs: dict = {}
-    for batch in batches:
-        for d in batch:
-            did = d.get("documentId")
-            if did and did not in docs:
-                docs[did] = d
-    return list(docs.values())
-
-
 def document_deeplink(document_id: str, document_date: str) -> str:
     return f"{BASE}/my/documents?documentId={document_id}&documentDate={document_date}"
 
@@ -496,85 +425,6 @@ def download_by_id(page, document_id: str, document_date: str, out_path) -> bool
     except Exception as e:
         log.info("download_by_id failed for %s: %s", document_id, e)
     return False
-
-
-def _find_doc_row(page, title: str, date_text: str, account: str):
-    """Return the readDocument (title) button for the row matching this
-    document, or None. Matched by content because row indexes are unstable."""
-    try:
-        rows = page.locator("table tr")
-        for i in range(rows.count()):
-            row = rows.nth(i)
-            try:
-                text = row.inner_text(timeout=800) or ""
-            except Exception:
-                continue
-            if title and title[:40] not in text:
-                continue
-            if date_text and date_text not in text:
-                continue
-            if account and account[:18] and account[:18] not in text:
-                continue
-            rd = row.locator("[data-testid^='readDocument-']")
-            if rd.count() > 0:
-                return rd.first
-    except Exception:
-        pass
-    return None
-
-
-def download_document_row(page, title: str, date_text: str, account: str,
-                          out_path) -> bool:
-    """Reload a fresh document list, click this document's title, and capture
-    the PDF it renders inline.
-
-    Navy Federal shows the PDF as a blob: iframe (no download event, no direct link).
-    We ALWAYS reload the list first so no previous document's iframe lingers -
-    that stale iframe was the cause of every capture returning the same file.
-    After the click we wait for a fresh blob iframe, then fetch its bytes in
-    the page context.
-    """
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # fresh list -> guarantees no leftover PDF iframe from the previous doc
-    goto_documents(page)
-    scroll_full_page(page, rounds=2)
-    rd = _find_doc_row(page, title, date_text, account)
-    if rd is None:
-        log.info("row not found for %r %r %r", title, date_text, account)
-        return False
-
-    try:
-        rd.click()
-        # the inline PDF renders into a blob: iframe once the click resolves
-        page.wait_for_selector("iframe[src^='blob:']", timeout=30000)
-        page.wait_for_timeout(1800)
-        b64 = page.evaluate(r"""async () => {
-            const f = document.querySelector("iframe[src^='blob:']");
-            if (!f || !f.src) return null;
-            const r = await fetch(f.src);
-            const buf = new Uint8Array(await r.arrayBuffer());
-            let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-            return btoa(s);
-        }""")
-        if b64:
-            data = base64.b64decode(b64)
-            if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
-                return True
-            log.info("blob for %r was not a PDF (%d bytes)", title, len(data))
-    except Exception as e:
-        log.info("capture failed for %r: %s", title, e)
-    return False
-
-
-# ===========================================================================
-# Navy Federal document center (verified 2026-08). Statements live on ONE page
-# (digitalomni SPA) grouped by account into expandable accordions; each row's
-# "View" button opens the PDF as a blob in a new tab. No documents API.
-# ===========================================================================
-STATEMENTS_URL = "https://digitalomni.navyfederal.org/nfcu-online-banking/statements"
 GROUP_SEL = "[class*='product-kind-description-row']"
 
 _NFCU_BLOB_FETCH = r"""async (u) => {

@@ -8,6 +8,7 @@
     python paperpull.py pge pilot          download the newest few
     python paperpull.py pge all --yes      download everything in scope
     python paperpull.py chase resume --account spouse
+    python paperpull.py chase add-account spouse    a second person's own config
 
 Every app is one Python script that takes one flag, and this finds the app,
 picks the interpreter it should run under, and passes the flag. Anything it
@@ -41,8 +42,9 @@ HERE = Path(__file__).resolve().parent
 # command not listed here becomes --<command>, so the receipt apps' own
 # modes (online, instore, review-names) need no entry.
 COMMANDS = {
-    "setup":    None,
-    "login":    None,
+    "setup":       None,
+    "login":       None,
+    "add-account": None,
     "discover": ["--discover"],
     "pilot":    ["--pilot"],
     "all":      ["--all"],
@@ -179,8 +181,8 @@ def account_flags(app_dir: Path, account: str | None) -> list[str]:
         return []
     cfg = app_dir / ("config.%s.json" % account)
     if not cfg.is_file():
-        raise SystemExit("No %s in %s. Add the account first (python add_account.py)."
-                         % (cfg.name, app_dir.name))
+        raise SystemExit("No %s in %s. Add the account first: python paperpull.py %s add-account %s"
+                         % (cfg.name, app_dir.name, _slug(app_dir), account))
     return ["--config", cfg.name]
 
 
@@ -241,6 +243,17 @@ def setup(app_dir: Path) -> int:
     return 0
 
 
+def add_account(app_dir: Path, extra: list[str]) -> int:
+    """paperpull <app> add-account NAME [--owner X] [--port-offset N], the
+    shared tool pointed at this one app."""
+    sys.path.insert(0, str(HERE / "tools"))
+    import add_account as tool
+    if not extra or extra[0].startswith("-"):
+        raise SystemExit("add-account needs the account's label, e.g. "
+                         "python paperpull.py %s add-account spouse" % _slug(app_dir))
+    return tool.main([extra[0], "--app", app_dir.name, "--root", str(app_dir.parent), *extra[1:]])
+
+
 # -- entry ---------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -282,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
     app_dir = find_app(root, args.app)
     if args.command == "setup":
         return setup(app_dir)
+    if args.command == "add-account":
+        return add_account(app_dir, extra)
     if interpreter(app_dir) == Path(sys.executable) and not has_core():
         raise SystemExit(
             "%s has no .venv and this Python does not have paperpull_core. "

@@ -1,6 +1,6 @@
 """Deterministic local classification of provider documents.
 
-the provider labels every document, so we map that label to a clean, searchable
+The provider labels every document, so we map that label to a clean, searchable
 filename summary. Rules live in the editable document_rules.json.
 
 Categories: Statement, Year-End Summary, Tax Document, Insurance Document,

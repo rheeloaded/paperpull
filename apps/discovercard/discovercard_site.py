@@ -49,7 +49,7 @@ WHAT THE LIVE PROBE ESTABLISHED (2026-08-19):
     from a template, so a change to the query string cannot silently fetch the
     wrong period. The served filename also carries the card's last four, which
     is the only place a single-card login states them.
-  * The neighbouring "Download" control opens a MODAL DIALOG (a transactions
+  * The neighboring "Download" control opens a MODAL DIALOG (a transactions
     export, not the statement PDF), and "Print" opens a popup. Neither is used:
     answering a dialog is exactly what this project never does.
   * History observed: 24 statements, the oldest .. the newest - about two
@@ -210,27 +210,6 @@ FALLBACK = {
                   ".pagination-next, [class*='next']"),
     "show_more": "button, a",
 }
-
-# A row control that opens/downloads one statement. Discover's form is UNKNOWN.
-#
-# The specific selectors below are tried first, then ROW_CONTROL_FALLBACK_SEL
-# considers any button/link in the row. That two-stage shape is not padding:
-# on ALLY the control turned out to be a plain <button> with no aria-label and
-# no href, whose text was just "Statement" - the words "Download statement
-# for:" lived in a separate visually-hidden element - so keying on aria-label
-# or on the word "Download" found nothing at all. Expect Discover to be
-# similarly unhelpful in its own way.
-#
-# Either way the element's own accessible name must clear is_safe_control(),
-# so widening the net does not widen what may be clicked.
-ROW_CONTROL_SEL = ("a[href$='.pdf'], a[download], "
-                   "a[aria-label*='statement' i], a[aria-label*='download' i], "
-                   "button[aria-label*='statement' i], button[aria-label*='download' i], "
-                   "button[aria-label*='view' i], "
-                   "a:has-text('Download'), a:has-text('View'), "
-                   "button:has-text('Download'), button:has-text('View'), "
-                   "button:has-text('PDF'), a:has-text('PDF')")
-ROW_CONTROL_FALLBACK_SEL = "button, a"
 
 # ---------------------------------------------------------------------------
 # Date parsing (shared with the other projects)
@@ -919,33 +898,6 @@ def _write_if_pdf(data: bytes, out_path: Path) -> bool:
     return True
 
 
-def _row_download_control(row):
-    """The row's own download control, or None.
-
-    Tries the explicit selectors first, then any button/link in the row -
-    Discover's control announces itself only through its text. In BOTH passes the
-    control's own accessible name must pass is_safe_control(), so a money
-    control in a row could never be picked up by the wider pass.
-    """
-    for sel in (ROW_CONTROL_SEL, ROW_CONTROL_FALLBACK_SEL):
-        try:
-            ctrl = row.locator(sel)
-            n = min(ctrl.count(), 8)
-        except Exception:
-            continue
-        for j in range(n):
-            c = ctrl.nth(j)
-            try:
-                label = ((c.inner_text(timeout=500) or "") + " " +
-                         (c.get_attribute("aria-label") or "") + " " +
-                         (c.get_attribute("href") or ""))
-            except Exception:
-                continue
-            if is_safe_control(label):
-                return c
-    return None
-
-
 # ===========================================================================
 # Downloading a statement. CONFIRMED LIVE 2026-08-19.
 #
@@ -1079,13 +1031,6 @@ def _redact(value):
     if isinstance(value, str):
         return _DIGITS_RE.sub(lambda m: m.group(0)[:2] + "…" + m.group(0)[-2:], value)
     return value
-
-
-# NOT a known Discover endpoint - a candidate shape only, so that IF Discover
-# turns out to answer a document list as JSON, probe_statements_api reports its
-# records. probe_api (below) is the one that finds endpoints without guessing.
-DOCREF_API_RE = re.compile(r"/(documents?|statements?|docref)[a-z/]*/(list|search)|"
-                           r"/statements?\?|/documents?\?", re.I)
 
 
 def probe_statements_api(page) -> dict:

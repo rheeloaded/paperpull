@@ -15,7 +15,7 @@ Nothing is frozen. The folder carries the official embeddable CPython from
 python.org, with the packages every app needs installed into it once. That was
 chosen over PyInstaller for three reasons.
 
-Every one of the 22 apps needs exactly the same three packages, so one shared
+Every app needs the same few packages, so one shared
 environment serves all of them, and there is nothing to gain from per-app
 bundles.
 
@@ -233,7 +233,7 @@ def stage_code() -> int:
         if not src.is_file():
             continue
         # App code ships as a TEMPLATE, not as installs. The panel's default
-        # root is apps/ beside it, and a folder of 22 apps with no config and
+        # root is apps/ beside it, and a folder of apps with no config and
         # no history is exactly what a fresh install must not list. Under
         # templates/ it is out of the way until a "create a new install"
         # feature needs it, and the panel asks where the real ones are.

@@ -37,13 +37,22 @@ def load_rules(path: Optional[Path] = None) -> dict:
 
 
 def _parse_money(text: str) -> Optional[float]:
+    """The first amount in the text, by shape rather than by currency. A
+    receipt from a European marketplace prints 1.234,56 where a U.S. one
+    prints 1,234.56, and exactly two digits after the last separator is the
+    decimal either way. The sign is not needed here, only the size."""
     if not text:
         return None
-    m = re.search(r"-?\$?\s*([\d,]+(?:\.\d{1,2})?)", str(text))
+    m = re.search(r"\d[\d.,]*", str(text))
     if not m:
         return None
+    s = m.group(0).rstrip(".,")
+    if re.search(r"[.,]\d{2}$", s):
+        s = s[:-3].replace(".", "").replace(",", "") + "." + s[-2:]
+    else:
+        s = s.replace(".", "").replace(",", "")
     try:
-        return float(m.group(1).replace(",", ""))
+        return float(s)
     except ValueError:
         return None
 

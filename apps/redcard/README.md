@@ -1,4 +1,4 @@
-# Target RedCard / Target Circle Card — statement downloader
+# Target RedCard / Target Circle Card statement downloader
 
 Downloads your **Target Circle Card (RedCard credit)** monthly **billing
 statements** as PDFs and keeps an index CSV. Read-only, delete-safe, part of
@@ -67,15 +67,15 @@ apps).
 
 ## Delete-safe (paperless-ngx workflow)
 
-Once a statement downloads successfully it is remembered as done for good — you
+Once a statement downloads successfully it is remembered as done for good, you
 can delete the PDF (e.g. after importing into paperless-ngx) and it will NOT be
 re-downloaded. Each run writes `new-this-run.txt` listing exactly what was
 downloaded that run. To rebuild deleted files, add `--redownload`.
 
 ## A second account
 
-`login.bat spouse` + `python add_account.py spouse` set up a second Target
-Circle Card login with its own folders, browser profile, and debugging port —
+`paperpull redcard add-account spouse` + `login.bat spouse` set up a second Target
+Circle Card login with its own folders, browser profile, and debugging port,
 no re-downloading and no mixing of data.
 
 ## Tests

@@ -3,12 +3,12 @@
 Downloads your available Target.com purchase history (Online and In-store),
 saves each printable receipt directly as a PDF, and maintains two CSV files:
 
-- `Target Order History.csv` — one row per purchased item
-- `Target Receipt Index.csv` — one row per downloaded PDF
+- `Target Order History.csv`, one row per purchased item
+- `Target Receipt Index.csv`, one row per downloaded PDF
 
 Everything runs **locally**. Nothing (item names, receipts, account data) is
 sent to any external AI API or third-party service. You sign in to Target
-**manually** — the tool never touches your credentials, and never bypasses
+**manually**, the tool never touches your credentials, and never bypasses
 CAPTCHAs or security checks.
 
 ## Setup (one time)
@@ -28,7 +28,7 @@ CAPTCHAs or security checks.
 | 3 | `paperpull target pilot` | 5 newest Online + 3 newest In-store; then **stops** |
 | 4 | inspect the PDFs/CSVs | You approve before anything bigger runs |
 | 5 | `paperpull target all` | Full history (asks for `YES` confirmation) |
-| any time | `paperpull target resume` | Continue after an interruption — never restarts finished work |
+| any time | `paperpull target resume` | Continue after an interruption, never restarts finished work |
 | any time | `paperpull target verify` | Re-validate every indexed PDF |
 | any time | `paperpull target review-names` | Fix low-confidence filenames interactively |
 
@@ -57,7 +57,7 @@ C:\Users\YOU\Downloads\Target Receipts\
 
 Filenames: `YYYY-MM-DD Target <Purchase Summary> Receipt.pdf`
 (e.g. `2024-12-31 Target Groceries Receipt.pdf`). Collisions get ` (2)`,
-` (3)`… — an existing PDF is **never overwritten**.
+` (3)`…, an existing PDF is **never overwritten**.
 
 ## Classification
 

@@ -174,26 +174,6 @@ FALLBACK = {
     "show_more": "button, a",
 }
 
-# A row control that opens/downloads one statement.
-#
-# Chase's is a plain <button> with NO aria-label and NO href, whose text is just
-# the statement's name ("Statement", or "<name> Trust Statement"). The words
-# "Download statement for:" sit in a separate visually-hidden element in the
-# row, not on the button - so keying on aria-label or on the word "Download"
-# finds nothing (confirmed live 2026-08-18). The specific selectors are kept
-# for other layouts and tried first; ROW_CONTROL_FALLBACK_SEL then considers
-# any button/link in the row. Either way the element's own accessible name
-# must clear is_safe_control(), so widening the net does not widen what may
-# be clicked.
-ROW_CONTROL_SEL = ("a[href$='.pdf'], a[download], "
-                   "a[aria-label*='statement' i], a[aria-label*='download' i], "
-                   "button[aria-label*='statement' i], button[aria-label*='download' i], "
-                   "button[aria-label*='view' i], "
-                   "a:has-text('Download'), a:has-text('View'), "
-                   "button:has-text('Download'), button:has-text('View'), "
-                   "button:has-text('PDF'), a:has-text('PDF')")
-ROW_CONTROL_FALLBACK_SEL = "button, a"
-
 # ---------------------------------------------------------------------------
 # Date parsing (shared with the other projects)
 # ---------------------------------------------------------------------------
@@ -632,7 +612,6 @@ def describe_selects(page, limit: int = 12):
     return _controls.describe_selects(page, FORBIDDEN_CONTROL_RE, limit=limit)
 
 
-
 def account_select(page):
     """Return (locator, [labels]) for a <select> that lists accounts, or
     (None, []). Money-movement pickers are refused outright."""
@@ -761,33 +740,6 @@ def _write_if_pdf(data: bytes, out_path: Path) -> bool:
         return False
     out_path.write_bytes(data)
     return True
-
-
-def _row_download_control(row):
-    """The row's own download control, or None.
-
-    Tries the explicit selectors first, then any button/link in the row -
-    Chase's control announces itself only through its text. In BOTH passes the
-    control's own accessible name must pass is_safe_control(), so a money
-    control in a row could never be picked up by the wider pass.
-    """
-    for sel in (ROW_CONTROL_SEL, ROW_CONTROL_FALLBACK_SEL):
-        try:
-            ctrl = row.locator(sel)
-            n = min(ctrl.count(), 8)
-        except Exception:
-            continue
-        for j in range(n):
-            c = ctrl.nth(j)
-            try:
-                label = ((c.inner_text(timeout=500) or "") + " " +
-                         (c.get_attribute("aria-label") or "") + " " +
-                         (c.get_attribute("href") or ""))
-            except Exception:
-                continue
-            if is_safe_control(label):
-                return c
-    return None
 
 
 _MONTHS_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -1285,7 +1237,7 @@ def read_card_rows(page, label: str) -> List[dict]:
     Attribution comes from the ROW, not from correlating an async API reply.
     Each row names itself completely - date, type and card - so a document can
     only ever be filed under the card printed on it. Correlating responses
-    instead put a card's statements under its neighbour: collapsing, expanding
+    instead put a card's statements under its neighbor: collapsing, expanding
     and changing the year all fire the same endpoint, so "the next reply" is
     not reliably the reply to this click.
     """

@@ -188,7 +188,7 @@ def test_no_screenshot_of_a_pay_page_is_written():
     assert "page.screenshot(" not in src
 
 
-def test_a_signin_page_returned_instead_of_a_pdf_is_recognised():
+def test_a_signin_page_returned_instead_of_a_pdf_is_recognized():
     """Government sessions are short. An expired one answers with HTML at
     HTTP 200, and if that is not spotted the run reports an empty success."""
     assert site._looks_like_login_html(
@@ -230,7 +230,7 @@ def test_a_corrected_w2_is_not_filed_as_an_ordinary_one():
     assert summary == "W-2 Tax Form"
 
 
-def test_active_duty_support_is_labelled_as_untested():
+def test_active_duty_support_is_labeled_as_untested():
     """It was written from myPay's own type numbers against an API proven on a
     retiree account, but nobody has run it on an active-duty account. Saying so
     is the difference between a caveat and a false claim."""

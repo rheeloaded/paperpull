@@ -3,8 +3,8 @@
 Downloads your Amazon order history and saves each order's **printable order
 summary** as a PDF, plus two CSV files:
 
-- `Amazon Order History.csv` — one row per purchased item
-- `Amazon Receipt Index.csv` — one row per downloaded PDF
+- `Amazon Order History.csv`, one row per purchased item
+- `Amazon Receipt Index.csv`, one row per downloaded PDF
 
 Everything runs **locally**. Nothing is sent to any external AI API or
 third-party service. You sign in to Amazon **manually**; the tool never
@@ -12,7 +12,7 @@ touches your credentials and never bypasses CAPTCHAs or OTP.
 
 ## Date range: your full history
 
-By default this downloads **every order in your account** — discovery walks
+By default this downloads **every order in your account**, discovery walks
 each year newest-first, back to your first order (it stops automatically once it
 reaches a year with no orders). To limit how far back it goes, set
 `default_start_date` in `config.json` (e.g. `"2024-01-01"`) or pass
@@ -57,7 +57,7 @@ Amazon challenges automation-launched browsers, so this tool does **not**
 launch its own browser. `login.bat` opens an ordinary Chromium (debugging
 port **9223**) that **you** sign into; the tool then connects to that
 already-signed-in browser and reads the pages you're authorized to see. No
-stealth, no evasion — a real human signs in to a real browser.
+stealth, no evasion, a real human signs in to a real browser.
 
 **The signed-in browser window must stay OPEN while the tool runs.**
 

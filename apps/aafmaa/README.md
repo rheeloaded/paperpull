@@ -43,7 +43,7 @@ belongs to a different document. The gate is tested.
 
 `login.bat` opens an ordinary Chromium (debugging port **9238**) that **you**
 sign into. The tool then connects to that already-signed-in browser and reads
-only the pages you are authorised to see. No stealth, no evasion.
+only the pages you are authorized to see. No stealth, no evasion.
 
 **The signed-in browser window must stay OPEN while the tool runs.**
 
@@ -56,7 +56,7 @@ once without two apps sharing a profile.
 
 - The session is a **server-side cookie**, so navigating straight to a deep
   page keeps you signed in. Unlike the Amex app, nothing is lost on `goto`.
-- Many "links" are not links — they are `__doPostBack(...)` handlers on an
+- Many "links" are not links, they are `__doPostBack(...)` handlers on an
   `<a>`, so the href tells you nothing and the control has to be clicked.
   Where a real handler URL with a document id exists, the tool uses that
   instead; clicking a row is the fallback.
@@ -78,7 +78,7 @@ Filenames: `YYYY-MM-DD AAFMAA <Summary>.pdf`, e.g.
 `2025-12-31 AAFMAA 1099-INT Tax Form.pdf`.
 
 Naming rules are in `document_rules.json` (plain regex -> summary, editable,
-no code changes needed). Those rules are provisional too — retune them once
+no code changes needed). Those rules are provisional too, retune them once
 you have seen what your account actually calls things.
 
 ## Setup / workflow
@@ -101,7 +101,7 @@ Filters: `--type "Insurance Document"`, `--year 2025`,
 
 All the site-specific logic lives in `aafmaa_site.py`. If AAFMAA redesigns its
 pages and discovery or download stops working, run `paperpull aafmaa diagnose` after signing
-in — it dumps the current page structure to `Diagnostics\` so the selectors can
+in, it dumps the current page structure to `Diagnostics\` so the selectors can
 be updated to match. Nothing else in the app needs to change.
 
 ## Sensitive files
@@ -111,7 +111,7 @@ numbers and coverage amounts. They are saved to the folder you set as
 `output_dir` in `config.json` (the default is this app's own folder). Keep it
 somewhere safe, and if that folder syncs to a cloud drive, know these
 documents go with it. The index CSV deliberately records **no** policy
-numbers, coverage amounts, or SSN — only what is needed to find and verify a
+numbers, coverage amounts, or SSN, only what is needed to find and verify a
 file.
 
 ## Tests

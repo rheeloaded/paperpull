@@ -1,4 +1,4 @@
-# T-Mobile — bill downloader
+# T-Mobile bill downloader
 
 Downloads your T-Mobile monthly **bill statements** as PDFs from My T-Mobile.
 Read-only, delete-safe, part of [PaperPull](../../README.md).
@@ -7,7 +7,7 @@ Read-only, delete-safe, part of [PaperPull](../../README.md).
 
 ```bat
 setup.bat                         REM one-time: venv + Playwright
-login.bat                         REM opens a browser on port 9231 — sign in yourself
+login.bat                         REM opens a browser on port 9231, sign in yourself
 paperpull tmobile pilot           REM download the newest 5 bills as a test
 paperpull tmobile all             REM download every available bill
 ```
@@ -16,13 +16,13 @@ paperpull tmobile all             REM download every available bill
 
 - **Plain Chromium.** T-Mobile does not block the bundled Playwright Chromium,
   so `login.bat` launches it with a debugging port and the tool attaches to
-  that signed-in browser — consistent with the other PaperPull apps.
+  that signed-in browser, consistent with the other PaperPull apps.
 - **You sign in** in that window; the tool reuses the signed-in tab.
 - **Bill history.** Discovery opens `t-mobile.com/bill/historical`, where every
   available bill (current + past) is listed. Each bill exposes a **Download
   detailed bill** button whose label carries the bill date
   (e.g. *"Aug 12, 2026 Download detailed bill PDF"*).
-- **Downloads** are ordinary browser download events — clicking a bill's
+- **Downloads** are ordinary browser download events, clicking a bill's
   **Download detailed bill** button fires a real download that Playwright
   captures directly, and the PDF is saved into `Statements/`. (No CDP
   download-directory plumbing is needed.)
@@ -39,5 +39,6 @@ paperpull tmobile all             REM download every available bill
   (a handful of recent months at the time of writing). Older bills that
   T-Mobile no longer lists cannot be downloaded through this page.
 - A second T-Mobile account (e.g. a family member's) can be added with the
-  multi-account feature (`add_account.py`, its own login/profile/port).
+  multi-account feature (`paperpull tmobile add-account NAME`, its own
+  login/profile/port).
 - Delete-safe & multi-account like every PaperPull app.

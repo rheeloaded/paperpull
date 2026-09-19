@@ -55,7 +55,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -65,7 +64,7 @@ CONTENTS = APP / "Contents"
 RES = CONTENTS / "Resources"
 MACOS = CONTENTS / "MacOS"
 
-# python-build-standalone, the install_only_stripped flavour. It unpacks to a
+# python-build-standalone, the install_only_stripped flavor. It unpacks to a
 # folder called python/ that is a complete, relocatable CPython with pip.
 PBS_TAG = "20260901"
 PY_VERSION = "3.12.14"

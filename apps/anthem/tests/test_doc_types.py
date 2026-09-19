@@ -235,7 +235,7 @@ def test_no_screenshot_of_a_phi_page_is_written():
 
 # -- SAFETY: a signed-out session must be recognized, not reported as empty --
 
-def test_a_signin_page_returned_instead_of_a_pdf_is_recognised():
+def test_a_signin_page_returned_instead_of_a_pdf_is_recognized():
     """An expired session answers with HTML (an Akamai block or a sign-in page),
     and if that is not spotted the run reports an empty success."""
     assert site._looks_like_login_html(

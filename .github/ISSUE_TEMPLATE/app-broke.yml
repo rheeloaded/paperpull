@@ -1,6 +1,6 @@
 name: "🔧 A supported app stopped working"
 description: A provider changed its site and one of the existing apps needs a fix.
-title: "[Broken] <app> — <what fails>"
+title: "[Broken] <app>, <what fails>"
 labels: ["bug", "site-changed"]
 body:
   - type: markdown
@@ -8,7 +8,7 @@ body:
       value: |
         Providers redesign their sites often. When that happens, the fix is
         almost always confined to that app's `*_site.py` (selectors / URLs /
-        download flow) — the rest of the app is provider-agnostic.
+        download flow), the rest of the app is provider-agnostic.
   - type: input
     id: app
     attributes:
@@ -32,7 +32,7 @@ body:
     id: what
     attributes:
       label: What happens
-      description: What you ran and what it did. **Redact anything private** — no account numbers, balances, or personal paths.
+      description: What you ran and what it did. **Redact anything private**, no account numbers, balances, or personal paths.
       placeholder: |
         Command: python redcard_docs.py --pilot
         Output (redacted): ...

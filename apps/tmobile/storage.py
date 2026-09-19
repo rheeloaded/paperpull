@@ -1,4 +1,4 @@
-"""What makes the T-Mobile app different — everything else is paperpull_core.
+"""What makes the T-Mobile app different, everything else is paperpull_core.
 
 This file used to be a 432-line copy of the same storage logic every other app
 carried. All that logic now lives in `paperpull_core`; what remains here is the
@@ -17,7 +17,7 @@ from paperpull_core.spec import (AppSpec, CsvSpec, DOCUMENT, Folder,
 
 # One row per downloaded T-Mobile document. Deliberately records NO account
 # numbers, SSN, balances, or other sensitive values from inside the documents
-# — only what is needed to find and verify a file locally.
+#, only what is needed to find and verify a file locally.
 DOCUMENT_INDEX_COLUMNS = [
     "Account Holder",
     "Document Date", "Category", "Document Summary", "Document Title",
@@ -36,7 +36,7 @@ SPEC = AppSpec(
         # one is still filed, but the folder is made on demand.
         Folder("tax_documents", "Tax Documents", precreate=False),
         # Reachable if "Insurance Document" is added to document_types, but
-        # T-Mobile does not issue them — so it is created only if one ever
+        # T-Mobile does not issue them, so it is created only if one ever
         # actually routes there, never left sitting empty.
         Folder("insurance_documents", "Insurance Documents", precreate=False),
         Folder("other_documents", "Other Documents", precreate=False),

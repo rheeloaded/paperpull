@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Awesome — you're the ideal person to add a provider you actually use.
+        Awesome, you're the ideal person to add a provider you actually use.
         Open this to **claim** it so nobody builds the same thing twice, then
         follow the guide: **[Adding a provider](../blob/main/docs/adding-a-provider.md)**.
   - type: input
@@ -28,9 +28,9 @@ body:
       label: The non-negotiables
       description: These keep PaperPull safe to run against real financial accounts.
       options:
-        - label: My app will be **read-only** — it never pays, transfers, redeems, enrolls, or changes a setting (guarded by FORBIDDEN_CONTROL_RE / SAFE_DOC_CONTROL_RE).
+        - label: My app will be **read-only**, it never pays, transfers, redeems, enrolls, or changes a setting (guarded by FORBIDDEN_CONTROL_RE / SAFE_DOC_CONTROL_RE).
           required: true
-        - label: It **never handles credentials** — the user signs in themselves; my code attaches to that session and only reads.
+        - label: It **never handles credentials**, the user signs in themselves; my code attaches to that session and only reads.
           required: true
         - label: I will **not commit** any real config.json, browser profile, PDF, or other private data.
           required: true

@@ -738,37 +738,6 @@ def _click_and_capture(page, control, title: str, out_path) -> bool:
     return True
 
 
-def find_row_download(page, title: str, date_text: str = ""):
-    """Re-find a row's safe download control by its text. Repair after
-    diagnose once the real row/menu structure is known."""
-    try:
-        rows = page.locator(FALLBACK["doc_row"])
-        for i in range(rows.count()):
-            row = rows.nth(i)
-            try:
-                text = row.inner_text(timeout=800) or ""
-            except Exception:
-                continue
-            if title and title[:40] not in text:
-                continue
-            if date_text and date_text not in text:
-                continue
-            link = row.locator("a[download], a[href$='.pdf'], a[href*='.pdf']")
-            if link.count() > 0:
-                return link.first
-            for b in row.locator("button, a").all():
-                try:
-                    label = (b.inner_text(timeout=600) or "") + \
-                        (b.get_attribute("aria-label") or "")
-                except Exception:
-                    label = ""
-                if is_safe_control(label):
-                    return b
-    except Exception:
-        pass
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Host allowlist. Added repo-wide after a review found this app would fetch or
 # navigate to whatever URL a stored record or a page attribute contained, using
