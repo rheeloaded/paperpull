@@ -120,7 +120,7 @@ this.
 
 **Short description** (up to 100 characters).
 
-> Download your own receipts and statements as PDFs. Read-only, runs on your computer.
+> Download your statements and receipts as PDFs, then read them into spreadsheets. Runs on your PC.
 
 **Description.**
 
@@ -130,7 +130,9 @@ this.
 >
 > Everything stays on your computer. There is no account, no cloud, no telemetry. Your documents land in folders you choose, named by date, provider and kind, ready for a filing system or for paperless-ngx.
 >
-> It remembers what it has downloaded, so a rerun fetches only what is new, even after you have moved the old files somewhere else. A Status tab tells you which archives are due and where a period looks missing from the middle. A Spreadsheet tab turns your receipts into one long table of purchases, and reads the transactions out of your statement PDFs, checking each one against its own printed balances.
+> It also turns the PDFs into spreadsheets. Your receipts become one long table of every item you have ever bought, across every store and every account, with what it cost and when. The transactions inside your bank and card statements are read out of the PDFs into a workbook, one row each, and every statement is checked against its own printed balances, so a row you are looking at is a row that adds up. One button, and the workbook opens in Excel.
+>
+> It remembers what it has downloaded, so a rerun fetches only what is new, even after you have moved the old files somewhere else. A Status tab tells you which archives are due and where a period looks missing from the middle.
 >
 > This is the Store edition of a free, open-source program. The same program is on GitHub under the AGPL at no charge. Buying it here gets you a signed package that installs without a warning and updates through the Store, and supports the work.
 
@@ -142,7 +144,8 @@ this.
 - You sign in, it only reads. Never sees a password, never clicks pay
 - Delete-safe. Move the PDFs anywhere, a rerun fetches only what is new
 - Status tab shows what is due and where history has a gap
-- Every purchase in one spreadsheet, and statement transactions reconciled to the cent
+- Reads your PDFs into spreadsheets. Every purchase in one table, every statement transaction in another
+- Each statement is checked against its own printed balances, so the numbers add up
 - Everything stays on your computer. No account, no cloud, no telemetry
 - Open source under the AGPL
 
