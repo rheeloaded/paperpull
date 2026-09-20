@@ -185,8 +185,8 @@ def test_the_billing_center_is_tried_first_and_the_nav_link_is_allowed():
 
 
 def test_a_url_in_the_survey_loses_its_query_string():
-    """The first survey carried the sign-in landing URL with a token in
-    its query. Nothing after the ? reaches the file now."""
+    """Query strings carry session details the survey has no use for.
+    Nothing after the ? reaches the file."""
     assert site.redact("https://www.att.com/acctmgmt/overview?haloSuccess=true&lt=abcDEF123456789") == \
         "https://www.att.com/acctmgmt/overview?..."
     assert site.redact("see https://www.att.com/a?b=c and https://www.att.com/d") == \
