@@ -138,3 +138,64 @@ def test_a_bare_save_is_refused_on_purpose():
     that one names the document."""
     for label in ["Save", "Save Changes", "Save Settings"]:
         assert not site.is_safe_control(label), label
+
+
+# -- #30, the statements page moved and a hand-opened page was thrown away ---
+
+class _Loc:
+    def __init__(self, n):
+        self._n = n
+
+    def count(self):
+        return self._n
+
+
+class _Page:
+    """A page already on the statements page with every group collapsed."""
+    def __init__(self, url, rows=0, groups=5):
+        self.url = url
+        self._counts = {site.FALLBACK["doc_row"]: rows, site.GROUP_SEL: groups}
+        self.visited = []
+
+    def locator(self, sel):
+        return _Loc(self._counts.get(sel, 0))
+
+    def goto(self, url, **kw):
+        self.visited.append(url)
+        self.url = url
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def wait_for_selector(self, sel, timeout=0):
+        pass
+
+    def get_by_role(self, *a, **k):
+        return _Loc(0)
+
+
+def test_the_statements_page_is_on_the_banking_host():
+    for u in site.DOCUMENT_URL_CANDIDATES:
+        assert site.is_safe_url(u), u
+    assert site.DOCUMENT_URL_CANDIDATES[0] == "https://digitalomni.navyfederal.org/nfcu-online-banking/statements"
+    assert not any("/inet/" in u for u in site.DOCUMENT_URL_CANDIDATES)
+
+
+def test_a_page_opened_by_hand_is_read_not_replaced():
+    """Every group collapsed, so no statement rows exist yet, and the person
+    navigated here themselves. The candidate loop must not run."""
+    page = _Page("https://digitalomni.navyfederal.org/nfcu-online-banking/statements")
+    assert site.goto_documents(page) is True
+    assert page.visited == []
+
+
+def test_a_collapsed_statements_page_still_counts_as_found():
+    assert site.has_document_list(_Page("https://digitalomni.navyfederal.org/x", rows=0, groups=3))
+    assert not site.has_document_list(_Page("https://digitalomni.navyfederal.org/x", rows=0, groups=0))
+    assert site.has_document_list(_Page("https://digitalomni.navyfederal.org/x", rows=24, groups=0))
+
+
+def test_a_page_off_the_bank_is_not_trusted_as_the_statements_page():
+    page = _Page("https://evil.test/statements")
+    site.goto_documents(page)
+    assert page.visited and page.visited[0] == site.DOCUMENT_URL_CANDIDATES[0]
