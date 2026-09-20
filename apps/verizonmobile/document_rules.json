@@ -1,0 +1,27 @@
+{
+  "_comment": "Editable rules mapping Verizon wireless document titles to filename summaries. Checked in order: tax, then insurance (unused), then statement. Verizon issues monthly bills and, on request, little else, so the statement rules do the work. Repair after running diagnose against a real billing page.",
+  "tax_rules": [
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|package|information|center)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "monthly\\s+(account\\s+)?(statement|bill)", "summary": "Monthly Statement"},
+    {"pattern": "\\b(wireless|mobility)\\s+bill", "summary": "Monthly Statement"},
+    {"pattern": "\\b(mobile|phone)\\s+bill", "summary": "Monthly Statement"},
+    {"pattern": "\\b(bill|invoice)\\b", "summary": "Monthly Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Monthly Statement"}
+  ],
+  "skip_patterns": [
+    "payment\\s+(receipt|confirmation|history)",
+    "autopay",
+    "paperless",
+    "customer\\s+agreement",
+    "terms\\s+of\\s+service",
+    "privacy\\s+(notice|policy)",
+    "marketing",
+    "\\boffers?\\b",
+    "\\bdeals?\\b",
+    "usage\\s+(details|summary)"
+  ]
+}
