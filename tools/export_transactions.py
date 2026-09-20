@@ -49,7 +49,7 @@ from typing import Dict, List, Optional, Tuple
 
 INDEX_SUFFIX = " Document Index.csv"
 CACHE_NAME = ".transactions-cache.json"
-CACHE_VERSION = 2      # 2: the index date drives the year, #29
+CACHE_VERSION = 3      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32
 
 # -- shapes -----------------------------------------------------------------------
 _MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
@@ -192,6 +192,11 @@ def balance_line(line: str) -> Optional[Tuple[str, float]]:
     if not m:
         return None
     after = line[m.end(): m.end() + 40].replace(":", " ").replace("=", " ")
+    # pdfplumber sometimes splits a number across a space, "$1,719.3 3",
+    # the same artifact _fuzzy tolerates in words. Left alone, the amount
+    # does not parse and the NEXT amount in the window is taken, which on
+    # a card summary line is the other balance (#32).
+    after = re.sub(r"(\d)\.(\d)\s(\d)(?!\d)", r"\1.\2\3", after)
     for tok in after.split():
         v = parse_amount_token(tok)
         if v is not None:
@@ -397,6 +402,13 @@ def parse_statement(lines: List[str], doc_date: Optional[str] = None) -> dict:
     else:
         bad = [f"section {i}: {s}" for i, s in enumerate(statuses, start=1) if not s.startswith("reconciled")]
         status = "; ".join(bad)
+    # A bracket that closed around nothing while every real transaction sat
+    # outside it "reconciled" trivially, and the word led the status. That
+    # is the one case the quality signal must be loudest (#32).
+    bracketed = sum(len(s["txns"]) for s in sections if not s["status"].endswith("outside the balance brackets"))
+    leftover = sum(len(s["txns"]) for s in sections if s["status"].endswith("outside the balance brackets"))
+    if bracketed == 0 and leftover:
+        status = "not reconciled, %d transaction(s) outside the balance brackets" % leftover
     status += note
     return {"period_start": start, "period_end": end,
             "beginning": next((s["beginning"] for s in sections if s["beginning"] is not None), None),

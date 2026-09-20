@@ -245,4 +245,46 @@ def test_the_index_date_drives_the_year_and_a_disagreement_is_said():
 def test_a_fixed_parse_is_not_hidden_by_the_cache():
     """The cache is keyed on path, size and mtime, so a wrong-year parse
     would survive the fix unless the cache version moves with it."""
-    assert xt.CACHE_VERSION >= 2
+    assert xt.CACHE_VERSION >= 3
+
+
+# -- #32, a split decimal and an empty bracket ---------------------------------
+
+def test_a_decimal_split_across_a_space_still_reads_as_one_amount():
+    """pdfplumber printed "$1,719.3 3". The amount did not parse, so the
+    next amount in the window, the NEW balance, was taken as the beginning
+    balance, and both ends of the statement read 466.93."""
+    assert xt.balance_line("Previous Balance $1,719.3 3 New Balance $466.93 Go Paperless") == ("beginning", 1719.33)
+    assert xt.balance_line("New Balance $466.9 3") == ("ending", 466.93)
+    assert xt.balance_line("Ending Balance $5,759.48 3 items") == ("ending", 5759.48)   # a real trailing number is left alone
+
+
+CARD_EMPTY_BRACKET = """Closing Date 09/15/26
+Previous Balance $1,719.3 3 New Balance $466.93 Go Paperless
+Payments -$1,500.00
+New Balance $466.93
+Transactions
+09/02/26 NFO PAYMENT RECEIVED -$1,500.00
+09/05/26 GROCER $120.00
+09/09/26 FUEL $47.60
+09/12/26 PHARMACY $80.00
+""".splitlines()
+
+
+def test_a_bracket_around_nothing_is_not_called_reconciled():
+    """With the split decimal misread, the beginning and ending balances
+    were both 466.93 a few lines apart, the bracket between them held no
+    transactions, and it "reconciled" while all 70 real lines sat outside
+    it. The word reconciled must never lead a status like that."""
+    s = xt.parse_statement(CARD_EMPTY_BRACKET)
+    assert (s["beginning"], s["ending"]) == (1719.33, 466.93)
+    assert len(s["transactions"]) == 4
+    assert not s["status"].startswith("reconciled, no transactions")
+    assert s["status"] == "reconciled, signed amounts"
+    # And the guard itself, on a statement whose only bracket is empty and
+    # every transaction sits after it.
+    lines = ["Closing Date 06/30/26", "Beginning Balance $100.00", "Ending Balance $100.00",
+             "06/16 DEPOSIT $50.00", "06/18 DEBIT $50.00"]
+    s = xt.parse_statement(lines)
+    assert len(s["transactions"]) == 2
+    assert s["status"] == "not reconciled, 2 transaction(s) outside the balance brackets"
