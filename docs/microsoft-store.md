@@ -151,9 +151,15 @@ this.
 
 **Keywords.** statements, receipts, PDF, download, archive, bank statements, paperless, invoices, records, personal finance
 
-**Screenshots.** `docs/store/1-panel.png`, `docs/store/2-setup.png`,
-`docs/store/3-spreadsheet.png`, 1920 by 1080, taken against a folder with
-no personal data in it. Retake them after any change to the panel.
+**Screenshots.** `docs/store/1-panel.png` (a finished pilot run),
+`2-status.png` (every archive, one overdue, one gap), `3-spreadsheet.png`
+(both workbooks built) and `4-setup.png` (the first-run screen), 1920 by
+1080, taken against a folder of made-up installs, every name, amount and
+date invented. Retake them after any change to the panel.
+
+**Store logos.** `docs/store/logo-1x1.png` (box art), `logo-2x3.png`
+(poster) and `logo-16x9.png` (super hero art), the icon on the panel's own
+dark background.
 
 **Copyright and trademark info.** Copyright (c) 2026 Bryan Rhee. PaperPull is a trade name of Bryan Rhee. Provider names are the property of their owners, and PaperPull is not affiliated with any of them.
 
