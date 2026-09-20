@@ -1,7 +1,7 @@
 r"""Receipt & Statement Downloaders - local control panel.
 
 A tiny FastAPI app that discovers the downloader apps, lists their accounts,
-and runs an action (Login / Discover / Pilot / Run All / Resume / Verify),
+and runs an action (Login / Discover / Pilot / Run All / Resume / Verify / Diagnose),
 streaming the live output to the browser. It only ever runs the predefined
 per-app commands - nothing from user input is passed to a shell.
 
@@ -169,6 +169,10 @@ ACTIONS = {
     "all":      {"label": "Run All",  "flags": ["--all", "--yes"]},
     "resume":   {"label": "Resume",   "flags": ["--resume", "--yes"]},
     "verify":   {"label": "Verify",   "flags": ["--verify"]},
+    # Reads the provider's page and writes a survey to Diagnostics. Downloads
+    # nothing. It is how a provider built without an account gets tested by
+    # someone who has one, and how a broken one gets repaired.
+    "diagnose": {"label": "Diagnose", "flags": ["--diagnose"]},
 }
 ENTRY_RE = re.compile(r".*_(receipts|docs)\.py$")
 
@@ -1126,7 +1130,9 @@ HTML = r"""<!doctype html>
     <div class="actions" id="actions"></div>
     <p class="hint">1. <b>Login</b> opens a browser. Sign in yourself and leave it open.<br>
        2. <b>Pilot</b> tests the newest few.<br>
-       3. <b>Run All</b> downloads everything you don't already have.</p>
+       3. <b>Run All</b> downloads everything you don't already have.<br>
+       <b>Diagnose</b> reads the page and writes a survey to Diagnostics, downloading
+       nothing. Attach it to an issue when a provider needs a repair or a first test.</p>
     <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
        ↻ <b>Safe to re-run.</b> Run All and Resume skip any statement or receipt
        you've already downloaded. Nothing is ever fetched twice, even if you
