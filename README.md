@@ -53,6 +53,7 @@ for someone with an account to test them ([#26](https://github.com/rheeloaded/pa
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported; fresh live pilot pending |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
+| [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | **Capital One is moving these accounts onto its own site. Once yours has moved this app can no longer read it** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills | Mendix portal, driven like a person; PDFs for the last year only, so run it quarterly |
@@ -158,8 +159,8 @@ ever clicked, and all site interaction lives in `provider_site.py` where it can
 be read in one sitting. Every app that clicks enforces this deny-by-default, a
 control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
 allowlist (`SAFE_DOC_CONTROL_RE`), and the app's host allowlist refuses any
-stored URL that points elsewhere. Ten apps click nothing at all (Affirm, Amazon,
-Anthem, Fidelity, Gap, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
+stored URL that points elsewhere. Eleven apps click nothing at all (Affirm, Amazon,
+Anthem, Citi, Fidelity, Gap, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
 page they navigated to. A repo-wide test checks every app's guard.
 [SECURITY.md](SECURITY.md) spells out which app does which.
 
@@ -433,7 +434,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **thirty-one** apps pass their tests, more than 1,500 of them across the
+- ✅ All **thirty-two** apps pass their tests, more than 1,500 of them across the
   repo. Twenty-four are in regular use by the author. The other seven (Ally,
   Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
   by people who hold those accounts, and the four marked in the table above

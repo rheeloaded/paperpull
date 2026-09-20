@@ -301,9 +301,10 @@ def discover_apps():
 
 @app.get("/api/apps", dependencies=[Depends(_same_origin_only)])
 def api_apps():
+    refreshed = refresh_installs()
     apps = discover_apps()
     return {"apps_root": str(apps_root()), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
-            "more_actions": list(MORE_ACTIONS), "apps": apps}
+            "more_actions": list(MORE_ACTIONS), "apps": apps, "refreshed": refreshed}
 
 
 # -- how current each archive is ---------------------------------------------
@@ -748,6 +749,116 @@ def create_install(root: Path, slug: str) -> str:
         # already unique to this app.
         shutil.copy2(example, dst / "config.json")
     return "created"
+
+
+def _template_files(src: Path):
+    """The files a template ships to an install, the same filter the first
+    copy uses."""
+    skip_launchers = _is_packaged()
+    for item in src.rglob("*"):
+        if item.is_dir():
+            continue
+        rel = item.relative_to(src)
+        if any(part in _TEMPLATE_SKIP or "browser-profile" in part.lower()
+               or part.lower().endswith(".pdf") for part in rel.parts):
+            continue
+        if skip_launchers and item.suffix.lower() in LAUNCHER_SUFFIXES:
+            continue
+        yield rel, item
+
+
+def refresh_install_code(dst: Path, src: Path) -> list:
+    """Bring one install's code up to the shipped version. Returns the
+    files replaced.
+
+    An install is made by copying a template once, and until this existed
+    it was never touched again: a provider fix shipped in a release reached
+    new installs only, and everyone who had already set the provider up
+    kept running the code from the day they did. The first AT&T tester
+    installed the release with the repair, clicked Diagnose, and sent back
+    a survey from the old code, which is how this was found.
+
+    Only what the template ships is compared, byte for byte, so config,
+    progress, the PDFs and the browser profile are never in question. A
+    file that differs is backed up under Backups/code-<time>/ before it is
+    replaced, so an edited document_rules.json is a copy away."""
+    replaced = []
+    stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    for rel, item in _template_files(src):
+        target = dst / rel
+        new = item.read_bytes()
+        try:
+            if target.is_file() and target.read_bytes() == new:
+                continue
+        except OSError:
+            continue
+        if target.is_file():
+            bak = dst / "Backups" / ("code-" + stamp) / rel
+            bak.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, bak)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item, target)
+        replaced.append(str(rel))
+    # A checkout install carries its own copy of the shared core inside its
+    # venv, and an entry script written against a newer core than that copy
+    # dies on Login over a keyword the copy never heard of. The package has
+    # no venv, its interpreter carries the core, so there is nothing to do.
+    core_src = HERE.parent / "core" / "paperpull_core"
+    if core_src.is_dir() and (dst / ".venv").is_dir():
+        for init in (dst / ".venv").rglob("paperpull_core/__init__.py"):
+            pkg = init.parent
+            for item in sorted(core_src.glob("*.py")):
+                target = pkg / item.name
+                new = item.read_bytes()
+                if target.is_file() and target.read_bytes() == new:
+                    continue
+                if target.is_file():
+                    bak = dst / "Backups" / ("code-" + stamp) / "paperpull_core" / item.name
+                    bak.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(target, bak)
+                shutil.copy2(item, target)
+                replaced.append("paperpull_core/" + item.name)
+            break
+    return replaced
+
+
+_REFRESHED_ROOTS: set = set()
+
+
+def refresh_installs(force: bool = False) -> dict:
+    """Every install under the apps root, brought up to the shipped code,
+    once per panel run per root. Returns {install folder: [files]} for the
+    ones that changed. An install is matched to its template by the entry
+    script's name, so a renamed folder still gets its provider's code."""
+    root = apps_root()
+    key = str(root)
+    if key in _REFRESHED_ROOTS and not force:
+        return {}
+    _REFRESHED_ROOTS.add(key)
+    tmpl_root = _templates_root()
+    if tmpl_root is None or not root.is_dir():
+        return {}
+    by_entry = {}
+    for d in tmpl_root.iterdir():
+        if d.is_dir():
+            script = _entry_script(d)
+            if script:
+                by_entry[script.name] = d
+    out = {}
+    for d in sorted(root.iterdir()):
+        if not d.is_dir() or d.name in _RUNNING:
+            continue
+        script = _entry_script(d)
+        src = by_entry.get(script.name) if script else None
+        if src is None or src.resolve() == d.resolve():
+            continue
+        try:
+            changed = refresh_install_code(d, src)
+        except OSError:
+            continue
+        if changed:
+            out[d.name] = changed
+    return out
 
 
 @app.get("/api/providers", dependencies=[Depends(_same_origin_only)])
@@ -1463,6 +1574,11 @@ async function load() {
   $('root').innerHTML = 'apps root: ' + esc(META.apps_root) +
     (META.root_source === 'environment' ? ' <span class="hint">(from APPS_ROOT)</span>'
      : ' <a href="#" onclick="changeRoot(); return false;" style="color:var(--accent)">change</a>');
+  const fresh = Object.keys(META.refreshed || {});
+  if (fresh.length) {
+    $('root').innerHTML += '<br><span class="hint">updated to this version\'s code: ' +
+      esc(fresh.join(', ')) + ' (the old files are in each folder\'s Backups)</span>';
+  }
   const appSel = $('app');
   appSel.innerHTML = '';
   const keys = Object.keys(META.apps);
