@@ -190,3 +190,59 @@ def test_the_export_caches_each_reading_and_writes_the_sheets(tmp_path, monkeypa
     r2 = xt.export(tmp_path, as_csv=True, log=lambda *_: None)
     assert r2["read"] == 0 and r2["cached"] == 1 and len(calls) == 1     # second build reads nothing
     assert (tmp_path / xt.CACHE_NAME).is_file()
+
+
+# -- #29, the closing month dated a year early --------------------------------
+
+CHASE_CARD = """Opening/Closing Date 07/27/26 - 08/26/26
+Previous Balance $1,000.00
+Payments/Credits -$1,000.00
+New Charges +$300.00
+New Balance $300.00
+PAYMENTS AND OTHER CREDITS
+08/02 Payment Thank You - Web -$1,000.00
+PURCHASE
+07/28 GROCER 12345 $100.00
+08/05 PHARMACY $80.00
+08/20 FUEL STATION $120.00
+""".splitlines()
+
+
+def test_the_closing_month_keeps_the_statement_year():
+    """A Chase card statement prints "Opening/Closing Date 07/27/26 -
+    08/26/26". The period fallback matched "Closing Date" and took the
+    first date after it, the OPENING date, so every August line was
+    treated as later than the period end and dated 2025 (#29)."""
+    s = xt.parse_statement(CHASE_CARD)
+    assert (s["period_start"], s["period_end"]) == ("2026-07-27", "2026-08-26")
+    assert sorted(t["date"] for t in s["transactions"]) == \
+        ["2026-07-28", "2026-08-02", "2026-08-05", "2026-08-20"]
+    assert s["status"].startswith("reconciled")
+
+
+def test_the_closing_fallback_takes_the_latest_date_on_the_line():
+    lines = ["Closing Date 07/27/26 08/26/26", "Previous Balance $10.00", "New Balance $10.00"]
+    assert xt.find_period(lines) == (None, "2026-08-26")
+
+
+def test_the_index_date_drives_the_year_and_a_disagreement_is_said():
+    """The app that downloaded the statement recorded its date in the index.
+    That date wins over whatever the text parse found, and when the two are
+    far apart the status says so instead of trusting the parse."""
+    lines = [l for l in CHASE_CARD if not l.startswith("Opening/Closing")]
+    lines.insert(0, "Closing Date 08/26/26")
+    s = xt.parse_statement(lines, doc_date="2026-08-26")
+    assert sorted(t["date"] for t in s["transactions"])[-1] == "2026-08-20"
+    assert "disagrees" not in s["status"]
+    wrong = [l for l in CHASE_CARD if not l.startswith("Opening/Closing")]
+    wrong.insert(0, "Closing Date 01/15/25")
+    s = xt.parse_statement(wrong, doc_date="2026-08-26")
+    assert [t["date"] for t in s["transactions"] if t["date"].startswith("2026-08")], s["transactions"]
+    assert "disagrees with the index date 2026-08-26" in s["status"]
+    assert s["period_end"] == "2025-01-15"        # what the text said is still reported
+
+
+def test_a_fixed_parse_is_not_hidden_by_the_cache():
+    """The cache is keyed on path, size and mtime, so a wrong-year parse
+    would survive the fix unless the cache version moves with it."""
+    assert xt.CACHE_VERSION >= 2

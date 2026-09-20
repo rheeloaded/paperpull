@@ -254,9 +254,18 @@ def is_safe_control(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def goto_documents(page) -> bool:
-    """Navigate to a document area. Tries known URLs; if none render a
-    document list, keeps whatever page is currently open (so you can navigate
-    to the right place manually and the tool reads it)."""
+    """Navigate to a document area. The page already open is checked
+    FIRST, so one the person navigated to by hand is read as it is. The
+    candidate loop used to run unconditionally, which replaced a hand
+    opened page and, when every candidate missed, left the browser on a
+    dead page outside the signed-in app (#30, found on Navy Federal, the
+    same shape here)."""
+    try:
+        if (is_safe_url(page.url or "") and not looks_signed_out(page)
+                and page.locator(FALLBACK["doc_row"]).count() > 1):
+            return True
+    except Exception:
+        pass
     for url in DOCUMENT_URL_CANDIDATES:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)

@@ -49,7 +49,7 @@ from typing import Dict, List, Optional, Tuple
 
 INDEX_SUFFIX = " Document Index.csv"
 CACHE_NAME = ".transactions-cache.json"
-CACHE_VERSION = 1
+CACHE_VERSION = 2      # 2: the index date drives the year, #29
 
 # -- shapes -----------------------------------------------------------------------
 _MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
@@ -83,9 +83,10 @@ NOT_A_TRANSACTION = re.compile(
     r"\b(total|subtotal|" + _fuzzy("balance") + r"|average daily|annual percentage|apr\b|interest rate|"
     r"minimum payment|payment due|due date|statement period|closing date|page \d)\b", re.I)
 PERIOD_RE = re.compile(
-    r"(?:statement\s+period|billing\s+period|period|for the period|from)\s*:?\s*"
+    r"(?:statement\s+period|billing\s+period|opening\s*/\s*closing\s+dates?|period|for the period|from)\s*:?\s*"
     r"(" + _DATE_ANY + r")\s*(?:to|-|–|—|through|thru)\s*(" + _DATE_ANY + r")", re.I)
 CLOSING_RE = re.compile(r"(?:closing\s+date|statement\s+date|statement\s+closing\s+date|as of)\s*:?\s*(" + _DATE_ANY + r")", re.I)
+_ANY_DATE_RE = re.compile(_DATE_ANY, re.I)
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
 
@@ -200,6 +201,12 @@ def balance_line(line: str) -> Optional[Tuple[str, float]]:
     return None
 
 
+def _days(iso: str) -> int:
+    from datetime import date
+    y, m, d = (int(x) for x in iso.split("-"))
+    return date(y, m, d).toordinal()
+
+
 def find_period(lines: List[str]) -> Tuple[Optional[str], Optional[str]]:
     """The statement period. The label and the dates are sometimes on
     separate lines, so each line is also tried joined with the next."""
@@ -213,9 +220,13 @@ def find_period(lines: List[str]) -> Tuple[Optional[str], Optional[str]]:
     for line in joined:
         m = CLOSING_RE.search(line)
         if m:
-            d = parse_date(m.group(1))
-            if d:
-                return None, d
+            # The latest date on the line, not the first after the label.
+            # "Opening/Closing Date 07/27/26 - 08/26/26" put the OPENING
+            # date here, and every transaction in the closing month was
+            # then dated a year early (#29).
+            dates = [d for d in (parse_date(x) for x in _ANY_DATE_RE.findall(line)) if d]
+            if dates:
+                return None, max(dates)
     return None, None
 
 
@@ -325,8 +336,14 @@ def _reconcile(txns: List[dict], begins: List[float], ends: List[float]) -> dict
     return out
 
 
-def parse_statement(lines: List[str]) -> dict:
+def parse_statement(lines: List[str], doc_date: Optional[str] = None) -> dict:
     """Everything the export needs from one statement's text lines.
+
+    `doc_date` is the statement date the app recorded in its index when it
+    downloaded the file, and when given it is what the year of an undated
+    transaction line is taken from. The period read off the text is kept
+    for the sheet, and a disagreement between the two is said in the
+    status rather than trusted silently.
 
     A statement is read as sections first. A bank statement that covers a
     checking and a savings account prints a beginning balance, the
@@ -337,8 +354,14 @@ def parse_statement(lines: List[str]) -> dict:
     balance is a candidate.
     """
     start, end = find_period(lines)
-    year_hint = int(end[:4]) if end else None
-    end_ym = (int(end[:4]), int(end[5:7])) if end else None
+    note = ""
+    anchor = end
+    if doc_date and re.fullmatch(r"\d{4}-\d{2}-\d{2}", doc_date):
+        if end and abs(_days(doc_date) - _days(end)) > 45:
+            note = f", the text's period end {end} disagrees with the index date {doc_date}, the index date was used"
+        anchor = doc_date
+    year_hint = int(anchor[:4]) if anchor else None
+    end_ym = (int(anchor[:4]), int(anchor[5:7])) if anchor else None
     txns = read_transactions(lines, year_hint, end_ym)
     marks = []                               # (line index, kind, value)
     for i, line in enumerate(lines):
@@ -374,6 +397,7 @@ def parse_statement(lines: List[str]) -> dict:
     else:
         bad = [f"section {i}: {s}" for i, s in enumerate(statuses, start=1) if not s.startswith("reconciled")]
         status = "; ".join(bad)
+    status += note
     return {"period_start": start, "period_end": end,
             "beginning": next((s["beginning"] for s in sections if s["beginning"] is not None), None),
             "ending": next((s["ending"] for s in reversed(sections) if s["ending"] is not None), None),
@@ -529,7 +553,7 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
             parsed = cache.get(p)
             if parsed is None:
                 try:
-                    parsed = parse_statement(pdf_lines(p))
+                    parsed = parse_statement(pdf_lines(p), (row.get("Document Date") or "").strip() or None)
                 except Exception as e:
                     parsed = {"period_start": None, "period_end": None, "beginning": None, "ending": None,
                               "transactions": [], "status": "could not read, %s" % str(e).splitlines()[0][:80],

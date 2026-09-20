@@ -20,6 +20,35 @@ All notable changes to PaperPull are recorded here. Versioning follows
   place. [#31](https://github.com/rheeloaded/paperpull/issues/31). CDP
   port 9255.
 
+### Fixed
+- **Transactions in a statement's closing month were dated a year
+  early.** A Chase card statement prints "Opening/Closing Date 07/27/26 -
+  08/26/26". The period parser's fallback matched "Closing Date" and took
+  the first date after it, the opening date, so every line in the closing
+  month looked later than the period end and was pushed back a year,
+  while the statement still reported itself reconciled. The parser now
+  reads that line as a period, the fallback takes the latest date on its
+  line, and the statement date the app recorded in its index when it
+  downloaded the file is what the year is taken from, with a disagreement
+  between the two said in the Statements sheet rather than trusted. The
+  cache version moved so old parses are re-read. Found and diagnosed by
+  dertbv in [#29](https://github.com/rheeloaded/paperpull/issues/29), with
+  6 of 47 rows matching an outside record before and 47 of 47 after.
+- **Navy Federal's statements page moved.** It lives on the banking host
+  now, `digitalomni.navyfederal.org/nfcu-online-banking/statements`, and
+  every old `www.navyfederal.org` path answers Page Not Found, outside the
+  banking app, which ended the session. The app goes to the new page, and
+  recognizes it with every group collapsed, since statement rows only
+  exist once a group is expanded. Reported with the live URL by dertbv in
+  [#30](https://github.com/rheeloaded/paperpull/issues/30).
+- **A page you opened by hand is read, not replaced.** Navy Federal, USAA
+  and Robinhood promised that if their known URLs missed, the page you had
+  navigated to yourself would be used. Their candidate loop ran first
+  regardless, and when every candidate missed it left the browser on a
+  dead page, so the promise could not be kept and each retry cost a
+  sign-in. All three now check the open page before trying anything.
+  Also from [#30](https://github.com/rheeloaded/paperpull/issues/30).
+
 ## [0.25.0] - 2026-09-20
 
 ### Added

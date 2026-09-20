@@ -34,20 +34,23 @@ from typing import List, Optional, Tuple
 log = logging.getLogger("navyfederal_docs.site")
 
 BASE = "https://www.navyfederal.org"
+# The signed-in banking app lives on its own host. The statements page
+# moved here in 2026-09 (#30), and every www.navyfederal.org path the app
+# used to try answers Page Not Found, outside the banking app, which ends
+# the session.
+BANKING = "https://digitalomni.navyfederal.org/nfcu-online-banking"
 URLS = {
     "home": f"{BASE}/",
     "login": f"{BASE}/",
-    # Document-center candidates (Navy Federal has moved these around). goto_documents
-    # tries each; if none match, it uses whatever page you left open.
-    "documents": f"{BASE}/inet/wc/my-documents-and-statements",
-    "documents_alt": f"{BASE}/my/documents",
-    "documents_alt2": f"{BASE}/inet/ent_documents/CpDocumentsAndStatements",
-    "statements": f"{BASE}/my/statements",
+    "documents": f"{BANKING}/statements",
+    "statements": f"{BANKING}/statements",
+    # The path before 2026-09, kept as the one fallback.
+    "documents_old": f"{BASE}/my/documents",
 }
-# /my/documents confirmed as the real document center (2026-07-23); try it
-# first, then the older paths as fallbacks.
-DOCUMENT_URL_CANDIDATES = [URLS["documents_alt"], URLS["documents"],
-                           URLS["documents_alt2"], URLS["statements"]]
+# Tried in order by goto_documents, after the page already open has had
+# its chance. Read off the live site with the statement list on screen,
+# 2026-09-20 (#30).
+DOCUMENT_URL_CANDIDATES = [URLS["statements"], URLS["documents_old"]]
 
 LOGIN_URL_MARKERS = ["/logon", "/login", "/signin", "/auth", "/idp", "/mfa",
                      "/verify", "logon.navyfederal"]
@@ -252,10 +255,31 @@ def is_safe_control(name: str) -> bool:
 # Documents page
 # ---------------------------------------------------------------------------
 
+def has_document_list(page) -> bool:
+    """Whether the page on screen is the statements page. Statement rows
+    only exist in the DOM once a group is expanded, and the page opens
+    with every group collapsed, so the group headers count as much as the
+    rows do. Counting rows alone made a correctly loaded page look like a
+    miss (#30)."""
+    try:
+        if page.locator(FALLBACK["doc_row"]).count() > 1:
+            return True
+        return page.locator(GROUP_SEL).count() > 0
+    except Exception:
+        return False
+
+
 def goto_documents(page) -> bool:
-    """Navigate to a document area. Tries known URLs; if none render a
-    document list, keeps whatever page is currently open (so you can navigate
-    to the right place manually and the tool reads it)."""
+    """Navigate to the statements page.
+
+    The page already open is checked FIRST. If the person navigated there
+    by hand, it is read as it is, which is the recovery path the README
+    promises. The candidate loop used to run unconditionally, so a hand
+    opened page was replaced by the first candidate, and when every
+    candidate missed the browser was left on a 404 outside the banking
+    app, which ended the session and cost a sign-in per retry (#30)."""
+    if is_safe_url(page.url or "") and not looks_signed_out(page) and has_document_list(page):
+        return True
     for url in DOCUMENT_URL_CANDIDATES:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -266,7 +290,7 @@ def goto_documents(page) -> bool:
                 page.wait_for_selector(FALLBACK["page_ready"], timeout=12000)
             except Exception:
                 pass
-            if page.locator(FALLBACK["doc_row"]).count() > 1:
+            if has_document_list(page):
                 return True
         except Exception as e:
             log.info("documents URL %s failed: %s", url, e)
@@ -279,11 +303,11 @@ def goto_documents(page) -> bool:
             if not FORBIDDEN_CONTROL_RE.search(label):
                 link.first.click()
                 page.wait_for_timeout(3000)
-                return page.locator(FALLBACK["doc_row"]).count() > 1
+                return has_document_list(page)
     except Exception:
         pass
     # fall back to the current page
-    return page.locator(FALLBACK["doc_row"]).count() > 1
+    return has_document_list(page)
 
 
 def scroll_full_page(page, rounds: int = 6, delay_ms: int = 700) -> None:
