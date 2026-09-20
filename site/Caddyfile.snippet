@@ -1,0 +1,22 @@
+# Add to the edge Caddy's Caddyfile (the fluxer-edge-1 container), then
+# `caddy reload` inside the container. Caddy fetches and renews the
+# certificate itself once paperpull.rhee.me resolves to this box.
+#
+# The root is the path INSIDE the container. The site folder on the host
+# has to be visible there, either because it sits inside a folder the
+# container already mounts, or through one extra volume line in the
+# compose file. site/deploy.sh puts the files where SITE_DIR says.
+
+paperpull.rhee.me {
+	root * /srv/paperpull
+	encode zstd gzip
+	file_server
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	@static path *.png *.ico *.css
+	header @static Cache-Control "public, max-age=86400"
+}

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaperPull</title>
+<meta name="description" content="PaperPull downloads your own statements and receipts as PDFs from the banks, cards, brokerages, utilities and stores you already use, then reads them into spreadsheets. You sign in yourself. It only reads. Everything stays on your computer.">
+<link rel="icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="img/icon-256.png">
+<link rel="canonical" href="https://paperpull.rhee.me/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="PaperPull">
+<meta property="og:description" content="Your statements and receipts, as PDFs. Then as spreadsheets. Read-only, open source, runs on your computer.">
+<meta property="og:image" content="https://paperpull.rhee.me/img/hero-16x9.png">
+<meta property="og:url" content="https://paperpull.rhee.me/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="wrap top">
+  <a class="brand" href="#"><img src="img/icon-64.png" alt="" width="32" height="32">PaperPull</a>
+  <nav class="nav">
+    <a href="#how">How it works</a>
+    <a href="#providers">Providers</a>
+    <a href="#spreadsheets">Spreadsheets</a>
+    <a href="#safe">Safety</a>
+    <a href="#get">Get it</a>
+    <a href="https://github.com/rheeloaded/paperpull">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div class="hero-copy">
+      <img class="icon" src="img/icon-256.png" alt="" width="88" height="88">
+      <h1>Your statements and receipts, as PDFs. <span>Then as spreadsheets.</span></h1>
+      <p class="lead">PaperPull signs in beside you, reads what you can see, and files every statement, bill and receipt on your own computer. Read-only, open source, no cloud.</p>
+      <div class="cta" id="cta">
+        <a class="btn primary" id="dl-win" href="https://github.com/rheeloaded/paperpull/releases/latest">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.5 11 4.4v7.1H3V5.5zm0 13 8 1.1v-7.1H3v6zm9 1.2L22 21v-8.5H12v7.2zm0-16.4v7.2h10V2.8L12 3.3z"/></svg>
+          <span>Download for Windows<small id="dl-win-note">free, from GitHub</small></span>
+        </a>
+        <a class="btn" id="dl-mac" href="https://github.com/rheeloaded/paperpull/releases/latest">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.5 2-3.6-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.7zM14.1 5.7c.6-.8 1.1-1.9 1-3-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.9 1 .1 2.1-.5 2.7-1.3z"/></svg>
+          <span>Download for Mac<small id="dl-mac-note">Apple Silicon</small></span>
+        </a>
+        <span class="btn soon" id="store-btn" title="The Store listing is in certification">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16l-1 12H5L4 7zm4-2a4 4 0 0 1 8 0v2h-2V5a2 2 0 0 0-4 0v2H8V5z"/></svg>
+          <span>Microsoft Store<small>coming soon, $2.99</small></span>
+        </span>
+      </div>
+      <p class="alt" id="alt">Latest release <span id="ver">on GitHub</span>. <a href="https://github.com/rheeloaded/paperpull/releases/latest">Checksums and notes</a> · <a href="https://github.com/rheeloaded/paperpull">Source on GitHub</a></p>
+    </div>
+    <div class="hero-shot">
+      <img src="img/1-panel.png" alt="The PaperPull control panel after a pilot run: two Chase statements saved, one skipped as already downloaded, no problems detected." width="1920" height="1080">
+    </div>
+  </div>
+
+  <section id="how">
+    <div class="wrap">
+      <p class="eyebrow">How it works</p>
+      <h2>You sign in. It reads. Your files land where you said.</h2>
+      <p class="lead">There is no PaperPull account and no PaperPull server. The program runs on your computer and talks only to the sites you sign in to.</p>
+      <div class="steps">
+        <div class="step">
+          <span class="n">STEP 1</span>
+          <h3>Sign in yourself</h3>
+          <p>Press Login and a real browser window opens on the provider's own site, with its own profile. You type your password and answer the two-factor prompt. PaperPull never sees either.</p>
+        </div>
+        <div class="step">
+          <span class="n">STEP 2</span>
+          <h3>It reads, and only reads</h3>
+          <p>PaperPull attaches to that window afterward and reads the document list the way you would. Nothing that pays, transfers, buys, sells or changes a setting is ever clicked. A blocklist of those words guards every click.</p>
+        </div>
+        <div class="step">
+          <span class="n">STEP 3</span>
+          <h3>Every PDF, filed</h3>
+          <p>Each document is saved as <code>2026-08-31 Chase Sapphire Monthly Statement.pdf</code> in a folder you chose. Run it again next month and it fetches only what is new, even if you moved the old files elsewhere.</p>
+        </div>
+      </div>
+      <div class="two">
+        <figure>
+          <div class="shot"><img src="img/2-status.png" alt="The Status tab: eleven archives, one marked overdue, one with a gap in the middle of 2025." width="1920" height="1080" loading="lazy"></div>
+          <figcaption>The Status tab knows which archive is due, and where a month is missing from the middle.</figcaption>
+        </figure>
+        <figure>
+          <div class="shot"><img src="img/5-welcome.png" alt="The first-run screen: choose a folder, tick the providers you have accounts with." width="1920" height="1080" loading="lazy"></div>
+          <figcaption>First run. Pick a folder, tick your providers, done.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="providers">
+    <div class="wrap">
+      <p class="eyebrow">Providers</p>
+      <h2>Does it do my bank?</h2>
+      <p class="lead">Thirty-one today. Each one is a small, separate app, so when a site changes only that one needs repairing.</p>
+      <div class="groups">
+        <div class="group"><h3>Banks and credit unions</h3><div class="chips">
+          <span class="chip">Ally</span><span class="chip">Capital One</span><span class="chip">Navy Federal</span><span class="chip">USAA</span><span class="chip">U.S. Bank</span><span class="chip">M&amp;T Bank (mortgage)</span></div></div>
+        <div class="group"><h3>Credit cards</h3><div class="chips">
+          <span class="chip">American Express</span><span class="chip">Chase</span><span class="chip">Discover</span><span class="chip">Target RedCard / Circle Card</span></div></div>
+        <div class="group"><h3>Investing and retirement</h3><div class="chips">
+          <span class="chip">Fidelity</span><span class="chip">Fidelity NetBenefits (401k)</span><span class="chip">Charles Schwab</span><span class="chip">Robinhood</span><span class="chip">Wealthfront</span><span class="chip">Thrift Savings Plan</span></div></div>
+        <div class="group"><h3>Pay and benefits</h3><div class="chips">
+          <span class="chip">Paylocity</span><span class="chip">UKG Pro</span><span class="chip">DFAS myPay</span><span class="chip">AAFMAA</span></div></div>
+        <div class="group"><h3>Insurance</h3><div class="chips">
+          <span class="chip">Anthem Blue Cross Blue Shield</span></div></div>
+        <div class="group"><h3>Utilities and phone</h3><div class="chips">
+          <span class="chip">Verizon Fios</span><span class="chip">T-Mobile</span><span class="chip">Dominion Energy</span><span class="chip">PG&amp;E</span><span class="chip">Fairfax Water</span></div></div>
+        <div class="group"><h3>Stores</h3><div class="chips">
+          <span class="chip">Amazon (any country)</span><span class="chip">Target</span><span class="chip">Walmart</span><span class="chip">Gap</span><span class="chip">Old Navy</span><span class="chip">Banana Republic</span><span class="chip">Athleta</span><span class="chip">Affirm</span></div></div>
+      </div>
+      <p class="missing">Missing yours? <a href="https://github.com/rheeloaded/paperpull/issues/new/choose">Ask for it</a>, or <a href="https://github.com/rheeloaded/paperpull/blob/main/docs/adding-a-provider.md">build it</a>, most take an evening. AT&amp;T is built and waiting for someone with an account to test it. Provider names belong to their owners. PaperPull is not affiliated with any of them.</p>
+    </div>
+  </section>
+
+  <section id="spreadsheets">
+    <div class="wrap split">
+      <div class="text">
+        <p class="eyebrow">Spreadsheets</p>
+        <h2>The PDFs become spreadsheets.</h2>
+        <p><strong>Every purchase in one table.</strong> Your receipts become one long list of every item you have ever bought, across every store and every account, with what it cost and when. Amounts are numbers, so Excel can sum them.</p>
+        <p><strong>Every transaction, out of the statement.</strong> The lines inside your bank and card statements are read out of the PDFs into a workbook, one row each. Every statement is checked against its own printed beginning and ending balances, and one that does not add up says so, so a row you are looking at is a row that reconciles.</p>
+        <p>One button on the control panel, or one command. Each PDF is read once and remembered, so the second build takes seconds.</p>
+      </div>
+      <div class="shot"><img src="img/3-spreadsheet.png" alt="The Spreadsheet tab: 602 purchases across 245 orders, and 459 transactions from 40 statements, all 40 reconciling to the cent." width="1920" height="1080" loading="lazy"></div>
+    </div>
+  </section>
+
+  <section id="safe">
+    <div class="wrap">
+      <p class="eyebrow">Safety</p>
+      <h2>Why it is safe to point at your bank.</h2>
+      <p class="lead">A tool that reads your bank has to earn that. These are the four promises, and every one of them is checkable in the source.</p>
+      <div class="trust">
+        <div><h3>It never has your password</h3><p>You sign in on the provider's own page, in a real browser. PaperPull attaches afterward and reads. There is nowhere to type a password into PaperPull, so there is nothing for it to store or leak.</p></div>
+        <div><h3>Read-only by construction</h3><p>Every app carries a blocklist of the words a dangerous control would use, pay, transfer, buy, sell, change, and refuses to activate anything that matches. Most providers are read through the site's own API with nothing clicked at all. <a href="https://github.com/rheeloaded/paperpull/blob/main/SECURITY.md">SECURITY.md</a> says which does what.</p></div>
+        <div><h3>Everything stays on your computer</h3><p>No account, no server, no telemetry, no update check. The control panel is a local page on 127.0.0.1 that only your own browser can reach. The whole <a href="privacy.html">privacy policy</a> is one sentence.</p></div>
+        <div><h3>Open source, built in the open</h3><p>AGPL-3.0. Every release is built by GitHub Actions from a tagged commit on a clean runner, with the checksums published by the same run, so the file you download is the code you can read.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="get">
+    <div class="wrap">
+      <p class="eyebrow">Get it</p>
+      <h2>Two editions, one program.</h2>
+      <p class="lead">Nothing is held back from either. The paint.net model.</p>
+      <div class="editions">
+        <div class="edition">
+          <h3>GitHub release</h3>
+          <p class="price">Free</p>
+          <ul>
+            <li>Windows installer and portable zip, macOS on Apple Silicon</li>
+            <li>The Windows installer is not yet code-signed, so SmartScreen asks once</li>
+            <li>Update by running the new installer over the old one</li>
+            <li>Checksums and build logs on every release</li>
+          </ul>
+          <div class="cta">
+            <a class="btn primary" id="dl-win-2" href="https://github.com/rheeloaded/paperpull/releases/latest">Download for Windows</a>
+            <a class="btn" id="dl-mac-2" href="https://github.com/rheeloaded/paperpull/releases/latest">Download for Mac</a>
+          </div>
+        </div>
+        <div class="edition">
+          <h3>Microsoft Store edition</h3>
+          <p class="price">$2.99 <small>one time</small></p>
+          <ul>
+            <li>The same program from the same build</li>
+            <li>Signed by the Store, installs with no warning</li>
+            <li>Updates itself through the Store</li>
+            <li>Uninstalls cleanly, and supports the work</li>
+          </ul>
+          <div class="cta">
+            <span class="btn soon" id="store-btn-2">Coming to the Microsoft Store</span>
+          </div>
+        </div>
+      </div>
+      <p class="kofi">PaperPull is free, and it costs money to make. The signed Mac build needs an Apple developer membership every year, the Store listing needs a developer account, and every provider takes evenings to build and keep working as sites change. If it saves you time, the Store edition or a <a href="https://ko-fi.com/rheeloaded">coffee on Ko-fi</a> says thanks.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Copyright 2026 Bryan Rhee. PaperPull is a trade name. AGPL-3.0.</span>
+    <nav>
+      <a href="privacy.html">Privacy</a>
+      <a href="https://github.com/rheeloaded/paperpull/blob/main/LICENSE">License</a>
+      <a href="https://github.com/rheeloaded/paperpull/blob/main/TRADEMARK.md">Trademark</a>
+      <a href="https://github.com/rheeloaded/paperpull/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/rheeloaded/paperpull/issues">Issues</a>
+      <a href="https://ko-fi.com/rheeloaded">Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // The download buttons point at the Releases page, which always works.
+  // GitHub's public API upgrades them to direct links to the newest
+  // installer and dmg, with the version and size, when it answers. No key,
+  // no cookie, nothing about the visitor is sent anywhere but GitHub.
+  var STORE_URL = "https://apps.microsoft.com/detail/9P5LZRR773FP";
+  var STORE_LIVE = false;   // flip when the listing passes certification
+
+  function mb(n) { return (n / 1048576).toFixed(0) + " MB"; }
+  function link(id, href, note) {
+    var a = document.getElementById(id);
+    if (!a) return;
+    a.href = href;
+    var n = document.getElementById(id + "-note");
+    if (n && note) n.textContent = note;
+  }
+  fetch("https://api.github.com/repos/rheeloaded/paperpull/releases/latest", {headers: {"Accept": "application/vnd.github+json"}})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (rel) {
+      if (!rel || !rel.assets) return;
+      var ver = (rel.tag_name || "").replace(/^v/, "");
+      var exe = null, dmg = null;
+      rel.assets.forEach(function (a) {
+        if (/-setup\.exe$/i.test(a.name)) exe = a;
+        if (/\.dmg$/i.test(a.name)) dmg = a;
+      });
+      if (exe) { link("dl-win", exe.browser_download_url, ver + ", " + mb(exe.size) + ", free"); link("dl-win-2", exe.browser_download_url); }
+      if (dmg) { link("dl-mac", dmg.browser_download_url, "Apple Silicon, " + mb(dmg.size)); link("dl-mac-2", dmg.browser_download_url); }
+      var v = document.getElementById("ver");
+      if (v && ver) { v.textContent = ver; }
+    })
+    .catch(function () {});
+
+  // A Mac visitor sees the Mac button first.
+  var isMac = /Mac/i.test(navigator.platform || "") && !/iPhone|iPad/i.test(navigator.userAgent || "");
+  if (isMac) {
+    var cta = document.getElementById("cta"), win = document.getElementById("dl-win"), mac = document.getElementById("dl-mac");
+    if (cta && win && mac) { cta.insertBefore(mac, win); mac.classList.add("primary"); win.classList.remove("primary"); }
+  }
+
+  if (STORE_LIVE) {
+    ["store-btn", "store-btn-2"].forEach(function (id) {
+      var s = document.getElementById(id);
+      if (!s) return;
+      var a = document.createElement("a");
+      a.className = "btn"; a.href = STORE_URL; a.innerHTML = s.innerHTML;
+      a.querySelector("small") && (a.querySelector("small").textContent = "$2.99, signed, updates itself");
+      if (id === "store-btn-2") a.textContent = "Get it on the Microsoft Store";
+      s.replaceWith(a);
+    });
+  }
+})();
+</script>
+</body>
+</html>
