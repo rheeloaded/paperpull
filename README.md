@@ -32,9 +32,11 @@ installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Thirty-one providers are supported today, all built on the same pattern,
-and a thirty-second, AT&T, is built and waiting for someone with an
-account to test it ([#26](https://github.com/rheeloaded/paperpull/issues/26)):
+Thirty-one providers are supported today, all built on the same pattern.
+Three more, AT&T, Wells Fargo and SBA, are built and waiting for someone
+with an account to test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
+[#27](https://github.com/rheeloaded/paperpull/issues/27),
+[#28](https://github.com/rheeloaded/paperpull/issues/28)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -60,6 +62,7 @@ account to test it ([#26](https://github.com/rheeloaded/paperpull/issues/26)):
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history, fresh live pilot pending |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
+| [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported; fresh live pilot pending |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
@@ -69,6 +72,7 @@ account to test it ([#26](https://github.com/rheeloaded/paperpull/issues/26)):
 | [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Ported; fresh live pilot pending |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
+| [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents | **Untested, built without an account. Have one? [Help test it](apps/wellsfargo/README.md#help-test-it-no-programming-needed)** |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | |
 
 > ⚠️ **Read this first:** these tools drive real, signed-in financial accounts.
