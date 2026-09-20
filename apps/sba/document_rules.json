@@ -1,0 +1,50 @@
+{
+  "_comment": "Editable rules mapping MySBA Loan Portal document titles to filename summaries. Checked in order: tax, then insurance (unused), then statement. Repair after running diagnose against a real statements page.",
+  "tax_rules": [
+    {
+      "pattern": "\\b1098\\b",
+      "summary": "1098 Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement|package|information|center)",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "monthly\\s+(loan\\s+|account\\s+)?statement",
+      "summary": "Monthly Statement"
+    },
+    {
+      "pattern": "(eidl|ppp|7\\(a\\)|504|disaster)\\s+.*statement",
+      "summary": "Loan Statement"
+    },
+    {
+      "pattern": "loan\\s+statement",
+      "summary": "Loan Statement"
+    },
+    {
+      "pattern": "account\\s+statement",
+      "summary": "Loan Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Loan Statement"
+    }
+  ],
+  "skip_patterns": [
+    "payment\\s+(receipt|confirmation|history)",
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "loan\\s+agreement",
+    "promissory",
+    "hardship",
+    "application",
+    "\\bfaq\\b"
+  ]
+}

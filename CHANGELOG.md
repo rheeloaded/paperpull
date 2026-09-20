@@ -7,6 +7,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Wells Fargo and SBA, built without accounts, for someone with one to
+  test.** Both are cut from the AT&T scaffold, the generic site layer
+  that reads document dates off whatever control fetches a document and
+  catches a click as a download event, a PDF response or a new tab. Wells
+  Fargo (Statements & Documents on connect.secure.wellsfargo.com, real
+  Edge or Chrome, a bank guard that refuses transfer, Zelle, wire, pay,
+  deposit, apply, open, close, lock, limit and every settings word) is
+  [#27](https://github.com/rheeloaded/paperpull/issues/27). SBA (the
+  MySBA Loan Portal at lending.sba.gov, monthly loan statements and the
+  1098, a loan-servicer guard that refuses pay, autopay, hardship,
+  deferment, forgiveness, apply, upload and submit) is
+  [#28](https://github.com/rheeloaded/paperpull/issues/28). Each has its
+  Diagnose survey, its tests, and a README that opens by saying it is
+  untested. CDP ports 9253 and 9254.
+
 ## [0.24.2] - 2026-09-20
 
 ### Added

@@ -1,0 +1,74 @@
+{
+  "_comment": "Editable rules mapping Wells Fargo document titles to filename summaries. Checked in order: tax, then insurance (unused), then statement. Repair after running diagnose against a real Statements & Documents page.",
+  "tax_rules": [
+    {
+      "pattern": "1099-?INT\\b",
+      "summary": "1099-INT Tax Form"
+    },
+    {
+      "pattern": "1099-?DIV\\b",
+      "summary": "1099-DIV Tax Form"
+    },
+    {
+      "pattern": "1099-?MISC\\b",
+      "summary": "1099-MISC Tax Form"
+    },
+    {
+      "pattern": "1099-?R\\b",
+      "summary": "1099-R Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "\\b1098\\b",
+      "summary": "1098 Tax Form"
+    },
+    {
+      "pattern": "\\b5498\\b",
+      "summary": "5498 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement|package|information|center)",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "monthly\\s+(account\\s+)?statement",
+      "summary": "Monthly Statement"
+    },
+    {
+      "pattern": "quarterly\\s+statement",
+      "summary": "Quarterly Statement"
+    },
+    {
+      "pattern": "annual\\s+statement|year.?end\\s+statement",
+      "summary": "Annual Statement"
+    },
+    {
+      "pattern": "(checking|savings|credit\\s+card|card|mortgage|loan)\\s+statement",
+      "summary": "Account Statement"
+    },
+    {
+      "pattern": "account\\s+statement",
+      "summary": "Account Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Account Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "account\\s+agreement",
+    "fee\\s+schedule",
+    "marketing",
+    "\\boffers?\\b",
+    "check\\s+image",
+    "deposit\\s+slip"
+  ]
+}
