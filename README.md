@@ -36,10 +36,11 @@ installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Thirty-one providers are supported today, all built on the same pattern.
-Three more, AT&T, Wells Fargo and SBA, are built and waiting for someone
-with an account to test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
+Four more, AT&T, Wells Fargo, SBA and Verizon Mobile, are built and waiting
+for someone with an account to test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 [#27](https://github.com/rheeloaded/paperpull/issues/27),
-[#28](https://github.com/rheeloaded/paperpull/issues/28)):
+[#28](https://github.com/rheeloaded/paperpull/issues/28),
+[#31](https://github.com/rheeloaded/paperpull/issues/31)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -74,6 +75,7 @@ with an account to test them ([#26](https://github.com/rheeloaded/paperpull/issu
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
 | [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Ported; fresh live pilot pending |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
+| [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/verizonmobile/README.md#help-test-it-no-programming-needed)** |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents | **Untested, built without an account. Have one? [Help test it](apps/wellsfargo/README.md#help-test-it-no-programming-needed)** |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | |

@@ -7,6 +7,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Verizon Mobile, built without an account, for someone with one to
+  test.** The wireless side of My Verizon, cut from the AT&T scaffold
+  with the same carrier guard, real Edge or Chrome since verizon.com walls
+  the Playwright build (the Fios app proved it), and the bill routes under
+  `/digital/nsa/secure/ui/` as the first guess with the Fios app's Download
+  Your Bill page as the fallback. Fios keeps its own app. Its Diagnose
+  survey, tests and a README that opens by saying it is untested are in
+  place. [#31](https://github.com/rheeloaded/paperpull/issues/31). CDP
+  port 9255.
+
 ## [0.25.0] - 2026-09-20
 
 ### Added
