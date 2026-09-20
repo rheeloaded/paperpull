@@ -21,7 +21,9 @@ and [The transactions inside your statements](#the-transactions-inside-your-stat
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-Thirty-one providers are supported today, all built on the same pattern:
+Thirty-one providers are supported today, all built on the same pattern,
+and a thirty-second, AT&T, is built and waiting for someone with an
+account to test it ([#26](https://github.com/rheeloaded/paperpull/issues/26)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -30,6 +32,7 @@ Thirty-one providers are supported today, all built on the same pattern:
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
+| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/att/README.md#help-test-it-no-programming-needed)** |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported; fresh live pilot pending |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |

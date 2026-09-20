@@ -39,7 +39,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
   elsewhere depends on
   how the provider exposes its documents:
 
-  - **The apps that click** (AAFMAA, Ally, Amex, Chase, Discover, Dominion,
+  - **The apps that click** (AAFMAA, Ally, Amex, AT&T, Chase, Discover, Dominion,
     Fairfax Water, M&T, Navy Federal, PG&E, RedCard, Robinhood, Schwab, T-Mobile, USAA,
     U.S. Bank, Verizon, Wealthfront, and Target and Walmart for a print
     control) gate every click with `is_safe_control()`: a hard blocklist

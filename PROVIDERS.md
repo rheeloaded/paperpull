@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (27)
+## Supported (31, plus one built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -18,6 +18,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
+| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #26 | Telecom |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, member/plan documents (all coverage years), digital ID cards, secure-message letters; tRPC API, nothing clicked | Health insurance (PHI) |
@@ -61,7 +62,9 @@ New to this? Look for the **`good first provider`** label, those are easy sites
 | _(none yet, add yours)_ | | | |
 
 Status legend: **requested** → **claimed** (someone's building it) →
-**in review** (PR open) → merged (moves to Supported).
+**in review** (PR open) → merged (moves to Supported). **Built, needs a
+tester** is an app written without an account, which anyone who holds one
+can finish by running its Diagnose button and attaching the result.
 
 ## How the list grows
 

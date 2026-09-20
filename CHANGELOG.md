@@ -9,6 +9,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **AT&T, built without an account, for someone with one to test.** A
+  bill downloader for myAT&T (Mobility, Fiber, Internet) cloned from the
+  T-Mobile app, with a carrier guard that refuses pay, autopay, add a line,
+  upgrade, trade-in, plan, SIM, suspend, port and every settings word, a
+  real Edge or Chrome launch since att.com runs Akamai, and a site layer
+  whose every guess is marked. Its Diagnose button surveys the billing
+  page into a file with no screenshot, digit runs masked and JSON as shape
+  only, which a tester attaches to
+  [#26](https://github.com/rheeloaded/paperpull/issues/26) without
+  writing code. The README says in its first line that it is untested,
+  and the provider table says so too. CDP port 9252.
+
 ### Changed
 - **The spreadsheets are on the front page.** The README, the Store
   listing text and the package description all led with the downloading
