@@ -4,11 +4,14 @@
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rheeloaded)
+[![Website](https://img.shields.io/badge/website-paperpull.rhee.me-4c8dff)](https://paperpull.rhee.me)
 
 **Receipt & Statement Downloader** is a family of small, **read-only** tools that log in *alongside you* to your own
 accounts and download your **statements and receipts** as PDFs, so you can
 archive them (e.g. into [paperless-ngx](https://docs.paperless-ngx.com/)) instead
 of clicking through each site by hand.
+
+**Website:** [paperpull.rhee.me](https://paperpull.rhee.me), what it does, which providers, why it is safe, and the downloads.
 
 **It also turns those PDFs into spreadsheets.** Your receipts become one
 long table of every item you have ever bought, across every store and every
