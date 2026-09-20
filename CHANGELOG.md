@@ -25,6 +25,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Diagnose survey, its tests, and a README that opens by saying it is
   untested. CDP ports 9253 and 9254.
 
+### Changed
+- **The website and the Store listing material live elsewhere.** The
+  Microsoft Store playbook, its screenshots and logos, and the website
+  are in a private repository now. This one holds the program, its
+  packaging and its privacy policy.
+
 ## [0.24.2] - 2026-09-20
 
 ### Added
