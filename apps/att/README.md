@@ -20,7 +20,7 @@ delete-safe, part of [PaperPull](../../README.md).
 3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
    Sign in to att.com yourself, answer any code it sends, and leave the
    window open.
-4. Click **Diagnose**. It reads the billing page and writes
+4. Click **more** under the buttons, then **Diagnose**. It reads the billing page and writes
    `Diagnostics\diagnose-billing.json` in the AT&T folder. It downloads
    nothing, clicks nothing but a billing link, takes no screenshot, and
    masks any run of six or more digits.
