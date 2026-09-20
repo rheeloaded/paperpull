@@ -163,7 +163,8 @@ this.
 
 **Screenshots.** `docs/store/1-panel.png` (a finished pilot run),
 `2-status.png` (every archive, one overdue, one gap), `3-spreadsheet.png`
-(both workbooks built) and `4-setup.png` (the first-run screen), 1920 by
+(both workbooks built), `4-setup.png` (adding a provider to an existing
+set) and `5-welcome.png` (the first-run screen on an empty folder), 1920 by
 1080, taken against a folder of made-up installs, every name, amount and
 date invented. Retake them after any change to the panel.
 
