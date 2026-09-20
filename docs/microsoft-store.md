@@ -124,7 +124,17 @@ this.
 
 **Description.**
 
-> PaperPull downloads your own statements and receipts as PDFs from the banks, cards, brokerages, utilities and stores you already use, so you can archive them instead of clicking through each site by hand. Thirty-one providers today, from American Express and Chase to Amazon, Fidelity and Target.
+> PaperPull downloads your own statements and receipts as PDFs from the banks, cards, brokerages, utilities and stores you already use, so you can archive them instead of clicking through each site by hand.
+>
+> Thirty-one providers today.
+> Banks and credit unions: Ally, Capital One, Navy Federal, USAA, U.S. Bank, M&T Bank (mortgage).
+> Credit cards: American Express, Chase, Discover, Target RedCard and Circle Card.
+> Investing and retirement: Fidelity, Fidelity NetBenefits (workplace 401k), Charles Schwab, Robinhood, Wealthfront, Thrift Savings Plan.
+> Pay and benefits: Paylocity, UKG Pro, DFAS myPay, AAFMAA.
+> Insurance: Anthem Blue Cross Blue Shield.
+> Utilities and phone: Verizon Fios, T-Mobile, Dominion Energy, PG&E, Fairfax Water.
+> Stores: Amazon (any country's store), Target, Walmart, Gap, Old Navy, Banana Republic, Athleta, Affirm.
+> Statements, tax forms, receipts, invoices, pay stubs, EOBs, whatever each one issues. New providers are added regularly, and anyone can contribute one.
 >
 > It never asks for your password. You sign in yourself, in a real browser window, and PaperPull attaches to that window afterward and reads. Two-factor prompts and device approvals are yours to answer, the way they should be. Nothing that pays, transfers, buys, sells or changes a setting is ever clicked. Every provider's code is built around a blocklist of those words, and the whole thing is open source so you can check.
 >
