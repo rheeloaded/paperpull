@@ -64,9 +64,9 @@ picking per device. Nothing else changes.
    below. Save each as you go, they are independent.
 7. **Submit.** Certification takes one to three business days. A failure
    comes with a report naming the policy. Fix, rebuild, resubmit.
-8. **After it is live,** put the Store link in the README and the release
-   notes, and add `ms-windows-store://pdp/?productid=<id>` to the panel's
-   footer as the update path for Store installs.
+8. **After it is live,** put the Store link (`https://apps.microsoft.com/detail/9P5LZRR773FP`)
+   in the README's Support section and the release notes, and point the
+   panel footer's "buy the Store edition" link at it instead of the README.
 
 Every later release is step 4 and a new submission with the new `.msix`.
 The version in the manifest is `<major>.<minor>.<patch>.0` from `VERSION`,

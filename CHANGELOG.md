@@ -7,6 +7,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **The ask is said plainly.** PaperPull is free and costs money to make,
+  an Apple developer membership every year, a Store account, and evenings
+  per provider. The README says so near the top and in a rewritten Support
+  section, with the two ways to help, a Ko-fi donation or the $2.99 Store
+  edition, and the free download beside them. The panel's footer says the
+  same in one line.
+
 ## [0.24.0] - 2026-09-19
 
 ### Added

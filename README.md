@@ -21,6 +21,17 @@ and [The transactions inside your statements](#the-transactions-inside-your-stat
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
+**PaperPull is free, and it costs money to make.** The signed Mac build
+needs an Apple developer membership every year, the Store listing needs a
+developer account, and every provider takes evenings to build and keep
+working as sites change. If it saves you time, you can show your
+appreciation and support future development by
+**[donating on Ko-fi](https://ko-fi.com/rheeloaded)**, or by buying the
+**Microsoft Store edition** for $2.99, the same program with a signed
+installer and automatic updates. Or download it free from the
+[Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
+is held back from the free build. See [Support](#support).
+
 Thirty-one providers are supported today, all built on the same pattern,
 and a thirty-second, AT&T, is built and waiting for someone with an
 account to test it ([#26](https://github.com/rheeloaded/paperpull/issues/26)):
@@ -455,9 +466,25 @@ Team roles, current status and the full policy are in
 
 ## Support
 
-If PaperPull saves you time, you can support its development on Ko-fi:
-**[ko-fi.com/rheeloaded](https://ko-fi.com/rheeloaded)** ☕. Entirely optional and
-much appreciated, it doesn't change anything below.
+PaperPull is free and open source, and it costs real money and real time
+to develop. The signed and notarized Mac build needs an Apple developer
+membership, renewed every year. The Microsoft Store listing needs a
+developer account. Every one of the thirty-odd providers took evenings to
+build, and each one needs repairing when its site changes, which they do.
+
+If PaperPull saves you time, there are two ways to show your appreciation
+and support future development. Both are optional, and neither changes
+what the free build does.
+
+- **Donate on Ko-fi:** **[ko-fi.com/rheeloaded](https://ko-fi.com/rheeloaded)** ☕
+- **Buy the Microsoft Store edition** for $2.99, the same program from the
+  same build, with a signed installer that opens with no warning and
+  updates through the Store. The listing is in review and will be linked
+  here once it is live. See [docs/microsoft-store.md](docs/microsoft-store.md).
+
+You can also help without spending anything: test a provider you hold an
+account with (see [PROVIDERS.md](PROVIDERS.md)), report what breaks, or
+contribute one. That is worth as much as a donation.
 
 ## Legal
 

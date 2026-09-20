@@ -1178,7 +1178,7 @@ HTML = r"""<!doctype html>
 </main>
 <footer>
   <span>PaperPull v__VERSION__ &middot; read-only, runs locally</span>
-  <span>☕ <a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">Support this project on Ko-fi</a></span>
+  <span>Free, and it costs money to make. Show your appreciation: <a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a> or <a href="https://github.com/rheeloaded/paperpull#support" target="_blank" rel="noopener">buy the Store edition</a></span>
 </footer>
 <script>
 async function saveRoot() {
