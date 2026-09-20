@@ -166,14 +166,18 @@ ACTIONS = {
     "login":    {"label": "Login",    "flags": ["__LOGIN__"]},
     "discover": {"label": "Discover", "flags": ["--discover"]},
     "pilot":    {"label": "Pilot",    "flags": ["--pilot"]},
-    "all":      {"label": "Run All",  "flags": ["--all", "--yes"]},
     "resume":   {"label": "Resume",   "flags": ["--resume", "--yes"]},
+    "all":      {"label": "Run All",  "flags": ["--all", "--yes"]},
     "verify":   {"label": "Verify",   "flags": ["--verify"]},
     # Reads the provider's page and writes a survey to Diagnostics. Downloads
     # nothing. It is how a provider built without an account gets tested by
     # someone who has one, and how a broken one gets repaired.
     "diagnose": {"label": "Diagnose", "flags": ["--diagnose"]},
 }
+# The actions for when something is off, kept behind a "more" link so the
+# main panel stays the four a normal day needs. Verify re-checks saved PDFs,
+# Diagnose surveys the page. Both are harmless and both are rarely wanted.
+MORE_ACTIONS = ("verify", "diagnose")
 ENTRY_RE = re.compile(r".*_(receipts|docs)\.py$")
 
 # Every app takes the same three scope flags. The panel passes them through
@@ -299,7 +303,7 @@ def discover_apps():
 def api_apps():
     apps = discover_apps()
     return {"apps_root": str(apps_root()), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
-            "apps": apps}
+            "more_actions": list(MORE_ACTIONS), "apps": apps}
 
 
 # -- how current each archive is ---------------------------------------------
@@ -1061,6 +1065,10 @@ HTML = r"""<!doctype html>
   .scope input[type=date]:disabled { opacity:.45; }
   .scope .sub { font-size:11px; color:var(--muted); text-transform:none; letter-spacing:0; margin:6px 0 4px; }
   .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
+  .actions.more { margin-top:8px; }
+  .morelink { font-size:12px; color:var(--muted); margin-top:10px; }
+  .morelink a { color:var(--accent); text-decoration:none; }
+  .morehint { font-size:12px; color:var(--muted); margin:6px 0 0; }
   button { padding:10px; border:1px solid var(--line); border-radius:8px; cursor:pointer;
            background:var(--panel); color:var(--fg); font-size:14px; }
   button:hover { border-color:var(--accent); }
@@ -1128,11 +1136,16 @@ HTML = r"""<!doctype html>
     </div>
     <p class="hint" id="scopehint" style="margin-top:8px"></p>
     <div class="actions" id="actions"></div>
+    <p class="morelink"><a href="#" id="morelink" onclick="toggleMore(); return false;">more</a></p>
+    <div id="morebox" style="display:none">
+      <div class="actions more" id="moreactions"></div>
+      <p class="morehint"><b>Verify</b> re-checks every saved PDF. <b>Diagnose</b> reads the
+         provider's page and writes a survey to its Diagnostics folder, downloading nothing.
+         Attach that file to an issue when a provider needs a repair or a first test.</p>
+    </div>
     <p class="hint">1. <b>Login</b> opens a browser. Sign in yourself and leave it open.<br>
        2. <b>Pilot</b> tests the newest few.<br>
-       3. <b>Run All</b> downloads everything you don't already have.<br>
-       <b>Diagnose</b> reads the page and writes a survey to Diagnostics, downloading
-       nothing. Attach it to an issue when a provider needs a repair or a first test.</p>
+       3. <b>Run All</b> downloads everything you don't already have.</p>
     <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
        ↻ <b>Safe to re-run.</b> Run All and Resume skip any statement or receipt
        you've already downloaded. Nothing is ever fetched twice, even if you
@@ -1470,14 +1483,27 @@ async function load() {
   appSel.onchange = onApp;
   fillScope();
   const acts = $('actions'); acts.innerHTML = '';
+  const more = $('moreactions'); more.innerHTML = '';
+  const tucked = new Set(META.more_actions || []);
   for (const [k, label] of Object.entries(META.actions)) {
     const b = document.createElement('button');
     b.textContent = label; b.className = (k === 'all') ? 'primary' : '';
     b.onclick = () => run(k);
-    acts.append(b);
+    (tucked.has(k) ? more : acts).append(b);
   }
+  let open = false;
+  try { open = localStorage.getItem('moreactions') === '1'; } catch (e) {}
+  showMore(open);
   onApp();
 }
+// The rarely wanted actions sit behind one link. Open or closed is
+// remembered in this browser only, like the scope.
+function showMore(on) {
+  $('morebox').style.display = on ? 'block' : 'none';
+  $('morelink').textContent = on ? 'fewer' : 'more';
+  try { localStorage.setItem('moreactions', on ? '1' : '0'); } catch (e) {}
+}
+function toggleMore() { showMore($('morebox').style.display === 'none'); }
 function onApp() {
   const m = META.apps[$('app').value];
   const accSel = $('account'); accSel.innerHTML = '';

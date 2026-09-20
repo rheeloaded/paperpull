@@ -10,11 +10,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
-- **A Diagnose button on the panel.** The AT&T tester instructions said
-  to click Diagnose, and the panel had no such button, only the command
-  line did. It runs the app's survey, which downloads nothing and writes
-  to the Diagnostics folder, and is how a provider built without an
-  account gets tested by someone who has one.
+- **A Diagnose button on the panel, behind "more".** The AT&T tester
+  instructions said to click Diagnose, and the panel had no such button,
+  only the command line did. It runs the app's survey, which downloads
+  nothing and writes to the Diagnostics folder, and is how a provider
+  built without an account gets tested by someone who has one. It sits
+  with Verify behind a "more" link under the main buttons, since both are
+  for when something is off rather than for a normal day, and the panel
+  remembers whether you left it open. Resume moved up beside Pilot so Run
+  All stands alone at the bottom.
 
 ## [0.24.1] - 2026-09-20
 
