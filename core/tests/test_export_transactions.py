@@ -317,15 +317,15 @@ Payments -$500.00
 08/20 PAYMENT THANK YOU -$500.00
 08/21 FLEX PLAN 04 CREDIT ADJ 08/20/26 -$8,156.56 Earned This Period
 08/21 FLEX PLAN 04 CREDIT ADJ 08/20/26 -$60.50 Year To Date : $1,209.58
-08/22 08/22 COSTCO WHSE #0204 FAIRFAX VA $227.16 5% on gas at Costco ............ +$0.00
-TOUS LES JOURS ANNANDALE VA 2% on Costco and Costco.com
+08/22 08/22 COSTCO WHSE #0204 OAKTON VA $227.16 5% on gas at Costco ............ +$0.00
+CORNER BAKERY OAKTON VA 2% on Costco and Costco.com
 08/23 08/23 $14.10
 08/24 08/24 $100.00 ANNUAL MEMBERSHIP FEE
 08/25 08/25 FLEX PLAN 04 TRANSFERRED APR PURCH $8,156.56
 08/25 08/25 FLEX PLAN 04 TRANSFERRED APR PURCH $60.50
 08/26 08/26 NEW BALANCE *0019 ANNAPOLIS MD $27.26
 08/27 08/27 NYT DIGITAL APR 2026 800-698-4637 NY $12.95
-08/28 08/28 GROCER 1365 FAIRFAX VA $19.28
+08/28 08/28 GROCER 1365 OAKTON VA $19.28
 Purchase APR 24.99%
 Total fees charged in 2026 $0.00
 """.splitlines()
@@ -342,13 +342,13 @@ def test_a_rewards_box_glued_onto_a_transaction_line_is_cut_off():
     by_line = {t["line"]: t for t in got["transactions"]}
     assert by_line[5]["amount"] == -8156.56 and by_line[5]["description"] == "FLEX PLAN 04 CREDIT ADJ 08/20/26"
     assert by_line[6]["amount"] == -60.50, "the box's year-to-date number is not the transaction"
-    assert by_line[7]["amount"] == 227.16 and by_line[7]["description"] == "COSTCO WHSE #0204 FAIRFAX VA"
+    assert by_line[7]["amount"] == 227.16 and by_line[7]["description"] == "COSTCO WHSE #0204 OAKTON VA"
 
 
 def test_a_merchant_on_the_neighboring_line_and_an_amount_printed_first():
     got = xt.parse_statement(COSTCO, "2026-09-15")
     by_line = {t["line"]: t for t in got["transactions"]}
-    assert by_line[9]["amount"] == 14.10 and by_line[9]["description"] == "TOUS LES JOURS ANNANDALE VA"
+    assert by_line[9]["amount"] == 14.10 and by_line[9]["description"] == "CORNER BAKERY OAKTON VA"
     assert by_line[10]["amount"] == 100.00 and by_line[10]["description"] == "ANNUAL MEMBERSHIP FEE"
 
 
@@ -378,17 +378,17 @@ def test_an_address_line_is_never_taken_as_a_description():
 
 
 def test_the_box_is_never_a_description_and_a_neighbor_loses_its_bleed():
-    lines = ["FT BELVOIR COMMISSARY FORT BELVOIR",
+    lines = ["BLUE HERON MARKET SPRINGFIELD",
              "09/24 09/24 $53.60 purchases ........................................... +$19.65",
              "VA",
-             "TOUS LES JOURS ANNANDALE 4% cash back rewards on eligible gas and",
+             "CORNER BAKERY OAKTON 4% cash back rewards on eligible gas and",
              "12/17 12/17 $26.50",
-             "FOOD BAZAAR FORT BELVOIR",
+             "GREEN LEAF GROCER OAKTON",
              "04/18 04/18 $24.00 1% on all other purchases +$41.56"]
     got = xt.read_transactions(lines, 2025, (2025, 12))
     assert [(t["amounts"][-1], t["description"]) for t in got] == [
-        (53.60, "FT BELVOIR COMMISSARY FORT BELVOIR"),
-        (26.50, "TOUS LES JOURS ANNANDALE"),
-        (24.00, "FOOD BAZAAR FORT BELVOIR"),
+        (53.60, "BLUE HERON MARKET SPRINGFIELD"),
+        (26.50, "CORNER BAKERY OAKTON"),
+        (24.00, "GREEN LEAF GROCER OAKTON"),
     ]
     assert xt.transaction_line("08/24 08/24 $100.00 ANNUAL MEMBERSHIP FEE")["description"] == "ANNUAL MEMBERSHIP FEE"
