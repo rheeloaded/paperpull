@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.24.0] - 2026-09-19
 
 ### Added
 - **AT&T, built without an account, for someone with one to test.** A
@@ -23,6 +23,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and the provider table says so too. CDP port 9252.
 
 ### Changed
+- **T-Mobile's rules file is a carrier's.** It still carried the crypto
+  1099 and trade confirmation rules of the brokerage app it was cloned
+  from. Harmless, nothing on a phone bill matched them, but wrong.
 - **The spreadsheets are on the front page.** The README, the Store
   listing text and the package description all led with the downloading
   and left the part people like best, reading the PDFs into spreadsheets,
