@@ -1,4 +1,4 @@
-"""T-Mobile document classification + the READ-ONLY (brokerage) safety guard."""
+"""T-Mobile document classification + the READ-ONLY carrier safety guard."""
 import sys
 from pathlib import Path
 
@@ -14,40 +14,31 @@ RULES = doc_types.load_rules()
 
 # -- classification -------------------------------------------------------
 
-def test_statements():
+def test_bills_are_monthly_statements():
     for title, summary in [
-            ("Account Statement", "Account Statement"),
+            ("Monthly Statement - December 12, 2025", "Monthly Statement"),
             ("Monthly Account Statement - December 2025", "Monthly Statement"),
-            ("Brokerage Statement", "Brokerage Statement"),
-            ("Crypto Statement", "Crypto Statement")]:
+            ("Download detailed bill", "Monthly Statement"),
+            ("Account Statement", "Account Statement"),
+            ("Bill", "Monthly Statement")]:
         cat, s, _ = doc_types.classify_document(title, RULES)
         assert cat == doc_types.STATEMENT, title
         assert s == summary, (title, s)
 
 
 def test_tax_forms():
-    for title, summary in [
-            ("Consolidated 1099", "Consolidated 1099 Tax Form"),
-            ("Consolidated Form 1099", "Consolidated 1099 Tax Form"),
-            ("T-Mobile Crypto 1099", "Crypto 1099 Tax Form"),
-            ("1099-B", "1099-B Tax Form"),
-            ("Form 1099-DIV", "1099-DIV Tax Form"),
-            ("1042-S", "1042-S Tax Form")]:
+    for title, summary in [("2025 Form 1099", "1099 Tax Form"),
+                           ("Tax document", "Tax Document")]:
         cat, s, _ = doc_types.classify_document(title, RULES)
         assert cat == doc_types.TAX, title
         assert s == summary, (title, s)
 
 
-def test_trade_confirmations_are_skipped():
-    assert doc_types.should_skip("Trade Confirmation", RULES)
-    assert doc_types.should_skip("Trade Confirmation - AAPL", RULES)
-    assert not doc_types.should_skip("Account Statement", RULES)
-
-
-def test_other_skips():
-    for t in ["Customer Agreement", "Prospectus for VTI", "Privacy Policy",
-              "Options Agreement Disclosure"]:
+def test_payment_receipts_and_marketing_are_skipped():
+    for t in ["Payment receipt", "Payment confirmation", "AutoPay enrollment",
+              "Paperless billing", "Customer Agreement", "Privacy Policy", "Usage details"]:
         assert doc_types.should_skip(t, RULES), t
+    assert not doc_types.should_skip("Monthly Statement - December 12, 2025", RULES)
 
 
 def test_wanted_respects_config():
@@ -70,7 +61,7 @@ def test_month_year_files_on_last_day():
 
 
 def test_year_only():
-    assert site.parse_period_date("2025 Consolidated 1099")[0] == "2025-12-31"
+    assert site.parse_period_date("2025 Form 1099")[0] == "2025-12-31"
 
 
 # -- filenames ------------------------------------------------------------
