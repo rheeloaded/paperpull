@@ -318,14 +318,14 @@ Payments -$960.00
 08/18 FLEX PLAN 04 CREDIT ADJ 08/17/26 -$7,204.56 Earned This Period
 08/18 FLEX PLAN 04 CREDIT ADJ 08/17/26 -$52.40 Year To Date : $1,106.58
 08/19 08/19 COSTCO WHSE #0684 LAKEVIEW VA $142.16 5% on gas at Costco ............ +$0.00
-TOUS LES JOURS ANNANDALE VA 2% on Costco and Costco.com
+CORNER CAFE LAKEVIEW VA 2% on Costco and Costco.com
 08/20 08/20 $11.80
 08/21 08/21 $120.00 ANNUAL MEMBERSHIP FEE
 08/22 08/22 FLEX PLAN 04 TRANSFERRED APR PURCH $7,204.56
 08/22 08/22 FLEX PLAN 04 TRANSFERRED APR PURCH $52.40
 08/23 08/23 NEW BALANCE *4410 HARBORVIEW MD $31.48
 08/24 08/24 NYT DIGITAL APR 2026 800-698-4637 NY $14.25
-08/22 08/22 GROCER 6120 LAKEVIEW VA $23.61
+08/25 08/25 GROCER 6120 LAKEVIEW VA $23.61
 Purchase APR 24.99%
 Total fees charged in 2026 $0.00
 """.splitlines()
@@ -348,7 +348,7 @@ def test_a_rewards_box_glued_onto_a_transaction_line_is_cut_off():
 def test_a_merchant_on_the_neighboring_line_and_an_amount_printed_first():
     got = xt.parse_statement(COSTCO, "2026-09-12")
     by_line = {t["line"]: t for t in got["transactions"]}
-    assert by_line[9]["amount"] == 11.80 and by_line[9]["description"] == "TOUS LES JOURS ANNANDALE VA"
+    assert by_line[9]["amount"] == 11.80 and by_line[9]["description"] == "CORNER CAFE LAKEVIEW VA"
     assert by_line[10]["amount"] == 120.00 and by_line[10]["description"] == "ANNUAL MEMBERSHIP FEE"
 
 
@@ -378,17 +378,17 @@ def test_an_address_line_is_never_taken_as_a_description():
 
 
 def test_the_box_is_never_a_description_and_a_neighbor_loses_its_bleed():
-    lines = ["FT BELVOIR COMMISSARY FORT BELVOIR",
+    lines = ["EXAMPLE HERON MARKET LAKEVIEW",
              "09/21 09/21 $47.30 purchases ........................................... +$17.40",
              "VA",
-             "TOUS LES JOURS ANNANDALE 4% cash back rewards on eligible gas and",
+             "CORNER CAFE LAKEVIEW 4% cash back rewards on eligible gas and",
              "12/14 12/14 $23.20",
-             "FOOD BAZAAR FORT BELVOIR",
+             "GREEN LEAF GROCER LAKEVIEW",
              "04/15 04/15 $21.10 1% on all other purchases +$36.94"]
     got = xt.read_transactions(lines, 2025, (2025, 12))
     assert [(t["amounts"][-1], t["description"]) for t in got] == [
-        (47.30, "FT BELVOIR COMMISSARY FORT BELVOIR"),
-        (23.20, "TOUS LES JOURS ANNANDALE"),
-        (21.10, "FOOD BAZAAR FORT BELVOIR"),
+        (47.30, "EXAMPLE HERON MARKET LAKEVIEW"),
+        (23.20, "CORNER CAFE LAKEVIEW"),
+        (21.10, "GREEN LEAF GROCER LAKEVIEW"),
     ]
     assert xt.transaction_line("08/21 08/21 $120.00 ANNUAL MEMBERSHIP FEE")["description"] == "ANNUAL MEMBERSHIP FEE"
