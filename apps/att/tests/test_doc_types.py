@@ -129,3 +129,65 @@ def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
     assert "UNVERIFIED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
     assert "Not yet tested against a real account" in readme
+
+
+# -- round two, from the first tester's survey (#26) --------------------------
+
+class _Loc:
+    def __init__(self, n):
+        self._n = n
+
+    def count(self):
+        return self._n
+
+    def or_(self, other):
+        return _Loc(self._n + other._n)
+
+
+class _Page:
+    def __init__(self, url, bill_controls=1, body=""):
+        self.url = url
+        self._n = bill_controls
+        self._body = body
+
+    def get_by_role(self, role, name=None):
+        # the fake splits its bill controls between the two roles
+        return _Loc(self._n - self._n // 2 if role == "button" else self._n // 2)
+
+    def locator(self, sel):
+        page = self
+
+        class _Body:
+            def inner_text(self_, timeout=0):
+                return page._body
+        return _Body()
+
+
+def test_the_overview_with_its_one_view_bill_button_is_not_the_billing_page():
+    """Sign-in lands on /acctmgmt/overview, a shop page with one "View
+    bill" button. That button alone passed the first check, so discovery
+    read 125 rows of phones and cases and no bills."""
+    assert not site._looks_like_billing(_Page("https://www.att.com/acctmgmt/overview?x=1", bill_controls=1))
+    assert site._looks_like_billing(_Page("https://www.att.com/acctmgmt/billing/mybillingcenter", bill_controls=0))
+    assert site._looks_like_billing(_Page("https://www.att.com/acctmgmt/x", bill_controls=3))
+    assert site._looks_like_billing(_Page("https://www.att.com/acctmgmt/x", bill_controls=0, body="Your bill history"))
+
+
+def test_the_billing_center_is_tried_first_and_the_nav_link_is_allowed():
+    assert site.BILLING_CANDIDATES[0] == "https://www.att.com/acctmgmt/billing/mybillingcenter"
+    assert site.is_safe_control("Billing")
+    assert site.BILLING_NAV_RE.match("Billing") and site.BILLING_NAV_RE.match("Bill & payments")
+    for text in ("Billing", "View bill", "Bill history"):
+        assert site.SURVEY_LINK_RE.match(text), text
+    # The nav's money words stay refused whatever the survey wants.
+    for text in ("Payments", "Pay off my device", "Check my usage", "See usage details"):
+        assert not site.is_safe_control(text), text
+
+
+def test_a_url_in_the_survey_loses_its_query_string():
+    """The first survey carried the sign-in landing URL with a token in
+    its query. Nothing after the ? reaches the file now."""
+    assert site.redact("https://www.att.com/acctmgmt/overview?haloSuccess=true&lt=abcDEF123456789") == \
+        "https://www.att.com/acctmgmt/overview?..."
+    assert site.redact("see https://www.att.com/a?b=c and https://www.att.com/d") == \
+        "see https://www.att.com/a?... and https://www.att.com/d"

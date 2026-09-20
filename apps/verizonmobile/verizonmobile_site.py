@@ -211,10 +211,16 @@ def _human_date(iso: str) -> str:
         return iso
 
 
+_QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
+
+
 def redact(text: str) -> str:
     """Runs of six or more digits become #, so an account or phone number
-    in a URL, a heading or a link never reaches the survey file."""
-    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text or "")
+    in a URL, a heading or a link never reaches the survey file, and a URL
+    loses its query string, which is where a sign-in token or a session
+    id rides. The first AT&T survey carried one (#26)."""
+    text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
+    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
 
 
 # ---------------------------------------------------------------------------

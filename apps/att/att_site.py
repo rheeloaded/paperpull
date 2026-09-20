@@ -45,16 +45,18 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 log = logging.getLogger("att_docs.site")
 
 BASE = "https://www.att.com"
-# GUESS. myAT&T's account management lives under /acctmgmt/. The bill and
-# payment history page is the one with every past bill on it; the billing
-# overview is the fallback, since it links to the history from a control
-# the survey will name. The oldest route is kept last for accounts that
-# still land on the older myAT&T.
+# Read off the signed-in site's own navigation in the first survey
+# (#26, 2026-09-20). The Billing link in myAT&T's nav goes to the billing
+# center. The overview is where sign-in lands and is the fallback, since
+# its nav carries the Billing link, which goto_documents follows. The
+# routes guessed before the survey all redirected to the overview.
 BILLING_CANDIDATES = [
-    f"{BASE}/acctmgmt/billandpay/history",
-    f"{BASE}/acctmgmt/billandpay",
-    f"{BASE}/my/#/passthrough/billing",
+    f"{BASE}/acctmgmt/billing/mybillingcenter",
+    f"{BASE}/acctmgmt/overview",
 ]
+# The nav link that leads to the billing center, followed when the
+# candidates land somewhere else. GUESS at nothing, this is its exact text.
+BILLING_NAV_RE = re.compile(r"^\s*(billing|bill\s*&\s*payments?|bill\s+history)\s*$", re.I)
 BILLING_URL = BILLING_CANDIDATES[0]
 URLS = {
     "home": f"{BASE}/acctmgmt/overview",
@@ -90,7 +92,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"confirm|submit|agree|accept|authorize|\bchat\b|contact\s+us)", re.I)
 
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(download|view|open|print|\bpdf\b|statement|document|\bbill\b|bills\b|"
+    r"(download|view|open|print|\bpdf\b|statement|document|\bbill\b|bills\b|billing\b|"
     r"invoice|history|see\s+(more|all|older)|show\s+(more|all|older)|load\s+more)", re.I)
 
 # A control that fetches one bill. GUESS at the wording, wide on purpose.
@@ -207,10 +209,16 @@ def _human_date(iso: str) -> str:
         return iso
 
 
+_QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
+
+
 def redact(text: str) -> str:
     """Runs of six or more digits become #, so an account or phone number
-    in a URL, a heading or a link never reaches the survey file."""
-    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text or "")
+    in a URL, a heading or a link never reaches the survey file, and a URL
+    loses its query string, which is where a sign-in token or a session
+    id rides. The first AT&T survey carried one (#26)."""
+    text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
+    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
 
 
 # ---------------------------------------------------------------------------
@@ -305,8 +313,18 @@ def _bill_controls(page):
 
 
 def _looks_like_billing(page) -> bool:
+    """The billing center, not the overview. The overview carries one
+    "View bill" button, which was enough to pass the first version of this
+    check and left discovery reading a shop page (#26). The URL decides
+    first, then the page has to show more than one bill control or the
+    words of a bill history."""
+    url = (page.url or "").lower()
+    if "/billing/" in url or "billhistory" in url or "/bill/" in url:
+        return True
+    if "/overview" in url:
+        return False
     try:
-        if _bill_controls(page).count() > 0:
+        if _bill_controls(page).count() > 1:
             return True
     except Exception:
         pass
@@ -316,6 +334,26 @@ def _looks_like_billing(page) -> bool:
         return False
     return bool(re.search(r"bill(ing)?\s+(history|period|date)|past\s+bills|previous\s+bills",
                           body, re.I))
+
+
+def _follow_billing_nav(page) -> bool:
+    """From wherever sign-in landed, click the nav's Billing link, once it
+    has passed the guard, and say whether that reached the billing center."""
+    for role in ("link", "button"):
+        try:
+            loc = page.get_by_role(role, name=BILLING_NAV_RE)
+            if loc.count() == 0:
+                continue
+            label = (loc.first.inner_text(timeout=1000) or "").strip()
+            if not is_safe_control(label):
+                continue
+            loc.first.click(timeout=5000)
+            page.wait_for_timeout(4000)
+            dismiss_overlay(page)
+            return is_safe_url(page.url or "") and not looks_signed_out(page) and _looks_like_billing(page)
+        except Exception as e:
+            log.info("billing nav %s failed: %s", role, e)
+    return False
 
 
 def goto_documents(page) -> bool:
@@ -338,6 +376,9 @@ def goto_documents(page) -> bool:
             return False
         if _looks_like_billing(page):
             BILLING_URL = url
+            return True
+        if _follow_billing_nav(page):
+            BILLING_URL = page.url.split("?")[0]
             return True
     return False
 
@@ -582,7 +623,7 @@ _ROW_JS = r"""() => {
 
 SURVEY_LINK_RE = re.compile(
     r"^\s*((see|view|show)\s+)?(bill(ing)?\s+)?(history|bills|statements|past\s+bills|"
-    r"previous\s+bills|documents|billing)\s*$", re.I)
+    r"previous\s+bills|documents|billing|bill\s*&\s*payments?|view\s+bill)\s*$", re.I)
 
 
 def collect_documents(page) -> List[RawDoc]:
@@ -705,12 +746,12 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
         report["pages"].append(start)
         followed = 0
         for c in start["controls"]:
-            if followed >= max_follow or c["role"] != "link" or not c["survey"]:
+            if followed >= max_follow or c["role"] not in ("link", "button") or not c["survey"]:
                 continue
             if not is_safe_control(c["text"]):
                 continue
             try:
-                link = page.get_by_role("link", name=re.compile(
+                link = page.get_by_role(c["role"], name=re.compile(
                     "^" + re.escape(c["text"].replace("#", "")) + "$", re.I)).first
                 if link.count() == 0:
                     continue

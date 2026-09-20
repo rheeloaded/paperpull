@@ -7,6 +7,32 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A balance split across a space read as the wrong balance.** pdfplumber
+  sometimes prints "$1,719.3 3". The amount did not parse, so the next
+  amount in the window, the NEW balance, was taken as the beginning
+  balance, and both ends of a card statement read the same. The window is
+  joined before scanning, the way split words already were.
+- **A bracket around nothing no longer calls itself reconciled.** With
+  both balances misread to the same value a few lines apart, the section
+  between them held no transactions, "reconciled" trivially, and led the
+  status while all seventy real lines sat outside it. A statement whose
+  only brackets are empty now says "not reconciled" first. Both from
+  dertbv in [#32](https://github.com/rheeloaded/paperpull/issues/32).
+  Cache version 3.
+- **AT&T, round two, from the first tester's survey.** Sign-in lands on
+  the overview, a shop page with one "View bill" button, which was enough
+  to pass the billing-page check, so discovery read 125 rows of phones
+  and cases and no bills. The billing center is the first route now, read
+  off the site's own nav, the overview never counts as billing, and when
+  the routes miss the nav's Billing link is followed. The survey follows
+  billing buttons as well as links. [#26](https://github.com/rheeloaded/paperpull/issues/26).
+- **A survey never carries a URL's query string.** The first AT&T survey
+  recorded the sign-in landing URL with a token in its query. Every
+  scaffold's survey now cuts a URL at the question mark.
+
 ## [0.26.0] - 2026-09-20
 
 ### Added
