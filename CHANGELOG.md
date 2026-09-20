@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.27.0] - 2026-09-20
 
 ### Added
 - **Citi credit cards.** Monthly card statements from Citi Online, read
