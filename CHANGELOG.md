@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.26.1] - 2026-09-20
 
 ### Fixed
 - **A balance split across a space read as the wrong balance.** pdfplumber
@@ -29,9 +29,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   off the site's own nav, the overview never counts as billing, and when
   the routes miss the nav's Billing link is followed. The survey follows
   billing buttons as well as links. [#26](https://github.com/rheeloaded/paperpull/issues/26).
-- **A survey never carries a URL's query string.** The first AT&T survey
-  recorded the sign-in landing URL with a token in its query. Every
-  scaffold's survey now cuts a URL at the question mark.
+- **A survey never carries a URL's query string.** Query strings are
+  where a site keeps session details, and the survey only needs the path,
+  so every scaffold's survey now cuts a URL at the question mark.
 
 ## [0.26.0] - 2026-09-20
 
