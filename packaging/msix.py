@@ -94,7 +94,7 @@ def manifest(version: str, ident: dict, arch: str = "x64") -> str:
     <DisplayName>{app}</DisplayName>
     <PublisherDisplayName>{display}</PublisherDisplayName>
     <Logo>Assets\\StoreLogo.png</Logo>
-    <Description>Downloads your own receipts and statements as PDFs from the banks, utilities and stores you already use. You sign in yourself, and it can only read.</Description>
+    <Description>Downloads your own receipts and statements as PDFs from the banks, utilities and stores you already use, and reads them into spreadsheets. You sign in yourself, and it can only read.</Description>
   </Properties>
 
   <Dependencies>

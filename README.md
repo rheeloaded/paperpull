@@ -10,6 +10,15 @@ accounts and download your **statements and receipts** as PDFs, so you can
 archive them (e.g. into [paperless-ngx](https://docs.paperless-ngx.com/)) instead
 of clicking through each site by hand.
 
+**It also turns those PDFs into spreadsheets.** Your receipts become one
+long table of every item you have ever bought, across every store and every
+account, with what it cost and when. The transactions inside your bank and
+card statements are read out of the PDFs into a workbook, one row each, and
+every statement is checked against its own printed balances, so a row you
+are looking at is a row that adds up. One button on the control panel, or
+one command. See [Every purchase in one spreadsheet](#every-purchase-in-one-spreadsheet)
+and [The transactions inside your statements](#the-transactions-inside-your-statements).
+
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
 Thirty-one providers are supported today, all built on the same pattern:

@@ -7,6 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **The spreadsheets are on the front page.** The README, the Store
+  listing text and the package description all led with the downloading
+  and left the part people like best, reading the PDFs into spreadsheets,
+  to a section far down. It is now the second paragraph everywhere.
+
 ## [0.23.1] - 2026-09-19
 
 ### Fixed
