@@ -353,8 +353,7 @@ Microsoft Store edition is the same package from the same build, for
 $2.99, and what the price buys is convenience, a Store-signed package that
 installs with no warning, updates through the Store, and uninstalls
 cleanly. Nothing is held back from either edition, the same way paint.net
-does it. The AGPL permits selling copies and the source stays public. How
-the Store listing is made is in [docs/microsoft-store.md](docs/microsoft-store.md). For macOS
+does it. The AGPL permits selling copies and the source stays public. For macOS
 there is `PaperPull-<version>-arm64.dmg`, Apple Silicon only, signed and
 notarized, so it opens with no warning. Drag PaperPull to Applications and
 double-click it. The Windows installer is not yet code-signed, so Windows
@@ -484,7 +483,7 @@ what the free build does.
 - **Buy the Microsoft Store edition** for $2.99, the same program from the
   same build, with a signed installer that opens with no warning and
   updates through the Store. The listing is in review and will be linked
-  here once it is live. See [docs/microsoft-store.md](docs/microsoft-store.md).
+  here once it is live.
 
 You can also help without spending anything: test a provider you hold an
 account with (see [PROVIDERS.md](PROVIDERS.md)), report what breaks, or
