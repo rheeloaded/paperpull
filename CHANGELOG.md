@@ -7,6 +7,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **A Diagnose button on the panel.** The AT&T tester instructions said
+  to click Diagnose, and the panel had no such button, only the command
+  line did. It runs the app's survey, which downloads nothing and writes
+  to the Diagnostics folder, and is how a provider built without an
+  account gets tested by someone who has one.
+
 ## [0.24.1] - 2026-09-20
 
 ### Changed
