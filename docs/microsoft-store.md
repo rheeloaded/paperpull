@@ -157,9 +157,13 @@ this.
 1080, taken against a folder of made-up installs, every name, amount and
 date invented. Retake them after any change to the panel.
 
-**Store logos.** `docs/store/logo-1x1.png` (box art), `logo-2x3.png`
-(poster) and `logo-16x9.png` (super hero art), the icon on the panel's own
-dark background.
+**Store logos.** `docs/store/logo-1x1.png` (1:1 box art, 1080),
+`poster-9x16.png` (9:16 poster art, 1440 by 2160) and `hero-16x9.png`
+(16:9 super hero art, 1920 by 1080, which the Store forbids the title on,
+so it carries the icon and the tagline only), the icon on the panel's own
+dark background. `tile-300.png`, `tile-150.png` and `tile-71.png` are the
+Store display icons, the icon alone at each size. The Xbox slots stay
+empty, the app is not offered there.
 
 **Copyright and trademark info.** Copyright (c) 2026 Bryan Rhee. PaperPull is a trade name of Bryan Rhee. Provider names are the property of their owners, and PaperPull is not affiliated with any of them.
 
