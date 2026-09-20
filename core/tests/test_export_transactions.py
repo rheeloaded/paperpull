@@ -348,7 +348,7 @@ def test_a_rewards_box_glued_onto_a_transaction_line_is_cut_off():
 def test_a_merchant_on_the_neighboring_line_and_an_amount_printed_first():
     got = xt.parse_statement(COSTCO, "2026-09-15")
     by_line = {t["line"]: t for t in got["transactions"]}
-    assert by_line[9]["amount"] == 14.10 and by_line[9]["description"] == "TOUS LES JOURS ANNANDALE VA 2% on Costco and Costco.com"
+    assert by_line[9]["amount"] == 14.10 and by_line[9]["description"] == "TOUS LES JOURS ANNANDALE VA"
     assert by_line[10]["amount"] == 100.00 and by_line[10]["description"] == "ANNUAL MEMBERSHIP FEE"
 
 
@@ -375,3 +375,20 @@ def test_an_address_line_is_never_taken_as_a_description():
     lines = ["Adjustment VA Home 93A", "10/23/25 278.28", "4100 ELM ST", "10/28/25 -76.89", "4100 ELM ST"]
     got = xt.read_transactions(lines, 2025, (2025, 11))
     assert [t["description"] for t in got] == ["Adjustment VA Home 93A"]
+
+
+def test_the_box_is_never_a_description_and_a_neighbor_loses_its_bleed():
+    lines = ["FT BELVOIR COMMISSARY FORT BELVOIR",
+             "09/24 09/24 $53.60 purchases ........................................... +$19.65",
+             "VA",
+             "TOUS LES JOURS ANNANDALE 4% cash back rewards on eligible gas and",
+             "12/17 12/17 $26.50",
+             "FOOD BAZAAR FORT BELVOIR",
+             "04/18 04/18 $24.00 1% on all other purchases +$41.56"]
+    got = xt.read_transactions(lines, 2025, (2025, 12))
+    assert [(t["amounts"][-1], t["description"]) for t in got] == [
+        (53.60, "FT BELVOIR COMMISSARY FORT BELVOIR"),
+        (26.50, "TOUS LES JOURS ANNANDALE"),
+        (24.00, "FOOD BAZAAR FORT BELVOIR"),
+    ]
+    assert xt.transaction_line("08/24 08/24 $100.00 ANNUAL MEMBERSHIP FEE")["description"] == "ANNUAL MEMBERSHIP FEE"

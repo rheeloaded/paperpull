@@ -7,6 +7,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Transaction export, the Account column and the last of the box.**
+  The Account column read the index's title, which is often just
+  "Statement" or a date. It now reads the summary, which is what names
+  the file and says which account, "Statement - FREEDOM (...1234)",
+  "Costco Anywhere Visa Monthly Statement". And on a card statement with
+  a rewards box, five descriptions in 2,368 still carried the box's words
+  where the box sat on an amount-first line or on the merchant's own
+  wrapped line. Both shapes are cut now. Verified on the full Citi
+  workbook through the panel's own Spreadsheet route, 24 of 24
+  reconciled, every statement's rows summing to its printed balances.
+
 ## [0.27.0] - 2026-09-20
 
 ### Added

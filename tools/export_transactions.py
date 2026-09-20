@@ -189,6 +189,19 @@ def transaction_line(line: str) -> Optional[dict]:
 
 
 _BARE_NUMBER = re.compile(r"^-?[\d,]+(?:\.\d+)?$")
+# The first token of a rewards box: "4%", "purchases ........", "+$19.65".
+_BOX_TOKEN = re.compile(r"^\d+%$|\.{4,}|^\+\$?\d")
+
+
+def _strip_box(text: str) -> str:
+    """A line with the rewards box's words glued on, minus the box. Cut at
+    the first token that could only come from the box, a percentage on
+    its own, dot leaders, or a plus-signed amount."""
+    tokens = text.split()
+    for i, tok in enumerate(tokens):
+        if _BOX_TOKEN.search(tok):
+            return " ".join(tokens[:i])
+    return text
 _AMOUNT_TAIL = re.compile(r"^(CR|-|0|\$?0\.00|[⧫*†‡])$", re.I)
 
 
@@ -211,8 +224,11 @@ def _cut_sidebar_bleed(rest: str) -> str:
             continue
         if i == 0:
             # "$100.00 ANNUAL MEMBERSHIP FEE": the amount came first and the
-            # words after it are the description, not a box beside it.
-            return " ".join(tokens[1:] + tokens[:1])
+            # words after it are the description, unless they are the box
+            # ("$53.60 purchases ........ +$19.65"), in which case the
+            # merchant is on a neighboring line and the tail is dropped.
+            tail = tokens[1:] if not any(_BOX_TOKEN.search(t) for t in tokens[1:]) else []
+            return " ".join(tail + tokens[:1])
         for j in range(i + 1, len(tokens)):
             t = tokens[j]
             if parse_amount_token(t) is None and not _AMOUNT_TAIL.match(t):
@@ -303,7 +319,7 @@ def read_transactions(lines: List[str], year_hint: Optional[int] = None,
             for j in (i - 1, i + 1):
                 if not (0 <= j < len(lines)):
                     continue
-                cand = re.sub(r"\s+", " ", lines[j]).strip()
+                cand = _strip_box(re.sub(r"\s+", " ", lines[j]).strip())
                 if not cand or cand[0].isdigit() or transaction_line(lines[j]) \
                         or DATE_AT_START.match(cand) or _is_summary_line(cand):
                     continue
@@ -658,7 +674,11 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
                 read += 1
                 if read % 25 == 0:
                     log(f"  read {read} statement(s)...")
-            account = row.get("Document Title") or row.get("Document Summary") or ""
+            # The summary is what names the file, "Statement - FREEDOM
+            # (...1234)", "Costco Anywhere Visa Monthly Statement", and is
+            # the one of the two that says which account. The title is
+            # often just "Statement" or carries the date.
+            account = row.get("Document Summary") or row.get("Document Title") or ""
             if row.get("Account Holder"):
                 account = f"{row['Account Holder']}, {account}" if account else row["Account Holder"]
             stmt_date = row.get("Document Date") or parsed.get("period_end") or ""
