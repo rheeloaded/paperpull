@@ -285,3 +285,61 @@ def test_only_a_discovered_app_can_be_removed(templates, settings, tmp_path):
         assert e.value.status_code == 404, name
     assert (tmp_path / "elsewhere").exists()
     assert (home / "Bank Statements").exists()
+
+
+# -- an upgrade reaches the installs that already exist ----------------------
+
+def test_an_upgrade_refreshes_the_code_in_an_existing_install(templates, settings, tmp_path):
+    """The first AT&T tester installed the release with the repair, clicked
+    Diagnose, and sent back a survey from the old code. An install was
+    copied once and never touched again."""
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    d = home / "Bank Statements"
+    marker = d / "progress.json"
+    marker.write_text('{"id:1": {"downloaded_ok": true}}', encoding="utf-8")
+    (d / "config.json").write_text('{"owner": "Me", "cdp_url": "http://127.0.0.1:9299"}', encoding="utf-8")
+    (templates / "bank" / "bank_site.py").write_text("# site, repaired\n", encoding="utf-8")
+    (templates / "bank" / "document_rules.json").write_text('{"statement_rules": []}', encoding="utf-8")
+
+    app_module._REFRESHED_ROOTS.clear()
+    got = app_module.refresh_installs()
+    assert got == {"Bank Statements": ["bank_site.py", "document_rules.json"]}
+    assert (d / "bank_site.py").read_text(encoding="utf-8") == "# site, repaired\n"
+    assert (d / "document_rules.json").is_file(), "a file the template gained is added"
+    assert "id:1" in marker.read_text(encoding="utf-8"), "history is not code"
+    assert '"Me"' in (d / "config.json").read_text(encoding="utf-8"), "config is not code"
+    backups = list((d / "Backups").glob("code-*/bank_site.py"))
+    assert len(backups) == 1 and backups[0].read_text(encoding="utf-8") == "# site\n"
+
+    app_module._REFRESHED_ROOTS.clear()
+    assert app_module.refresh_installs() == {}, "a second look changes nothing"
+
+
+def test_a_renamed_install_folder_still_gets_its_providers_code(templates, settings, tmp_path):
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    (home / "Bank Statements").rename(home / "My Bank")
+    (templates / "bank" / "bank_site.py").write_text("# v2\n", encoding="utf-8")
+    app_module._REFRESHED_ROOTS.clear()
+    assert app_module.refresh_installs() == {"My Bank": ["bank_site.py"]}
+
+
+def test_a_running_install_is_left_alone_until_it_finishes(templates, settings, tmp_path):
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    (templates / "bank" / "bank_site.py").write_text("# v2\n", encoding="utf-8")
+    app_module._RUNNING.add("Bank Statements")
+    try:
+        app_module._REFRESHED_ROOTS.clear()
+        assert app_module.refresh_installs() == {}
+    finally:
+        app_module._RUNNING.discard("Bank Statements")
+    assert (home / "Bank Statements" / "bank_site.py").read_text(encoding="utf-8") == "# site\n"
+
+
+def test_the_apps_root_that_is_the_templates_folder_is_not_refreshed_onto_itself(templates, settings, monkeypatch):
+    monkeypatch.setattr(app_module, "apps_root", lambda: templates)
+    app_module._REFRESHED_ROOTS.clear()
+    assert app_module.refresh_installs() == {}
+    assert not (templates / "bank" / "Backups").exists()

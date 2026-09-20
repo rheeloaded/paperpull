@@ -7,6 +7,54 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Citi credit cards.** Monthly card statements from Citi Online, read
+  through the same JSON API the Account Statements page uses, from inside
+  the signed-in page, nothing clicked. Every card on the sign-in is read.
+  Identity is the card plus the closing date, and the filename carries the
+  card's name without its last four. The site lists roughly two years
+  online, older statements sit behind a request the app never submits,
+  and the Annual Account Summary is a web page, not a PDF, and is left
+  alone. Run against a real account, 24 statements, a second run
+  downloaded nothing, and the transaction export reads all 24 to the
+  cent. Port 9256.
+
+### Fixed
+- **An upgrade now reaches the installs that already exist.** The panel
+  copied a provider's code into its folder at Set up and never touched it
+  again, so a fix shipped in a release reached new installs only, and
+  everyone who had already set the provider up kept running the code
+  from the day they did. The first AT&T tester installed the release with
+  the round-two repair, clicked Diagnose, and sent back a survey from the
+  old code, which is how this was found. The panel now compares each
+  install's shipped files with this version's, byte for byte, when it
+  opens, replaces the ones that differ, and says so under the apps root.
+  Config, progress, the PDFs and the browser profile are never in
+  question, and a replaced file is kept under `Backups/code-<time>/`, so
+  an edited `document_rules.json` is a copy away. A checkout install's
+  copy of the shared core inside its venv is brought up too.
+  [#26](https://github.com/rheeloaded/paperpull/issues/26).
+- **The transaction export found no PDFs for a panel install.** Every
+  install the panel creates has `output_dir` "." and records each PDF's
+  path relative to its own folder. The export tool runs from its own
+  folder, where that path is nothing, so the panel offered no providers
+  to export and the sheet came out empty for them. A relative path is now
+  taken from the index's folder.
+- **Card statements with a rewards box beside the list.** The PDF reader
+  glues the box's words onto the transaction line level with it, so a
+  line lost its trailing amount and was dropped, or handed over the box's
+  number instead of its own. A line is now cut at the first word after
+  its amount. A transaction whose merchant wrapped onto the line before or
+  after it takes that line as its description, an amount printed before
+  its description is read the right way round, and the month APR in a
+  description is no longer mistaken for the interest rate word. A shoe
+  store called New Balance is no longer the statement's ending balance.
+  On a Costco Visa archive this took reconciliation from 5 of 24
+  statements to 24 of 24, with no change to any other archive. Cache
+  version 4.
+
 ## [0.26.1] - 2026-09-20
 
 ### Fixed

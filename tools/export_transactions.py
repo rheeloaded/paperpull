@@ -49,7 +49,7 @@ from typing import Dict, List, Optional, Tuple
 
 INDEX_SUFFIX = " Document Index.csv"
 CACHE_NAME = ".transactions-cache.json"
-CACHE_VERSION = 3      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32
+CACHE_VERSION = 4      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32. 4: sidebar bleed, neighbor descriptions
 
 # -- shapes -----------------------------------------------------------------------
 _MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
@@ -79,8 +79,12 @@ def _fuzzy(phrase: str) -> str:
 BALANCE_WORDS = re.compile(
     r"\b(?:" + "|".join(_fuzzy(w) for w in ("beginning", "previous", "opening", "starting", "ending", "new", "closing"))
     + r")\s+" + _fuzzy("balance") + r"\b|\b" + _fuzzy("balance forward") + r"\b", re.I)
+# "APR" is the month as often as it is the rate. "FLEX PLAN TRANSFERRED APR
+# PURCH" and "NYT DIGITAL APR 2025" are transactions, "PURCHASE APR 24.99%"
+# is not, so APR followed by a day, a year or a word is left alone.
+_APR = r"apr\b(?!\s*(?:\d{1,2}(?:[,/]|\s|$)|\d{4}\b|[A-Za-z]{3,}))"
 NOT_A_TRANSACTION = re.compile(
-    r"\b(total|subtotal|" + _fuzzy("balance") + r"|average daily|annual percentage|apr\b|interest rate|"
+    r"\b(total|subtotal|" + _fuzzy("balance") + r"|average daily|annual percentage|" + _APR + r"|interest rate|"
     r"minimum payment|payment due|due date|statement period|closing date|page \d)\b", re.I)
 PERIOD_RE = re.compile(
     r"(?:statement\s+period|billing\s+period|opening\s*/\s*closing\s+dates?|period|for the period|from)\s*:?\s*"
@@ -176,11 +180,45 @@ def transaction_line(line: str) -> Optional[dict]:
     m2 = DATE_AT_START.match(rest)
     if m2:
         rest = rest[m2.end():].strip()
+    rest = _cut_sidebar_bleed(rest)
     desc, amounts, raw = split_trailing_amounts(rest)
-    if not amounts or not desc.strip():
+    if not amounts:
         return None
     return {"date_text": m.group(1), "description": re.sub(r"\s+", " ", desc).strip(),
             "amounts": amounts, "tokens": raw}
+
+
+_BARE_NUMBER = re.compile(r"^-?[\d,]+(?:\.\d+)?$")
+_AMOUNT_TAIL = re.compile(r"^(CR|-|0|\$?0\.00|[⧫*†‡])$", re.I)
+
+
+def _cut_sidebar_bleed(rest: str) -> str:
+    """A card statement prints a rewards or summary box beside the
+    transaction list, and the PDF reader glues that box's words onto the
+    transaction line it sits level with. "FLEX PLAN ... -$8,156.56 Earned
+    This Period" then has no trailing amount and is dropped, and
+    "... -$60.50 Year To Date : $1,209.58" hands over the box's number
+    instead of the transaction's. Once an amount has been printed, the
+    only things that belong after it on the line are more amounts and the
+    marks that qualify them, so the line is cut at the first WORD that is
+    neither. A bare number there (a share price, units, a rate) is not a
+    bleed but a column this tool does not read, and the line is left as
+    it was, which is to say dropped. Citi Costco statements are where the
+    bleed was found."""
+    tokens = rest.split()
+    for i, tok in enumerate(tokens):
+        if parse_amount_token(tok) is None:
+            continue
+        if i == 0:
+            # "$100.00 ANNUAL MEMBERSHIP FEE": the amount came first and the
+            # words after it are the description, not a box beside it.
+            return " ".join(tokens[1:] + tokens[:1])
+        for j in range(i + 1, len(tokens)):
+            t = tokens[j]
+            if parse_amount_token(t) is None and not _AMOUNT_TAIL.match(t):
+                return rest if _BARE_NUMBER.match(t) else " ".join(tokens[:j])
+        return rest
+    return rest
 
 
 def balance_line(line: str) -> Optional[Tuple[str, float]]:
@@ -235,6 +273,19 @@ def find_period(lines: List[str]) -> Tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+def _is_summary_line(desc: str) -> bool:
+    """A dated line that is a total or a balance, not a transaction. A
+    balance word with a merchant's worth of text after it is a merchant:
+    "NEW BALANCE *0019 ANNAPOLIS MD" is a shoe store, "Ending balance" and
+    "Beginning balance for period" are not."""
+    m = NOT_A_TRANSACTION.search(desc)
+    if not m:
+        return False
+    if re.sub(r"\s+", "", m.group(0)).lower() == "balance":
+        return len(desc[m.end():].split()) <= 2
+    return True
+
+
 def read_transactions(lines: List[str], year_hint: Optional[int] = None,
                       period_end: Optional[Tuple[int, int]] = None) -> List[dict]:
     """Every line that has the shape of a transaction, with its line index."""
@@ -243,7 +294,24 @@ def read_transactions(lines: List[str], year_hint: Optional[int] = None,
         t = transaction_line(line)
         if not t:
             continue
-        if NOT_A_TRANSACTION.search(t["description"]):
+        if not t["description"]:
+            # "02/10 02/10 $6.50" with the merchant on the line before or
+            # after, where the PDF reader put a wrapped or offset name. A
+            # neighbor that is itself a transaction, blank, a total, or
+            # begins with a number is not it: an insurance summary
+            # interleaves "10/23/25 278.28" with the insured street address.
+            for j in (i - 1, i + 1):
+                if not (0 <= j < len(lines)):
+                    continue
+                cand = re.sub(r"\s+", " ", lines[j]).strip()
+                if not cand or cand[0].isdigit() or transaction_line(lines[j]) \
+                        or DATE_AT_START.match(cand) or _is_summary_line(cand):
+                    continue
+                t["description"] = cand
+                break
+            if not t["description"]:
+                continue
+        if _is_summary_line(t["description"]):
             continue
         d = parse_date(t["date_text"], year_hint, period_end)
         if not d:
@@ -369,7 +437,12 @@ def parse_statement(lines: List[str], doc_date: Optional[str] = None) -> dict:
     end_ym = (int(anchor[:4]), int(anchor[5:7])) if anchor else None
     txns = read_transactions(lines, year_hint, end_ym)
     marks = []                               # (line index, kind, value)
+    read = {t["line"] for t in txns}
     for i, line in enumerate(lines):
+        if i in read:
+            # "11/23 NEW BALANCE *0019 $27.26" is a shoe store, and it was
+            # taken as the statement's ending balance.
+            continue
         b = balance_line(line)
         if b:
             marks.append((i, b[0], b[1]))
@@ -481,12 +554,23 @@ def find_indexes(root: Path) -> List[Tuple[str, Path]]:
     return found
 
 
+def pdf_path(index: Path, row: dict) -> Path:
+    """Where the row's PDF is. An install whose output_dir is "." (every
+    one the control panel creates) records the path relative to its own
+    folder, and this tool runs from somewhere else, so a relative path is
+    taken from the index's folder, never from the working directory."""
+    p = Path(row.get("PDF Full Path") or "")
+    if p.is_absolute() or not str(p):
+        return p
+    return index.parent / p
+
+
 def providers(root: Path) -> List[dict]:
     """Statement archives with at least one PDF on disk."""
     out: "OrderedDict[str, dict]" = OrderedDict()
     for prov, f in find_indexes(root):
         rows = _index_rows(f)
-        on_disk = sum(1 for r in rows if Path(r.get("PDF Full Path") or "").is_file())
+        on_disk = sum(1 for r in rows if pdf_path(f, r).is_file())
         if not on_disk:
             continue
         e = out.setdefault(prov, {"provider": prov, "folders": [], "pdfs": 0})
@@ -558,7 +642,7 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
     read = missing = 0
     for prov, index in indexes:
         for row in _index_rows(index):
-            p = Path(row.get("PDF Full Path") or "")
+            p = pdf_path(index, row)
             if not p.is_file():
                 missing += 1
                 continue

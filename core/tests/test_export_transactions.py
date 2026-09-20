@@ -170,6 +170,24 @@ def test_only_statement_archives_with_pdfs_on_disk_are_offered(tmp_path):
     assert xt.providers(tmp_path) == [{"provider": "A Bank", "folders": ["A Bank"], "pdfs": 1}]
 
 
+def test_a_relative_pdf_path_is_taken_from_the_index_folder_not_the_working_directory(tmp_path, monkeypatch):
+    """Every install the control panel creates has output_dir ".", so its
+    index records a path relative to its own folder. The export tool runs
+    from its own folder, where that path is nothing, and so the panel
+    offered no providers to export and the sheet came out empty for them."""
+    rel = str(Path("Statements") / "s.pdf")
+    (tmp_path / "Citi Statements" / "Statements").mkdir(parents=True)
+    (tmp_path / "Citi Statements" / "Statements" / "s.pdf").write_bytes(b"%PDF")
+    with open(tmp_path / "Citi Statements" / "Citi Document Index.csv", "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=["Document Date", "PDF Full Path"]); w.writeheader()
+        w.writerow({"Document Date": "2026-01-01", "PDF Full Path": rel})
+    monkeypatch.chdir(tmp_path.parent)
+    assert xt.providers(tmp_path) == [{"provider": "Citi", "folders": ["Citi Statements"], "pdfs": 1}]
+    index = tmp_path / "Citi Statements" / "Citi Document Index.csv"
+    assert xt.pdf_path(index, {"PDF Full Path": rel}).is_file()
+    assert xt.pdf_path(index, {"PDF Full Path": str(tmp_path / "abs.pdf")}) == tmp_path / "abs.pdf"
+
+
 def test_the_export_caches_each_reading_and_writes_the_sheets(tmp_path, monkeypatch):
     pytest.importorskip("pdfplumber")
     (tmp_path / "A Bank").mkdir()
@@ -288,3 +306,72 @@ def test_a_bracket_around_nothing_is_not_called_reconciled():
     s = xt.parse_statement(lines)
     assert len(s["transactions"]) == 2
     assert s["status"] == "not reconciled, 2 transaction(s) outside the balance brackets"
+
+
+# -- a card statement with a rewards box beside the list ---------------------
+
+COSTCO = """Billing Period: 08/18/26-09/15/26
+Previous balance $1,000.00
+New balance $900.75
+Payments -$500.00
+08/20 PAYMENT THANK YOU -$500.00
+08/21 FLEX PLAN 04 CREDIT ADJ 08/20/26 -$8,156.56 Earned This Period
+08/21 FLEX PLAN 04 CREDIT ADJ 08/20/26 -$60.50 Year To Date : $1,209.58
+08/22 08/22 COSTCO WHSE #0204 FAIRFAX VA $227.16 5% on gas at Costco ............ +$0.00
+TOUS LES JOURS ANNANDALE VA 2% on Costco and Costco.com
+08/23 08/23 $14.10
+08/24 08/24 $100.00 ANNUAL MEMBERSHIP FEE
+08/25 08/25 FLEX PLAN 04 TRANSFERRED APR PURCH $8,156.56
+08/25 08/25 FLEX PLAN 04 TRANSFERRED APR PURCH $60.50
+08/26 08/26 NEW BALANCE *0019 ANNAPOLIS MD $27.26
+08/27 08/27 NYT DIGITAL APR 2026 800-698-4637 NY $12.95
+08/28 08/28 GROCER 1365 FAIRFAX VA $19.28
+Purchase APR 24.99%
+Total fees charged in 2026 $0.00
+""".splitlines()
+
+
+def test_a_rewards_box_glued_onto_a_transaction_line_is_cut_off():
+    """The PDF reader lays the rewards box's words onto whichever
+    transaction line sits level with it. One line lost its trailing
+    amount, one handed over the box's number, and the flex plan credits
+    that should have cancelled their transfers went missing, which is
+    why 19 of 24 Costco statements did not add up."""
+    got = xt.parse_statement(COSTCO, "2026-09-15")
+    assert got["status"] == "reconciled, signed amounts"
+    by_line = {t["line"]: t for t in got["transactions"]}
+    assert by_line[5]["amount"] == -8156.56 and by_line[5]["description"] == "FLEX PLAN 04 CREDIT ADJ 08/20/26"
+    assert by_line[6]["amount"] == -60.50, "the box's year-to-date number is not the transaction"
+    assert by_line[7]["amount"] == 227.16 and by_line[7]["description"] == "COSTCO WHSE #0204 FAIRFAX VA"
+
+
+def test_a_merchant_on_the_neighboring_line_and_an_amount_printed_first():
+    got = xt.parse_statement(COSTCO, "2026-09-15")
+    by_line = {t["line"]: t for t in got["transactions"]}
+    assert by_line[9]["amount"] == 14.10 and by_line[9]["description"] == "TOUS LES JOURS ANNANDALE VA 2% on Costco and Costco.com"
+    assert by_line[10]["amount"] == 100.00 and by_line[10]["description"] == "ANNUAL MEMBERSHIP FEE"
+
+
+def test_the_month_apr_and_a_shoe_store_are_transactions_the_rate_line_is_not():
+    got = xt.parse_statement(COSTCO, "2026-09-15")
+    descs = {t["description"] for t in got["transactions"]}
+    assert "FLEX PLAN 04 TRANSFERRED APR PURCH" in descs
+    assert "NYT DIGITAL APR 2026 800-698-4637 NY" in descs
+    assert "NEW BALANCE *0019 ANNAPOLIS MD" in descs
+    assert not any("24.99" in d for d in descs)
+    assert got["ending"] == 900.75, "the shoe store is not the ending balance"
+
+
+def test_a_bare_number_after_the_amount_is_a_column_not_a_bleed():
+    """A retirement statement prints an amount, then units and a share
+    price. That is a column this tool does not read, not a box beside the
+    line, and reading the amount off it would file a contribution with
+    the wrong sign. The line stays unread, as before."""
+    assert xt.transaction_line("10/06/2021 Contribution $95.56 $0.00 $95.56 65.6583 1.4554") is None
+    assert xt.transaction_line("06/16 RECURRING DEB CARD PURCH 12345 $74.99 0 $5,684.49")["amounts"] == [74.99, 0.0, 5684.49]
+
+
+def test_an_address_line_is_never_taken_as_a_description():
+    lines = ["Adjustment VA Home 93A", "10/23/25 278.28", "4100 ELM ST", "10/28/25 -76.89", "4100 ELM ST"]
+    got = xt.read_transactions(lines, 2025, (2025, 11))
+    assert [t["description"] for t in got] == ["Adjustment VA Home 93A"]
