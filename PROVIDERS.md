@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (32, plus four built and waiting for a tester)
+## Supported (32, plus nine built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -26,19 +26,24 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements, the roughly two years the site lists online; statements API, nothing clicked | Card |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card, **moving to Capital One** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
+| [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #36 | Brokerage |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills, the last year's, from the FW Customer portal | Utility |
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms; Document Access Hub API, nothing clicked | Brokerage |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
+| [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #35 | Credit union |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Mortgage servicing |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits | Quarterly or monthly 401(k) statements, made to order and rendered; nothing clicked | Workplace retirement plan |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
+| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098. UNTESTED, built without an account. Have a Newrez mortgage? Run Diagnose and attach the file to issue #38 | Mortgage servicer |
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Utility |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098. UNTESTED, built without an account. Have an SBA loan? Run Diagnose and attach the file to issue #28 | Government loan servicing |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Brokerage |
+| [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #34 | Utility |
+| [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents. UNTESTED, built without an account. Have a policy? Run Diagnose and attach the file to issue #37 | Insurance |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
 | [`tsp`](apps/tsp) | Thrift Savings Plan (tsp.gov) | Participant statements, 1099-R | Federal retirement (government system) |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |

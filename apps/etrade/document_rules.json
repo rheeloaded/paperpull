@@ -1,0 +1,72 @@
+{
+  "_comment": "Editable rules mapping E*TRADE document titles to filename summaries. Checked in order: tax, then insurance, then statement. Repair after running diagnose against the real documents page.",
+  "tax_rules": [
+    {
+      "pattern": "1099-?INT\\b",
+      "summary": "1099-INT Tax Form"
+    },
+    {
+      "pattern": "1099-?DIV\\b",
+      "summary": "1099-DIV Tax Form"
+    },
+    {
+      "pattern": "1099-?B\\b",
+      "summary": "1099-B Tax Form"
+    },
+    {
+      "pattern": "1099-?R\\b",
+      "summary": "1099-R Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "\\b1098\\b",
+      "summary": "1098 Tax Form"
+    },
+    {
+      "pattern": "\\b5498\\b",
+      "summary": "5498 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement|package|information|center)",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "trade\\s+confirmation|\\bconfirmation\\b",
+      "summary": "Trade Confirmation"
+    },
+    {
+      "pattern": "monthly\\s+(account\\s+)?statement",
+      "summary": "Monthly Statement"
+    },
+    {
+      "pattern": "quarterly\\s+statement",
+      "summary": "Quarterly Statement"
+    },
+    {
+      "pattern": "annual\\s+statement|year.?end\\s+statement",
+      "summary": "Annual Statement"
+    },
+    {
+      "pattern": "(brokerage|ira|retirement|bank)\\s+statement",
+      "summary": "Account Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Account Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "prospectus",
+    "margin\\s+agreement",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "\\boffers?\\b"
+  ]
+}

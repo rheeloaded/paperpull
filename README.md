@@ -35,12 +35,18 @@ installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Thirty-one providers are supported today, all built on the same pattern.
-Four more, AT&T, Wells Fargo, SBA and Verizon Mobile, are built and waiting
-for someone with an account to test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
+Thirty-two providers are supported today, all built on the same pattern.
+Nine more, AT&T, Wells Fargo, SBA, Verizon Mobile, SMUD, Golden 1, E*TRADE,
+State Farm and Newrez, are built and waiting for someone with an account to
+test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 [#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
-[#31](https://github.com/rheeloaded/paperpull/issues/31)):
+[#31](https://github.com/rheeloaded/paperpull/issues/31),
+[#34](https://github.com/rheeloaded/paperpull/issues/34),
+[#35](https://github.com/rheeloaded/paperpull/issues/35),
+[#36](https://github.com/rheeloaded/paperpull/issues/36),
+[#37](https://github.com/rheeloaded/paperpull/issues/37),
+[#38](https://github.com/rheeloaded/paperpull/issues/38)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -56,19 +62,24 @@ for someone with an account to test them ([#26](https://github.com/rheeloaded/pa
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | **Capital One is moving these accounts onto its own site. Once yours has moved this app can no longer read it** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
+| [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms | **Untested, built without an account. Have one? [Help test it](apps/etrade/README.md#help-test-it-no-programming-needed)** |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills | Mendix portal, driven like a person; PDFs for the last year only, so run it quarterly |
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms | Document Access Hub API from inside the page, nothing clicked; real Edge/Chrome |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Lazy-loading history; ~13-month limit |
+| [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Untested, built without an account. Have one? [Help test it](apps/golden1/README.md#help-test-it-no-programming-needed)** |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
+| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Untested, built without an account. Have a Newrez mortgage? [Help test it](apps/newrez/README.md#help-test-it-no-programming-needed)** |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history, fresh live pilot pending |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported; fresh live pilot pending |
+| [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/smud/README.md#help-test-it-no-programming-needed)** |
+| [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents | **Untested, built without an account. Have a policy? [Help test it](apps/statefarm/README.md#help-test-it-no-programming-needed)** |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
@@ -434,7 +445,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **thirty-two** apps pass their tests, more than 1,500 of them across the
+- ✅ All **thirty-two** apps pass their tests, and the nine scaffolds theirs, more than 1,500 of them across the
   repo. Twenty-four are in regular use by the author. The other seven (Ally,
   Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
   by people who hold those accounts, and the four marked in the table above

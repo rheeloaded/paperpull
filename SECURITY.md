@@ -39,9 +39,9 @@ The `.gitignore` already blocks all of the following. Do not override it.
   elsewhere depends on
   how the provider exposes its documents:
 
-  - **The apps that click** (AAFMAA, Ally, Amex, AT&T, Chase, Discover, Dominion,
-    Fairfax Water, M&T, Navy Federal, PG&E, RedCard, Robinhood, SBA, Schwab, T-Mobile, USAA,
-    U.S. Bank, Verizon, Verizon Mobile, Wealthfront, Wells Fargo, and Target and Walmart for a print
+  - **The apps that click** (AAFMAA, Ally, Amex, AT&T, Chase, Discover, Dominion, E*TRADE,
+    Fairfax Water, Golden 1, M&T, Navy Federal, Newrez, PG&E, RedCard, Robinhood, SBA, Schwab, SMUD,
+    State Farm, T-Mobile, USAA, U.S. Bank, Verizon, Verizon Mobile, Wealthfront, Wells Fargo, and Target and Walmart for a print
     control) gate every click with `is_safe_control()`: a hard blocklist
     (`FORBIDDEN_CONTROL_RE`, buy/sell/transfer/pay/delete/change-setting)
     **plus** a document allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass
