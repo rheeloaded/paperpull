@@ -99,3 +99,46 @@ def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
     assert "UNVERIFIED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
     assert "Not yet tested against a real account" in readme
+
+
+# -- round two, from the first survey --------------------------------------
+
+def test_the_billing_history_is_first_and_the_vendor_host_is_allowed():
+    assert site.BILLING_CANDIDATES[0] == "https://myaccount.smud.org/manage/billing"
+    assert site.ARCHIVE_URL == "https://myaccount.smud.org/manage/billing/archive"
+    assert site.is_safe_url("https://secure8.i-doxs.net/SMUD/BillPopLogin.aspx?x=1")
+    assert not site.is_safe_url("https://i-doxs.net.evil.test/x")
+
+
+def test_the_download_control_wins_over_the_view_control():
+    class _El:
+        def __init__(self, name): self._name = name
+        def get_attribute(self, k): return None
+        def inner_text(self, timeout=0): return self._name
+        def evaluate(self, js): return "09/03/2026 $93.63 View Download"
+    class _Loc:
+        def __init__(self, items): self._items = items
+        def count(self): return len(self._items)
+        def nth(self, i): return self._items[i]
+    class _Page:
+        def get_by_role(self, role, name=None):
+            return _Loc([_El("View"), _El("Download")] if role == "link" else [])
+    class _Or(_Loc):
+        pass
+    page = _Page()
+    # _bill_controls joins button and link locators with or_; the fake link
+    # locator carries both controls, the button one none
+    orig = site._bill_controls
+    site._bill_controls = lambda p: _Loc([_El("View"), _El("Download")])
+    try:
+        el, name = site._control_for(page, "2026-09-03")
+        assert name == "Download"
+        assert site._control_for(page, "2026-08-03") == (None, "")
+    finally:
+        site._bill_controls = orig
+
+
+def test_a_greeting_never_carries_the_persons_name():
+    assert site.redact("Welcome, JOHN Account 123456789") == "Welcome, [name] #########"
+    assert site.redact("Good evening!") == "Good evening!"
+    assert site.redact("Welcome back") == "Welcome back"

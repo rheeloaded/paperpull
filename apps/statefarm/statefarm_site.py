@@ -2,8 +2,8 @@
 
 When State Farm changes its site, repair this file only.
 
-STATUS: UNVERIFIED. This app was written without a State Farm account, from
-what is publicly known about the site, so that someone who holds one can
+STATUS: UNVERIFIED, round two, repaired from the first survey (#37). Written
+without a State Farm account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
 
@@ -48,22 +48,27 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 log = logging.getLogger("statefarm_docs.site")
 
-BASE = "https://www.statefarm.com"
-# GUESS. State Farm signs in at auth.proofing.statefarm.com and lands in
-# the customer care area on www.statefarm.com. Bills and renewal
-# notices, ID cards and payment receipts are expected under documents
-# or billing pages there, with the landing page as the fallback since
-# its nav names the real ones. Some pages may live on an apps.statefarm.com
-# host, which the allowlist already admits.
+BASE = "https://my.statefarm.com"
+# Read off the first survey (#37, 2026-09-20). Sign-in lands on My
+# Accounts at my.statefarm.com. Documents live in the Document Center on
+# edocuments.statefarm.com ("View documents & PDFs"), bills and payment
+# history in the Payment Center on financials.statefarm.com, ID cards on
+# get-id-card.statefarm.com, and each policy's own page behind
+# tc-ui.statefarm.com. All are statefarm.com hosts. The Document Center
+# is the first route, since it is where the PDFs are expected, and the
+# survey has not seen inside it yet.
 BILLING_CANDIDATES = [
-    f"{BASE}/customer-care/documents",
-    f"{BASE}/customer-care/billing",
-    f"{BASE}/customer-care",
+    "https://edocuments.statefarm.com/DocumentCenterUI/",
+    "https://financials.statefarm.com/digital-pay/billHistory",
+    f"{BASE}/accounts/",
 ]
 BILLING_URL = BILLING_CANDIDATES[0]
 URLS = {
-    "home": f"{BASE}/customer-care",
-    "login": BILLING_URL,
+    "home": f"{BASE}/accounts/",
+    # A signed-out visit to My Accounts goes through State Farm's sign-in
+    # and back. The customer-care route the first round used landed on a
+    # contact page instead.
+    "login": f"{BASE}/",
     "documents": BILLING_URL,
     "statements": BILLING_URL,
 }
@@ -87,7 +92,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"password|passcode|username|profile\b|settings|preferences|contact\s+info|\baddress\b|"
     r"confirm\b|submit|agree|accept|authorize|\bchat\b|contact\s+us|"
     r"beneficiar|nickname|order\s+checks|stop\s+payment|"
-    r"\bclaims?\b|file\s+a\s+claim|report\s+(a\s+)?claim|coverage|\bquote\b|add\s+(a\s+)?(vehicle|driver|car|home|policy)|change\s+(my\s+)?policy|cancel\s+policy|renew\s+now|drive\s+safe|start\s+(a\s+)?quote|roadside|\bagent\b|contact\s+(my\s+)?agent|policy\s+change)", re.I)
+    r"(?<!excludes )\bclaims?\b|file\s+a\s+claim|report\s+(a\s+)?claim|coverage|\bquote\b|add\s+(a\s+)?(vehicle|driver|car|home|policy)|change\s+(my\s+)?policy|cancel\s+policy|renew\s+now|drive\s+safe|start\s+(a\s+)?quote|roadside|\bagent\b|contact\s+(my\s+)?agent|policy\s+change)", re.I)
 
 SAFE_DOC_CONTROL_RE = re.compile(
     r"(download|view|open|print|\bpdf\b|statement|document|\bletter\b|notice|"
@@ -154,6 +159,10 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
 _ID_RE = re.compile(r"\d{6,}")
+# "Welcome, JOHN", "Hi Jane", "Good evening, Sam": a greeting names the
+# person, and a survey has no use for the name.
+_GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
+                          r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)?", re.I)
 
 
 def _last_day(year: int, month: int) -> int:
@@ -217,6 +226,7 @@ def redact(text: str) -> str:
     loses its query string, which is where a site keeps session details
     the survey has no use for."""
     text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
+    text = _GREETING_RE.sub(lambda m: m.group(1) + " [name]", text)
     return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
 
 
@@ -408,7 +418,7 @@ def _looks_like_billing(page) -> bool:
         body = page.locator("body").inner_text(timeout=5000)
     except Exception:
         return False
-    return bool(re.search(r"bill(ing)?\s+(history|period|date)|past\s+bills|renewal\s+notice|id\s+cards?|policy\s+documents|payment\s+receipts?",
+    return bool(re.search(r"bill(ing)?\s+(history|period|date)|past\s+bills|renewal\s+notice|id\s+cards?|policy\s+documents|payment\s+receipts?|document\s+center|documents\s*&\s*pdfs",
                           body, re.I))
 
 
@@ -686,7 +696,9 @@ _ROW_JS = r"""() => {
 }"""
 
 SURVEY_LINK_RE = re.compile(
-    r"^\s*((see|view|show)\s+)?(bills?|billing|bill(ing)?\s+history|documents|policy\s+documents|id\s+cards?|receipts?|payment\s+history|statements?)\s*$", re.I)
+    r"^\s*((see|view|show|get)\s+)?(bills?|billing|bill(ing)?\s+history|documents(\s*\(excludes\s+claims\))?|"
+    r"documents\s*&\s*pdfs|policy\s+documents|(insurance\s+)?id\s+cards?|receipts?|payment\s+history|"
+    r"(insurance\s+)?billing\s+and\s+payment\s+history|statements?)\s*$", re.I)
 
 
 def collect_documents(page) -> List[RawDoc]:

@@ -100,3 +100,21 @@ def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
     assert "UNVERIFIED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
     assert "Not yet tested against a real account" in readme
+
+
+# -- round two, from the first survey --------------------------------------
+
+def test_the_document_center_is_first_and_sign_in_goes_through_my_accounts():
+    assert site.BILLING_CANDIDATES[0] == "https://edocuments.statefarm.com/DocumentCenterUI/"
+    assert site.URLS["login"] == "https://my.statefarm.com/"
+    assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
+    assert site.is_safe_url("https://get-id-card.statefarm.com/")
+
+
+def test_the_documents_link_that_mentions_claims_is_followed_and_a_claim_is_not():
+    for text in ("Documents (excludes claims)", "View documents & PDFs", "Get insurance ID card",
+                 "View Insurance Billing and Payment History"):
+        assert site.is_safe_control(text), text
+        assert site.SURVEY_LINK_RE.match(text), text
+    for text in ("File a claim", "Claims", "Report a claim", "Make a policy change", "Enroll in AutoPay"):
+        assert not site.is_safe_control(text), text
