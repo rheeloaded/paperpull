@@ -35,8 +35,11 @@ SAFETY (this is an insurance account with a payment method on file):
 """
 from __future__ import annotations
 
+import base64
 import logging
+import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -272,6 +275,93 @@ def is_safe_control(name: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Downloads from a real Edge or Chrome attached over CDP. The browser saves
+# the file itself, into its own Downloads folder, and Playwright's download
+# event never fires. So the browser is pointed at a folder of ours and that
+# folder is watched after every click. The Verizon app found this first.
+# AT&T's fourth round found it again, with a trace that showed a clean
+# click and nothing arriving.
+# ---------------------------------------------------------------------------
+
+def set_download_dir(page, dirpath) -> None:
+    """Point the attached browser's downloads at `dirpath`, via CDP."""
+    try:
+        Path(dirpath).mkdir(parents=True, exist_ok=True)
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Browser.setDownloadBehavior",
+                 {"behavior": "allow", "downloadPath": str(dirpath), "eventsEnabled": True})
+    except Exception as e:
+        log.info("set_download_dir failed: %s", e)
+
+
+def _snapshot(dl_dir) -> set:
+    try:
+        return set(os.listdir(dl_dir)) if dl_dir else set()
+    except OSError:
+        return set()
+
+
+def _take_new_pdf(dl_dir, before: set, out_path: Path) -> bool:
+    """A finished PDF that appeared in `dl_dir` since `before`, moved to
+    `out_path`. A file still downloading (.crdownload, .partial) is not
+    finished."""
+    if not dl_dir:
+        return False
+    try:
+        names = [f for f in os.listdir(dl_dir) if f not in before
+                 and not f.lower().endswith((".crdownload", ".partial", ".tmp"))]
+    except OSError:
+        return False
+    for name in names:
+        src = Path(dl_dir) / name
+        try:
+            if src.stat().st_size == 0 or src.read_bytes()[:5] != b"%PDF-":
+                continue
+            if out_path.exists():
+                out_path.unlink()
+            shutil.move(str(src), str(out_path))
+            return True
+        except OSError:
+            continue
+    return False
+
+
+_FETCH_AS_B64 = r"""async (u) => {
+    const r = await fetch(u, {credentials: 'include'});
+    if (!r.ok) return null;
+    const buf = new Uint8Array(await r.arrayBuffer());
+    let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return btoa(s);
+}"""
+
+
+def _take_new_tab(page, new_pages, out_path: Path) -> bool:
+    """A PDF that a click opened in a new tab, read out of that tab and
+    written to `out_path`. A blob: tab was minted by the page itself and
+    is read through the page that made it. Any other address is host
+    checked before its bytes are fetched with the session."""
+    for extra in new_pages:
+        try:
+            extra.wait_for_load_state("domcontentloaded", timeout=15000)
+            url = extra.url or ""
+            if url.startswith("blob:"):
+                b64 = page.evaluate(_FETCH_AS_B64, url)
+            elif is_safe_url(url):
+                b64 = extra.evaluate(_FETCH_AS_B64, url)
+            else:
+                continue
+            if not b64:
+                continue
+            data = base64.b64decode(b64)
+            if data[:5] == b"%PDF-":
+                out_path.write_bytes(data)
+                return True
+        except Exception as e:
+            log.info("tab capture failed: %s", e)
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Billing page
 # ---------------------------------------------------------------------------
 
@@ -490,7 +580,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
     it has passed the guard, and whichever the site produces is caught, a
     download event or a PDF response, in this tab or one it opens.
 
-    `dl_dir` is unused, kept for parity with the shared orchestrator."""
+    `dl_dir` is where the attached browser saves a download, watched
+    after every click."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
@@ -536,6 +627,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
 
     ctx.on("response", on_response)
     before = set(ctx.pages)
+    seen = _snapshot(dl_dir)
     try:
         try:
             el.scroll_into_view_if_needed(timeout=4000)
@@ -550,12 +642,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
                 return True
         except Exception:
             pass
-        deadline = 30
+        deadline = 45
         while not got and deadline > 0:
+            if _take_new_pdf(dl_dir, seen, out_path):
+                return True
             page.wait_for_timeout(1000)
             deadline -= 1
         if got:
             out_path.write_bytes(got["body"])
+            return True
+        if _take_new_pdf(dl_dir, seen, out_path):
+            return True
+        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
         log.info("click on %r produced no PDF for %s", label, iso_date)
         return False
