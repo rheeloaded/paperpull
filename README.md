@@ -25,10 +25,10 @@ and [The transactions inside your statements](#the-transactions-inside-your-stat
 
 Runs on **Windows and macOS** (and Linux), with the same commands on each.
 
-**PaperPull is free, and it costs money to make.** The signed Mac build
-needs an Apple developer membership every year, the Store listing needs a
-developer account, and every provider takes evenings to build and keep
-working as sites change. If it saves you time, you can show your
+**PaperPull is free, and it costs money to make.** There is a server and
+domains to keep paid, developer accounts for the signed Mac build and the
+Microsoft Store, the tools it is built with, and evenings on every provider
+to build it and to keep it working as sites change. If it saves you time, you can show your
 appreciation and support future development by
 **[sponsoring on GitHub](https://github.com/sponsors/rheeloaded)** or
 **[donating on Ko-fi](https://ko-fi.com/rheeloaded)**, or by buying the
@@ -489,10 +489,11 @@ Team roles, current status and the full policy are in
 ## Support
 
 PaperPull is free and open source, and it costs real money and real time
-to develop. The signed and notarized Mac build needs an Apple developer
-membership, renewed every year. The Microsoft Store listing needs a
-developer account. Every one of the thirty-odd providers took evenings to
-build, and each one needs repairing when its site changes, which they do.
+to develop. There is a server and domain names to keep paid, developer
+accounts for the signed and notarized Mac build and for the Microsoft Store
+listing, and the tools it is built with. Every one of the thirty-odd
+providers took evenings to build, and each one needs repairing when its
+site changes, which they do.
 
 If PaperPull saves you time, there are three ways to show your appreciation
 and support future development. All are optional, and none changes what
