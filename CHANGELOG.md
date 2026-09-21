@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.28.5] - 2026-09-21
 
 ### Added
 - **A second person, from the panel.** "Add a person" beside the Account
@@ -19,6 +19,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   install folder itself, and the second account's folder is now a sibling
   of the install, where the old rule made a folder called " - spouse"
   inside it.
+- **The README says a password manager can live in the sign-in profile.**
+  The profile Login opens is separate from your everyday browser on
+  purpose, so it has no extensions, and a password manager installed into
+  it once stays for every Login after (#40).
 
 ## [0.28.4] - 2026-09-21
 
