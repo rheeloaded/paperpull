@@ -2,7 +2,7 @@
 
 When State Farm changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round two, repaired from the first survey (#37). Written
+STATUS: UNVERIFIED, round three, repaired from two surveys (#37). Written
 without a State Farm account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
@@ -62,6 +62,18 @@ BILLING_CANDIDATES = [
     "https://financials.statefarm.com/digital-pay/billHistory",
     f"{BASE}/accounts/",
 ]
+# The Document Center (second survey, #37). edocuments.statefarm.com
+# lands on a DocumentCenterUI app that lists documents by category (Auto,
+# Billing/Payments, Homeowners) with a Time Period filter, and a "View
+# Documents" control per row that opens the PDFs in a new tab. The app
+# fills itself from DocumentCenterProxyV1/customerMetadata?year=NNNN,
+# whose answer is data.attributes[] of {availableDate, category, type,
+# description, documentId, filePathUrl, policyId, ...}. Discovery reads
+# that answer as the page loads it, then asks the same address for each
+# earlier year. A document's PDF is its filePathUrl, fetched from inside
+# the page, with the row's own control as the fallback.
+DOCS_API_RE = re.compile(r"/DocumentCenterProxyV1/customerMetadata", re.I)
+YEARS_BACK = 7
 BILLING_URL = BILLING_CANDIDATES[0]
 URLS = {
     "home": f"{BASE}/accounts/",
@@ -159,6 +171,9 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
 _ID_RE = re.compile(r"\d{6,}")
+# A path segment shaped like an id or a key, "/accounts/d11-Kz9Rc.../",
+# ten or more characters with a letter and a digit in it.
+_PATH_TOKEN_RE = re.compile(r"(?<=/)(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{10,}(?=[/?#]|$)")
 # "Welcome, ALEX", "Hi Jane", "Good evening, Sam": a greeting names the
 # person, and a survey has no use for the name.
 _GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
@@ -252,6 +267,7 @@ def redact(text: str) -> str:
     the survey has no use for."""
     text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
     text = _GREETING_RE.sub(lambda m: m.group(1) + " [name]", text)
+    text = _PATH_TOKEN_RE.sub("...", text)
     return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
 
 
@@ -533,11 +549,114 @@ _ROW_OF_JS = r"""el => {
 }"""
 
 
+def _docs_from_api(body: dict) -> List[dict]:
+    """The documents in one customerMetadata answer, as {date, title,
+    kind, hint, url}. The description can carry a policy or vehicle, so
+    the title is the type and the category, and the description only
+    rides along with its digits masked."""
+    out = []
+    data = (body or {}).get("data") or {}
+    for e in data.get("attributes") or []:
+        if not isinstance(e, dict):
+            continue
+        iso = parse_date(str(e.get("availableDate") or e.get("creationDate") or ""))
+        if not iso:
+            continue
+        kind = str(e.get("type") or "").strip()
+        cat = str(e.get("category") or "").strip()
+        desc = redact(str(e.get("description") or ""))[:60]
+        title = " - ".join(x for x in (kind or "Document", cat) if x)
+        out.append({"date": iso, "title": title, "kind": kind, "category": cat, "desc": desc,
+                    "hint": str(e.get("documentId") or ""), "url": str(e.get("filePathUrl") or "")})
+    return out
+
+
+def _capture_docs(page) -> Tuple[list, list]:
+    """Open the Document Center while catching the customerMetadata answer
+    and the address it was asked at, so discovery can ask for other years
+    the same way."""
+    bodies: list = []
+    urls: list = []
+
+    def on_response(res):
+        try:
+            url = res.url or ""
+            if is_safe_url(url) and DOCS_API_RE.search(url):
+                urls.append(url)
+                bodies.append(res.json())
+        except Exception:
+            pass
+    page.on("response", on_response)
+    try:
+        page.goto(BILLING_CANDIDATES[0], wait_until="domcontentloaded", timeout=60000)
+        for _ in range(40):
+            page.wait_for_timeout(500)
+            if bodies:
+                break
+        page.wait_for_timeout(1500)
+    except Exception as e:
+        log.info("goto document center failed: %s", e)
+    finally:
+        try:
+            page.remove_listener("response", on_response)
+        except Exception:
+            pass
+    dismiss_overlay(page)
+    return bodies, urls
+
+
+_FETCH_JSON = r"""async (u) => {
+    const r = await fetch(u, {credentials: 'include', headers: {accept: 'application/json'}});
+    if (!r.ok) return null;
+    return await r.json();
+}"""
+
+
+def _years_from(page, url: str, first_year: int) -> List[dict]:
+    """The same customerMetadata call for each earlier year, made from
+    inside the page. The year is the only thing changed in the address."""
+    from datetime import date as _date
+    out = []
+    this_year = _date.today().year
+    for year in range(this_year, this_year - YEARS_BACK - 1, -1):
+        if year == first_year:
+            continue
+        target = re.sub(r"([?&]year=)\d{4}", lambda m: m.group(1) + str(year), url)
+        if target == url or not is_safe_url(target):
+            break
+        try:
+            body = page.evaluate(_FETCH_JSON, target)
+        except Exception as e:
+            log.info("year %d: %s", year, e)
+            continue
+        if body:
+            out.extend(_docs_from_api(body))
+    return out
+
+
 def collect_download_docs(page) -> List[RawDoc]:
-    """Read every statement and tax document the page offers. Each
-    control's own name, or the row it sits in, carries the date."""
+    """Every document the Document Center's API lists, this year as the
+    page loads it and each earlier year by the same call, else the rows."""
     docs: List[RawDoc] = []
     seen = set()
+    bodies, urls = _capture_docs(page)
+    found = []
+    for body in bodies:
+        found.extend(_docs_from_api(body))
+    if urls:
+        m = re.search(r"[?&]year=(\d{4})", urls[0])
+        found.extend(_years_from(page, urls[0], int(m.group(1)) if m else -1))
+    for d in found:
+        key = (d["date"], d["title"], d["hint"])
+        if key in seen:
+            continue
+        seen.add(key)
+        insurance = bool(re.search(r"id\s*card|declaration|policy", d["kind"] + " " + d["title"], re.I))
+        docs.append(RawDoc(title=d["title"], account=d["category"], date_text=d["date"],
+                           href=d["url"] or d["hint"], text=f"State Farm {d['title']} {d['desc']}",
+                           kind="insurance" if insurance else "statement"))
+    if docs:
+        return docs
     expand_all(page)
     scroll_full_page(page)
     ctrls = _bill_controls(page)
@@ -609,7 +728,223 @@ def _fetch_pdf(page, href: str) -> Optional[bytes]:
     return body if body[:5] == b"%PDF-" else None
 
 
-def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
+def _take_same_tab(page, start_url: str, out_path: Path, trace: Optional[list]) -> bool:
+    """A PDF the click opened in this very tab, the way SMUD's vendor does
+    it. The tab's address moved to a document, its bytes are fetched
+    through the session, and the tab is sent back where it was."""
+    url = page.url or ""
+    if not url or url == start_url or not is_safe_url(url):
+        return False
+    kind = ""
+    try:
+        kind = (page.evaluate("() => document.contentType || ''") or "").lower()
+    except Exception:
+        pass
+    if trace is not None:
+        trace.append({"note": "the tab moved", "url": redact(url)[:160], "content_type": kind[:40]})
+    if "pdf" not in kind and not url.lower().split("?")[0].endswith(".pdf"):
+        return False
+    body = b""
+    try:
+        resp = page.context.request.get(url, timeout=60000)
+        body = resp.body() if resp.ok else b""
+    except Exception as e:
+        log.info("same-tab fetch failed: %s", e)
+    if body[:5] != b"%PDF-":
+        try:
+            b64 = page.evaluate(_FETCH_AS_B64, url)
+            body = base64.b64decode(b64) if b64 else b""
+        except Exception:
+            body = b""
+    try:
+        page.go_back(wait_until="domcontentloaded", timeout=15000)
+        page.wait_for_timeout(1500)
+    except Exception:
+        pass
+    if body[:5] == b"%PDF-":
+        out_path.write_bytes(body)
+        return True
+    return False
+
+
+def _control_texts(page) -> set:
+    out = set()
+    for role in ("button", "link", "menuitem"):
+        try:
+            loc = page.get_by_role(role)
+            for i in range(min(loc.count(), 120)):
+                try:
+                    t = (loc.nth(i).inner_text(timeout=200) or "").strip()
+                except Exception:
+                    continue
+                if t:
+                    out.add(re.sub(r"\s+", " ", t)[:60])
+        except Exception:
+            pass
+    return out
+
+
+_SECOND_STEP_RE = re.compile(
+    r"^\s*(download|download\s+(pdf|now|file|statement|document)|save|save\s+(as\s+)?pdf|"
+    r"(regular|standard|full|detailed)\s+pdf|pdf|view\s*/\s*print\s+pdf|print|open\s+pdf)\s*$", re.I)
+
+
+def _second_step(page, appeared: set):
+    """A control the click revealed whose text says it finishes a
+    download, once it has passed the guard, or None."""
+    ranked = sorted(appeared, key=lambda t: (0 if re.search(r"regular|standard|full|^download", t, re.I) else 1, t))
+    for text in ranked:
+        if _SECOND_STEP_RE.match(text) and is_safe_control(text):
+            for role in ("button", "link", "menuitem"):
+                try:
+                    loc = page.get_by_role(role, name=re.compile("^" + re.escape(text) + "$", re.I))
+                    if loc.count() and loc.first.is_visible():
+                        return loc.first, text
+                except Exception:
+                    continue
+    return None, ""
+
+
+def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
+               dl_dir=None) -> bool:
+    """Click `el` and save whatever PDF the site produces, a file landing
+    in `dl_dir`, a download event, a PDF response, a new tab, this tab
+    moving to the document, or a second control the click revealed.
+    `trace` collects what happened, the click's own outcome included."""
+    ctx = page.context
+    got: dict = {}
+    downloads: list = []
+    start_url = page.url or ""
+
+    def on_download(dl):
+        downloads.append(dl)
+
+    def on_response(res):
+        try:
+            url = res.url or ""
+            if not is_safe_url(url):
+                return
+            ct = (res.headers.get("content-type") or "").lower()
+            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
+                trace.append({"status": res.status, "type": ct[:40], "url": redact(url)[:160]})
+            if got:
+                return
+            if "pdf" in ct or "octet" in ct:
+                try:
+                    body = res.body()
+                except Exception:
+                    body = b""
+                    got["refetch"] = url
+                if body[:5] == b"%PDF-":
+                    got["body"] = body
+        except Exception:
+            pass
+
+    ctx.on("response", on_response)
+    page.on("download", on_download)
+    before = set(ctx.pages)
+    seen = _snapshot(dl_dir)
+    controls_before = _control_texts(page)
+
+    def landed() -> bool:
+        if downloads:
+            try:
+                from paperpull_core.receipt_pdf import save_download
+                save_download(downloads[0], out_path)
+                if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
+                    return True
+            except Exception as e:
+                log.info("download event save failed: %s", e)
+        if got.get("body"):
+            out_path.write_bytes(got["body"])
+            return True
+        if got.get("refetch"):
+            try:
+                resp = page.context.request.get(got.pop("refetch"), timeout=60000)
+                body = resp.body() if resp.ok else b""
+                if body[:5] == b"%PDF-":
+                    out_path.write_bytes(body)
+                    return True
+            except Exception:
+                pass
+        return _take_new_pdf(dl_dir, seen, out_path)
+
+    def wait_for_pdf(seconds: int) -> bool:
+        for _ in range(seconds):
+            if landed():
+                return True
+            page.wait_for_timeout(1000)
+        return landed()
+
+    try:
+        try:
+            el.scroll_into_view_if_needed(timeout=4000)
+        except Exception:
+            pass
+        try:
+            el.click(timeout=8000)
+            if trace is not None:
+                trace.append({"note": "clicked", "control": label[:60]})
+        except Exception as e:
+            if trace is not None:
+                trace.append({"note": "click failed", "control": label[:60], "error": str(e)[:160]})
+            try:
+                el.evaluate("el => el.click()")
+                if trace is not None:
+                    trace.append({"note": "clicked through the DOM instead", "control": label[:60]})
+            except Exception as e2:
+                if trace is not None:
+                    trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
+        if wait_for_pdf(10):
+            return True
+        if _take_same_tab(page, start_url, out_path, trace):
+            return True
+        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
+            return True
+        appeared = _control_texts(page) - controls_before
+        if trace is not None:
+            trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
+                          "appeared": [redact(t) for t in sorted(appeared)[:15]],
+                          "new_tabs": len([p for p in ctx.pages if p not in before])})
+        step, step_label = _second_step(page, appeared)
+        if step is not None:
+            try:
+                step.click(timeout=8000)
+                if trace is not None:
+                    trace.append({"note": "second step clicked", "control": step_label[:60]})
+            except Exception as e:
+                if trace is not None:
+                    trace.append({"note": "second step click failed", "control": step_label[:60],
+                                  "error": str(e)[:160]})
+            if wait_for_pdf(20):
+                return True
+            if _take_same_tab(page, start_url, out_path, trace) or \
+                    _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
+                return True
+        if wait_for_pdf(15):
+            return True
+        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
+            return True
+        log.info("click on %r produced no PDF", label)
+        return False
+    finally:
+        try:
+            ctx.remove_listener("response", on_response)
+        except Exception:
+            pass
+        try:
+            page.remove_listener("download", on_download)
+        except Exception:
+            pass
+        for extra in [p for p in ctx.pages if p not in before]:
+            try:
+                extra.close()
+            except Exception:
+                pass
+
+
+def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
+                  trace: Optional[list] = None, hint: str = "") -> bool:
     """Save the document dated `iso_date`. A PDF link on the row is fetched
     from inside the page. Otherwise the row's own control is clicked, once
     it has passed the guard, and whichever the site produces is caught, a
@@ -622,6 +957,23 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
     if not goto_documents(page):
         log.info("could not open the documents page for %s", iso_date)
         return False
+    # The document's own address from the API, fetched from inside the
+    # page. Only on statefarm.com, and only a PDF counts.
+    if hint and "/" in hint:
+        from urllib.parse import urljoin
+        target = urljoin(page.url, hint)
+        if is_safe_url(target):
+            try:
+                b64 = page.evaluate(_FETCH_AS_B64, target)
+                data = base64.b64decode(b64) if b64 else b""
+                if data[:5] == b"%PDF-":
+                    out_path.write_bytes(data)
+                    return True
+                if trace is not None:
+                    trace.append({"note": "filePathUrl did not answer with a PDF", "url": redact(target)[:160]})
+            except Exception as e:
+                if trace is not None:
+                    trace.append({"note": "filePathUrl fetch failed", "error": str(e)[:160]})
     expand_all(page)
 
     el, label = _control_for(page, iso_date)
@@ -636,72 +988,21 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
         href = el.get_attribute("href") or ""
     except Exception:
         href = ""
-    if href and PDF_HREF_RE.search(href):
+    if href and not href.lower().startswith(("javascript", "#")):
         from urllib.parse import urljoin
-        body = _fetch_pdf(page, urljoin(page.url, href))
-        if body:
-            out_path.write_bytes(body)
-            return True
-
-    # The click. A PDF can arrive as a download event, as a response in
-    # this tab, or in a new tab the control opens. All three are watched,
-    # at the context level so a new tab is covered too.
-    ctx = page.context
-    got: dict = {}
-
-    def on_response(res):
-        try:
-            if got or not is_safe_url(res.url or ""):
-                return
-            if "pdf" in (res.headers.get("content-type") or "").lower():
-                body = res.body()
-                if body[:5] == b"%PDF-":
-                    got["body"] = body
-        except Exception:
-            pass
-
-    ctx.on("response", on_response)
-    before = set(ctx.pages)
-    seen = _snapshot(dl_dir)
-    try:
-        try:
-            el.scroll_into_view_if_needed(timeout=4000)
-        except Exception:
-            pass
-        try:
-            with page.expect_download(timeout=20000) as dl:
-                el.click()
-            from paperpull_core.receipt_pdf import save_download
-            save_download(dl.value, out_path)
-            if out_path.stat().st_size > 0 and out_path.read_bytes()[:5] == b"%PDF-":
+        target = urljoin(page.url, href)
+        # A link on the provider's own hosts is fetched through the session
+        # first. A PDF answer is the document. Anything else means the link
+        # is a page or a handoff, and the click below follows it.
+        if is_safe_url(target):
+            body = _fetch_pdf(page, target)
+            if body:
+                out_path.write_bytes(body)
                 return True
-        except Exception:
-            pass
-        deadline = 45
-        while not got and deadline > 0:
-            if _take_new_pdf(dl_dir, seen, out_path):
-                return True
-            page.wait_for_timeout(1000)
-            deadline -= 1
-        if got:
-            out_path.write_bytes(got["body"])
-            return True
-        if _take_new_pdf(dl_dir, seen, out_path):
-            return True
-        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-            return True
-        log.info("click on %r produced no PDF for %s", label, iso_date)
-        return False
-    finally:
-        try:
-            ctx.remove_listener("response", on_response)
-        except Exception:
-            pass
-        for extra in [p for p in ctx.pages if p not in before]:
-            try:
-                extra.close()
-            except Exception:
-                pass
+            if trace is not None:
+                trace.append({"note": "the control's own link did not answer with a PDF",
+                              "url": redact(target)[:160]})
+    return _catch_pdf(page, el, label, out_path, trace, dl_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -832,6 +1133,16 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
             if "json" not in ct and "pdf" not in ct:
                 return
             entry = {"url": redact(url)[:200], "status": res.status, "type": ct[:40]}
+            try:
+                entry["method"] = res.request.method
+                body = res.request.post_data or ""
+                if body.lstrip().startswith("{"):
+                    import json as _json
+                    parsed = _json.loads(body)
+                    if isinstance(parsed, dict):
+                        entry["post_keys"] = sorted(str(k) for k in parsed)[:30]
+            except Exception:
+                pass
             q = _safe_query(url)
             if q:
                 entry["query"] = q[:240]
@@ -862,8 +1173,27 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
                 if link.count() == 0:
                     continue
                 before = page.url
+                tabs_before = set(page.context.pages)
                 link.click(timeout=5000)
                 page.wait_for_timeout(dwell_ms)
+                # A control that opened a new tab (a document vendor behind
+                # a single sign-on, a PDF) is surveyed there, then the tab
+                # is closed. Off the provider's hosts it is still recorded,
+                # marked, and nothing on it is followed.
+                for extra in [p for p in page.context.pages if p not in tabs_before]:
+                    try:
+                        extra.wait_for_load_state("domcontentloaded", timeout=15000)
+                        tab = _page_summary(extra)
+                        tab["opened_tab_from"] = c["text"]
+                        tab["off_host"] = not is_safe_url(extra.url or "")
+                        report["pages"].append(tab)
+                    except Exception as e:
+                        report.setdefault("notes", []).append(
+                            "could not read the tab %r opened: %s" % (c["text"], str(e)[:120]))
+                    try:
+                        extra.close()
+                    except Exception:
+                        pass
                 if not is_safe_url(page.url or ""):
                     page.go_back()
                     continue

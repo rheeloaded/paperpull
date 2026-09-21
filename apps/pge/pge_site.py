@@ -379,17 +379,64 @@ def goto_page_number(page, target_page: int) -> bool:
                     break
         if opt and is_page_option(control_label(opt), target_page):
             opt.click()
-            for _ in range(24):                     # up to twelve seconds
-                page.wait_for_timeout(500)
-                if _current_page(page) == target_page and _rows_signature(page) != before:
-                    page.wait_for_timeout(500)
-                    return True
+            if _wait_for_page_change(page, before, target_page, 8):
+                return True
+            # A Lightning option can swallow a plain click. Once more
+            # through the DOM, then the picker is given up on.
+            try:
+                opt.evaluate("el => el.click()")
+            except Exception:
+                pass
+            if _wait_for_page_change(page, before, target_page, 8):
+                return True
             log.info("page %d did not show after the jump (picker reads %s, rows %s)",
                      target_page, _current_page(page),
                      "unchanged" if _rows_signature(page) == before else "changed")
-            return _current_page(page) == target_page and _rows_signature(page) != before
+        else:
+            log.info("no option for page %d in the picker", target_page)
     except Exception as e:
         log.debug(f"goto_page_number {target_page} failed: {e}")
+    return False
+
+
+def _wait_for_page_change(page, before: tuple, target_page: int, seconds: int) -> bool:
+    """True once the table shows different rows. The picker reading the
+    target is the ideal, but a picker whose value never updates is not
+    proof the page did not move, the rows are."""
+    for _ in range(seconds * 2):
+        page.wait_for_timeout(500)
+        sig = _rows_signature(page)
+        if sig and sig != before:
+            page.wait_for_timeout(500)
+            return True
+    return False
+
+
+def is_next_control(label: str) -> bool:
+    """The history's Next page control, and nothing that commits anything."""
+    label = (label or "").strip()
+    return bool(re.match(r"^(next(\s+page)?|>|›|»)$", label, re.I)) and not (
+        FORBIDDEN_CONTROL_RE.search(label))
+
+
+def next_page(page) -> bool:
+    """One page forward through the history's Next control, for a picker
+    that will not jump. True once the rows changed."""
+    before = _rows_signature(page)
+    try:
+        for cand in page.query_selector_all(FALLBACK["next_page"]):
+            label = all_labels(cand)
+            if not is_next_control(label):
+                continue
+            try:
+                if cand.get_attribute("disabled") is not None or (cand.get_attribute("aria-disabled") or "") == "true":
+                    return False
+            except Exception:
+                pass
+            cand.click()
+            return _wait_for_page_change(page, before, 0, 8)
+    except Exception as e:
+        log.debug(f"next_page failed: {e}")
     return False
 
 
@@ -406,7 +453,7 @@ def collect_download_docs(page) -> List[dict]:
         last_sig = None
         for p_num in pages:
             if len(pages) > 1 and p_num != pages[0]:
-                if not goto_page_number(page, p_num):
+                if not goto_page_number(page, p_num) and not next_page(page):
                     log.info("could not reach page %d of the history, stopping at %d bill(s)",
                              p_num, len(results))
                     break
@@ -463,6 +510,43 @@ def pick_document_control(candidates) -> Optional[object]:
     return None
 
 
+def row_controls(row) -> list:
+    """Everything in a bill row that could be its PDF control. Anchors and
+    buttons first, then anything whose own text reads View Bill PDF, since
+    on the tester's history the control was neither (#33)."""
+    out = []
+    for sel in ("a, button, [role='button']", "lightning-button, lightning-formatted-url",
+                ":text-matches('view\\s+(bill\\s+)?pdf', 'i')"):
+        try:
+            for el in row.query_selector_all(sel):
+                if el not in out:
+                    out.append(el)
+        except Exception:
+            continue
+    return out
+
+
+def _describe_row(row) -> str:
+    """What a row holds, digits masked, for the log line that says no
+    control was found in it."""
+    try:
+        text = re.sub(r"\s+", " ", row.inner_text() or "")[:120]
+    except Exception:
+        text = "?"
+    labels = []
+    try:
+        for el in row.query_selector_all("a, button, [role='button'], lightning-button, span, div"):
+            label = control_label(el)
+            if label and len(label) < 40 and label not in labels:
+                labels.append(label)
+            if len(labels) >= 8:
+                break
+    except Exception:
+        pass
+    mask = lambda t: re.sub(r"\d{4,}", "####", t)
+    return "row %r controls %s" % (mask(text), [mask(x) for x in labels])
+
+
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
     """Download a bill PDF for specified doc dictionary handling downloads, popups, fetches, and network responses."""
     try:
@@ -489,7 +573,9 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 target_page = p_num
                 break
         if row is not None:
-            link = pick_document_control(row.query_selector_all("a, button"))
+            link = pick_document_control(row_controls(row))
+            if not link:
+                print("  [site] the row for %s hands over no PDF control: %s" % (want_date, _describe_row(row)))
 
         # Fallback if the rows moved. Every View Bill PDF control on the page,
         # kept only if the row it sits in carries this bill's date.

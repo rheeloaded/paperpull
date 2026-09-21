@@ -121,3 +121,33 @@ def test_the_search_answer_gives_each_document_a_date_a_title_and_a_hint():
     assert [(d["date"], d["title"], d["hint"]) for d in got] == [
         ("2026-08-31", "Monthly Statement", "g1|i1"), ("2026-02-15", "1099 Consolidated", "g2|i2")]
     assert site._docs_from_api({}) == []
+
+
+# -- round three, the period picker and the row's own link -----------------
+
+def test_the_period_picker_and_its_periods_are_the_only_controls_outside_a_row():
+    for t in ("Last 90 Days", "Last 12 Months", "Year to Date", "All", "Last 7 Years", "2024", "Custom Range"):
+        assert site.is_date_filter(t), t
+    for t in ("Apply", "Download", "Trade", "Last 90 Days Pay", "", "Transfer money"):
+        assert not site.is_date_filter(t), t
+
+
+def test_the_widest_period_wins():
+    options = ["Last 30 Days", "Last 90 Days", "Year to Date", "Last 12 Months", "Last 24 Months", "Last 7 Years", "Custom Range"]
+    import re
+    choice = None
+    for pat in site._WIDEST:
+        for t in options:
+            if re.search(pat, t, re.I):
+                choice = t
+                break
+        if choice:
+            break
+    assert choice == "Last 7 Years"
+
+
+def test_the_documents_page_is_reloaded_when_it_is_already_open():
+    import inspect
+    src = inspect.getsource(site.goto_docs_capturing)
+    assert "page.reload(" in src and "already" in src
+    assert site.DOCS_URL.endswith("#/documents")

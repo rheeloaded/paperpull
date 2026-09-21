@@ -120,3 +120,19 @@ def test_query_parameters_reach_the_survey_as_names_and_plain_words_only():
     got = site._safe_query("https://myaccount.newrez.com/x?docType=STATEMENT&range=LAST_90_DAYS&acct=12345678&key=d11-123456789&t=abcDEF123456789xyz&p=1")
     assert got == "docType=STATEMENT&range=LAST_90_DAYS&acct=...&key=...&t=...&p=..."
     assert site._safe_query("https://myaccount.newrez.com/x") == ""
+
+
+# -- round three, the servicing app ----------------------------------------
+
+def test_the_loan_number_comes_off_the_servicing_address_and_is_never_in_the_code():
+    class _P:
+        url = "https://servicing.newrez.com/servicing/1234567890/dashboard?x=1"
+    assert site.loan_number(_P()) == "1234567890"
+    _P.url = "https://myaccount.newrez.com/dashboard"
+    assert site.loan_number(_P()) == ""
+    src = Path(site.__file__).read_text(encoding="utf-8")
+    import re
+    assert not re.search(r"servicing/\d{6,}", src)
+    assert site.STATEMENT_PAGES == ("/statements/monthly", "/statements/yearly")
+    assert site.is_safe_url("https://servicing.newrez.com/servicing/1/statements/monthly")
+    assert site.is_safe_control("Account Details") and site.ACCOUNT_DETAILS_RE.match("Account Details")

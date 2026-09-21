@@ -7,6 +7,62 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **AT&T, round seven.** The tester answered the question: "Download PDF"
+  opens a small menu with "Regular PDF" and "Accessibility PDF", and
+  "View/print PDF" opens the PDF in a new tab. "Regular PDF" is the
+  second step now, ahead of the accessibility variant.
+  [#26](https://github.com/rheeloaded/paperpull/issues/26).
+- **PG&E, round two.** The page jump still did not take, and a bill row
+  on page 1 handed over no control. A jump counts when the rows changed
+  even if the picker's value never updates, the option is clicked through
+  the DOM when a plain click did nothing, a Next control is the fallback,
+  the row's PDF control is found by its text when it is neither an anchor
+  nor a button, and a row that hands over nothing says what it holds.
+  [#33](https://github.com/rheeloaded/paperpull/issues/33).
+- **SMUD, round three.** Discovery listed all 24 bills, and a Download
+  opened the PDF in the same tab, which nothing caught. A PDF the tab
+  itself moved to is fetched through the session and the tab sent back,
+  and the control's own link is fetched through the session before any
+  click. [#34](https://github.com/rheeloaded/paperpull/issues/34).
+- **Golden 1, round two.** Sign-in is at login.golden1.com/login and
+  lands on digitalbanking.golden1.com, whose documents page has a "View
+  Documents" button that signs the person on to the credit union's
+  document vendor, ebank.hepsiian.com, in a new tab. The Login button had
+  opened a 404. The routes are right now, the vendor's host is allowed,
+  and discovery and download work in the vendor's tab once the button
+  has opened it. [#35](https://github.com/rheeloaded/paperpull/issues/35).
+- **E*TRADE, round three.** Discovery found nothing because the documents
+  page is a single-page app that calls nothing when landed on twice. It
+  is reloaded now, the period picker is widened to the widest period it
+  offers (its options are recorded), and a document is downloaded by its
+  own link in its row, which is what a person clicks.
+  [#36](https://github.com/rheeloaded/paperpull/issues/36).
+- **State Farm, round three.** The Document Center fills itself from a
+  customerMetadata call with a year parameter, whose answer names each
+  document's date, category, type, id and file address. Discovery reads
+  this year's answer as the page loads and asks the same address for each
+  of the last seven years, a document's file address is fetched from
+  inside the page, ID cards and policy documents file under Insurance
+  Documents. [#37](https://github.com/rheeloaded/paperpull/issues/37).
+- **Newrez, round three.** "Account Details" leads to a servicing app
+  whose address carries the loan number, and the statements and the 1098
+  are at statements/monthly and statements/yearly under it. The loan
+  number is read off the address at run time, never stored, and both
+  pages are read. The tester found both answering with an API error on
+  Newrez's side, which the app now reports rather than mistaking for an
+  empty list. [#38](https://github.com/rheeloaded/paperpull/issues/38).
+- **Every scaffold's survey.** A path segment shaped like an id or a key
+  is masked, since an account key sat in a URL path in one survey. A
+  control the survey follows that opens a new tab is surveyed there, then
+  the tab is closed, with its host marked when it is not the provider's.
+  A call's method and the names of its POST body keys are recorded. And
+  the eight scaffolds cut from Wells Fargo get what AT&T got in round six,
+  the click's own outcome, a second step the click revealed, and a
+  `download-attempt.json` trace when a download fails.
+
 ## [0.28.3] - 2026-09-21
 
 ### Fixed

@@ -118,3 +118,43 @@ def test_the_documents_link_that_mentions_claims_is_followed_and_a_claim_is_not(
         assert site.SURVEY_LINK_RE.match(text), text
     for text in ("File a claim", "Claims", "Report a claim", "Make a policy change", "Enroll in AutoPay"):
         assert not site.is_safe_control(text), text
+
+
+# -- round three, the Document Center's API --------------------------------
+
+def test_the_document_center_answer_gives_each_document_a_date_a_title_and_its_file():
+    body = {"data": {"attributes": [
+        {"availableDate": "07/22/2026", "category": "Auto", "type": "Renewal Notice",
+         "description": "Renewal Notice - 2019 SEDAN 1HGCM82633A123456", "documentId": "d1",
+         "filePathUrl": "/DocumentCenterProxyV1/document/d1", "policyId": "p1"},
+        {"availableDate": "09/12/2026", "category": "Billing/Payments", "type": "Payment Receipt",
+         "description": "Payment Receipt - Payment Receipt", "documentId": "d2", "filePathUrl": ""},
+        {"availableDate": "07/22/2026", "category": "Auto", "type": "ID Card", "description": "ID Card - 2019 SEDAN",
+         "documentId": "d3", "filePathUrl": "/x/d3"},
+        {"type": "no date"},
+    ]}}
+    got = site._docs_from_api(body)
+    assert [(d["date"], d["title"], d["hint"], d["url"]) for d in got] == [
+        ("2026-07-22", "Renewal Notice - Auto", "d1", "/DocumentCenterProxyV1/document/d1"),
+        ("2026-09-12", "Payment Receipt - Billing/Payments", "d2", ""),
+        ("2026-07-22", "ID Card - Auto", "d3", "/x/d3")]
+    assert "1HGCM82633A123456" not in got[0]["desc"], "a VIN in the description is masked"
+    assert site._docs_from_api({}) == []
+
+
+def test_the_year_is_the_only_thing_changed_in_the_metadata_address():
+    calls = []
+    class _P:
+        def evaluate(self, js, url):
+            calls.append(url)
+            return {"data": {"attributes": [{"availableDate": "01/05/" + url[-4:], "type": "Bill", "category": "Auto"}]}}
+    got = site._years_from(_P(), "https://documentcenterproxyv1-prod.statefarm.com/DocumentCenterProxyV1/customerMetadata?commId=null&year=2026", 2026)
+    assert calls[0].endswith("year=2025") and all("year=" in c for c in calls)
+    assert len(calls) == site.YEARS_BACK and got[0]["date"] == "2025-01-05"
+    assert site._years_from(_P(), "https://x.statefarm.com/customerMetadata?commId=null", -1) == []
+
+
+def test_the_download_takes_a_hint_and_only_fetches_it_on_statefarm():
+    import inspect
+    assert "hint" in inspect.signature(site.download_bill).parameters
+    assert "is_safe_url(target)" in inspect.getsource(site.download_bill)

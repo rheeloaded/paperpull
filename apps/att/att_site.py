@@ -201,6 +201,9 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
 _ID_RE = re.compile(r"\d{6,}")
+# A path segment shaped like an id or a key, "/accounts/d11-Kz9Rc.../",
+# ten or more characters with a letter and a digit in it.
+_PATH_TOKEN_RE = re.compile(r"(?<=/)(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{10,}(?=[/?#]|$)")
 # "Welcome, ALEX", "Hi Jane", "Good evening, Sam": a greeting names the
 # person, and a survey has no use for the name.
 _GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
@@ -294,6 +297,7 @@ def redact(text: str) -> str:
     the survey has no use for."""
     text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
     text = _GREETING_RE.sub(lambda m: m.group(1) + " [name]", text)
+    text = _PATH_TOKEN_RE.sub("...", text)
     return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
 
 
@@ -864,6 +868,7 @@ def _pdf_button(page):
 
 _SECOND_STEP_RE = re.compile(
     r"^\s*(download|download\s+(pdf|bill|now)|save|save\s+(as\s+)?pdf|pdf|full\s+bill|"
+    r"(regular|standard|full|detailed|accessibility)\s+pdf|"
     r"bill\s+pdf|view\s*/\s*print\s+pdf|print|ok|continue|get\s+(my\s+)?bill)\s*$", re.I)
 
 _VIEWER_JS = r"""() => {
@@ -896,7 +901,8 @@ def _control_texts(page) -> set:
 def _second_step(page, appeared: set):
     """A control the click revealed whose text says it finishes a
     download, once it has passed the guard, or None."""
-    for text in sorted(appeared):
+    ranked = sorted(appeared, key=lambda t: (0 if re.search(r"regular|standard|full|^download", t, re.I) else 1, t))
+    for text in ranked:
         if _SECOND_STEP_RE.match(text) and is_safe_control(text):
             for role in ("button", "link", "menuitem"):
                 try:
@@ -1295,6 +1301,16 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
             if "json" not in ct and "pdf" not in ct:
                 return
             entry = {"url": redact(url)[:200], "status": res.status, "type": ct[:40]}
+            try:
+                entry["method"] = res.request.method
+                body = res.request.post_data or ""
+                if body.lstrip().startswith("{"):
+                    import json as _json
+                    parsed = _json.loads(body)
+                    if isinstance(parsed, dict):
+                        entry["post_keys"] = sorted(str(k) for k in parsed)[:30]
+            except Exception:
+                pass
             q = _safe_query(url)
             if q:
                 entry["query"] = q[:240]
@@ -1325,8 +1341,27 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
                 if link.count() == 0:
                     continue
                 before = page.url
+                tabs_before = set(page.context.pages)
                 link.click(timeout=5000)
                 page.wait_for_timeout(dwell_ms)
+                # A control that opened a new tab (a document vendor behind
+                # a single sign-on, a PDF) is surveyed there, then the tab
+                # is closed. Off the provider's hosts it is still recorded,
+                # marked, and nothing on it is followed.
+                for extra in [p for p in page.context.pages if p not in tabs_before]:
+                    try:
+                        extra.wait_for_load_state("domcontentloaded", timeout=15000)
+                        tab = _page_summary(extra)
+                        tab["opened_tab_from"] = c["text"]
+                        tab["off_host"] = not is_safe_url(extra.url or "")
+                        report["pages"].append(tab)
+                    except Exception as e:
+                        report.setdefault("notes", []).append(
+                            "could not read the tab %r opened: %s" % (c["text"], str(e)[:120]))
+                    try:
+                        extra.close()
+                    except Exception:
+                        pass
                 if not is_safe_url(page.url or ""):
                     page.go_back()
                     continue
