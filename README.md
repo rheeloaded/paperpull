@@ -3,6 +3,7 @@
 ![Version](https://img.shields.io/github/v/tag/rheeloaded/paperpull?sort=semver&label=version&color=blue)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+[![Sponsor on GitHub](https://img.shields.io/badge/sponsor-on%20GitHub-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/rheeloaded)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rheeloaded)
 [![Website](https://img.shields.io/badge/website-paperpull.net-4c8dff)](https://paperpull.net)
 
@@ -29,6 +30,7 @@ needs an Apple developer membership every year, the Store listing needs a
 developer account, and every provider takes evenings to build and keep
 working as sites change. If it saves you time, you can show your
 appreciation and support future development by
+**[sponsoring on GitHub](https://github.com/sponsors/rheeloaded)** or
 **[donating on Ko-fi](https://ko-fi.com/rheeloaded)**, or by buying the
 **Microsoft Store edition** for $2.99, the same program with a signed
 installer and automatic updates. Or download it free from the
@@ -492,10 +494,11 @@ membership, renewed every year. The Microsoft Store listing needs a
 developer account. Every one of the thirty-odd providers took evenings to
 build, and each one needs repairing when its site changes, which they do.
 
-If PaperPull saves you time, there are two ways to show your appreciation
-and support future development. Both are optional, and neither changes
-what the free build does.
+If PaperPull saves you time, there are three ways to show your appreciation
+and support future development. All are optional, and none changes what
+the free build does.
 
+- **Sponsor on GitHub:** **[github.com/sponsors/rheeloaded](https://github.com/sponsors/rheeloaded)**, one-time or monthly, from a card you already have on GitHub.
 - **Donate on Ko-fi:** **[ko-fi.com/rheeloaded](https://ko-fi.com/rheeloaded)** ☕
 - **Buy the Microsoft Store edition** for $2.99, the same program from the
   same build, with a signed installer that opens with no warning and
