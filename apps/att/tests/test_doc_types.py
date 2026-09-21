@@ -249,3 +249,56 @@ def test_the_history_page_counts_as_billing_and_its_api_is_recognized():
 def test_download_bill_takes_a_hint_and_a_trace():
     params = inspect.signature(site.download_bill).parameters
     assert "hint" in params and "trace" in params
+
+
+# -- round four, from the round-three pilot ------------------------------------
+
+class _Btn:
+    def __init__(self, text, label=""):
+        self._text, self._label = text, label
+    def inner_text(self, timeout=0): return self._text
+    def get_attribute(self, name): return self._label if name == "aria-label" else None
+    def is_visible(self): return True
+    def scroll_into_view_if_needed(self, timeout=0): pass
+
+
+class _TextLoc:
+    def __init__(self, items): self._items = items
+    def count(self): return len(self._items)
+    def nth(self, i): return self._items[i]
+    def filter(self, has_text=None):
+        return _TextLoc([b for b in self._items if has_text.search(b._text)])
+
+
+class _HistoryPage:
+    """Buttons whose accessible name says nothing about the period."""
+    url = "https://www.att.com/acctmgmt/billing/billandpaymenthistory?filter=bill"
+    def __init__(self):
+        self.buttons = [_Btn("Account\n123456789\nWireless", "Switch account"),
+                        _Btn("Bill\nJul 23 - Aug 22\n$88.05", "View details"),
+                        _Btn("Bill\nJun 23 - Jul 22\n$88.05", "View details")]
+    def get_by_role(self, role, name=None):
+        assert name is None, "round three matched on the accessible name and found nothing"
+        return _TextLoc(self.buttons if role == "button" else [])
+
+
+def test_the_bill_button_is_matched_on_its_visible_text_not_its_name():
+    page = _HistoryPage()
+    el, text = site._bill_button_for(page, "2026-08-22")
+    assert el is page.buttons[1] and text.startswith("Bill")
+    el, _ = site._bill_button_for(page, "2026-07-22")
+    assert el is page.buttons[2]
+    assert site._bill_button_for(page, "2026-09-11") == (None, "")
+    assert site._period_buttons(page).count() == 2
+
+
+def test_a_miss_records_the_buttons_it_saw_with_digits_masked():
+    seen = site._buttons_seen(_HistoryPage())
+    assert seen[0] == "Account / ######### / Wireless"
+    assert "Bill / Jul 23 - Aug 22 / $88.05" in seen
+
+
+def test_the_billing_center_fallback_opens_the_billing_center_itself():
+    src = inspect.getsource(site.download_bill)
+    assert "page.goto(BILLING_CANDIDATES[0]" in src
+    assert "goto_documents(page)" not in src.split("# The current bill")[1]
