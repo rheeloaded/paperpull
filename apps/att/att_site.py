@@ -2,7 +2,7 @@
 
 When AT&T changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round three. Written without an AT&T account and
+STATUS: UNVERIFIED, round four. Written without an AT&T account and
 repaired from two surveys a tester sent (#26). What the surveys showed:
 
   * Sign-in lands on /acctmgmt/overview, a shop page. The nav's Billing
@@ -17,6 +17,9 @@ repaired from two surveys a tester sent (#26). What the surveys showed:
     cycleEndDate, statementId, invoiceIndex, ...}, sixteen entries.
   * Round two's pilot recognized only the current bill and clicked "See
     bill history" instead of "Download PDF" beside it.
+  * Round three read all sixteen bills from the API but matched the
+    history buttons by accessible name, found none, and then looked for
+    "Download PDF" on the history page instead of the billing center.
 
   So discovery now reads the history API as the page loads it, passively,
   and falls back to the bill buttons. A download opens the history page,
@@ -554,9 +557,13 @@ def goto_history(page, capture: Optional[list] = None) -> bool:
     page.on("response", on_response)
     try:
         page.goto(HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
-        for _ in range(20):
+        # Until the API answered, or the bill buttons are on the page,
+        # whichever the caller is after, up to fifteen seconds.
+        for _ in range(30):
             page.wait_for_timeout(500)
             if capture:
+                break
+            if capture is None and _period_buttons(page).count() > 0:
                 break
         page.wait_for_timeout(1500)
     except Exception as e:
@@ -661,6 +668,15 @@ def _fetch_pdf(page, href: str) -> Optional[bytes]:
     return body if body[:5] == b"%PDF-" else None
 
 
+def _period_buttons(page):
+    """The history page's bill buttons, every button whose visible text
+    carries a "Jul 23 - Aug 22" period. Matched on the text a person
+    sees, not the accessible name: round three matched the name, which
+    a button can carry as an aria-label that reads nothing like its
+    face, and found none of them."""
+    return page.get_by_role("button").filter(has_text=_PERIOD_RE)
+
+
 def _bill_button_for(page, iso_date: str):
     """The history page's button for the bill whose period ends on
     `iso_date`, matched on "Mon d" since the buttons carry no year, or
@@ -669,7 +685,7 @@ def _bill_button_for(page, iso_date: str):
     try:
         y, m, d = iso_date.split("-")
         want = f"{_MONTH_NAMES[int(m) - 1][:3]} {int(d)}"
-        loc = page.get_by_role("button", name=BILL_BUTTON_RE)
+        loc = _period_buttons(page)
         for i in range(min(loc.count(), 60)):
             el = loc.nth(i)
             text = (el.inner_text(timeout=800) or "").strip()
@@ -679,6 +695,26 @@ def _bill_button_for(page, iso_date: str):
     except Exception as e:
         log.info("bill button lookup failed: %s", e)
     return None, ""
+
+
+def _buttons_seen(page, limit: int = 12) -> list:
+    """The visible text of the page's buttons, digits masked, for a trace
+    that has to explain why nothing matched."""
+    out = []
+    try:
+        loc = page.get_by_role("button")
+        for i in range(min(loc.count(), 80)):
+            try:
+                text = (loc.nth(i).inner_text(timeout=300) or "").strip()
+            except Exception:
+                continue
+            if text:
+                out.append(redact(text).replace("\n", " / ")[:60])
+            if len(out) >= limit:
+                break
+    except Exception:
+        pass
+    return out
 
 
 def _pdf_button(page):
@@ -778,11 +814,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
             try:
                 el.scroll_into_view_if_needed(timeout=4000)
                 el.click(timeout=5000)
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(2000)
                 dismiss_overlay(page)
             except Exception as e:
                 log.info("bill button click failed for %s: %s", iso_date, e)
-            btn, blabel = _pdf_button(page)
+            # The bill opens in place or on its own page, and its Download
+            # PDF may take a moment to appear.
+            btn, blabel = None, ""
+            for _ in range(10):
+                btn, blabel = _pdf_button(page)
+                if btn is not None:
+                    break
+                page.wait_for_timeout(1000)
             if btn is not None:
                 if _catch_pdf(page, btn, blabel, out_path, trace):
                     return True
@@ -790,11 +833,26 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
                 log.info("no Download PDF after opening the bill for %s", iso_date)
                 if trace is not None:
                     trace.append({"note": "no Download PDF button after the bill button",
-                                  "url": redact(page.url or "")[:160]})
+                                  "url": redact(page.url or "")[:160],
+                                  "buttons": _buttons_seen(page)})
+        else:
+            log.info("no bill button for %s on the history page", iso_date)
+            if trace is not None:
+                trace.append({"note": "no bill button for this date on the history page",
+                              "wanted": iso_date, "period_buttons": _period_buttons(page).count(),
+                              "buttons": _buttons_seen(page)})
 
-    # The current bill, on the billing center.
-    if not goto_documents(page):
-        log.info("could not open the billing center for %s", iso_date)
+    # The current bill, on the billing center, which is a page of its
+    # own and has to be opened as one. The history page passes the
+    # billing check too, which is how round three looked for the button
+    # there and never here.
+    try:
+        page.goto(BILLING_CANDIDATES[0], wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(4000)
+    except Exception as e:
+        log.info("could not open the billing center for %s: %s", iso_date, e)
+        return False
+    if looks_signed_out(page) or not is_safe_url(page.url or ""):
         return False
     dismiss_overlay(page)
     try:
@@ -809,6 +867,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
     btn, blabel = _pdf_button(page)
     if btn is None:
         log.info("no Download PDF on the billing center for %s", iso_date)
+        if trace is not None:
+            trace.append({"note": "no Download PDF on the billing center",
+                          "url": redact(page.url or "")[:160], "buttons": _buttons_seen(page)})
         return False
     if shown and iso_date not in shown:
         log.info("the billing center shows %s, not %s, so its PDF is not this bill",

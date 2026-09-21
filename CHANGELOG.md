@@ -9,6 +9,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **AT&T, round four, from the round-three pilot.** Discovery read all
+  sixteen bills from the history API, and every download failed the same
+  way. The history page's bill buttons were matched on their accessible
+  name, which a button can carry as an aria-label that reads nothing like
+  its face, so none matched, and the fallback then looked for "Download
+  PDF" on the history page instead of the billing center, since the
+  history page passes the billing check too. The buttons are matched on
+  the text a person sees now, the wait is for the buttons themselves, the
+  billing center is opened as its own page, and a miss records the
+  buttons it saw, digits masked, so the next trace explains itself.
+  [#26](https://github.com/rheeloaded/paperpull/issues/26).
+
 ### Added
 - **Five providers built without accounts, for their requester to test.**
   SMUD ([#34](https://github.com/rheeloaded/paperpull/issues/34)), Golden 1
