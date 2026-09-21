@@ -10,6 +10,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [0.28.3] - 2026-09-21
 
 ### Fixed
+- **AT&T, round six, from the round-five trace.** With every capture in
+  place, the click on "Download PDF" still produced nothing, no download,
+  no response, no tab, nothing in the browser's own download list. So the
+  click either needs a second step, puts the PDF in a viewer, or is not
+  landing, and the trace could not tell those apart because a click
+  failure was swallowed. The click's own outcome goes in the trace now,
+  the page is compared before and after it, a control the click revealed
+  (a format choice, a download confirm) is taken as the second step once
+  it has passed the guard, an embedded viewer is read through the page,
+  and "View/print PDF" is tried when "Download PDF" gave nothing.
+  [#26](https://github.com/rheeloaded/paperpull/issues/26).
 - **PG&E read the first page of its history seven times.** The Jump to
   page picker was clicked, the app slept a second and a half, and read
   the table, which still showed the page before. A seven-page history
