@@ -139,6 +139,6 @@ def test_the_download_control_wins_over_the_view_control():
 
 
 def test_a_greeting_never_carries_the_persons_name():
-    assert site.redact("Welcome, JOHN Account 123456789") == "Welcome, [name] #########"
+    assert site.redact("Welcome, ALEX Account 123456789") == "Welcome, [name] #########"
     assert site.redact("Good evening!") == "Good evening!"
     assert site.redact("Welcome back") == "Welcome back"
