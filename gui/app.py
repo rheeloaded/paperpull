@@ -1192,7 +1192,7 @@ HTML = r"""<!doctype html>
   header h1 .tag { color:var(--muted); font-weight:400; }
   header h1 .ver { color:var(--accent); font-weight:400; font-size:13px; vertical-align:middle; }
   header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
-  main { display:grid; grid-template-columns: 320px 1fr; gap:0; flex:1; min-height:0; }
+  main { display:grid; grid-template-columns: 320px 1fr; grid-template-rows: minmax(0, 1fr); gap:0; flex:1; min-height:0; }
   footer { padding:8px 22px; border-top:1px solid var(--line); font-size:12px;
            color:var(--muted); display:flex; justify-content:space-between; align-items:center; }
   footer a { color:var(--accent); text-decoration:none; }

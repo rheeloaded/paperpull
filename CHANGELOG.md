@@ -24,6 +24,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   of the list and one receipt page for the tester to attach. Port 9263,
   real Edge or Chrome.
 
+### Fixed
+- **The panel's left column no longer paints over the footer** on a short
+  window. The grid row now shrinks with the window, so the controls column
+  scrolls inside it instead of drawing across the footer.
+
+### Changed
+- **README leads with what PaperPull is for**, the same words as the
+  website, with a screenshot, and the Microsoft Store edition is $9.99 one
+  time. The free build holds nothing back, and says so.
+
 ## [0.29.0] - 2026-09-21
 
 ### Added
