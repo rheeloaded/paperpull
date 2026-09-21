@@ -55,7 +55,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Newrez's side, which the app now reports rather than mistaking for an
   empty list. [#38](https://github.com/rheeloaded/paperpull/issues/38).
 - **Every scaffold's survey.** A path segment shaped like an id or a key
-  is masked, since an account key sat in a URL path in one survey. A
+  is masked, the way a query string and a digit run already were. A
   control the survey follows that opens a new tab is surveyed there, then
   the tab is closed, with its host marked when it is not the provider's.
   A call's method and the names of its POST body keys are recorded. And
