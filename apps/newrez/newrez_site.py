@@ -2,8 +2,8 @@
 
 When Newrez changes its site, repair this file only.
 
-STATUS: UNVERIFIED. This app was written without a Newrez account, from
-what is publicly known about the site, so that someone who holds one can
+STATUS: UNVERIFIED, round two, repaired from the first survey (#38). Written
+without a Newrez account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
 
@@ -48,13 +48,15 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 log = logging.getLogger("newrez_docs.site")
 
 BASE = "https://myaccount.newrez.com"
-# GUESS. Newrez's servicing portal is myaccount.newrez.com, sign-in lands
-# on /dashboard, and the monthly statements and the yearly 1098 are
-# expected under a documents or statements area the dashboard links to.
-# The dashboard is the fallback, since its nav names the real page.
+# From the first survey (#38, 2026-09-20). Sign-in lands on /dashboard,
+# a landing page with "Access My Loan" and "Account Details" controls and
+# no statements on it. The /documents and /statements guesses went back
+# to the dashboard. The loan itself, and its statements, sit behind those
+# two controls, which the survey follows this round. The route guesses
+# stay first in case one of them is where "Access My Loan" goes.
 BILLING_CANDIDATES = [
+    f"{BASE}/loan/documents",
     f"{BASE}/documents",
-    f"{BASE}/statements",
     f"{BASE}/dashboard",
 ]
 BILLING_URL = BILLING_CANDIDATES[0]
@@ -75,7 +77,7 @@ LOGIN_URL_MARKERS = ["/login", "/signin", "/sign-in", "/auth/", "/mfa",
 FORBIDDEN_CONTROL_RE = re.compile(
     r"(transfer|zelle|\bwire\b|\bpay\b|payment|bill\s*pay|autopay|auto\s*pay|"
     r"deposit|withdraw|send\s+money|request\s+money|move\s+money|"
-    r"\bapply\b|open\s+(an?\s+)?account|close\s+account|\bloan\b|\bborrow|"
+    r"\bapply\b|open\s+(an?\s+)?account|close\s+account|(apply\s+for|get|new|take\s+out)\s+(a\s+)?loan|\bborrow|"
     r"\bcard\b|\bcards\b|replace|activate|lock|unlock|\bpin\b|limit|"
     r"overdraft|alerts?\b|\bbudget|\bgoal|\brewards?\b|\boffers?\b|"
     r"enroll|unenroll|sign\s+up|paperless|delivery\s+preference|"
@@ -89,7 +91,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
 SAFE_DOC_CONTROL_RE = re.compile(
     r"(download|view|open|print|\bpdf\b|statement|document|\bletter\b|notice|"
     r"1099|1098|5498|tax\s+(form|document)|history|"
-    r"escrow\s+(analysis|statement)|see\s+(more|all|older)|show\s+(more|all|older)|load\s+more)", re.I)
+    r"escrow\s+(analysis|statement)|access\s+my\s+loan|account\s+details|loan\s+details|my\s+loan|see\s+(more|all|older)|show\s+(more|all|older)|load\s+more)", re.I)
 
 # A control that fetches one document. GUESS at the wording, wide on
 # purpose. "View", "Download", "View PDF", "Statement", "1099-INT".
@@ -210,6 +212,31 @@ def _human_date(iso: str) -> str:
 
 
 _QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
+
+
+_WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
+
+
+def _plain_word(v: str) -> bool:
+    """"STATEMENT", "LAST_90_DAYS", not an id, a token or a number."""
+    return bool(_WORD_VALUE_RE.match(v)) and sum(ch.isdigit() for ch in v) <= 3
+
+
+def _safe_query(url: str) -> str:
+    """A URL's query parameters, names always, values only when they are
+    plain words ("docType=STATEMENT", "range=LAST_90_DAYS"). A value with
+    a digit, a token, an id, anything long, is "...". This is what a
+    repair needs to make the same call with a wider filter, and nothing
+    else."""
+    from urllib.parse import urlsplit, parse_qsl
+    try:
+        pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    except ValueError:
+        return ""
+    out = []
+    for k, v in pairs[:20]:
+        out.append("%s=%s" % (k[:30], v if _plain_word(v) else "..."))
+    return "&".join(out)
 
 
 def redact(text: str) -> str:
@@ -688,7 +715,8 @@ _ROW_JS = r"""() => {
 }"""
 
 SURVEY_LINK_RE = re.compile(
-    r"^\s*((see|view|show)\s+)?(statements?(\s+(and|&)\s+documents)?|documents|tax\s+(documents|forms)|statement\s+history|escrow\s+(analysis|documents))\s*$", re.I)
+    r"^\s*((see|view|show)\s+)?(statements?(\s+(and|&)\s+documents)?|documents|tax\s+(documents|forms)|statement\s+history|"
+    r"escrow\s+(analysis|documents)|access\s+my\s+loan|account\s+details|loan\s+details|my\s+loan)\s*$", re.I)
 
 
 def collect_documents(page) -> List[RawDoc]:
@@ -717,6 +745,9 @@ def collect_documents(page) -> List[RawDoc]:
         seen.add(key)
         docs.append(RawDoc(title=re.sub(r"\s+", " ", title), date_text=date_text,
                            href=href, text=text[:400], row_index=i))
+    # A row with a date is a document row, and those are what a repair
+    # wants to see first, ahead of a nav full of links.
+    docs.sort(key=lambda d: 0 if d.date_text else 1)
     return docs
 
 
@@ -794,6 +825,9 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
             if "json" not in ct and "pdf" not in ct:
                 return
             entry = {"url": redact(url)[:200], "status": res.status, "type": ct[:40]}
+            q = _safe_query(url)
+            if q:
+                entry["query"] = q[:240]
             if "json" in ct:
                 try:
                     entry["shape"] = _shape(res.json())
@@ -811,12 +845,12 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
         report["pages"].append(start)
         followed = 0
         for c in start["controls"]:
-            if followed >= max_follow or c["role"] != "link" or not c["survey"]:
+            if followed >= max_follow or c["role"] not in ("link", "button") or not c["survey"]:
                 continue
             if not is_safe_control(c["text"]):
                 continue
             try:
-                link = page.get_by_role("link", name=re.compile(
+                link = page.get_by_role(c["role"], name=re.compile(
                     "^" + re.escape(c["text"].replace("#", "")) + "$", re.I)).first
                 if link.count() == 0:
                     continue

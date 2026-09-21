@@ -99,3 +99,24 @@ def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
     assert "UNVERIFIED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
     assert "Not yet tested against a real account" in readme
+
+
+# -- round two, from the first survey --------------------------------------
+
+def test_the_survey_follows_the_loan_controls_and_still_refuses_a_new_loan():
+    for text in ("Access My Loan", "Account Details"):
+        assert site.is_safe_control(text), text
+        assert site.SURVEY_LINK_RE.match(text), text
+    for text in ("Make a Payment", "Apply for a loan", "Get a new loan", "Loan modification", "Request payoff"):
+        assert not site.is_safe_control(text), text
+
+
+def test_the_survey_follows_buttons_too():
+    import inspect
+    assert '("link", "button")' in inspect.getsource(site.survey)
+
+
+def test_query_parameters_reach_the_survey_as_names_and_plain_words_only():
+    got = site._safe_query("https://myaccount.newrez.com/x?docType=STATEMENT&range=LAST_90_DAYS&acct=12345678&key=d11-123456789&t=abcDEF123456789xyz&p=1")
+    assert got == "docType=STATEMENT&range=LAST_90_DAYS&acct=...&key=...&t=...&p=..."
+    assert site._safe_query("https://myaccount.newrez.com/x") == ""

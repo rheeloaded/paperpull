@@ -99,3 +99,25 @@ def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
     assert "UNVERIFIED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
     assert "Not yet tested against a real account" in readme
+
+
+# -- round two, from the first survey --------------------------------------
+
+def test_the_documents_page_is_first_and_its_api_is_recognized():
+    assert site.BILLING_CANDIDATES[0] == "https://us.etrade.com/etx/pxy/accountdocs"
+    assert site.DOCS_API_RE.search("https://ext-web.etrade.com/etaz/api/adsal/accountdocs/v2/searchItems?x=1")
+    assert site.is_safe_url("https://ext-web.etrade.com/etaz/api/adsal/accountdocs/v2/searchItems")
+
+
+def test_the_search_answer_gives_each_document_a_date_a_title_and_a_hint():
+    body = {"defaultDocumentList": [
+        {"documentGuid": "g1", "documentId": "i1", "documentTypeName": "STATEMENTS", "documentDisplayName": "Statement",
+         "documentTitle": "Monthly Statement", "documentDate": "08/31/2026", "keyAccountNo": "x", "displayMultipleAccounts": "Brokerage -1234"},
+        {"documentGuid": "g2", "documentId": "i2", "documentTypeName": "TAX", "documentTitle": "1099 Consolidated",
+         "documentDate": "2026-02-15"},
+        {"documentGuid": "g3", "documentTitle": "no date"},
+    ], "numFound": "3"}
+    got = site._docs_from_api(body)
+    assert [(d["date"], d["title"], d["hint"]) for d in got] == [
+        ("2026-08-31", "Monthly Statement", "g1|i1"), ("2026-02-15", "1099 Consolidated", "g2|i2")]
+    assert site._docs_from_api({}) == []

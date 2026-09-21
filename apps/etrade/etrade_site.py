@@ -2,8 +2,8 @@
 
 When E*TRADE changes its site, repair this file only.
 
-STATUS: UNVERIFIED. This app was written without an E*TRADE account, from
-what is publicly known about the site, so that someone who holds one can
+STATUS: UNVERIFIED, round two, repaired from the first survey (#36). Written
+without an E*TRADE account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
 
@@ -48,17 +48,20 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 log = logging.getLogger("etrade_docs.site")
 
 BASE = "https://us.etrade.com"
-# GUESS. E*TRADE's signed-in site is us.etrade.com, sign-in at
-# /etx/pxy/login. Statements, trade confirmations and tax forms are
-# expected in a documents area, with the dashboard as the fallback
-# since its nav names the real page. E*TRADE is part of Morgan
-# Stanley, and some pages may live on a morganstanley.com host, which
-# the survey will reveal and the allowlist then has to admit.
+# From the first survey (#36, 2026-09-20). The Documents page is
+# /etx/pxy/accountdocs, a list with a type filter (Statements and three
+# more), a date filter that defaults to the last 90 days, a Download
+# button and pagination. It is fed by an API on ext-web.etrade.com,
+# usermetadata (the accounts and the filter vocabulary) and
+# v2/searchItems (the documents, each with a guid, an id, a type, a
+# title, a date and its account). The Tax Center is /etx/pxy/tax-center.
+# Discovery reads the searchItems answer as the page loads it.
 BILLING_CANDIDATES = [
-    f"{BASE}/etx/pxy/documents",
-    f"{BASE}/e/t/accounts/statements",
-    f"{BASE}/etx/pxy/dashboard",
+    f"{BASE}/etx/pxy/accountdocs",
+    f"{BASE}/etx/pxy/tax-center",
+    f"{BASE}/etx/hw/v2/accountshome",
 ]
+DOCS_API_RE = re.compile(r"/etaz/api/adsal/accountdocs/v2/searchItems", re.I)
 BILLING_URL = BILLING_CANDIDATES[0]
 URLS = {
     "home": f"{BASE}/etx/pxy/dashboard",
@@ -212,6 +215,31 @@ def _human_date(iso: str) -> str:
 
 
 _QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
+
+
+_WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
+
+
+def _plain_word(v: str) -> bool:
+    """"STATEMENT", "LAST_90_DAYS", not an id, a token or a number."""
+    return bool(_WORD_VALUE_RE.match(v)) and sum(ch.isdigit() for ch in v) <= 3
+
+
+def _safe_query(url: str) -> str:
+    """A URL's query parameters, names always, values only when they are
+    plain words ("docType=STATEMENT", "range=LAST_90_DAYS"). A value with
+    a digit, a token, an id, anything long, is "...". This is what a
+    repair needs to make the same call with a wider filter, and nothing
+    else."""
+    from urllib.parse import urlsplit, parse_qsl
+    try:
+        pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    except ValueError:
+        return ""
+    out = []
+    for k, v in pairs[:20]:
+        out.append("%s=%s" % (k[:30], v if _plain_word(v) else "..."))
+    return "&".join(out)
 
 
 def redact(text: str) -> str:
@@ -502,11 +530,75 @@ _ROW_OF_JS = r"""el => {
 }"""
 
 
+def _docs_from_api(body: dict) -> List[dict]:
+    """The documents in one searchItems answer, as {date, title, kind,
+    hint, account}. The guid rides as the hint. It names a document, not
+    a person, and the download will need it."""
+    out = []
+    for e in (body or {}).get("defaultDocumentList") or (body or {}).get("resultList") or []:
+        if not isinstance(e, dict):
+            continue
+        iso = parse_date(str(e.get("documentDate") or ""))
+        if not iso:
+            continue
+        title = str(e.get("documentTitle") or e.get("documentDisplayName") or e.get("documentTypeName") or "Document").strip()
+        kind = str(e.get("documentTypeName") or "")
+        hint = "|".join(str(e.get(k) or "") for k in ("documentGuid", "documentId"))
+        out.append({"date": iso, "title": title, "kind": kind, "hint": hint,
+                    "account": redact(str(e.get("displayMultipleAccounts") or ""))[:40]})
+    return out
+
+
+def goto_docs_capturing(page, capture: list) -> bool:
+    """Open the Documents page while catching the searchItems answer that
+    fills it, so discovery never has to know how the page asks."""
+    def on_response(res):
+        try:
+            url = res.url or ""
+            if is_safe_url(url) and DOCS_API_RE.search(url):
+                capture.append(res.json())
+        except Exception:
+            pass
+    page.on("response", on_response)
+    try:
+        page.goto(BILLING_CANDIDATES[0], wait_until="domcontentloaded", timeout=60000)
+        for _ in range(30):
+            page.wait_for_timeout(500)
+            if capture:
+                break
+        page.wait_for_timeout(1500)
+    except Exception as e:
+        log.info("goto documents failed: %s", e)
+    finally:
+        try:
+            page.remove_listener("response", on_response)
+        except Exception:
+            pass
+    dismiss_overlay(page)
+    return is_safe_url(page.url or "") and not looks_signed_out(page)
+
+
 def collect_download_docs(page) -> List[RawDoc]:
-    """Read every statement and tax document the page offers. Each
-    control's own name, or the row it sits in, carries the date."""
+    """Every document the Documents page lists, from the API answer the
+    page loads, else from the rows. The date filter is the page's own
+    default (the last 90 days), which round two reads as it is. Widening
+    it is round three, once the survey shows the filter's vocabulary."""
     docs: List[RawDoc] = []
     seen = set()
+    bodies: list = []
+    if goto_docs_capturing(page, bodies):
+        for body in bodies:
+            for d in _docs_from_api(body):
+                key = (d["date"], d["title"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                tax = bool(re.search(r"1099|1098|5498|tax", d["title"] + " " + d["kind"], re.I))
+                docs.append(RawDoc(title=d["title"], account=d["account"], date_text=d["date"],
+                                   href=d["hint"], text=f"E*TRADE {d['title']} {_human_date(d['date'])}",
+                                   kind="tax" if tax else "statement"))
+        if docs:
+            return docs
     expand_all(page)
     scroll_full_page(page)
     ctrls = _bill_controls(page)
@@ -719,6 +811,9 @@ def collect_documents(page) -> List[RawDoc]:
         seen.add(key)
         docs.append(RawDoc(title=re.sub(r"\s+", " ", title), date_text=date_text,
                            href=href, text=text[:400], row_index=i))
+    # A row with a date is a document row, and those are what a repair
+    # wants to see first, ahead of a nav full of links.
+    docs.sort(key=lambda d: 0 if d.date_text else 1)
     return docs
 
 
@@ -796,6 +891,9 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
             if "json" not in ct and "pdf" not in ct:
                 return
             entry = {"url": redact(url)[:200], "status": res.status, "type": ct[:40]}
+            q = _safe_query(url)
+            if q:
+                entry["query"] = q[:240]
             if "json" in ct:
                 try:
                     entry["shape"] = _shape(res.json())
@@ -813,12 +911,12 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
         report["pages"].append(start)
         followed = 0
         for c in start["controls"]:
-            if followed >= max_follow or c["role"] != "link" or not c["survey"]:
+            if followed >= max_follow or c["role"] not in ("link", "button") or not c["survey"]:
                 continue
             if not is_safe_control(c["text"]):
                 continue
             try:
-                link = page.get_by_role("link", name=re.compile(
+                link = page.get_by_role(c["role"], name=re.compile(
                     "^" + re.escape(c["text"].replace("#", "")) + "$", re.I)).first
                 if link.count() == 0:
                     continue
