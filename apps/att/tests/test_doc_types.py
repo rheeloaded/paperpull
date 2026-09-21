@@ -191,3 +191,61 @@ def test_a_url_in_the_survey_loses_its_query_string():
         "https://www.att.com/acctmgmt/overview?..."
     assert site.redact("see https://www.att.com/a?b=c and https://www.att.com/d") == \
         "see https://www.att.com/a?... and https://www.att.com/d"
+
+
+# -- round three, from the second survey ------------------------------------
+
+def test_the_history_api_answer_gives_every_bill_its_date_and_hint():
+    """content.historyList[] of {type, displayDate, cycleStartDate,
+    cycleEndDate, statementId, invoiceIndex, ...}, the shape the second
+    survey recorded. Payments are left out, the id rides as the hint."""
+    body = {"content": {"accountNumber": "x", "billFound": True, "historyList": [
+        {"type": "Bill", "displayDate": "Aug 22, 2026", "cycleStartDate": "07/23/2026",
+         "cycleEndDate": "08/22/2026", "statementId": "S1", "invoiceIndex": "3"},
+        {"type": "Payment", "displayDate": "Aug 10, 2026", "cycleEndDate": "", "statementId": ""},
+        {"type": "Bill", "displayDate": "Jul 22, 2026", "cycleStartDate": "2026-06-23",
+         "cycleEndDate": "2026-07-22", "statementId": "S2", "invoiceIndex": "2"},
+        {"type": "Bill", "displayDate": "Jun 22, 2026", "statementId": "S3"},
+    ]}}
+    got = site._history_from_api(body)
+    assert [(b["date"], b["hint"], b["start"]) for b in got] == [
+        ("2026-08-22", "S1|3", "2026-07-23"), ("2026-07-22", "S2|2", "2026-06-23"), ("2026-06-22", "S3|", "")]
+    assert site._history_from_api({}) == [] and site._history_from_api({"content": {}}) == []
+
+
+def test_bill_buttons_without_a_year_step_the_year_back_across_january():
+    """"Bill / Jul 23 - Aug 22 / $xx.xx". The newest takes this year, and
+    each older one goes back a year whenever its month is later than the
+    one before it."""
+    iso, prev = site._period_end("Bill\nJan 23 - Feb 22\n$10.00", 2026, None)
+    assert (iso, prev) == ("2026-02-22", 2)
+    iso, prev = site._period_end("Bill\nDec 23 - Jan 22\n$10.00", 2026, 2)
+    assert (iso, prev) == ("2026-01-22", 1)
+    iso, prev = site._period_end("Bill\nNov 23 - Dec 22\n$10.00", 2026, 1)
+    assert (iso, prev) == ("2025-12-22", 12)
+    assert site._period_end("Bill\nno dates here", 2026, 12) == (None, 12)
+
+
+def test_the_two_pdf_buttons_are_allowed_and_see_bill_history_is_not_a_bill():
+    for text in ("Download PDF", "View/print PDF"):
+        assert site.PDF_BUTTON_RE.match(text), text
+        assert site.is_safe_control(text), text
+    assert not site.PDF_BUTTON_RE.match("Download bill & payment info")
+    # Round two clicked this instead of Download PDF. It is navigation.
+    assert not site.BILL_CONTROL_RE.search("See bill history")
+    assert site.BILL_CONTROL_RE.search("View bill") and site.BILL_CONTROL_RE.search("Download PDF")
+    # The history page's bill buttons pass the guard, the account picker does not matter.
+    assert site.is_safe_control("Bill\nJul 23 - Aug 22\n$xx.xx")
+    assert site.BILL_BUTTON_RE.match("Bill\nJul 23 - Aug 22\n$xx.xx")
+
+
+def test_the_history_page_counts_as_billing_and_its_api_is_recognized():
+    assert site._looks_like_billing(_Page("https://www.att.com/acctmgmt/billing/billandpaymenthistory?filter=bill", bill_controls=0))
+    assert site.HISTORY_API_RE.search("https://www.att.com/msapi/webbillexpms/v1/billandpaymenthistory")
+    assert not site.HISTORY_API_RE.search("https://www.att.com/msapi/webbillexpms/v1/billandpaymenthistorygraph")
+    assert site.HISTORY_URL.startswith("https://www.att.com/acctmgmt/billing/billandpaymenthistory")
+
+
+def test_download_bill_takes_a_hint_and_a_trace():
+    params = inspect.signature(site.download_bill).parameters
+    assert "hint" in params and "trace" in params

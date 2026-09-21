@@ -2,10 +2,29 @@
 
 When AT&T changes its site, repair this file only.
 
-STATUS: UNVERIFIED. This app was written without an AT&T account, from what
-is publicly known about myAT&T, so that someone who holds an account can
-test it without writing code. Nothing below has run against the live
-signed-in site. What it does on a first run is deliberately cautious:
+STATUS: UNVERIFIED, round three. Written without an AT&T account and
+repaired from two surveys a tester sent (#26). What the surveys showed:
+
+  * Sign-in lands on /acctmgmt/overview, a shop page. The nav's Billing
+    link goes to /acctmgmt/billing/mybillingcenter, which shows the
+    current bill with "View/print PDF" and "Download PDF" buttons, an
+    account picker (the tester holds wireless and fiber), and a "See bill
+    history" link to /acctmgmt/billing/billandpaymenthistory?filter=bill.
+  * The history page lists past bills as buttons reading "Bill / Jul 23 -
+    Aug 22 / $amount", and while it loads the page calls its own API,
+    /msapi/webbillexpms/v1/billandpaymenthistory, whose answer is
+    content.historyList[] of {type, displayDate, cycleStartDate,
+    cycleEndDate, statementId, invoiceIndex, ...}, sixteen entries.
+  * Round two's pilot recognized only the current bill and clicked "See
+    bill history" instead of "Download PDF" beside it.
+
+  So discovery now reads the history API as the page loads it, passively,
+  and falls back to the bill buttons. A download opens the history page,
+  clicks the bill's own button, then the "Download PDF" it reveals, and
+  catches what arrives. The current bill is downloaded from the billing
+  center's own button. Only the account in focus is read this round.
+
+  What it does on a first run is deliberately cautious:
 
   * --login opens a real Edge or Chrome, since att.com runs Akamai bot
     protection that walls the Playwright build of Chromium.
@@ -54,6 +73,17 @@ BILLING_CANDIDATES = [
     f"{BASE}/acctmgmt/billing/mybillingcenter",
     f"{BASE}/acctmgmt/overview",
 ]
+# The bill history, read off the billing center's "See bill history" link
+# in the second survey, and the API the page calls to fill it.
+HISTORY_URL = f"{BASE}/acctmgmt/billing/billandpaymenthistory?filter=bill"
+HISTORY_API_RE = re.compile(r"/msapi/webbillexpms/v1/billandpaymenthistory\b", re.I)
+# The two buttons that fetch a bill's PDF, exact text from the survey.
+PDF_BUTTON_RE = re.compile(r"^\s*(download\s+pdf|view\s*/\s*print\s+pdf)\s*$", re.I)
+# A past bill on the history page, "Bill\nJul 23 - Aug 22\n$xx.xx".
+BILL_BUTTON_RE = re.compile(r"^\s*bill\s", re.I)
+_PERIOD_RE = re.compile(
+    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})\s*[-\u2013]\s*"
+    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})", re.I)
 # The nav link that leads to the billing center, followed when the
 # candidates land somewhere else. GUESS at nothing, this is its exact text.
 BILLING_NAV_RE = re.compile(r"^\s*(billing|bill\s*&\s*payments?|bill\s+history)\s*$", re.I)
@@ -98,6 +128,7 @@ SAFE_DOC_CONTROL_RE = re.compile(
 # A control that fetches one bill. GUESS at the wording, wide on purpose.
 # "Download bill (PDF)", "View bill", "Print bill", "See bill", "Bill PDF".
 BILL_CONTROL_RE = re.compile(
+    r"^(?!.*\bhistory\b).*?"
     r"((download|view|print|see|open|get)\s+(my\s+|the\s+|this\s+|your\s+|full\s+|"
     r"detailed\s+|past\s+)?(bill|statement|invoice)|"
     r"(bill|statement|invoice)\s*\(?\s*pdf\s*\)?|\bpdf\b)", re.I)
@@ -319,7 +350,7 @@ def _looks_like_billing(page) -> bool:
     first, then the page has to show more than one bill control or the
     words of a bill history."""
     url = (page.url or "").lower()
-    if "/billing/" in url or "billhistory" in url or "/bill/" in url:
+    if "/billing/" in url or "billhistory" in url or "/bill/" in url or "billandpaymenthistory" in url:
         return True
     if "/overview" in url:
         return False
@@ -445,11 +476,123 @@ _ROW_OF_JS = r"""el => {
 }"""
 
 
+def _history_from_api(body: dict) -> List[dict]:
+    """The bills in one billandpaymenthistory answer, as {date, hint,
+    period}. A payment row, if the filter ever lets one through, is left
+    out. The statement id and invoice index ride along as the download
+    hint. They name a bill, not a person."""
+    out = []
+    content = (body or {}).get("content") or {}
+    for e in content.get("historyList") or []:
+        if not isinstance(e, dict):
+            continue
+        kind = str(e.get("type") or "")
+        if re.search(r"pay", kind, re.I) and not re.search(r"bill", kind, re.I):
+            continue
+        iso = parse_date(str(e.get("cycleEndDate") or "")) or parse_date(str(e.get("displayDate") or ""))
+        if not iso:
+            continue
+        hint = "|".join(str(e.get(k) or "") for k in ("statementId", "invoiceIndex"))
+        start = parse_date(str(e.get("cycleStartDate") or ""))
+        out.append({"date": iso, "hint": hint, "start": start or ""})
+    return out
+
+
+def _period_end(text: str, newest_year: int, prev_month: Optional[int]) -> Tuple[Optional[str], Optional[int]]:
+    """The end date of "Jul 23 - Aug 22" as ISO. The buttons carry no year,
+    so the newest bill takes this year, or last year when its month has
+    not come yet, and each older one steps the year back whenever its
+    month is later than the one before it."""
+    m = _PERIOD_RE.search(text or "")
+    if not m:
+        return None, prev_month
+    month = _MONTHS[m.group(3)[:3].lower()]
+    day = int(m.group(4))
+    year = newest_year
+    if prev_month is not None and month > prev_month:
+        year -= 1
+    return f"{year:04d}-{month:02d}-{day:02d}", month
+
+
+def _history_from_buttons(page) -> List[dict]:
+    """The history page's own bill buttons, when the API was not seen."""
+    from datetime import date as _date
+    out = []
+    today = _date.today()
+    year = today.year
+    prev = None
+    try:
+        loc = page.get_by_role("button", name=BILL_BUTTON_RE)
+        for i in range(min(loc.count(), 60)):
+            text = (loc.nth(i).inner_text(timeout=800) or "").strip()
+            if not _PERIOD_RE.search(text):
+                continue
+            if prev is None:
+                first = _MONTHS[_PERIOD_RE.search(text).group(3)[:3].lower()]
+                if first > today.month:
+                    year -= 1
+            iso, prev = _period_end(text, year, prev)
+            if iso:
+                year = int(iso[:4])
+                out.append({"date": iso, "hint": "", "start": ""})
+    except Exception as e:
+        log.info("history buttons: %s", e)
+    return out
+
+
+def goto_history(page, capture: Optional[list] = None) -> bool:
+    """Open the bill history page. While it loads, the API answer that
+    fills it is caught and appended to `capture`, so discovery never has
+    to know how the page asks for it."""
+    def on_response(res):
+        try:
+            url = res.url or ""
+            if capture is not None and is_safe_url(url) and HISTORY_API_RE.search(url):
+                capture.append(res.json())
+        except Exception:
+            pass
+    page.on("response", on_response)
+    try:
+        page.goto(HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
+        for _ in range(20):
+            page.wait_for_timeout(500)
+            if capture:
+                break
+        page.wait_for_timeout(1500)
+    except Exception as e:
+        log.info("goto history failed: %s", e)
+    finally:
+        try:
+            page.remove_listener("response", on_response)
+        except Exception:
+            pass
+    dismiss_overlay(page)
+    return is_safe_url(page.url or "") and not looks_signed_out(page) \
+        and "billandpaymenthistory" in (page.url or "")
+
+
 def collect_download_docs(page) -> List[RawDoc]:
-    """Read every bill the history page offers. Each bill control's own
-    name, or the row it sits in, carries the bill date."""
+    """Every bill the account in focus has. The history API as the page
+    loads it, else the history page's bill buttons, else the bill
+    controls wherever they sit on the page, the way round two read them."""
     docs: List[RawDoc] = []
     seen = set()
+    bodies: list = []
+    if goto_history(page, bodies):
+        bills = []
+        for body in bodies:
+            bills.extend(_history_from_api(body))
+        if not bills:
+            bills = _history_from_buttons(page)
+        for b in bills:
+            if b["date"] in seen:
+                continue
+            seen.add(b["date"])
+            disp = _human_date(b["date"])
+            docs.append(RawDoc(title=f"Monthly Statement - {disp}", date_text=b["date"],
+                               href=b["hint"], text=f"AT&T Bill {disp}", kind="statement"))
+        if docs:
+            return docs
     expand_all(page)
     scroll_full_page(page)
     ctrls = _bill_controls(page)
@@ -518,50 +661,61 @@ def _fetch_pdf(page, href: str) -> Optional[bytes]:
     return body if body[:5] == b"%PDF-" else None
 
 
-def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
-    """Save the bill dated `iso_date`. A PDF link on the row is fetched
-    from inside the page. Otherwise the row's own control is clicked, once
-    it has passed the guard, and whichever the site produces is caught, a
-    download event or a PDF response, in this tab or one it opens.
-
-    `dl_dir` is unused, kept for parity with the shared orchestrator."""
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    if not goto_documents(page):
-        log.info("could not open bill history for %s", iso_date)
-        return False
-    expand_all(page)
-
-    el, label = _control_for(page, iso_date)
-    if el is None:
-        log.info("no bill control found for %s", iso_date)
-        return False
-    if not is_safe_control(label):
-        log.info("refusing unsafe control %r for %s", label, iso_date)
-        return False
-
+def _bill_button_for(page, iso_date: str):
+    """The history page's button for the bill whose period ends on
+    `iso_date`, matched on "Mon d" since the buttons carry no year, or
+    None. Two bills a year apart share the text, so the first match
+    walking newest to oldest is taken for the newer date."""
     try:
-        href = el.get_attribute("href") or ""
-    except Exception:
-        href = ""
-    if href and PDF_HREF_RE.search(href):
-        from urllib.parse import urljoin
-        body = _fetch_pdf(page, urljoin(page.url, href))
-        if body:
-            out_path.write_bytes(body)
-            return True
+        y, m, d = iso_date.split("-")
+        want = f"{_MONTH_NAMES[int(m) - 1][:3]} {int(d)}"
+        loc = page.get_by_role("button", name=BILL_BUTTON_RE)
+        for i in range(min(loc.count(), 60)):
+            el = loc.nth(i)
+            text = (el.inner_text(timeout=800) or "").strip()
+            pm = _PERIOD_RE.search(text)
+            if pm and f"{pm.group(3)[:3].title()} {int(pm.group(4))}" == want:
+                return el, text
+    except Exception as e:
+        log.info("bill button lookup failed: %s", e)
+    return None, ""
 
-    # The click. A PDF can arrive as a download event, as a response in
-    # this tab, or in a new tab the control opens. All three are watched,
-    # at the context level so a new tab is covered too.
+
+def _pdf_button(page):
+    """The "Download PDF" or "View/print PDF" button on the page, once it
+    has passed the guard, or None."""
+    for pat in (re.compile(r"^\s*download\s+pdf\s*$", re.I), PDF_BUTTON_RE):
+        try:
+            loc = page.get_by_role("button", name=pat).or_(page.get_by_role("link", name=pat))
+            for i in range(min(loc.count(), 6)):
+                el = loc.nth(i)
+                label = (el.inner_text(timeout=800) or el.get_attribute("aria-label") or "").strip()
+                if is_safe_control(label) and el.is_visible():
+                    return el, label
+        except Exception:
+            continue
+    return None, ""
+
+
+def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None) -> bool:
+    """Click `el` and save whatever PDF the site produces, a download
+    event, a PDF response in this tab, or a new tab. `trace` collects the
+    att.com JSON and PDF responses seen meanwhile, URL cut at the query,
+    so a failed attempt tells the next round what the button called."""
     ctx = page.context
     got: dict = {}
 
     def on_response(res):
         try:
-            if got or not is_safe_url(res.url or ""):
+            url = res.url or ""
+            if not is_safe_url(url):
                 return
-            if "pdf" in (res.headers.get("content-type") or "").lower():
+            ct = (res.headers.get("content-type") or "").lower()
+            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
+                trace.append({"status": res.status, "type": ct[:40], "url": redact(url)[:160]})
+            if got:
+                return
+            if "pdf" in ct or "octet" in ct:
                 body = res.body()
                 if body[:5] == b"%PDF-":
                     got["body"] = body
@@ -591,7 +745,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
         if got:
             out_path.write_bytes(got["body"])
             return True
-        log.info("click on %r produced no PDF for %s", label, iso_date)
+        log.info("click on %r produced no PDF", label)
         return False
     finally:
         try:
@@ -603,6 +757,66 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
                 extra.close()
             except Exception:
                 pass
+
+
+def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
+                  trace: Optional[list] = None) -> bool:
+    """Save the bill whose period ends on `iso_date`. The history page's
+    button for that bill is clicked, which shows the bill, then the
+    "Download PDF" it reveals, and whatever arrives is caught. When the
+    history has no button for it (the current bill lives on the billing
+    center), the billing center's own "Download PDF" is used, provided the
+    bill shown there carries this date. Nothing else is ever clicked.
+
+    `dl_dir` is unused, kept for parity with the shared orchestrator."""
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if goto_history(page):
+        el, label = _bill_button_for(page, iso_date)
+        if el is not None and is_safe_control(label):
+            try:
+                el.scroll_into_view_if_needed(timeout=4000)
+                el.click(timeout=5000)
+                page.wait_for_timeout(3000)
+                dismiss_overlay(page)
+            except Exception as e:
+                log.info("bill button click failed for %s: %s", iso_date, e)
+            btn, blabel = _pdf_button(page)
+            if btn is not None:
+                if _catch_pdf(page, btn, blabel, out_path, trace):
+                    return True
+            else:
+                log.info("no Download PDF after opening the bill for %s", iso_date)
+                if trace is not None:
+                    trace.append({"note": "no Download PDF button after the bill button",
+                                  "url": redact(page.url or "")[:160]})
+
+    # The current bill, on the billing center.
+    if not goto_documents(page):
+        log.info("could not open the billing center for %s", iso_date)
+        return False
+    dismiss_overlay(page)
+    try:
+        body = page.locator("body").inner_text(timeout=5000)
+    except Exception:
+        body = ""
+    shown = set()
+    for m in re.finditer(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}", body, re.I):
+        iso = parse_date(m.group(0))
+        if iso:
+            shown.add(iso)
+    btn, blabel = _pdf_button(page)
+    if btn is None:
+        log.info("no Download PDF on the billing center for %s", iso_date)
+        return False
+    if shown and iso_date not in shown:
+        log.info("the billing center shows %s, not %s, so its PDF is not this bill",
+                 sorted(shown)[-1], iso_date)
+        if trace is not None:
+            trace.append({"note": "billing center shows other dates", "dates": sorted(shown)[-3:]})
+        return False
+    return _catch_pdf(page, btn, blabel, out_path, trace)
 
 
 # ---------------------------------------------------------------------------
