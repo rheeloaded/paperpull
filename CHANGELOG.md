@@ -7,6 +7,32 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **E*TRADE, round two, from the first survey.** The Documents page is
+  `/etx/pxy/accountdocs`, a list with a type filter, a date filter that
+  defaults to the last 90 days, a Download button and pagination, fed by
+  an API on ext-web.etrade.com whose answer carries each document's
+  guid, type, title, date and account. The documents page is the first
+  route, the Tax Center the second, and discovery reads the API answer
+  as the page loads it, within the page's own default window for now.
+  [#36](https://github.com/rheeloaded/paperpull/issues/36).
+- **Newrez, round two, from the first survey.** Sign-in lands on a
+  dashboard with "Access My Loan" and "Account Details" and no statements
+  on it, and the route guesses went back there. The loan servicer's guard
+  refused "Access My Loan" for the word loan, which on this site is the
+  noun of everything, so only applying for, getting or taking out a loan
+  is refused now, and the survey follows those two controls.
+  [#38](https://github.com/rheeloaded/paperpull/issues/38).
+- **Three things every scaffold's survey does better.** It follows
+  buttons as well as links, since two sites put the documents behind a
+  button. It records the names of a JSON call's query parameters, and a
+  value only when it is a plain word such as `docType=STATEMENT`, never
+  an id, a token or a number, which is what a repair needs to make the
+  same call with a wider filter. And its row samples put rows that carry
+  a date first, ahead of a nav full of links.
+
 ## [0.28.2] - 2026-09-20
 
 ### Fixed

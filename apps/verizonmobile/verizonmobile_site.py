@@ -221,6 +221,31 @@ def _human_date(iso: str) -> str:
 _QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
 
 
+_WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
+
+
+def _plain_word(v: str) -> bool:
+    """"STATEMENT", "LAST_90_DAYS", not an id, a token or a number."""
+    return bool(_WORD_VALUE_RE.match(v)) and sum(ch.isdigit() for ch in v) <= 3
+
+
+def _safe_query(url: str) -> str:
+    """A URL's query parameters, names always, values only when they are
+    plain words ("docType=STATEMENT", "range=LAST_90_DAYS"). A value with
+    a digit, a token, an id, anything long, is "...". This is what a
+    repair needs to make the same call with a wider filter, and nothing
+    else."""
+    from urllib.parse import urlsplit, parse_qsl
+    try:
+        pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    except ValueError:
+        return ""
+    out = []
+    for k, v in pairs[:20]:
+        out.append("%s=%s" % (k[:30], v if _plain_word(v) else "..."))
+    return "&".join(out)
+
+
 def redact(text: str) -> str:
     """Runs of six or more digits become #, so an account or phone number
     in a URL, a heading or a link never reaches the survey file, and a URL
@@ -724,6 +749,9 @@ def collect_documents(page) -> List[RawDoc]:
         seen.add(key)
         docs.append(RawDoc(title=re.sub(r"\s+", " ", title), date_text=date_text,
                            href=href, text=text[:400], row_index=i))
+    # A row with a date is a document row, and those are what a repair
+    # wants to see first, ahead of a nav full of links.
+    docs.sort(key=lambda d: 0 if d.date_text else 1)
     return docs
 
 
@@ -801,6 +829,9 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
             if "json" not in ct and "pdf" not in ct:
                 return
             entry = {"url": redact(url)[:200], "status": res.status, "type": ct[:40]}
+            q = _safe_query(url)
+            if q:
+                entry["query"] = q[:240]
             if "json" in ct:
                 try:
                     entry["shape"] = _shape(res.json())
@@ -818,12 +849,12 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
         report["pages"].append(start)
         followed = 0
         for c in start["controls"]:
-            if followed >= max_follow or c["role"] != "link" or not c["survey"]:
+            if followed >= max_follow or c["role"] not in ("link", "button") or not c["survey"]:
                 continue
             if not is_safe_control(c["text"]):
                 continue
             try:
-                link = page.get_by_role("link", name=re.compile(
+                link = page.get_by_role(c["role"], name=re.compile(
                     "^" + re.escape(c["text"].replace("#", "")) + "$", re.I)).first
                 if link.count() == 0:
                     continue
