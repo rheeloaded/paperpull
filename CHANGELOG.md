@@ -7,6 +7,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **SMUD, round two, from the first survey.** The dashboard's BILLING
+  HISTORY link goes to `/manage/billing`, a table of two years of bills
+  with a View link (an HTML bill page) and a Download link per row, and
+  older bills sit on `/manage/billing/archive`. The Download link goes to
+  SMUD's bill vendor on i-doxs.net, so that host is in the allowlist.
+  The billing page is the first route now, the archive is read after it,
+  and a row's Download wins over its View.
+  [#34](https://github.com/rheeloaded/paperpull/issues/34).
+- **State Farm, round two, from the first survey.** Sign-in lands on My
+  Accounts at my.statefarm.com, and the first round's customer-care
+  route landed on a contact page. Documents live in the Document Center
+  on edocuments.statefarm.com, bills in the Payment Center on
+  financials.statefarm.com. The Document Center is the first route, the
+  survey follows "View documents & PDFs", "Documents (excludes claims)"
+  and the ID card link, and the word claims inside that documents link no
+  longer trips the guard.
+  [#37](https://github.com/rheeloaded/paperpull/issues/37).
+- **A survey never carries the person's name.** "Welcome, NAME" on a
+  dashboard button reached a survey file. Every scaffold's survey now
+  masks the name after a greeting.
+
 ## [0.28.1] - 2026-09-20
 
 ### Fixed

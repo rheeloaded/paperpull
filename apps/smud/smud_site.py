@@ -2,8 +2,8 @@
 
 When SMUD changes its site, repair this file only.
 
-STATUS: UNVERIFIED. This app was written without an SMUD account, from
-what is publicly known about the site, so that someone who holds one can
+STATUS: UNVERIFIED, round two, repaired from the first survey (#34). Written
+without an SMUD account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
 
@@ -48,17 +48,20 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 log = logging.getLogger("smud_docs.site")
 
 BASE = "https://myaccount.smud.org"
-# GUESS. SMUD's My Account is myaccount.smud.org, sign-in at
-# /signin/index. Past bills are expected on a billing history page,
-# with the dashboard as the fallback since its nav names the real one.
+# Read off the first survey (#34, 2026-09-20). Sign-in lands on the
+# dashboard, whose BILLING HISTORY link goes to /manage/billing, a table
+# of two years of bills with a View link (an HTML bill page) and a
+# Download link per row. Download goes to SMUD's bill vendor on
+# i-doxs.net, which is why that host is in the allowlist. Older bills
+# sit on /manage/billing/archive, read after the main page.
 BILLING_CANDIDATES = [
-    f"{BASE}/billing/history",
-    f"{BASE}/billing",
-    f"{BASE}/dashboard",
+    f"{BASE}/manage/billing",
+    f"{BASE}/manage/residential/dashboard",
 ]
+ARCHIVE_URL = f"{BASE}/manage/billing/archive"
 BILLING_URL = BILLING_CANDIDATES[0]
 URLS = {
-    "home": f"{BASE}/dashboard",
+    "home": f"{BASE}/manage/residential/dashboard",
     "login": BILLING_URL,
     "documents": BILLING_URL,
     "statements": BILLING_URL,
@@ -150,6 +153,10 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
 _ID_RE = re.compile(r"\d{6,}")
+# "Welcome, JOHN", "Hi Jane", "Good evening, Sam": a greeting names the
+# person, and a survey has no use for the name.
+_GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
+                          r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)?", re.I)
 
 
 def _last_day(year: int, month: int) -> int:
@@ -213,6 +220,7 @@ def redact(text: str) -> str:
     loses its query string, which is where a site keeps session details
     the survey has no use for."""
     text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
+    text = _GREETING_RE.sub(lambda m: m.group(1) + " [name]", text)
     return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
 
 
@@ -495,10 +503,30 @@ _ROW_OF_JS = r"""el => {
 
 
 def collect_download_docs(page) -> List[RawDoc]:
-    """Read every statement and tax document the page offers. Each
-    control's own name, or the row it sits in, carries the date."""
+    """Every bill on the billing history, then on the archive page, each
+    dated by its row. The billing page is left open at the end."""
     docs: List[RawDoc] = []
-    seen = set()
+    seen: set = set()
+    _read_bill_rows(page, docs, seen)
+    try:
+        page.goto(ARCHIVE_URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(4000)
+        dismiss_overlay(page)
+        if is_safe_url(page.url or "") and not looks_signed_out(page):
+            _read_bill_rows(page, docs, seen)
+    except Exception as e:
+        log.info("archive page: %s", e)
+    try:
+        page.goto(BILLING_URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)
+    except Exception:
+        pass
+    return docs
+
+
+def _read_bill_rows(page, docs: List[RawDoc], seen: set) -> None:
+    """The bills on the page that is open, one per row, appended to
+    `docs`. A row has a View and a Download control that share a date."""
     expand_all(page)
     scroll_full_page(page)
     ctrls = _bill_controls(page)
@@ -526,19 +554,17 @@ def collect_download_docs(page) -> List[RawDoc]:
             continue
         seen.add(iso)
         disp = _human_date(iso)
-        tax = bool(re.search(r"1099|1098|5498|tax", name + " " + row_text, re.I))
-        kind_title = "Tax Document" if tax else "Account Statement"
-        docs.append(RawDoc(title=f"{kind_title} - {disp}", date_text=iso,
+        docs.append(RawDoc(title=f"Monthly Statement - {disp}", date_text=iso,
                            href=href if PDF_HREF_RE.search(href or "") else "",
-                           text=f"SMUD {kind_title} {disp}", row_index=i,
-                           kind="tax" if tax else "statement"))
-    return docs
+                           text=f"SMUD Bill {disp}", row_index=i, kind="statement"))
 
 
 def _control_for(page, iso: str):
-    """The control for the document dated `iso`, matched the same way
-    discovery found it, or None."""
+    """The control for the bill dated `iso`, matched the same way
+    discovery found it, or None. A row carries View (an HTML page) and
+    Download (the PDF), and Download wins."""
     ctrls = _bill_controls(page)
+    fallback = (None, "")
     for i in range(ctrls.count()):
         el = ctrls.nth(i)
         try:
@@ -552,8 +578,11 @@ def _control_for(page, iso: str):
             except Exception:
                 found = None
         if found == iso:
-            return el, name
-    return None, ""
+            if re.search(r"download|pdf", name, re.I):
+                return el, name
+            if fallback[0] is None:
+                fallback = (el, name)
+    return fallback
 
 
 def _fetch_pdf(page, href: str) -> Optional[bytes]:
@@ -586,6 +615,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
     expand_all(page)
 
     el, label = _control_for(page, iso_date)
+    if el is None:
+        # An older bill lives on the archive page.
+        try:
+            page.goto(ARCHIVE_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(4000)
+            dismiss_overlay(page)
+            expand_all(page)
+            el, label = _control_for(page, iso_date)
+        except Exception as e:
+            log.info("archive page for %s: %s", iso_date, e)
     if el is None:
         log.info("no document control found for %s", iso_date)
         return False
@@ -842,7 +881,9 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
 # Host allowlist. Parsed, never a string prefix, so a lookalike host cannot
 # walk through.
 # ---------------------------------------------------------------------------
-ALLOWED_HOSTS = {"smud.org"}
+# i-doxs.net is the bill vendor the Download links point at, seen in the
+# first survey. Every bill PDF is served from there.
+ALLOWED_HOSTS = {"smud.org", "i-doxs.net"}
 
 
 def is_safe_url(url: str) -> bool:
