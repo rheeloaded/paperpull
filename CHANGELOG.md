@@ -10,6 +10,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **PG&E read the first page of its history seven times.** The Jump to
+  page picker was clicked, the app slept a second and a half, and read
+  the table, which still showed the page before. A seven-page history
+  came back as 28 rows and 4 bills, every bill filed under page 7, and
+  nothing found there at download time. A jump now counts only once the
+  picker reads the target and the rows have changed, discovery keeps a
+  bill's first sighting and stops when a page repeats the one before it
+  rather than reading it again under a new number, and a download looks
+  for its bill on the page it was seen on and then on every other page.
+  Found by watling777 in [#33](https://github.com/rheeloaded/paperpull/issues/33).
 - **E*TRADE, round two, from the first survey.** The Documents page is
   `/etx/pxy/accountdocs`, a list with a type filter, a date filter that
   defaults to the last 90 days, a Download button and pagination, fed by

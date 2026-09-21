@@ -152,3 +152,86 @@ def test_the_history_page_is_the_only_place_that_counts_as_found():
     assert not site.on_documents_page(Page("https://evil.test/bill-and-payment-history"))
     assert not site.on_documents_page(Page(
         "https://myaccount.pge.com/myaccount/s/bill-and-payment-history", "Page Not Found"))
+
+
+# -- #33, a page jump that did not take ---------------------------------------
+
+class _Row:
+    def __init__(self, text): self._text = text
+    def inner_text(self, timeout=None): return self._text
+    def query_selector_all(self, sel): return [_Ctl("Pay"), _Ctl("View Bill PDF")]
+
+
+class _Ctl:
+    def __init__(self, text): self._text = text
+    def inner_text(self, timeout=None): return self._text
+    def get_attribute(self, name): return None
+
+
+class _Picker:
+    """The Jump to combobox. `sticky` is the site as the tester saw it: the
+    picker takes the value, the table never follows."""
+    def __init__(self, history, pages, sticky):
+        self.history, self.pages, self.sticky, self.value, self.shown = history, pages, sticky, 1, 1
+    def evaluate(self, js):
+        return self.pages if "options" in js else self.value
+    def click(self): pass
+    def inner_text(self, timeout=None): return str(self.value)
+    def get_attribute(self, name): return "Jump to" if name == "aria-label" else None
+
+
+class _Opt:
+    def __init__(self, picker, n): self.picker, self.n = picker, n
+    def inner_text(self, timeout=None): return str(self.n)
+    def get_attribute(self, name): return None
+    def click(self):
+        self.picker.value = self.n
+        if not self.picker.sticky:
+            self.picker.shown = self.n
+
+
+class _History:
+    def __init__(self, pages_of_dates, sticky=False):
+        self.by_page = pages_of_dates
+        self.picker = _Picker(self, list(range(1, len(pages_of_dates) + 1)), sticky)
+    def query_selector(self, sel):
+        return self.picker if "combobox" in sel and "combobox-item" not in sel else None
+    def query_selector_all(self, sel):
+        if "combobox-item" in sel or "option" in sel:
+            return [_Opt(self.picker, n) for n in self.picker.pages]
+        return [_Row("%s View Bill PDF Pay" % d) for d in self.by_page[self.picker.shown - 1]]
+    def wait_for_timeout(self, ms): pass
+
+
+PAGES = [["08/20/2026", "07/21/2026", "06/21/2026", "05/21/2026"],
+         ["04/21/2026", "03/21/2026", "02/20/2026", "01/21/2026"],
+         ["12/20/2025", "11/20/2025", "10/21/2025", "09/20/2025"]]
+
+
+def test_a_jump_that_does_not_take_is_reported_not_read_again(monkeypatch):
+    """The tester's history had 7 pages and discovery reported 28 rows and
+    4 bills, the first page read seven times, every bill filed under page
+    7, and nothing found there at download time."""
+    monkeypatch.setattr(site, "get_pagination_pages", lambda page: page.picker.pages)
+    got = site.collect_download_docs(_History(PAGES, sticky=True))
+    assert [d["date_text"] for d in got] == ["2026-08-20", "2026-07-21", "2026-06-21", "2026-05-21"]
+    assert {d["page_number"] for d in got} == {1}, "a bill is filed where it was seen, never where a jump claimed to be"
+
+
+def test_a_jump_that_takes_reads_every_page_once(monkeypatch):
+    monkeypatch.setattr(site, "get_pagination_pages", lambda page: page.picker.pages)
+    got = site.collect_download_docs(_History(PAGES))
+    assert len(got) == 12
+    assert [d["page_number"] for d in got] == [1] * 4 + [2] * 4 + [3] * 4
+    assert got[4] == {"date_text": "2026-04-21", "title": "Energy Statement - 2026-04-21",
+                      "page_number": 2, "row_index": 0, "summary": "Energy Statement"}
+
+
+def test_a_bill_filed_under_the_wrong_page_is_still_found():
+    hist = _History(PAGES)
+    site.goto_page_number(hist, 3)
+    assert hist.picker.shown == 3
+    assert site._row_for_date(hist, "2025-11-20", 9) is not None
+    assert site._row_for_date(hist, "2026-08-20", 0) is None
+    site.goto_page_number(hist, 1)
+    assert site._row_for_date(hist, "2026-08-20", 0) is not None

@@ -325,8 +325,35 @@ def get_pagination_pages(page) -> List[int]:
     return [1]
 
 
+def _rows_signature(page) -> tuple:
+    """The dates of the rows on the page, in order, so a page that did not
+    change can be told from one that did."""
+    try:
+        rows = page.query_selector_all(FALLBACK["doc_row"])
+        return tuple(parse_date(r.inner_text() or "") for r in rows[:12])
+    except Exception:
+        return ()
+
+
+def _current_page(page) -> Optional[int]:
+    try:
+        cb = page.query_selector("lightning-combobox[aria-label='Jump to'], .pagination-block lightning-combobox")
+        if cb:
+            v = cb.evaluate("el => el.value")
+            return int(v) if str(v).isdigit() else None
+    except Exception:
+        pass
+    return None
+
+
 def goto_page_number(page, target_page: int) -> bool:
-    """Navigate table to specified page number via Jump to combobox."""
+    """Navigate the table to `target_page` through the Jump to combobox,
+    and say so only once the table shows it. The picker's value has to
+    read the target, and the rows have to have changed from what they
+    were, before this returns True. Version one clicked the option,
+    slept a second and a half, and answered True while the table still
+    showed the page before (#33). Discovery then read page 1 seven times
+    and filed every bill under page 7."""
     try:
         cb = page.query_selector("lightning-combobox[aria-label='Jump to'], .pagination-block lightning-combobox")
         if not cb:
@@ -334,6 +361,7 @@ def goto_page_number(page, target_page: int) -> bool:
         curr_val = cb.evaluate("el => el.value")
         if curr_val == target_page or str(curr_val) == str(target_page):
             return True
+        before = _rows_signature(page)
         # The only two clicks outside a bill row. The picker must call itself
         # a page jump, and the option must be nothing but a page number, so a
         # combobox that turned into something else is left alone.
@@ -351,27 +379,49 @@ def goto_page_number(page, target_page: int) -> bool:
                     break
         if opt and is_page_option(control_label(opt), target_page):
             opt.click()
-            time.sleep(1.5)
-            return True
+            for _ in range(24):                     # up to twelve seconds
+                page.wait_for_timeout(500)
+                if _current_page(page) == target_page and _rows_signature(page) != before:
+                    page.wait_for_timeout(500)
+                    return True
+            log.info("page %d did not show after the jump (picker reads %s, rows %s)",
+                     target_page, _current_page(page),
+                     "unchanged" if _rows_signature(page) == before else "changed")
+            return _current_page(page) == target_page and _rows_signature(page) != before
     except Exception as e:
         log.debug(f"goto_page_number {target_page} failed: {e}")
     return False
 
 
 def collect_download_docs(page) -> List[dict]:
-    """Collect available billing statements across all pages from page DOM."""
-    results = []
+    """Every bill across every page of the history, each with the page and
+    row it was seen on. A bill seen twice keeps its first sighting, and a
+    page that shows the same rows as the page before it means the jump did
+    not take, so the walk stops there and says so rather than reading the
+    same page again under a new number."""
+    results: List[dict] = []
+    seen_dates = set()
     try:
         pages = get_pagination_pages(page)
+        last_sig = None
         for p_num in pages:
-            if len(pages) > 1:
-                goto_page_number(page, p_num)
+            if len(pages) > 1 and p_num != pages[0]:
+                if not goto_page_number(page, p_num):
+                    log.info("could not reach page %d of the history, stopping at %d bill(s)",
+                             p_num, len(results))
+                    break
+            sig = _rows_signature(page)
+            if sig and sig == last_sig:
+                log.info("page %d shows the same rows as the page before, stopping", p_num)
+                break
+            last_sig = sig
             rows = page.query_selector_all(FALLBACK["doc_row"])
             for idx, row in enumerate(rows):
                 text = row.inner_text() or ""
                 if "View Bill PDF" in text:
                     date_str = parse_date(text)
-                    if date_str:
+                    if date_str and date_str not in seen_dates:
+                        seen_dates.add(date_str)
                         results.append({
                             "date_text": date_str,
                             "title": f"Energy Statement - {date_str}",
@@ -380,10 +430,24 @@ def collect_download_docs(page) -> List[dict]:
                             "summary": "Energy Statement",
                         })
         if len(pages) > 1:
-            goto_page_number(page, 1)
+            goto_page_number(page, pages[0])
     except Exception as e:
         log.debug(f"Error collecting docs: {e}")
     return results
+
+
+def _row_for_date(page, want_date: str, idx: int):
+    """The bill row dated `want_date` on the page that is open. The row at
+    `idx` first, then every row, since rows move as bills post."""
+    rows = page.query_selector_all(FALLBACK["doc_row"])
+    order = ([rows[idx]] if 0 <= idx < len(rows) else []) + list(rows)
+    for row in order:
+        try:
+            if parse_date(row.inner_text() or "") == want_date:
+                return row
+        except Exception:
+            continue
+    return None
 
 
 def pick_document_control(candidates) -> Optional[object]:
@@ -404,27 +468,28 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
     try:
         idx = doc.get("row_index", -1)
         target_page = int(doc.get("page_number", 1))
-        if target_page > 1:
-            goto_page_number(page, target_page)
         link = None
         want_date = doc.get("date_text") or doc.get("date") or ""
 
-        # The row is found by its position from discovery, then checked
-        # against the bill's own date, so a row that shifted since (a new
-        # bill posted, a header row counted) cannot hand over the wrong PDF.
-        rows = page.query_selector_all(FALLBACK["doc_row"])
-        if 0 <= idx < len(rows):
-            row = rows[idx]
-            try:
-                row_text = row.inner_text() or ""
-            except Exception:
-                row_text = ""
-            if want_date and parse_date(row_text) != want_date:
-                log.info("row %d on page %d is dated %s, wanted %s",
-                         idx, target_page, parse_date(row_text) or "?", want_date)
-                row = None
+        # The row is found on the page discovery saw it on, by its date,
+        # and when it is not there (the page number was wrong, a bill
+        # posted since and everything moved down a page) every page of the
+        # history is walked until the date turns up.
+        row = None
+        pages = get_pagination_pages(page)
+        order = [target_page] + [p for p in pages if p != target_page]
+        for p_num in order:
+            if p_num != (_current_page(page) or pages[0]):
+                if not goto_page_number(page, p_num):
+                    continue
+            row = _row_for_date(page, want_date, idx if p_num == target_page else -1)
             if row is not None:
-                link = pick_document_control(row.query_selector_all("a, button"))
+                if p_num != target_page:
+                    log.info("bill %s is on page %d now, not %d", want_date, p_num, target_page)
+                target_page = p_num
+                break
+        if row is not None:
+            link = pick_document_control(row.query_selector_all("a, button"))
 
         # Fallback if the rows moved. Every View Bill PDF control on the page,
         # kept only if the row it sits in carries this bill's date.
