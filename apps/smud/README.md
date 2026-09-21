@@ -1,0 +1,62 @@
+# SMUD document downloader
+
+**Not yet tested against a real account.** This app was built without
+a SMUD electric account, so that someone who holds one can test it without
+writing code. It runs, its guards are tested, and every guess about
+smud.org is marked in `smud_site.py`. What it needs is a survey from a
+signed-in account, which the Diagnose button produces and which contains
+no personal data. The conversation is
+[issue #34](https://github.com/rheeloaded/paperpull/issues/34).
+
+Downloads your SMUD **monthly bills** as PDFs. Read-only,
+delete-safe, part of [PaperPull](../../README.md).
+
+## Help test it, no programming needed
+
+1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
+   and open the control panel.
+2. Click **add a provider** and tick **SMUD**. Pick it in the App list.
+3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+   Sign in yourself, answer any code it sends, and leave the window open.
+4. Click **more** under the buttons, then **Diagnose**. It reads the
+   documents page and writes `Diagnostics\diagnose-documents.json` in the
+   SMUD folder. It downloads nothing, clicks nothing but a documents
+   link, takes no screenshot, and masks any run of six or more digits.
+5. Open that file in Notepad and look through it. It should hold page
+   headings, the names of buttons and links, and the shape of the data the
+   page loads, no values. If anything in it looks personal, delete that
+   line.
+6. Attach the file to [issue #34](https://github.com/rheeloaded/paperpull/issues/34)
+   with a sentence about whether past bills are listed on the same page as the current one or behind a bill history link, and what the download control is called.
+7. When a new build is posted, click **Pilot** and say whether PDFs landed
+   in `Statements\`, then attach a fresh Diagnose file.
+
+Two or three rounds usually gets a provider working.
+
+## Setup, for a checkout
+
+```bat
+setup.bat                         REM one-time: venv + Playwright
+login.bat                         REM opens Edge or Chrome on port 9259, sign in yourself
+paperpull smud diagnose         REM the survey, for the maintainer
+paperpull smud pilot            REM once the site layer is confirmed
+```
+
+## How it is meant to work
+
+- **Real Edge or Chrome.** A utility portal is happiest in a real browser, so `login.bat` launches the browser already on the machine with a separate profile.
+- **You sign in** in that window. The tool reuses the signed-in tab.
+- **Billing history.** Discovery tries the billing routes on myaccount.smud.org in turn and takes the first that is not a sign-in page and looks like a bill list. Every control whose name says it fetches a bill ("View bill", "Download", "Bill PDF") is read, and the date comes from the control's name or the row it sits in.
+- **Downloads.** A row that links straight to a PDF is fetched from inside
+  the page with the session's own cookies. Otherwise the row's control is
+  clicked, once it has passed the guard, and whatever the site does, a
+  download event, a PDF response or a new tab, is caught and saved to
+  `Statements\`.
+- **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays, sets up autopay, enrolls in a program or a rate plan, starts, stops or moves service, requests an extension, or edits the account. A control must also look like a document action before it can be clicked.
+
+## Scope
+
+- Whatever the billing history lists. Utilities usually keep one to two years of bills online.
+- One service account per sign-in is assumed. If you have more than one, say so in the issue.
+- Delete-safe and multi-account like every PaperPull app
+  (`paperpull smud add-account NAME`).

@@ -7,6 +7,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Five providers built without accounts, for their requester to test.**
+  SMUD ([#34](https://github.com/rheeloaded/paperpull/issues/34)), Golden 1
+  Credit Union ([#35](https://github.com/rheeloaded/paperpull/issues/35)),
+  E*TRADE ([#36](https://github.com/rheeloaded/paperpull/issues/36)), State
+  Farm ([#37](https://github.com/rheeloaded/paperpull/issues/37)) and Newrez
+  ([#38](https://github.com/rheeloaded/paperpull/issues/38)), all requested
+  by the AT&T tester, who holds each account. Each is cut from the Wells
+  Fargo scaffold with its own routes, its own guard on top of the bank
+  words (a loan servicer's payoff and hardship words, a utility's start,
+  stop and move service, a brokerage's trade, buy, sell and order, an
+  insurer's claims, coverage and quotes), its own rules, tests and tester
+  guide. State Farm files ID cards, declarations and policy documents
+  under Insurance Documents. E*TRADE's provider string is ETRADE, since a
+  star is not a filename character. A trade confirmation and an insurer's
+  ID card pass the guard, a trade and a lost card do not. Every one is
+  marked untested everywhere a person would see it. Ports 9257 to 9261.
+
 ## [0.27.1] - 2026-09-20
 
 ### Fixed
