@@ -16,7 +16,7 @@ carry the attribution SignPath asks for.
 **The Microsoft Store edition is signed by the Store.** The same build
 produces an unsigned `.msix`, and the Store signs it with Microsoft's
 certificate on submission, so a Store install shows no warning. That
-edition costs $2.99 and is otherwise the same program.
+edition costs $9.99, one time, and is otherwise the same program.
 
 ## How a release is built
 

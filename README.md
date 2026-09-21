@@ -7,12 +7,21 @@
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rheeloaded)
 [![Website](https://img.shields.io/badge/website-paperpull.net-4c8dff)](https://paperpull.net)
 
-**Receipt & Statement Downloader** is a family of small, **read-only** tools that log in *alongside you* to your own
-accounts and download your **statements and receipts** as PDFs, so you can
-archive them (e.g. into [paperless-ngx](https://docs.paperless-ngx.com/)) instead
-of clicking through each site by hand.
+**Collect years of statements and receipts. Skip the endless downloading.**
 
-**Website:** [paperpull.net](https://paperpull.net), what it does, which providers, why it is safe, and the downloads.
+PaperPull retrieves the statement and receipt history your banks, cards,
+stores and utilities already hold, organizes it as PDFs on your own
+computer, and turns your purchases and transactions into spreadsheets. It
+is a family of small, **read-only** tools that sign in *alongside you*: you
+type the password and answer the two-factor prompt in a real browser
+window, and PaperPull reads what you can see. Free and open source, no
+account, no cloud. Made for archiving (into
+[paperless-ngx](https://docs.paperless-ngx.com/) or a folder of your own)
+instead of clicking through each site by hand.
+
+![The PaperPull control panel after a pilot run on a sample archive. Every name and amount is invented.](docs/panel.png)
+
+**Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html) and the [Paperless-ngx tutorial](https://paperpull.net/paperless.html). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon, Linux from source.
 
 **It also turns those PDFs into spreadsheets.** Your receipts become one
 long table of every item you have ever bought, across every store and every
@@ -32,8 +41,8 @@ to build it and to keep it working as sites change. If it saves you time, you ca
 appreciation and support future development by
 **[sponsoring on GitHub](https://github.com/sponsors/rheeloaded)** or
 **[donating on Ko-fi](https://ko-fi.com/rheeloaded)**, or by buying the
-**Microsoft Store edition** for $2.99, the same program with a signed
-installer and automatic updates. Or download it free from the
+**Microsoft Store edition** for $9.99, one time, the same program with a
+signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
@@ -378,10 +387,10 @@ will be shipped when someone needs it.
 
 **Two Windows editions, one program.** The GitHub release is free. The
 Microsoft Store edition is the same package from the same build, for
-$2.99, and what the price buys is convenience, a Store-signed package that
-installs with no warning, updates through the Store, and uninstalls
-cleanly. Nothing is held back from either edition, the same way paint.net
-does it. The AGPL permits selling copies and the source stays public. For macOS
+$9.99 one time, and what the price buys is convenience, a Store-signed
+package that installs with no warning, updates through the Store, and
+uninstalls cleanly, plus the knowledge that it keeps the project going.
+Nothing is held back from either edition. The AGPL permits selling copies and the source stays public. For macOS
 there is `PaperPull-<version>-arm64.dmg`, Apple Silicon only, signed and
 notarized, so it opens with no warning. Drag PaperPull to Applications and
 double-click it. The Windows installer is not yet code-signed, so Windows
@@ -510,10 +519,10 @@ the free build does.
 
 - **Sponsor on GitHub:** **[github.com/sponsors/rheeloaded](https://github.com/sponsors/rheeloaded)**, one-time or monthly, from a card you already have on GitHub.
 - **Donate on Ko-fi:** **[ko-fi.com/rheeloaded](https://ko-fi.com/rheeloaded)** ☕
-- **Buy the Microsoft Store edition** for $2.99, the same program from the
-  same build, with a signed installer that opens with no warning and
-  updates through the Store. The listing is in review and will be linked
-  here once it is live.
+- **Buy the Microsoft Store edition** for $9.99, one time, the same
+  program from the same build, with a signed installer that opens with no
+  warning and updates through the Store. The listing is in review and will
+  be linked here once it is live. It unlocks nothing the free build lacks.
 
 You can also help without spending anything: test a provider you hold an
 account with (see [PROVIDERS.md](PROVIDERS.md)), report what breaks, or
