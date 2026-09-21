@@ -57,37 +57,37 @@ test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
-| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/att/README.md#help-test-it-no-programming-needed)** |
-| [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked |
-| [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported; fresh live pilot pending |
+| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/att/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
+| [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | **Capital One is moving these accounts onto its own site. Once yours has moved this app can no longer read it** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
-| [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms | **Untested, built without an account. Have one? [Help test it](apps/etrade/README.md#help-test-it-no-programming-needed)** |
+| [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms | **Untested, built without an account. Have one? [Help test it](apps/etrade/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills | Mendix portal, driven like a person; PDFs for the last year only, so run it quarterly |
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms | Document Access Hub API from inside the page, nothing clicked; real Edge/Chrome |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Lazy-loading history; ~13-month limit |
-| [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Untested, built without an account. Have one? [Help test it](apps/golden1/README.md#help-test-it-no-programming-needed)** |
+| [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Untested, built without an account. Have one? [Help test it](apps/golden1/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
-| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Untested, built without an account. Have a Newrez mortgage? [Help test it](apps/newrez/README.md#help-test-it-no-programming-needed)** |
+| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Untested, built without an account. Have a Newrez mortgage? [Help test it](apps/newrez/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
-| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history, fresh live pilot pending |
+| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp), a pagination repair being tested by [@watling777](https://github.com/watling777) |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
-| [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported; fresh live pilot pending |
-| [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/smud/README.md#help-test-it-no-programming-needed)** |
-| [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents | **Untested, built without an account. Have a policy? [Help test it](apps/statefarm/README.md#help-test-it-no-programming-needed)** |
+| [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
+| [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/smud/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents | **Untested, built without an account. Have a policy? [Help test it](apps/statefarm/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements** | Per-employer tenant; JSON-API, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
-| [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Ported; fresh live pilot pending |
+| [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
 | [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/verizonmobile/README.md#help-test-it-no-programming-needed)** |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
@@ -509,6 +509,30 @@ the free build does.
 You can also help without spending anything: test a provider you hold an
 account with (see [PROVIDERS.md](PROVIDERS.md)), report what breaks, or
 contribute one. That is worth as much as a donation.
+
+## Thanks
+
+PaperPull only reaches the providers people bring to it. These people
+built one, tested one against an account the author does not hold, or
+found a bug and diagnosed it to the line.
+
+- [@davidrudnick](https://github.com/davidrudnick), the Capital One, U.S.
+  Bank and Charles Schwab apps, and a long run of panel fixes.
+- [@riordan](https://github.com/riordan), the Anthem BCBS app, the first
+  health insurer.
+- [@appchamp](https://github.com/appchamp), the PG&E app.
+- [@marecabo](https://github.com/marecabo), Amazon's legal invoice PDFs on
+  the German store.
+- [@watling777](https://github.com/watling777), the tester behind AT&T,
+  SMUD, Golden 1, E*TRADE, State Farm and Newrez, seven providers' worth of
+  surveys and pilots in a weekend, and the PG&E pagination bug.
+- [@dertbv](https://github.com/dertbv), three exporter and Navy Federal
+  bugs, each diagnosed so exactly there was nothing to add.
+- [@liamrotheram](https://github.com/liamrotheram) and
+  [@OberstK](https://github.com/OberstK), Amazon outside the United States.
+
+If you tested a provider and are not here, say so on the issue and you
+will be.
 
 ## Legal
 
