@@ -343,3 +343,42 @@ def test_the_apps_root_that_is_the_templates_folder_is_not_refreshed_onto_itself
     app_module._REFRESHED_ROOTS.clear()
     assert app_module.refresh_installs() == {}
     assert not (templates / "bank" / "Backups").exists()
+
+
+# -- a second person, from the panel -----------------------------------------
+
+def _account(body):
+    return asyncio.run(app_module.api_account(_Req(body)))
+
+
+def test_a_second_account_is_made_from_the_panel(templates, settings, tmp_path):
+    """A packaged Mac install has no paperpull on the PATH, so the terminal
+    command for a second account was out of reach (issue #39). The panel
+    makes it, and the Account dropdown then lists it."""
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["shop"]})
+    got = _account({"app": "Shop Receipts", "label": "Spouse", "owner": "Jane Doe"})
+    assert got["account"] == "spouse" and got["config"] == "config.spouse.json"
+    inst = home / "Shop Receipts"
+    cfg = json.loads((inst / "config.spouse.json").read_text(encoding="utf-8"))
+    assert cfg["owner"] == "Jane Doe"
+    assert cfg["cdp_url"] == "http://127.0.0.1:9309"          # its own port
+    assert (home / "Shop Receipts - spouse").is_dir()          # its own folder, beside the first
+    assert app_module.discover_apps()["Shop Receipts"]["accounts"] == ["primary", "spouse"]
+    cmd = app_module._build_cmd(app_module.discover_apps()["Shop Receipts"], "spouse", "pilot")
+    assert cmd[-2:] == ["--config", "config.spouse.json"]
+
+
+def test_a_bad_label_or_a_repeat_is_refused_and_nothing_is_overwritten(templates, settings, tmp_path):
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["shop"]})
+    _account({"app": "Shop Receipts", "label": "spouse"})
+    before = (home / "Shop Receipts" / "config.spouse.json").read_text(encoding="utf-8")
+    for bad in ("", "primary", "../x", "a b", "spouse"):
+        with pytest.raises(fastapi.HTTPException) as e:
+            _account({"app": "Shop Receipts", "label": bad})
+        assert e.value.status_code in (400, 409), bad
+    with pytest.raises(fastapi.HTTPException) as e:
+        _account({"app": "Nope", "label": "spouse"})
+    assert e.value.status_code == 404
+    assert (home / "Shop Receipts" / "config.spouse.json").read_text(encoding="utf-8") == before

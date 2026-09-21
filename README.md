@@ -179,9 +179,11 @@ page they navigated to. A repo-wide test checks every app's guard.
 
 ### One app, more than one person
 
-`paperpull <app> add-account spouse` makes the second person's account,
-and `paperpull <app> all --account spouse` runs the app against it, with its
-own profile, port and output folders, so no data mixes. Underneath it is a
+In the control panel, **add a person** beside the Account box makes the
+second person's account, and the Account box then runs every action against
+it. From a terminal it is `paperpull <app> add-account spouse`, then
+`paperpull <app> all --account spouse`. Either way it gets its own profile,
+port and output folder beside the first one's, so no data mixes. Underneath it is a
 `config.spouse.json` beside the app's `config.json`, which the app also takes
 directly as `--config`, and the sign-in launcher takes the label too
 (`login.bat spouse` / `./login.command spouse`). `python tools/add_account.py
