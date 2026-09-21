@@ -154,7 +154,7 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
 _ID_RE = re.compile(r"\d{6,}")
-# "Welcome, JOHN", "Hi Jane", "Good evening, Sam": a greeting names the
+# "Welcome, ALEX", "Hi Jane", "Good evening, Sam": a greeting names the
 # person, and a survey has no use for the name.
 _GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
                           r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)?", re.I)
