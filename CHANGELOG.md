@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.28.4] - 2026-09-21
 
 ### Fixed
 - **AT&T, round seven.** The tester answered the question: "Download PDF"
