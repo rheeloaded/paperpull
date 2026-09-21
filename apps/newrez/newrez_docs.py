@@ -481,13 +481,21 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
-        saved = site.download_bill(page, self._dl_dir, doc.date, out_path)
+        trace: list = []
+        saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
+                                   title=doc.title, trace=trace)
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):
             out_path.unlink()
             saved = False
         if not saved:
+            import json as _json
+            attempt = self.paths.diagnostics / "download-attempt.json"
+            atomic_write_text(attempt, _json.dumps(
+                {"timestamp": now_iso(), "date": doc.date, "landed_on": site.redact(page.url or ""),
+                 "responses": trace[:80]}, indent=2))
+            print(f"  What the site answered is in {attempt}, attach it to the issue.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
             self._write_row(doc, "Capture failed", "Needs Manual Review")

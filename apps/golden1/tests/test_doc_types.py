@@ -99,3 +99,26 @@ def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
     assert "UNVERIFIED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
     assert "Not yet tested against a real account" in readme
+
+
+# -- round two, the document vendor in a new tab --------------------------
+
+def test_sign_in_and_the_documents_page_are_where_the_survey_found_them():
+    assert site.URLS["login"] == "https://login.golden1.com/login/?realm=/alpha#/"
+    assert site.BILLING_CANDIDATES[0] == "https://digitalbanking.golden1.com/accounts/documents"
+    assert site.is_safe_url("https://ebank.hepsiian.com/cv/searchResults.jsf")
+    assert not site.is_safe_url("https://hepsiian.com.evil.test/x")
+    assert site.is_safe_control("View Documents") and site.VENDOR_BUTTON_RE.match("View Documents")
+
+
+def test_the_vendor_tab_is_found_among_the_open_tabs():
+    class _Tab:
+        def __init__(self, url): self.url = url
+        def is_closed(self): return False
+    class _Ctx:
+        pages = [_Tab("https://digitalbanking.golden1.com/accounts/documents"), _Tab("https://ebank.hepsiian.com/cv/searchResults.jsf")]
+    class _P:
+        context = _Ctx()
+    assert site._vendor_tab(_P()).url.startswith("https://ebank.hepsiian.com")
+    _Ctx.pages = _Ctx.pages[:1]
+    assert site._vendor_tab(_P()) is None

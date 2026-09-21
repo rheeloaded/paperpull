@@ -235,3 +235,38 @@ def test_a_bill_filed_under_the_wrong_page_is_still_found():
     assert site._row_for_date(hist, "2026-08-20", 0) is None
     site.goto_page_number(hist, 1)
     assert site._row_for_date(hist, "2026-08-20", 0) is not None
+
+
+def test_a_jump_that_moves_the_rows_counts_even_if_the_picker_never_says_so(monkeypatch):
+    """Round one of #33 waited for the picker's value to read the target.
+    The tester's picker never did, and the walk stopped at page 1 again."""
+    class _MutePicker(_Picker):
+        def evaluate(self, js):
+            return self.pages if "options" in js else 1     # the value never updates
+    hist = _History(PAGES)
+    hist.picker = _MutePicker(hist, [1, 2, 3], sticky=False)
+    monkeypatch.setattr(site, "get_pagination_pages", lambda page: page.picker.pages)
+    got = site.collect_download_docs(hist)
+    assert [d["page_number"] for d in got] == [1] * 4 + [2] * 4 + [3] * 4
+
+
+def test_the_next_control_is_only_ever_next():
+    assert site.is_next_control("Next") and site.is_next_control("Next page") and site.is_next_control(">")
+    assert not site.is_next_control("Next: Pay") and not site.is_next_control("") and not site.is_next_control("Previous")
+
+
+def test_a_row_whose_pdf_control_is_not_an_anchor_still_hands_it_over():
+    class _El:
+        def __init__(self, text): self._text = text
+        def inner_text(self, timeout=None): return self._text
+        def get_attribute(self, name): return None
+    class _Row:
+        def query_selector_all(self, sel):
+            if sel.startswith("a, button"): return [_El("Pay")]
+            if "text-matches" in sel: return [_El("View Bill PDF")]
+            return []
+        def inner_text(self): return "09/20/2026 View Bill PDF Pay"
+    ctrls = site.row_controls(_Row())
+    assert [c._text for c in ctrls] == ["Pay", "View Bill PDF"]
+    assert site.pick_document_control(ctrls)._text == "View Bill PDF"
+    assert "View Bill PDF" in site._describe_row(_Row())
