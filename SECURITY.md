@@ -74,4 +74,6 @@ The `.gitignore` already blocks all of the following. Do not override it.
 ## Reporting
 
 This is a personal-use project with no warranty. If you find a security issue,
-open an issue describing it (without including any real credentials or data).
+write to support@paperpull.net so it can be fixed before it is public, or open
+an issue if it is not sensitive. Either way, never include real credentials,
+account numbers or downloaded documents.

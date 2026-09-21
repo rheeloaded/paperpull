@@ -29,7 +29,8 @@ step added.
 - A hosted service that runs this code for other people, under any name
   that includes PaperPull.
 - A domain name, app-store listing, package-index name, social account or
-  company name that includes PaperPull.
+  company name that includes PaperPull. The project's own domain is
+  paperpull.net.
 - Anything that suggests the project endorses it.
 
 ## The one thing to remember
