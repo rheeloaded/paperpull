@@ -7,6 +7,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **A second person, from the panel.** "Add a person" beside the Account
+  box asks for a label and a name, makes the account with its own folder
+  beside the first one's, its own sign-in window and its own port, and
+  selects it. The terminal command is still there, but a packaged Mac
+  install has no `paperpull` on the PATH, so the panel was the only
+  honest answer (#39). A packaged install keeps its downloads in the
+  install folder itself, and the second account's folder is now a sibling
+  of the install, where the old rule made a folder called " - spouse"
+  inside it.
+
 ## [0.28.4] - 2026-09-21
 
 ### Fixed

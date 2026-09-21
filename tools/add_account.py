@@ -42,10 +42,18 @@ def make_config(app_dir: Path, name: str, port_offset: int = 10,
     cfg = json.loads(base.read_text(encoding="utf-8-sig"))
 
     cfg["owner"] = owner or name.title()   # stamped on every document this account downloads
-    out = Path(cfg["output_dir"])
-    cfg["output_dir"] = str(out.parent / f"{out.name} - {name}")
+    # The second account's folder sits beside the first one's, named for the
+    # account, the way "Amazon Receipts - spouse" sits beside "Amazon
+    # Receipts". A packaged install keeps its downloads in the install folder
+    # itself (output_dir "."), so there the new folder is a sibling of the
+    # install, written as a relative path so the install can still be moved.
+    out = Path(cfg.get("output_dir") or ".")
+    if (app_dir / out).resolve() == app_dir.resolve():
+        cfg["output_dir"] = str(Path("..") / f"{app_dir.name} - {name}")
+    else:
+        cfg["output_dir"] = str(out.parent / f"{out.name} - {name}")
     cfg["profile_dir"] = str(Path(cfg["output_dir"]) /
-                             Path(cfg.get("profile_dir", "browser-profile")).name)
+                             Path(cfg.get("profile_dir") or "browser-profile").name)
     if cfg.get("cdp_url"):
         m = re.search(r":(\d+)", cfg["cdp_url"])
         if m:
@@ -54,7 +62,7 @@ def make_config(app_dir: Path, name: str, port_offset: int = 10,
 
     dest = app_dir / f"config.{slug(name)}.json"
     dest.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    Path(cfg["output_dir"]).mkdir(parents=True, exist_ok=True)
+    (app_dir / cfg["output_dir"]).mkdir(parents=True, exist_ok=True)
     return dest
 
 

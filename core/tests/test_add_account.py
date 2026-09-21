@@ -79,3 +79,20 @@ def test_the_launcher_command_reaches_the_tool_and_names_it_when_missing(tmp_pat
     with pytest.raises(SystemExit) as e:
         paperpull.main(["--root", str(tmp_path), "chase", "pilot", "--account", "nobody"])
     assert "python paperpull.py chase add-account nobody" in str(e.value)
+
+
+def test_an_install_that_holds_its_own_downloads_gets_a_sibling_folder(tmp_path):
+    """A packaged install keeps its downloads in the install folder itself
+    (output_dir "."). The old rule turned that into a folder called " - spouse"
+    inside the install. The second account's folder is a sibling of the
+    install, named for it, and the path is relative so the install can move."""
+    home = tmp_path / "PaperPull"
+    amazon = _install(home, "Amazon Receipts", "amazon_receipts.py",
+                      {"output_dir": ".", "profile_dir": "./browser-profile", "cdp_url": "http://127.0.0.1:9223"})
+    dest = add_account.make_config(amazon, "spouse")
+    cfg = json.loads(dest.read_text(encoding="utf-8"))
+    assert cfg["output_dir"] == str(Path("..") / "Amazon Receipts - spouse")
+    assert cfg["profile_dir"] == str(Path("..") / "Amazon Receipts - spouse" / "browser-profile")
+    assert (home / "Amazon Receipts - spouse").is_dir()
+    assert not (amazon / " - spouse").exists()
+    assert cfg["cdp_url"] == "http://127.0.0.1:9233"

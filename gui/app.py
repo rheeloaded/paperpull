@@ -920,6 +920,83 @@ async def api_create(request: Request):
             "apps": _looks_like_installs(root)}
 
 
+# -- a second person's account ------------------------------------------------
+#
+# The panel's Account dropdown lists config.<name>.json files beside an
+# app's config.json, and every action passes the chosen one as --config, so
+# a second account is its own folder, profile and port with nothing shared.
+# Making one used to need a terminal, which a packaged Mac install does not
+# put on the PATH. tools/add_account.py does the work, the same code the
+# launcher's add-account command runs.
+
+_ACCOUNT_MOD = None
+_LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+
+def _account_module():
+    global _ACCOUNT_MOD
+    if _ACCOUNT_MOD is not None:
+        return _ACCOUNT_MOD or None
+    import importlib.util
+    for cand in (HERE.parent / "tools" / "add_account.py",
+                 apps_root() / "add_account.py",
+                 apps_root().parent / "add_account.py"):
+        try:
+            if not cand.is_file():
+                continue
+            spec = importlib.util.spec_from_file_location("paperpull_add_account", cand)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _ACCOUNT_MOD = mod
+            return mod
+        except Exception:
+            continue
+    _ACCOUNT_MOD = False
+    return None
+
+
+@app.post("/api/account", dependencies=[Depends(_same_origin_only)])
+async def api_account(request: Request):
+    """Make config.<label>.json for one app, a second person's account with
+    its own folder beside the first one's, its own browser profile and its
+    own debugging port. The app must be one the panel discovered, the label
+    is kept to a filename-safe slug, and an existing account is never
+    overwritten, since its progress.json is someone's download history."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    body = body if isinstance(body, dict) else {}
+    name = str(body.get("app") or "")
+    label = str(body.get("label") or "").strip().lower()
+    owner = str(body.get("owner") or "").strip()[:80]
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "unknown app")
+    if not _LABEL_RE.match(label):
+        raise HTTPException(400, "the label is used in a filename, so letters, digits, - and _ only, "
+                                 "starting with a letter or digit")
+    if label in ("primary", "example") or label in apps[name]["accounts"]:
+        raise HTTPException(409, "there is already an account called %r in %s" % (label, name))
+    mod = _account_module()
+    if mod is None:
+        raise HTTPException(500, "add_account.py was not found next to this control panel")
+    app_dir = Path(apps[name]["dir"])
+    if not (app_dir / "config.json").is_file():
+        raise HTTPException(409, "%s has no config.json yet. Run Login once for the first account, "
+                                 "then add the second." % name)
+    try:
+        dest = mod.make_config(app_dir, label, owner=owner)
+    except Exception as e:
+        raise HTTPException(500, "could not make the account: %s" % str(e).splitlines()[0][:160])
+    cfg = json.loads(Path(dest).read_text(encoding="utf-8"))
+    global _STATUS_MOD
+    _STATUS_MOD = None
+    return {"app": name, "account": label, "config": Path(dest).name,
+            "output_dir": cfg.get("output_dir", ""), "cdp_url": cfg.get("cdp_url", ""),
+            "owner": cfg.get("owner", "")}
+
+
 # -- removing a provider ------------------------------------------------------
 #
 # The one action in this panel that could destroy something, so it does not.
@@ -1237,7 +1314,7 @@ HTML = r"""<!doctype html>
   <div class="controls">
     <label for="app">App <a href="#" id="addlink" onclick="addProvider(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a provider</a> <a href="#" id="removelink" onclick="removeProvider(); return false;" style="color:var(--muted); font-weight:400; font-size:12px; margin-left:8px;">remove</a></label>
     <select id="app"></select>
-    <label for="account">Account</label>
+    <label for="account">Account <a href="#" id="addacct" onclick="addAccount(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a person</a></label>
     <select id="account"></select>
     <label for="year">Scope</label>
     <select id="year" onchange="onScope()"></select>
@@ -1396,6 +1473,35 @@ async function addProvider() {
   $('existing').style.display = 'none';
   $('newroot').value = META.apps_root || '';
   await loadProviders(true);
+}
+
+async function addAccount() {
+  const name = $('app').value;
+  if (!name) return;
+  const label = (prompt(
+    'A second person on "' + name + '".\n\n' +
+    'They get their own folder beside this one, their own sign-in window and their own ' +
+    'download history, so nothing mixes with the first account.\n\n' +
+    'Short label for the account (letters, digits, - or _), for example spouse or alex:') || '').trim();
+  if (!label) return;
+  const owner = (prompt('Their name, as it should appear on the documents (optional):') || '').trim();
+  let r;
+  try {
+    r = await fetch('/api/account', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({app: name, label, owner})});
+  } catch (e) { $('console').textContent = 'could not reach the control panel'; return; }
+  const d = await r.json();
+  if (!r.ok) { $('console').textContent = d.detail || 'that did not work'; return; }
+  STATUS_LOADED = false;
+  await load();
+  $('app').value = name; onApp();
+  $('account').value = d.account;
+  $('console').textContent =
+    'Added "' + d.account + '" to ' + name + (d.owner ? ' for ' + d.owner : '') + '.\n\n' +
+    'Downloads go to ' + d.output_dir + '\n' +
+    (d.cdp_url ? 'Sign-in browser on ' + d.cdp_url + '\n' : '') +
+    '\nThe Account box above is set to it. Click Login, sign in as that person in the window ' +
+    'that opens, then Pilot.';
 }
 
 async function removeProvider() {
