@@ -359,14 +359,16 @@ class App:
             self.stats["skipped_out_of_scope"] += 1
             return 0
         doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+                       date=date, confidence=confidence, source_url=source_url,
+                       href=r.href or "")
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
-        # refresh which page the doc's download link lives on
-        self.discovery.update(doc.key, {"source_url": source_url}, save=False)
+        # refresh which page the doc's download link lives on, and the
+        # statement hint the site layer keeps beside it
+        self.discovery.update(doc.key, {"source_url": source_url, "href": r.href or ""}, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
@@ -475,18 +477,28 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Open the bill-history page and click this bill's "Download detailed
-        # bill" button; Playwright captures the resulting download event.
+        # The site layer opens the bill history, clicks this bill's own
+        # button and then the Download PDF it reveals, and catches what
+        # arrives. What the site answered meanwhile is kept, so a failure
+        # leaves a file the next repair can read.
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
-        saved = site.download_bill(page, self._dl_dir, doc.date, out_path)
+        trace: list = []
+        saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
+                                   hint=doc.href, trace=trace)
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):
             out_path.unlink()
             saved = False
         if not saved:
+            import json as _json
+            attempt = self.paths.diagnostics / "download-attempt.json"
+            atomic_write_text(attempt, _json.dumps(
+                {"timestamp": now_iso(), "date": doc.date, "landed_on": site.redact(page.url or ""),
+                 "responses": trace[:80]}, indent=2))
+            print(f"  What the site answered is in {attempt}, attach it to the issue.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
             self._write_row(doc, "Capture failed", "Needs Manual Review")

@@ -10,6 +10,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **AT&T, round three, from the second survey.** The survey reached the
+  billing center and followed "See bill history" to a page that lists
+  past bills as buttons ("Bill, Jul 23 - Aug 22") and, while loading,
+  calls the site's own history API with sixteen bills, each with its
+  cycle dates and a statement id. Round two's pilot had recognized only
+  the current bill and clicked "See bill history" instead of the
+  "Download PDF" beside it. Discovery now reads the history API as the
+  page loads it, passively, and falls back to the bill buttons, stepping
+  the year back across January since the buttons carry none. A download
+  opens the history, clicks the bill's own button, then the "Download
+  PDF" it reveals, and catches what arrives, with the current bill taken
+  from the billing center's own button. "See bill history" is
+  navigation, not a bill. A failed download now writes
+  `Diagnostics/download-attempt.json` with what the site answered, so the
+  next round can read what the button called. Only the account in focus
+  is read this round. Still untested until a Pilot lands PDFs.
+  [#26](https://github.com/rheeloaded/paperpull/issues/26).
 - **Transaction export, the Account column and the last of the box.**
   The Account column read the index's title, which is often just
   "Statement" or a date. It now reads the summary, which is what names
