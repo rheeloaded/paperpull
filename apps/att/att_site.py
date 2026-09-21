@@ -2,7 +2,7 @@
 
 When AT&T changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round four. Written without an AT&T account and
+STATUS: UNVERIFIED, round six. Written without an AT&T account and
 repaired from two surveys a tester sent (#26). What the surveys showed:
 
   * Sign-in lands on /acctmgmt/overview, a shop page. The nav's Billing
@@ -20,6 +20,15 @@ repaired from two surveys a tester sent (#26). What the surveys showed:
   * Round three read all sixteen bills from the API but matched the
     history buttons by accessible name, found none, and then looked for
     "Download PDF" on the history page instead of the billing center.
+  * Rounds four and five reached "Download PDF" and clicked it, and
+    nothing arrived, no download, no response, no tab, nothing in the
+    browser's own download list. Round five had every capture in place.
+    So the click either needs a second step, puts the PDF in a viewer,
+    or is not landing, and the trace could not tell those apart because
+    a click failure was swallowed. Round six records the click's own
+    outcome, compares the page before and after, takes a control the
+    click revealed as the second step, reads an embedded viewer, and
+    tries "View/print PDF" when "Download PDF" gave nothing.
 
   So discovery now reads the history API as the page loads it, passively,
   and falls back to the bill buttons. A download opens the history page,
@@ -853,14 +862,104 @@ def _pdf_button(page):
     return None, ""
 
 
+_SECOND_STEP_RE = re.compile(
+    r"^\s*(download|download\s+(pdf|bill|now)|save|save\s+(as\s+)?pdf|pdf|full\s+bill|"
+    r"bill\s+pdf|view\s*/\s*print\s+pdf|print|ok|continue|get\s+(my\s+)?bill)\s*$", re.I)
+
+_VIEWER_JS = r"""() => {
+  const out = [];
+  for (const e of document.querySelectorAll("iframe, embed, object")) {
+    const src = e.getAttribute("src") || e.getAttribute("data") || "";
+    if (src) out.push(src.slice(0, 300));
+  }
+  return out;
+}"""
+
+
+def _control_texts(page) -> set:
+    out = set()
+    for role in ("button", "link", "menuitem"):
+        try:
+            loc = page.get_by_role(role)
+            for i in range(min(loc.count(), 120)):
+                try:
+                    t = (loc.nth(i).inner_text(timeout=200) or "").strip()
+                except Exception:
+                    continue
+                if t:
+                    out.add(re.sub(r"\s+", " ", t)[:60])
+        except Exception:
+            pass
+    return out
+
+
+def _second_step(page, appeared: set):
+    """A control the click revealed whose text says it finishes a
+    download, once it has passed the guard, or None."""
+    for text in sorted(appeared):
+        if _SECOND_STEP_RE.match(text) and is_safe_control(text):
+            for role in ("button", "link", "menuitem"):
+                try:
+                    loc = page.get_by_role(role, name=re.compile("^" + re.escape(text) + "$", re.I))
+                    if loc.count() and loc.first.is_visible():
+                        return loc.first, text
+                except Exception:
+                    continue
+    return None, ""
+
+
+def _take_viewer(page, out_path: Path, trace: Optional[list]) -> bool:
+    """A PDF the click put into an embedded viewer on the page, read from
+    the viewer's source. A blob: source is read through the page, any
+    other is host checked first."""
+    try:
+        srcs = page.evaluate(_VIEWER_JS) or []
+    except Exception:
+        srcs = []
+    if trace is not None and srcs:
+        trace.append({"note": "embedded viewers after the click", "sources": [redact(x)[:120] for x in srcs[:5]]})
+    for src in srcs:
+        try:
+            if src.startswith("blob:") or is_safe_url(src):
+                b64 = page.evaluate(_FETCH_AS_B64, src)
+                if b64:
+                    data = base64.b64decode(b64)
+                    if data[:5] == b"%PDF-":
+                        out_path.write_bytes(data)
+                        return True
+        except Exception as e:
+            log.info("viewer read failed: %s", e)
+    return False
+
+
+def _view_print_button(page):
+    """The "View/print PDF" button, once it has passed the guard, or None."""
+    pat = re.compile(r"^\s*view\s*/\s*print\s+pdf\s*$", re.I)
+    try:
+        loc = page.get_by_role("button", name=pat).or_(page.get_by_role("link", name=pat))
+        for i in range(min(loc.count(), 4)):
+            el = loc.nth(i)
+            label = (el.inner_text(timeout=800) or el.get_attribute("aria-label") or "").strip()
+            if is_safe_control(label) and el.is_visible():
+                return el, label
+    except Exception:
+        pass
+    return None, ""
+
+
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
                dl_dir=None) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
-    in `dl_dir`, a download event, a PDF response in this tab, or a new tab. `trace` collects the
-    att.com JSON and PDF responses seen meanwhile, URL cut at the query,
-    so a failed attempt tells the next round what the button called."""
+    in `dl_dir`, a download event, a PDF response in this tab, a new tab,
+    an embedded viewer, or a second control the click revealed. `trace`
+    collects what happened, the click's own outcome included, so a failed
+    attempt says which of those it was not."""
     ctx = page.context
     got: dict = {}
+    downloads: list = []
+
+    def on_download(dl):
+        downloads.append(dl)
 
     def on_response(res):
         try:
@@ -880,40 +979,94 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             pass
 
     ctx.on("response", on_response)
+    page.on("download", on_download)
     before = set(ctx.pages)
     seen = _snapshot(dl_dir)
+    controls_before = _control_texts(page)
+
+    def landed() -> bool:
+        if downloads:
+            try:
+                from paperpull_core.receipt_pdf import save_download
+                save_download(downloads[0], out_path)
+                if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
+                    return True
+            except Exception as e:
+                log.info("download event save failed: %s", e)
+        if got:
+            out_path.write_bytes(got["body"])
+            return True
+        return _take_new_pdf(dl_dir, seen, out_path)
+
+    def wait_for_pdf(seconds: int) -> bool:
+        for _ in range(seconds):
+            if landed():
+                return True
+            page.wait_for_timeout(1000)
+        return landed()
+
     try:
         try:
             el.scroll_into_view_if_needed(timeout=4000)
         except Exception:
             pass
         try:
-            with page.expect_download(timeout=20000) as dl:
-                el.click()
-            from paperpull_core.receipt_pdf import save_download
-            save_download(dl.value, out_path)
-            if out_path.stat().st_size > 0 and out_path.read_bytes()[:5] == b"%PDF-":
-                return True
-        except Exception:
-            pass
-        deadline = 45
-        while not got and deadline > 0:
-            if _take_new_pdf(dl_dir, seen, out_path):
-                return True
-            page.wait_for_timeout(1000)
-            deadline -= 1
-        if got:
-            out_path.write_bytes(got["body"])
+            el.click(timeout=8000)
+            if trace is not None:
+                trace.append({"note": "clicked", "control": label[:60]})
+        except Exception as e:
+            log.info("click on %r failed: %s", label, str(e)[:120])
+            if trace is not None:
+                trace.append({"note": "click failed", "control": label[:60], "error": str(e)[:160]})
+            try:
+                el.evaluate("el => el.click()")
+                if trace is not None:
+                    trace.append({"note": "clicked through the DOM instead", "control": label[:60]})
+            except Exception as e2:
+                if trace is not None:
+                    trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
+        if wait_for_pdf(12):
             return True
-        if _take_new_pdf(dl_dir, seen, out_path):
+        # What did the click change? A menu or a dialog with the real
+        # download control, a viewer with the PDF in it, or nothing.
+        appeared = _control_texts(page) - controls_before
+        if trace is not None:
+            trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
+                          "appeared": [redact(t) for t in sorted(appeared)[:15]],
+                          "new_tabs": len([p for p in ctx.pages if p not in before])})
+        if _take_viewer(page, out_path, trace):
+            return True
+        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
+            return True
+        step, step_label = _second_step(page, appeared)
+        if step is not None:
+            try:
+                step.click(timeout=8000)
+                if trace is not None:
+                    trace.append({"note": "second step clicked", "control": step_label[:60]})
+            except Exception as e:
+                if trace is not None:
+                    trace.append({"note": "second step click failed", "control": step_label[:60],
+                                  "error": str(e)[:160]})
+            if wait_for_pdf(20):
+                return True
+            if _take_viewer(page, out_path, trace) or \
+                    _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
+                return True
+        if wait_for_pdf(15):
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
         log.info("click on %r produced no PDF", label)
         return False
     finally:
+        for name, fn in (("response", on_response),):
+            try:
+                ctx.remove_listener(name, fn)
+            except Exception:
+                pass
         try:
-            ctx.remove_listener("response", on_response)
+            page.remove_listener("download", on_download)
         except Exception:
             pass
         for extra in [p for p in ctx.pages if p not in before]:
@@ -958,6 +1111,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
             if btn is not None:
                 if _catch_pdf(page, btn, blabel, out_path, trace, dl_dir):
                     return True
+                # Download PDF gave nothing. View/print PDF is the other
+                # control the survey saw, and it may open the PDF in a tab.
+                alt, alabel = _view_print_button(page)
+                if alt is not None and alabel.lower() != blabel.lower():
+                    if _catch_pdf(page, alt, alabel, out_path, trace, dl_dir):
+                        return True
             else:
                 log.info("no Download PDF after opening the bill for %s", iso_date)
                 if trace is not None:

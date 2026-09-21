@@ -346,3 +346,65 @@ def test_a_pdf_in_a_new_tab_is_read_only_from_a_blob_or_an_att_host(tmp_path):
     assert out.read_bytes().startswith(b"%PDF-1.7")
     assert site._take_new_tab(_Page(), [_Tab("blob:https://www.att.com/abc", None)], out)
     assert out.read_bytes() == b"%PDF-1.7 blob"
+
+
+# -- round six, from the round-five trace ------------------------------------
+
+class _Ctl:
+    def __init__(self, text, visible=True): self._text, self._visible = text, visible
+    def inner_text(self, timeout=0): return self._text
+    def get_attribute(self, name): return None
+    def is_visible(self): return self._visible
+    def click(self, timeout=0): self.clicked = True
+
+
+class _RoleLoc:
+    def __init__(self, items): self._items = items
+    def count(self): return len(self._items)
+    def nth(self, i): return self._items[i]
+    @property
+    def first(self): return self._items[0]
+
+
+class _AfterClick:
+    """A page whose Download PDF click opened a small menu."""
+    url = "https://www.att.com/acctmgmt/billing/billandpaymenthistory"
+    def __init__(self, texts): self.texts = texts
+    def get_by_role(self, role, name=None):
+        items = [_Ctl(t) for t in self.texts if role == "button" and (name is None or name.match(t))]
+        return _RoleLoc(items)
+    def evaluate(self, js): return ["blob:https://www.att.com/abc"] if "iframe" in js else None
+
+
+def test_the_control_the_click_revealed_is_the_second_step_and_pay_never_is():
+    before = site._control_texts(_AfterClick(["Download PDF", "See bill history"]))
+    after = site._control_texts(_AfterClick(["Download PDF", "See bill history", "Full bill", "Pay now", "Cancel"]))
+    appeared = after - before
+    assert appeared == {"Full bill", "Pay now", "Cancel"}
+    step, label = site._second_step(_AfterClick(sorted(appeared)), appeared)
+    assert label == "Full bill"
+    assert site._second_step(_AfterClick(["Pay now", "Cancel"]), {"Pay now", "Cancel"}) == (None, "")
+    for t in ("Download", "Save as PDF", "Bill PDF", "View/print PDF"):
+        assert site._SECOND_STEP_RE.match(t) and site.is_safe_control(t), t
+    for t in ("Pay now", "Make a payment", "Cancel", "Enroll in AutoPay"):
+        assert not site.is_safe_control(t), t
+
+
+def test_an_embedded_viewer_is_read_through_the_page(tmp_path):
+    class _P(_AfterClick):
+        def evaluate(self, js, *a):
+            if "iframe" in js:
+                return ["blob:https://www.att.com/abc"]
+            return "JVBERi0xLjcgdmlld2Vy"   # %PDF-1.7 viewer
+    out = tmp_path / "v.pdf"
+    trace = []
+    assert site._take_viewer(_P([]), out, trace)
+    assert out.read_bytes().startswith(b"%PDF-1.7")
+    assert trace[0]["note"] == "embedded viewers after the click"
+
+
+def test_the_click_outcome_is_in_the_trace():
+    src = inspect.getsource(site._catch_pdf)
+    for note in ('"clicked"', '"click failed"', '"after the click"', '"second step clicked"'):
+        assert note in src, note
+    assert "expect_download" not in src, "a swallowed expect_download hid whether the click landed"
