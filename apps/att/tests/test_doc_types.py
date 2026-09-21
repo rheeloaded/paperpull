@@ -302,3 +302,47 @@ def test_the_billing_center_fallback_opens_the_billing_center_itself():
     src = inspect.getsource(site.download_bill)
     assert "page.goto(BILLING_CANDIDATES[0]" in src
     assert "goto_documents(page)" not in src.split("# The current bill")[1]
+
+
+# -- round five, from the round-four trace ------------------------------------
+
+def test_a_pdf_the_browser_saved_itself_is_taken_from_the_download_folder(tmp_path):
+    """A real Edge or Chrome attached over CDP saves a download itself and
+    Playwright never sees it. Round four's trace showed a clean click on
+    Download PDF and nothing arriving."""
+    dl = tmp_path / "dl"; dl.mkdir()
+    (dl / "old.pdf").write_bytes(b"%PDF-old")
+    before = site._snapshot(dl)
+    out = tmp_path / "out.pdf"
+    assert not site._take_new_pdf(dl, before, out)
+    (dl / "bill.pdf.crdownload").write_bytes(b"%PDF-")
+    assert not site._take_new_pdf(dl, before, out), "a file still downloading is not finished"
+    (dl / "notes.txt").write_bytes(b"hello")
+    assert not site._take_new_pdf(dl, before, out), "only a PDF counts"
+    (dl / "bill.pdf").write_bytes(b"%PDF-1.7 the bill")
+    assert site._take_new_pdf(dl, before, out)
+    assert out.read_bytes() == b"%PDF-1.7 the bill" and not (dl / "bill.pdf").exists()
+    assert (dl / "old.pdf").exists()
+    assert site._take_new_pdf(None, set(), out) is False
+
+
+def test_the_orchestrator_points_the_browser_at_a_folder_it_watches():
+    docs_src = (Path(site.__file__).parent / "att_docs.py").read_text(encoding="utf-8")
+    assert "site.set_download_dir(self._work_page, self._dl_dir)" in docs_src
+    assert "_dl_dir = None" not in docs_src
+    assert "dl_dir" in inspect.signature(site._catch_pdf).parameters
+
+
+def test_a_pdf_in_a_new_tab_is_read_only_from_a_blob_or_an_att_host(tmp_path):
+    class _Tab:
+        def __init__(self, url, b64): self.url, self._b64 = url, b64
+        def wait_for_load_state(self, *_ , **__): pass
+        def evaluate(self, js, url): return self._b64
+    class _Page:
+        def evaluate(self, js, url): return "JVBERi0xLjcgYmxvYg=="   # %PDF-1.7 blob
+    out = tmp_path / "t.pdf"
+    assert not site._take_new_tab(_Page(), [_Tab("https://evil.test/x.pdf", "JVBERi0xLjc=")], out)
+    assert site._take_new_tab(_Page(), [_Tab("https://www.att.com/x.pdf", "JVBERi0xLjcgYXR0")], out)
+    assert out.read_bytes().startswith(b"%PDF-1.7")
+    assert site._take_new_tab(_Page(), [_Tab("blob:https://www.att.com/abc", None)], out)
+    assert out.read_bytes() == b"%PDF-1.7 blob"

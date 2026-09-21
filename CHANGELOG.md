@@ -7,6 +7,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Every scaffold waited for a download event a real browser never
+  sends.** A real Edge or Chrome attached over CDP saves a download
+  itself, into its own Downloads folder, and Playwright's download event
+  never fires. The Verizon app learned this a year ago and points the
+  browser at a folder it watches. The nine scaffolds cut from the AT&T
+  template did not, so AT&T's tester clicked "Download PDF" five times in
+  round four and the app saw nothing each time, with a trace showing a
+  clean click and no PDF. All nine now point the attached browser at
+  `.<provider>-downloads` under the output folder and watch it after
+  every click, alongside the download event, the PDF response and the
+  new tab they already caught, and a PDF that opens in a new tab, a
+  blob: tab included, is read out of the tab the way Chase reads one. A
+  repo-wide test now refuses any app that clicks in a real browser
+  without one of those. [#26](https://github.com/rheeloaded/paperpull/issues/26).
+
 ## [0.28.0] - 2026-09-20
 
 ### Fixed

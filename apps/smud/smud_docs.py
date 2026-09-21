@@ -206,10 +206,13 @@ class App:
             self._work_page = dom[0] if dom else (live[0] if live else ctx.new_page())
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        # Whatever the site does on a document click, a download event, a PDF
-        # response or a new tab, is caught in smud_site.download_bill. No CDP
-        # download directory is needed.
-        self._dl_dir = None
+        # A real Edge or Chrome attached over CDP saves a download itself,
+        # into its own Downloads folder, and Playwright never sees it. So
+        # the browser is pointed at a folder under the output and the site
+        # layer watches that folder after every click, alongside the
+        # download event, PDF response and new tab it already catches.
+        self._dl_dir = Path(self.config["output_dir"]) / ".smud-downloads"
+        site.set_download_dir(self._work_page, self._dl_dir)
         return self._work_page
 
     def close(self):

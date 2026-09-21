@@ -334,3 +334,24 @@ def press_something(page):
 '''
     assert unguarded_broad_clicks(every) == [
         ("press_something", "get_by_role('button') with no name")]
+
+
+# -- a real browser saves its own downloads ----------------------------------
+
+REAL_BROWSER_APPS = [d for d in APPS if any(
+    "prefer_real=True" in p.read_text(encoding="utf-8") for p in d.glob("*_docs.py"))]
+
+
+@pytest.mark.parametrize("app", REAL_BROWSER_APPS, ids=lambda d: d.name)
+def test_an_app_that_clicks_in_a_real_browser_watches_a_download_folder(app):
+    """A real Edge or Chrome attached over CDP saves a download itself, into
+    its own Downloads folder, and Playwright's download event never fires.
+    Nine scaffolds waited for that event. AT&T's tester clicked Download
+    PDF five times and the app saw nothing each time. An app that clicks a
+    download control in a real browser has to point the browser at a
+    folder and watch it, or read the PDF some other way."""
+    site = (app / ("%s_site.py" % app.name)).read_text(encoding="utf-8")
+    if "expect_download" not in site:
+        return
+    assert "setDownloadBehavior" in site or "setDownloadBehavior" in (app / ("%s_docs.py" % app.name)).read_text(encoding="utf-8") \
+        or "_FETCH_AS_B64" in site, "%s waits for a download event a real browser never sends" % app.name
