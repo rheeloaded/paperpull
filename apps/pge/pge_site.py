@@ -11,6 +11,19 @@ SAFETY (this is a utility billing account):
   the guard; a control must ALSO look like a document action
   (SAFE_DOC_CONTROL_RE) before it may be clicked. There is no code here that
   submits a form or confirms a dialog.
+
+ROUND THREE (#33, 2026-09-22). The tester's third pilot reported two
+things. Every bill row read "09/20/2026 Bill Charges View Bill PDF
+$xx.xx" and handed over no control, so "View Bill PDF" is not an anchor,
+a button or a lightning-button on his history, and whatever element
+carries the words was not in the list the app looked through. The row's
+controls are now found by their own text, innermost element first,
+whatever kind it is, and when a row still hands over nothing the log
+prints the row's outline (tags, classes, roles, shadow roots) so the
+next round sees it. And the Jump to picker opened without listing its
+options, "no option for page 2 in the picker", so after the click the
+picker is asked through its own value and change event, the way a
+Lightning parent hears it, before giving up.
 """
 from __future__ import annotations
 
@@ -393,10 +406,36 @@ def goto_page_number(page, target_page: int) -> bool:
                      target_page, _current_page(page),
                      "unchanged" if _rows_signature(page) == before else "changed")
         else:
-            log.info("no option for page %d in the picker", target_page)
+            log.info("no option for page %d in the picker, asking it by value", target_page)
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+        # The picker as its parent hears it. A Lightning combobox tells the
+        # page about a choice through a change event carrying the value,
+        # and the parent's own handler reads event.detail.value. That is
+        # the same message a click on the option sends, without needing
+        # the option list to have rendered.
+        if _jump_by_value(page, cb, target_page) and _wait_for_page_change(page, before, target_page, 8):
+            return True
     except Exception as e:
         log.debug(f"goto_page_number {target_page} failed: {e}")
     return False
+
+
+def _jump_by_value(page, cb, target_page: int) -> bool:
+    """Set the page picker's value and tell its parent, the way the
+    component itself does after an option is chosen. Only ever the page
+    picker, which has already passed is_page_picker."""
+    try:
+        cb.evaluate("""(el, v) => {
+          el.value = v;
+          el.dispatchEvent(new CustomEvent('change', {detail: {value: v}, bubbles: true, composed: true}));
+        }""", str(target_page))
+        return True
+    except Exception as e:
+        log.info("picker by value: %s", e)
+        return False
 
 
 def _wait_for_page_change(page, before: tuple, target_page: int, seconds: int) -> bool:
@@ -510,20 +549,67 @@ def pick_document_control(candidates) -> Optional[object]:
     return None
 
 
+_VIEW_PDF_RE = re.compile(r"^\s*view\s+(bill\s+)?pdf\s*$", re.I)
+
+# Every element in the row whose own text reads View Bill PDF, innermost
+# first, so the thing a person clicks is tried before the cell around it.
+_ROW_TEXT_CONTROLS_JS = r"""row => {
+  const rx = /^\s*view\s+(bill\s+)?pdf\s*$/i;
+  const out = [];
+  const walk = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) walk(el.shadowRoot);
+      const t = (el.innerText || el.textContent || '').trim();
+      if (rx.test(t)) out.push(el);
+    }
+  };
+  walk(row);
+  // innermost first: an element none of the others is inside of
+  out.sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0));
+  return out;
+}"""
+
+
 def row_controls(row) -> list:
     """Everything in a bill row that could be its PDF control. Anchors and
-    buttons first, then anything whose own text reads View Bill PDF, since
-    on the tester's history the control was neither (#33)."""
+    buttons first, then every element whose own text reads View Bill PDF,
+    innermost first, whatever it is, shadow roots included, since on the
+    tester's history the control was none of the usual kinds (#33)."""
     out = []
-    for sel in ("a, button, [role='button']", "lightning-button, lightning-formatted-url",
-                ":text-matches('view\\s+(bill\\s+)?pdf', 'i')"):
+    for sel in ("a, button, [role='button']", "lightning-button, lightning-formatted-url"):
         try:
             for el in row.query_selector_all(sel):
                 if el not in out:
                     out.append(el)
         except Exception:
             continue
+    try:
+        handles = row.evaluate_handle(_ROW_TEXT_CONTROLS_JS)
+        props = handles.get_properties()
+        for h in props.values():
+            el = h.as_element()
+            if el is not None and el not in out:
+                out.append(el)
+    except Exception as e:
+        log.debug("text controls in row: %s", e)
     return out
+
+
+_ROW_OUTLINE_JS = r"""row => {
+  const out = [];
+  const walk = (el, d, inShadow) => {
+    if (d > 6 || out.length > 60) return;
+    const tag = el.tagName ? el.tagName.toLowerCase() : '#';
+    const cls = (el.className || '').toString().split(' ').filter(Boolean).slice(0, 2).join('.');
+    const role = el.getAttribute ? (el.getAttribute('role') || '') : '';
+    const own = Array.from(el.childNodes || []).filter(n => n.nodeType === 3).map(n => n.textContent.trim()).filter(Boolean).join(' ');
+    out.push('  '.repeat(d) + (inShadow ? '~' : '') + tag + (cls ? '.' + cls : '') + (role ? ' [' + role + ']' : '') + (own ? ' = ' + own.replace(/\d{4,}/g, '####').slice(0, 40) : '') + (el.shadowRoot ? ' {shadow}' : ''));
+    if (el.shadowRoot) for (const c of el.shadowRoot.children) walk(c, d + 1, true);
+    for (const c of (el.children || [])) walk(c, d + 1, inShadow);
+  };
+  walk(row, 0, false);
+  return out;
+}"""
 
 
 def _describe_row(row) -> str:
@@ -544,7 +630,12 @@ def _describe_row(row) -> str:
     except Exception:
         pass
     mask = lambda t: re.sub(r"\d{4,}", "####", t)
-    return "row %r controls %s" % (mask(text), [mask(x) for x in labels])
+    try:
+        outline = row.evaluate(_ROW_OUTLINE_JS) or []
+    except Exception:
+        outline = []
+    return "row %r controls %s\n  [site] row outline:\n    %s" % (
+        mask(text), [mask(x) for x in labels], "\n    ".join(outline))
 
 
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:

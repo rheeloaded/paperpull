@@ -260,13 +260,24 @@ def test_a_row_whose_pdf_control_is_not_an_anchor_still_hands_it_over():
         def __init__(self, text): self._text = text
         def inner_text(self, timeout=None): return self._text
         def get_attribute(self, name): return None
+    class _Handle:
+        """The JS walk's answer, a td and the span inside it, innermost first."""
+        def __init__(self, els): self._els = els
+        def get_properties(self): return {str(i): _H(e) for i, e in enumerate(self._els)}
+    class _H:
+        def __init__(self, e): self._e = e
+        def as_element(self): return self._e
     class _Row:
         def query_selector_all(self, sel):
             if sel.startswith("a, button"): return [_El("Pay")]
-            if "text-matches" in sel: return [_El("View Bill PDF")]
             return []
+        def evaluate_handle(self, js):
+            assert "view" in js and "shadowRoot" in js, "the walk reads text and pierces shadow roots"
+            return _Handle([_El("View Bill PDF"), _El("View Bill PDF")])
         def inner_text(self): return "09/20/2026 View Bill PDF Pay"
     ctrls = site.row_controls(_Row())
-    assert [c._text for c in ctrls] == ["Pay", "View Bill PDF"]
+    assert [c._text for c in ctrls] == ["Pay", "View Bill PDF", "View Bill PDF"]
+    # and the guard hands over the PDF control, never Pay
+    assert site.pick_document_control(ctrls)._text == "View Bill PDF"
     assert site.pick_document_control(ctrls)._text == "View Bill PDF"
     assert "View Bill PDF" in site._describe_row(_Row())
