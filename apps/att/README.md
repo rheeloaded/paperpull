@@ -1,13 +1,13 @@
 # AT&T bill downloader
 
-**Not yet tested against a real account.** This app was built without an
-AT&T account, so that someone who holds one can test it without writing
-code. It runs, its guards are tested, and every guess about att.com is
-marked in `att_site.py`. What it needs is a survey from a signed-in
-account, which the Diagnose button produces and which contains no personal
-data. If you have an AT&T Mobility, Fiber or Internet account, the steps
-are below, and the conversation is
-[issue #26](https://github.com/rheeloaded/paperpull/issues/26).
+**Working on the tester's account, still being finished.** This app was
+built without an AT&T account and repaired across eight rounds from the
+surveys and traces one tester sent. Round eight's pilot saved his bills.
+What is still open is the full history run and a household with more than
+one account (he holds wireless and fiber, and only the account in focus is
+read so far). The conversation is
+[issue #26](https://github.com/rheeloaded/paperpull/issues/26), and the
+steps below are still how a round works.
 
 Downloads your AT&T monthly **bills** as PDFs from myAT&T. Read-only,
 delete-safe, part of [PaperPull](../../README.md).

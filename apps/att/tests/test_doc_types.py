@@ -124,11 +124,11 @@ def test_only_att_hosts():
     assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
 
 
-def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
+def test_the_status_is_stated_where_a_tester_will_read_it():
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "UNVERIFIED" in src.split('"""')[1]
+    assert "STATUS: round nine" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "Not yet tested against a real account" in readme
+    assert "still being finished" in readme and "Not yet tested" not in readme
 
 
 # -- round two, from the first tester's survey (#26) --------------------------
@@ -467,3 +467,34 @@ def test_the_menu_entries_pass_the_guard_and_the_accessibility_one_is_not_prefer
     assert site.is_safe_control("View/print PDF")
     assert site._REGULAR_PDF_RE.match("Regular PDF") and not site._REGULAR_PDF_RE.match("Accessibility PDF")
     assert site._VIEW_PRINT_RE.match("View/print PDF") and site._VIEW_PRINT_RE.match("View / print PDF")
+
+
+# -- round nine, the account's kind and the due date (#26) --------------------
+
+class _SwitcherPage:
+    def __init__(self, text):
+        self._t = text
+
+    def get_by_role(self, role, name=None):
+        page = self
+
+        class _L:
+            def count(self_): return 1
+            def nth(self_, i): return self_
+            def inner_text(self_, timeout=0): return page._t
+        return _L()
+
+
+def test_the_accounts_kind_is_read_off_the_switcher_and_leads_nowhere_else():
+    assert site.current_account_label(_SwitcherPage("Account\n123456789\nWireless")) == "Wireless"
+    assert site.current_account_label(_SwitcherPage("Account\n123456789\nFiber")) == "Fiber"
+    assert site.current_account_label(_SwitcherPage("Account\n123456789\nInternet")) == "Internet"
+    assert site.current_account_label(_SwitcherPage("Account\n123456789\nMobility")) == "Wireless"
+    assert site.current_account_label(_SwitcherPage("Account\n123456789")) == ""
+
+
+def test_a_due_date_is_never_a_bill_date():
+    assert site._date_not_due("Bill issued Sep 11, 2026") == "2026-09-11"
+    assert site._date_not_due("Current balance $88.05\nDue Sep 30, 2026") is None
+    assert site._date_not_due("Amount due Sep 30, 2026\nBill date Sep 11, 2026") == "2026-09-11"
+    assert site._date_not_due("no date") is None

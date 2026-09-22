@@ -1,4 +1,4 @@
-"""AT&T bill downloader (local, supervised). UNVERIFIED, see att_site.py.
+"""AT&T bill downloader (local, supervised). Being finished with a tester, see att_site.py.
 
 This app was written without an AT&T account so that someone who holds one
 can test it without writing code. The orchestrator below is the same one
@@ -361,6 +361,12 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        # The account's kind leads the summary, so a household with a
+        # wireless and an internet account gets "Wireless Monthly
+        # Statement" and "Internet Monthly Statement" (#26).
+        account = re.sub(r"\s+", " ", (getattr(r, "account", "") or "")).strip()
+        if account and account.lower() not in summary.lower():
+            summary = f"{account} {summary}"
         doc = Document(title=title, category=category, summary=summary,
                        date=date, confidence=confidence, source_url=source_url,
                        href=r.href or "")
@@ -386,6 +392,20 @@ class App:
         docs = site.collect_download_docs(page)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
+        # A record an earlier round made from a date the history does
+        # not list (round two read the current bill's due date off the
+        # billing center) is dropped, unless a file was downloaded for
+        # it, which stays remembered so it is never fetched twice.
+        if docs:
+            listed = {r.date_text for r in docs}
+            for key, rec in list(self.discovery.data.items()):
+                if rec.get("date") in listed:
+                    continue
+                prog = self.progress.get(key) or {}
+                if prog.get("downloaded_ok") or prog.get("state") in ("Completed", "PDF Verified"):
+                    continue
+                log.info("dropping %s, the history does not list a bill dated %s", key, rec.get("date"))
+                self.discovery.data.pop(key, None)
         self.discovery.save()
         log.info("billing history: %d statements, %d new", len(docs), n_new)
 
