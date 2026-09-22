@@ -34,6 +34,7 @@ from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import pge_site as site
 from paperpull_core.models import State
+from paperpull_core import failure
 from paperpull_core.run_reporting import report_run_result
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
@@ -400,6 +401,7 @@ class App:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the bill PDF (see the log)")
             self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self.write_failure('capture the document', 'the document would not render')
             self.stats["manual_review"] += 1
             print("  Could not capture this bill - marked for manual review.")
             return
@@ -420,6 +422,7 @@ class App:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes=f"PDF validation failed: {result.reason}")
             self._write_row(doc, "Validation failed", "Needs Manual Review")
+            self.write_failure('validate the saved PDF', 'the saved PDF did not validate')
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
@@ -552,6 +555,39 @@ class App:
                 row["Verified At"] = now_iso()
         self.index_csv.rewrite(rows)
         print(f"\nVerified {len(rows)} index rows; {bad} problem(s).")
+
+    def write_failure(self, step: str, reason: str, text: str = "",
+                      postmortem: dict = None) -> None:
+        """What the page looked like when this went wrong, to a file.
+
+        Written without anybody having to know to ask for it, because a
+        tester who has to be told to run a second command is a tester who
+        sends one file and waits a day for the request for the other.
+
+        One per run. A run where thirty documents fail for one reason
+        does not need thirty files, and the first is taken while the page
+        is still sitting on the thing that broke."""
+        if self.stats.get("failure_files"):
+            return
+        extra = {"postmortem": postmortem} if postmortem else None
+        path = failure.write_failure(
+            self.paths.diagnostics,
+            command=self.stats.get("mode") or "run",
+            step=step, reason=reason,
+            page=getattr(self, "_work_page", None),
+            selectors=getattr(site, "FALLBACK", None),
+            provider='PG&E', text=text, extra=extra)
+        if not path:
+            return
+        self.stats["failure_files"] = 1
+        try:
+            import json as _failure_json
+            said = failure.summarize(_failure_json.loads(
+                Path(path).read_text(encoding="utf-8")))
+        except Exception:
+            said = []
+        for line in said[:6]:
+            print("  - %s" % line)
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"

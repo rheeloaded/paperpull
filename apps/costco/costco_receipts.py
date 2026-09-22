@@ -21,6 +21,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core import failure
 from paperpull_core.run_reporting import report_run_result
 
 import argparse
@@ -184,6 +185,7 @@ class App:
             self._work_page.add_init_script(receipt_pdf.PRINT_SUPPRESS_INIT_SCRIPT)
         except Exception:
             pass
+        failure.watch_errors(self._work_page)
         return self._work_page
 
     def close(self):
@@ -450,6 +452,7 @@ class App:
                     self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
                                        notes="Receipt page failed to load twice")
                     self.stats["manual_review"] += 1
+                    self.write_failure("open the receipt", str(e))
                     return
                 time.sleep(5)
                 site.goto_orders(page)
@@ -545,6 +548,8 @@ class App:
             self.stats["no_receipt"] += 1
             self.stats["manual_review"] += 1
             print(f"  {why} - marked for manual review.")
+            self.write_failure("render the receipt", why,
+                               text=site.receipt_text(page))
             return False
 
         purchase.document_type = "Receipt"
@@ -887,6 +892,39 @@ class App:
             self.index_csv.rewrite(rows)
             self.order_csv.rewrite(order_rows)
             print("CSV files and progress.json updated.")
+
+    def write_failure(self, step: str, reason: str, text: str = "",
+                      postmortem: dict = None) -> None:
+        """What the page looked like when this went wrong, to a file.
+
+        Written without anybody having to know to ask for it, because a
+        tester who has to be told to run a second command is a tester who
+        sends one file and waits a day for the request for the other.
+
+        One per run. A run where thirty documents fail for one reason
+        does not need thirty files, and the first is taken while the page
+        is still sitting on the thing that broke."""
+        if self.stats.get("failure_files"):
+            return
+        extra = {"postmortem": postmortem} if postmortem else None
+        path = failure.write_failure(
+            self.paths.diagnostics,
+            command=self.stats.get("mode") or "run",
+            step=step, reason=reason,
+            page=getattr(self, "_work_page", None),
+            selectors=getattr(site, "FALLBACK", None),
+            provider='Costco', text=text, extra=extra)
+        if not path:
+            return
+        self.stats["failure_files"] = 1
+        try:
+            import json as _failure_json
+            said = failure.summarize(_failure_json.loads(
+                Path(path).read_text(encoding="utf-8")))
+        except Exception:
+            said = []
+        for line in said[:6]:
+            print("  - %s" % line)
 
     def cmd_diagnose(self):
         """The purchase history and one receipt page, as this browser sees
