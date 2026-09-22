@@ -38,8 +38,8 @@ def test_payment_receipts_and_marketing_are_skipped():
 
 def test_filename_shape():
     storage.set_filename_owner("")
-    assert build_pdf_filename("2026-08-12", "Monthly Statement", "Statement") == \
-        "2026-08-12 AT&T Monthly Statement Statement.pdf"
+    assert build_pdf_filename("2026-08-12", "Monthly Statement", "") == \
+        "2026-08-12 AT&T Monthly Statement.pdf"
 
 
 # -- the carrier guard ------------------------------------------------------
