@@ -59,6 +59,11 @@ from urllib.parse import urlparse
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
+# Everything on its way into a diagnostic file goes through here. It
+# lives in core because seventeen apps each had their own copy and
+# they drifted into three different versions.
+from paperpull_core.redact import redact, set_private_words  # noqa: F401
+
 log = logging.getLogger("citi_docs.site")
 
 # Every host this app will read from. Anything else is refused.
@@ -161,10 +166,6 @@ MONTH_YEAR_RE = re.compile(
 YEAR_RE = re.compile(r"\b(19|20)(\d{2})\b")
 _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
              7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
-_ID_RE = re.compile(r"\d{6,}")
-_QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
-
-
 def _last_day(year: int, month: int) -> int:
     if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
         return 29
@@ -219,14 +220,6 @@ def api_date(iso: str) -> str:
     """2026-09-15 -> 09/15/2026, the form the API takes."""
     y, m, d = iso.split("-")
     return f"{m}/{d}/{y}"
-
-
-def redact(text: str) -> str:
-    """Runs of six or more digits become #, and a URL loses its query
-    string, so nothing personal reaches a survey file."""
-    text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
-    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
-
 
 def account_label(nickname: str) -> str:
     """The card's name as it goes into a filename. "Costco Anywhere Visa
