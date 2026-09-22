@@ -7,6 +7,67 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Record, so a provider is built from what a person did rather than
+  from a guess about it.** A survey describes a page and is still a
+  guess, because it cannot know which control the account holder would
+  click, in what order, or what the site does in between. AT&T took nine
+  rounds of guessing. A tester now signs in themselves, presses **Record**
+  in the panel or runs `paperpull <slug> record`, clicks through to one
+  document the way they always do, and presses **Stop recording**. What
+  comes out is `Diagnostics/recording.json`, the controls clicked named
+  the way a person reads them, the option picked in each dropdown, where
+  the page moved, what downloaded, and the addresses and shapes of the
+  provider's own answers.
+- **Nothing typed is captured, and that is enforced rather than
+  promised.** The capture script listens for click, change and submit
+  and for nothing else, so a password, a card number or a search term has
+  no listener to be caught by. A field that was typed into is recorded as
+  having been typed into and its value is the fixed word `[REDACTED]`.
+  Cookies, headers and storage are never read, a recording refuses to
+  start unless the page is on the provider's own host with no password
+  field on it, and tests fail the build if any of that changes.
+- **The app says what to look at before the file goes anywhere.** When a
+  recording ends it prints the things redaction is known not to catch, a
+  four or five digit number, a name standing on its own where no account
+  holder name is configured, anything still shaped like an address or an
+  email, each quoted so the tester can find it. One finding is one
+  sentence however many places it appears in.
+- **`tools/read_recording.py`**, which reads a recording back as what the
+  person did, what the site answered, and the locator lines to start the
+  site layer from, with the brittle ones and the ones the app's control
+  guard would refuse called out.
+- **[Testing a provider](docs/testing-a-provider.md)**, the whole thing
+  written for somebody who has the account and does not write code, from
+  the installer to the issue comment. Every untested provider's README
+  now points at it.
+
+### Fixed
+- **A run that only looked at the page no longer wipes the record of the
+  last one that downloaded.** Setting a run's mode causes a run summary
+  at exit, which rewrites `new-this-run.txt`. For a download run that is
+  right. For `diagnose`, which downloads nothing by design, it replaced a
+  list that was still true, in all forty-seven apps since the mode was
+  introduced. A tester running Diagnose silently lost the record of what
+  their last real run fetched.
+- **A field is never named by what is already in it.** The accessible
+  name falls back to an element's text, and a server-rendered textarea
+  holds its contents as text, so a form with the account holder's address
+  pre-filled named the field after the address. Fields are now named by
+  their label or not at all.
+- **Stop recording follows the recording, not the App list.** The App
+  list is not disabled while a run is going, so changing it mid-recording
+  and pressing Stop wrote the signal into another provider's folder and
+  the recording, watching its own, never ended.
+- Nothing arriving from the page is trusted. The binding sits on
+  `window`, so any script on the provider's page can call it, and a
+  malformed payload used to lose the step it arrived with.
+- A JSON response over 2 MB is recorded as too large rather than read,
+  since reading a body is a round trip to the browser and a year of
+  transactions has the same shape as a month of them.
+
 ## [0.30.2] - 2026-09-22
 
 ### Added

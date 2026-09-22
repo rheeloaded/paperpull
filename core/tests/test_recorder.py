@@ -14,7 +14,8 @@ import re
 from pathlib import Path
 
 import pytest
-from paperpull_core.recorder import REDACTED, Recorder, _CAPTURE_JS
+from paperpull_core.recorder import (REDACTED, Recorder, _CAPTURE_JS,
+                                    concerns, record_session)
 from paperpull_core.redact import set_private_words
 
 CORE = Path(__file__).resolve().parents[1] / "paperpull_core"
@@ -149,6 +150,24 @@ def test_the_capture_script_never_reads_an_input_value():
     button's caption attribute, and only for a button."""
     assert ".value" not in _CAPTURE_JS.replace("el.options[el.selectedIndex]", "")
     assert "getAttribute(\"value\")" in _CAPTURE_JS
+
+
+def test_a_field_is_never_named_by_what_is_already_in_it():
+    """`.value` is not the only way to read what is in a field.
+
+    A server-rendered textarea holds its contents as a text node, so
+    innerText reads them, and a form with the account holder's address
+    pre-filled would have named the field after the address. Checked
+    against the real script in a JS runtime before this was written, which
+    is why the assertion is on the guard rather than on a behaviour the
+    FakePage cannot produce."""
+    body = _CAPTURE_JS[_CAPTURE_JS.index("const nameOf"):
+                       _CAPTURE_JS.index("const locate")]
+    fallback = [ln for ln in body.splitlines() if "el.innerText" in ln]
+    assert len(fallback) == 1, fallback
+    assert "typed ?" in fallback[0], fallback[0]
+    assert 'tag === "textarea"' in body
+    assert 'tag === "select"' in body
 
 
 def test_a_typed_field_records_that_it_was_typed_into_and_not_what():
@@ -577,3 +596,175 @@ def test_a_normal_response_body_is_still_read():
     small.headers["content-length"] = "120"
     page.emit("response", small)
     assert r.requests[0]["shape"] == {"a": "int"}
+
+
+# ---------------------------------------------------------------------------
+# Reading the file back, before it goes anywhere
+#
+# The bar here is different from the rest of the module. A check that shouts
+# at every year in a statement list is a check nobody reads, and one that
+# says nothing at all is worse than not having it.
+# ---------------------------------------------------------------------------
+
+def a_report(**kw):
+    r = {"kind": "paperpull-recording", "provider": "Testco",
+         "recorded_at": "2026-09-22T10:00:00", "steps": [], "requests": [],
+         "dropped": {}, "note": "Typed values are never captured."}
+    r.update(kw)
+    return r
+
+
+def a_step(**kw):
+    s = {"i": 0, "action": "click", "label": "", "at": 1,
+         "locator": {"how": "role", "role": "link", "name": "Statements"},
+         "effect": {"requests": 0}}
+    s.update(kw)
+    return s
+
+
+def named(value, how="role"):
+    loc = {"how": how, "role": "link", "name": value} if how == "role" \
+        else {"how": how, "value": value}
+    return a_report(steps=[a_step(locator=loc)])
+
+
+def test_a_year_is_not_flagged():
+    """A statement list is nothing but years. Flagging every one of them
+    buries the single number that matters."""
+    r = a_report(steps=[a_step(action="select", option="2024",
+                               locator={"how": "label", "value": "Year"})])
+    assert not any("2024" in c for c in concerns(r))
+
+
+def test_a_number_that_is_not_a_year_is_flagged():
+    assert any("48213" in c for c in concerns(named("Account 48213")))
+
+
+def test_a_six_digit_number_is_not_flagged_here():
+    """Redaction already took it, so seeing one would mean redaction ran
+    and this is reporting on its own output. The check below covers that."""
+    assert not any("123456" in c for c in concerns(named("Account [REDACTED]")))
+
+
+def test_our_own_timestamp_is_never_a_concern():
+    assert not any("recorded_at" in c for c in concerns(a_report()))
+
+
+def test_our_own_note_is_never_a_concern():
+    r = a_report(note="Typed values are never captured. Read this through.")
+    assert not any(c.startswith("note") for c in concerns(r))
+
+
+def test_an_email_that_slipped_through_is_flagged():
+    assert any("email" in c for c in concerns(named("ada@example.test", "text")))
+
+
+def test_a_street_address_is_flagged():
+    r = named("1600 Pennsylvania Ave", "text")
+    assert any("street address" in c for c in concerns(r))
+
+
+def test_a_control_name_that_looks_like_a_name_is_not_flagged():
+    """Sites label things Bill History and Account Summary all day."""
+    for name in ("Bill History", "Account Summary", "View Statements",
+                 "Payment History", "Tax Documents", "Order Details"):
+        assert not any(name in c for c in concerns(named(name))), name
+
+
+def test_a_person_shaped_name_is_flagged():
+    """The one thing redaction cannot take when no owner is configured."""
+    assert any("Alex Morgan" in c for c in concerns(named("Alex Morgan")))
+
+
+def test_something_redaction_would_have_removed_is_flagged():
+    """A value redaction removes should never be in the file. If one is,
+    it got there without going through redaction, which is a bug."""
+    r = named("Balance $1,204.55", "text")
+    assert any("redaction would remove" in c for c in concerns(r))
+
+
+def test_a_clean_recording_raises_nothing():
+    assert concerns(a_report()) == []
+
+
+def test_one_finding_is_one_sentence_however_often_it_appears():
+    """An account number in forty rows is one thing to fix. Forty lines
+    saying so is a wall of text that gets skipped."""
+    s = a_step(locator={"how": "role", "role": "link", "name": "Account 48213"})
+    r = a_report(steps=[s, dict(s, i=1), dict(s, i=2)])
+    said = concerns(r)
+    assert len(said) == 1
+    assert "steps[0].locator.name (and 2 other places)" in said[0]
+
+
+def test_two_places_reads_as_one_other_place():
+    s = a_step(locator={"how": "role", "role": "link", "name": "Account 48213"})
+    said = concerns(a_report(steps=[s, dict(s, i=1)]))
+    assert "(and 1 other place)" in said[0]
+
+
+def test_two_different_findings_are_two_sentences():
+    r = a_report(steps=[
+        a_step(locator={"how": "role", "role": "link", "name": "Account 48213"}),
+        a_step(i=1, locator={"how": "text", "value": "ada@example.test"})])
+    assert len(concerns(r)) == 2
+
+
+def test_a_file_nested_beyond_all_reason_does_not_run_out_of_stack():
+    """Running out of stack while checking a file for private data would
+    fail in the one direction that matters."""
+    deep = "the bottom"
+    for _ in range(400):
+        deep = {"x": deep}
+    assert concerns(a_report(steps=[a_step(effect=deep)])) == []
+
+
+def test_the_tester_is_told_what_to_look_at_without_a_maintainer_tool(tmp_path):
+    """The person deciding whether to attach the file is standing in front
+    of the app's console, not the maintainer's checkout, so the check runs
+    at the end of the recording and not only in tools/read_recording.py."""
+    import threading
+
+    said = []
+    page = FakePage()
+    page.url = "https://bank.example/documents"
+
+    class Site:
+        is_safe_url = staticmethod(safe)
+
+    def click_then_stop():
+        page.fire({"action": "click", "at": 1, "label": "Alex Morgan",
+                   "locator": {"how": "role", "role": "button",
+                               "name": "Alex Morgan"}})
+        (tmp_path / ".stop-recording").write_text("stop", encoding="utf-8")
+
+    threading.Timer(0.05, click_then_stop).start()
+    out = record_session(page, Site, tmp_path, provider="Testco", owner="",
+                         say=said.append)
+
+    printed = " ".join(said)
+    assert "Before this file goes anywhere" in printed
+    assert "Alex Morgan" in printed
+    assert json.loads(Path(out).read_text(encoding="utf-8"))["steps"]
+
+
+def test_a_clean_recording_does_not_warn_the_tester(tmp_path):
+    import threading
+
+    said = []
+    page = FakePage()
+    page.url = "https://bank.example/documents"
+
+    class Site:
+        is_safe_url = staticmethod(safe)
+
+    def click_then_stop():
+        page.fire({"action": "click", "at": 1, "label": "Statements",
+                   "locator": {"how": "role", "role": "link",
+                               "name": "Statements"}})
+        (tmp_path / ".stop-recording").write_text("stop", encoding="utf-8")
+
+    threading.Timer(0.05, click_then_stop).start()
+    record_session(page, Site, tmp_path, provider="Testco", owner="",
+                   say=said.append)
+    assert "Before this file goes anywhere" not in " ".join(said)

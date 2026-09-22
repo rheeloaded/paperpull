@@ -468,6 +468,10 @@ you use isn't here yet, you're the ideal person to add it:
   claim one so nobody builds it twice.
 - 📥 Can't build it yourself? [Request a provider](https://github.com/rheeloaded/paperpull/issues/new/choose)
   and someone with that account may pick it up.
+- 🎬 **[Testing a provider](docs/testing-a-provider.md)**, for people who have
+  the account but do not write code. Sign in, press **Record**, click your way
+  to one document, and send back what the app wrote down. That is usually all
+  it takes to turn a scaffold into a working app.
 
 Every contribution keeps the **read-only, local, no-credentials** design, see
 [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).

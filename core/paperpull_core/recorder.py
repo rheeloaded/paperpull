@@ -64,6 +64,7 @@ maintainer this provider needs a different approach.
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Callable, Optional
 
@@ -140,18 +141,26 @@ _CAPTURE_JS = r"""
         .join(" ").trim();
       if (parts) return parts;
     }
-    if (el.tagName.toLowerCase() === "input" && el.labels && el.labels.length)
+    const tag = el.tagName.toLowerCase();
+    const typed = (tag === "input" || tag === "textarea" || tag === "select");
+    if (typed && el.labels && el.labels.length)
       return (el.labels[0].textContent || "").trim();
     const alt = el.getAttribute("alt");
     if (alt && alt.trim()) return alt.trim();
     const title = el.getAttribute("title");
     if (title && title.trim()) return title.trim();
-    const text = (el.innerText || el.textContent || "").trim();
+    // Not for a field. A textarea's text content is whatever was in it,
+    // which on a server-rendered page is the account holder's own words,
+    // and a field is named by its label or it is not named at all.
+    const text = typed ? "" : (el.innerText || el.textContent || "").trim();
     if (text) return text.replace(/\s+/g, " ");
     const val = el.getAttribute("value");
-    // A button's own caption, never a text field's contents.
-    const t = (el.getAttribute("type") || "").toLowerCase();
-    if (val && (t === "submit" || t === "button" || t === "reset")) return val.trim();
+    // A button's own caption, never a text field's contents. The value
+    // attribute, not the property, so what somebody typed is not in it
+    // even for the kinds of field that are allowed through here.
+    const kind = (el.getAttribute("type") || "").toLowerCase();
+    if (val && (kind === "submit" || kind === "button" || kind === "reset"))
+      return val.trim();
     return "";
   };
 
@@ -547,6 +556,137 @@ class Recorder:
 
 
 # ---------------------------------------------------------------------------
+# Reading the file back, before it goes anywhere
+# ---------------------------------------------------------------------------
+
+# A number this long is left alone by redaction on purpose, because a year,
+# a page count and a dollar figure are all four digits and masking them
+# would make a recording useless. An account number can be four digits too.
+_SHORT_NUMBER = re.compile(r"(?<!\d)\d{4,5}(?!\d)")
+
+# 1900 through 2099. A statement list is nothing but years, so flagging
+# those would bury the one number worth looking at.
+_A_YEAR = re.compile(r"^(19|20)\d\d$")
+
+# The report's own fields. Nothing personal has ever been in them and
+# every one of them is a number or a fixed sentence.
+_OURS = ("kind", "note", "provider", "recorded_at", "dropped")
+
+# Two or three capitalised words in a row, which is what a person's name
+# looks like when it is sitting on a profile button. Most hits are the
+# name of a control, so this is a prompt to look rather than a finding.
+_NAME_SHAPED = re.compile(r"\b[A-Z][a-z]{1,14} [A-Z][a-z]{1,14}(?: [A-Z][a-z]{1,14})?\b")
+
+# Words that make a name-shaped pair almost certainly a control, not a
+# person. Sites label things "Bill History" and "Account Summary" all day.
+_CONTROL_WORDS = {
+    "account", "accounts", "bill", "billing", "bills", "card", "cards",
+    "center", "check", "close", "current", "detail", "details", "document",
+    "documents", "download", "estimate", "file", "files", "form", "forms",
+    "go", "history", "home", "invoice", "invoices", "loan", "log", "logout",
+    "menu", "more", "my", "next", "open", "order", "orders", "page", "pay",
+    "payment", "payments", "pdf", "period", "plan", "policy", "previous",
+    "print", "profile", "receipt", "receipts", "records", "report", "return",
+    "save", "search", "select", "settings", "show", "sign", "statement",
+    "statements", "summary", "tax", "the", "transaction", "transactions",
+    "view", "year",
+}
+
+_EMAIL_OR_MAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
+_STREET = re.compile(r"\b\d{1,5}\s+[A-Z][a-z]+\s+"
+                     r"(st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|"
+                     r"blvd|boulevard|way|pl|place|ter|terrace)\b", re.I)
+
+
+def _strings(obj, path="", found=None, depth=0) -> list:
+    """Every string in the report, with where it came from.
+
+    The recorder never nests deeper than a handful, but this reads a file
+    a person has had in a text editor, so the depth is capped rather than
+    trusted. Running out of stack while checking a file for private data
+    would fail in the one direction that matters."""
+    found = [] if found is None else found
+    if depth > 12:
+        return found
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _strings(v, "%s.%s" % (path, k) if path else str(k), found, depth + 1)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            _strings(v, "%s[%d]" % (path, i), found, depth + 1)
+    elif isinstance(obj, str) and obj:
+        found.append((path, obj))
+    return found
+
+
+def _name_shaped(text: str) -> list:
+    out = []
+    for hit in _NAME_SHAPED.findall(text):
+        words = [w.lower() for w in hit.split()]
+        if any(w in _CONTROL_WORDS for w in words):
+            continue
+        out.append(hit)
+    return out
+
+
+def concerns(report: dict) -> list:
+    """What a person should look at, worst first. Each is a sentence, not a
+    verdict. This does not edit the file and does not claim the file is
+    clean, because no check can.
+
+    One finding is one sentence however many places it appears. An account
+    number in forty rows is one thing to fix, and forty lines saying so is
+    a wall of text that gets skipped."""
+    found: dict = {}
+
+    def add(key, where, text):
+        said.add(key[0])
+        if key in found:
+            found[key][1] += 1
+        else:
+            found[key] = [where, 1, text]
+
+    for where, text in _strings(report, ""):
+        if where.split(".")[0].split("[")[0] in _OURS:
+            continue
+        said = set()
+        if _EMAIL_OR_MAIL.search(text):
+            add(("email", text), where,
+                "%s holds something shaped like an email address. Redaction "
+                "removes those, so this one arrived by a route it does not "
+                "cover. Delete it and tell the maintainer where it was.")
+        if _STREET.search(text):
+            add(("street", text), where,
+                "%s holds something shaped like a street address. Delete it.")
+        for hit in _SHORT_NUMBER.findall(text):
+            if _A_YEAR.match(hit):
+                continue
+            add(("number", hit), where,
+                "%s holds the number " + hit + ". Four and five digit numbers "
+                "are left alone, because a four digit number is usually a "
+                "count or a page. If that one is part of an account number, "
+                "replace it with x's.")
+        for hit in _name_shaped(text):
+            add(("name", hit), where,
+                '%s reads "' + hit + '". If that is a person\'s name rather '
+                "than the name of a button, replace it.")
+        # Only when nothing above named the thing. An email is caught by
+        # the line above and by this one, and the line above says more.
+        if not said and redact(text) != text:
+            add(("unredacted", text), where,
+                "%s still holds something redaction would remove, which means "
+                "it was written without going through it. Tell the "
+                "maintainer.")
+
+    out = []
+    for where, times, text in found.values():
+        place = where if times == 1 else "%s (and %d other place%s)" % (
+            where, times - 1, "" if times == 2 else "s")
+        out.append(text % place)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # One whole recording, from the app's point of view
 # ---------------------------------------------------------------------------
 
@@ -642,6 +782,27 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
     if not report["steps"]:
         say("  Nothing was recorded. If you clicked, the page may have been")
         say("  replaced between starting and clicking. Try again.")
+
+    # The file has already been through redaction. This is the second pair
+    # of eyes over the result, and it runs here rather than only in the
+    # maintainer's tool because the person deciding whether to attach the
+    # file is standing in front of this console, not that one.
+    try:
+        worry = concerns(report)
+    except Exception:
+        # The file is already on disk and is the thing that matters. A
+        # check that fails is not a reason to lose it.
+        worry = ["the check over this file could not be run, so read it"
+                 " through with particular care"]
+    say("")
+    if worry:
+        say("Before this file goes anywhere, look at %d thing%s in it."
+            % (len(worry), "" if len(worry) == 1 else "s"))
+        for line in worry[:20]:
+            say("  - %s" % line)
+        if len(worry) > 20:
+            say("  - and %d more of the same kind." % (len(worry) - 20))
+        say("")
     say("Read that file through for anything you would not want public,")
     say("then attach it to the provider's issue on GitHub.")
     return str(out)

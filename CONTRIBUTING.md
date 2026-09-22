@@ -26,6 +26,13 @@ seeing your change merged. If you already know your way around, skip to
 You do not have to write code to be useful. All of these happen on the
 GitHub website with nothing installed.
 
+**You have an account with a provider nobody has tested.** This is the most
+useful thing on the page and it needs no code. Install PaperPull, sign in,
+press **Record**, and click your way to one document. The app writes down the
+path you took and you send that back. The whole walkthrough is
+[Testing a provider](docs/testing-a-provider.md), written for someone who has
+never contributed to anything.
+
 **A provider stopped working.** Go to
 [New issue](https://github.com/rheeloaded/paperpull/issues/new/choose) and
 pick **A supported app stopped working**. Say which provider, what you ran,
@@ -431,8 +438,16 @@ app found on the page, which controls it saw, and which the guard would
 allow, so you can see where the site moved. Then fix the selector or the
 navigation, run the tests, run `pilot` against your account, and send it.
 
+Better still, `python paperpull.py <slug> record`, then click your way to a
+document yourself. That writes `Diagnostics/recording.json`, the path a person
+actually takes, rather than the app's guess at it.
+`python tools/read_recording.py <that file>` reads it back as what was clicked,
+what the site answered, and the locator lines to start from. The tester's half
+of this is [Testing a provider](docs/testing-a-provider.md).
+
 If you cannot fix it but can see what changed, that alone is worth an issue.
-Say what `diagnose` reported. Someone else can take it from there.
+Say what `diagnose` or `record` reported. Someone else can take it from
+there.
 
 ---
 
