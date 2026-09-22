@@ -2,45 +2,83 @@
 
 When Costco changes its website, repair this file only.
 
-BUILT WITHOUT AN ACCOUNT, 2026-09-22. Everything below marked VERIFIED was
-read off the live public site. Everything marked GUESS is what a signed-in
-page is expected to look like and is exactly what the first tester's
-recording settles. This app exists to be corrected, not to be right.
+WRITTEN FROM A RECORDING, 2026-09-22. The first version of this file was
+guesswork off the public site. A member then signed in, pressed Record and
+clicked their way to two warehouse receipts and one online invoice, and
+everything below marked SEEN comes from that. See issue #47.
 
-* **Orders and purchases** is
-  ``https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/ordersandpurchases``
-  VERIFIED, and that UUID is the same for everybody. It is the OAuth
-  client id, not an account id, which the sign-in redirect proves by
-  carrying it as ``client_id``. The page is a hash-routed single page
-  app, so the part after the ``#`` never reaches the server and the shell
-  has to settle before anything is on screen.
-* **Signing in** is Azure AD B2C on ``signin.costco.com``, policy
-  ``B2C_1A_SSO_WCS_signup_signin_209``, which returns to
-  ``https://www.costco.com/OAuthLogonCmd``. VERIFIED. Password, emailed
-  passcode and passkey are all offered, so the person signs in themselves
-  and this app only ever finds the session already there. A URL on
-  signin.costco.com is the signed-out signal.
-* **Costco is behind Akamai Bot Manager**, whose sensor script sits at
-  ``/149e9513-01fa-4fb0-aad4-566afd725d1b/.../p.js``. VERIFIED, and
-  verified the hard way, because that script wraps ``window.fetch`` and
-  refused a fetch issued from an automated page. So this app drives a
-  real Edge or Chrome, and it reads the page rather than calling an API
-  behind the page's back. If the recording shows the site's own JSON
-  calls, a later round can use them the way the page itself does.
-* **A virtual waiting room** (queue-it) is wired into the site. VERIFIED
-  that the script loads. A run can land in a queue at a busy hour, which
-  looks like a page that never arrives, so it is called out by name.
-* **The legacy storefront is still there**, ``LogonForm``,
-  ``OrderStatusCmd`` and ``OrderStatusSummaryView`` with
-  ``storeId=10301&catalogId=10701&langId=-1``. VERIFIED as links on the
-  home page. Kept as a second route to try when the SPA gives nothing.
-* **What a purchase looks like** is a GUESS. Costco shows online orders
-  and in-warehouse receipts in the same list, usually behind two tabs,
-  and the warehouse receipt is the one nobody else can get at. The card
-  shape, the link to a receipt, and whether a receipt is a page or a PDF
-  are all unknown until somebody records themselves opening one.
+THE TWO HALVES
 
-Site layer verified against the live public site (signed out): 2026-09-22
+Orders & Purchases is one page with two tabs, and they are two different
+things behind one heading.
+
+    Warehouse   what was bought at a warehouse, including the gas station
+                and the car wash. This is the half nobody else can get at,
+                because Costco keeps it for a matter of months and the
+                paper fades.
+    Online      costco.com orders.
+
+SEEN. Both are ``role=tab``, named "Warehouse" and "Online". Switching
+tabs does not navigate, it asks the API and redraws.
+
+HOW FAR BACK
+
+A ``role=combobox`` labelled "Showing", holding quarters rather than
+years, "2026 April - June" and so on, opening on "Last 3 Months". SEEN.
+So a run that does not touch it sees a quarter at most, and reaching a
+year means walking the options.
+
+A WAREHOUSE RECEIPT IS A DIALOG
+
+SEEN. "View Receipt" on a row opens a dialog **on the same page**, with
+no navigation and no URL of its own, and the dialog carries a "Print
+Receipt" link and a "Close" button. So a receipt here has no address to
+go to, and the only way back to one is to find its row again. Its
+identity is therefore made from what the row shows, the date and the
+total, and not from any number Costco gives out.
+
+The app never presses Print Receipt. That link calls ``window.print()``,
+SEEN, which opens a dialog no program can answer or dismiss. The dialog's
+own contents are rendered with CDP printToPDF instead.
+
+AN ONLINE ORDER IS TWO NAVIGATIONS
+
+SEEN. "View Order Details" is a link to
+``/myaccount/#/app/<client id>/orderdetails/<order number>``, and that
+page carries a "Print Invoice" link to ``/OrderDetailPrintView``, which
+is a plain printable page. Both are links with real addresses, so this
+app reads the address and goes there. It clicks neither, because the
+second press of Print Invoice, on the print view itself, calls
+``window.print()``. SEEN, in the recording, twice.
+
+THE API, AND WHY THIS APP DOES NOT USE IT
+
+SEEN. Everything is one GraphQL endpoint,
+``https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql``, POSTed
+with ``query`` and ``variables``.
+
+    Warehouse tab    data.receiptsWithCounts, carrying inWarehouse,
+                     gasStation, carWash and gasAndCarWash counts and a
+                     receipts list
+    View Receipt     the same shape with one receipt in it
+    Online tab       data.getOnlineOrders, with pageNumber, pageSize,
+                     totalNumberOfRecords and bcOrders
+    Order details    data.getOrderDetails
+
+That is the shape of the answers, which is all a recording keeps. The
+query text is a value and was deliberately not captured, so this app
+cannot make those calls and does not try. It drives the page the way the
+person did. If a later recording brings the queries back, discovery is
+the only part that changes.
+
+Costco also runs Akamai Bot Manager, whose script wraps window.fetch and
+refused a call made from an automated page, and a queue-it waiting room.
+Both verified. So this app drives a real Edge or Chrome.
+
+Signing in is Azure AD B2C on signin.costco.com, returning to
+/OAuthLogonCmd. A URL on that host is the signed-out signal. Verified.
+
+Site layer written from a member's recording: 2026-09-22
 """
 from __future__ import annotations
 
@@ -68,8 +106,16 @@ BASE = "https://www.costco.com"
 # every member, so this URL is a constant and not something to discover.
 MYACCOUNT_APP_ID = "4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf"
 ORDERS_URL = f"{BASE}/myaccount/#/app/{MYACCOUNT_APP_ID}/ordersandpurchases"
+DETAILS_PATH = f"/myaccount/#/app/{MYACCOUNT_APP_ID}/orderdetails/"
 
-# The old storefront, still mounted. Tried only when the SPA gives nothing.
+# The printable version of an online order. SEEN as the target of the
+# Print Invoice link.
+PRINT_VIEW_PATH = "/OrderDetailPrintView"
+
+# The one GraphQL endpoint everything goes through. Not called by this
+# app, and listed so a reader of a diagnostics file knows what it is.
+ORDER_API = "https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql"
+
 LEGACY_QS = "storeId=10301&catalogId=10701&langId=-1"
 LEGACY_ORDERS_URL = f"{BASE}/OrderStatusCmd?{LEGACY_QS}&URL=OrderStatusSummaryView"
 
@@ -80,47 +126,56 @@ URLS = {
     "account": f"{BASE}/myaccount/",
 }
 
-# Every route worth trying for a list of purchases, best first. Discovery
-# takes the first that is not a sign-in page and has something on it. The
-# recording replaces this list with the one route that is right.
 ORDER_ROUTES = [ORDERS_URL, f"{BASE}/myaccount/", LEGACY_ORDERS_URL]
 
-# GUESS. A receipt or an order detail lives under one of these. Written as
-# path fragments rather than a formatted URL because which one Costco uses,
-# and what it puts after it, is the main thing the recording answers.
-RECEIPT_PATH = "/myaccount/#/app/%s/ordersandpurchases/" % MYACCOUNT_APP_ID
-DETAIL_PATH = RECEIPT_PATH
-PENDING_PATH = RECEIPT_PATH
+# Kept for the shared orchestrator, which asks for these by name.
+RECEIPT_PATH = DETAILS_PATH
+DETAIL_PATH = DETAILS_PATH
+PENDING_PATH = DETAILS_PATH
 
 LOGIN_URL_MARKERS = ["signin.costco.com", "/logonform", "/oauthlogoncmd",
                      "/oauth2/", "/b2c_1a_", "/login", "/sign-in", "/signin",
                      "/registration", "/join"]
 
-# An order number or a receipt key, whatever shape Costco uses. Letters,
-# digits, dashes and tildes, which covers every shape seen on comparable
-# sites, and nothing that could turn a key into a path of its own.
+# An online order number, or the identity this app makes for a warehouse
+# receipt, which has none of its own.
 PURCHASE_KEY_RE = re.compile(r"^[0-9A-Za-z]+(?:[~_-][0-9A-Za-z]+)*$")
+
+# The two tabs. SEEN.
+TAB_WAREHOUSE = "Warehouse"
+TAB_ONLINE = "Online"
+
+
+def details_url(key: str) -> str:
+    return f"{BASE}{DETAILS_PATH}{key}"
 
 
 def receipt_url(key: str) -> str:
-    return f"{BASE}{RECEIPT_PATH}{key}"
-
-
-def detail_url(key: str) -> str:
-    return f"{BASE}{DETAIL_PATH}{key}"
+    return details_url(key)
 
 
 def orders_url(page_no: int = 1) -> str:
-    """The list. It is one hash route with no page in it as far as anyone
-    outside an account can see, so the page number is ignored until a
-    recording shows otherwise."""
     return ORDERS_URL
 
 
+def warehouse_key(date: str, total: str, where: str = "") -> str:
+    """The identity of a warehouse receipt, made from what its row shows.
+
+    Costco gives a warehouse receipt no number on the list and no address
+    of its own, so there is nothing to key it by except what a person
+    reads on the row. Date, total and the warehouse, which together are
+    what tells two rows apart on screen. Two receipts from the same
+    warehouse on the same day for the same amount would collide, and a
+    run would fetch one of them. That is the cost of a list that carries
+    no identifier, and it is recorded here rather than papered over."""
+    money = re.sub(r"[^0-9]", "", total or "")
+    day = re.sub(r"[^0-9]", "", date or "")
+    where = re.sub(r"[^A-Za-z0-9]", "", (where or ""))[:12]
+    return "-".join(p for p in ("wh", day, money, where) if p)
+
+
 # ---------------------------------------------------------------------------
-# Guards. This app reads the page rather than clicking through it, but the
-# diagnostics grade every control and the repo-wide tests hold every app to
-# the same standard.
+# Guards
 # ---------------------------------------------------------------------------
 FORBIDDEN_CONTROL_RE = re.compile(
     r"(add\s+(all\s+)?to\s+(cart|list)|add\s+all|buy\s+(it\s+)?again|reorder|checkout|"
@@ -139,10 +194,11 @@ try:
 except Exception:  # the shared core is optional at import time
     pass
 
-# "Orders & Returns" is the top nav, "Orders & Purchases" the left one and
-# the page heading. Both are Costco's own words, read off a signed-in
-# account, and the first recording refused both because this list had only
-# guessed at one of them.
+# Everything here is a control SEEN in the recording, except the few kept
+# from the first version because a near miss should still be allowed.
+# "Print Receipt" and "Print Invoice" stay refused on purpose. They are
+# the right controls and this app must not press them, because they call
+# window.print() and open a dialog no program can dismiss.
 SAFE_DOC_CONTROL_RE = re.compile(
     r"(view\s+(receipt|invoice|details|order)|receipt|invoice|order\s+details|"
     r"purchase\s+details|order\s+history|purchase\s+history|"
@@ -161,7 +217,6 @@ SECURITY_CHALLENGE_MARKERS = [
     "enter the one-time password", "enter the otp",
     "enter the verification code", "confirm it's you",
     "pardon our interruption",
-    # Akamai and the waiting room, both of which this site actually runs.
     "reference #", "you are now in line", "your estimated wait time",
     "waiting room", "queue-it",
 ]
@@ -171,28 +226,41 @@ RATE_LIMIT_MARKERS = [
     "temporarily blocked", "http error 429", "request was throttled",
 ]
 
-# GUESS, every one of them. Written wide on purpose, because a scaffold
-# that finds too much tells a tester more than one that finds nothing.
+# SEEN, every one of them, with a looser spelling beside each in case
+# Costco changes the wording before somebody changes this file.
+# What a control says, for code that runs INSIDE the page. Everything in
+# FALLBACK below is a Playwright selector, and Playwright's own additions
+# to CSS, :has-text() among them, are understood by page.locator() and
+# rejected by the browser's querySelectorAll. Discovery runs in the page,
+# so it matches on these instead. A live run against a real account is
+# what found that out.
+RECEIPT_CONTROL_TEXT = r"view\s+receipt"
+DETAILS_CONTROL_TEXT = r"view\s+order\s+details|order\s+details"
+
 FALLBACK = {
-    "order_card": ("[data-testid*='order' i], [class*='order-card' i], "
-                   "[class*='OrderCard' i], [class*='purchase' i] li, "
-                   "[data-automation-id*='order' i]"),
-    "order_link": ("a[href*='order' i], a[href*='receipt' i], "
-                   "a[href*='invoice' i], a[href*='purchase' i]"),
-    "page_ready": "#main, main, [role=main], .myaccount, body",
-    "receipt_area": ("[data-testid*='receipt' i], [class*='receipt' i], "
-                     "[id*='receipt' i], [class*='invoice' i]"),
-    "receipt_shell": "main, [role=main], body",
-    "print_button": "button[aria-label*='print' i], [data-testid*='print' i]",
-    "item_row": "[class*='item' i], [data-testid*='item' i], tbody tr",
+    "tab": "[role=tab]",
+    "receipt_button": "button:has-text('View Receipt')",
+    "details_link": "a:has-text('View Order Details')",
+    "range_select": "select",
+    "dialog": "[role=dialog], [aria-modal=true]",
+    "dialog_close": "[role=dialog] button:has-text('Close')",
+    "print_invoice": "a:has-text('Print Invoice')",
+    # The receipt itself, inside the dialog. The dialog is the block worth
+    # rendering, so the shell and the block are the same thing here.
+    "receipt_area": "[role=dialog], [aria-modal=true]",
+    "receipt_shell": "[role=dialog], [aria-modal=true], main, body",
+    "print_button": "[role=dialog] a:has-text('Print Receipt'), "
+                    "[role=dialog] button:has-text('Print Receipt')",
+    "order_card": "[role=dialog], li, tr, [class*='card' i]",
+    "order_link": "a[href*='orderdetails' i]",
+    "page_ready": "[role=tab], main, [role=main], body",
+    "item_row": "[role=dialog] tr, [role=dialog] li",
     "print_page_body": "body",
 }
 
-# The page's own words for an empty list. GUESS, in the wording these
-# sites usually choose.
 NO_ORDERS_RE = re.compile(
     r"no\s+orders|don't\s+have\s+any\s+orders|aren't\s+any\s+orders|"
-    r"no\s+purchases|nothing\s+to\s+show\s+here", re.I)
+    r"no\s+purchases|no\s+receipts|nothing\s+to\s+show", re.I)
 MISSING_LOYALTY_RE = re.compile(
     r"membership\s+(number\s+)?not\s+found|add\s+your\s+membership|"
     r"link\s+your\s+membership", re.I)
@@ -202,17 +270,20 @@ RECEIPT_FAILED_RE = re.compile(
 
 MONEY_RE = re.compile(r"\$\s*(-?[\d,]+\.\d{2})")
 
-# Costco's own words for the kinds of purchase, to the folder each belongs
-# in. GUESS at the exact spelling, generous on purpose so a near miss
-# still files correctly.
+# Costco's own words, with the API's spellings beside them because a
+# later round may read the list from getOnlineOrders instead of the page.
 PURCHASE_TYPE_LABELS = {
     "WAREHOUSE": ("In-Warehouse", IN_STORE),
     "IN_WAREHOUSE": ("In-Warehouse", IN_STORE),
+    "INWAREHOUSE": ("In-Warehouse", IN_STORE),
     "IN_STORE": ("In-Warehouse", IN_STORE),
-    "INSTORE": ("In-Warehouse", IN_STORE),
     "GAS": ("Gas Station", IN_STORE),
+    "GASSTATION": ("Gas Station", IN_STORE),
     "GAS_STATION": ("Gas Station", IN_STORE),
     "FUEL": ("Gas Station", IN_STORE),
+    "CARWASH": ("Car Wash", IN_STORE),
+    "CAR_WASH": ("Car Wash", IN_STORE),
+    "GASANDCARWASH": ("Gas and Car Wash", IN_STORE),
     "PHARMACY": ("Pharmacy", IN_STORE),
     "OPTICAL": ("Optical", IN_STORE),
     "ONLINE": ("Online", ONLINE),
@@ -221,7 +292,6 @@ PURCHASE_TYPE_LABELS = {
     "SHIP_TO_HOME": ("Online", ONLINE),
     "DELIVERY": ("Delivery", ONLINE),
     "SAME_DAY": ("Same-Day Delivery", ONLINE),
-    "INSTACART": ("Same-Day Delivery", ONLINE),
     "GROCERY": ("Grocery", ONLINE),
     "TRAVEL": ("Travel", ONLINE),
     "PHOTO": ("Photo", ONLINE),
@@ -321,39 +391,43 @@ def is_safe_control(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def goto_orders(page, page_no: int = 1) -> None:
-    """Open orders and purchases and wait for the app to settle.
+    """Open Orders & Purchases and wait for the tabs to exist.
 
-    The route is a hash, so the server sees only /myaccount/ and the list
-    is drawn afterwards. Navigating from one hash to another does not
-    reload, which is why this checks where it ended up rather than
-    assuming."""
-    page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
+    The route is a hash, so the server sees only /myaccount/ and the
+    tabs are drawn afterwards. There is a real marker to wait for now,
+    the tab strip, rather than a guess at one."""
+    if not on_orders_page(page):
+        page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
     try:
-        page.wait_for_selector(FALLBACK["page_ready"], timeout=20000)
+        page.wait_for_selector(FALLBACK["tab"], timeout=30000)
     except Exception:
-        pass
-    # The shell arrives first and the list a moment later. There is no
-    # marker to wait on that is known to be right, so this waits for the
-    # page to stop changing instead.
+        log.warning("The Orders & Purchases tabs did not appear")
+    settle(page)
+
+
+def on_orders_page(page) -> bool:
+    return "ordersandpurchases" in (page.url or "").lower()
+
+
+def settle(page, ms: int = 12000) -> None:
+    """Wait for the page to stop talking. Every tab and every date range
+    is an API call and a redraw, with no navigation to wait on."""
     try:
-        page.wait_for_load_state("networkidle", timeout=15000)
+        page.wait_for_load_state("networkidle", timeout=ms)
     except Exception:
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(2500)
 
 
 def goto_orders_route(page, url: str) -> None:
-    """One candidate route, for discovery to try in turn."""
+    """One candidate route, for diagnostics to try in turn."""
     if not is_safe_url(url):
         raise ValueError("refusing to open a URL that is not on costco.com")
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    try:
-        page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception:
-        page.wait_for_timeout(3000)
+    settle(page)
 
 
 def history_state(page) -> str:
-    '''"empty" when the page says there is nothing to show, "no-membership"
+    '''"empty" when the tab says there is nothing to show, "no-membership"
     when it wants a membership number linked first, else "".'''
     try:
         body = page.locator("body").inner_text(timeout=5000)
@@ -366,15 +440,121 @@ def history_state(page) -> str:
     return ""
 
 
-# Runs inside the signed-in page and reads what is on screen. GUESS, all
-# of it. Costco's own JSON calls would be better and this app does not
-# know them, which is the whole reason a recording is worth more than
-# another round of guessing. Every value comes back as a string and every
-# one of them is shaped like the API record record_to_purchase expects, so
-# when the real call is known only this function changes.
-_READ_HISTORY_JS = r"""
-(sel) => {
-  const seen = new Set(), out = [];
+# -- the two tabs --------------------------------------------------------------
+
+def tab_names(page) -> List[str]:
+    out = []
+    try:
+        for tab in page.locator(FALLBACK["tab"]).all()[:12]:
+            name = (tab.inner_text(timeout=1000) or "").strip()
+            if name:
+                out.append(name)
+    except Exception:
+        pass
+    return out
+
+
+def open_tab(page, name: str) -> bool:
+    """Click one of the two tabs. Returns whether it is now the open one.
+
+    Switching does not navigate, it asks the API and redraws, so the only
+    thing to wait on is the page going quiet."""
+    if not is_safe_control(name):
+        raise ValueError("refusing to click a control called %r" % name)
+    try:
+        tab = page.get_by_role("tab", name=name, exact=False).first
+        if tab.count() == 0:
+            log.warning("No tab called %r on this page", name)
+            return False
+        if (tab.get_attribute("aria-selected") or "").lower() == "true":
+            return True
+        tab.click(timeout=15000)
+    except Exception as e:
+        log.warning("Could not open the %s tab: %s", name, e)
+        return False
+    settle(page)
+    return True
+
+
+# -- how far back ---------------------------------------------------------------
+
+# "2026 April - June", and "Last 3 Months" for the one it opens on. SEEN.
+_QUARTER_RE = re.compile(
+    r"(20\d\d)\s*[-,]?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
+    re.I)
+_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun",
+           "jul", "aug", "sep", "oct", "nov", "dec"]
+
+
+def range_options(page) -> List[str]:
+    """Every option in the "Showing" picker, in the order it lists them."""
+    try:
+        sel = page.get_by_role("combobox", name=re.compile("showing", re.I)).first
+        if sel.count() == 0:
+            sel = page.locator(FALLBACK["range_select"]).first
+        if sel.count() == 0:
+            return []
+        return [o.strip() for o in
+                sel.locator("option").all_inner_texts()[:60] if o.strip()]
+    except Exception as e:
+        log.warning("Could not read the date range options: %s", e)
+        return []
+
+
+def range_covers(option: str, date: str) -> bool:
+    """Does an option like "2026 April - June" contain this date?
+
+    Only the year and the first month are read, because the option names
+    a quarter and a quarter is three months from the one it names. An
+    option that is not a quarter, "Last 3 Months" say, covers nothing in
+    particular and is never chosen on purpose."""
+    m = _QUARTER_RE.search(option or "")
+    if not m or not date:
+        return False
+    try:
+        year, month, _ = date.split("-")
+        start = _MONTHS.index(m.group(2)[:3].lower()) + 1
+    except (ValueError, IndexError):
+        return False
+    return m.group(1) == year and start <= int(month) <= start + 2
+
+
+def select_range(page, option: str) -> bool:
+    """Choose one option in the "Showing" picker and wait for the redraw."""
+    try:
+        sel = page.get_by_role("combobox", name=re.compile("showing", re.I)).first
+        if sel.count() == 0:
+            sel = page.locator(FALLBACK["range_select"]).first
+        if sel.count() == 0:
+            return False
+        sel.select_option(label=option, timeout=15000)
+    except Exception as e:
+        log.warning("Could not choose the range %r: %s", option, e)
+        return False
+    settle(page)
+    return True
+
+
+def ranges_for(page, year: str = "") -> List[str]:
+    """The options worth walking. A year if one is asked for, otherwise
+    every quarter the picker offers, newest first as it lists them."""
+    quarters = [o for o in range_options(page) if _QUARTER_RE.search(o)]
+    if year:
+        quarters = [o for o in quarters if o.strip().startswith(year)]
+    return quarters
+
+
+# -- what is on the tab ---------------------------------------------------------
+
+# Runs inside the signed-in page. One entry per row that carries a control
+# for looking at the purchase, with the row's own words beside it. The
+# GraphQL answers behind this page would be better and this app cannot
+# make those calls, because their query text is a value and a recording
+# keeps no values. Shaped like a JSON record all the same, so the day a
+# recording brings the queries back, only this function changes.
+_READ_ROWS_JS = r"""
+([receiptText, linkSel]) => {
+  const out = [];
   const money = (s) => { const m = (s || '').match(/\$\s*-?[\d,]+\.\d{2}/); return m ? m[0] : ''; };
   const when = (s) => {
     let m = (s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
@@ -386,49 +566,89 @@ _READ_HISTORY_JS = r"""
                  .indexOf(m[1].slice(0,3).toLowerCase()) + 1;
     return m[3] + '-' + String(mo).padStart(2,'0') + '-' + String(+m[2]).padStart(2,'0');
   };
-  // A link to something that reads like one order, and the card it sits in.
-  for (const a of document.querySelectorAll(sel)) {
-    const href = a.getAttribute('href') || '';
-    if (!href || href === '#') continue;
-    let card = a;
-    for (let i = 0; i < 6 && card.parentElement; i++) {
-      card = card.parentElement;
-      if ((card.innerText || '').length > 60) break;
+  // Up from the control to the block a person would call one purchase.
+  const card = (el) => {
+    let n = el;
+    for (let i = 0; i < 8 && n.parentElement; i++) {
+      n = n.parentElement;
+      const txt = (n.innerText || '');
+      if (txt.length > 40 && /\$\s*[\d,]+\.\d{2}/.test(txt)) return n;
     }
-    const text = (card.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 600);
-    const key = (href.split(/[?#]/)[0].split('/').filter(Boolean).pop() || '').slice(0, 80);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push({orderNumber: key, href: a.href,
+    return el.parentElement || el;
+  };
+  const rows = [];
+  // Plain CSS and a text test, because this runs in the browser and the
+  // browser has never heard of :has-text().
+  const wants = new RegExp(receiptText, 'i');
+  for (const el of document.querySelectorAll('button, [role=button], a')) {
+    const label = (el.innerText || el.getAttribute('aria-label') || '').trim();
+    if (label && label.length < 40 && wants.test(label)) rows.push(['WAREHOUSE', el]);
+  }
+  for (const el of document.querySelectorAll(linkSel)) rows.push(['ONLINE', el]);
+  const done = new Set();
+  for (const [kind, el] of rows) {
+    if (done.has(el)) continue;
+    done.add(el);
+    const block = card(el);
+    const text = (block.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 600);
+    const href = el.tagName.toLowerCase() === 'a' ? (el.href || '') : '';
+    out.push({purchaseType: kind, href: href,
               createdDateTime: when(text), total: money(text),
               status: /cancell?ed/i.test(text) ? 'CANCELLED' : '',
-              purchaseType: /warehouse|in.?store|gas|fuel|pharmacy/i.test(text)
-                              ? 'WAREHOUSE' : 'ONLINE',
-              cardText: text});
+              where: (text.match(/\b([A-Z][A-Z' -]{3,24})\b(?=\s|$)/) || [,''])[1].trim(),
+              index: out.length, cardText: text});
   }
   return out;
 }
 """
 
 
-def fetch_history(page, max_pages: int = 200) -> dict:
-    """Every purchase the page is showing, read from the page itself.
-
-    Named for what the orchestrator calls, not for how it works. The
-    answer has the same shape a JSON API would give, so when a recording
-    shows Costco's real call this is the only function that changes."""
+def read_rows(page) -> List[dict]:
+    """The purchases on the tab that is open, as records."""
     try:
-        records = page.evaluate(_READ_HISTORY_JS, FALLBACK["order_link"]) or []
+        rows = page.evaluate(_READ_ROWS_JS,
+                             [RECEIPT_CONTROL_TEXT, FALLBACK["order_link"]]) or []
     except Exception as e:
-        log.warning("Could not read the purchase list from the page: %s", e)
-        return {"status": 0, "pages": 0, "last": True, "records": []}
+        log.warning("Could not read the rows on this tab: %s", e)
+        return []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def fetch_history(page, max_pages: int = 200, year: str = "") -> dict:
+    """Every purchase on both tabs, across the quarters the picker offers.
+
+    Named for what the orchestrator calls. The answer has the shape a
+    JSON API would give, so the day a recording brings Costco's own
+    query text back, this is the only function that changes."""
+    records, seen = [], set()
+    ranges_walked = 0
+    for tab in (TAB_WAREHOUSE, TAB_ONLINE):
+        if not open_tab(page, tab):
+            continue
+        options = ranges_for(page, year)
+        # Whatever it opens on first, then each quarter in turn. Without
+        # touching the picker a run sees three months and no more.
+        for option in [None] + options:
+            if option is not None:
+                if not select_range(page, option):
+                    continue
+                ranges_walked += 1
+            for rec in read_rows(page):
+                rec["tab"] = tab
+                rec["range"] = option or ""
+                key = record_key(rec)
+                if key and key not in seen:
+                    seen.add(key)
+                    records.append(rec)
+            if year and option is None:
+                # A scoped run should not keep whatever the page opened on.
+                records = [r for r in records if not r.get("createdDateTime")
+                           or r["createdDateTime"].startswith(year)]
     if not records:
-        log.warning("No purchases found on the page. This app was built "
-                    "without a Costco account, so the selectors are a guess. "
-                    "Run `record` and send the file, and the guess becomes "
-                    "the answer.")
-    return {"status": 200 if records else 0, "pages": 1, "last": True,
-            "records": records}
+        log.warning("No purchases were found on either tab. If there are "
+                    "purchases on screen, run `record` and send the file.")
+    return {"status": 200 if records else 0, "pages": ranges_walked or 1,
+            "last": True, "records": records}
 
 
 def _first(d: dict, *names, default=None):
@@ -448,19 +668,38 @@ def _datetime_value(v) -> str:
 
 
 def record_key(rec: dict) -> str:
-    """The receipt key when the purchase is finished, else the order number.
-    The bundle's own rule for which page a record links to."""
-    key = _first(rec, "receiptKey", "receiptId", "orderNumber", "orderId", default="")
-    key = str(key).strip()
-    return key if PURCHASE_KEY_RE.match(key) and len(key) <= 80 else ""
+    """What tells this purchase from the next one, on both tabs.
+
+    An online order has a number, in the address of its details link. A
+    warehouse receipt has nothing at all on the list, so one is made from
+    what its row shows. See warehouse_key."""
+    key = str(_first(rec, "orderNumber", "receiptKey", "orderId", default="")).strip()
+    if not key:
+        href = str(rec.get("href") or "")
+        m = re.search(r"orderdetails/([0-9A-Za-z_-]{4,40})", href, re.I)
+        if m:
+            key = m.group(1)
+    if not key and str(rec.get("purchaseType") or "").upper().startswith("WAREHOUSE"):
+        key = warehouse_key(str(rec.get("createdDateTime") or ""),
+                            str(rec.get("total") or ""),
+                            str(rec.get("where") or ""))
+        if key == "wh":
+            key = ""
+    return key if key and PURCHASE_KEY_RE.match(key) and len(key) <= 80 else ""
 
 
 def record_is_pending(rec: dict) -> bool:
-    """An order with no receipt yet. Its receipt page does not exist until
-    the order is fulfilled, so it is recorded and revisited next run."""
-    has_receipt = bool(_first(rec, "receiptKey", "receiptId"))
+    """An order still on its way. A warehouse receipt is never pending,
+    it is a thing that already happened at a till."""
+    if str(rec.get("purchaseType") or "").upper().startswith("WAREHOUSE"):
+        return False
     status = str(_first(rec, "status", default="")).upper()
-    return not has_receipt and status not in ("CANCELLED", "CANCELED")
+    text = str(rec.get("cardText") or "")
+    if status in ("CANCELLED", "CANCELED"):
+        return False
+    return bool(re.search(r"processing|in\s*transit|shipping\s+soon|"
+                          r"on\s+its\s+way|not\s+yet\s+shipped|pending",
+                          text, re.I))
 
 
 def record_to_purchase(rec: dict) -> Optional[Purchase]:
@@ -498,8 +737,9 @@ def record_to_purchase(rec: dict) -> Optional[Purchase]:
         # The href the page itself drew, when there is one and it is on
         # Costco. A link the site made is worth more than a URL this app
         # assembled from a guess at the path.
-        details_url=href or detail_url(key),
-        receipt_url=href or receipt_url(key),
+        details_url=href or details_url(key),
+        receipt_url=href or details_url(key),
+        fulfillment=str(_first(rec, "tab", default="") or ""),
         items=items,
         discovered_at=now_iso(),
     )
@@ -514,50 +754,178 @@ def record_to_purchase(rec: dict) -> Optional[Purchase]:
 # ---------------------------------------------------------------------------
 
 def on_receipt_page(page) -> bool:
-    """GUESS. Any page that is not the list and has a receipt-shaped block
-    on it, since the address of a Costco receipt is unknown until a
-    recording shows one being opened."""
+    """Either half counts. A warehouse receipt is a dialog with no
+    address of its own, an online one is the print view."""
+    if PRINT_VIEW_PATH.lower() in (page.url or "").lower():
+        return True
+    return dialog_open(page)
+
+
+def dialog_open(page) -> bool:
     try:
-        return page.locator(FALLBACK["receipt_area"]).count() > 0
+        return page.locator(FALLBACK["dialog"]).count() > 0
     except Exception:
         return False
+
+
+def close_dialog(page) -> None:
+    """Dismiss the receipt dialog, Escape first.
+
+    Escape rather than the Close button, because Escape is not a control
+    and cannot be the wrong one. A page that ignores it falls back to the
+    dialog's own Close, found inside the dialog rather than by name, so
+    there is no way to reach a "Close Account" somewhere else on the
+    page."""
+    if not dialog_open(page):
+        return
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(400)
+    except Exception:
+        pass
+    if not dialog_open(page):
+        return
+    try:
+        button = page.locator(FALLBACK["dialog_close"]).first
+        if button.count():
+            button.click(timeout=5000)
+            page.wait_for_timeout(400)
+    except Exception as e:
+        log.warning("Could not close the receipt dialog: %s", e)
 
 
 def goto_receipt(page, purchase: Purchase) -> None:
-    """Open one purchase. The href read off the card is used when there is
-    one, because a link the page itself drew is worth more than a URL this
-    app assembled from a guess at the path."""
-    url = purchase.receipt_url or ""
-    if not is_safe_url(url):
-        url = detail_url(purchase.order_number)
-    if not is_safe_url(url):
-        raise ValueError("refusing to open a URL that is not on costco.com")
-    page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    wait_for_receipt(page)
+    """Put this purchase's receipt on screen, whichever half it is from."""
+    if purchase.purchase_type == IN_STORE:
+        open_warehouse_receipt(page, purchase)
+    else:
+        open_online_invoice(page, purchase)
+
+
+# -- the warehouse half, which is a dialog --------------------------------------
+
+def open_warehouse_receipt(page, purchase: Purchase) -> None:
+    """Find this receipt's row again and press its View Receipt.
+
+    A warehouse receipt has no address, so there is nothing to navigate
+    to and the row has to be found the way a person finds it. Back to the
+    tab, forward to the quarter the date falls in, then the row whose
+    date and total are this purchase's."""
+    close_dialog(page)
+    goto_orders(page)
+    if not open_tab(page, TAB_WAREHOUSE):
+        raise RuntimeError("could not open the Warehouse tab")
+
+    wanted = record_key({"purchaseType": "WAREHOUSE",
+                         "createdDateTime": purchase.purchase_date,
+                         "total": purchase.total,
+                         "where": purchase.store_info})
+    for option in [None] + [o for o in ranges_for(page)
+                            if range_covers(o, purchase.purchase_date)]:
+        if option is not None and not select_range(page, option):
+            continue
+        for row in read_rows(page):
+            if record_key(row) != wanted:
+                continue
+            press_view_receipt(page, row.get("index", 0))
+            if wait_for_receipt(page):
+                return
+            close_dialog(page)
+    raise RuntimeError("no row on the Warehouse tab matches this receipt")
+
+
+def press_view_receipt(page, index: int) -> None:
+    """Press one row's View Receipt, by position among the rows read.
+
+    The position comes from the same pass that read the rows, so it is
+    the same page and the same order. Its name is checked against the
+    guard first, because a button in that position that says something
+    else is a page this app no longer understands."""
+    buttons = page.locator(FALLBACK["receipt_button"])
+    if index >= buttons.count():
+        raise RuntimeError("that row is no longer on the page")
+    button = buttons.nth(index)
+    name = (button.inner_text(timeout=2000) or "").strip()
+    if not is_safe_control(name):
+        raise RuntimeError("refusing to press a control called %r" % name)
+    button.click(timeout=15000)
 
 
 def wait_for_receipt(page, timeout_ms: int = 30000) -> bool:
-    """The receipt renders a moment after the shell, or the page says it
-    could not load it. Either ends the wait."""
+    """The dialog, or the print view, or the page saying it could not."""
     try:
         page.wait_for_function(
-            """([area, failed]) => !!document.querySelector(area) || new RegExp(failed, 'i').test(document.body.innerText)""",
-            arg=[FALLBACK["receipt_area"], RECEIPT_FAILED_RE.pattern], timeout=timeout_ms)
+            """([dialog, failed, printPath]) =>
+                 !!document.querySelector(dialog)
+                 || location.href.toLowerCase().includes(printPath)
+                 || new RegExp(failed, 'i').test(document.body.innerText)""",
+            arg=[FALLBACK["dialog"], RECEIPT_FAILED_RE.pattern,
+                 PRINT_VIEW_PATH.lower()],
+            timeout=timeout_ms)
     except Exception:
-        log.warning("Receipt page did not render within %dms", timeout_ms)
+        log.warning("No receipt appeared within %dms", timeout_ms)
         return False
-    page.wait_for_timeout(800)
+    settle(page, 8000)
     return True
 
 
-def receipt_is_present(page) -> bool:
+# -- the online half, which is two links ----------------------------------------
+
+def open_online_invoice(page, purchase: Purchase) -> None:
+    """The order's own details page, then its printable invoice.
+
+    Both steps are links with real addresses, so this reads the address
+    and goes there. Print Invoice is never pressed. Pressing it once
+    navigates, and pressing it again on the page it lands on calls
+    window.print(), which opens a dialog no program can dismiss."""
+    url = purchase.details_url or purchase.receipt_url or ""
+    if not is_safe_url(url):
+        url = details_url(purchase.order_number)
+    if not is_safe_url(url):
+        raise ValueError("refusing to open a URL that is not on costco.com")
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    settle(page)
+
+    printable = print_view_url(page)
+    if printable:
+        page.goto(printable, wait_until="domcontentloaded", timeout=60000)
+        settle(page)
+    else:
+        log.warning("No Print Invoice link on this order, saving the details "
+                    "page instead")
+    wait_for_receipt(page)
+
+
+def print_view_url(page) -> str:
+    """Where Print Invoice points, read rather than pressed."""
     try:
-        if page.locator(FALLBACK["receipt_area"]).count() == 0:
-            return False
-        text = page.locator(FALLBACK["receipt_area"]).first.inner_text(timeout=5000)
-    except Exception:
-        return False
-    return bool(text and MONEY_RE.search(text))
+        link = page.locator(FALLBACK["print_invoice"]).first
+        if link.count() == 0:
+            return ""
+        href = link.get_attribute("href") or ""
+    except Exception as e:
+        log.warning("Could not read the Print Invoice link: %s", e)
+        return ""
+    if href.startswith("/"):
+        href = BASE + href
+    return href if is_safe_url(href) and PRINT_VIEW_PATH.lower() in href.lower() else ""
+
+
+def receipt_is_present(page) -> bool:
+    """Something with money in it, in the dialog or on the print view."""
+    for sel in (FALLBACK["receipt_area"], "body"):
+        try:
+            block = page.locator(sel)
+            if block.count() == 0:
+                continue
+            text = block.first.inner_text(timeout=5000)
+        except Exception:
+            continue
+        if text and MONEY_RE.search(text):
+            return True
+        if sel == "body":
+            break
+    return False
 
 
 def receipt_failed(page) -> bool:
@@ -649,13 +1017,23 @@ def scroll_full_page(page, rounds: int = 2, delay_ms: int = 400) -> None:
         pass
 
 
-# Everything outside the receipt block is hidden, a live DOM display change
-# only, discarded on the next navigation. The block's own Print button is
-# hidden too, never pressed.
+# Everything outside the receipt is hidden, a live DOM display change
+# only, discarded on the next navigation. For a warehouse receipt that
+# means the dialog and nothing else, including the backdrop the dialog
+# sits on, which is what would otherwise print as a grey page. The
+# dialog's own Print Receipt link and its Close button are hidden too,
+# and never pressed. On the online print view there is nothing to hide,
+# because that page is already only the invoice.
 _ISOLATE_RECEIPT_JS = r"""
 ([area, printBtn]) => {
   const n = document.querySelector(area);
-  if (!n) return false;
+  if (!n) {
+    // The online print view. Costco serves it as a page of its own with
+    // nothing else on it, so there is nothing to take away.
+    document.body.style.zoom = '1';
+    window.scrollTo(0, 0);
+    return true;
+  }
   let el = n;
   while (el && el.parentElement && el !== document.body) {
     for (const s of Array.from(el.parentElement.children)) {
@@ -663,7 +1041,18 @@ _ISOLATE_RECEIPT_JS = r"""
     }
     el = el.parentElement;
   }
-  for (const x of n.querySelectorAll(printBtn + ', button')) x.style.display = 'none';
+  // The dialog's own controls. A printed receipt with a Print Receipt
+  // link and a Close button in it looks like a screenshot of a website.
+  for (const x of n.querySelectorAll(printBtn + ', button, a[href="#"]'))
+    x.style.display = 'none';
+  // The dialog is positioned, so it keeps its own scroll. Let it grow to
+  // its full height instead, or printToPDF captures one screen of it.
+  for (const el of [n, n.parentElement].filter(Boolean)) {
+    el.style.maxHeight = 'none';
+    el.style.height = 'auto';
+    el.style.overflow = 'visible';
+    el.style.position = 'static';
+  }
   const w = Math.max(n.scrollWidth, n.getBoundingClientRect().width);
   const zoom = Math.min(1, Math.max(0.5, 736 / (w + 16)));
   document.body.style.zoom = String(zoom);
@@ -793,29 +1182,40 @@ def survey_receipt_page(page) -> ReceiptSurvey:
 
 
 def survey_history_page(page) -> dict:
-    """The purchase-history page, its API answer's shape, and the page's
-    own words, masked."""
-    out = {"url": mask_text(page.url or ""), "title": "", "state": history_state(page),
-           "api": {}, "cards_on_page": 0, "sample_records": []}
+    """Orders & Purchases as a tester's browser shows it, masked.
+
+    Both tabs, because they are two different lists, and the quarters the
+    picker offers, because without touching it a run sees three months."""
+    out = {"url": mask_text(page.url or ""), "title": "",
+           "state": history_state(page), "tabs": [], "ranges": [],
+           "api": {"endpoint": ORDER_API,
+                   "note": "not called by this app, see the module docstring"},
+           "per_tab": {}}
     try:
         out["title"] = page.title() or ""
     except Exception:
         pass
-    try:
-        out["cards_on_page"] = page.locator(FALLBACK["order_card"]).count()
-    except Exception:
-        pass
-    hist = fetch_history(page, max_pages=1)
-    out["api"] = {"status": hist.get("status"), "pages_read": hist.get("pages"),
-                  "last_page": hist.get("last"), "records": len(hist.get("records") or [])}
-    out["sample_records"] = mask_json(hist.get("records") or [])
-    parsed = []
-    for rec in (hist.get("records") or [])[:3]:
-        p = record_to_purchase(rec)
-        parsed.append({"key_shape": mask_text(p.order_number), "kind": p.purchase_type, "date": p.purchase_date,
-                       "total": p.total, "status": p.status, "label": p.store_info,
-                       "items": len(p.items), "pending": record_is_pending(rec)} if p else "record without a key")
-    out["parsed"] = parsed
+    out["tabs"] = tab_names(page)
+    for tab in (TAB_WAREHOUSE, TAB_ONLINE):
+        info = {"opened": False, "rows": 0, "sample": [], "state": ""}
+        if open_tab(page, tab):
+            info["opened"] = True
+            if not out["ranges"]:
+                out["ranges"] = range_options(page)
+            rows = read_rows(page)
+            info["rows"] = len(rows)
+            info["state"] = history_state(page)
+            info["sample"] = mask_json(rows[:3])
+            parsed = []
+            for rec in rows[:3]:
+                p = record_to_purchase(dict(rec, tab=tab))
+                parsed.append({"key_shape": mask_text(p.order_number),
+                               "kind": p.purchase_type, "date": p.purchase_date,
+                               "total": p.total, "label": p.store_info,
+                               "pending": record_is_pending(rec)}
+                              if p else "row without anything to key it by")
+            info["parsed"] = parsed
+        out["per_tab"][tab] = info
     return out
 
 
