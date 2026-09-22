@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.30.0] - 2026-09-21
 
 ### Fixed
 - **AT&T, round nine.** Round eight's pilot saved the tester's bills, the
