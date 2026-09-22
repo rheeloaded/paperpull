@@ -7,6 +7,51 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.30.2] - 2026-09-22
+
+### Added
+- **ADP asks for an identity check before a tax statement, and the app
+  now knows it.** A pay statement needs none, which is why a tester's pay
+  statements landed and his W-2s did not. ADP answers the W-2's address
+  with "Authentication is Required" and offers a code by text, email or
+  call. The app reads that refusal for what it is, presses the Tax
+  Statements card's own View statement so ADP shows the prompt in the
+  browser window already open, and waits, taking the statement ADP's own
+  viewer fetches once the code is accepted. Nothing is typed into the
+  app, since the panel runs it with no keyboard. Asking twice is what
+  blocks an account, so a tax form is asked for at one address only, one
+  unanswered check ends that run's tax forms, and a blocked account is
+  reported in ADP's own words. Tax forms run last, and the employer
+  leads their filename (#46).
+
+### Fixed
+- **eBay found two of nine orders.** A card whose details link is missing
+  or points elsewhere is taken from its own order number now, and the
+  scroll waits for the page to stop growing as well as for the count to
+  settle (#44).
+- **Meijer read the wrong tab.** The page has Online Orders and In-Store
+  Receipts and opens on the first, which is empty for someone who only
+  shops in the store. Both are read now, a store receipt files under
+  In-Store, and capture presses the row's own PDF icon (#42).
+- **Two GitHub receipts on one day wrote one filename.** The row says
+  nothing about what was bought, so GitHub's own payment id goes in the
+  name (#43).
+- **PG&E handed over no control although the link was plainly there.**
+  Lightning replaces querySelectorAll on each element to hide a
+  component's children. A walk over each node's own children is not
+  patched, and that is how a row's controls are gathered now (#33).
+- **E*TRADE wrote an empty download trace.** The row is found by its
+  date, every way it might hand over a PDF is tried, and each attempt's
+  requests go in the trace. The period picker's years are clicked by
+  text (#36).
+- **Golden 1's survey pressed a link, not the button of the same name**,
+  so the vendor's tab never opened. The button comes first, and the tab
+  it opens is read whatever host it lands on (#35).
+- **Redaction lives in the core now.** Seventeen apps carried their own
+  copy in three versions, five of which masked long digit runs and
+  nothing else. One copy, one place to fix, with a test for each thing
+  it removes.
+
 ## [0.30.1] - 2026-09-22
 
 ### Fixed
