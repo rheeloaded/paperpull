@@ -236,18 +236,24 @@ RATE_LIMIT_MARKERS = [
 # what found that out.
 RECEIPT_CONTROL_TEXT = r"view\s+receipt"
 DETAILS_CONTROL_TEXT = r"view\s+order\s+details|order\s+details"
+PRINT_CONTROL_TEXT = r"print\s*(receipt|invoice)?"
 
 FALLBACK = {
     "tab": "[role=tab]",
     "receipt_button": "button:has-text('View Receipt')",
     "details_link": "a:has-text('View Order Details')",
     "range_select": "select",
-    "dialog": "[role=dialog], [aria-modal=true]",
+    # Costco's receipt is a Bootstrap modal, and Bootstrap leaves the
+    # empty one in the markup with role=dialog on it, nought by nought,
+    # from the moment the page loads. Matching on the selector alone
+    # found that one every time, so everything below picks by what is on
+    # screen instead. See _VISIBLE_JS.
+    "dialog": "[role=dialog], [aria-modal=true], .modal.show, .modal.in",
     "dialog_close": "[role=dialog] button:has-text('Close')",
     "print_invoice": "a:has-text('Print Invoice')",
     # The receipt itself, inside the dialog. The dialog is the block worth
     # rendering, so the shell and the block are the same thing here.
-    "receipt_area": "[role=dialog], [aria-modal=true]",
+    "receipt_area": "[role=dialog], [aria-modal=true], .modal.show, .modal.in",
     "receipt_shell": "[role=dialog], [aria-modal=true], main, body",
     "print_button": "[role=dialog] a:has-text('Print Receipt'), "
                     "[role=dialog] button:has-text('Print Receipt')",
@@ -393,16 +399,43 @@ def is_safe_control(name: str) -> bool:
 def goto_orders(page, page_no: int = 1) -> None:
     """Open Orders & Purchases and wait for the tabs to exist.
 
-    The route is a hash, so the server sees only /myaccount/ and the
-    tabs are drawn afterwards. There is a real marker to wait for now,
-    the tab strip, rather than a guess at one."""
-    if not on_orders_page(page):
-        page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
-    try:
-        page.wait_for_selector(FALLBACK["tab"], timeout=30000)
-    except Exception:
-        log.warning("The Orders & Purchases tabs did not appear")
+    Both routes under /myaccount/ differ only after the "#", so going
+    from one order's details back to the list is a same document
+    navigation. The browser changes the address and loads nothing, and
+    whether the app notices is the app's business. Coming back from an
+    order this way left the tabs undrawn and every receipt after the
+    first failed with "could not open the Warehouse tab". A live run
+    found it.
+
+    So the address is set first and the page is then reloaded for real
+    if the tabs do not turn up, which is the one thing a hash cannot
+    do on its own."""
+    if on_orders_page(page) and has_tabs(page):
+        return
+    for attempt in (1, 2):
+        try:
+            if attempt == 1:
+                page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
+            else:
+                # A hash change loads nothing, so ask for the load.
+                page.reload(wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            log.warning("Could not open Orders & Purchases: %s", e)
+        try:
+            page.wait_for_selector(FALLBACK["tab"], timeout=25000)
+            settle(page)
+            return
+        except Exception:
+            if attempt == 2:
+                log.warning("The Orders & Purchases tabs did not appear")
     settle(page)
+
+
+def has_tabs(page) -> bool:
+    try:
+        return page.locator(FALLBACK["tab"]).count() > 0
+    except Exception:
+        return False
 
 
 def on_orders_page(page) -> bool:
@@ -589,6 +622,13 @@ _READ_ROWS_JS = r"""
   for (const [kind, el] of rows) {
     if (done.has(el)) continue;
     done.add(el);
+    // Marked so the code that presses it can ask for this element and
+    // not for the nth of some other list. Counting by position meant
+    // reading `button, [role=button], a` and pressing the nth `button`,
+    // and the first receipt on the page worked while the rest did not.
+    // A live run found it. The attribute is a DOM change like the
+    // isolation, gone on the next navigation.
+    el.setAttribute('data-pp-row', String(out.length));
     const block = card(el);
     const text = (block.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 600);
     const href = el.tagName.toLowerCase() === 'a' ? (el.href || '') : '';
@@ -603,8 +643,46 @@ _READ_ROWS_JS = r"""
 """
 
 
-def read_rows(page) -> List[dict]:
+_ROWS_READY_JS = r"""
+([linkSel, receiptText, emptyText]) => {
+  const wants = new RegExp(receiptText, 'i');
+  for (const el of document.querySelectorAll('button, [role=button], a')) {
+    const label = (el.innerText || el.getAttribute('aria-label') || '').trim();
+    if (label && label.length < 40 && wants.test(label)) return true;
+  }
+  if (document.querySelector(linkSel)) return true;
+  // An account with nothing in this quarter says so, and that is an
+  // answer too. Without this the wait would run its full length on
+  // every empty quarter, of which there are many.
+  return new RegExp(emptyText, 'i').test(document.body.innerText || '');
+}
+"""
+
+
+def wait_for_rows(page, timeout_ms: int = 20000) -> bool:
+    """Wait until the tab has drawn its rows, or said it has none.
+
+    Switching a tab or a quarter does not navigate, it asks the API and
+    redraws, so there is no load to wait on and network quiet comes back
+    before the rows are on screen. A live run read an empty list this
+    way and then could not find the receipt it had discovered a minute
+    earlier."""
+    try:
+        page.wait_for_function(
+            _ROWS_READY_JS,
+            arg=[FALLBACK["order_link"], RECEIPT_CONTROL_TEXT,
+                 NO_ORDERS_RE.pattern],
+            timeout=timeout_ms)
+        return True
+    except Exception:
+        log.debug("The list did not draw within %dms", timeout_ms)
+        return False
+
+
+def read_rows(page, wait_ms: int = 20000) -> List[dict]:
     """The purchases on the tab that is open, as records."""
+    if wait_ms:
+        wait_for_rows(page, wait_ms)
     try:
         rows = page.evaluate(_READ_ROWS_JS,
                              [RECEIPT_CONTROL_TEXT, FALLBACK["order_link"]]) or []
@@ -733,7 +811,10 @@ def record_to_purchase(rec: dict) -> Optional[Purchase]:
         total=money_from_api(_first(rec, "total", "orderTotal", "grandTotal")),
         status=parse_status(str(_first(rec, "status", default=""))),
         store_info=purchase_label(ptype) or "Costco",
-        summary=str(_first(rec, "cardText", default="") or "")[:300],
+        # NOT summary. The summary becomes the PDF's filename, and a
+        # receipt that fails before it is classified would be saved
+        # under the whole row's text, timestamp and all.
+        notes=("Row: " + str(_first(rec, "cardText", default="") or ""))[:300],
         # The href the page itself drew, when there is one and it is on
         # Costco. A link the site made is worth more than a URL this app
         # assembled from a guess at the path.
@@ -745,13 +826,59 @@ def record_to_purchase(rec: dict) -> Optional[Purchase]:
     )
     if record_is_pending(rec):
         p.status = p.status or "Pending"
-        p.notes = "Pending order, no receipt yet"
+        p.notes = ("Pending order, no receipt yet. " + p.notes)[:300]
     return p
 
 
 # ---------------------------------------------------------------------------
 # The receipt page = the receipt
 # ---------------------------------------------------------------------------
+
+# The block a person is actually looking at. Bootstrap keeps a hidden
+# copy of the modal in the markup, so a selector is not enough, and the
+# biggest visible match is. Shared by every piece of code below that has
+# to find the receipt, because they all fell for the hidden one.
+_VISIBLE_JS = r"""
+  const onScreen = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 80 || r.height < 80) return false;
+    const s = getComputedStyle(el);
+    return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+  };
+  const pick = (sel) => {
+    let best = null, most = -1;
+    for (const el of document.querySelectorAll(sel)) {
+      if (!onScreen(el)) continue;
+      const n = (el.innerText || '').length;
+      if (n > most) { most = n; best = el; }
+    }
+    return best;
+  };
+"""
+
+_FIND_RECEIPT_JS = "(area) => {" + _VISIBLE_JS + """
+  const n = pick(area);
+  if (!n) return null;
+  const r = n.getBoundingClientRect();
+  return {text: (n.innerText || '').slice(0, 20000),
+          width: Math.round(r.width), height: Math.round(n.scrollHeight)};
+}"""
+
+
+def visible_receipt(page) -> Optional[dict]:
+    """The receipt on screen, as its text and its size, or None."""
+    try:
+        got = page.evaluate(_FIND_RECEIPT_JS, FALLBACK["receipt_area"])
+    except Exception as e:
+        log.debug("Could not look for the receipt: %s", e)
+        return None
+    return got if isinstance(got, dict) else None
+
+
+def receipt_text(page) -> str:
+    got = visible_receipt(page)
+    return (got or {}).get("text") or ""
+
 
 def on_receipt_page(page) -> bool:
     """Either half counts. A warehouse receipt is a dialog with no
@@ -762,10 +889,9 @@ def on_receipt_page(page) -> bool:
 
 
 def dialog_open(page) -> bool:
-    try:
-        return page.locator(FALLBACK["dialog"]).count() > 0
-    except Exception:
-        return False
+    """On screen, not merely present. Bootstrap's hidden copy is always
+    present."""
+    return visible_receipt(page) is not None
 
 
 def close_dialog(page) -> None:
@@ -815,13 +941,23 @@ def open_warehouse_receipt(page, purchase: Purchase) -> None:
     goto_orders(page)
     if not open_tab(page, TAB_WAREHOUSE):
         raise RuntimeError("could not open the Warehouse tab")
+    log.debug("Back on the Warehouse tab, looking for %s", purchase.purchase_date)
 
-    wanted = record_key({"purchaseType": "WAREHOUSE",
-                         "createdDateTime": purchase.purchase_date,
-                         "total": purchase.total,
-                         "where": purchase.store_info})
-    for option in [None] + [o for o in ranges_for(page)
-                            if range_covers(o, purchase.purchase_date)]:
+    # The key discovery gave it, not one rebuilt from the fields here.
+    # Rebuilding it needs the warehouse name, and a Purchase carries the
+    # kind of place rather than which one, so every lookup asked for
+    # wh-<date>-<total>-InWarehouse and no row ever answered. A live run
+    # found that on the first receipt it tried to open.
+    wanted = purchase.order_number
+    # Whatever the picker is showing, then the quarters the date falls
+    # in, then the rest. The picker keeps whichever quarter the last
+    # receipt needed, so "what it shows now" is not a range this app can
+    # reason about, and two receipts a fortnight apart failed to open
+    # because only the covering quarters were tried after it had moved.
+    every = ranges_for(page)
+    covering = [o for o in every if range_covers(o, purchase.purchase_date)]
+    order = [None] + covering + [o for o in every if o not in covering]
+    for option in order:
         if option is not None and not select_range(page, option):
             continue
         for row in read_rows(page):
@@ -835,16 +971,15 @@ def open_warehouse_receipt(page, purchase: Purchase) -> None:
 
 
 def press_view_receipt(page, index: int) -> None:
-    """Press one row's View Receipt, by position among the rows read.
+    """Press the control read_rows took as row `index`.
 
-    The position comes from the same pass that read the rows, so it is
-    the same page and the same order. Its name is checked against the
-    guard first, because a button in that position that says something
-    else is a page this app no longer understands."""
-    buttons = page.locator(FALLBACK["receipt_button"])
-    if index >= buttons.count():
+    Asked for by the mark read_rows left on it, so this is the same
+    element and not the nth of a list assembled differently. Its name is
+    checked against the guard first, because a control in that place
+    saying something else is a page this app no longer understands."""
+    button = page.locator('[data-pp-row="%d"]' % int(index)).first
+    if button.count() == 0:
         raise RuntimeError("that row is no longer on the page")
-    button = buttons.nth(index)
     name = (button.inner_text(timeout=2000) or "").strip()
     if not is_safe_control(name):
         raise RuntimeError("refusing to press a control called %r" % name)
@@ -855,11 +990,12 @@ def wait_for_receipt(page, timeout_ms: int = 30000) -> bool:
     """The dialog, or the print view, or the page saying it could not."""
     try:
         page.wait_for_function(
-            """([dialog, failed, printPath]) =>
-                 !!document.querySelector(dialog)
-                 || location.href.toLowerCase().includes(printPath)
-                 || new RegExp(failed, 'i').test(document.body.innerText)""",
-            arg=[FALLBACK["dialog"], RECEIPT_FAILED_RE.pattern,
+            "([area, failed, printPath]) => {" + _VISIBLE_JS + """
+                 if (pick(area)) return true;
+                 if (location.href.toLowerCase().includes(printPath)) return true;
+                 return new RegExp(failed, 'i').test(document.body.innerText || '');
+               }""",
+            arg=[FALLBACK["receipt_area"], RECEIPT_FAILED_RE.pattern,
                  PRINT_VIEW_PATH.lower()],
             timeout=timeout_ms)
     except Exception:
@@ -886,7 +1022,7 @@ def open_online_invoice(page, purchase: Purchase) -> None:
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     settle(page)
 
-    printable = print_view_url(page)
+    printable = print_view_url(page, wait_ms=20000)
     if printable:
         page.goto(printable, wait_until="domcontentloaded", timeout=60000)
         settle(page)
@@ -896,10 +1032,19 @@ def open_online_invoice(page, purchase: Purchase) -> None:
     wait_for_receipt(page)
 
 
-def print_view_url(page) -> str:
-    """Where Print Invoice points, read rather than pressed."""
+def print_view_url(page, wait_ms: int = 0) -> str:
+    """Where Print Invoice points, read rather than pressed.
+
+    Waited for, because the order details page is drawn by the app after
+    the shell arrives and a first look finds nothing. A live run decided
+    two orders had no invoice at all, and they both did."""
+    link = page.locator(FALLBACK["print_invoice"]).first
+    if wait_ms:
+        try:
+            link.wait_for(state="attached", timeout=wait_ms)
+        except Exception:
+            pass
     try:
-        link = page.locator(FALLBACK["print_invoice"]).first
         if link.count() == 0:
             return ""
         href = link.get_attribute("href") or ""
@@ -913,18 +1058,15 @@ def print_view_url(page) -> str:
 
 def receipt_is_present(page) -> bool:
     """Something with money in it, in the dialog or on the print view."""
-    for sel in (FALLBACK["receipt_area"], "body"):
+    text = receipt_text(page)
+    if text and MONEY_RE.search(text):
+        return True
+    if PRINT_VIEW_PATH.lower() in (page.url or "").lower():
         try:
-            block = page.locator(sel)
-            if block.count() == 0:
-                continue
-            text = block.first.inner_text(timeout=5000)
+            body = page.locator("body").inner_text(timeout=5000)
         except Exception:
-            continue
-        if text and MONEY_RE.search(text):
-            return True
-        if sel == "body":
-            break
+            return False
+        return bool(body and MONEY_RE.search(body))
     return False
 
 
@@ -936,61 +1078,155 @@ def receipt_failed(page) -> bool:
     return bool(RECEIPT_FAILED_RE.search(body))
 
 
-# GUESS. Lines on the rendered receipt, read from its text. A line that
-# ends in a price and is not one of the summary labels is an item.
-_SUMMARY_LINE_RE = re.compile(
-    r"^(sub\s*total|subtotal|total|tax|sales\s+tax|savings|total\s+savings|coupons?|discounts?|"
-    r"tip|gratuity|fees?|delivery\s+fee|service\s+fee|bag\s+fee|bottle\s+deposit|"
-    r"balance|change|payment|paid|amount\s+(due|paid)|ebt|snap|gift\s+card|visa|mastercard|"
-    r"master\s*card|discover|amex|american\s+express|debit|credit|cash|refund|items?\s+purchased|"
-    r"\d+\s+items?)\b", re.I)
+# A Costco warehouse receipt line, as one reads on screen.
+#
+#     E     933402  DORITOS 30Z     7.29 3
+#           512599  **KS TOWEL**   20.79 Y
+#
+# An optional department letter, the item number, the name, the price,
+# and a tax code. No currency sign anywhere, which is why the first
+# version of this found no items at all and every receipt was filed as
+# "Mixed Purchases". The item number is what tells a line from a total,
+# since SUBTOTAL and TAX have no number in front of them.
 _ITEM_LINE_RE = re.compile(
-    r"^(?P<name>.+?)(?:\s+(?P<qty>\d+)\s*(?:x|@)\s*\$?\s*[\d,]+\.\d{2})?\s+\$\s*(?P<price>-?[\d,]+\.\d{2})\s*$")
+    r"^(?:(?P<dept>[A-Z])\s+)?(?P<num>\d{5,8})\s+"
+    r"(?P<name>\S.*?)\s+"
+    r"(?P<price>-?[\d,]+\.\d{2})(?P<sign>-)?"
+    r"(?:\s+(?P<code>[A-Z0-9]))?\s*$")
+
+# The online invoice is a table, and a table read as text gives one
+# cell per line. An item is six of them.
+#
+#     Sour Punch Twists, Variety, 180-count     the name
+#     Item 12345678                             Costco's item number
+#     $12.34                                    unit price
+#     1                                         quantity
+#     Delivered                                 status
+#     $12.34                                    total price
+#
+# The item number line is the anchor, because it is the only one whose
+# shape cannot be anything else.
+_ONLINE_ANCHOR_RE = re.compile(r"^item\s+#?\s*(\d{5,12})$", re.I)
+_MONEY_ONLY_RE = re.compile(r"^\$\s*(-?[\d,]+\.\d{2})$")
+_QTY_ONLY_RE = re.compile(r"^(\d{1,4})$")
+
+# A one line invoice, kept for a layout that is not a table.
+_ONLINE_ITEM_QTY_RE = re.compile(
+    r"^(?P<name>.+?)\s+(?P<qty>\d+)\s*(?:x|@)\s*"
+    r"\$\s*[\d,]+\.\d{2}\s+\$\s*(?P<price>-?[\d,]+\.\d{2})\s*$")
+_ONLINE_ITEM_RE = re.compile(
+    r"^(?P<name>.+?)\s+\$\s*(?P<price>-?[\d,]+\.\d{2})\s*$")
+
+# Lines that carry a number and a price and are still not a purchase.
+_NOT_AN_ITEM_RE = re.compile(
+    r"^(sub\s*total|subtotal|total|tax|sales\s+tax|total\s+tax|savings|"
+    r"total\s+savings|instant\s+savings|coupons?|discounts?|tip|gratuity|"
+    r"fees?|shipping|handling|delivery\s+fee|service\s+fee|surcharge|"
+    r"balance|change|payment|paid|amount|amount\s+(due|paid)|"
+    r"visa|mastercard|master\s*card|discover|amex|american\s+express|"
+    r"debit|credit|cash|ebt|snap|gift\s+card|refund|member|whse|trm|trn|opt|"
+    r"items?\s+sold|total\s+number\s+of\s+items?|approved)\b", re.I)
 
 
 def _clean_item_name(name: str) -> str:
-    name = _html.unescape(re.sub(r"\s+", " ", name or "")).strip(" -:*")
-    if len(name) < 3 or _SUMMARY_LINE_RE.match(name):
+    """A name as a person would write it down. Costco wraps some in
+    asterisks, which mean something to Costco and nothing here."""
+    name = _html.unescape(re.sub(r"\s+", " ", name or "")).strip()
+    name = name.strip("*").strip(" -:")
+    if len(name) < 2 or _NOT_AN_ITEM_RE.match(name):
         return ""
     return name
 
 
-def extract_items(page) -> List[Item]:
-    """Line items from the rendered receipt. GUESS at the line shape, and
-    an empty answer only means the spreadsheet's item rows come from the
-    API record instead."""
-    try:
-        text = page.locator(FALLBACK["receipt_area"]).first.inner_text(timeout=8000)
-    except Exception:
-        return []
+def _online_table_items(lines: List[str]) -> List[Item]:
+    """The six line blocks on an online invoice, if that is what this is.
+
+    Anchored on the item number, because the name above it can be
+    anything and the four lines below it can each be missing."""
     items: List[Item] = []
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    for i, ln in enumerate(lines):
-        m = _ITEM_LINE_RE.match(ln)
+    for i, line in enumerate(lines):
+        if not _ONLINE_ANCHOR_RE.match(line):
+            continue
+        name = ""
+        for back in range(i - 1, max(-1, i - 4), -1):
+            candidate = _clean_item_name(lines[back])
+            if candidate and not _MONEY_ONLY_RE.match(lines[back]):
+                name = candidate
+                break
+        if not name:
+            continue
+        money, qty = [], "1"
+        for ahead in range(i + 1, min(len(lines), i + 7)):
+            ahead_line = lines[ahead]
+            if _ONLINE_ANCHOR_RE.match(ahead_line):
+                break
+            m = _MONEY_ONLY_RE.match(ahead_line)
+            if m:
+                money.append(m.group(1))
+                continue
+            q = _QTY_ONLY_RE.match(ahead_line)
+            if q and qty == "1":
+                qty = q.group(1)
+        total = money[-1] if money else ""
+        items.append(Item(name=name[:300], quantity=qty,
+                          unit_price="$" + money[0] if money else "",
+                          line_total="$" + total if total else ""))
+    return items
+
+
+def extract_items(page) -> List[Item]:
+    """Line items from the receipt on screen, warehouse or online."""
+    return items_from_text(receipt_text(page) or _page_text(page))
+
+
+def _page_text(page) -> str:
+    try:
+        return page.locator("body").inner_text(timeout=8000) or ""
+    except Exception:
+        return ""
+
+
+def items_from_text(text: str) -> List[Item]:
+    """Kept apart from the page so a real receipt can be tested."""
+    lines = [ln.strip() for ln in (text or "").splitlines()]
+    items = _online_table_items(lines)
+    if items:
+        return items
+    for raw in lines:
+        line = raw.strip()
+        if not line or _NOT_AN_ITEM_RE.match(line):
+            continue
+        m = _ITEM_LINE_RE.match(line)
+        if m:
+            name = _clean_item_name(m.group("name"))
+            if not name:
+                continue
+            price = m.group("price")
+            if m.group("sign"):
+                price = "-" + price
+            items.append(Item(name=name[:300], quantity="1",
+                              line_total="$" + price.lstrip("-").lstrip()
+                              if not price.startswith("-") else "-$" + price[1:]))
+            continue
+        m = _ONLINE_ITEM_QTY_RE.match(line) or _ONLINE_ITEM_RE.match(line)
         if m:
             name = _clean_item_name(m.group("name"))
             if name:
-                items.append(Item(name=name[:300], quantity=m.group("qty") or "1",
-                                  line_total=f"${m.group('price')}"))
-            continue
-        # A name on one line and its price on the next.
-        if i + 1 < len(lines) and re.fullmatch(r"\$\s*-?[\d,]+\.\d{2}", lines[i + 1]):
-            name = _clean_item_name(ln)
-            if name and not MONEY_RE.search(ln):
-                items.append(Item(name=name[:300], quantity="1",
-                                  line_total="$" + re.sub(r"[^\d.,-]", "", lines[i + 1])))
+                qty = m.groupdict().get("qty") or "1"
+                items.append(Item(name=name[:300], quantity=qty,
+                                  line_total="$" + m.group("price")))
     return items
 
 
 def extract_details(page, purchase: Purchase) -> Purchase:
     """Fill in what the rendered receipt says. The API record already gave
     the date, total and type, so this only fills gaps and reads items."""
-    try:
-        text = page.locator(FALLBACK["receipt_area"]).first.inner_text(timeout=8000)
-    except Exception:
-        text = ""
+    text = receipt_text(page) or _page_text(page)
     if text:
-        m = re.search(r"^\s*total\s*:?\s*\$\s*([\d,]+\.\d{2})\s*$", text, re.I | re.M)
+        # "**** TOTAL 50.59", with no currency sign, which is how a till
+        # prints it.
+        m = re.search(r"^\s*\**\s*total\s*:?\s*\$?\s*([\d,]+\.\d{2})\s*$",
+                      text, re.I | re.M)
         if m and not purchase.total:
             purchase.total = f"${m.group(1)}"
         m = re.search(r"(\d{1,2}/\d{1,2}/\d{2,4})", text)
@@ -1024,9 +1260,8 @@ def scroll_full_page(page, rounds: int = 2, delay_ms: int = 400) -> None:
 # dialog's own Print Receipt link and its Close button are hidden too,
 # and never pressed. On the online print view there is nothing to hide,
 # because that page is already only the invoice.
-_ISOLATE_RECEIPT_JS = r"""
-([area, printBtn]) => {
-  const n = document.querySelector(area);
+_ISOLATE_RECEIPT_JS = "([area, printText]) => {" + _VISIBLE_JS + r"""
+  const n = pick(area);
   if (!n) {
     // The online print view. Costco serves it as a page of its own with
     // nothing else on it, so there is nothing to take away.
@@ -1043,8 +1278,16 @@ _ISOLATE_RECEIPT_JS = r"""
   }
   // The dialog's own controls. A printed receipt with a Print Receipt
   // link and a Close button in it looks like a screenshot of a website.
-  for (const x of n.querySelectorAll(printBtn + ', button, a[href="#"]'))
-    x.style.display = 'none';
+  // Plain CSS and a text test, because this runs in the browser, which
+  // has never heard of :has-text(). The isolation was the second place
+  // that got wrong, after discovery.
+  const saysPrint = new RegExp(printText, 'i');
+  for (const x of n.querySelectorAll('button, [role=button]')) x.style.display = 'none';
+  for (const x of n.querySelectorAll('a')) {
+    const label = (x.innerText || x.getAttribute('aria-label') || '').trim();
+    if (!x.getAttribute('href') || x.getAttribute('href') === '#'
+        || (label && saysPrint.test(label))) x.style.display = 'none';
+  }
   // The dialog is positioned, so it keeps its own scroll. Let it grow to
   // its full height instead, or printToPDF captures one screen of it.
   for (const el of [n, n.parentElement].filter(Boolean)) {
@@ -1052,6 +1295,29 @@ _ISOLATE_RECEIPT_JS = r"""
     el.style.height = 'auto';
     el.style.overflow = 'visible';
     el.style.position = 'static';
+  }
+  // A modal locks the page behind it. Left on, printToPDF renders one
+  // blank viewport and stops. The grey it dims the page with, and the
+  // help tab bolted to the window, both print as well if left alone.
+  for (const el of [document.documentElement, document.body]) {
+    el.style.overflow = 'visible';
+    el.style.height = 'auto';
+    el.style.maxHeight = 'none';
+    el.style.position = 'static';
+    el.style.background = '#fff';
+    el.style.backgroundColor = '#fff';
+  }
+  for (const el of document.querySelectorAll(
+      '.modal-backdrop, [class*="backdrop" i], [class*="overlay" i]')) {
+    el.style.display = 'none';
+  }
+  // Anything pinned to the window that is not part of the receipt. A
+  // feedback tab, a cookie bar, a chat bubble. They sit outside the
+  // block being kept, so hiding its siblings never reached them.
+  for (const el of document.querySelectorAll('body *')) {
+    if (el === n || n.contains(el) || el.contains(n)) continue;
+    const s = getComputedStyle(el);
+    if (s.position === 'fixed' || s.position === 'sticky') el.style.display = 'none';
   }
   const w = Math.max(n.scrollWidth, n.getBoundingClientRect().width);
   const zoom = Math.min(1, Math.max(0.5, 736 / (w + 16)));
@@ -1064,7 +1330,8 @@ _ISOLATE_RECEIPT_JS = r"""
 
 def isolate_receipt(page) -> bool:
     try:
-        ok = bool(page.evaluate(_ISOLATE_RECEIPT_JS, [FALLBACK["receipt_area"], FALLBACK["print_button"]]))
+        ok = bool(page.evaluate(_ISOLATE_RECEIPT_JS,
+                                [FALLBACK["receipt_area"], PRINT_CONTROL_TEXT]))
     except Exception as e:
         log.warning("Receipt isolation failed: %s", e)
         return False
@@ -1095,10 +1362,27 @@ _KEEP_VALUES = {"purchaseType", "status", "fulfillmentType", "modality", "quanti
 # every "Jr" and "II" on a page became [name].
 
 
+# An online invoice prints the member's name and their shipping and
+# billing address in full. Digits alone do not cover a street name, and
+# the owner's name only covers the parts of it this app was told. SEEN
+# on a live invoice, which is why this exists.
+_ADDRESS_BLOCK_RE = re.compile(
+    r"((?:shipping|billing|delivery|mailing)\s+address)"
+    r"(?:(?!\n\s*\n)[\s\S]){0,200}", re.I)
+_STREET_LINE_RE = re.compile(
+    r"^\s*\d{1,6}\s+[A-Za-z0-9.' -]{2,40}"
+    r"\s(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|cir|circle|"
+    r"blvd|boulevard|way|pl|place|ter|terrace|pkwy|parkway|hwy|highway)\.?\s*$",
+    re.I | re.M)
+
+
 def mask_text(s: str) -> str:
+    s = s or ""
     for word in private_words():
-        s = re.sub(re.escape(word), "[name]", s or "", flags=re.I)
-    s = _EMAIL_RE.sub("<email>", s or "")
+        s = re.sub(re.escape(word), "[name]", s, flags=re.I)
+    s = _EMAIL_RE.sub("<email>", s)
+    s = _STREET_LINE_RE.sub("[address]", s)
+    s = _ADDRESS_BLOCK_RE.sub(lambda m: m.group(1) + " [address]", s)
     return _DIGITS_RE.sub(lambda m: "#" * len(m.group(0)), s)
 
 

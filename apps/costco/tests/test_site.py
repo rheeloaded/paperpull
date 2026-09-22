@@ -104,6 +104,23 @@ def test_an_href_too_short_to_carry_an_order_number_yields_no_purchase():
     assert site.record_to_purchase(evil) is None
 
 
+def test_the_row_text_is_kept_in_the_notes_and_never_in_the_summary():
+    """The summary becomes the PDF's filename. A receipt that failed
+    before it was classified would otherwise be saved under the whole
+    row, timestamp and all, which a live run produced."""
+    p = site.record_to_purchase(ROW_WAREHOUSE)
+    assert p.notes.startswith("Row: In-Warehouse 08/30/2026")
+    assert not p.summary
+
+
+def test_a_pending_order_says_so_and_keeps_its_row():
+    row = dict(ROW_ONLINE, cardText="Order Placed May 14, 2026 Processing")
+    p = site.record_to_purchase(row)
+    assert p.notes.startswith("Pending order")
+    assert "Row:" in p.notes
+    assert not p.summary
+
+
 def test_which_tab_a_purchase_came_from_is_kept():
     p = site.record_to_purchase(dict(ROW_WAREHOUSE, tab="Warehouse"))
     assert p.fulfillment == "Warehouse"
@@ -264,6 +281,13 @@ class _Page:
     def title(self):
         return "Costco"
 
+    def evaluate(self, script, arg=None):
+        """The site asks the page which receipt is on screen. Here that
+        is whatever this stub was made with."""
+        if not self._dialog:
+            return None
+        return {"text": self._body, "width": 600, "height": 900}
+
     def locator(self, sel):
         page = self
 
@@ -387,7 +411,7 @@ def test_the_isolation_script_hides_the_dialogs_own_controls():
     """A printed receipt with a Print Receipt link and a Close button in
     it looks like a screenshot of a website."""
     js = site._ISOLATE_RECEIPT_JS
-    assert "printBtn" in js
+    assert "printText" in js
     assert "button" in js
     assert "display = 'none'" in js
 
@@ -405,6 +429,41 @@ def test_the_isolation_script_lets_the_dialog_grow_to_its_full_height():
 # a selector carrying one reaches querySelectorAll as a syntax error.
 PLAYWRIGHT_ONLY = (":has-text(", ":has(", ":text(", ":text-is(",
                    ":visible", ":nth-match(", ">>")
+
+
+def _js_code_only(js: str) -> str:
+    """The script with its // comments taken out, so a comment saying
+    what must not be there does not count as it being there."""
+    out = []
+    for line in js.splitlines():
+        i = line.find("//")
+        out.append(line if i < 0 else line[:i])
+    return "\n".join(out)
+
+
+def test_no_page_script_carries_a_playwright_selector():
+    """Every one of these runs inside the browser, where Playwright's
+    additions to CSS are a syntax error. Discovery got this wrong first,
+    and the isolation got it wrong again a run later, which is why the
+    rule is checked on all of them rather than on the one that broke."""
+    for name in ("_READ_ROWS_JS", "_ISOLATE_RECEIPT_JS", "_OUTLINE_JS"):
+        code = _js_code_only(getattr(site, name))
+        for bad in PLAYWRIGHT_ONLY:
+            assert bad not in code, "%s carries %s" % (name, bad)
+
+
+def test_every_selector_handed_to_a_page_script_is_plain_css():
+    """The scripts themselves are clean above. This is the other half,
+    the strings passed into them."""
+    import inspect
+    src = inspect.getsource(site)
+    handed = re.findall(r"page\.evaluate\(\s*_\w+_JS\s*,\s*(.+?)\)", src, re.S)
+    assert handed, "no page scripts are being called"
+    for args in handed:
+        for key in re.findall(r'FALLBACK\["(\w+)"\]', args):
+            value = site.FALLBACK[key]
+            for bad in PLAYWRIGHT_ONLY:
+                assert bad not in value, "FALLBACK[%r] carries %s" % (key, bad)
 
 
 def test_nothing_handed_to_the_browser_is_a_playwright_selector():
@@ -436,6 +495,187 @@ def test_the_selectors_meant_for_playwright_are_only_used_there():
     src = inspect.getsource(site)
     assert 'page.evaluate(_READ_ROWS_JS' in src
     assert 'FALLBACK["receipt_button"]] ) or []' not in src
+
+
+# -- reading the receipt's own lines -------------------------------------------
+
+# The shape a warehouse till prints, taken from a real receipt with the
+# numbers changed. No currency sign anywhere, which is what the first
+# version of the parser assumed there would be, so it found nothing and
+# every receipt was filed as "Mixed Purchases".
+RECEIPT_TEXT = """In-Warehouse Receipt
+FAIRFAX #204
+4725 W OX RD
+FAIRFAX, VA 22030
+21020420504082608301756
+Member 111111111111
+E 933402 DORITOS 30Z 7.29 3
+E 2038687 LACROIX DAZZ 10.99 3
+E 1331732 MINI COOKIE 9.99 3
+512599 **KS TOWEL** 20.79 Y
+SUBTOTAL 49.06
+TAX 1.53
+**** TOTAL 50.59
+XXXXXXXXXXXXX1111 CHIP read
+APPROVED - PURCHASE
+AMOUNT: $50.59
+COSTCO VISA 50.59
+CHANGE 0
+TOTAL TAX 1.53
+TOTAL NUMBER OF ITEMS SOLD = 4
+Thank You!
+Items Sold: 4"""
+
+
+def test_every_line_item_is_read_and_nothing_else_is():
+    items = site.items_from_text(RECEIPT_TEXT)
+    assert [i.name for i in items] == ["DORITOS 30Z", "LACROIX DAZZ",
+                                       "MINI COOKIE", "KS TOWEL"]
+    assert [i.line_total for i in items] == ["$7.29", "$10.99", "$9.99", "$20.79"]
+
+
+def test_the_totals_are_not_mistaken_for_items():
+    names = [i.name for i in site.items_from_text(RECEIPT_TEXT)]
+    for summary in ("SUBTOTAL", "TAX", "TOTAL", "COSTCO VISA", "CHANGE",
+                    "AMOUNT", "Items Sold"):
+        assert not any(n.upper().startswith(summary.upper()) for n in names), summary
+
+
+def test_the_membership_number_is_not_an_item():
+    """It is a long number on a line of its own, which is exactly what a
+    line item looks like from a distance."""
+    names = [i.name for i in site.items_from_text(RECEIPT_TEXT)]
+    assert not any("111111111111" in n for n in names)
+    assert not any(n.lower().startswith("member") for n in names)
+
+
+def test_the_card_line_is_not_an_item():
+    names = [i.name for i in site.items_from_text(RECEIPT_TEXT)]
+    assert not any("XXXX" in n for n in names)
+
+
+def test_costco_asterisks_are_taken_off_a_name():
+    """They mean something to Costco and nothing in a spreadsheet."""
+    items = site.items_from_text("512599 **KS TOWEL** 20.79 Y")
+    assert items[0].name == "KS TOWEL"
+
+
+def test_a_refunded_line_keeps_its_sign():
+    items = site.items_from_text("E 933402 DORITOS 30Z 7.29-")
+    assert items[0].line_total == "-$7.29"
+
+
+def test_an_online_invoice_line_with_a_currency_sign_is_read_too():
+    items = site.items_from_text("Kirkland Signature Olive Oil 2 x $12.99 $25.98")
+    assert items and items[0].line_total == "$25.98"
+    assert items[0].quantity == "2"
+
+
+def test_nothing_at_all_is_not_an_error():
+    assert site.items_from_text("") == []
+    assert site.items_from_text("Loading your receipt") == []
+
+
+def test_a_line_with_no_item_number_is_not_an_item():
+    """The item number is the only thing that tells a purchase from a
+    total, since SUBTOTAL and TAX carry no number."""
+    assert site.items_from_text("SOMETHING ELSE 12.34") == []
+
+
+# -- the online invoice, which is a table ---------------------------------------
+
+# Read as text, a table gives one cell per line. Taken from a real
+# invoice with the numbers and the address changed.
+ONLINE_INVOICE = """Back to Order Details
+Order Details
+Print Invoice
+Order Number
+1234567890
+Order Date
+04/30/2026
+Membership Number
+111111111111
+Payment Method
+Visa ending in 1111
+Shipping Address
+Pat Morgan
+4321 Dansk Ct
+FAIRFAX, VA
+22030-1234
+
+Item
+Quantity
+Status
+Total Price
+Sour Punch Twists, Variety, 180-count
+Item 12345678
+$12.34
+2
+Delivered
+$24.68
+Order Summary
+Subtotal (2 Items)
+$24.68
+Shipping
+$5.99
+Tax
+$1.48
+Order Total
+$32.15"""
+
+
+def test_an_online_item_is_read_out_of_its_block():
+    items = site.items_from_text(ONLINE_INVOICE)
+    assert len(items) == 1
+    assert items[0].name == "Sour Punch Twists, Variety, 180-count"
+    assert items[0].quantity == "2"
+    assert items[0].unit_price == "$12.34"
+    assert items[0].line_total == "$24.68"
+
+
+def test_the_order_summary_is_not_read_as_items():
+    names = [i.name for i in site.items_from_text(ONLINE_INVOICE)]
+    for summary in ("Subtotal", "Shipping", "Tax", "Order Total",
+                    "Membership Number", "Payment Method"):
+        assert not any(summary.lower() in n.lower() for n in names), summary
+
+
+def test_the_membership_number_and_the_card_are_not_items():
+    names = " ".join(i.name for i in site.items_from_text(ONLINE_INVOICE))
+    assert "111111111111" not in names
+    assert "Visa" not in names
+
+
+def test_an_invoice_with_no_items_is_not_an_error():
+    assert site.items_from_text("Order Details\nPrint Invoice") == []
+
+
+# -- the address on an online invoice ------------------------------------------
+
+def test_the_shipping_address_does_not_survive_into_a_diagnostics_file():
+    """An online invoice prints the member's name and their address in
+    full. Digits alone do not cover a street name, and the owner's name
+    only covers the parts of it this app was told."""
+    site.set_private_words(["Pat"])
+    try:
+        out = site.mask_text(ONLINE_INVOICE)
+    finally:
+        site.set_private_words([])
+    assert "Dansk" not in out
+    assert "Morgan" not in out
+    assert "22030" not in out
+
+
+def test_a_street_line_on_its_own_is_masked():
+    assert "Dansk" not in site.mask_text("4321 Dansk Ct")
+    assert "Elm" not in site.mask_text("12 Elm Street")
+
+
+def test_masking_leaves_the_words_a_maintainer_needs():
+    out = site.mask_text(ONLINE_INVOICE)
+    for kept in ("Order Number", "Print Invoice", "Order Total", "Delivered",
+                 "Sour Punch Twists"):
+        assert kept in out, kept
 
 
 # -- the diagnostics file ------------------------------------------------------
