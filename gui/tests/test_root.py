@@ -267,6 +267,20 @@ def test_an_unknown_app_cannot_be_told_to_stop(settings, tmp_path):
     assert e.value.status_code == 404
 
 
+def test_stop_uses_the_app_the_recording_started_on():
+    """The App list is not disabled during a run. Reading it back when Stop
+    is pressed would write the sentinel into whichever provider happened to
+    be selected, and the recording, watching its own folder, would never
+    end."""
+    js = app_module.HTML
+    assert "body: JSON.stringify({ app: recordingApp })" in js
+    assert "body: JSON.stringify({ app: $('app').value })" not in js
+    assert "recordingApp = (action === 'record') ? app : null;" in js
+    # And it is cleared both ways a run can finish, so the button cannot
+    # fire against a recording that is already over.
+    assert js.count("recordingApp = null;") >= 3
+
+
 def test_the_panel_offers_record_and_tucks_it_behind_more():
     assert "record" in app_module.ACTIONS
     assert app_module.ACTIONS["record"]["flags"] == ["--record"]

@@ -1828,8 +1828,13 @@ function run(action) {
   // tab's build buttons stay disabled when there is nothing to build from.
   document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl):not(#stoprec):not(:disabled)')
     .forEach(b => { b.disabled = true; b.dataset.runlock = '1'; });
-  // A recording waits for the person, so it needs a way to say when.
-  $('stoprec').style.display = (action === 'record') ? 'block' : 'none';
+  // A recording waits for the person, so it needs a way to say when. The
+  // app this run belongs to is remembered here rather than read back off
+  // the App list when Stop is pressed, because the App list is not locked
+  // during a run and a recording stopped against the wrong provider would
+  // never stop at all.
+  recordingApp = (action === 'record') ? app : null;
+  $('stoprec').style.display = recordingApp ? 'block' : 'none';
   es = new EventSource(`/api/run?${q.toString()}`);
   const con = $('console');
   let result = null;
@@ -1851,18 +1856,21 @@ function run(action) {
       setStatus('warn', 'finished, check output (no run summary)');
     }
     $('stoprec').style.display = 'none';
+    recordingApp = null;
     unlockButtons();
     es.close(); es = null;
   });
-  es.onerror = () => { if (es) { setStatus('err','connection lost'); $('stoprec').style.display = 'none'; unlockButtons(); es.close(); es=null; } };
+  es.onerror = () => { if (es) { setStatus('err','connection lost'); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; } };
 }
+let recordingApp = null;
 async function stopRecording() {
+  if (!recordingApp) return;
   const b = $('stoprec');
   b.disabled = true; b.textContent = 'Stopping...';
   try {
     await fetch('/api/record/stop', { method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: $('app').value }) });
+      body: JSON.stringify({ app: recordingApp }) });
   } catch (e) {}
   b.disabled = false; b.textContent = 'Stop recording';
 }

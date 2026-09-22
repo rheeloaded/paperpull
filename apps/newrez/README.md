@@ -22,16 +22,25 @@ delete-safe, part of [PaperPull](../../README.md).
    documents page and writes `Diagnostics\diagnose-documents.json` in the
    Newrez folder. It downloads nothing, clicks nothing but a documents
    link, takes no screenshot, and masks any run of six or more digits.
-5. Open that file in Notepad and look through it. It should hold page
+5. Click **Record**, in the same **more** menu. Go back to the browser window
+   and click your way to one document the way you normally would, then come
+   back here and click **Stop recording**. It writes
+   `Diagnostics\recording.json`, which is the path you actually took rather
+   than a guess at it. It records nothing you type and reads no cookies, and
+   it refuses to start before you are signed in. The whole walkthrough, written
+   for someone who has never done this, is
+   [Testing a provider](../../docs/testing-a-provider.md).
+6. Open each file in Notepad and look through it. It should hold page
    headings, the names of buttons and links, and the shape of the data the
    page loads, no values. If anything in it looks personal, delete that
    line.
-6. Attach the file to [issue #38](https://github.com/rheeloaded/paperpull/issues/38)
+7. Attach both files to [issue #38](https://github.com/rheeloaded/paperpull/issues/38)
    with a sentence about how you get from the dashboard to your statements, and whether the 1098 sits with them or on a tax page.
-7. When a new build is posted, click **Pilot** and say whether PDFs landed
+8. When a new build is posted, click **Pilot** and say whether PDFs landed
    in `Statements\` or `Tax Documents\`, then attach a fresh Diagnose file.
 
-Two or three rounds usually gets a provider working.
+A Diagnose file and one recording together are usually enough to get a
+provider working in a single round. Diagnose on its own takes two or three.
 
 ## Setup, for a checkout
 

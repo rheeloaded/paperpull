@@ -34,16 +34,25 @@ two-factor prompts.
    downloads nothing to keep, clicks nothing, takes no screenshot, and
    masks every number of two digits or more, every email address and
    every @handle.
-5. Open that file in Notepad and look through it. It should hold the
+5. Click **Record**, in the same **more** menu. Go back to the browser window
+   and click your way to one document the way you normally would, then come
+   back here and click **Stop recording**. It writes
+   `Diagnostics\recording.json`, which is the path you actually took rather
+   than a guess at it. It records nothing you type and reads no cookies, and
+   it refuses to start before you are signed in. The whole walkthrough, written
+   for someone who has never done this, is
+   [Testing a provider](../../docs/testing-a-provider.md).
+6. Open each file in Notepad and look through it. It should hold the
    page's words with the numbers masked, every link on it with its kind,
    the rows the app would take, and whether the receipt link gave a PDF
    or a page. If anything in it looks personal, delete that line.
-6. Attach the file to [issue #43](https://github.com/rheeloaded/paperpull/issues/43)
+7. Attach both files to [issue #43](https://github.com/rheeloaded/paperpull/issues/43)
    with a sentence about what a receipt looks like to you.
-7. When a new build is posted, click **Pilot** and say whether PDFs landed
+8. When a new build is posted, click **Pilot** and say whether PDFs landed
    in `Online\`, then attach a fresh Diagnose file.
 
-Two or three rounds usually gets a provider working.
+A Diagnose file and one recording together are usually enough to get a
+provider working in a single round. Diagnose on its own takes two or three.
 
 ## How it connects (important)
 

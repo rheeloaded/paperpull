@@ -51,6 +51,7 @@ COMMANDS = {
     "resume":   ["--resume"],
     "verify":   ["--verify"],
     "diagnose": ["--diagnose"],
+    "record":   ["--record"],
     "dry-run":  ["--dry-run"],
 }
 

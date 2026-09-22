@@ -41,17 +41,26 @@ recorded where the site says.
    Kroger folder. It downloads nothing, clicks nothing, takes no
    screenshot, and masks every number of two digits or more and every
    email address.
-5. Open that file in Notepad and look through it. It should hold the
+5. Click **Record**, in the same **more** menu. Go back to the browser window
+   and click your way to one document the way you normally would, then come
+   back here and click **Stop recording**. It writes
+   `Diagnostics\recording.json`, which is the path you actually took rather
+   than a guess at it. It records nothing you type and reads no cookies, and
+   it refuses to start before you are signed in. The whole walkthrough, written
+   for someone who has never done this, is
+   [Testing a provider](../../docs/testing-a-provider.md).
+6. Open each file in Notepad and look through it. It should hold the
    shape of the purchase list (field names, purchase types, statuses,
    masked values), the lines of one receipt with the numbers masked, and
    the names of the buttons on that page. If anything in it looks
    personal, delete that line.
-6. Attach the file to [issue #41](https://github.com/rheeloaded/paperpull/issues/41)
+7. Attach both files to [issue #41](https://github.com/rheeloaded/paperpull/issues/41)
    with a sentence about what the receipt page looks like to you.
-7. When a new build is posted, click **Pilot** and say whether PDFs landed
+8. When a new build is posted, click **Pilot** and say whether PDFs landed
    in `In-Store\` and `Online\`, then attach a fresh Diagnose file.
 
-Two or three rounds usually gets a provider working.
+A Diagnose file and one recording together are usually enough to get a
+provider working in a single round. Diagnose on its own takes two or three.
 
 ## In-store, fuel, pickup and delivery
 
