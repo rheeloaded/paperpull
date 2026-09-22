@@ -682,6 +682,16 @@ class App:
 
     # -- summary -----------------------------------------------------------
 
+    def cmd_record(self):
+        """Record the path a person takes to a document, so this app can be
+        written or repaired to take the same one. Downloads nothing, and
+        captures no keystroke. The whole thing is in the core."""
+        self.stats["mode"] = "record"
+        from paperpull_core.recorder import record_session
+        record_session(self.page(), site, self.paths.diagnostics,
+                       provider='M&T Bank',
+                       owner=self.config.get("owner", ""))
+
     def write_run_summary(self):
         s = self.stats
         s["ended"] = now_iso()
@@ -732,7 +742,9 @@ def build_parser() -> argparse.ArgumentParser:
             ("all", "download everything in scope (asks for confirmation)"),
             ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
-            ("diagnose", "dump the Documents page structure (no downloads)")]:
+            ("diagnose", "dump the Documents page structure (no downloads)"),
+            ("record", "record your own path to a document, so this app can be repaired (downloads nothing)"),
+            ]:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)
     ap.add_argument("--dry-run", action="store_true",
                     help="plan filenames but download nothing")
@@ -774,6 +786,8 @@ def main(argv=None):
             app.cmd_resume()
         elif args.verify:
             app.cmd_verify()
+        elif args.record:
+            app.cmd_record()
         elif args.diagnose:
             app.cmd_diagnose()
         elif args.dry_run:

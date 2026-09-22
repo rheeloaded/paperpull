@@ -67,6 +67,7 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional
 
+from .browser import can_ask
 from .redact import redact, safe_query, shape_of
 
 # The only thing a typed value is ever recorded as.
@@ -509,3 +510,95 @@ class Recorder:
         parts = ", ".join("%d %s" % (n, k) for k, n in sorted(kinds.items()))
         return "%d step(s)%s, %d provider request(s)" % (
             len(self.steps), " (" + parts + ")" if parts else "", len(self.requests))
+
+
+# ---------------------------------------------------------------------------
+# One whole recording, from the app's point of view
+# ---------------------------------------------------------------------------
+
+_CONSENT = """\
+RECORDING - what this does and does not capture
+
+  It records   the controls you click, by the name you read on them, the
+               option you pick in a dropdown, a box you tick, and the
+               addresses and shapes of the provider's own answers.
+  It does not  record anything you type. Not the text, not a password,
+               not a code. There is no keystroke listener in it at all.
+  It does not  read cookies, headers or anything that holds your session.
+
+Nothing is downloaded. Click your way to a statement the way you normally
+would, once, then stop. Read the file it writes before sending it.
+"""
+
+
+def _wait_for_stop(stop_file, say) -> None:
+    """Enter at a console, or the panel's Stop button, whichever comes.
+
+    The panel runs an app with its input closed, so there is nobody to
+    press Enter and the sentinel file is the only way to say when to
+    stop. can_ask() decides which, and the prompt is only printed when
+    somebody could answer it. input() on a closed stdin raises ValueError
+    rather than EOFError, which a live run found, so both are caught."""
+    say("")
+    if can_ask():
+        try:
+            input("Recording. Press Enter here when you are done... ")
+            return
+        except (EOFError, OSError, ValueError, RuntimeError):
+            pass
+    say("Recording. Press Stop in the control panel when you are done.")
+    while not stop_file.exists():
+        time.sleep(0.5)
+
+
+def record_session(page, site, diagnostics_dir, provider: str = "",
+                   owner: str = "", say=print) -> Optional[str]:
+    """Start a recording on `page`, wait for the person, write the file.
+
+    `site` is the app's own site module, for the two host checks and its
+    control guard. Returns the path written, or None if it refused."""
+    from .redact import set_private_words
+    from .storage import atomic_write_text
+    import json
+    from pathlib import Path
+
+    set_private_words([owner] if owner else [])
+    rec = Recorder(page,
+                   is_safe_url=site.is_safe_url,
+                   looks_signed_out=getattr(site, "looks_signed_out", None),
+                   is_safe_control=getattr(site, "is_safe_control", None),
+                   provider=provider)
+    why = rec.refusal()
+    if why:
+        say("Not recording, because %s." % why)
+        return None
+
+    say(_CONSENT)
+    rec.start()
+    stop_file = Path(diagnostics_dir) / ".stop-recording"
+    try:
+        stop_file.unlink()
+    except OSError:
+        pass
+    try:
+        _wait_for_stop(stop_file, say)
+    except KeyboardInterrupt:
+        say("\nStopped.")
+    finally:
+        report = rec.stop()
+        try:
+            stop_file.unlink()
+        except OSError:
+            pass
+
+    out = Path(diagnostics_dir) / "recording.json"
+    atomic_write_text(out, json.dumps(report, indent=2))
+    say("")
+    say("Wrote %s" % out)
+    say("  %s" % rec.summary())
+    if not report["steps"]:
+        say("  Nothing was recorded. If you clicked, the page may have been")
+        say("  replaced between starting and clicking. Try again.")
+    say("Read that file through for anything you would not want public,")
+    say("then attach it to the provider's issue on GitHub.")
+    return str(out)

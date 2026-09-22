@@ -390,3 +390,49 @@ def test_a_click_long_before_a_change_is_its_own_step():
     page.fire({"action": "check", "locator": loc, "label": "PDF only",
                "checked": True, "at": 9000})
     assert [s["action"] for s in r.steps] == ["click", "check"]
+
+
+# -- waiting for the person ----------------------------------------------------
+
+def test_with_no_console_it_waits_for_the_panels_file_and_prints_no_prompt(tmp_path, monkeypatch):
+    """The panel runs an app with its input closed. A live run found that
+    input() raises ValueError there, not EOFError, and that the prompt had
+    already been printed before it did."""
+    from paperpull_core import recorder as mod
+    monkeypatch.setattr(mod, "can_ask", lambda: False)
+    said = []
+    stop = tmp_path / ".stop-recording"
+
+    def asked(*a, **k):
+        raise AssertionError("it must not ask when nobody can answer")
+
+    monkeypatch.setattr("builtins.input", asked)
+    import threading
+    threading.Timer(0.05, lambda: stop.write_text("stop", encoding="utf-8")).start()
+    mod._wait_for_stop(stop, said.append)
+    assert any("control panel" in s for s in said)
+    assert not any("Press Enter" in s for s in said)
+
+
+def test_with_a_console_it_waits_for_enter(tmp_path, monkeypatch):
+    from paperpull_core import recorder as mod
+    monkeypatch.setattr(mod, "can_ask", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda *a: "")
+    mod._wait_for_stop(tmp_path / "never-written", said := [].append)
+    assert not any("control panel" in s for s in said.__self__)
+
+
+@pytest.mark.parametrize("boom", [EOFError, OSError, ValueError, RuntimeError])
+def test_a_console_that_turns_out_not_to_be_one_falls_back(tmp_path, monkeypatch, boom):
+    from paperpull_core import recorder as mod
+    monkeypatch.setattr(mod, "can_ask", lambda: True)
+
+    def raiser(*a, **k):
+        raise boom("no console after all")
+
+    monkeypatch.setattr("builtins.input", raiser)
+    stop = tmp_path / ".stop-recording"
+    stop.write_text("stop", encoding="utf-8")
+    said = []
+    mod._wait_for_stop(stop, said.append)
+    assert any("control panel" in s for s in said)

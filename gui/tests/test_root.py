@@ -227,3 +227,47 @@ def test_a_settings_file_from_an_earlier_version_is_moved_once(tmp_path, monkeyp
     # and the choice survives
     monkeypatch.delenv("APPS_ROOT", raising=False)
     assert app_module.apps_root() == Path("D:/mine")
+
+
+def test_stopping_a_recording_writes_the_file_the_app_waits_for(settings, tmp_path, monkeypatch):
+    """A recording has no natural end. Started from the panel the app's
+    input is closed, so this file is the only way to say when to stop."""
+    root = tmp_path / "installs"
+    d = root / "Bank Statements"
+    d.mkdir(parents=True)
+    (d / "bank_docs.py").write_text("# entry\n", encoding="utf-8")
+    (d / "config.json").write_text(json.dumps({"output_dir": "."}), encoding="utf-8")
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"apps_root": str(root)}), encoding="utf-8")
+    out = asyncio.run(app_module.api_record_stop(_Req({"app": "Bank Statements"})))
+    assert out["stopping"] is True
+    assert (d / "Diagnostics" / ".stop-recording").is_file()
+
+
+def test_a_recording_stop_follows_the_config_to_another_drive(settings, tmp_path, monkeypatch):
+    root = tmp_path / "installs"
+    d = root / "Bank Statements"
+    d.mkdir(parents=True)
+    (d / "bank_docs.py").write_text("# entry\n", encoding="utf-8")
+    elsewhere = tmp_path / "D" / "Bank"
+    elsewhere.mkdir(parents=True)
+    (d / "config.json").write_text(json.dumps({"output_dir": str(elsewhere)}),
+                                   encoding="utf-8")
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"apps_root": str(root)}), encoding="utf-8")
+    asyncio.run(app_module.api_record_stop(_Req({"app": "Bank Statements"})))
+    assert (elsewhere / "Diagnostics" / ".stop-recording").is_file()
+
+
+def test_an_unknown_app_cannot_be_told_to_stop(settings, tmp_path):
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"apps_root": str(tmp_path)}), encoding="utf-8")
+    with pytest.raises(app_module.HTTPException) as e:
+        asyncio.run(app_module.api_record_stop(_Req({"app": "../etc"})))
+    assert e.value.status_code == 404
+
+
+def test_the_panel_offers_record_and_tucks_it_behind_more():
+    assert "record" in app_module.ACTIONS
+    assert app_module.ACTIONS["record"]["flags"] == ["--record"]
+    assert "record" in app_module.MORE_ACTIONS
