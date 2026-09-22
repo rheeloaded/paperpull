@@ -412,12 +412,15 @@ def goto_orders(page, page_no: int = 1, fresh: bool = False) -> None:
     do on its own."""
     if on_orders_page(page) and has_tabs(page) and not fresh:
         return
+    # Going from this page to this page is a hash change and loads
+    # nothing at all, so when a fresh one is wanted it is asked for
+    # outright. Trying goto first cost twenty five seconds a receipt
+    # waiting for tabs that were never going to be redrawn.
     for attempt in (1, 2):
         try:
-            if attempt == 1:
+            if attempt == 1 and not (fresh and on_orders_page(page)):
                 page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
             else:
-                # A hash change loads nothing, so ask for the load.
                 page.reload(wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
             log.warning("Could not open Orders & Purchases: %s", e)
