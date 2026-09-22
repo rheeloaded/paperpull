@@ -39,10 +39,17 @@ page, wrote down everything it could see, and somebody guessed from that.
 AT&T took **nine rounds** of guessing that way. Each round was a day of
 waiting on both sides.
 
-**Record removes the guessing.** You click your way to a document once, the
-way you always do, and the app writes down the path you took. The maintainer
-reads the path and writes the app to take the same one. Usually that is one
-round.
+**Record removes the guessing about the shape of the site.** You click your
+way to a document once, the way you always do, and the app writes down the
+path you took. The maintainer reads the path and writes the app to take the
+same one.
+
+That is worth several rounds on its own. It is **not** the whole job, and it
+would be unfair to tell you otherwise. A recording says what a person did. It
+cannot say what happens when a program tries to do the same thing twice, and
+that is where most of the work turns out to be. Expect to run **Pilot** a few
+times after the first build and to say what came out wrong. Costco took one
+recording and then several rounds of exactly that.
 
 ---
 
@@ -192,9 +199,14 @@ build, usually within a few days. You update PaperPull, click **Pilot**, and
 say whether the documents landed in the provider's folder.
 
 If they did, you get a line in the README under Thanks, with your GitHub
-username, and the provider stops being marked untested. If they did not,
-record it again on the new build and say what happened instead. Two rounds is
-normal. Nine was the old way.
+username, and the provider stops being marked untested. If they did not, say
+what came out wrong and the next build will fix it.
+
+**Expect a few of those.** The recording gets the provider written in one go,
+which used to take three rounds on a good site and eight on a bad one. Making
+it work is a separate job, because a recording cannot show what happens when
+a program tries the same path twice, and that is where the awkward bugs live.
+Costco took one recording and then several Pilot runs.
 
 ---
 

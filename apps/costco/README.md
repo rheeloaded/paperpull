@@ -51,8 +51,9 @@ contributed to anything, is
    goes. Do not attach a screenshot of a receipt. Those carry your
    membership number and the card tail, and the recording deliberately
    does not.
-One recording was enough to write this. A survey on its own takes two
-or three rounds, and once took nine.
+One recording was enough to write this app. Making it work took several
+runs against the account afterwards, which is the normal shape of it and
+not a sign anything went wrong.
 
 ## How Costco is put together
 
