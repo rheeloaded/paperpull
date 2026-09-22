@@ -10,6 +10,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **AT&T, round nine.** Round eight's pilot saved the tester's bills, the
+  first time. Two things came back with it. The current bill was saved
+  twice, once dated by its issue date and once by its due date, the
+  second a record round two had left in discovery from the billing
+  center's current-balance box. Discovery now drops records the history
+  no longer lists when nothing was downloaded for them, and a date that
+  follows the word "due" is never a bill date. And the filename now
+  leads with the account's kind read off the account switcher, "Wireless
+  Monthly Statement" or "Fiber Monthly Statement", so a household with
+  two accounts can tell them apart in Paperless (#26).
 - **Golden 1, round three.** The second survey reached the documents
   page and never looked inside the vendor's tab, because "View Documents"
   is a button and the survey followed only links. The survey now presses

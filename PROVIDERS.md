@@ -19,7 +19,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
-| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #26. Being tested by @watling777 | Telecom |
+| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. Pilot confirmed by @watling777 in round eight, the full run and a second account still being tested on issue #26 | Telecom |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #45. Being tested by @jpfieber | Insurance |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |

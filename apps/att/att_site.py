@@ -2,7 +2,7 @@
 
 When AT&T changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round eight. Written without an AT&T account and
+STATUS: round nine, the first round with bills on disk. Written without an AT&T account and
 repaired from two surveys a tester sent (#26). What the surveys showed:
 
   * Sign-in lands on /acctmgmt/overview, a shop page. The nav's Billing
@@ -38,6 +38,16 @@ repaired from two surveys a tester sent (#26). What the surveys showed:
     their text, whatever element they are, waits for one to be visible,
     clicks "Regular PDF", and records every element on the page whose
     text says PDF, with its tag, role and visibility, for the next look.
+  * Round eight WORKED. The tester's pilot saved five bills. Two things
+    came back with it. The current bill was saved twice, once dated by
+    its issue date from the history API and once dated by its due date,
+    a record left in discovery.json by round two, which read the date
+    off the billing center's current-balance box. And the filename said
+    nothing about which account (the tester holds wireless and fiber).
+    Round nine reads the account's kind off the account switcher and
+    puts it in the summary, drops discovery records the history API no
+    longer lists when nothing was downloaded for them, and never takes a
+    date that follows the word "due" as a bill date.
 
   So discovery now reads the history API as the page loads it, passively,
   and falls back to the bill buttons. A download opens the history page,
@@ -481,6 +491,47 @@ def dismiss_overlay(page) -> None:
         pass
 
 
+ACCOUNT_KIND_RE = re.compile(
+    r"\b(wireless|mobility|mobile|fiber|internet|home\s+phone|phone|tv|u-?verse|directv|prepaid|business)\b", re.I)
+
+
+def current_account_label(page) -> str:
+    """The kind of account in focus, "Wireless" or "Internet", read off
+    the account switcher's own text. Nothing is clicked. "" when the page
+    has no switcher, a person with one account."""
+    try:
+        loc = page.get_by_role("button", name=re.compile(r"switch\s+account|^\s*account\b", re.I))
+        for i in range(min(loc.count(), 6)):
+            text = (loc.nth(i).inner_text(timeout=800) or "")
+            for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
+                m = ACCOUNT_KIND_RE.search(line)
+                if m and not re.fullmatch(r"account", line, re.I):
+                    kind = m.group(1).lower()
+                    return {"mobility": "Wireless", "mobile": "Wireless", "u-verse": "TV", "uverse": "TV"}.get(
+                        kind, kind.title().replace("Home Phone", "Home Phone"))
+    except Exception as e:
+        log.info("account switcher: %s", e)
+    return ""
+
+
+# "Due Sep 30" is not a bill date. The billing center's current-balance
+# box prints the due date beside the "Download PDF" button, and round two
+# took it for the bill's own date.
+_DUE_BEFORE_DATE_RE = re.compile(r"\bdue\b[^\n]{0,40}$", re.I)
+
+
+def _date_not_due(text: str) -> Optional[str]:
+    """The first date in `text` that is not a due date."""
+    for m in re.finditer(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}/\d{1,2}/\d{2,4}|\d{4}-\d{2}-\d{2}", text or "", re.I):
+        before = (text or "")[max(0, m.start() - 40):m.start()]
+        if _DUE_BEFORE_DATE_RE.search(before):
+            continue
+        iso = parse_date(m.group(0))
+        if iso:
+            return iso
+    return None
+
+
 def _bill_controls(page):
     """Every control on the page whose name says it fetches a bill, as a
     button or a link. The row it sits in supplies the date."""
@@ -728,6 +779,7 @@ def collect_download_docs(page) -> List[RawDoc]:
     seen = set()
     bodies: list = []
     if goto_history(page, bodies):
+        account = current_account_label(page)
         bills = []
         for body in bodies:
             bills.extend(_history_from_api(body))
@@ -738,10 +790,11 @@ def collect_download_docs(page) -> List[RawDoc]:
                 continue
             seen.add(b["date"])
             disp = _human_date(b["date"])
-            docs.append(RawDoc(title=f"Monthly Statement - {disp}", date_text=b["date"],
+            docs.append(RawDoc(title=f"Monthly Statement - {disp}", date_text=b["date"], account=account,
                                href=b["hint"], text=f"AT&T Bill {disp}", kind="statement"))
         if docs:
             return docs
+    account = current_account_label(page)
     expand_all(page)
     scroll_full_page(page)
     ctrls = _bill_controls(page)
@@ -758,18 +811,18 @@ def collect_download_docs(page) -> List[RawDoc]:
         except Exception:
             href = ""
         row_text = ""
-        iso = parse_date(name)
+        iso = _date_not_due(name)
         if not iso:
             try:
                 row_text = el.evaluate(_ROW_OF_JS) or ""
             except Exception:
                 row_text = ""
-            iso = parse_date(row_text)
+            iso = _date_not_due(row_text)
         if not iso or iso in seen:
             continue
         seen.add(iso)
         disp = _human_date(iso)
-        docs.append(RawDoc(title=f"Monthly Statement - {disp}", date_text=iso,
+        docs.append(RawDoc(title=f"Monthly Statement - {disp}", date_text=iso, account=account,
                            href=href if PDF_HREF_RE.search(href or "") else "",
                            text=f"AT&T Bill {disp}", row_index=i, kind="statement"))
     return docs
