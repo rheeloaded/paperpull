@@ -295,7 +295,7 @@ def test_the_bill_button_is_matched_on_its_visible_text_not_its_name():
 def test_a_miss_records_the_buttons_it_saw_with_digits_masked():
     seen = site._buttons_seen(_HistoryPage())
     assert seen[0] == "Account / ######### / Wireless"
-    assert "Bill / Jul 23 - Aug 22 / $88.05" in seen
+    assert "Bill / Jul 23 - Aug 22 / $x.xx" in seen, "amounts are masked too now"
 
 
 def test_the_billing_center_fallback_opens_the_billing_center_itself():

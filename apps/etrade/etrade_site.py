@@ -2,7 +2,7 @@
 
 When E*TRADE changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round four, repaired from three surveys (#36). Written
+STATUS: UNVERIFIED, round five, repaired from four surveys (#36). Written
 without an E*TRADE account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
@@ -33,6 +33,19 @@ no "all" or "last N years" period exists the app chooses each year in
 turn, applies it, and gathers every list. One filter click per year, the
 only clicks outside a document row.
 
+Round five, from the fourth survey and its download trace. The dates are
+ISO date-times and read fine now, discovery found the statement, and the
+download wrote an empty trace, which means the document's row was never
+found, the list's rows are not role=row elements with a link in them.
+The row is now found by walking the page for the element whose own text
+is the document's date, taking the row around it, and its outline goes
+in the trace. Then every way a row can hand over a PDF is tried in turn,
+the title's own element, any anchor or button in the row, and the row's
+checkbox with the page's Download button, each through the catch that
+watches for a download, a PDF answer or a new tab, and every request the
+click causes is written to the trace so the next look sees the address
+the page uses.
+
 SAFETY (this is a brokerage account that can trade and move money):
   This module is strictly READ-ONLY. It opens the documents area, reads
   the list, and saves the PDFs E*TRADE already generated. It must NEVER
@@ -55,6 +68,11 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+
+# Everything on its way into a diagnostic file goes through here. It
+# lives in core because seventeen apps each had their own copy and
+# they drifted into three different versions.
+from paperpull_core.redact import redact, set_private_words  # noqa: F401
 
 log = logging.getLogger("etrade_docs.site")
 
@@ -175,16 +193,6 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
              7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
-_ID_RE = re.compile(r"\d{6,}")
-# A path segment shaped like an id or a key, "/accounts/d11-Kz9Rc.../",
-# ten or more characters with a letter and a digit in it.
-_PATH_TOKEN_RE = re.compile(r"(?<=/)(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{10,}(?=[/?#]|$)")
-# "Welcome, ALEX", "Hi Jane", "Good evening, Sam": a greeting names the
-# person, and a survey has no use for the name.
-_GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
-                          r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)?", re.I)
-
-
 def _last_day(year: int, month: int) -> int:
     if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
         return 29
@@ -235,11 +243,6 @@ def _human_date(iso: str) -> str:
         return f"{_MONTH_NAMES[int(m) - 1]} {int(d)}, {y}"
     except Exception:
         return iso
-
-
-_QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
-
-
 _WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
 
 
@@ -263,22 +266,6 @@ def _safe_query(url: str) -> str:
     for k, v in pairs[:20]:
         out.append("%s=%s" % (k[:30], v if _plain_word(v) else "..."))
     return "&".join(out)
-
-
-def redact(text: str) -> str:
-    """Runs of six or more digits become #, so an account or phone number
-    in a URL, a heading or a link never reaches the survey file, and a URL
-    loses its query string, which is where a site keeps session details
-    the survey has no use for."""
-    text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
-    text = _GREETING_RE.sub(lambda m: m.group(1) + " [name]", text)
-    text = _PATH_TOKEN_RE.sub("...", text)
-    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
-
-
-# ---------------------------------------------------------------------------
-# Session / safety
-# ---------------------------------------------------------------------------
 
 def looks_signed_out(page) -> bool:
     url = (page.url or "").lower()
@@ -653,7 +640,7 @@ def widen_date_filter(page, capture: list, trace: Optional[list] = None) -> bool
         before = _control_texts(page)
         picker.click(timeout=5000)
         page.wait_for_timeout(1500)
-        appeared = sorted(_control_texts(page) - before)
+        appeared = sorted((_control_texts(page) | _short_visible_texts(page)) - before)
         if trace is not None:
             trace.append({"note": "period picker options", "options": [redact(t) for t in appeared[:20]]})
         options = [t for t in appeared if is_date_filter(t)]
@@ -689,12 +676,7 @@ def _choose_period(page, choice: str, capture: list, trace: Optional[list] = Non
     """Open the period picker if it is closed, choose `choice`, apply it,
     and catch the list the page then loads. True when a list arrived."""
     try:
-        opened = False
-        for role in ("menuitem", "option", "button", "link"):
-            opt = page.get_by_role(role, name=re.compile("^\\s*" + re.escape(choice) + "\\s*$", re.I))
-            if opt.count() and opt.first.is_visible():
-                opened = True
-                break
+        opened = choice in _short_visible_texts(page)
         if not opened:
             picker = page.get_by_role("button", name=DATE_FILTER_RE)
             if picker.count() == 0:
@@ -711,11 +693,8 @@ def _choose_period(page, choice: str, capture: list, trace: Optional[list] = Non
                 pass
         page.on("response", on_response)
         try:
-            for role in ("menuitem", "option", "button", "link"):
-                opt = page.get_by_role(role, name=re.compile("^\\s*" + re.escape(choice) + "\\s*$", re.I))
-                if opt.count():
-                    opt.first.click(timeout=5000)
-                    break
+            if not _click_text(page, choice) and trace is not None:
+                trace.append({"note": "period option not found to click", "period": choice})
             page.wait_for_timeout(1500)
             apply = page.get_by_role("button", name=re.compile(r"^\s*apply\s*$", re.I))
             if apply.count() and apply.first.is_visible():
@@ -869,6 +848,56 @@ def _take_same_tab(page, start_url: str, out_path: Path, trace: Optional[list]) 
     if body[:5] == b"%PDF-":
         out_path.write_bytes(body)
         return True
+    return False
+
+
+_SHORT_TEXTS_JS = r"""() => {
+  const out = new Set();
+  const walk = (el) => {
+    for (const c of el.children) {
+      if (c.shadowRoot) walk(c.shadowRoot);
+      const t = (c.innerText || '').trim().replace(/\s+/g, ' ');
+      if (t && t.length <= 30 && c.children.length <= 2) {
+        const r = c.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) out.add(t);
+      }
+      walk(c);
+    }
+  };
+  walk(document.body);
+  return Array.from(out).slice(0, 400);
+}"""
+
+
+def _short_visible_texts(page) -> set:
+    """Every short visible text on the page, whatever element carries it.
+    A period picker's years were not buttons or menu items (#36)."""
+    try:
+        return set(page.evaluate(_SHORT_TEXTS_JS) or [])
+    except Exception:
+        return set()
+
+
+def _click_text(page, text: str) -> bool:
+    """Click the visible element whose whole text is `text`, by role
+    first, then by text alone. The text has passed is_date_filter."""
+    pat = re.compile("^\\s*" + re.escape(text) + "\\s*$", re.I)
+    for role in ("menuitem", "option", "radio", "menuitemradio", "button", "link", "tab"):
+        try:
+            opt = page.get_by_role(role, name=pat)
+            if opt.count() and opt.first.is_visible():
+                opt.first.click(timeout=5000)
+                return True
+        except Exception:
+            continue
+    try:
+        loc = page.get_by_text(pat)
+        for i in range(min(loc.count(), 6)):
+            if loc.nth(i).is_visible():
+                loc.nth(i).click(timeout=5000)
+                return True
+    except Exception:
+        pass
     return False
 
 
@@ -1074,6 +1103,162 @@ def _row_link_for(page, iso_date: str, title: str):
     return None, ""
 
 
+# The row around the element whose own text is the document's date, by a
+# walk over children (never querySelectorAll, which some frameworks
+# patch), with an outline of what it holds for the trace.
+_ROW_BY_DATE_JS = r"""([dates, title]) => {
+  const own = (el) => Array.from(el.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent.trim()).filter(Boolean).join(' ');
+  const all = [];
+  const walk = (el) => { for (const c of el.children) { all.push(c); if (c.shadowRoot) for (const s of c.shadowRoot.children) { all.push(s); walk(s); } walk(c); } };
+  walk(document.body);
+  const hit = all.find(el => dates.some(d => own(el).includes(d)) || dates.some(d => (el.innerText || '').trim() === d));
+  if (!hit) return null;
+  let row = hit;
+  for (let i = 0; i < 8 && row.parentElement && row.parentElement !== document.body; i++) {
+    row = row.parentElement;
+    const tag = row.tagName.toLowerCase();
+    const role = row.getAttribute('role') || '';
+    const t = (row.innerText || '');
+    if (tag === 'tr' || tag === 'li' || role === 'row' || (title && t.includes(title) && t.includes(dates[0]) && row.children.length > 1)) break;
+  }
+  const outline = [];
+  const desc = (el, d) => {
+    if (d > 6 || outline.length > 80) return;
+    const tag = el.tagName.toLowerCase();
+    if (['svg', 'path', 'script', 'style'].includes(tag)) return;
+    const cls = (el.className || '').toString().split(' ').filter(Boolean).slice(0, 2).join('.');
+    const role = el.getAttribute('role') || '';
+    const type = el.getAttribute('type') || '';
+    const href = tag === 'a' ? (el.getAttribute('href') || '') : '';
+    const aria = el.getAttribute('aria-label') || '';
+    const cursor = getComputedStyle(el).cursor;
+    outline.push('  '.repeat(d) + tag + (cls ? '.' + cls : '') + (role ? ' [' + role + ']' : '') + (type ? ' type=' + type : '') + (aria ? ' aria=' + aria.slice(0, 30) : '') + (own(el) ? ' = ' + own(el).slice(0, 40) : '') + (href ? ' href=' + href.slice(0, 60) : '') + (cursor === 'pointer' ? ' {pointer}' : ''));
+    for (const c of el.children) desc(c, d + 1);
+  };
+  desc(row, 0);
+  // candidates, innermost first: the title's element, anchors, buttons,
+  // anything the cursor says is clickable, and a checkbox
+  const cands = [];
+  const collect = (el) => {
+    for (const c of el.children) {
+      const tag = c.tagName.toLowerCase();
+      const role = c.getAttribute('role') || '';
+      const t = (c.innerText || '').trim();
+      const type = (c.getAttribute('type') || '').toLowerCase();
+      let kind = '';
+      if (title && t === title) kind = 'title';
+      else if (tag === 'a' || tag === 'button' || role === 'button' || role === 'link') kind = 'control';
+      else if (type === 'checkbox' || role === 'checkbox') kind = 'checkbox';
+      else if (getComputedStyle(c).cursor === 'pointer' && t && t.length < 80) kind = 'pointer';
+      if (kind) cands.push({el: c, kind, text: t.slice(0, 60), aria: c.getAttribute('aria-label') || ''});
+      collect(c);
+    }
+  };
+  collect(row);
+  cands.sort((a, b) => (a.el.contains(b.el) ? 1 : b.el.contains(a.el) ? -1 : 0));
+  return {outline, cands: cands.map(c => ({kind: c.kind, text: c.text, aria: c.aria})), els: cands.map(c => c.el)};
+}"""
+
+
+def _row_by_date(page, iso_date: str, title: str):
+    """(outline, candidates, handles) for the document's row, or None."""
+    y, m, d = iso_date.split("-")
+    dates = [f"{m}/{d}/{y}", f"{m}/{d}/{y[2:]}", _human_date(iso_date), f"{int(m)}/{int(d)}/{y}"]
+    try:
+        h = page.evaluate_handle(_ROW_BY_DATE_JS, [dates, title or ""])
+        props = h.get_properties()
+        if not props or "els" not in props:
+            return None
+        outline = h.get_property("outline").json_value()
+        cands = h.get_property("cands").json_value()
+        els = [v.as_element() for v in props["els"].get_properties().values()]
+        return outline, cands, els
+    except Exception as e:
+        log.info("row by date: %s", e)
+        return None
+
+
+def _try_every_way(page, dl_dir, iso_date: str, out_path: Path, title: str, trace: Optional[list]) -> bool:
+    """The document's row found by its date, and every way it could hand
+    over its PDF tried in turn. Each attempt goes through the catch."""
+    found = _row_by_date(page, iso_date, title)
+    if not found:
+        if trace is not None:
+            trace.append({"note": "no element on the page carries this document's date", "date": iso_date})
+        return False
+    outline, cands, els = found
+    if trace is not None:
+        trace.append({"note": "the document's row", "outline": outline[:80],
+                      "candidates": [{**c, "text": redact(c["text"]), "aria": redact(c["aria"])} for c in cands[:20]]})
+    ctx = page.context
+    requests: list = []
+
+    def on_request(req):
+        try:
+            url = req.url or ""
+            if not is_safe_url(url) or re.search(r"neologger|analytics|beacon|\.(js|css|png|gif|svg|woff)", url, re.I):
+                return
+            entry = {"method": req.method, "url": redact(url)[:160]}
+            body = req.post_data or ""
+            if body.lstrip().startswith("{"):
+                import json as _json
+                try:
+                    parsed = _json.loads(body)
+                    if isinstance(parsed, dict):
+                        entry["post_keys"] = sorted(str(k) for k in parsed)[:30]
+                except Exception:
+                    pass
+            requests.append(entry)
+        except Exception:
+            pass
+    ctx.on("request", on_request)
+    try:
+        order = [i for i, c in enumerate(cands) if c["kind"] == "title"] + \
+                [i for i, c in enumerate(cands) if c["kind"] == "control"] + \
+                [i for i, c in enumerate(cands) if c["kind"] == "pointer"]
+        tried = 0
+        for i in order[:6]:
+            c, el = cands[i], els[i]
+            if el is None:
+                continue
+            label = c["text"] or c["aria"] or title or "document"
+            if FORBIDDEN_CONTROL_RE.search(label):
+                continue
+            if trace is not None:
+                trace.append({"note": "trying", "kind": c["kind"], "label": redact(label)[:60]})
+            tried += 1
+            if _catch_pdf(page, el, label, out_path, trace, dl_dir):
+                return True
+            if trace is not None and requests:
+                trace.append({"note": "requests after that click", "requests": requests[-12:]})
+                requests.clear()
+        # The checkbox and the page's own Download button.
+        boxes = [i for i, c in enumerate(cands) if c["kind"] == "checkbox"]
+        if boxes and els[boxes[0]] is not None:
+            btn = page.get_by_role("button", name=re.compile(r"^\s*download\s*$", re.I))
+            if btn.count():
+                if trace is not None:
+                    trace.append({"note": "trying", "kind": "checkbox then Download"})
+                try:
+                    els[boxes[0]].click(timeout=4000)
+                    page.wait_for_timeout(800)
+                except Exception as e:
+                    if trace is not None:
+                        trace.append({"note": "checkbox click failed", "error": str(e)[:120]})
+                if _catch_pdf(page, btn.first, "Download", out_path, trace, dl_dir):
+                    return True
+                if trace is not None and requests:
+                    trace.append({"note": "requests after Download", "requests": requests[-12:]})
+        if trace is not None and not tried and not boxes:
+            trace.append({"note": "the row holds nothing that looks clickable"})
+    finally:
+        try:
+            ctx.remove_listener("request", on_request)
+        except Exception:
+            pass
+    return False
+
+
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None) -> bool:
     """Save the document dated `iso_date`. A PDF link on the row is fetched
@@ -1097,16 +1282,17 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         except Exception:
             pass
     row_link = _row_link_for(page, iso_date, title)
-    if row_link is not None:
+    if row_link is not None and row_link[0] is not None:
         el, label = row_link
         if is_safe_control(label):
-            return _catch_pdf(page, el, label, out_path, trace, dl_dir)
+            if _catch_pdf(page, el, label, out_path, trace, dl_dir):
+                return True
     expand_all(page)
 
     el, label = _control_for(page, iso_date)
     if el is None:
-        log.info("no document control found for %s", iso_date)
-        return False
+        log.info("no document control by name for %s, looking for its row by date", iso_date)
+        return _try_every_way(page, dl_dir, iso_date, out_path, title, trace)
     if not is_safe_control(label):
         log.info("refusing unsafe control %r for %s", label, iso_date)
         return False

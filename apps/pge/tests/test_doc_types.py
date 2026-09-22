@@ -272,11 +272,11 @@ def test_a_row_whose_pdf_control_is_not_an_anchor_still_hands_it_over():
             if sel.startswith("a, button"): return [_El("Pay")]
             return []
         def evaluate_handle(self, js):
-            assert "view" in js and "shadowRoot" in js, "the walk reads text and pierces shadow roots"
+            assert "view" in js and "children" in js and "querySelectorAll" not in js, "the walk uses children, never the patched querySelectorAll"
             return _Handle([_El("View Bill PDF"), _El("View Bill PDF")])
         def inner_text(self): return "09/20/2026 View Bill PDF Pay"
     ctrls = site.row_controls(_Row())
-    assert [c._text for c in ctrls] == ["Pay", "View Bill PDF", "View Bill PDF"]
+    assert [c._text for c in ctrls] == ["View Bill PDF", "View Bill PDF", "Pay"], "the walk answers first, the queries after"
     # and the guard hands over the PDF control, never Pay
     assert site.pick_document_control(ctrls)._text == "View Bill PDF"
     assert site.pick_document_control(ctrls)._text == "View Bill PDF"

@@ -2,7 +2,7 @@
 
 When Golden 1 changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round three, repaired from two surveys (#35). Written
+STATUS: UNVERIFIED, round four, repaired from three surveys (#35). Written
 without a Golden 1 account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
@@ -46,6 +46,11 @@ from urllib.parse import urlsplit
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
+# Everything on its way into a diagnostic file goes through here. It
+# lives in core because seventeen apps each had their own copy and
+# they drifted into three different versions.
+from paperpull_core.redact import redact, set_private_words  # noqa: F401
+
 log = logging.getLogger("golden1_docs.site")
 
 BASE = "https://digitalbanking.golden1.com"
@@ -62,6 +67,15 @@ BILLING_CANDIDATES = [
     f"{BASE}/accounts/overview",
 ]
 VENDOR_HOSTS = ("hepsiian.com",)
+# Round four (#35). The third survey pressed "View documents", the
+# sidebar LINK, because the button and the link share a name and the
+# link came first, so it landed on the documents page again and the
+# vendor was never opened. The button is taken first now. And since the
+# vendor's real host has still not been seen, a tab the bank's own
+# button opens is read as the vendor's tab whatever host it is on, its
+# host is recorded, and that host is allowed for that run's fetches.
+# Every click on that tab still goes through the guard.
+_VENDOR_HOSTS_SEEN: set = set()
 # The button's text, with room for an icon's word after it. The second
 # survey listed the button as "View Documents" and yet did not match it
 # on the exact form, so the match is on the start of the text.
@@ -158,16 +172,6 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
              7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
-_ID_RE = re.compile(r"\d{6,}")
-# A path segment shaped like an id or a key, "/accounts/d11-Kz9Rc.../",
-# ten or more characters with a letter and a digit in it.
-_PATH_TOKEN_RE = re.compile(r"(?<=/)(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{10,}(?=[/?#]|$)")
-# "Welcome, ALEX", "Hi Jane", "Good evening, Sam": a greeting names the
-# person, and a survey has no use for the name.
-_GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
-                          r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)?", re.I)
-
-
 def _last_day(year: int, month: int) -> int:
     if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
         return 29
@@ -218,11 +222,6 @@ def _human_date(iso: str) -> str:
         return f"{_MONTH_NAMES[int(m) - 1]} {int(d)}, {y}"
     except Exception:
         return iso
-
-
-_QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
-
-
 _WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
 
 
@@ -246,22 +245,6 @@ def _safe_query(url: str) -> str:
     for k, v in pairs[:20]:
         out.append("%s=%s" % (k[:30], v if _plain_word(v) else "..."))
     return "&".join(out)
-
-
-def redact(text: str) -> str:
-    """Runs of six or more digits become #, so an account or phone number
-    in a URL, a heading or a link never reaches the survey file, and a URL
-    loses its query string, which is where a site keeps session details
-    the survey has no use for."""
-    text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
-    text = _GREETING_RE.sub(lambda m: m.group(1) + " [name]", text)
-    text = _PATH_TOKEN_RE.sub("...", text)
-    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
-
-
-# ---------------------------------------------------------------------------
-# Session / safety
-# ---------------------------------------------------------------------------
 
 def looks_signed_out(page) -> bool:
     url = (page.url or "").lower()
@@ -538,13 +521,55 @@ _ROW_OF_JS = r"""el => {
 
 
 def _vendor_tab(page):
-    """The document vendor's tab, if one is open."""
+    """The document vendor's tab, if one is open, on a known vendor host
+    or on the host the bank's button opened this run."""
+    hosts = set(VENDOR_HOSTS) | _VENDOR_HOSTS_SEEN
     for p in page.context.pages:
         try:
-            if not p.is_closed() and any(h in (p.url or "") for h in VENDOR_HOSTS):
+            if p is page or p.is_closed():
+                continue
+            host = (urlsplit(p.url or "").hostname or "").lower()
+            if host and any(host == h or host.endswith("." + h) for h in hosts):
                 return p
         except Exception:
             continue
+    return None
+
+
+def _vendor_button(page):
+    """The "View Documents" BUTTON on the documents page, and only when
+    there is no button, the link of the same name."""
+    btn = page.get_by_role("button", name=VENDOR_BUTTON_RE)
+    if btn.count():
+        return btn
+    return page.get_by_role("link", name=VENDOR_BUTTON_RE)
+
+
+def _adopt_new_tab(page, tabs_before: set):
+    """A tab the bank's own button opened, adopted as the vendor's tab.
+    Its host is remembered for this run so the app can read and fetch
+    there. Anything that is not https is closed unread."""
+    for extra in [p for p in page.context.pages if p not in tabs_before]:
+        try:
+            extra.wait_for_load_state("domcontentloaded", timeout=20000)
+        except Exception:
+            pass
+        for _ in range(20):
+            extra.wait_for_timeout(500)
+            u = extra.url or ""
+            if u and u != "about:blank" and not u.startswith("https://digitalbanking.golden1.com"):
+                break
+        u = extra.url or ""
+        host = (urlsplit(u).hostname or "").lower()
+        if u.startswith("https://") and host:
+            _VENDOR_HOSTS_SEEN.add(host)
+            ALLOWED_HOSTS.add(host)
+            log.info("the vendor's tab is on %s", redact(host))
+            return extra
+        try:
+            extra.close()
+        except Exception:
+            pass
     return None
 
 
@@ -559,7 +584,7 @@ def open_vendor(page):
     if not goto_documents(page):
         return None
     try:
-        loc = page.get_by_role("button", name=VENDOR_BUTTON_RE).or_(page.get_by_role("link", name=VENDOR_BUTTON_RE))
+        loc = _vendor_button(page)
         if loc.count() == 0:
             return None
         label = (loc.first.inner_text(timeout=1000) or "").strip()
@@ -569,20 +594,13 @@ def open_vendor(page):
         loc.first.click(timeout=5000)
         for _ in range(30):
             page.wait_for_timeout(500)
-            tab = _vendor_tab(page)
-            if tab is not None:
-                try:
-                    tab.wait_for_load_state("domcontentloaded", timeout=20000)
-                    tab.wait_for_timeout(3000)
-                except Exception:
-                    pass
-                return tab
-        for extra in [p for p in page.context.pages if p not in before]:
-            log.info("View Documents opened %s, not the vendor", redact(extra.url or "")[:80])
-            try:
-                extra.close()
-            except Exception:
-                pass
+            if [p for p in page.context.pages if p not in before]:
+                break
+        tab = _adopt_new_tab(page, before)
+        if tab is not None:
+            tab.wait_for_timeout(3000)
+            return tab
+        log.info("View Documents opened no tab")
     except Exception as e:
         log.info("could not open the document vendor: %s", e)
     return None
@@ -1147,7 +1165,7 @@ def _survey_vendor_button(page, report: dict, dwell_ms: int) -> None:
         if not goto_documents(page):
             report.setdefault("notes", []).append("documents page not reached, vendor button not tried")
             return
-        loc = page.get_by_role("button", name=VENDOR_BUTTON_RE).or_(page.get_by_role("link", name=VENDOR_BUTTON_RE))
+        loc = _vendor_button(page)
         if loc.count() == 0:
             report.setdefault("notes", []).append("no View Documents button on the documents page")
             return
@@ -1223,7 +1241,7 @@ def _survey_vendor_button(page, report: dict, dwell_ms: int) -> None:
 # ---------------------------------------------------------------------------
 # hepsiian.com is the document vendor the "View Documents" button signs
 # on to, seen in the first survey. The statements are listed there.
-ALLOWED_HOSTS = {"golden1.com", "hepsiian.com"}
+ALLOWED_HOSTS = {"golden1.com", "hepsiian.com"}  # the vendor's host is added when its tab opens
 
 
 def is_safe_url(url: str) -> bool:

@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import meijer_site as site
-from paperpull_core.models import ONLINE, Purchase
+from paperpull_core.models import IN_STORE, ONLINE, Purchase
 
 ROW_WITH_LINKS = site.RawCard(
     text="Pickup\nSep 13, 2026\nOrder #12345678\n14 items\n$86.42\nView order details\nView receipt",
@@ -115,3 +115,33 @@ def test_the_diagnose_file_masks_numbers_emails_and_handles_and_keeps_json_shape
     assert site.mask_href("/shopping/orders/12345678/receipt.pdf?x=1") == "/shopping/orders/<id>/receipt.pdf?..."
     assert site.json_shape({"orders": [{"id": 1, "total": 2.5, "items": [{"upc": "1"}]}], "page": 1}) == \
         {"orders": ["list of 1", {"id": "int", "total": "float", "items": ["list of 1", {"upc": "str"}]}], "page": "int"}
+
+
+# -- round two, the two tabs the tester's page has (#42) ---------------------
+
+def test_an_in_store_row_is_filed_as_in_store():
+    """His page has an Online Orders tab, which is empty, and an In-Store
+    Receipts tab holding everything. A row that says In-Store is one."""
+    row = site.RawCard(text="In-Store: 09/19/2026\n1600 N. Port Washington Road\n$31.23 \u2022 15 items", links=[])
+    p = site.card_to_purchase(row)
+    assert p.purchase_type == IN_STORE
+    assert p.purchase_date == "2026-09-19" and p.total == "$31.23"
+    online = site.card_to_purchase(site.RawCard(text="Pickup\nSep 13, 2026\nOrder #123\n$86.42", links=[]))
+    assert online.purchase_type == ONLINE
+
+
+def test_both_tabs_are_read_and_named_as_the_page_names_them():
+    for t in ("In-Store Receipts", "In-store receipts", "Instore Receipts"):
+        assert site.TAB_IN_STORE_RE.match(t), t
+    for t in ("Online Orders", "online order"):
+        assert site.TAB_ONLINE_RE.match(t), t
+    assert not site.TAB_IN_STORE_RE.match("Add Paper Receipt")
+    import inspect
+    src = inspect.getsource(site.collect_both_tabs)
+    assert "TAB_IN_STORE_RE" in src and "TAB_ONLINE_RE" in src
+
+
+def test_a_pdf_icon_with_no_text_is_still_the_receipt_control():
+    js = site._ROW_CONTROLS_JS
+    assert "aria-label" in js and "cursor" in js and "pdf|receipt|download" in js
+    assert "out.sort" in js, "the PDF icon is tried before anything else in the row"

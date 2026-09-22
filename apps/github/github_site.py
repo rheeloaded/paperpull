@@ -27,6 +27,15 @@ marked GUESS and are what the first tester's Diagnose file confirms.
 * GitHub has no bot wall. The app still opens the browser already on the
   machine so passkeys and password managers work as they do elsewhere.
 
+Round two (#43, 2026-09-22), from a tester whose pilot captured five
+receipts. His payment history is a table with the columns Date, ID,
+Payment Method, Amount, Status, Receipt and Invoice, and the Receipt
+column's link is ``/account/receipt/<id>``, which answers with a PDF.
+There is no description of what was bought anywhere on the row, so two
+payments on one day used to write the same filename and the second got
+" (2)". The ID column is the one thing that tells them apart, and it is
+GitHub's own short payment id, so it goes in the filename.
+
 Site layer verified against the live site (empty account): 2026-09-21
 """
 from __future__ import annotations
@@ -43,6 +52,8 @@ from urllib.parse import urljoin, urlsplit
 
 from paperpull_core.models import ONLINE, Item, Purchase
 from storage import now_iso
+
+from paperpull_core.redact import private_words, set_private_words  # noqa: F401
 
 log = logging.getLogger("github_receipts.site")
 
@@ -303,6 +314,20 @@ _DESCRIPTION_SKIP_RE = re.compile(
     r"[•*x]{2,}\s*\d{4}|ending\s+in\s+\d{4}|\d{1,2}/\d{2,4})\b", re.I)
 
 
+# GitHub's own payment id, the ID column: eight or so characters of
+# capitals and digits, no spaces. It names a payment, not a person.
+PAYMENT_ID_RE = re.compile(r"^[0-9A-Z]{6,16}$")
+
+
+def payment_id(purchase) -> str:
+    """The payment's own id, from the row's ID column, or ""."""
+    for item in getattr(purchase, "items", None) or []:
+        name = (item.name or "").strip()
+        if PAYMENT_ID_RE.match(name):
+            return name
+    return ""
+
+
 def card_to_purchase(card: RawCard, purchase_type: str = "", base_url: str = BASE) -> Optional[Purchase]:
     """A Purchase from one payment row. The description is the first
     line that is not the date, the amount, the card or a link's text."""
@@ -486,7 +511,14 @@ _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 _HANDLE_RE = re.compile(r"@[A-Za-z0-9-]{2,39}")
 
 
+# The owner's name and the rest of the redaction live in core. These apps
+# had a fourth version of it, without the title and suffix exclusion, so
+# every "Jr" and "II" on a page became [name].
+
+
 def mask_text(s: str) -> str:
+    for word in private_words():
+        s = re.sub(re.escape(word), "[name]", s or "", flags=re.I)
     s = _EMAIL_RE.sub("<email>", s or "")
     s = _HANDLE_RE.sub("@<user>", s)
     return _DIGITS_RE.sub(lambda m: "#" * len(m.group(0)), s)

@@ -38,9 +38,13 @@ SPEC = AppSpec(
     kind=RECEIPT,
     folders=[
         Folder("online", "Online"),
+        # A store receipt is not an online order, and the tester's are all
+        # from the store (#42).
+        Folder("instore", "In-Store"),
         *INFRASTRUCTURE_FOLDERS,
     ],
     routes={
+        "In-Store": "instore",
         "Online": "online",
     },
     default_route="online",
@@ -50,6 +54,7 @@ SPEC = AppSpec(
     ],
     config_defaults={
         "pilot_online": 5,
+        "pilot_instore": 5,
     },
     base_url="https://www.meijer.com/",
     rules_filename="category_rules.json",

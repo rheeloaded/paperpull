@@ -687,6 +687,7 @@ class App:
             info["landed_on"] = site.redact(page.url)
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
+            site.set_private_words([self.config.get("owner", "")])
             info["survey"] = site.survey(page)
             if found:
                 site.expand_all(page)

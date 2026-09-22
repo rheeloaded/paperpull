@@ -29,7 +29,7 @@ def test_precreated_folders_are_unchanged(tmp_path):
     paths = storage.Paths(tmp_path)
     paths.ensure()
     made = sorted(p.name for p in tmp_path.iterdir() if p.is_dir())
-    assert made == ['Backups', 'Diagnostics', 'Logs', 'Manual Review', 'Online']
+    assert made == ['Backups', 'Diagnostics', 'In-Store', 'Logs', 'Manual Review', 'Online']
 
 
 def test_every_declared_route_resolves(tmp_path):

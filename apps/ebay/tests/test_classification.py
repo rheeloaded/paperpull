@@ -313,3 +313,25 @@ def test_ebays_daily_limit_page_is_recognized_by_url_and_by_sentence():
     class _Fine(_Page):
         def title(self): return "Order details | eBay"
     assert not site.hit_daily_limit(_Fine(DETAILS))
+
+
+# -- round two, an order with no details link, and a patient scroll (#44) ----
+
+def test_a_card_with_no_details_link_is_still_an_order():
+    """A tester saw two of nine orders. A card whose "View order details"
+    link is missing or points elsewhere is taken from its own order
+    number, and the details address is built from that."""
+    card = site.RawCard(text="Delivered\nOrder date:Sep 13, 2026 Order total:US $12.00 Order number:25-12345-67890",
+                        order_id="25-12345-67890", href="", title="A thing", seller="someone")
+    p = site.card_to_purchase(card)
+    assert p is not None and p.order_number == "25-12345-67890"
+    js = site._COLLECT_CARDS_JS
+    assert r"order\s*number" in js and "childNodes" in js, "cards are found by their own order number too"
+    assert "_SHOW_MORE_RE" in Path(site.__file__).read_text(encoding="utf-8")
+
+
+def test_the_scroll_waits_for_the_page_to_stop_growing():
+    import inspect
+    src = inspect.getsource(site.scroll_all_orders)
+    assert "scrollHeight" in src and "_press_show_more(page)" in src
+    assert site.scroll_all_orders.__defaults__[0] >= 20, "more rounds than the first version"

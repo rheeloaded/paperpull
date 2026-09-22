@@ -115,3 +115,16 @@ def test_the_diagnose_file_masks_numbers_emails_and_handles():
         "Sponsorship to @<user>, card ####, <email>, Sep ##, ####"
     assert site.mask_href("/account/billing/history/12345678/receipt.pdf?x=1") == "/account/billing/history/<id>/receipt.pdf?..."
     assert site.mask_href("https://github.com/settings/billing") == "https://github.com/settings/billing"
+
+
+def test_two_payments_on_one_day_get_two_filenames():
+    """GitHub's rows carry no description, so the ID column is what tells
+    two payments apart. It leads the filename (#43)."""
+    row = site.RawCard(text="2026-09-21\n1EAX6IX2\nVisa ending in 4242\n$4.00\nSuccess",
+                       links=[{"text": "", "href": "/account/receipt/ch_123", "label": "", "download": False}])
+    p = site.card_to_purchase(row)
+    assert p.items[0].name == "1EAX6IX2"
+    assert site.payment_id(p) == "1EAX6IX2"
+    other = site.card_to_purchase(site.RawCard(text="2026-09-21\n0TMCZ5RM\nVisa ending in 4242\n$10.00\nSuccess", links=[]))
+    assert site.payment_id(other) == "0TMCZ5RM" and site.payment_id(other) != site.payment_id(p)
+    assert site.payment_id(site.card_to_purchase(site.RawCard(text="2026-08-13\nGitHub Pro\n$4.00", links=[]))) == ""

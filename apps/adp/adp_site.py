@@ -34,6 +34,26 @@ signed-in employee account (a former employer's, still open):
 * The older myADP list, ``/myadp_prefix/v1_0/O/A/payStatements``, also
   answers here without an id, but its image links did not, so the
   payroll/v1 services above are the ones used.
+* **A tax statement needs an identity check first.** Pressing "View
+  statement" on the Tax Statements card makes the page POST to
+  ``/events/core/v1/step-up-myadp-pre-auth``, and ADP then asks the
+  person to verify themselves. Until that is done the W-2's PDF address
+  answers 403 with a message in ``resourceMessages`` saying so, while
+  pay statements answer normally. Verified on two accounts, one of them
+  a tester's (#46). This app never answers that check. It reads ADP's
+  own words, asks the person to do it in the browser window that is
+  already open, and tries again afterward. Asking too often gets the
+  account blocked for the session ("too many unsuccessful attempts...
+  you must log out and log back in"), so each tax statement is asked for
+  once per run, and once blocked the rest are left for the next run.
+  Nothing is typed into this app to answer the check. The app presses the
+  card's own "View statement", which is what makes ADP show the prompt,
+  and then watches the page: the viewer the page opens after a successful
+  check fetches the PDF itself, and that answer is the document. So the
+  person answers ADP in the browser and the run carries on by itself,
+  which matters because the control panel gives an app no keyboard at all.
+  One verification covers every tax statement in the session (two W-2s
+  from two employers came down after one, verified 2026-09-22).
 
 Discovery is those two calls. Capture is a fetch of each statement's own
 PDF from inside the page. Nothing is clicked, and only my.adp.com and
@@ -55,6 +75,7 @@ Site layer verified working against the live site: 2026-09-21
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import re
@@ -64,6 +85,11 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+
+# Everything on its way into a diagnostic file goes through here. It
+# lives in core because seventeen apps each had their own copy and
+# they drifted into three different versions.
+from paperpull_core.redact import redact, set_private_words  # noqa: F401
 
 log = logging.getLogger("adp_docs.site")
 
@@ -175,16 +201,6 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
              7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
-_ID_RE = re.compile(r"\d{6,}")
-# A path segment shaped like an id or a key, "/accounts/d11-Kz9Rc.../",
-# ten or more characters with a letter and a digit in it.
-_PATH_TOKEN_RE = re.compile(r"(?<=/)(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{10,}(?=[/?#]|$)")
-# "Welcome, ALEX", "Hi Jane", "Good evening, Sam": a greeting names the
-# person, and a survey has no use for the name.
-_GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
-                          r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)?", re.I)
-
-
 def _last_day(year: int, month: int) -> int:
     if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
         return 29
@@ -235,11 +251,6 @@ def _human_date(iso: str) -> str:
         return f"{_MONTH_NAMES[int(m) - 1]} {int(d)}, {y}"
     except Exception:
         return iso
-
-
-_QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
-
-
 _WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
 
 
@@ -263,22 +274,6 @@ def _safe_query(url: str) -> str:
     for k, v in pairs[:20]:
         out.append("%s=%s" % (k[:30], v if _plain_word(v) else "..."))
     return "&".join(out)
-
-
-def redact(text: str) -> str:
-    """Runs of six or more digits become #, so an account or phone number
-    in a URL, a heading or a link never reaches the survey file, and a URL
-    loses its query string, which is where a site keeps session details
-    the survey has no use for."""
-    text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
-    text = _GREETING_RE.sub(lambda m: m.group(1) + " [name]", text)
-    text = _PATH_TOKEN_RE.sub("...", text)
-    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
-
-
-# ---------------------------------------------------------------------------
-# Session / safety
-# ---------------------------------------------------------------------------
 
 def looks_signed_out(page) -> bool:
     url = (page.url or "").lower()
@@ -579,6 +574,20 @@ def pay_statement_doc(rec: dict) -> Optional[RawDoc]:
     return RawDoc(title=title, date_text=date, href=_image_url(rec), kind="statement")
 
 
+# ADP prints an employer's name in capitals. A filename reads better
+# without them, while LLC and its kind stay as they are written.
+_KEEP_UPPER = {"LLC", "INC", "LP", "LLP", "PLLC", "LTD", "CO", "PC", "USA", "US", "NA", "LC", "PA"}
+
+
+def tidy_employer(name: str) -> str:
+    name = re.sub(r"[\s,]+", " ", str(name or "")).strip(" ,")
+    if not name:
+        return ""
+    if not re.search(r"[a-z]", name):
+        name = " ".join(w if w.strip(".") in _KEEP_UPPER else w.title() for w in name.split())
+    return name[:28].strip()
+
+
 def tax_statement_doc(rec: dict) -> Optional[RawDoc]:
     """A RawDoc for one tax statement. Dated at the tax year's end, and the
     employer's name kept in the title so two employers' forms stay apart."""
@@ -594,12 +603,78 @@ def tax_statement_doc(rec: dict) -> Optional[RawDoc]:
     employer = re.sub(r"\s+", " ", str(rec.get("employerName") or "")).strip()
     if employer:
         title = f"{title} {employer}"
-    return RawDoc(title=title, date_text=f"{year}-12-31", href=_image_url(rec), kind="tax")
+    # The employer rides along so the filename can carry it. Two employers
+    # in one year would otherwise write the same name twice (#46).
+    return RawDoc(title=title, date_text=f"{year}-12-31", href=_image_url(rec),
+                  kind="tax", account=tidy_employer(employer))
+
+
+class StepUpNotDone(Exception):
+    """ADP asked the person to verify themselves and the answer never
+    came. Carries ADP's own message."""
+
+
+class TaxAccessBlocked(Exception):
+    """ADP has blocked tax statements for this session after too many
+    tries. Carries ADP's own message."""
+
+
+# What ADP says when a tax statement needs the identity check, and when
+# it has stopped accepting tries. Read out of the 403's own JSON.
+_STEP_UP_MARKERS = ("stepup", "step-up", "step up", "verify your identity",
+                    "identity verification", "verification code")
+_BLOCKED_MARKERS = ("too many unsuccessful", "block_more_trans",
+                    "to_many_unsuccessful", "too_many_unsuccessful")
+
+
+def refusal_message(body: bytes):
+    """(kind, message) from a refusal's JSON body, kind being "blocked",
+    "step-up" or "". The message is ADP's own words, for the person."""
+    try:
+        data = json.loads(body.decode("utf-8", "replace"))
+    except Exception:
+        return "", ""
+    texts, said = [], []
+
+    def walk(o, key=""):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in ("messageTxt", "message", "serviceDevMsg", "errorCode") and isinstance(v, str):
+                    texts.append(v)
+                    # Only what ADP wrote for the person is ever shown. Its
+                    # developer message carries the masked email and phone
+                    # the code could be sent to, which is theirs, not ours.
+                    if key == "userMessage":
+                        said.append(v)
+                else:
+                    walk(v, k)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v, key)
+    walk(data)
+    hay = " ".join(texts).lower()
+    human = said[0] if said else ""
+    if any(m in hay for m in _BLOCKED_MARKERS):
+        return "blocked", human
+    if any(m in hay for m in _STEP_UP_MARKERS):
+        return "step-up", human
+    return "", human
 
 
 # Every document seen this run, by (date, title), so a download can find
-# its PDF address without asking the services again.
+# its PDF address without asking the services again. Beside the image
+# address the statement's own address is kept, for a tax form whose
+# image address does not answer (#46, the tester's 2023 W-2).
 _PDF_BY_KEY: dict = {}
+_STATEMENT_BY_KEY: dict = {}
+
+
+def _statement_url(rec: dict) -> str:
+    href = ((rec.get("statementUri") or {}).get("href") or "").strip()
+    if not re.match(r"^/(?!/)[A-Za-z0-9_./~%-]+$", href):
+        return ""
+    url = API_BASE + href
+    return url if is_safe_url(url) else ""
 
 
 def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
@@ -680,6 +755,8 @@ def collect_download_docs(page) -> List[RawDoc]:
         d = tax_statement_doc(rec) if isinstance(rec, dict) else None
         if d:
             docs.append(d)
+            if _statement_url(rec):
+                _STATEMENT_BY_KEY[(d.date_text, d.title)] = _statement_url(rec)
     for d in docs:
         if d.href:
             _PDF_BY_KEY[(d.date_text, d.title)] = d.href
@@ -939,31 +1016,182 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 pass
 
 
-_FETCH_PDF_B64_JS = r"""async (url) => {
-  const res = await fetch(url, {credentials: 'include'});
-  if (!res.ok) return {status: res.status, b64: ''};
+_FETCH_PDF_B64_JS = r"""async ([url, accept]) => {
+  const res = await fetch(url, {credentials: 'include', headers: accept ? {Accept: accept} : {}});
   const buf = await res.arrayBuffer();
-  let bin = ''; const bytes = new Uint8Array(buf);
+  const bytes = new Uint8Array(buf);
+  let bin = '';
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return {status: res.status, type: res.headers.get('content-type') || '', b64: btoa(bin)};
+  // The body comes back whether the answer was yes or no. A refusal's
+  // own words are how this app knows ADP wants an identity check.
+  return {status: res.status, type: res.headers.get('content-type') || '', size: bytes.length,
+          head: String.fromCharCode.apply(null, bytes.subarray(0, 40)), b64: btoa(bin)};
 }"""
 
 
-def fetch_statement_pdf(page, url: str) -> Optional[bytes]:
+LAST_REFUSAL: dict = {}
+
+
+def fetch_statement_pdf(page, url: str, trace: Optional[list] = None, accept: str = "") -> Optional[bytes]:
     """The statement's PDF, fetched from inside the signed-in page the way
-    the page's own viewer fetches it. None unless the answer is a PDF."""
+    the page's own viewer fetches it. None unless the answer is a PDF, and
+    the answer's status, type and first bytes go in the trace either way,
+    digits masked."""
     if not is_safe_url(url):
         return None
     try:
-        out = page.evaluate(_FETCH_PDF_B64_JS, url) or {}
+        out = page.evaluate(_FETCH_PDF_B64_JS, [url, accept]) or {}
+        if trace is not None:
+            trace.append({"note": "fetched", "url": redact(url)[:160], "accept": accept or "(none)",
+                          "status": out.get("status"), "type": (out.get("type") or "")[:40],
+                          "size": out.get("size"), "head": redact(str(out.get("head") or ""))[:40]})
         if out.get("b64"):
             data = base64.b64decode(out["b64"])
             if data[:5] == b"%PDF-":
+                LAST_REFUSAL.clear()
                 return data
-        log.info("statement PDF answered HTTP %s", out.get("status"))
+            kind, human = refusal_message(data)
+            if kind:
+                LAST_REFUSAL.update({"kind": kind, "message": human})
+                if trace is not None:
+                    trace.append({"note": "ADP refused this document", "kind": kind, "message": human[:300]})
+        log.info("statement PDF answered HTTP %s %s", out.get("status"), (out.get("type") or "")[:30])
     except Exception as e:
         log.info("in-page PDF fetch failed: %s", e)
+        if trace is not None:
+            trace.append({"note": "in-page fetch failed", "url": redact(url)[:160], "error": str(e)[:120]})
     return _fetch_pdf(page, url)
+
+
+# The tax statement the page's own viewer fetched, caught as it passes.
+_TAX_IMAGE_RE = re.compile(r"/tax-statements/[^/]+/images/", re.I)
+
+STEP_UP_WAIT_SECONDS = 300
+
+
+def wait_for_tax_access(page, url: str, trace: Optional[list] = None,
+                        seconds: int = STEP_UP_WAIT_SECONDS) -> Optional[bytes]:
+    """ADP has asked for an identity check. Press the tax card's own
+    "View statement", which is what shows the prompt, then wait for the
+    person to answer it in the browser. The viewer ADP opens afterward
+    fetches the statement itself, and that answer is taken as it passes,
+    so nothing is typed here and ADP is asked at most once more."""
+    ctx = page.context
+    caught: dict = {}
+
+    def on_response(res):
+        try:
+            if caught or not is_safe_url(res.url or "") or not _TAX_IMAGE_RE.search(res.url or ""):
+                return
+            if "pdf" not in (res.headers.get("content-type") or "").lower():
+                return
+            body = res.body()
+            if body[:5] == b"%PDF-":
+                caught["body"] = body
+        except Exception:
+            pass
+
+    ctx.on("response", on_response)
+    try:
+        print("\n  >> ADP is showing a security prompt in your browser RIGHT NOW. <<")
+        print("  Do not close or dismiss it. It is the identity check ADP asks for")
+        print("  before it hands over a tax form, and it is asking how to send you")
+        print("  a security code. Choose text, email or a call, then type the code")
+        print("  into that window.")
+        print("  Nothing needs typing here. This run carries on by itself the moment")
+        print("  ADP accepts the code, and waits up to %d minutes for it." % (seconds // 60))
+        print("  If the prompt is dismissed or ignored, ADP hands over no tax forms")
+        print("  until you sign out of ADP and sign in again. Your pay statements are")
+        print("  already saved by this point, so nothing else is held up.")
+        if not open_tax_statement_check(page):
+            print("  (Could not press the card's View statement, so open the Tax")
+            print("   Statements card yourself and press View statement there.)")
+        for waited in range(seconds):
+            page.wait_for_timeout(1000)
+            if caught:
+                print("  Verified. The tax statement came down with the page's own viewer.")
+                if trace is not None:
+                    trace.append({"note": "the page's viewer fetched the statement after the check"})
+                return caught["body"]
+            if waited and waited % 60 == 0:
+                print("  ... still waiting for ADP to accept the code (%d min)" % (waited // 60))
+        # The viewer may have opened without this catching it, so ADP is
+        # asked once, and only once, before giving up.
+        if not step_up_pending(page):
+            body = fetch_statement_pdf(page, url, trace)
+            if body:
+                return body
+        if trace is not None:
+            trace.append({"note": "the identity check was not completed in time"})
+    finally:
+        try:
+            ctx.remove_listener("response", on_response)
+        except Exception:
+            pass
+    return None
+
+
+_STEP_UP_ON_PAGE_RE = re.compile(
+    r"authorize\s+this\s+transaction|how\s+you\s+want\s+to\s+receive\s+your\s+security\s+code|"
+    r"send\s+me\s+(a\s+text|an\s+email)|enter\s+the\s+(security\s+)?code", re.I)
+
+
+def step_up_pending(page) -> bool:
+    """True while ADP's own verification prompt is still on the page."""
+    try:
+        return bool(_STEP_UP_ON_PAGE_RE.search(page.locator("body").inner_text(timeout=5000)))
+    except Exception:
+        return False
+
+
+def open_tax_statement_check(page) -> bool:
+    """Press the Tax Statements card's own "View statement", which is
+    what starts ADP's identity check, so the person can answer it in the
+    window that is already open. The control has passed the guard. True
+    when it was pressed."""
+    try:
+        if not goto_documents(page):
+            return False
+        pressed = page.evaluate(r"""() => {
+          const found = [];
+          const walk = (root) => {
+            for (const e of root.querySelectorAll('*')) {
+              if (e.shadowRoot) walk(e.shadowRoot);
+              const t = (e.innerText || '').trim();
+              if ((e.tagName === 'SDF-BUTTON' || e.tagName === 'BUTTON') && /^\s*view statement\s*$/i.test(t)) found.push(e);
+            }
+          };
+          walk(document);
+          const el = found[found.length - 1];
+          if (!el) return false;
+          el.scrollIntoView({block: 'center'});
+          el.click();
+          return true;
+        }""")
+        return bool(pressed)
+    except Exception as e:
+        log.info("could not open the tax statement check: %s", e)
+        return False
+
+
+def _pdf_addresses(key, iso_date: str) -> list:
+    """Every address worth asking for this document's PDF, the image
+    address first, then the same path on the bare host, then the
+    statement's own address asked for as a PDF."""
+    out = []
+    img = _PDF_BY_KEY.get(key) or _PDF_BY_KEY.get((iso_date, ""))
+    if img:
+        out.append((img, ""))
+    # A tax statement is asked for at ONE address and no other. ADP counts
+    # every refusal against the account and blocks it after a few, and a
+    # refusal there means an identity check is due, not a wrong address
+    # (#46). A pay statement has no such check, so a second address is
+    # worth trying if the first says nothing useful.
+    if key in _STATEMENT_BY_KEY:
+        return out
+    if img and img.startswith(API_BASE):
+        out.append(("https://my.adp.com" + img[len(API_BASE):], ""))
+    return out
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
@@ -975,26 +1203,42 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     key = (iso_date, title or "")
-    url = _PDF_BY_KEY.get(key) or _PDF_BY_KEY.get((iso_date, ""))
-    if not url:
+    addresses = _pdf_addresses(key, iso_date)
+    if not addresses:
         if not goto_documents(page):
             if trace is not None:
                 trace.append({"note": "statements page not reached"})
             return False
         collect_download_docs(page)
-        url = _PDF_BY_KEY.get(key) or _PDF_BY_KEY.get((iso_date, ""))
-    if not url:
+        addresses = _pdf_addresses(key, iso_date)
+    if not addresses:
         log.info("no statement listed for %s %r", iso_date, title)
         if trace is not None:
             trace.append({"note": "the statement services list nothing for this date", "date": iso_date})
         return False
-    body = fetch_statement_pdf(page, url)
-    if body:
-        out_path.write_bytes(body)
-        return True
+    LAST_REFUSAL.clear()
+    for url, accept in addresses:
+        body = fetch_statement_pdf(page, url, trace, accept)
+        if body:
+            return _written(out_path, body)
+        # A refusal is ADP speaking, not an address to keep guessing at.
+        kind = LAST_REFUSAL.get("kind")
+        if kind == "blocked":
+            raise TaxAccessBlocked(LAST_REFUSAL.get("message", ""))
+        if kind == "step-up":
+            message = LAST_REFUSAL.get("message", "")
+            body = wait_for_tax_access(page, url, trace)
+            if body:
+                return _written(out_path, body)
+            raise StepUpNotDone(message)
     if trace is not None:
-        trace.append({"note": "the statement's PDF address did not answer with a PDF", "url": redact(url)[:160]})
+        trace.append({"note": "none of the statement's addresses answered with a PDF", "tried": len(addresses)})
     return False
+
+
+def _written(out_path: Path, body: bytes) -> bool:
+    out_path.write_bytes(body)
+    return True
 
 
 # ---------------------------------------------------------------------------
