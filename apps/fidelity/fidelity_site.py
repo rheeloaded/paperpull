@@ -62,6 +62,11 @@ from urllib.parse import urlsplit
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
+# Everything on its way into a diagnostic file goes through here. It
+# lives in core because seventeen apps each had their own copy and
+# they drifted into three different versions.
+from paperpull_core.redact import redact, set_private_words  # noqa: F401
+
 log = logging.getLogger("fidelity_docs.site")
 
 # Every host this app will read from. Anything else is refused.
@@ -479,17 +484,6 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
     return True
-
-
-_ID_RE = re.compile(r"\d{6,}")
-
-
-def redact(text: str) -> str:
-    """Runs of six or more digits become #, so an account number in a URL,
-    a heading or a link never reaches the survey file."""
-    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text or "")
-
-
 def _shape(obj, depth=0):
     """The shape of a JSON body, never its values."""
     if depth > 3:
