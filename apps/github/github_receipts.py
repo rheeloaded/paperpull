@@ -437,6 +437,13 @@ class App:
         cls = classification.classify_items(purchase.items, self.rules)
         purchase.summary = cls.summary
         purchase.confidence = cls.confidence
+        # A GitHub payment row says nothing about what was bought, so two
+        # payments on one day classified the same and the second filename
+        # got a " (2)". The ID column tells them apart (#43).
+        pid = site.payment_id(purchase)
+        if pid:
+            purchase.summary = f"Payment {pid}"
+            purchase.confidence = classification.HIGH
         review_needed = cls.confidence == classification.LOW
         notes_extra = f"Items: {'; '.join(i.name for i in purchase.items[:12])}" \
             if review_needed and purchase.items else ""
@@ -870,6 +877,7 @@ class App:
         the file a tester attaches to the issue. No screenshot is taken."""
         self.stats["mode"] = "diagnose"
         page = self.page()
+        site.set_private_words([self.config.get("owner", "")])
         info = {"timestamp": now_iso(), "app": "github", "history": {}, "receipt": {}}
         try:
             site.goto_orders(page)

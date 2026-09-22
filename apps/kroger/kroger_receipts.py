@@ -887,6 +887,7 @@ class App:
         tester attaches to the issue. No screenshot is taken."""
         self.stats["mode"] = "diagnose"
         page = self.page()
+        site.set_private_words([self.config.get("owner", "")])
         info = {"timestamp": now_iso(), "app": "kroger", "history": {}, "receipt": {}}
         try:
             site.goto_orders(page)

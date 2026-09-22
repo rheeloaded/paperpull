@@ -34,7 +34,7 @@ from typing import List, Optional
 from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import meijer_site as site
-from paperpull_core.models import (ONLINE, Item, Purchase, State)
+from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -292,7 +292,7 @@ class App:
             if page_no == 1 and site.history_state(page) == "empty":
                 print("\nMeijer says this account has no orders to show.")
                 break
-            found = site.collect_cards(page)
+            found = site.collect_both_tabs(page) if page_no == 1 else site.collect_cards(page)
             fresh = [c for c in found if c.text not in seen_texts]
             log.info("Orders page %d: %d row(s), %d new", page_no, len(found), len(fresh))
             if not fresh:
@@ -499,6 +499,27 @@ class App:
                 return False
 
         url = purchase.receipt_url or ""
+        # An in-store receipt's row has a PDF icon and no link at all, so
+        # the row itself is asked first when there is nothing to fetch (#42).
+        if not url or not site.is_safe_url(url):
+            folder = self.paths.folder_for(purchase.purchase_type, "Receipt")
+            filename = build_pdf_filename(purchase.purchase_date, purchase.summary, "Receipt")
+            out_path = unique_path(folder, filename, self.config["max_path_length"])
+            trace: list = []
+            site.goto_orders(page)
+            body = site.press_row_receipt(page, purchase, trace)
+            if body:
+                purchase.document_type = "Receipt"
+                self._record_state(purchase, State.RECEIPT_LOCATED)
+                out_path.write_bytes(body)
+                log.info("Capture path: the row's own receipt control")
+                return self._finish_pdf(page, purchase, out_path, source_page=None)
+            import json as _json
+            attempt = self.paths.diagnostics / "download-attempt.json"
+            atomic_write_text(attempt, _json.dumps(
+                {"timestamp": now_iso(), "date": purchase.purchase_date,
+                 "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]}, indent=2))
+            print(f"  What the page answered is in {attempt}, attach it to the issue.")
         if not url or not site.is_safe_url(url):
             self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                                notes="The order row carries no receipt or details link")
@@ -697,9 +718,11 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.")
-        self.cmd_discover(types=[ONLINE], quiet=False)
+        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False)
         selected: List[Purchase] = self._select_purchases(
             ONLINE, limit=self.config["pilot_online"])
+        selected += self._select_purchases(
+            IN_STORE, limit=self.config.get("pilot_instore", 5))
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
             return
@@ -870,12 +893,34 @@ class App:
         the file a tester attaches to the issue. No screenshot is taken."""
         self.stats["mode"] = "diagnose"
         page = self.page()
+        site.set_private_words([self.config.get("owner", "")])
         info = {"timestamp": now_iso(), "app": "meijer", "history": {}, "receipt": {}, "json_answers": []}
         sniffer = site.JsonSniffer(page)
         try:
             site.goto_orders(page)
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
+            # Both tabs, since a person who only shops in the store has an
+            # empty first tab and everything behind the second (#42).
+            info["tabs"] = {}
+            for name, pattern in (("In-Store Receipts", site.TAB_IN_STORE_RE),
+                                  ("Online Orders", site.TAB_ONLINE_RE)):
+                opened = site.open_tab(page, pattern)
+                survey = site.survey_history_page(page) if opened else {}
+                info["tabs"][name] = {"opened": opened, "rows": survey.get("rows"),
+                                      "lines": (survey.get("lines") or [])[:40],
+                                      "links": (survey.get("links") or [])[:15],
+                                      "parsed": survey.get("parsed"),
+                                      "outline": (survey.get("outline") or [])[:60]}
+                if opened:
+                    for c in site.collect_cards(page)[:1]:
+                        p0 = site.card_to_purchase(c)
+                        if p0:
+                            found = site.row_controls(page, p0)
+                            info["tabs"][name]["row_controls"] = [
+                                {**x, "text": site.mask_text(x["text"]), "label": site.mask_text(x["label"]),
+                                 "href": site.mask_href(x["href"])} for x in (found[0] if found else [])][:10]
+            site.open_tab(page, site.TAB_IN_STORE_RE)
             info["history"] = site.survey_history_page(page)
             cards = site.collect_cards(page)
             links = []
@@ -996,7 +1041,7 @@ def main(argv=None):
         elif args.pilot:
             app.cmd_pilot()
         elif args.all:
-            app.cmd_run([ONLINE], "all")
+            app.cmd_run([ONLINE, IN_STORE], "all")
         elif args.resume:
             app.cmd_resume()
         elif args.verify:
@@ -1006,7 +1051,7 @@ def main(argv=None):
         elif args.diagnose:
             app.cmd_diagnose()
         elif args.dry_run:
-            app.cmd_run([ONLINE], "dry-run")
+            app.cmd_run([ONLINE, IN_STORE], "dry-run")
         else:
             build_parser().print_help()
             return 0

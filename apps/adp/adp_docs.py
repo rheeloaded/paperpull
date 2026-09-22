@@ -62,6 +62,11 @@ def ask(prompt: str) -> str:
         raise SystemExit(3)
 
 
+def _invert(text: str) -> tuple:
+    """A sort key that puts the newest date first inside a group."""
+    return tuple(-ord(c) for c in text)
+
+
 class Document:
     """One ADP Workforce Now document."""
 
@@ -362,6 +367,11 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        # The employer leads a tax form's summary, so a year with two
+        # employers gives two filenames instead of one and a copy (#46).
+        account = re.sub(r"\s+", " ", (getattr(r, "account", "") or "")).strip()
+        if account and account.lower() not in summary.lower():
+            summary = f"{account} {summary}"
         doc = Document(title=title, category=category, summary=summary,
                        date=date, confidence=confidence, source_url=source_url)
         if self.discovery.get(doc.key) is None:
@@ -413,7 +423,10 @@ class App:
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         docs = [d for d in docs if self._in_scope(d)]
-        docs.sort(key=lambda d: d.date or "0000", reverse=True)
+        # Tax forms last. ADP asks for an identity check before it hands
+        # one over, and a check that goes unanswered holds up nothing if
+        # every pay statement is already saved by then (#46).
+        docs.sort(key=lambda d: ((d.category == doc_types.TAX), _invert(d.date or "0000")))
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
 
@@ -484,8 +497,38 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         trace: list = []
-        saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                   title=doc.title, trace=trace)
+        if getattr(self, "_tax_blocked", False) and doc.category == doc_types.TAX:
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="ADP blocked tax statements for this session")
+            self._write_row(doc, "Blocked by ADP", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print("  Skipped, ADP is not accepting tax statement requests this session.")
+            return
+        try:
+            saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
+                                       title=doc.title, trace=trace)
+        except site.TaxAccessBlocked as e:
+            self._tax_blocked = True
+            print("\n  ADP says: " + str(e)[:400])
+            print("  Sign out of ADP in the browser window, sign in again, and run this")
+            print("  app once more. The pay statements already downloaded are untouched.")
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="ADP blocked tax statements for this session")
+            self._write_row(doc, "Blocked by ADP", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            return
+        except site.StepUpNotDone:
+            # The check went unanswered. Asking again and again is what
+            # gets an account blocked, so the rest of the tax forms wait
+            # for the next run.
+            self._tax_blocked = True
+            print("  ADP did not accept a verification in time, so the tax forms are")
+            print("  left for the next run. The pay statements are unaffected.")
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="ADP's identity check was not completed")
+            self._write_row(doc, "Identity check not completed", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            return
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):
@@ -689,6 +732,7 @@ class App:
             info["landed_on"] = site.redact(page.url)
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
+            site.set_private_words([self.config.get("owner", "")])
             info["survey"] = site.survey(page)
             if found:
                 site.expand_all(page)

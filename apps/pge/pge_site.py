@@ -12,6 +12,19 @@ SAFETY (this is a utility billing account):
   (SAFE_DOC_CONTROL_RE) before it may be clicked. There is no code here that
   submits a form or confirms a dialog.
 
+ROUND FOUR (#33, 2026-09-22). Round three's outline showed the control
+plainly: a.pdf-link = "View Bill PDF", inside td > div.align-right, in
+the light DOM. And still the row handed over nothing, which means the
+selector queries on the row answer empty on this history. The page is a
+Salesforce Lightning app, whose synthetic shadow DOM replaces
+querySelectorAll on every element with one that hides a component's
+children from anything outside the component. A walk over each node's
+own children is not patched, which is how the outline saw the link. The
+row's controls are now gathered by that walk, anchors and buttons and
+anything whose own text reads View Bill PDF, and the rows are waited
+for before they are read, since one discovery ran before the table had
+drawn and found nothing.
+
 ROUND THREE (#33, 2026-09-22). The tester's third pilot reported two
 things. Every bill row read "09/20/2026 Bill Charges View Bill PDF
 $xx.xx" and handed over no control, so "View Bill PDF" is not an anchor,
@@ -488,6 +501,7 @@ def collect_download_docs(page) -> List[dict]:
     results: List[dict] = []
     seen_dates = set()
     try:
+        wait_for_rows(page)
         pages = get_pagination_pages(page)
         last_sig = None
         for p_num in pages:
@@ -522,9 +536,26 @@ def collect_download_docs(page) -> List[dict]:
     return results
 
 
+def wait_for_rows(page, seconds: int = 20) -> int:
+    """How many bill rows the page shows, once it shows any. The table
+    draws a moment after the page, and one discovery ran before it had,
+    read nothing, and said so as if the history were empty."""
+    for _ in range(seconds * 2):
+        try:
+            rows = page.query_selector_all(FALLBACK["doc_row"])
+            n = sum(1 for r in rows if "View Bill PDF" in (r.inner_text() or ""))
+            if n:
+                return n
+        except Exception:
+            pass
+        page.wait_for_timeout(500)
+    return 0
+
+
 def _row_for_date(page, want_date: str, idx: int):
     """The bill row dated `want_date` on the page that is open. The row at
     `idx` first, then every row, since rows move as bills post."""
+    wait_for_rows(page)
     rows = page.query_selector_all(FALLBACK["doc_row"])
     order = ([rows[idx]] if 0 <= idx < len(rows) else []) + list(rows)
     for row in order:
@@ -551,16 +582,23 @@ def pick_document_control(candidates) -> Optional[object]:
 
 _VIEW_PDF_RE = re.compile(r"^\s*view\s+(bill\s+)?pdf\s*$", re.I)
 
-# Every element in the row whose own text reads View Bill PDF, innermost
-# first, so the thing a person clicks is tried before the cell around it.
+# Every control in the row, gathered by walking each node's own children
+# rather than querySelectorAll, which Lightning's synthetic shadow DOM
+# patches to hide a component's children from anything outside it (round
+# three's outline saw a.pdf-link that way while every query saw nothing).
+# Anchors, buttons and anything whose own text reads View Bill PDF,
+# innermost first, so the thing a person clicks comes before its cell.
 _ROW_TEXT_CONTROLS_JS = r"""row => {
   const rx = /^\s*view\s+(bill\s+)?pdf\s*$/i;
   const out = [];
-  const walk = (root) => {
-    for (const el of root.querySelectorAll('*')) {
-      if (el.shadowRoot) walk(el.shadowRoot);
-      const t = (el.innerText || el.textContent || '').trim();
-      if (rx.test(t)) out.push(el);
+  const walk = (el) => {
+    const kids = el.shadowRoot ? [...el.shadowRoot.children, ...el.children] : [...el.children];
+    for (const c of kids) {
+      const tag = c.tagName ? c.tagName.toLowerCase() : '';
+      const t = (c.innerText || c.textContent || '').trim();
+      const role = c.getAttribute ? (c.getAttribute('role') || '') : '';
+      if (tag === 'a' || tag === 'button' || role === 'button' || tag === 'lightning-button' || rx.test(t)) out.push(c);
+      walk(c);
     }
   };
   walk(row);
@@ -576,22 +614,22 @@ def row_controls(row) -> list:
     innermost first, whatever it is, shadow roots included, since on the
     tester's history the control was none of the usual kinds (#33)."""
     out = []
-    for sel in ("a, button, [role='button']", "lightning-button, lightning-formatted-url"):
-        try:
-            for el in row.query_selector_all(sel):
-                if el not in out:
-                    out.append(el)
-        except Exception:
-            continue
     try:
         handles = row.evaluate_handle(_ROW_TEXT_CONTROLS_JS)
         props = handles.get_properties()
         for h in props.values():
             el = h.as_element()
-            if el is not None and el not in out:
+            if el is not None:
                 out.append(el)
     except Exception as e:
         log.debug("text controls in row: %s", e)
+    # The selector queries too, for a history where they do answer.
+    for sel in ("a, button, [role='button']", "lightning-button, lightning-formatted-url"):
+        try:
+            for el in row.query_selector_all(sel):
+                out.append(el)
+        except Exception:
+            continue
     return out
 
 
@@ -603,7 +641,8 @@ _ROW_OUTLINE_JS = r"""row => {
     const cls = (el.className || '').toString().split(' ').filter(Boolean).slice(0, 2).join('.');
     const role = el.getAttribute ? (el.getAttribute('role') || '') : '';
     const own = Array.from(el.childNodes || []).filter(n => n.nodeType === 3).map(n => n.textContent.trim()).filter(Boolean).join(' ');
-    out.push('  '.repeat(d) + (inShadow ? '~' : '') + tag + (cls ? '.' + cls : '') + (role ? ' [' + role + ']' : '') + (own ? ' = ' + own.replace(/\d{4,}/g, '####').slice(0, 40) : '') + (el.shadowRoot ? ' {shadow}' : ''));
+    const href = (tag === 'a' && el.getAttribute) ? (el.getAttribute('href') || '') : '';
+    out.push('  '.repeat(d) + (inShadow ? '~' : '') + tag + (cls ? '.' + cls : '') + (role ? ' [' + role + ']' : '') + (own ? ' = ' + own.replace(/\d{4,}/g, '####').slice(0, 40) : '') + (href ? ' href=' + href.replace(/\d{4,}/g, '####').slice(0, 60) : '') + (el.shadowRoot ? ' {shadow}' : ''));
     if (el.shadowRoot) for (const c of el.shadowRoot.children) walk(c, d + 1, true);
     for (const c of (el.children || [])) walk(c, d + 1, inShadow);
   };

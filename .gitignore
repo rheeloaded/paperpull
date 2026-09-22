@@ -101,3 +101,6 @@ dist/
 
 # Additional provider output stays private
 **/Reports/
+
+# Release working area: downloaded artifacts and the notes for a pending release
+.release/

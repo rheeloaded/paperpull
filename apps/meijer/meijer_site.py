@@ -2,10 +2,24 @@
 
 When Meijer changes its website, repair this file only.
 
-STATUS: UNVERIFIED. Written without a Meijer account, from the orders page
-the requester named (#42) and what is publicly known about meijer.com, so
-that someone who holds one can test it without writing code. Nothing
-below has run against the live signed-in site.
+STATUS: round two (#42), repaired from a tester's survey and screenshots.
+Written without a Meijer account, so what follows is what his own pages
+showed.
+
+* ``https://www.meijer.com/shopping/orders.html`` is titled "Your Orders"
+  and shows "Orders and Receipts" with TWO TABS, "Online Orders" and
+  "In-Store Receipts". It opens on Online Orders, which for a person who
+  only shops in the store reads "You haven't placed any orders yet", and
+  every purchase sits behind the second tab. Round one read the first tab
+  only and reported nothing. Both tabs are read now, and a receipt from
+  the store is filed under In-Store.
+* An in-store row reads "In-Store: 09/19/2026", the store's address, then
+  "$31.23 - 15 items", with a PDF icon at the right end of the row. That
+  icon is the receipt, and the page warns that a pop-up blocker will get
+  in its way, so it opens a window rather than a link.
+* The page fills the online tab from ``/bin/meijer/order``. What the
+  in-store tab calls has not been seen, so the rows are read from the
+  page, and the survey records every answer either tab loads.
 
 * The orders page is ``https://www.meijer.com/shopping/orders.html``
   (#42), pickup and delivery orders. In-store purchases show up as
@@ -41,8 +55,10 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 from urllib.parse import urljoin, urlsplit
 
-from paperpull_core.models import ONLINE, Item, Purchase
+from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
+
+from paperpull_core.redact import private_words, set_private_words  # noqa: F401
 
 log = logging.getLogger("meijer_receipts.site")
 
@@ -224,6 +240,41 @@ def orders_url(page_no: int = 1) -> str:
     return f"{ORDERS_URL}?page={page_no}" if page_no > 1 else ORDERS_URL
 
 
+# The two tabs, and the folder a purchase from each belongs in.
+TAB_IN_STORE_RE = re.compile(r"^\s*in-?store\s+receipts?\s*$", re.I)
+TAB_ONLINE_RE = re.compile(r"^\s*online\s+orders?\s*$", re.I)
+IN_STORE_ROW_RE = re.compile(r"\bin-?store\b\s*:", re.I)
+
+
+def open_tab(page, pattern) -> bool:
+    """Show one of the two tabs. A tab is not a control that buys or
+    changes anything, and its name has to read as one of the two."""
+    try:
+        for role in ("tab", "button", "link"):
+            loc = page.get_by_role(role, name=pattern)
+            for i in range(min(loc.count(), 4)):
+                el = loc.nth(i)
+                if not el.is_visible():
+                    continue
+                label = (el.inner_text(timeout=800) or "").strip()
+                if not pattern.match(label) or FORBIDDEN_CONTROL_RE.search(label):
+                    continue
+                el.click(timeout=5000)
+                page.wait_for_timeout(2500)
+                return True
+        # Not a role the page declares, so by its text.
+        loc = page.get_by_text(pattern)
+        for i in range(min(loc.count(), 4)):
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=5000)
+                page.wait_for_timeout(2500)
+                return True
+    except Exception as e:
+        log.info("could not open the tab: %s", e)
+    return False
+
+
 def _looks_like_orders(page) -> bool:
     try:
         text = page.locator(FRAME).first.inner_text(timeout=5000)
@@ -296,6 +347,28 @@ _COLLECT_ROWS_JS = r"""
 """
 
 
+def collect_both_tabs(page) -> List[RawCard]:
+    """Every row on both tabs. The page opens on Online Orders, and a
+    person who only shops in the store has everything on the other one
+    (#42)."""
+    cards: List[RawCard] = []
+    seen = set()
+    for pattern, label in ((TAB_IN_STORE_RE, "In-Store Receipts"), (TAB_ONLINE_RE, "Online Orders")):
+        if not open_tab(page, pattern):
+            log.info("no %s tab on this page", label)
+            continue
+        found = collect_cards(page)
+        log.info("%s: %d row(s)", label, len(found))
+        for c in found:
+            if c.text in seen:
+                continue
+            seen.add(c.text)
+            cards.append(c)
+    if not cards:
+        cards = collect_cards(page)
+    return cards
+
+
 def collect_cards(page, purchase_type: str = "") -> List[RawCard]:
     try:
         raw = page.evaluate(_COLLECT_ROWS_JS, FALLBACK["row"]) or []
@@ -303,6 +376,63 @@ def collect_cards(page, purchase_type: str = "") -> List[RawCard]:
         log.warning("Row collection failed: %s", e)
         raw = []
     return [RawCard(text=r.get("text") or "", links=r.get("links") or []) for r in raw]
+
+
+# A row's own controls, including an icon with no text, so the PDF icon
+# at the end of an in-store row can be pressed (#42).
+_ROW_CONTROLS_JS = r"""([text, money]) => {
+  const rows = [];
+  const walk = (el) => {
+    for (const c of el.children) {
+      const t = (c.innerText || '').trim();
+      if (t.includes(money) && t.includes(text.slice(0, 12))) rows.push(c);
+      walk(c);
+    }
+  };
+  walk(document.body);
+  if (!rows.length) return {found: false};
+  rows.sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0));
+  const row = rows[0];
+  const out = [];
+  const collect = (el) => {
+    for (const c of el.children) {
+      const tag = c.tagName.toLowerCase();
+      const role = c.getAttribute('role') || '';
+      const label = c.getAttribute('aria-label') || c.getAttribute('title') || '';
+      const cls = (c.className || '').toString();
+      const clickable = tag === 'a' || tag === 'button' || role === 'button' || role === 'link' ||
+                        getComputedStyle(c).cursor === 'pointer';
+      const looksPdf = /pdf|receipt|download/i.test(label + ' ' + cls + ' ' + (c.getAttribute('href') || ''));
+      if (clickable || looksPdf) {
+        out.push({el: c, text: (c.innerText || '').trim().slice(0, 40), label: label.slice(0, 40),
+                  href: c.getAttribute('href') || '', pdf: looksPdf});
+      }
+      collect(c);
+    }
+  };
+  collect(row);
+  out.sort((a, b) => (b.pdf ? 1 : 0) - (a.pdf ? 1 : 0));
+  return {found: true, cands: out.map(c => ({text: c.text, label: c.label, href: c.href, pdf: c.pdf})),
+          els: out.map(c => c.el), outline: (row.innerText || '').slice(0, 200)};
+}"""
+
+
+def row_controls(page, purchase):
+    """(candidates, handles) for the row this purchase came from, the PDF
+    icon first. None when the row is not on the page."""
+    money = purchase.total or ""
+    text = (purchase.items[0].name if purchase.items else "") or purchase.purchase_date or ""
+    try:
+        h = page.evaluate_handle(_ROW_CONTROLS_JS, [text, money])
+        props = h.get_properties()
+        if "els" not in props:
+            return None
+        cands = h.get_property("cands").json_value()
+        els = [v.as_element() for v in props["els"].get_properties().values()]
+        return cands, els
+    except Exception as e:
+        log.info("row controls: %s", e)
+        return None
 
 
 def receipt_links(card: RawCard) -> List[dict]:
@@ -363,8 +493,9 @@ def card_to_purchase(card: RawCard, purchase_type: str = "", base_url: str = BAS
         break
     links = receipt_links(card)
     key = _stable_key(card, date, total)
+    in_store = bool(IN_STORE_ROW_RE.search(text))
     return Purchase(
-        purchase_type=ONLINE,
+        purchase_type=IN_STORE if in_store else ONLINE,
         purchase_date=date,
         order_number=key,
         total=total,
@@ -409,6 +540,115 @@ def fetch_receipt_bytes(page, url: str) -> Optional[bytes]:
     data = base64.b64decode(out["b64"])
     if data[:5] == b"%PDF-":
         return data
+    return None
+
+
+def press_row_receipt(page, purchase, trace=None):
+    """Press the row's own receipt control, the PDF icon at its end, and
+    take whatever the page produces: a download, a PDF answer, or the
+    window it opens (the page warns a pop-up blocker will stop it, so it
+    opens one). Bytes, or None."""
+    found = row_controls(page, purchase)
+    if not found:
+        if trace is not None:
+            trace.append({"note": "the row for this purchase is not on the page"})
+        return None
+    cands, els = found
+    if trace is not None:
+        trace.append({"note": "the row's controls",
+                      "candidates": [{**c, "text": mask_text(c["text"]), "label": mask_text(c["label"]),
+                                      "href": mask_href(c["href"])} for c in cands[:12]]})
+    ctx = page.context
+    for c, el in list(zip(cands, els))[:6]:
+        if el is None:
+            continue
+        label = c["label"] or c["text"] or "receipt"
+        if FORBIDDEN_CONTROL_RE.search(label):
+            continue
+        href = urljoin(BASE, c["href"] or "")
+        if c["href"] and is_safe_url(href):
+            body = fetch_receipt_bytes(page, href)
+            if body:
+                return body
+        got = {}
+
+        def on_response(res):
+            try:
+                if got or "pdf" not in (res.headers.get("content-type") or "").lower():
+                    return
+                if not is_safe_url(res.url or ""):
+                    return
+                body = res.body()
+                if body[:5] == b"%PDF-":
+                    got["body"] = body
+            except Exception:
+                pass
+        downloads = []
+        ctx.on("response", on_response)
+        page.on("download", downloads.append)
+        before = set(ctx.pages)
+        try:
+            el.click(timeout=5000)
+        except Exception as e:
+            if trace is not None:
+                trace.append({"note": "click failed", "control": mask_text(label)[:40], "error": str(e)[:100]})
+        try:
+            for _ in range(20):
+                page.wait_for_timeout(500)
+                if got or downloads:
+                    break
+                for extra in [x for x in ctx.pages if x not in before]:
+                    try:
+                        extra.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except Exception:
+                        pass
+                    u = extra.url or ""
+                    if u.startswith("blob:") or is_safe_url(u):
+                        body = fetch_receipt_bytes(extra, u) if not u.startswith("blob:") else None
+                        if not body:
+                            try:
+                                body = extra.evaluate(_FETCH_AS_B64, u)
+                                body = base64.b64decode(body["b64"]) if body.get("b64") else None
+                            except Exception:
+                                body = None
+                        if body and body[:5] == b"%PDF-":
+                            got["body"] = body
+                    if u and not got:
+                        if trace is not None:
+                            trace.append({"note": "the control opened a window", "url": mask_href(u)})
+                    try:
+                        extra.close()
+                    except Exception:
+                        pass
+                if got:
+                    break
+        finally:
+            try:
+                ctx.remove_listener("response", on_response)
+            except Exception:
+                pass
+            try:
+                page.remove_listener("download", downloads.append)
+            except Exception:
+                pass
+        if downloads and not got:
+            # A download the browser saved for itself. Its own file is read
+            # rather than moved, so nothing is left in the browser's folder
+            # half-taken.
+            try:
+                import pathlib
+                saved = downloads[0].path()
+                if saved:
+                    body = pathlib.Path(saved).read_bytes()
+                    if body[:5] == b"%PDF-":
+                        got["body"] = body
+            except Exception as e:
+                if trace is not None:
+                    trace.append({"note": "download save failed", "error": str(e)[:100]})
+        if got.get("body"):
+            if trace is not None:
+                trace.append({"note": "the receipt came from the row's control", "control": mask_text(label)[:40]})
+            return got["body"]
     return None
 
 
@@ -525,7 +765,14 @@ _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 _HANDLE_RE = re.compile(r"@[A-Za-z0-9-]{2,39}")
 
 
+# The owner's name and the rest of the redaction live in core. These apps
+# had a fourth version of it, without the title and suffix exclusion, so
+# every "Jr" and "II" on a page became [name].
+
+
 def mask_text(s: str) -> str:
+    for word in private_words():
+        s = re.sub(re.escape(word), "[name]", s or "", flags=re.I)
     s = _EMAIL_RE.sub("<email>", s or "")
     s = _HANDLE_RE.sub("@<user>", s)
     return _DIGITS_RE.sub(lambda m: "#" * len(m.group(0)), s)

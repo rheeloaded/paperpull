@@ -55,6 +55,8 @@ from typing import List, Optional
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
 
+from paperpull_core.redact import private_words, set_private_words  # noqa: F401
+
 log = logging.getLogger("kroger_receipts.site")
 
 # ---------------------------------------------------------------------------
@@ -566,7 +568,14 @@ _KEEP_VALUES = {"purchaseType", "status", "fulfillmentType", "modality", "quanti
                 "pageSize", "pageTotal", "isLastPage", "itemType", "unitOfMeasure"}
 
 
+# The owner's name and the rest of the redaction live in core. These apps
+# had a fourth version of it, without the title and suffix exclusion, so
+# every "Jr" and "II" on a page became [name].
+
+
 def mask_text(s: str) -> str:
+    for word in private_words():
+        s = re.sub(re.escape(word), "[name]", s or "", flags=re.I)
     s = _EMAIL_RE.sub("<email>", s or "")
     return _DIGITS_RE.sub(lambda m: "#" * len(m.group(0)), s)
 

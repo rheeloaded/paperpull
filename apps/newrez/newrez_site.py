@@ -45,6 +45,11 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
+# Everything on its way into a diagnostic file goes through here. It
+# lives in core because seventeen apps each had their own copy and
+# they drifted into three different versions.
+from paperpull_core.redact import redact, set_private_words  # noqa: F401
+
 log = logging.getLogger("newrez_docs.site")
 
 BASE = "https://myaccount.newrez.com"
@@ -162,16 +167,6 @@ _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
              7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                 "August", "September", "October", "November", "December"]
-_ID_RE = re.compile(r"\d{6,}")
-# A path segment shaped like an id or a key, "/accounts/d11-Kz9Rc.../",
-# ten or more characters with a letter and a digit in it.
-_PATH_TOKEN_RE = re.compile(r"(?<=/)(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{10,}(?=[/?#]|$)")
-# "Welcome, ALEX", "Hi Jane", "Good evening, Sam": a greeting names the
-# person, and a survey has no use for the name.
-_GREETING_RE = re.compile(r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
-                          r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)?", re.I)
-
-
 def _last_day(year: int, month: int) -> int:
     if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
         return 29
@@ -222,11 +217,6 @@ def _human_date(iso: str) -> str:
         return f"{_MONTH_NAMES[int(m) - 1]} {int(d)}, {y}"
     except Exception:
         return iso
-
-
-_QUERY_RE = re.compile(r"(https?://[^\s\"'?#]+)\?[^\s\"'#]*")
-
-
 _WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
 
 
@@ -250,22 +240,6 @@ def _safe_query(url: str) -> str:
     for k, v in pairs[:20]:
         out.append("%s=%s" % (k[:30], v if _plain_word(v) else "..."))
     return "&".join(out)
-
-
-def redact(text: str) -> str:
-    """Runs of six or more digits become #, so an account or phone number
-    in a URL, a heading or a link never reaches the survey file, and a URL
-    loses its query string, which is where a site keeps session details
-    the survey has no use for."""
-    text = _QUERY_RE.sub(lambda m: m.group(1) + "?...", text or "")
-    text = _GREETING_RE.sub(lambda m: m.group(1) + " [name]", text)
-    text = _PATH_TOKEN_RE.sub("...", text)
-    return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
-
-
-# ---------------------------------------------------------------------------
-# Session / safety
-# ---------------------------------------------------------------------------
 
 def looks_signed_out(page) -> bool:
     url = (page.url or "").lower()

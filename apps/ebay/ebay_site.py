@@ -43,6 +43,15 @@ this app does not touch. Nothing here clicks an action control. Capture is
 navigation plus printToPDF, so ``FORBIDDEN_CONTROL_RE`` exists as a guard
 for the diagnostics helpers and the repo-wide guard tests.
 
+Round two (#44, 2026-09-22). A tester's pilot found two of the nine
+orders he made this year. Two things could hide an order, and both are
+now covered: a card whose "View order details" link is missing or points
+somewhere else (a card is now taken from the "Order number" line, and
+the details address is built from the id), and a list that had not
+finished lazy-loading when it was read (the scroll is more patient, it
+waits for the page to stop growing as well as for the count to settle,
+and it presses any "Show more" control it finds).
+
 Site layer verified working against the live site: 2026-09-21
 """
 from __future__ import annotations
@@ -308,10 +317,44 @@ def _order_link_count(page) -> int:
         return 0
 
 
-def scroll_all_orders(page, max_rounds: int = 12, delay_ms: int = 1500,
-                      stable_rounds: int = 2) -> int:
-    """Scroll until the list stops growing. Returns the order-link count."""
-    last = _order_link_count(page)
+_SHOW_MORE_RE = re.compile(r"^\s*(show|see|load)\s+(more|older)( orders| purchases)?\s*$", re.I)
+
+
+def _press_show_more(page) -> bool:
+    """A "Show more" the list offers instead of loading on scroll."""
+    try:
+        loc = page.get_by_role("button", name=_SHOW_MORE_RE).or_(page.get_by_role("link", name=_SHOW_MORE_RE))
+        if loc.count() and loc.first.is_visible():
+            label = (loc.first.inner_text(timeout=800) or "").strip()
+            if is_safe_control(label):
+                loc.first.click(timeout=5000)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _order_count(page) -> int:
+    """Orders on the page, by link and by order number, since a card
+    without a link is still an order (#44)."""
+    try:
+        return int(page.evaluate(
+            r"""() => { const s = new Set();
+               for (const a of document.querySelectorAll("a[href*='order.ebay.com/ord/show']")) {
+                 const m = (a.getAttribute('href')||'').match(/[?&]orderId=([0-9A-Za-z!-]+)/); if (m) s.add(m[1]); }
+               const t = document.body.innerText || ''; const rx = /order\s*number\s*:?\s*([0-9A-Za-z][0-9A-Za-z!-]{4,})/gi;
+               let m; while ((m = rx.exec(t))) s.add(m[1]);
+               return s.size; }"""))
+    except Exception:
+        return _order_link_count(page)
+
+
+def scroll_all_orders(page, max_rounds: int = 25, delay_ms: int = 2000,
+                      stable_rounds: int = 3) -> int:
+    """Scroll until the list stops growing, in orders and in page height,
+    pressing any "Show more" it offers. Returns the order count."""
+    last = _order_count(page)
+    last_height = 0
     stable = 0
     for _ in range(max_rounds):
         try:
@@ -319,16 +362,23 @@ def scroll_all_orders(page, max_rounds: int = 12, delay_ms: int = 1500,
             page.wait_for_timeout(delay_ms)
             page.keyboard.press("End")
             page.wait_for_timeout(delay_ms)
+            if _press_show_more(page):
+                page.wait_for_timeout(delay_ms)
         except Exception:
             break
-        now = _order_link_count(page)
-        if now == last:
+        now = _order_count(page)
+        try:
+            height = int(page.evaluate("() => document.body.scrollHeight") or 0)
+        except Exception:
+            height = last_height
+        if now == last and height == last_height:
             stable += 1
             if stable >= stable_rounds:
                 break
         else:
             stable = 0
             last = now
+            last_height = height
     try:
         page.evaluate("() => window.scrollTo(0, 0)")
     except Exception:
@@ -369,23 +419,50 @@ class RawCard:
 _COLLECT_CARDS_JS = r"""
 () => {
   const LINK = "a[href*='order.ebay.com/ord/show']";
+  const NUM = /order\s*number\s*:?\s*([0-9A-Za-z][0-9A-Za-z!-]{4,})/i;
   const idOf = (l) => { const m = (l.getAttribute('href') || '').match(/[?&]orderId=([0-9A-Za-z!-]+)/); return m ? m[1] : null; };
-  const idsIn = (el) => { const s = new Set(); for (const l of el.querySelectorAll(LINK)) { const id = idOf(l); if (id) s.add(id); } return s; };
+  const idsIn = (el) => {
+    const s = new Set();
+    for (const l of el.querySelectorAll(LINK)) { const id = idOf(l); if (id) s.add(id); }
+    const t = el.innerText || '';
+    let m; const rx = new RegExp(NUM.source, 'gi');
+    while ((m = rx.exec(t))) s.add(m[1]);
+    return s;
+  };
+  // Every anchor that names an order, and every element whose own text
+  // carries an order number. A card with no details link is still an
+  // order, and the details address is built from the number (#44).
+  const starts = [];
+  for (const a of document.querySelectorAll(LINK)) starts.push({el: a, id: idOf(a), href: a.getAttribute('href') || ''});
+  const walk = (el) => {
+    for (const c of el.children) {
+      const own = Array.from(c.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join(' ');
+      const m = own.match(NUM);
+      if (m) starts.push({el: c, id: m[1], href: ''});
+      walk(c);
+    }
+  };
+  walk(document.body);
   const out = [];
   const seen = new Set();
-  for (const a of document.querySelectorAll(LINK)) {
-    const id = idOf(a);
+  for (const start of starts) {
+    const id = start.id;
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    let best = a, el = a.parentElement;
+    let best = start.el, el = start.el.parentElement;
     while (el && el !== document.body) {
       if (idsIn(el).size > 1) break;
       best = el;
       el = el.parentElement;
     }
+    let href = start.href;
+    if (!href) {
+      const a = best.querySelector(LINK);
+      if (a) href = a.getAttribute('href') || '';
+    }
     const h3 = best.querySelector('h3');
     const seller = best.querySelector("a[href*='/usr/']");
-    out.push({id: id, href: a.getAttribute('href') || '', text: (best.innerText || '').trim(),
+    out.push({id: id, href: href, text: (best.innerText || '').trim(),
               title: h3 ? h3.innerText.trim() : '', seller: seller ? seller.innerText.trim().split('\n')[0] : ''});
   }
   return out;
@@ -404,7 +481,12 @@ def collect_cards(page, purchase_type: str = "") -> List[RawCard]:
     for r in raw:
         kind, oid, poid = parse_order_link(r.get("href") or "")
         if not oid:
-            continue
+            # No usable link on the card. The order number in its own text
+            # is enough, the details page takes it as orderId (#44).
+            oid = str(r.get("id") or "").strip()
+            poid = ""
+            if not oid or len(oid) > 60 or not ORDER_ID_TOKEN_RE.match(oid):
+                continue
         cards.append(RawCard(href=order_details_url(oid, poid), text=r.get("text") or "",
                              order_id=oid, purchase_order_id=poid or "", kind=ONLINE,
                              title=(r.get("title") or "").strip(), seller=(r.get("seller") or "").strip()))

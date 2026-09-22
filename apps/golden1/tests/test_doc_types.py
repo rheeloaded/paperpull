@@ -137,3 +137,45 @@ def test_the_survey_presses_the_vendor_button_and_reads_the_tab_on_any_host():
     assert "off_host" in src and "row_counts" in src and "extra.close()" in src
     assert ".screenshot(" not in src
     assert "_survey_vendor_button(page, report" in inspect.getsource(site.survey)
+
+
+# -- round four, the button before the link, the tab the button opens (#35) --
+
+def test_the_vendor_button_is_the_button_and_the_link_only_when_there_is_none():
+    class _Loc:
+        def __init__(self, n): self._n = n
+        def count(self): return self._n
+    class _Page:
+        def __init__(self, buttons, links): self._b, self._l = buttons, links
+        def get_by_role(self, role, name=None):
+            assert name is site.VENDOR_BUTTON_RE
+            return _Loc(self._b if role == "button" else self._l)
+    assert site._vendor_button(_Page(1, 1)).count() == 1
+    assert site._vendor_button(_Page(0, 1)) is not None
+    src = inspect.getsource(site.open_vendor)
+    assert "_vendor_button(page)" in src and ".or_(" not in src
+    src = inspect.getsource(site._survey_vendor_button)
+    assert "_vendor_button(page)" in src and ".or_(" not in src
+
+
+def test_a_tab_the_bank_opened_is_adopted_and_its_host_allowed_for_the_run():
+    site._VENDOR_HOSTS_SEEN.clear()
+    site.ALLOWED_HOSTS.discard("edocs.example.test")
+    assert not site.is_safe_url("https://edocs.example.test/statements/1.pdf")
+
+    class _Tab:
+        url = "https://edocs.example.test/statements"
+        def wait_for_load_state(self, *a, **k): pass
+        def wait_for_timeout(self, ms): pass
+        def is_closed(self): return False
+        def close(self): raise AssertionError("an https tab the button opened is kept")
+    class _Ctx:
+        pages = ["main", _Tab()]
+    class _Page:
+        context = _Ctx()
+    tab = site._adopt_new_tab(_Page(), {"main"})
+    assert tab is not None and "edocs.example.test" in site._VENDOR_HOSTS_SEEN
+    assert site.is_safe_url("https://edocs.example.test/statements/1.pdf")
+    assert not site.is_safe_url("http://edocs.example.test/x")
+    site.ALLOWED_HOSTS.discard("edocs.example.test")
+    site._VENDOR_HOSTS_SEEN.clear()
