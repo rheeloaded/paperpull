@@ -277,7 +277,8 @@ class Recorder:
         if self._looks_signed_out is not None:
             try:
                 if self._looks_signed_out(self.page):
-                    return "sign in first, then start recording"
+                    return ("you are not signed in yet. Sign in, open the "
+                        "page with your documents on it, and start again")
             except Exception:
                 pass
         try:
@@ -690,6 +691,14 @@ def concerns(report: dict) -> list:
 # One whole recording, from the app's point of view
 # ---------------------------------------------------------------------------
 
+def _host_of(url: str) -> str:
+    from urllib.parse import urlsplit
+    try:
+        return urlsplit(url or "").hostname or ""
+    except ValueError:
+        return ""
+
+
 _CONSENT = """\
 RECORDING - what this does and does not capture
 
@@ -703,6 +712,41 @@ RECORDING - what this does and does not capture
 Nothing is downloaded. Click your way to a statement the way you normally
 would, once, then stop. Read the file it writes before sending it.
 """
+
+
+def page_to_watch(page, is_safe_url):
+    """The tab the account holder is looking at.
+
+    An app that attaches to a running browser hands out a FRESH page in
+    the signed-in context. That is right for a download run, which
+    navigates it wherever it needs to go, and it is wrong for a
+    recording, which has nowhere to navigate to and has to watch what
+    the person is already doing. Handed a blank page, every recording
+    refused with "this is not a page on the provider's own site", which
+    is a true sentence about the wrong tab.
+
+    So look past the given page at the others in the same context and
+    take the provider's own, the most recently opened one when there is
+    more than one, because that is the tab somebody just went to. If
+    none of them is on the provider, keep the page we were given so the
+    refusal describes the situation honestly."""
+    try:
+        if is_safe_url(page.url or ""):
+            return page
+        others = [p for p in page.context.pages if p is not page]
+    except Exception:
+        return page
+    best = None
+    for other in others:
+        try:
+            closed = getattr(other, "is_closed", None)
+            if callable(closed) and closed():
+                continue
+            if is_safe_url(other.url or ""):
+                best = other
+        except Exception:
+            continue
+    return best or page
 
 
 def _wait_for_stop(stop_file, say) -> None:
@@ -737,6 +781,15 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
     from pathlib import Path
 
     set_private_words([owner] if owner else [])
+    watching = page_to_watch(page, site.is_safe_url)
+    if watching is not page:
+        page = watching
+        try:
+            page.bring_to_front()
+        except Exception:
+            pass
+        say("Watching the tab you already have open at %s."
+            % (_host_of(page.url or "") or "this provider"))
     rec = Recorder(page,
                    is_safe_url=site.is_safe_url,
                    looks_signed_out=getattr(site, "looks_signed_out", None),
