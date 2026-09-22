@@ -285,3 +285,131 @@ def test_the_panel_offers_record_and_tucks_it_behind_more():
     assert "record" in app_module.ACTIONS
     assert app_module.ACTIONS["record"]["flags"] == ["--record"]
     assert "record" in app_module.MORE_ACTIONS
+
+# ---------------------------------------------------------------------------
+# What adding a provider leaves behind
+#
+# Both of these were found by adding Costco and running it, not by a test.
+# An install made from this panel could not import the shared core at all,
+# and it ran with no account holder name, which is the one thing redaction
+# needs to take a person's name out of a file before it is sent anywhere.
+# ---------------------------------------------------------------------------
+
+def _fake_venv(install, with_core=False):
+    """A venv the way a real one is laid out on Windows."""
+    site = install / ".venv" / "Lib" / "site-packages"
+    site.mkdir(parents=True, exist_ok=True)
+    if with_core:
+        pkg = site / "paperpull_core"
+        pkg.mkdir(exist_ok=True)
+        (pkg / "__init__.py").write_text("# old\n", encoding="utf-8")
+    return site
+
+
+def test_an_install_with_a_venv_and_no_core_is_given_one(tmp_path, monkeypatch):
+    """setup.bat installs the core from the repo two folders up, or from a
+    wheel the packaged build ships. An install made from this panel sits in
+    somebody's Documents folder and has neither, so setup finished cleanly
+    and left a venv that could not import anything."""
+    install = tmp_path / "Costco Receipts"
+    install.mkdir()
+    (install / "costco_receipts.py").write_text("def main(): pass\n", encoding="utf-8")
+    site = _fake_venv(install)
+
+    made = app_module.ensure_core(install)
+    assert made, "nothing was seeded"
+    assert (site / "paperpull_core" / "__init__.py").is_file()
+    assert (site / "paperpull_core" / "recorder.py").is_file()
+
+
+def test_seeding_the_core_is_idempotent(tmp_path):
+    install = tmp_path / "Costco Receipts"
+    install.mkdir()
+    (install / "costco_receipts.py").write_text("def main(): pass\n", encoding="utf-8")
+    _fake_venv(install)
+    assert app_module.ensure_core(install)
+    assert app_module.ensure_core(install) == []
+
+
+def test_an_existing_core_is_updated_and_the_old_one_kept(tmp_path):
+    """The reason this function existed before it could seed. An entry
+    script written against a newer core than the copy in the venv dies on
+    Login over a keyword the copy never heard of."""
+    install = tmp_path / "Costco Receipts"
+    install.mkdir()
+    (install / "costco_receipts.py").write_text("def main(): pass\n", encoding="utf-8")
+    site = _fake_venv(install, with_core=True)
+
+    made = app_module.ensure_core(install)
+    assert "paperpull_core/__init__.py" in made
+    assert (site / "paperpull_core" / "__init__.py").read_text(encoding="utf-8") != "# old\n"
+    backups = list((install / "Backups").rglob("paperpull_core/__init__.py"))
+    assert backups and backups[0].read_text(encoding="utf-8") == "# old\n"
+
+
+def test_an_install_with_no_venv_is_left_alone(tmp_path):
+    """The packaged build has no venv. Its interpreter carries the core,
+    so there is nothing to seed and nothing to break."""
+    install = tmp_path / "Costco Receipts"
+    install.mkdir()
+    assert app_module.ensure_core(install) == []
+
+
+def test_the_core_check_runs_even_after_the_file_sweep_has_been_done(tmp_path,
+                                                                    monkeypatch):
+    """The file sweep compares every shipped file byte for byte, so it runs
+    once per panel run. setup.bat is run after the panel has already
+    started, so a memo on the core check would leave the answer a restart
+    away."""
+    root = tmp_path / "installs"
+    install = root / "Costco Receipts"
+    install.mkdir(parents=True)
+    (install / "costco_receipts.py").write_text("def main(): pass\n", encoding="utf-8")
+    site = _fake_venv(install)
+    monkeypatch.setattr(app_module, "apps_root", lambda: root)
+    app_module._REFRESHED_ROOTS.add(str(root))
+    try:
+        out = app_module.refresh_installs()
+    finally:
+        app_module._REFRESHED_ROOTS.discard(str(root))
+    assert "Costco Receipts" in out
+    assert (site / "paperpull_core" / "__init__.py").is_file()
+
+
+def test_a_new_install_is_given_the_account_holders_name(tmp_path, monkeypatch):
+    """An app asks for this on its first run at a console. Started from
+    this panel its stdin is closed, so it cannot ask, and an empty name is
+    the one thing that stops redaction taking a person's name out of a
+    survey or a recording."""
+    root = tmp_path / "installs"
+    root.mkdir()
+    assert app_module.create_install(root, "costco", owner="Alex Morgan") == "created"
+    cfg = json.loads((root / "Costco Receipts" / "config.json")
+                     .read_text(encoding="utf-8"))
+    assert cfg["owner"] == "Alex Morgan"
+    # and nothing else in the example config was disturbed
+    assert cfg["cdp_url"].endswith(":9268")
+
+
+def test_a_new_install_without_a_name_still_works(tmp_path):
+    root = tmp_path / "installs"
+    root.mkdir()
+    assert app_module.create_install(root, "costco") == "created"
+    cfg = json.loads((root / "Costco Receipts" / "config.json")
+                     .read_text(encoding="utf-8"))
+    assert cfg["owner"] == ""
+
+
+def test_the_panel_asks_for_the_name_before_it_makes_anything():
+    js = app_module.HTML
+    assert "Whose documents are these?" in js
+    assert "body: JSON.stringify({root, providers: picked, owner})" in js
+
+
+def test_a_name_long_enough_to_be_an_attack_is_cut(tmp_path):
+    root = tmp_path / "installs"
+    root.mkdir()
+    app_module.create_install(root, "costco", owner="x" * 500)
+    cfg = json.loads((root / "Costco Receipts" / "config.json")
+                     .read_text(encoding="utf-8"))
+    assert len(cfg["owner"]) == 80
