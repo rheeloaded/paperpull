@@ -31,7 +31,20 @@ def test_result_drops_unexpected_private_fields():
     assert "account" not in result and "path" not in result
 
 
+def _set_up(install):
+    """An install with a venv, which is what the panel will agree to run.
+
+    Only the path is looked at, never the file, so an empty one is
+    enough and no interpreter is launched by these tests."""
+    exe = install / ".venv" / "Scripts" / "python.exe"
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text("", encoding="utf-8")
+    return install
+
+
 def test_stream_carries_current_counts_and_keeps_exit_code(tmp_path, monkeypatch):
+    _set_up(tmp_path)
+
     class Process:
         def __init__(self, *args, **kwargs):
             self.stdin = io.StringIO()
@@ -49,3 +62,48 @@ def test_stream_carries_current_counts_and_keeps_exit_code(tmp_path, monkeypatch
     assert "event: result" in output and "event: done\ndata: 0" in output
     assert run_result.PREFIX not in output
     assert "example" not in app._RUNNING
+
+
+def test_an_app_that_is_not_set_up_is_told_so_and_never_started(tmp_path,
+                                                                monkeypatch):
+    """A checkout install with no venv used to run under the panel's own
+    interpreter, which has fastapi and nothing else, and died on
+    `No module named 'paperpull_core'`. That is a true sentence about the
+    wrong interpreter and it tells a tester nothing."""
+    started = []
+    monkeypatch.setattr(app, "discover_apps", lambda: {"example": {"dir": str(tmp_path)}})
+    monkeypatch.setattr(app, "_build_cmd", lambda *args: ["synthetic-command"])
+    monkeypatch.setattr(app.subprocess, "Popen",
+                        lambda *a, **k: started.append(a) or (_ for _ in ()).throw(
+                            AssertionError("should never have started")))
+    monkeypatch.setattr(app, "_is_packaged", lambda: False)
+
+    async def consume():
+        return "".join([part async for part in
+                        app.api_run("example", action="all").body_iterator])
+
+    output = asyncio.run(consume())
+    assert not started
+    assert "not set up yet" in output
+    assert "setup" in output
+    assert "RELOAD this page" in output
+    assert "event: done\ndata: 1" in output
+
+
+def test_the_packaged_build_is_never_told_to_run_setup(tmp_path, monkeypatch):
+    """It has no venv anywhere and does not need one. Its single bundled
+    interpreter carries the core and every app's dependencies."""
+    monkeypatch.setattr(app, "_is_packaged", lambda: True)
+    assert app.setup_needed({"dir": str(tmp_path)}) == ""
+
+
+def test_an_install_that_is_set_up_is_not_blocked(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "_is_packaged", lambda: False)
+    _set_up(tmp_path)
+    assert app.setup_needed({"dir": str(tmp_path)}) == ""
+
+
+def test_the_message_names_the_folder_to_open(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "_is_packaged", lambda: False)
+    said = app.setup_needed({"dir": str(tmp_path)})
+    assert str(tmp_path) in said

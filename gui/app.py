@@ -256,8 +256,35 @@ def _venv_python(app_dir: Path):
 
 
 def _python_for(app_dir: Path) -> str:
+    """The interpreter to run one app with.
+
+    Falling back to this program's own is right for the packaged build,
+    whose single bundled interpreter carries the shared core and every
+    app's dependencies. In a checkout it is a trap: the panel's venv has
+    fastapi and nothing else, so an app that has not been set up ran
+    under it and died on `No module named 'paperpull_core'`, a sentence
+    about the wrong interpreter that tells a tester nothing. The run
+    endpoint refuses that case before it gets here."""
     venv = _venv_python(app_dir)
     return str(venv) if venv else sys.executable
+
+
+def setup_needed(meta: dict) -> str:
+    """Why this app cannot be run yet, or "".
+
+    Only ever true in a checkout. The packaged build has no venv
+    anywhere and does not need one."""
+    if _is_packaged() or _venv_python(Path(meta["dir"])) is not None:
+        return ""
+    script = "setup.command" if sys.platform != "win32" else "setup.bat"
+    return ("This provider is not set up yet, so there is nothing to run "
+            "it with.\n\n"
+            "  1. Open  %s\n"
+            "  2. Double-click  %s  and let it finish\n"
+            "  3. Come back here and RELOAD this page\n\n"
+            "Step 3 is not optional. Reloading is what puts the shared "
+            "code into the new folder. Without it the buttons will fail "
+            "on an import error." % (meta["dir"], script))
 
 
 def _login_flag(script: Path) -> str:
@@ -1220,7 +1247,21 @@ def api_run(app: str, account: str = "primary", action: str = "pilot",
     if app not in apps:
         raise HTTPException(404, "unknown app")
     meta = apps[app]
+    blocked = setup_needed(meta)
     cmd = _build_cmd(meta, account, action, _scope_flags(year, start, end))
+
+    if blocked:
+        # Said here rather than let the app start under an interpreter
+        # that cannot import it. The page already carries a warning, and
+        # a warning above the buttons is not what somebody reads when a
+        # button has just produced a traceback.
+        async def refuse():
+            for line in blocked.splitlines():
+                yield "data: %s\n\n" % line
+            yield "event: done\ndata: 1\n\n"
+        return StreamingResponse(refuse(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
 
     # Deliberately an *async* generator. With a plain sync one, Starlette wraps
     # it in iterate_in_threadpool, which never calls .close() on it - so the
