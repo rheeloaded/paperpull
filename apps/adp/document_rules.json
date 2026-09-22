@@ -1,0 +1,66 @@
+{
+  "_comment": "Editable rules mapping ADP Workforce Now document titles to filename summaries. Checked in order: tax, then insurance (unused), then statement. Repair after running diagnose against a real Pay and Annual Statements page.",
+  "tax_rules": [
+    {
+      "pattern": "\\bw-?2c\\b",
+      "summary": "W-2c Corrected Tax Form"
+    },
+    {
+      "pattern": "\\bw-?2\\b",
+      "summary": "W-2 Tax Form"
+    },
+    {
+      "pattern": "1095-?[abc]",
+      "summary": "1095 Health Coverage Form"
+    },
+    {
+      "pattern": "1099-?(nec|misc|r)?\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(statement|form|document)",
+      "summary": "Tax Document"
+    },
+    {
+      "pattern": "annual\\s+statement",
+      "summary": "Annual Tax Statement"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "pay\\s+statement",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "pay\\s*stub",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "earnings\\s+statement",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "direct\\s+deposit\\s+(advice|statement|voucher)",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Pay Statement"
+    },
+    {
+      "pattern": "\\bcheck\\b|\\bpaycheck\\b|\\bvoucher\\b|\\badvice\\b",
+      "summary": "Pay Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "handbook",
+    "policy\\s+acknowledg",
+    "marketing",
+    "\\boffers?\\b",
+    "benefits?\\s+guide",
+    "open\\s+enrollment"
+  ]
+}

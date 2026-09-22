@@ -1,0 +1,69 @@
+{
+  "_comment": "Editable rules mapping American Family document titles to filename summaries. Checked in order: tax, then insurance, then statement. Repair after running diagnose against a real documents page.",
+  "tax_rules": [
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement)",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [
+    {
+      "pattern": "declarations?|dec\\s+page",
+      "summary": "Declarations Page"
+    },
+    {
+      "pattern": "id\\s+cards?|insurance\\s+cards?|proof\\s+of\\s+insurance",
+      "summary": "Insurance ID Card"
+    },
+    {
+      "pattern": "renewal",
+      "summary": "Renewal Notice"
+    },
+    {
+      "pattern": "policy\\s+(document|packet|contract|jacket)|\\bpolicy\\b",
+      "summary": "Policy Document"
+    },
+    {
+      "pattern": "endorsement|amendment",
+      "summary": "Policy Endorsement"
+    },
+    {
+      "pattern": "cancellation|non-?renewal|reinstatement",
+      "summary": "Policy Notice"
+    },
+    {
+      "pattern": "\\bletter\\b|notice",
+      "summary": "Insurance Letter"
+    }
+  ],
+  "statement_rules": [
+    {
+      "pattern": "billing\\s+statement|bill\\s+statement",
+      "summary": "Billing Statement"
+    },
+    {
+      "pattern": "\\bbill\\b|invoice",
+      "summary": "Billing Statement"
+    },
+    {
+      "pattern": "payment\\s+(receipt|confirmation)|receipt",
+      "summary": "Payment Receipt"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Billing Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "\\boffers?\\b",
+    "brochure",
+    "newsletter"
+  ]
+}

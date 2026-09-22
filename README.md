@@ -47,8 +47,8 @@ signed installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Thirty-two providers are supported today, all built on the same pattern.
-Eleven more, AT&T, Wells Fargo, SBA, Verizon Mobile, SMUD, Golden 1, E*TRADE,
-State Farm, Newrez, Kroger and GitHub, are built and waiting for someone with an account to
+Fourteen more, AT&T, Wells Fargo, SBA, Verizon Mobile, SMUD, Golden 1, E*TRADE,
+State Farm, Newrez, Kroger, GitHub, Meijer, American Family and ADP Workforce Now, are built and waiting for someone with an account to
 test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 [#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -59,14 +59,19 @@ test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 [#37](https://github.com/rheeloaded/paperpull/issues/37),
 [#38](https://github.com/rheeloaded/paperpull/issues/38),
 [#41](https://github.com/rheeloaded/paperpull/issues/41),
-[#43](https://github.com/rheeloaded/paperpull/issues/43)):
+[#43](https://github.com/rheeloaded/paperpull/issues/43),
+[#42](https://github.com/rheeloaded/paperpull/issues/42),
+[#45](https://github.com/rheeloaded/paperpull/issues/45),
+[#46](https://github.com/rheeloaded/paperpull/issues/46)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
 | [`affirm`](apps/affirm) | Affirm | Loan agreements (Truth in Lending), one per loan | JSON API from inside the page, nothing clicked; no monthly statement exists for a pay-over-time account |
+| [`adp`](apps/adp) | ADP Workforce Now | Pay statements, W-2s | **Untested, built without an account. Have one? [Help test it](apps/adp/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy docs | ASP.NET WebForms; one documented disclosure dialog |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
+| [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards | **Untested, built without an account. Have one? [Help test it](apps/amfam/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/att/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
@@ -83,6 +88,7 @@ test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 | [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery | **Built against an account with no purchases yet. Have one? [Help test it](apps/kroger/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Purchase-history API and receipt page, nothing clicked, real Edge/Chrome |
 | [`github`](apps/github) | GitHub | Payment receipts (Pro, Copilot, Actions, Sponsors and the rest) | **Built against an account with no payments yet. Have one? [Help test it](apps/github/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Receipt links fetched or printed, nothing clicked |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Untested, built without an account. Have one? [Help test it](apps/golden1/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`meijer`](apps/meijer) | Meijer | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
@@ -192,8 +198,8 @@ ever clicked, and all site interaction lives in `provider_site.py` where it can
 be read in one sitting. Every app that clicks enforces this deny-by-default, a
 control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
 allowlist (`SAFE_DOC_CONTROL_RE`), and the app's host allowlist refuses any
-stored URL that points elsewhere. Fourteen apps click nothing at all (Affirm, Amazon,
-Anthem, Citi, eBay, Fidelity, Gap, GitHub, Kroger, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
+stored URL that points elsewhere. Fifteen apps click nothing at all (Affirm, Amazon,
+Anthem, Citi, eBay, Fidelity, Gap, GitHub, Kroger, Meijer, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
 page they navigated to. A repo-wide test checks every app's guard.
 [SECURITY.md](SECURITY.md) spells out which app does which.
 
@@ -469,7 +475,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **thirty-three** apps pass their tests, and the eleven scaffolds theirs, more than 1,500 of them across the
+- ✅ All **thirty-three** apps pass their tests, and the fourteen scaffolds theirs, more than 1,500 of them across the
   repo. Twenty-five are in regular use by the author. The other seven (Ally,
   Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
   by people who hold those accounts, and the four marked in the table above
