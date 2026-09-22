@@ -537,6 +537,8 @@ found a bug and diagnosed it to the line.
   bugs, each diagnosed so exactly there was nothing to add.
 - [@liamrotheram](https://github.com/liamrotheram) and
   [@OberstK](https://github.com/OberstK), Amazon outside the United States.
+- [@jpfieber](https://github.com/jpfieber), who asked for eBay and became
+  PaperPull's first sponsor before it was even built.
 
 If you tested a provider and are not here, say so on the issue and you
 will be.
