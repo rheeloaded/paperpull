@@ -47,7 +47,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     **plus** a document allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass
     **both**, so anything unrecognized is refused, deny by default. Capital
     One clicks only its own "continue session" dialog.
-  - **Eleven apps click nothing at all.** Amazon, Gap and TSP navigate to a
+  - **Twelve apps click nothing at all.** Amazon, eBay, Gap and TSP navigate to a
     page by URL and read it. NetBenefits sends the statement request its own
     page sends and renders the answer. Affirm, Anthem, Citi, Fidelity, myPay, Paylocity and UKG read their
     documents from the same JSON API the provider's own page uses, over the
