@@ -10,6 +10,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **AT&T, round eight.** Round seven's trace showed the click on "Download
+  PDF" landing and nothing appearing, because the menu it opens is made
+  of elements that are not buttons, links or menuitems, so the
+  before-and-after comparison of those roles could not see "Regular PDF"
+  or "View/print PDF". The entries are now found by their text, whatever
+  element they are, with a wait for the menu to open, "Regular PDF" is
+  clicked, and the trace records every element on the page whose text
+  says PDF, with its tag, role and visibility (#26).
 - **The README said a password manager installed into the sign-in profile
   stays for every provider.** It stays for that provider. Each provider has
   its own profile so several can be signed in at once on their own ports,
