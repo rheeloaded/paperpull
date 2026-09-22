@@ -1,12 +1,15 @@
 # Costco Receipts Downloader (local, supervised)
 
-**Written from a member's recording, not yet run against an account.**
-The first version of this file was guesswork off the public site. A
-member then signed in, pressed **Record**, and clicked through to two
-warehouse receipts and one online invoice, and this app is now written
-from that path. What remains untested is whether it walks the path
-correctly, which one **Pilot** run settles. The recording is on
+**Works against a real account.** Built from a member's recording and
+then run against their membership, where it found 34 purchases going
+back to July 2024 across ten quarters on both tabs, and saved warehouse
+receipts and online invoices as readable PDFs. The recording and the
+rounds are on
 [issue #47](https://github.com/rheeloaded/paperpull/issues/47).
+
+It has been run by one person on one membership, so it is new rather
+than proven. If you have a Costco card, a **Pilot** run and a word about
+what it got wrong is worth a lot.
 
 Downloads your Costco purchase history and saves each purchase's receipt
 as a PDF, plus two CSV files, one row per line item and one row per
@@ -65,7 +68,9 @@ tabs does not navigate, it asks the API and redraws.
 **How far back you can see is a picker labelled "Showing"**, holding
 quarters rather than years, "2026 April - June" and so on, opening on
 "Last 3 Months". So a run that never touches it sees a quarter at most.
-This app walks the quarters.
+This app walks the quarters, and on the account it was built against
+that was ten of them, back to January 2024. A quarter holds ten rows at
+a time.
 
 **A warehouse receipt is a dialog.** "View Receipt" opens it on the same
 page, with no navigation and no address of its own, and the dialog
@@ -116,15 +121,23 @@ changes.
 
 ## What is still open
 
-- Whether a warehouse receipt renders to a readable PDF. The dialog
-  keeps its own scroll, so the isolation lets it grow to full height
-  first, and nobody has looked at the result yet.
-- How far back the quarters go, and whether Costco drops the oldest.
-- Whether the gas station and the car wash appear as their own rows or
-  inside a warehouse receipt.
-- Costco's own words for the kinds of purchase. The table in
-  `costco_site.py` is generous on purpose so a near miss still files
-  correctly.
+- **One membership, one person.** Everything here held on that account.
+  A second one is the next thing this needs.
+- **Whether a quarter ever holds more than ten rows**, and if it does,
+  how you ask for the eleventh. Nothing on that account went over ten,
+  so there was nothing to find out from.
+- **The gas station and the car wash.** The API answers with counts for
+  both, so Costco tracks them apart, and no row for either turned up to
+  look at.
+- **What a returned or cancelled purchase looks like**, on either tab.
+- **The GraphQL queries.** Everything the page does goes through one
+  endpoint, and a recording keeps the shape of an answer and never a
+  value, so the query text is not known. Reading the page works and is
+  slower than asking the API would be.
+- **Classification is best effort.** Costco's till prints short names
+  and 113 of them are in `category_rules.json` now. Anything it does not
+  recognise is filed as "Mixed Purchases", which is a true description
+  of most Costco trips and not an error.
 
 ## In-warehouse and online
 

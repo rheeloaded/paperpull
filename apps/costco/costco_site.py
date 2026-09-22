@@ -396,7 +396,7 @@ def is_safe_control(name: str) -> bool:
 # The purchase history, read through the page's own API
 # ---------------------------------------------------------------------------
 
-def goto_orders(page, page_no: int = 1) -> None:
+def goto_orders(page, page_no: int = 1, fresh: bool = False) -> None:
     """Open Orders & Purchases and wait for the tabs to exist.
 
     Both routes under /myaccount/ differ only after the "#", so going
@@ -410,7 +410,7 @@ def goto_orders(page, page_no: int = 1) -> None:
     So the address is set first and the page is then reloaded for real
     if the tabs do not turn up, which is the one thing a hash cannot
     do on its own."""
-    if on_orders_page(page) and has_tabs(page):
+    if on_orders_page(page) and has_tabs(page) and not fresh:
         return
     for attempt in (1, 2):
         try:
@@ -936,9 +936,17 @@ def open_warehouse_receipt(page, purchase: Purchase) -> None:
     A warehouse receipt has no address, so there is nothing to navigate
     to and the row has to be found the way a person finds it. Back to the
     tab, forward to the quarter the date falls in, then the row whose
-    date and total are this purchase's."""
+    date and total are this purchase's.
+
+    Always on a freshly loaded page. Saving the one before it hid every
+    element on this page except the dialog, because that is what makes a
+    printable receipt out of a modal sitting on top of a shop, and
+    nothing puts them back. The list was still in the document and none
+    of it could be clicked, so the first receipt of a run worked and
+    every one after it failed to open. A live run found that twice
+    before the cause was clear."""
     close_dialog(page)
-    goto_orders(page)
+    goto_orders(page, fresh=True)
     if not open_tab(page, TAB_WAREHOUSE):
         raise RuntimeError("could not open the Warehouse tab")
     log.debug("Back on the Warehouse tab, looking for %s", purchase.purchase_date)
