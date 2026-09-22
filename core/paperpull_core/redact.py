@@ -106,3 +106,45 @@ def redact(text: str) -> str:
     for word in _PRIVATE_WORDS:
         text = re.sub(re.escape(word), "[name]", text, flags=re.I)
     return _ID_RE.sub(lambda m: "#" * len(m.group(0)), text)
+
+# ---------------------------------------------------------------------------
+# Values, for the parts of a diagnostic file that describe a request
+# ---------------------------------------------------------------------------
+# A survey and a recording both want to say what a provider's API was
+# asked and what came back, without carrying any of the answer. These say
+# it as names and shapes. Seventeen apps had their own copy of the first
+# of these and eleven had the other two.
+
+_WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
+
+
+def plain_word(v: str) -> bool:
+    '''"STATEMENT", "LAST_90_DAYS", not an id, a token or a number.'''
+    return bool(_WORD_VALUE_RE.match(v or "")) and sum(ch.isdigit() for ch in v) <= 3
+
+
+def safe_query(url: str) -> str:
+    """A URL's query parameters, names always, values only when they are
+    plain words ("docType=STATEMENT", "range=LAST_90_DAYS"). A value with
+    a digit, a token, an id, anything long, is "...". This is what a
+    repair needs to make the same call with a wider filter, and nothing
+    else."""
+    from urllib.parse import urlsplit, parse_qsl
+    try:
+        pairs = parse_qsl(urlsplit(url or "").query, keep_blank_values=True)
+    except ValueError:
+        return ""
+    return "&".join("%s=%s" % (k[:30], v if plain_word(v) else "...")
+                    for k, v in pairs[:20])
+
+
+def shape_of(obj, depth: int = 0):
+    """The shape of a JSON body, never its values. Keys are the signal, a
+    balance is not."""
+    if depth > 3:
+        return "..."
+    if isinstance(obj, dict):
+        return {k: shape_of(v, depth + 1) for k, v in list(obj.items())[:25]}
+    if isinstance(obj, list):
+        return ["list of %d" % len(obj), shape_of(obj[0], depth + 1) if obj else None]
+    return type(obj).__name__
