@@ -9,6 +9,7 @@ open one are guesses, marked GUESS in `costco_site.py`.
 
 **If you shop at Costco, you can fix that in one sitting and without
 writing any code.** See [Help test it](#help-test-it-no-programming-needed).
+The conversation is [issue #47](https://github.com/rheeloaded/paperpull/issues/47).
 
 Downloads your Costco purchase history and saves each purchase's receipt
 as a PDF, plus two CSV files, one row per line item and one row per
@@ -47,9 +48,12 @@ contributed to anything, is
 6. Open each file in Notepad and read it through. The recording ends by
    printing anything worth a second look. Delete any line you do not like
    the look of.
-7. Attach both to the Costco issue with a sentence about whether
-   warehouse receipts and online orders are on the same page or behind
-   separate tabs, and how far back the list goes.
+7. Attach both to [issue #47](https://github.com/rheeloaded/paperpull/issues/47)
+   with a sentence about whether warehouse receipts and online orders are
+   on the same page or behind separate tabs, and how far back the list
+   goes. Do not attach a screenshot of a receipt. Those carry your
+   membership number and the card tail, and the recording deliberately
+   does not.
 8. When a new build is posted, click **Pilot** and say whether PDFs
    landed in `In-Warehouse\` or `Online\`.
 
