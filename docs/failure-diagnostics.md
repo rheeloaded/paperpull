@@ -145,11 +145,23 @@ after three.
 - Judgement about whether a saved PDF is the *right* document, which
   needs a person to look at it
 
-## Where it would live
+## Where it lives
 
-In `paperpull_core`, called by the orchestrator on any failed step, with
-each app contributing its own `FALLBACK` dictionary and nothing else.
-Thirty-seven of the forty-eight apps already declare one, 362 selectors
-between them, so the census costs almost nothing to turn on across all
-of them. The other eleven drive an API rather than a page and need a
-different census, most likely the request that failed and its status.
+Built. `core/paperpull_core/failure.py`, called by every one of the 48
+apps at the point each already knows it has given up, with each app
+contributing its own `FALLBACK` dictionary and nothing else. One file
+per run, taken at the first failure while the page is still sitting on
+it.
+
+Proved against the live Costco page with the selectors exactly as they
+were wrong on day one. It named the Playwright-dialect selector, named
+the engine-prefix one, and reported the hidden Bootstrap modal as
+`matched 1, visible 0, div.modal fade, box [0, 0]`, with the reading
+underneath saying a framework leaving a hidden copy of a dialog in the
+markup looks exactly like that. Four kilobytes, no emails, no amounts,
+no names, nothing personal in it.
+Thirty-seven of the forty-eight apps declare one, 362 selectors between
+them. The other eleven drive an API rather than a page, so their census
+comes back empty and the rest of the file, the page state and the text
+it was reading, still applies. A census of the request that failed and
+its status is what those eleven want, and is not built yet.
