@@ -960,6 +960,16 @@ class App:
 
     # -- run summary --------------------------------------------------------
 
+    def cmd_record(self):
+        """Record the path a person takes to a receipt, so this app can be
+        written or repaired to take the same one. Downloads nothing, and
+        captures no keystroke. The whole thing is in the core."""
+        self.stats["mode"] = "record"
+        from paperpull_core.recorder import record_session
+        record_session(self.page(), site, self.paths.diagnostics,
+                       provider='Walmart',
+                       owner=self.config.get("owner", ""))
+
     def write_run_summary(self):
         s = self.stats
         s["ended"] = now_iso()
@@ -1020,6 +1030,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("verify", "re-validate every indexed PDF"),
         ("review-names", "interactively fix low-confidence names"),
         ("diagnose", "inspect one purchase per section, write diagnostics"),
+        ("record", "record your own path to a receipt, so this app can be repaired"),
     ]
     for name, help_text in modes:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)
@@ -1076,6 +1087,8 @@ def main(argv=None):
             app.cmd_verify()
         elif getattr(args, "review_names"):
             app.cmd_review_names()
+        elif args.record:
+            app.cmd_record()
         elif args.diagnose:
             app.cmd_diagnose()
         elif args.dry_run:

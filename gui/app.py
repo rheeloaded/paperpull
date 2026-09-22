@@ -173,11 +173,16 @@ ACTIONS = {
     # nothing. It is how a provider built without an account gets tested by
     # someone who has one, and how a broken one gets repaired.
     "diagnose": {"label": "Diagnose", "flags": ["--diagnose"]},
+    # Watches one signed-in page while the person clicks their way to a
+    # document, and writes what they did to Diagnostics. Downloads nothing
+    # and captures no keystroke. It is the one-round version of Diagnose:
+    # a survey guesses which control matters, a recording knows.
+    "record": {"label": "Record", "flags": ["--record"]},
 }
 # The actions for when something is off, kept behind a "more" link so the
 # main panel stays the four a normal day needs. Verify re-checks saved PDFs,
 # Diagnose surveys the page. Both are harmless and both are rarely wanted.
-MORE_ACTIONS = ("verify", "diagnose")
+MORE_ACTIONS = ("verify", "diagnose", "record")
 ENTRY_RE = re.compile(r".*_(receipts|docs)\.py$")
 
 # Every app takes the same three scope flags. The panel passes them through
@@ -997,6 +1002,44 @@ async def api_account(request: Request):
             "owner": cfg.get("owner", "")}
 
 
+# -- stopping a recording -----------------------------------------------------
+
+def _diagnostics_of(meta: dict) -> Path:
+    """An app's Diagnostics folder, wherever its config sends output."""
+    app_dir = Path(meta["dir"])
+    out = ""
+    try:
+        cfg = json.loads((app_dir / "config.json").read_text(encoding="utf-8-sig"))
+        out = str(cfg.get("output_dir") or "")
+    except (OSError, ValueError):
+        pass
+    base = Path(out).expanduser() if out else app_dir
+    if not base.is_absolute():
+        base = (app_dir / base)
+    return base / "Diagnostics"
+
+
+@app.post("/api/record/stop", dependencies=[Depends(_same_origin_only)])
+async def api_record_stop(request: Request):
+    """End a recording that is waiting on us.
+
+    A recording has no natural end, so the app waits. At a console it
+    waits on Enter. Started from here its input is closed, so it watches
+    for this file instead. Writing it is the Stop button."""
+    body = await request.json()
+    name = str((body or {}).get("app") or "")
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "unknown app")
+    target = _diagnostics_of(apps[name])
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        (target / ".stop-recording").write_text("stop\n", encoding="utf-8")
+    except OSError as e:
+        raise HTTPException(500, "could not signal the recording: %s" % e)
+    return {"app": name, "stopping": True}
+
+
 # -- removing a provider ------------------------------------------------------
 #
 # The one action in this panel that could destroy something, so it does not.
@@ -1324,6 +1367,8 @@ HTML = r"""<!doctype html>
     </div>
     <p class="hint" id="scopehint" style="margin-top:8px"></p>
     <div class="actions" id="actions"></div>
+    <button id="stoprec" class="primary" style="display:none;margin-top:8px"
+            onclick="stopRecording()">Stop recording</button>
     <p class="morelink"><a href="#" id="morelink" onclick="toggleMore(); return false;">more</a></p>
     <div id="morebox" style="display:none">
       <div class="actions more" id="moreactions"></div>
@@ -1781,8 +1826,10 @@ function run(action) {
   setStatus('run', `running ${action} on ${app} / ${account}${scoped}`);
   // Only the buttons this run locked are unlocked at the end. The Spreadsheet
   // tab's build buttons stay disabled when there is nothing to build from.
-  document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl):not(:disabled)')
+  document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl):not(#stoprec):not(:disabled)')
     .forEach(b => { b.disabled = true; b.dataset.runlock = '1'; });
+  // A recording waits for the person, so it needs a way to say when.
+  $('stoprec').style.display = (action === 'record') ? 'block' : 'none';
   es = new EventSource(`/api/run?${q.toString()}`);
   const con = $('console');
   let result = null;
@@ -1803,10 +1850,21 @@ function run(action) {
     } else {
       setStatus('warn', 'finished, check output (no run summary)');
     }
+    $('stoprec').style.display = 'none';
     unlockButtons();
     es.close(); es = null;
   });
-  es.onerror = () => { if (es) { setStatus('err','connection lost'); unlockButtons(); es.close(); es=null; } };
+  es.onerror = () => { if (es) { setStatus('err','connection lost'); $('stoprec').style.display = 'none'; unlockButtons(); es.close(); es=null; } };
+}
+async function stopRecording() {
+  const b = $('stoprec');
+  b.disabled = true; b.textContent = 'Stopping...';
+  try {
+    await fetch('/api/record/stop', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app: $('app').value }) });
+  } catch (e) {}
+  b.disabled = false; b.textContent = 'Stop recording';
 }
 function unlockButtons() {
   document.querySelectorAll('button[data-runlock]').forEach(b => { b.disabled = false; delete b.dataset.runlock; });
