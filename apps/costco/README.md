@@ -1,15 +1,12 @@
 # Costco Receipts Downloader (local, supervised)
 
-**Untested, and built without a Costco account.** Everything this app
-believes about a signed-in Costco page is a guess made from the public
-site. The sign-in, the address of the orders page and the fact that
-Costco runs a bot check were all read off the live site and are real.
-Where a purchase sits on that page, what a receipt looks like and how to
-open one are guesses, marked GUESS in `costco_site.py`.
-
-**If you shop at Costco, you can fix that in one sitting and without
-writing any code.** See [Help test it](#help-test-it-no-programming-needed).
-The conversation is [issue #47](https://github.com/rheeloaded/paperpull/issues/47).
+**Written from a member's recording, not yet run against an account.**
+The first version of this file was guesswork off the public site. A
+member then signed in, pressed **Record**, and clicked through to two
+warehouse receipts and one online invoice, and this app is now written
+from that path. What remains untested is whether it walks the path
+correctly, which one **Pilot** run settles. The recording is on
+[issue #47](https://github.com/rheeloaded/paperpull/issues/47).
 
 Downloads your Costco purchase history and saves each purchase's receipt
 as a PDF, plus two CSV files, one row per line item and one row per
@@ -36,33 +33,67 @@ contributed to anything, is
 3. Click **Login**. Your own Edge or Chrome opens with a separate
    profile. Sign in to costco.com yourself, answer any code it sends, and
    leave the window open.
-4. Click **more** under the buttons, then **Record**. Go back to the
-   browser and click your way to one receipt the way you normally would,
-   an in-warehouse one if you have it, then come back and click **Stop
-   recording**. It writes `Diagnostics\recording.json`, the path you
-   actually took. It records nothing you type, reads no cookies, and
-   refuses to start before you are signed in.
-5. Click **Diagnose** as well. That writes
-   `Diagnostics\diagnose-costco.json`, what the app sees on the page,
-   which says what this app got wrong.
-6. Open each file in Notepad and read it through. The recording ends by
-   printing anything worth a second look. Delete any line you do not like
-   the look of.
+4. Click **Pilot**. It takes the newest few from each tab. Say whether
+   PDFs landed in `In-Warehouse\` and `Online\`, and whether they are
+   readable, which is the one thing nobody has checked yet.
+5. If anything is wrong, click **more**, then **Diagnose**, and attach
+   that file. It says what the app sees on both tabs. A fresh **Record**
+   helps too, if the path it takes has changed.
+6. Read any file through before you attach it. A recording ends by
+   printing anything worth a second look. Delete any line you do not
+   like.
 7. Attach both to [issue #47](https://github.com/rheeloaded/paperpull/issues/47)
    with a sentence about whether warehouse receipts and online orders are
    on the same page or behind separate tabs, and how far back the list
    goes. Do not attach a screenshot of a receipt. Those carry your
    membership number and the card tail, and the recording deliberately
    does not.
-8. When a new build is posted, click **Pilot** and say whether PDFs
-   landed in `In-Warehouse\` or `Online\`.
+One recording was enough to write this. A survey on its own takes two
+or three rounds, and once took nine.
 
-One recording is usually enough. A survey on its own takes two or three
-rounds, and once took nine.
+## How Costco is put together
 
-## What was actually verified, and when
+Everything here was seen on a signed-in account on 2026-09-22.
 
-Read off the live public site on 2026-09-22, signed out.
+**Orders & Purchases is one page with two tabs**, and they are two
+different things behind one heading. **Warehouse** is what was bought at
+a warehouse, including the gas station and the car wash, and it is the
+half nobody else can get at, because Costco keeps it for a matter of
+months and the paper fades. **Online** is costco.com orders. Switching
+tabs does not navigate, it asks the API and redraws.
+
+**How far back you can see is a picker labelled "Showing"**, holding
+quarters rather than years, "2026 April - June" and so on, opening on
+"Last 3 Months". So a run that never touches it sees a quarter at most.
+This app walks the quarters.
+
+**A warehouse receipt is a dialog.** "View Receipt" opens it on the same
+page, with no navigation and no address of its own, and the dialog
+carries a "Print Receipt" link and a "Close" button. Because it has no
+address, a receipt here is identified by what its row shows, the date,
+the total and the warehouse. Two receipts from the same warehouse on the
+same day for the same amount would collide, which is the cost of a list
+that carries no identifier.
+
+**An online order is two links.** "View Order Details" goes to
+`/myaccount/#/app/<client id>/orderdetails/<order number>`, and that page
+carries a "Print Invoice" link to `/OrderDetailPrintView`, a plain
+printable page. This app reads both addresses and goes to them. It
+presses neither.
+
+**Neither print control is ever pressed.** Both call `window.print()`,
+which opens a dialog no program can answer or dismiss. The receipt is
+rendered with CDP printToPDF instead.
+
+**There is one API, and this app does not use it.** Everything goes
+through `https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql`,
+POSTed with a `query` and `variables`. A recording keeps the shape of an
+answer and never a value, so the query text is not known and this app
+does not guess at it. It drives the page the way the member did. If a
+later round brings the queries back, discovery is the only part that
+changes.
+
+## What was verified off the public site, signed out
 
 - **Orders and purchases** is
   `https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/ordersandpurchases`.
@@ -83,12 +114,14 @@ Read off the live public site on 2026-09-22, signed out.
 - **The old storefront is still mounted**, `OrderStatusCmd` and friends,
   kept as a second route to try when the new one gives nothing.
 
-## What is a guess
+## What is still open
 
-- Where purchases sit on the page, and what the link to one looks like.
-- Whether a receipt is a page, a PDF or a panel that opens in place.
-- Whether warehouse receipts and online orders share one list.
-- How far back Costco keeps either of them.
+- Whether a warehouse receipt renders to a readable PDF. The dialog
+  keeps its own scroll, so the isolation lets it grow to full height
+  first, and nobody has looked at the result yet.
+- How far back the quarters go, and whether Costco drops the oldest.
+- Whether the gas station and the car wash appear as their own rows or
+  inside a warehouse receipt.
 - Costco's own words for the kinds of purchase. The table in
   `costco_site.py` is generous on purpose so a near miss still files
   correctly.
@@ -127,14 +160,14 @@ paperpull costco pilot          REM once the site layer is confirmed
   `login.bat` launches the one already on the machine with a profile of
   its own.
 - **You sign in** in that window. The app reuses the signed-in tab.
-- **The purchase list is read off the page**, not fetched from an API,
-  because the bot sensor refuses a call this app makes itself. Every
-  link on the list that looks like one purchase becomes a record, and
-  the record carries the href the page itself drew rather than a URL
-  this app assembled.
-- **Each purchase is opened and rendered to PDF** with CDP printToPDF.
-  No button is clicked, the page's own Print button included, and the
-  native print dialog is never involved.
+- **Both tabs are read, quarter by quarter**, off the page rather than
+  from the API, for the reason above. A row's own words become the
+  record, and an online row carries the address the page itself drew.
+- **A warehouse receipt** is opened by pressing that row's View
+  Receipt, which is the only way in, and the dialog is rendered with CDP
+  printToPDF and then dismissed with Escape.
+- **An online order** is opened by address, twice, and nothing on either
+  page is pressed at all.
 - **Nothing is downloaded twice.** A purchase already in `progress.json`
   is skipped forever, even if you delete the PDF afterwards.
 

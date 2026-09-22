@@ -526,8 +526,11 @@ class App:
                 self.stats["manual_review"] += 1
                 return False
 
-        # Make sure we are on this purchase's receipt page.
-        if not site.on_receipt_page(page) or purchase.order_number not in (page.url or ""):
+        # Make sure this purchase's receipt is the one on screen. A
+        # warehouse receipt is a dialog with no address of its own, so
+        # there is no URL to check it against and the only question that
+        # can be asked is whether a receipt is up at all.
+        if not site.on_receipt_page(page):
             site.goto_receipt(page, purchase)
         site.scroll_full_page(page)
 
@@ -568,10 +571,11 @@ class App:
 
     def _capture_document(self, target_page, purchase: Purchase,
                           out_path: Path, content_kind: str = "") -> None:
-        """Render the Costco order-details receipt to PDF.
+        """Render the receipt on screen to PDF.
 
-        Costco ships NO print stylesheet, so printing the page as-is captures the
-        whole site (nav, promo banners, footer) across three cluttered pages.
+        A warehouse receipt is a dialog sitting on top of the whole site,
+        so printing the page as-is captures the nav, the banners and a
+        grey backdrop around a letterbox of receipt.
         site.isolate_receipt hides everything except the purchase-summary
         block first - a live-DOM display change only, discarded on the next
         navigation - which leaves a clean one-page receipt for CDP
