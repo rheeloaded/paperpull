@@ -132,6 +132,23 @@ def test_one_request_is_singular():
     assert rr.effects(step(effect={"requests": 1}))[0].endswith("1 request to the provider")
 
 
+def test_a_print_reads_as_an_effect():
+    out = rr.effects(step(effect={"printed": True}))
+    assert out == ["the page asked the browser to print"]
+
+
+def test_a_printed_receipt_tells_the_maintainer_how_to_save_it():
+    """The single most useful thing to know about a receipt page."""
+    r = report(steps=[step(effect={"printed": True, "requests": 0})])
+    said = " ".join(rr.notes(r))
+    assert "printToPDF" in said
+    assert "never press the site's own Print button" in said
+
+
+def test_a_recording_with_no_print_does_not_say_that():
+    assert not any("printToPDF" in n for n in rr.notes(report()))
+
+
 def test_a_step_with_no_effect_key_says_nothing():
     assert rr.effects({"action": "click"}) == []
 

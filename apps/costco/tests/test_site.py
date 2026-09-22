@@ -163,10 +163,21 @@ def test_nothing_that_spends_renews_returns_or_prints_is_safe():
 
 
 def test_the_controls_that_only_look_at_a_purchase_are_safe():
+    """The last four came off a signed-in account. The first recording
+    refused both of the nav links because this list had guessed at the
+    wording, so everything here is now what Costco actually writes."""
     for name in ("View Receipt", "View Order Details", "Order Details",
                  "Purchase History", "Orders & Purchases", "In-Warehouse",
-                 "Online Orders", "View More", "Next Page"):
+                 "Online Orders", "View More", "Next Page",
+                 "Orders & Returns", "Online", "Last 3 Months", "Showing"):
         assert site.is_safe_control(name), name
+
+
+def test_print_receipt_is_still_refused_even_though_it_is_the_right_control():
+    """Costco's receipt really is printed, and the app renders it with
+    printToPDF rather than pressing this. Pressing it opens a dialog the
+    app cannot answer and cannot close."""
+    assert not site.is_safe_control("Print Receipt")
 
 
 def test_a_control_with_no_name_is_never_safe():

@@ -48,6 +48,7 @@ class FakePage:
         self.handlers = {}
         self.bindings = {}
         self.evaluated = []
+        self.init_scripts = []
         self.main_frame = FakeFrame(url)
         self.context = self
         self.removed = []
@@ -57,6 +58,14 @@ class FakePage:
 
     def expose_binding(self, name, fn):
         self.bindings[name] = fn
+
+    def add_init_script(self, script):
+        # Playwright runs this on every document the page loads from now
+        # on, which is the whole point of using it.
+        self.init_scripts.append(script)
+
+    def wait_for_timeout(self, ms):
+        pass
 
     def evaluate(self, script, arg=None):
         self.evaluated.append((script, arg))
@@ -429,16 +438,16 @@ def test_with_no_console_it_waits_for_the_panels_file_and_prints_no_prompt(tmp_p
     monkeypatch.setattr("builtins.input", asked)
     import threading
     threading.Timer(0.05, lambda: stop.write_text("stop", encoding="utf-8")).start()
-    mod._wait_for_stop(stop, said.append)
+    mod._wait_for_stop(FakePage(), stop, said.append)
     assert any("control panel" in s for s in said)
-    assert not any("Press Enter" in s for s in said)
+    assert not any("press Enter" in s.lower() for s in said)
 
 
 def test_with_a_console_it_waits_for_enter(tmp_path, monkeypatch):
     from paperpull_core import recorder as mod
     monkeypatch.setattr(mod, "can_ask", lambda: True)
     monkeypatch.setattr("builtins.input", lambda *a: "")
-    mod._wait_for_stop(tmp_path / "never-written", said := [].append)
+    mod._wait_for_stop(FakePage(), tmp_path / "never-written", said := [].append)
     assert not any("control panel" in s for s in said.__self__)
 
 
@@ -454,7 +463,7 @@ def test_a_console_that_turns_out_not_to_be_one_falls_back(tmp_path, monkeypatch
     stop = tmp_path / ".stop-recording"
     stop.write_text("stop", encoding="utf-8")
     said = []
-    mod._wait_for_stop(stop, said.append)
+    mod._wait_for_stop(FakePage(), stop, said.append)
     assert any("control panel" in s for s in said)
 
 
@@ -520,7 +529,7 @@ def _session(tmp_path, monkeypatch, owner):
     """One whole record_session, with the wait for the person skipped."""
     import types
     from paperpull_core import recorder as mod
-    monkeypatch.setattr(mod, "_wait_for_stop", lambda stop, say: None)
+    monkeypatch.setattr(mod, "_wait_for_stop", lambda page, stop, say: None)
     said = []
     site = types.SimpleNamespace(is_safe_url=safe, looks_signed_out=lambda p: False)
     out = mod.record_session(FakePage(), site, tmp_path, provider="Bank",
@@ -569,7 +578,7 @@ def test_a_stale_stop_file_does_not_end_the_next_recording_at_once(tmp_path, mon
     (tmp_path / ".stop-recording").write_text("stale", encoding="utf-8")
     seen = {}
 
-    def wait(stop, say):
+    def wait(page, stop, say):
         seen["existed_when_waiting"] = stop.exists()
 
     monkeypatch.setattr(mod, "_wait_for_stop", wait)
@@ -901,3 +910,87 @@ def test_record_session_switches_and_says_so(tmp_path):
     assert "fronted" in said
     # and the step it recorded came from the person's tab, not the blank one
     assert json.loads(Path(out).read_text(encoding="utf-8"))["steps"]
+
+# ---------------------------------------------------------------------------
+# Surviving a navigation, and the print button
+#
+# The first real recording, against Costco, caught two clicks and then
+# sixty-six seconds of nothing, because the first click navigated. And the
+# site's Print Receipt did nothing at all while recording, because a
+# download run replaces window.print on the whole context.
+# ---------------------------------------------------------------------------
+
+def test_the_capture_is_armed_for_every_future_document():
+    """Putting it back when a navigation is noticed cannot work and did
+    not. A click that navigates takes the listeners with it, and the
+    notice arrives, if at all, after the next page is already up."""
+    page = FakePage()
+    Recorder(page, is_safe_url=safe).start()
+    assert page.init_scripts, "nothing was armed for the next document"
+    armed = page.init_scripts[0]
+    assert "addEventListener" in armed
+    assert "__ppRecorderPost" in armed, "the binding name was not baked in"
+
+
+def test_what_is_armed_is_the_same_script_that_is_installed_now():
+    page = FakePage()
+    Recorder(page, is_safe_url=safe).start()
+    assert "__ppRecorderInstalled" in page.init_scripts[0]
+    assert page.evaluated, "the document already here was not armed"
+
+
+def test_nothing_is_recorded_after_stop():
+    """An init script cannot be taken off a page, so a navigation after
+    Stop arms the new document too."""
+    r, page = rec()
+    page.fire({"action": "click", "at": 1, "label": "Statements",
+               "locator": {"how": "role", "role": "link", "name": "Statements"}})
+    r.stop()
+    page.fire({"action": "click", "at": 9999, "label": "Something after",
+               "locator": {"how": "role", "role": "link", "name": "After"}})
+    assert len(r.steps) == 1
+    assert r.steps[0]["locator"]["name"] == "Statements"
+
+
+def test_the_capture_script_puts_the_real_print_back():
+    """Every app replaces window.print on the whole context so a download
+    run can keep the print HTML. During a recording that makes the site's
+    own Print button do nothing at all."""
+    assert "__paperpullOriginalPrint" in _CAPTURE_JS
+    assert "realPrint.apply" in _CAPTURE_JS
+
+
+def test_a_print_is_an_effect_of_the_step_before_it():
+    """Nobody clicks "print". They click a control and the page prints."""
+    r, page = rec()
+    page.fire({"action": "click", "at": 1, "label": "Print Receipt",
+               "locator": {"how": "role", "role": "link", "name": "Print Receipt"}})
+    page.fire({"action": "print", "at": 2})
+    assert len(r.steps) == 1
+    assert r.steps[0]["effect"]["printed"] is True
+
+
+def test_a_print_before_any_step_is_counted_not_lost():
+    r, page = rec()
+    page.fire({"action": "print", "at": 1})
+    assert r.steps == []
+    assert r.dropped["print_without_step"] == 1
+
+
+def test_a_print_does_not_become_a_step_of_its_own():
+    r, page = rec()
+    page.fire({"action": "print", "at": 1})
+    page.fire({"action": "click", "at": 2, "label": "Close",
+               "locator": {"how": "role", "role": "button", "name": "Close"}})
+    assert [s["action"] for s in r.steps] == ["click"]
+
+
+def test_waiting_uses_the_browsers_timer_so_the_page_is_heard():
+    """Playwright's sync API dispatches what the page sends only while
+    this thread is inside a Playwright call. A thread parked in sleep()
+    hears no navigation and reads no response body."""
+    import inspect
+    from paperpull_core import recorder as mod
+    src = inspect.getsource(mod._wait_for_stop)
+    assert "page.wait_for_timeout" in src
+    assert "input()" in src and "threading.Thread" in src
