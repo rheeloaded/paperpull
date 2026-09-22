@@ -88,6 +88,12 @@ _NOT_A_CONTROL = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "span", "div",
 _MAX_STEPS = 400
 _MAX_REQUESTS = 300
 
+# Reading a response body is a round trip to the browser, and it happens
+# while the person is still clicking. A transaction list can be megabytes,
+# and its shape is the same as a small one's, so anything over this is
+# recorded as having been too large to read rather than fetched.
+_MAX_BODY_BYTES = 2_000_000
+
 
 # ---------------------------------------------------------------------------
 # What runs in the page
@@ -241,7 +247,8 @@ class Recorder:
         self.provider = provider
         self.steps: list = []
         self.requests: list = []
-        self.dropped = {"repeat": 0, "unresolved": 0, "off_host_request": 0}
+        self.dropped = {"repeat": 0, "unresolved": 0, "off_host_request": 0,
+                        "malformed": 0}
         self._binding = "__ppRecorderPost"
         self._started = False
         self._stopped = False
@@ -325,18 +332,32 @@ class Recorder:
     # -- what comes back from the page ------------------------------------
 
     def _on_event(self, source, record) -> None:
+        """Whatever the page sent. The binding is on `window`, so any
+        script on the provider's page can call it, not only the listener
+        installed above. Nothing here trusts a type or a length. An
+        exception raised in this handler would surface in the page and
+        lose the step, so the whole thing is guarded."""
+        try:
+            self._record_event(record)
+        except Exception:
+            self.dropped["malformed"] = self.dropped.get("malformed", 0) + 1
+
+    def _record_event(self, record) -> None:
         if not isinstance(record, dict) or len(self.steps) >= _MAX_STEPS:
             return
         action = str(record.get("action") or "")
         if action not in ("click", "select", "check", "fill", "submit"):
             return
-        loc = record.get("locator") or {}
+        loc = record.get("locator")
+        loc = loc if isinstance(loc, dict) else {}
         label = str(record.get("label") or "")
 
         # A click that landed on nothing nameable, or on a heading or a
         # paragraph, is the mouse wandering rather than a step.
         if action == "click" and loc.get("how") in ("unresolved", "text"):
-            if not label.strip() or str(record.get("tag") or "") in _NOT_A_CONTROL:
+            tag = record.get("tag")
+            tag = tag if isinstance(tag, str) else ""
+            if not label.strip() or tag in _NOT_A_CONTROL:
                 self.dropped["unresolved"] += 1
                 return
 
@@ -349,6 +370,8 @@ class Recorder:
         }
         if action == "select":
             step["option"] = redact(str(record.get("option") or ""))[:60]
+        if action == "select" and not step["option"]:
+            step["option"] = ""
         if action == "check":
             step["checked"] = bool(record.get("checked"))
         if action == "fill":
@@ -386,10 +409,13 @@ class Recorder:
             step["i"] = len(self.steps)
 
     def _clean_locator(self, loc: dict) -> dict:
-        out = {"how": str(loc.get("how") or "unresolved")}
+        """Every field coerced to a string and cut, because what the page
+        sent is not necessarily what the listener above would send."""
+        out = {"how": str(loc.get("how") or "unresolved")[:20]}
         for key in ("role", "name", "value", "tag"):
-            if loc.get(key):
-                out[key] = redact(str(loc[key]))[:80]
+            value = loc.get(key)
+            if value not in (None, "", [], {}):
+                out[key] = redact(str(value))[:80]
         return out
 
     def _is_repeat(self, step: dict) -> bool:
@@ -475,10 +501,18 @@ class Recorder:
             except Exception:
                 pass
             if "json" in kind:
+                size = 0
                 try:
-                    entry["shape"] = shape_of(response.json())
-                except Exception:
-                    entry["shape"] = "unreadable"
+                    size = int(response.headers.get("content-length") or 0)
+                except (TypeError, ValueError):
+                    size = 0
+                if size > _MAX_BODY_BYTES:
+                    entry["shape"] = "not read, %d bytes" % size
+                else:
+                    try:
+                        entry["shape"] = shape_of(response.json())
+                    except Exception:
+                        entry["shape"] = "unreadable"
             self.requests.append(entry)
             if step is not None:
                 step["effect"]["requests"] += 1
@@ -574,6 +608,15 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
         return None
 
     say(_CONSENT)
+    if not owner:
+        # The owner's name is what lets redaction remove it from a profile
+        # button or a heading. Without it a greeting is still caught, but a
+        # name standing on its own is not, so say so rather than imply a
+        # cover that is not there.
+        say("No account holder name is set in this app's config, so a name"
+            " shown on its own, on a profile button say, cannot be removed"
+            " for you. Look for one when you read the file.")
+        say("")
     rec.start()
     stop_file = Path(diagnostics_dir) / ".stop-recording"
     try:
