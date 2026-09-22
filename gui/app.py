@@ -712,7 +712,7 @@ def list_providers() -> list:
     return out
 
 
-def create_install(root: Path, slug: str) -> str:
+def create_install(root: Path, slug: str, owner: str = "") -> str:
     """Make one install from its template. Returns "created" or "exists".
     Never overwrites, because an existing folder may hold years of history."""
     tmpl_root = _templates_root()
@@ -753,7 +753,27 @@ def create_install(root: Path, slug: str) -> str:
         # profile_dir are relative to the install folder, and its port is
         # already unique to this app.
         shutil.copy2(example, dst / "config.json")
+    if owner:
+        _set_owner(dst / "config.json", owner)
     return "created"
+
+
+def _set_owner(config: Path, owner: str) -> None:
+    """The account holder's name, written once when the install is made.
+
+    An app asks for this on its first run at a console. Started from this
+    panel its stdin is closed, so it cannot ask and the name stays empty,
+    and an empty name is the one thing that stops redaction taking a
+    person's name out of a survey or a recording. So it is asked for
+    here, where somebody is looking at a screen."""
+    try:
+        data = json.loads(config.read_text(encoding="utf-8-sig"))
+        if not isinstance(data, dict):
+            return
+        data["owner"] = owner[:80]
+        config.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except (OSError, ValueError):
+        pass
 
 
 def _template_files(src: Path):
@@ -804,27 +824,71 @@ def refresh_install_code(dst: Path, src: Path) -> list:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(item, target)
         replaced.append(str(rel))
-    # A checkout install carries its own copy of the shared core inside its
-    # venv, and an entry script written against a newer core than that copy
-    # dies on Login over a keyword the copy never heard of. The package has
-    # no venv, its interpreter carries the core, so there is nothing to do.
-    core_src = HERE.parent / "core" / "paperpull_core"
-    if core_src.is_dir() and (dst / ".venv").is_dir():
-        for init in (dst / ".venv").rglob("paperpull_core/__init__.py"):
-            pkg = init.parent
-            for item in sorted(core_src.glob("*.py")):
-                target = pkg / item.name
-                new = item.read_bytes()
-                if target.is_file() and target.read_bytes() == new:
-                    continue
-                if target.is_file():
-                    bak = dst / "Backups" / ("code-" + stamp) / "paperpull_core" / item.name
-                    bak.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(target, bak)
-                shutil.copy2(item, target)
-                replaced.append("paperpull_core/" + item.name)
-            break
+    replaced.extend(ensure_core(dst, stamp))
     return replaced
+
+
+def _site_packages(venv: Path):
+    """Where a venv keeps its packages, on either platform."""
+    for rel in ("Lib/site-packages", "lib/site-packages"):
+        d = venv / rel
+        if d.is_dir():
+            return d
+    for d in sorted(venv.glob("lib/python*/site-packages")):
+        if d.is_dir():
+            return d
+    return None
+
+
+def ensure_core(dst: Path, stamp: str = "") -> list:
+    """The shared core inside one checkout install's venv, current.
+
+    A checkout install carries its own copy of paperpull_core, and an
+    entry script written against a newer core than that copy dies on
+    Login over a keyword the copy never heard of. The package has no
+    venv, its interpreter carries the core, so there is nothing to do.
+
+    It also SEEDS the copy when there is none, which is the case for
+    every provider added from this panel. setup.bat installs the core
+    from the repo two folders up when the install sits inside it, or
+    from a wheel the packaged build ships. An install made here has
+    neither,
+    so setup finished cleanly and left a venv that could not import
+    anything. Found by adding Costco and running it."""
+    core_src = HERE.parent / "core" / "paperpull_core"
+    venv = dst / ".venv"
+    if not core_src.is_dir() or not venv.is_dir():
+        return []
+    stamp = stamp or datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    pkg = None
+    for init in venv.rglob("paperpull_core/__init__.py"):
+        pkg = init.parent
+        break
+    if pkg is None:
+        site = _site_packages(venv)
+        if site is None:
+            return []
+        pkg = site / "paperpull_core"
+        try:
+            pkg.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return []
+    out = []
+    for item in sorted(core_src.glob("*.py")):
+        target = pkg / item.name
+        new = item.read_bytes()
+        try:
+            if target.is_file() and target.read_bytes() == new:
+                continue
+            if target.is_file():
+                bak = dst / "Backups" / ("code-" + stamp) / "paperpull_core" / item.name
+                bak.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, bak)
+            shutil.copy2(item, target)
+        except OSError:
+            continue
+        out.append("paperpull_core/" + item.name)
+    return out
 
 
 _REFRESHED_ROOTS: set = set()
@@ -837,12 +901,13 @@ def refresh_installs(force: bool = False) -> dict:
     script's name, so a renamed folder still gets its provider's code."""
     root = apps_root()
     key = str(root)
+    seeded = _seed_missing_cores(root)
     if key in _REFRESHED_ROOTS and not force:
-        return {}
+        return seeded
     _REFRESHED_ROOTS.add(key)
     tmpl_root = _templates_root()
     if tmpl_root is None or not root.is_dir():
-        return {}
+        return seeded
     by_entry = {}
     for d in tmpl_root.iterdir():
         if d.is_dir():
@@ -862,7 +927,34 @@ def refresh_installs(force: bool = False) -> dict:
         except OSError:
             continue
         if changed:
-            out[d.name] = changed
+            out.setdefault(d.name, []).extend(changed)
+    return out
+
+
+def _seed_missing_cores(root: Path) -> dict:
+    """Any install whose venv has no core yet, given one.
+
+    Cheap enough to do on every call, unlike the file sweep above, and it
+    has to be, because setup.bat is run after the panel has already
+    started and a memo would leave the answer a restart away."""
+    out = {}
+    if not root.is_dir():
+        return out
+    try:
+        installs = sorted(root.iterdir())
+    except OSError:
+        return out
+    for d in installs:
+        if not d.is_dir() or d.name in _RUNNING or not _entry_script(d):
+            continue
+        venv = d / ".venv"
+        if not venv.is_dir():
+            continue
+        if any(True for _ in venv.rglob("paperpull_core/__init__.py")):
+            continue
+        made = ensure_core(d)
+        if made:
+            out[d.name] = made
     return out
 
 
@@ -892,6 +984,7 @@ async def api_create(request: Request):
     except Exception:
         raise HTTPException(400, "expected a JSON body")
     raw = str((body or {}).get("root") or "").strip().strip('"')
+    owner = str((body or {}).get("owner") or "").strip()[:80]
     slugs = (body or {}).get("providers") or []
     if not raw:
         raise HTTPException(400, "no folder given")
@@ -910,7 +1003,7 @@ async def api_create(request: Request):
     for slug in slugs:
         if not isinstance(slug, str):
             continue
-        result = create_install(root, slug)
+        result = create_install(root, slug, owner=owner)
         (created if result == "created" else existed).append(slug)
 
     data = _read_settings()
@@ -922,7 +1015,7 @@ async def api_create(request: Request):
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"root": str(root.resolve()), "created": created, "existed": existed,
-            "apps": _looks_like_installs(root)}
+            "owner": owner, "apps": _looks_like_installs(root)}
 
 
 # -- a second person's account ------------------------------------------------
@@ -1495,12 +1588,21 @@ async function createInstalls() {
   $('newmsg').textContent = '';
   if (!root) { $('newmsg').textContent = 'choose a folder first'; return; }
   if (!picked.length) { $('newmsg').textContent = 'tick at least one provider'; return; }
+  // Asked here because an app started from this panel has no stdin to
+  // ask on, and without it redaction cannot take this person's name out
+  // of a survey or a recording.
+  const owner = (prompt(
+    'Whose documents are these?\n\n' +
+    'The name on the account, as the provider writes it. It never leaves ' +
+    'this computer. It is what lets PaperPull remove your name from a file ' +
+    'before you send it to anyone.\n\n' +
+    'Leave it blank to skip.') || '').trim();
   $('newmsg').textContent = 'setting up...';
   let r;
   try {
     r = await fetch('/api/create', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({root, providers: picked})});
+      body: JSON.stringify({root, providers: picked, owner})});
   } catch (e) { $('newmsg').textContent = 'could not reach the control panel'; return; }
   const d = await r.json();
   if (!r.ok) { $('newmsg').textContent = d.detail || 'that did not work'; return; }
@@ -1509,6 +1611,8 @@ async function createInstalls() {
   const n = d.created.length;
   $('console').textContent =
     'Set up ' + n + ' provider' + (n === 1 ? '' : 's') + ' under\n' + d.root +
+    (d.owner ? '\nDocuments will be filed under ' + d.owner + '.' :
+     '\nNo name was given, so nothing can be removed from a file for you.') +
     '\n\nNext: pick one above, click Login, and sign in when the browser opens.';
 }
 
