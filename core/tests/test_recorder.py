@@ -15,7 +15,8 @@ from pathlib import Path
 
 import pytest
 from paperpull_core.recorder import (REDACTED, Recorder, _CAPTURE_JS,
-                                    concerns, record_session)
+                                    concerns, page_to_watch,
+                                    record_session)
 from paperpull_core.redact import set_private_words
 
 CORE = Path(__file__).resolve().parents[1] / "paperpull_core"
@@ -123,7 +124,7 @@ def test_a_page_off_the_providers_site_refuses_the_recording():
 
 def test_an_app_that_says_signed_out_refuses_the_recording():
     r = Recorder(FakePage(), is_safe_url=safe, looks_signed_out=lambda p: True)
-    assert "sign in first" in r.refusal()
+    assert "not signed in yet" in r.refusal()
     with pytest.raises(RuntimeError):
         r.start()
 
@@ -768,3 +769,135 @@ def test_a_clean_recording_does_not_warn_the_tester(tmp_path):
     record_session(page, Site, tmp_path, provider="Testco", owner="",
                    say=said.append)
     assert "Before this file goes anywhere" not in " ".join(said)
+
+# ---------------------------------------------------------------------------
+# Which tab a recording watches
+#
+# Found by running --record against a real provider rather than by a test.
+# An app that attaches to a running browser hands out a FRESH page in the
+# signed-in context, which is right for a download run and useless for a
+# recording, and every recording refused with "this is not a page on the
+# provider's own site" while the person stared at the tab that was.
+# ---------------------------------------------------------------------------
+
+class _Tab:
+    def __init__(self, url, context=None):
+        self.url = url
+        self.context = context
+        self.fronted = False
+
+    def is_closed(self):
+        return False
+
+    def bring_to_front(self):
+        self.fronted = True
+
+
+class _Ctx:
+    def __init__(self, *tabs):
+        self.pages = list(tabs)
+        for tab in tabs:
+            tab.context = self
+
+
+def test_a_blank_work_page_gives_way_to_the_providers_tab():
+    blank = _Tab("about:blank")
+    theirs = _Tab("https://bank.example/documents")
+    _Ctx(theirs, blank)
+    assert page_to_watch(blank, safe) is theirs
+
+
+def test_a_page_already_on_the_provider_is_kept():
+    theirs = _Tab("https://bank.example/documents")
+    other = _Tab("https://bank.example/help")
+    _Ctx(theirs, other)
+    assert page_to_watch(theirs, safe) is theirs
+
+
+def test_the_most_recently_opened_provider_tab_wins():
+    """Two tabs on the provider means the person opened a second one, and
+    the second one is where they are."""
+    blank = _Tab("about:blank")
+    first = _Tab("https://bank.example/home")
+    second = _Tab("https://bank.example/statements")
+    _Ctx(first, second, blank)
+    assert page_to_watch(blank, safe) is second
+
+
+def test_with_no_provider_tab_the_given_page_is_kept():
+    """So the refusal describes the situation honestly rather than
+    pointing at somebody's unrelated tab."""
+    blank = _Tab("about:blank")
+    elsewhere = _Tab("https://example.test/news")
+    _Ctx(elsewhere, blank)
+    assert page_to_watch(blank, safe) is blank
+
+
+def test_a_closed_tab_is_not_chosen():
+    blank = _Tab("about:blank")
+    gone = _Tab("https://bank.example/statements")
+    gone.is_closed = lambda: True
+    _Ctx(gone, blank)
+    assert page_to_watch(blank, safe) is blank
+
+
+def test_a_context_that_cannot_be_read_does_not_raise():
+    class _Broken:
+        url = "about:blank"
+
+        @property
+        def context(self):
+            raise RuntimeError("detached")
+
+    p = _Broken()
+    assert page_to_watch(p, safe) is p
+
+
+def test_a_tab_whose_url_raises_is_skipped_not_fatal():
+    class _Odd(_Tab):
+        @property
+        def url(self):
+            raise RuntimeError("gone")
+
+        @url.setter
+        def url(self, v):
+            pass
+
+    blank = _Tab("about:blank")
+    odd = _Odd("x")
+    good = _Tab("https://bank.example/statements")
+    _Ctx(odd, good, blank)
+    assert page_to_watch(blank, safe) is good
+
+
+def test_record_session_switches_and_says_so(tmp_path):
+    import threading
+
+    said = []
+    blank = FakePage()
+    blank.url = "about:blank"
+    theirs = FakePage()
+    theirs.url = "https://bank.example/statements"
+    ctx = _Ctx(theirs, blank)
+    blank.context = ctx
+    theirs.context = ctx
+    theirs.bring_to_front = lambda: said.append("fronted")
+
+    class Site:
+        is_safe_url = staticmethod(safe)
+
+    def click_then_stop():
+        theirs.fire({"action": "click", "at": 1, "label": "Statements",
+                     "locator": {"how": "role", "role": "link",
+                                 "name": "Statements"}})
+        (tmp_path / ".stop-recording").write_text("stop", encoding="utf-8")
+
+    threading.Timer(0.05, click_then_stop).start()
+    out = record_session(blank, Site, tmp_path, provider="Bank", owner="",
+                         say=said.append)
+
+    printed = " ".join(str(s) for s in said)
+    assert "bank.example" in printed
+    assert "fronted" in said
+    # and the step it recorded came from the person's tab, not the blank one
+    assert json.loads(Path(out).read_text(encoding="utf-8"))["steps"]
