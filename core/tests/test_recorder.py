@@ -436,3 +436,144 @@ def test_a_console_that_turns_out_not_to_be_one_falls_back(tmp_path, monkeypatch
     said = []
     mod._wait_for_stop(stop, said.append)
     assert any("control panel" in s for s in said)
+
+
+# -- the page is not to be trusted ---------------------------------------------
+# The binding sits on window, so any script on the provider's page can call
+# it, not only the listener the recorder installed. Found by auditing.
+
+@pytest.mark.parametrize("payload", [
+    None, "a string", 42, [], {"action": "eval"}, {"action": "click"},
+    {"action": "click", "locator": "not a dict", "label": "x"},
+    {"action": "click", "locator": {"how": ["a"], "role": {"b": 1}, "name": None},
+     "label": "x", "at": "not a number"},
+    {"action": "click", "locator": {"how": "role", "role": "link", "name": "x"},
+     "label": "x", "tag": 99, "at": 1},
+    {"action": "select", "locator": {"how": "id", "value": 1}, "option": [1, 2], "at": 1},
+])
+def test_a_malformed_payload_from_the_page_never_raises(payload):
+    r, page = rec()
+    page.fire(payload)
+    assert json.dumps(r.report()), "the report must stay serialisable"
+
+
+def test_a_page_cannot_grow_the_file_without_limit():
+    r, page = rec()
+    for i in range(600):
+        page.fire({"action": "click", "locator": {"how": "role", "role": "link",
+                                                  "name": "L%d" % i},
+                   "label": "L%d" % i, "at": i * 1000})
+    assert len(r.steps) == 400
+    for i in range(500):
+        page.emit("response", FakeResponse("https://bank.example/a%d" % i, body={"i": i}))
+    assert len(r.requests) == 300
+
+
+def test_every_string_the_page_sends_is_cut_to_a_sane_length():
+    r, page = rec()
+    page.fire({"action": "select", "locator": {"how": "id", "value": "x" * 500},
+               "label": "L" * 5000, "option": "O" * 5000, "at": 1})
+    step = r.steps[0]
+    assert len(step["label"]) <= 120
+    assert len(step["option"]) <= 60
+    assert len(step["locator"]["value"]) <= 80
+
+
+def test_a_response_or_download_before_any_click_is_not_a_crash():
+    r, page = rec()
+    page.emit("response", FakeResponse("https://bank.example/api/x", body={"a": 1}))
+    page.emit("download", type("D", (), {"suggested_filename": "x.pdf"})())
+    page.emit("page", FakePage())
+    assert r.steps == []
+    assert r.requests[0]["step"] is None
+
+
+def test_starting_or_stopping_twice_is_harmless():
+    r, page = rec()
+    r.start()
+    assert len(page.bindings) == 1
+    r.stop()
+    assert r.stop()["kind"] == "paperpull-recording"
+
+
+def _session(tmp_path, monkeypatch, owner):
+    """One whole record_session, with the wait for the person skipped."""
+    import types
+    from paperpull_core import recorder as mod
+    monkeypatch.setattr(mod, "_wait_for_stop", lambda stop, say: None)
+    said = []
+    site = types.SimpleNamespace(is_safe_url=safe, looks_signed_out=lambda p: False)
+    out = mod.record_session(FakePage(), site, tmp_path, provider="Bank",
+                             owner=owner, say=said.append)
+    return said, out
+
+
+def test_with_no_owner_set_the_person_is_told_what_is_not_covered(tmp_path, monkeypatch):
+    """redact removes the owner's name because the config gives it. With
+    no owner, a name on a profile button is not caught, and saying so
+    beats implying a cover that is not there."""
+    said, _ = _session(tmp_path, monkeypatch, owner="")
+    assert any("cannot be removed for you" in s for s in said)
+
+
+def test_with_an_owner_set_it_does_not_say_that(tmp_path, monkeypatch):
+    said, _ = _session(tmp_path, monkeypatch, owner="Alex Morgan")
+    assert not any("cannot be removed" in s for s in said)
+
+
+def test_a_session_writes_the_file_and_says_to_read_it(tmp_path, monkeypatch):
+    said, out = _session(tmp_path, monkeypatch, owner="Alex Morgan")
+    assert Path(out) == tmp_path / "recording.json"
+    assert json.loads(Path(out).read_text(encoding="utf-8"))["kind"] == "paperpull-recording"
+    assert any("Read that file through" in s for s in said)
+    assert any("Nothing was recorded" in s for s in said), "an empty one says so"
+
+
+def test_a_session_refuses_and_writes_nothing_on_a_sign_in_page(tmp_path, monkeypatch):
+    import types
+    from paperpull_core import recorder as mod
+    said = []
+    site = types.SimpleNamespace(is_safe_url=safe, looks_signed_out=lambda p: False)
+    out = mod.record_session(FakePage(passwords=1), site, tmp_path,
+                             provider="Bank", owner="", say=said.append)
+    assert out is None
+    assert not list(tmp_path.iterdir()), "nothing may be written when it refuses"
+    assert any("Not recording" in s for s in said)
+
+
+def test_a_stale_stop_file_does_not_end_the_next_recording_at_once(tmp_path, monkeypatch):
+    """A recording that was interrupted can leave the sentinel behind. The
+    next one must clear it before it starts waiting, or it ends instantly."""
+    import types
+    from paperpull_core import recorder as mod
+    (tmp_path / ".stop-recording").write_text("stale", encoding="utf-8")
+    seen = {}
+
+    def wait(stop, say):
+        seen["existed_when_waiting"] = stop.exists()
+
+    monkeypatch.setattr(mod, "_wait_for_stop", wait)
+    site = types.SimpleNamespace(is_safe_url=safe, looks_signed_out=lambda p: False)
+    mod.record_session(FakePage(), site, tmp_path, provider="B", owner="", say=lambda *a: None)
+    assert seen["existed_when_waiting"] is False
+    assert not (tmp_path / ".stop-recording").exists(), "and it is cleaned up after"
+
+
+def test_a_huge_response_body_is_not_fetched_while_the_person_is_clicking():
+    """Reading a body is a round trip to the browser. A megabyte-sized
+    transaction list has the same shape as a small one, so it is not worth
+    the pause."""
+    r, page = rec()
+    big = FakeResponse("https://bank.example/api/all", body={"rows": [1]})
+    big.headers["content-length"] = str(9_000_000)
+    big.json = lambda: (_ for _ in ()).throw(AssertionError("must not read it"))
+    page.emit("response", big)
+    assert r.requests[0]["shape"] == "not read, 9000000 bytes"
+
+
+def test_a_normal_response_body_is_still_read():
+    r, page = rec()
+    small = FakeResponse("https://bank.example/api/x", body={"a": 1})
+    small.headers["content-length"] = "120"
+    page.emit("response", small)
+    assert r.requests[0]["shape"] == {"a": "int"}
