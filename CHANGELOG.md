@@ -7,6 +7,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **GitHub, built and waiting for its tester (#43).** Receipts from the
+  Payment history page, github.com/account/billing/history. Discovery
+  reads the page and its ?page=N pages until one adds nothing new, each
+  row with an amount is a payment. The row's receipt link is fetched from
+  inside the signed-in page and saved when it is a PDF, or its page is
+  opened, cut down to the receipt block and printed. Nothing is clicked.
+  Built against an account that has never paid GitHub, so the sign-in and
+  the history page are verified and the row and receipt shapes come from
+  GitHub's documentation. Diagnose writes a masked survey of the page,
+  its links, and what the first receipt link gives. Port 9264.
+
 ## [0.29.1] - 2026-09-21
 
 ### Fixed
