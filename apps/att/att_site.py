@@ -2,7 +2,7 @@
 
 When AT&T changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round six. Written without an AT&T account and
+STATUS: UNVERIFIED, round eight. Written without an AT&T account and
 repaired from two surveys a tester sent (#26). What the surveys showed:
 
   * Sign-in lands on /acctmgmt/overview, a shop page. The nav's Billing
@@ -29,6 +29,15 @@ repaired from two surveys a tester sent (#26). What the surveys showed:
     outcome, compares the page before and after, takes a control the
     click revealed as the second step, reads an embedded viewer, and
     tries "View/print PDF" when "Download PDF" gave nothing.
+  * Round seven learned from the tester's screenshot that "Download PDF"
+    opens a menu of "Regular PDF" and "View/print PDF", and took the
+    first as the second step. Round seven's trace then showed the click
+    landing and NOTHING appearing, because the menu's entries are not
+    buttons, links or menuitems, so the before-and-after comparison of
+    those roles could not see them. Round eight finds the entries by
+    their text, whatever element they are, waits for one to be visible,
+    clicks "Regular PDF", and records every element on the page whose
+    text says PDF, with its tag, role and visibility, for the next look.
 
   So discovery now reads the history API as the page loads it, passively,
   and falls back to the bill buttons. A download opens the history page,
@@ -898,6 +907,64 @@ def _control_texts(page) -> set:
     return out
 
 
+_REGULAR_PDF_RE = re.compile(r"^\s*regular\s+pdf\s*$", re.I)
+_VIEW_PRINT_RE = re.compile(r"^\s*view\s*/\s*print\s+pdf\s*$", re.I)
+
+# Every element whose own text says PDF, with what it is and whether it
+# can be seen. The menu under "Download PDF" is made of elements that are
+# not buttons, links or menuitems, which is why round seven saw nothing.
+_PDF_TEXTS_JS = r"""() => {
+  const out = [];
+  const seen = new Set();
+  for (const e of document.querySelectorAll('body *')) {
+    if (e.children.length > 3) continue;
+    const t = (e.innerText || '').trim().replace(/\s+/g, ' ');
+    if (!t || t.length > 60 || !/pdf/i.test(t)) continue;
+    const key = e.tagName + '|' + t;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const r = e.getBoundingClientRect();
+    const cs = getComputedStyle(e);
+    const visible = r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none';
+    out.push({text: t, tag: e.tagName.toLowerCase(), role: e.getAttribute('role') || '',
+              cls: (e.className || '').toString().slice(0, 40), visible});
+    if (out.length >= 25) break;
+  }
+  return out;
+}"""
+
+
+def _pdf_texts(page) -> list:
+    try:
+        return page.evaluate(_PDF_TEXTS_JS) or []
+    except Exception:
+        return []
+
+
+def _menu_entry(page, pat, wait_ms: int = 4000):
+    """A visible element whose whole text matches `pat`, found by text so
+    the element's kind does not matter, waited for up to `wait_ms` since a
+    menu opens a moment after the click. Guard checked. None if absent."""
+    deadline = wait_ms
+    while True:
+        try:
+            loc = page.get_by_text(pat)
+            for i in range(min(loc.count(), 6)):
+                el = loc.nth(i)
+                try:
+                    text = re.sub(r"\s+", " ", (el.inner_text(timeout=500) or "")).strip()
+                except Exception:
+                    continue
+                if pat.match(text) and is_safe_control(text) and el.is_visible():
+                    return el, text
+        except Exception:
+            pass
+        if deadline <= 0:
+            return None, ""
+        page.wait_for_timeout(500)
+        deadline -= 500
+
+
 def _second_step(page, appeared: set):
     """A control the click revealed whose text says it finishes a
     download, once it has passed the guard, or None."""
@@ -1036,15 +1103,26 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         # What did the click change? A menu or a dialog with the real
         # download control, a viewer with the PDF in it, or nothing.
         appeared = _control_texts(page) - controls_before
+        pdf_texts = _pdf_texts(page)
         if trace is not None:
             trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
                           "appeared": [redact(t) for t in sorted(appeared)[:15]],
+                          "pdf_texts": [{**x, "text": redact(x["text"])} for x in pdf_texts],
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
         if _take_viewer(page, out_path, trace):
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
-        step, step_label = _second_step(page, appeared)
+        # The menu under "Download PDF" holds "Regular PDF", which saves
+        # the file, and "View/print PDF", which opens a tab. Found by text.
+        step, step_label = _menu_entry(page, _REGULAR_PDF_RE)
+        if step is None:
+            step, step_label = _second_step(page, appeared)
+        if step is None:
+            step, step_label = _menu_entry(page, _VIEW_PRINT_RE, wait_ms=1000)
+        if step is None and trace is not None:
+            trace.append({"note": "no menu entry found after the click",
+                          "pdf_texts_now": [{**x, "text": redact(x["text"])} for x in _pdf_texts(page)]})
         if step is not None:
             try:
                 step.click(timeout=8000)

@@ -408,3 +408,62 @@ def test_the_click_outcome_is_in_the_trace():
     for note in ('"clicked"', '"click failed"', '"after the click"', '"second step clicked"'):
         assert note in src, note
     assert "expect_download" not in src, "a swallowed expect_download hid whether the click landed"
+
+
+# -- round eight, the menu's entries are found by text (#26) ------------------
+
+class _TextEl:
+    def __init__(self, text, visible=True):
+        self._t = text
+        self._v = visible
+
+    def inner_text(self, timeout=0):
+        return self._t
+
+    def is_visible(self):
+        return self._v
+
+
+class _MenuLoc:
+    def __init__(self, els):
+        self._els = els
+
+    def count(self):
+        return len(self._els)
+
+    def nth(self, i):
+        return self._els[i]
+
+
+class _MenuPage:
+    """A page whose "Download PDF" menu is made of plain elements, the way
+    round seven's trace showed it, with the entries hidden until the menu
+    opens a moment later."""
+    def __init__(self, open_after=1):
+        self._open_after = open_after
+        self.waited = 0
+
+    def get_by_text(self, pat):
+        visible = self.waited >= self._open_after
+        els = [_TextEl(t, visible) for t in ("Regular PDF", "View/print PDF", "Accessibility PDF")
+               if pat.match(t)]
+        return _MenuLoc(els)
+
+    def wait_for_timeout(self, ms):
+        self.waited += 1
+
+
+def test_the_regular_pdf_entry_is_found_by_text_once_the_menu_opens():
+    page = _MenuPage(open_after=2)
+    el, label = site._menu_entry(page, site._REGULAR_PDF_RE, wait_ms=3000)
+    assert el is not None and label == "Regular PDF"
+    assert page.waited == 2
+    el, label = site._menu_entry(_MenuPage(open_after=99), site._REGULAR_PDF_RE, wait_ms=1000)
+    assert el is None and label == ""
+
+
+def test_the_menu_entries_pass_the_guard_and_the_accessibility_one_is_not_preferred():
+    assert site.is_safe_control("Regular PDF")
+    assert site.is_safe_control("View/print PDF")
+    assert site._REGULAR_PDF_RE.match("Regular PDF") and not site._REGULAR_PDF_RE.match("Accessibility PDF")
+    assert site._VIEW_PRINT_RE.match("View/print PDF") and site._VIEW_PRINT_RE.match("View / print PDF")
