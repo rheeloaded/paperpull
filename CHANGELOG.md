@@ -7,7 +7,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.30.0-kroger.1] - 2026-09-21
+
+A prerelease for the Kroger tester. Latest stays 0.29.0.
 
 ### Added
 - **Kroger, built and waiting for its tester (#41).** Receipts for the whole
