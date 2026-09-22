@@ -64,6 +64,7 @@ test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | **Capital One is moving these accounts onto its own site. Once yours has moved this app can no longer read it** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
+| [`ebay`](apps/ebay) | eBay | Order receipts, ten years of purchase history | Order-details page rendered to PDF, nothing clicked, real Edge/Chrome. Requested in [#44](https://github.com/rheeloaded/paperpull/issues/44) |
 | [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms | **Untested, built without an account. Have one? [Help test it](apps/etrade/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills | Mendix portal, driven like a person; PDFs for the last year only, so run it quarterly |
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms | Document Access Hub API from inside the page, nothing clicked; real Edge/Chrome |
@@ -176,8 +177,8 @@ ever clicked, and all site interaction lives in `provider_site.py` where it can
 be read in one sitting. Every app that clicks enforces this deny-by-default, a
 control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
 allowlist (`SAFE_DOC_CONTROL_RE`), and the app's host allowlist refuses any
-stored URL that points elsewhere. Eleven apps click nothing at all (Affirm, Amazon,
-Anthem, Citi, Fidelity, Gap, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
+stored URL that points elsewhere. Twelve apps click nothing at all (Affirm, Amazon,
+Anthem, Citi, eBay, Fidelity, Gap, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
 page they navigated to. A repo-wide test checks every app's guard.
 [SECURITY.md](SECURITY.md) spells out which app does which.
 
@@ -453,8 +454,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **thirty-two** apps pass their tests, and the nine scaffolds theirs, more than 1,500 of them across the
-  repo. Twenty-four are in regular use by the author. The other seven (Ally,
+- ✅ All **thirty-three** apps pass their tests, and the nine scaffolds theirs, more than 1,500 of them across the
+  repo. Twenty-five are in regular use by the author. The other seven (Ally,
   Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
   by people who hold those accounts, and the four marked in the table above
   are awaiting a fresh live pilot since they were ported.

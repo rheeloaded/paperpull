@@ -7,6 +7,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **eBay.** Order receipts from the purchase history, requested in #44.
+  The order-details page is the receipt, so the app opens it by URL,
+  waits for the order to fill in, hides everything outside the details
+  block, scales the fixed-width desktop layout to the printable width so
+  the amounts column is not cut off, and renders it with printToPDF.
+  Nothing is clicked. The site's "All" filter is only four years, but
+  its year filter is a URL word out to ten years ago, so discovery walks
+  one year at a time and stops after two empty years. Some orders from
+  2019 and before get eBay's own "Order not found" page every time, and
+  for those the app prints the order's history card (date, item, total,
+  seller, status, order number) as an Order Summary instead. eBay also
+  caps how many details pages an account may open in a day, a few
+  hundred, and past the cap every one lands on a "daily limit exceeded"
+  page. The app recognizes it, stops with progress saved, and resume
+  continues the next day. Run against a real account, 108 orders back to
+  2017, the first day reached the cap after the second full pass. Port
+  9262, real Edge or Chrome.
+
 ## [0.28.5] - 2026-09-21
 
 ### Added
