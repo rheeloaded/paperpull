@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.30.1] - 2026-09-22
 
 ### Fixed
 - **PG&E, round three.** Every bill row on the tester's history read
