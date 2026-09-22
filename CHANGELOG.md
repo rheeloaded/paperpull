@@ -7,6 +7,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Golden 1, round three.** The second survey reached the documents
+  page and never looked inside the vendor's tab, because "View Documents"
+  is a button and the survey followed only links. The survey now presses
+  that button itself, waits for the tab it opens, records the tab's host,
+  headings, controls, row counts and frames whatever host it lands on,
+  marked, and listens for the sign-on calls across every tab (#35).
+
+### Added
+- **Three more apps built and waiting for their testers.** Meijer (#42),
+  order receipts and, where mPerks lists them, in-store digital receipts,
+  cut from the GitHub receipt scaffold with a walk of the likely routes
+  and a record of the shape of every JSON answer the page loads.
+  American Family Insurance (#45), billing statements, policy documents,
+  declarations pages and ID cards, cut from the document scaffold with
+  the insurer's guard. ADP Workforce Now (#46), pay statements and W-2s,
+  cut from the document scaffold with a payroll guard that refuses
+  anything about direct deposit, withholding, time or benefits, and the
+  myADP statement services as routes to try. None has an account behind
+  it here. Each has a Diagnose that writes a masked survey for the
+  tester. Ports 9266, 9267 and 9265.
+
 ## [0.30.0-github.1] - 2026-09-21
 
 A prerelease for the GitHub and Kroger tester. Latest stays 0.29.1.

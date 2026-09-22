@@ -10,16 +10,18 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (33, plus eleven built and waiting for a tester)
+## Supported (33, plus fourteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
 | [`affirm`](apps/affirm) | Affirm | Loan agreements, one per loan; Affirm Money and Card statements not covered | Lender |
+| [`adp`](apps/adp) | ADP Workforce Now | Pay statements, W-2s. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #46. Being tested by @watling777 | Payroll |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #26. Being tested by @watling777 | Telecom |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
+| [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #45. Being tested by @jpfieber | Insurance |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, member/plan documents (all coverage years), digital ID cards, secure-message letters; tRPC API, nothing clicked. Contributed by @riordan | Health insurance (PHI) |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Card |
@@ -34,6 +36,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery. UNTESTED, built against an account with no purchases. Have one? Run Diagnose and attach the file to issue #41. Being tested by @jpfieber | Retail |
 | [`github`](apps/github) | GitHub | Payment receipts for Pro, Copilot, Actions, Sponsors and anything else GitHub charged. UNTESTED, built against an account with no payments. Have one? Run Diagnose and attach the file to issue #43. Being tested by @jpfieber | Software services |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #35. Being tested by @watling777 | Credit union |
+| [`meijer`](apps/meijer) | Meijer | Order receipts, and in-store digital receipts where mPerks lists them. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #42. Being tested by @jpfieber | Retail |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Mortgage servicing |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits | Quarterly or monthly 401(k) statements, made to order and rendered; nothing clicked | Workplace retirement plan |

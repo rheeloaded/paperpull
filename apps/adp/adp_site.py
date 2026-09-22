@@ -1,37 +1,48 @@
-"""ALL golden1.com selectors, URLs, and page behavior live here.
+"""ALL ADP Workforce Now selectors, URLs, and page behavior live here.
 
-When Golden 1 changes its site, repair this file only.
+When ADP changes its portal, repair this file only.
 
-STATUS: UNVERIFIED, round three, repaired from two surveys (#35). Written
-without a Golden 1 account, so that someone who holds one can
-test it without writing code. Nothing below has run against the live
-signed-in site. On a first run it is deliberately cautious:
+STATUS: UNVERIFIED. This app was written without an ADP Workforce Now
+login, from the page the requester named (#46) and what is publicly known
+about how ADP's employee portal lists pay statements, so that someone who
+holds one can test it without writing code. Nothing below has run against
+the live signed-in site. On a first run it is deliberately cautious:
 
-  * --login opens a real Edge or Chrome, since a credit union's sign-in is happiest in a real browser.
-  * --diagnose surveys whatever the documents page turns out to be,
-    records its headings, its controls with the guard's verdict on each,
-    and the shape of every JSON response, with digit runs masked, and
-    takes no screenshot. That file is what a tester attaches to the
-    GitHub issue.
-  * --discover reads dates from any control that looks like a
-    statement or tax form, wherever it sits on the page.
+  * --login opens a real Edge or Chrome at ADP's sign-in, which the
+    employer's setup may route through its own identity provider. The
+    sign-in is the user's to complete.
+  * --diagnose surveys whatever the Pay and Annual Statements page turns
+    out to be, records its headings, its controls with the guard's verdict
+    on each, and the shape of every JSON response, with digit runs
+    masked, and takes no screenshot. That file is what a tester attaches
+    to the GitHub issue.
+  * --discover reads pay dates from any control that looks like a pay
+    statement or a W-2, wherever it sits on the page.
   * --pilot tries to save the newest few, by fetching a PDF link the row
-    carries from inside the page, or by clicking the row's own control
-    and catching a download event, a PDF response or a new tab.
+    carries from inside the page, or by clicking the row's own control and
+    catching a download event, a PDF response or a new tab.
 
-The guesses that most need confirming from a survey are marked GUESS.
-The routes are the biggest one.
+The guesses that most need confirming from a survey are marked GUESS. The
+biggest one: Workforce Now's Myself pages are an Angular shell at
+workforcenow.adp.com/theme/index.html whose Pay and Annual Statements view
+fills itself from ADP's myADP services, which on other ADP products live
+at my.adp.com/myadp_prefix/v1_0/O/A/payStatements (one JSON list of pay
+dates, each with a link to its statement PDF) and .../annualStatements
+for W-2s. Whether Workforce Now calls the same services, from which host,
+is what the first survey's response shapes will show.
 
-SAFETY (this is a bank account that can move money):
-  This module is strictly READ-ONLY. It opens eStatements, reads the
-  list, and saves the PDFs Golden 1 already generated. It must NEVER
-  activate any control that transfers, pays, sends money by Zelle,
-  wires, deposits, opens or closes an account, changes a limit or an
-  address, or edits any setting.
-  FORBIDDEN_CONTROL_RE is the guard. A control must ALSO look like a
-  document action (SAFE_DOC_CONTROL_RE) before it may be clicked. There
-  is no code here that submits a form or confirms a dialog.
+SAFETY (this is a payroll account that holds direct-deposit and tax
+withholding settings):
+  This module is strictly READ-ONLY. It opens the pay statements area,
+  reads the list, and saves the PDFs ADP already generated. It must NEVER
+  activate any control that changes direct deposit, tax withholding or a
+  W-4, requests time off, edits a timecard, enrolls in a benefit, changes
+  an address or a beneficiary, or edits any setting. FORBIDDEN_CONTROL_RE
+  is the guard. A control must ALSO look like a document action
+  (SAFE_DOC_CONTROL_RE) before it may be clicked. There is no code here
+  that submits a form or confirms a dialog.
 """
+
 from __future__ import annotations
 
 import base64
@@ -42,34 +53,29 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urlsplit
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
-log = logging.getLogger("golden1_docs.site")
+log = logging.getLogger("adp_docs.site")
 
-BASE = "https://digitalbanking.golden1.com"
-# From the first survey (#35, 2026-09-21). Sign-in is at
-# login.golden1.com/login/?realm=/alpha and lands on digitalbanking
-# .golden1.com/accounts/overview. The documents page is
-# /accounts/documents, whose "View Documents" button signs the person on
-# to the credit union's document vendor, ebank.hepsiian.com, in a new
-# tab. The statements themselves are listed there, which is why that
-# host is in the allowlist and why discovery and download work in that
-# tab once it is open. Documents are kept for seven years.
+BASE = "https://workforcenow.adp.com"
+# The page the requester named, and GUESSES around it. Workforce Now's
+# Myself area is a hash-routed shell. The myADP statement services are
+# where other ADP products keep the same lists, so they are tried too, in
+# case Workforce Now answers there for this login.
 BILLING_CANDIDATES = [
-    f"{BASE}/accounts/documents",
-    f"{BASE}/accounts/overview",
+    f"{BASE}/theme/index.html#/Myself/PayandAnnualStatements",
+    f"{BASE}/theme/index.html#/Myself/PayStatements",
+    "https://my.adp.com/static/redbox/#/pay/statements",
+    f"{BASE}/theme/index.html#/Myself",
 ]
-VENDOR_HOSTS = ("hepsiian.com",)
-# The button's text, with room for an icon's word after it. The second
-# survey listed the button as "View Documents" and yet did not match it
-# on the exact form, so the match is on the start of the text.
-VENDOR_BUTTON_RE = re.compile(r"^\s*view\s+documents\b", re.I)
+# The statement services, as myADP names them. GUESS that Workforce Now
+# uses them. The survey records whatever JSON the page does load.
+DOCS_API_RE = re.compile(r"/payStatements|/annualStatements|/payStatement/|/taxStatements", re.I)
 BILLING_URL = BILLING_CANDIDATES[0]
 URLS = {
-    "home": f"{BASE}/accounts/overview",
-    "login": "https://login.golden1.com/login/?realm=/alpha#/",
+    "home": f"{BASE}/theme/index.html#/Myself",
+    "login": "https://online.adp.com/signin/v1/?APPID=WFNPortal&productId=80e309c3-7085-bae1-e053-3505430b5495&returnURL=https://workforcenow.adp.com/&callingAppId=WFN",
     "documents": BILLING_URL,
     "statements": BILLING_URL,
 }
@@ -78,26 +84,28 @@ LOGIN_URL_MARKERS = ["/login", "/signin", "/sign-in", "/auth/", "/mfa",
                      "/verification", "/challenge", "/authenticate"]
 
 # ---------------------------------------------------------------------------
-# HARD SAFETY GUARD. Tuned for credit union, on top of the bank words. Never move
-# money, never change service or coverage, never change a setting.
+# HARD SAFETY GUARD. Tuned for a payroll portal. Never touch pay, tax,
+# time, benefits or a setting.
 # ---------------------------------------------------------------------------
 FORBIDDEN_CONTROL_RE = re.compile(
-    r"(transfer|zelle|\bwire\b|\bpay\b|payment|bill\s*pay|autopay|auto\s*pay|"
-    r"deposit|withdraw|send\s+money|request\s+money|move\s+money|"
-    r"\bapply\b|open\s+(an?\s+)?account|close\s+account|\bloan\b|\bborrow|"
-    r"\bcard\b|\bcards\b|replace|activate|lock|unlock|\bpin\b|limit|"
-    r"overdraft|alerts?\b|\bbudget|\bgoal|\brewards?\b|\boffers?\b|"
-    r"enroll|unenroll|sign\s+up|paperless|delivery\s+preference|"
+    r"(direct\s+deposit|\bdeposit|withholding|\bw-?4\b|tax\s+(elections?|setup|withholding)|"
+    r"\bpay\b(?!\s+(statements?|stubs?|history|date))|payment|\bwire\b|transfer|"
+    r"time\s*off|\bpto\b|request\s+(time|leave)|timecard|time\s*card|clock\s+(in|out)|punch|"
+    r"benefit|enroll|unenroll|open\s+enrollment|\bclaims?\b|dependent|beneficiar|"
+    r"\bapply\b|sign\s+up|paperless|delivery\s+preference|consent|"
     r"enable|disable|change\b|edit\b|update\b|modify|manage\b|"
-    r"set\s+up|delete|remove|cancel|dispute|"
-    r"password|passcode|username|profile\b|settings|preferences|contact\s+info|\baddress\b|"
-    r"confirm\b|submit|agree|accept|authorize|\bchat\b|contact\s+us|"
-    r"beneficiar|nickname|order\s+checks|stop\s+payment)", re.I)
+    r"set\s+up|delete|remove|cancel|submit|confirm|agree|accept|authorize|approve|"
+    r"password|passcode|username|security\s+questions?|profile\b|settings|preferences|"
+    r"contact\s+info|\baddress\b|phone|\bemail\b|emergency\s+contact|"
+    r"\bchat\b|contact\s+us|help\s+desk|message\s+(hr|manager)|"
+    r"performance|goals?\b|review\b|survey|acknowledge|\bsign\b(?!\s*in)|e-?sign|"
+    r"\bloan\b|garnish|401\s*\(?k\)?|retirement|\bhsa\b|\bfsa\b|wisely|earned\s+wage|"
+    r"myadp\s+wallet|\bcard\b|\bcards\b|activate|lock|unlock|\bpin\b)", re.I)
 
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(download|view|open|print|\bpdf\b|statement|document|\bletter\b|notice|"
-    r"1099|1098|5498|tax\s+(form|document)|history|"
-    r"e-?statements?|see\s+(more|all|older)|show\s+(more|all|older)|load\s+more)", re.I)
+    r"(download|view|open|print|\bpdf\b|statement|\bstubs?\b|earnings|\bw-?2c?\b|1095|1099|"
+    r"tax\s+(form|document|statement)|annual\s+statement|pay\s+(statement|stub|history|date)|"
+    r"see\s+(more|all|older)|show\s+(more|all|older)|load\s+more|previous\s+years?|prior\s+years?)", re.I)
 
 # A control that fetches one document. GUESS at the wording, wide on
 # purpose. "View", "Download", "View PDF", "Statement", "1099-INT".
@@ -237,7 +245,7 @@ def _safe_query(url: str) -> str:
     a digit, a token, an id, anything long, is "...". This is what a
     repair needs to make the same call with a wider filter, and nothing
     else."""
-    from urllib.parse import parse_qsl
+    from urllib.parse import urlsplit, parse_qsl
     try:
         pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
     except ValueError:
@@ -406,7 +414,7 @@ def _take_new_tab(page, new_pages, out_path: Path) -> bool:
 
 def dismiss_overlay(page) -> None:
     """Close a cookie banner, a survey prompt or a promo overlay, the things
-    that sit over bank pages and intercept clicks. Escape first, then
+    that sit over signed-in pages and intercept clicks. Escape first, then
     only a control that says close or dismiss, never accept."""
     try:
         page.keyboard.press("Escape")
@@ -447,7 +455,7 @@ def _looks_like_billing(page) -> bool:
         body = page.locator("body").inner_text(timeout=5000)
     except Exception:
         return False
-    return bool(re.search(r"statements?\s+(and|&)\s+documents|e-?statements|statement\s+(period|date)|tax\s+(documents|forms)",
+    return bool(re.search(r"statements?\s+(and|&)\s+documents|statement\s+(period|date)|tax\s+documents",
                           body, re.I))
 
 
@@ -537,61 +545,9 @@ _ROW_OF_JS = r"""el => {
 }"""
 
 
-def _vendor_tab(page):
-    """The document vendor's tab, if one is open."""
-    for p in page.context.pages:
-        try:
-            if not p.is_closed() and any(h in (p.url or "") for h in VENDOR_HOSTS):
-                return p
-        except Exception:
-            continue
-    return None
-
-
-def open_vendor(page):
-    """The vendor tab, opened through the documents page's "View
-    Documents" button when it is not open yet, or None. The button has
-    passed the guard, and the tab it opens has to be on the vendor's
-    host, anything else is closed unread."""
-    tab = _vendor_tab(page)
-    if tab is not None:
-        return tab
-    if not goto_documents(page):
-        return None
-    try:
-        loc = page.get_by_role("button", name=VENDOR_BUTTON_RE).or_(page.get_by_role("link", name=VENDOR_BUTTON_RE))
-        if loc.count() == 0:
-            return None
-        label = (loc.first.inner_text(timeout=1000) or "").strip()
-        if not is_safe_control(label):
-            return None
-        before = set(page.context.pages)
-        loc.first.click(timeout=5000)
-        for _ in range(30):
-            page.wait_for_timeout(500)
-            tab = _vendor_tab(page)
-            if tab is not None:
-                try:
-                    tab.wait_for_load_state("domcontentloaded", timeout=20000)
-                    tab.wait_for_timeout(3000)
-                except Exception:
-                    pass
-                return tab
-        for extra in [p for p in page.context.pages if p not in before]:
-            log.info("View Documents opened %s, not the vendor", redact(extra.url or "")[:80])
-            try:
-                extra.close()
-            except Exception:
-                pass
-    except Exception as e:
-        log.info("could not open the document vendor: %s", e)
-    return None
-
-
 def collect_download_docs(page) -> List[RawDoc]:
-    """Read every statement and tax document the vendor's page offers.
-    Each control's own name, or the row it sits in, carries the date."""
-    page = open_vendor(page) or page
+    """Read every statement and tax document the page offers. Each
+    control's own name, or the row it sits in, carries the date."""
     docs: List[RawDoc] = []
     seen = set()
     expand_all(page)
@@ -625,7 +581,7 @@ def collect_download_docs(page) -> List[RawDoc]:
         kind_title = "Tax Document" if tax else "Account Statement"
         docs.append(RawDoc(title=f"{kind_title} - {disp}", date_text=iso,
                            href=href if PDF_HREF_RE.search(href or "") else "",
-                           text=f"Golden 1 {kind_title} {disp}", row_index=i,
+                           text=f"ADP Workforce Now {kind_title} {disp}", row_index=i,
                            kind="tax" if tax else "statement"))
     return docs
 
@@ -653,7 +609,7 @@ def _control_for(page, iso: str):
 
 def _fetch_pdf(page, href: str) -> Optional[bytes]:
     """A PDF link fetched from inside the signed-in page, cookies and all,
-    only on golden1.com. None unless the answer is a PDF."""
+    only on adp.com. None unless the answer is a PDF."""
     if not is_safe_url(href):
         return None
     try:
@@ -894,7 +850,6 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     if not goto_documents(page):
         log.info("could not open the documents page for %s", iso_date)
         return False
-    page = open_vendor(page) or page
     expand_all(page)
 
     el, label = _control_for(page, iso_date)
@@ -928,7 +883,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
 
 # ---------------------------------------------------------------------------
 # Diagnose. A survey a tester can attach to an issue. No screenshot, since a
-# bank page shows names, numbers and balances. Digit runs are masked and
+# signed-in page shows names, numbers and amounts. Digit runs are masked and
 # JSON bodies are recorded as shape only.
 # ---------------------------------------------------------------------------
 _ROW_JS = r"""() => {
@@ -943,7 +898,9 @@ _ROW_JS = r"""() => {
 }"""
 
 SURVEY_LINK_RE = re.compile(
-    r"^\s*((see|view|show)\s+)?(statements?(\s+(and|&)\s+documents)?|e-?statements|documents|tax\s+(documents|forms)|statement\s+history)\s*$", re.I)
+    r"^\s*((see|view|show)\s+)?(pay(\s+(and|&)\s+annual)?\s+statements?|pay\s+stubs?|"
+    r"annual\s+statements?|tax\s+(statements?|forms?|documents?)|\bw-?2s?\b|"
+    r"statements?|earnings\s+statements?|pay\s+history|myself)\s*$", re.I)
 
 
 def collect_documents(page) -> List[RawDoc]:
@@ -1038,7 +995,7 @@ def _page_summary(page) -> dict:
 def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
     """What the signed-in documents area looks like, without downloading
     anything. Records each page, its headings and controls with the
-    guard's verdict on each, and every JSON or PDF response golden1.com sends
+    guard's verdict on each, and every JSON or PDF response adp.com sends
     while the page settles. Then follows, one at a time and back again,
     the few links whose text is a documents word. No screenshot."""
     seen: list = []
@@ -1074,8 +1031,7 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
         except Exception:
             pass
 
-    ctx = page.context
-    ctx.on("response", on_response)
+    page.on("response", on_response)
     report = {"pages": [], "responses": seen}
     try:
         page.wait_for_timeout(dwell_ms)
@@ -1127,103 +1083,19 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
             except Exception as e:
                 report.setdefault("notes", []).append(
                     "could not follow %r: %s" % (c["text"], str(e)[:120]))
-        # The second survey never saw inside the vendor's tab, because the
-        # "View Documents" control is a button the follow loop above did
-        # not take. Press it here, on purpose, and record whatever opens,
-        # on whatever host, marked. Nothing on that tab is followed.
-        _survey_vendor_button(page, report, dwell_ms)
     finally:
         try:
-            ctx.remove_listener("response", on_response)
+            page.remove_listener("response", on_response)
         except Exception:
             pass
     return report
-
-
-def _survey_vendor_button(page, report: dict, dwell_ms: int) -> None:
-    """Press "View Documents" on the documents page and describe the tab
-    it opens, or the page it changes, for the report."""
-    try:
-        if not goto_documents(page):
-            report.setdefault("notes", []).append("documents page not reached, vendor button not tried")
-            return
-        loc = page.get_by_role("button", name=VENDOR_BUTTON_RE).or_(page.get_by_role("link", name=VENDOR_BUTTON_RE))
-        if loc.count() == 0:
-            report.setdefault("notes", []).append("no View Documents button on the documents page")
-            return
-        label = (loc.first.inner_text(timeout=1000) or "").strip()
-        if not is_safe_control(label):
-            report.setdefault("notes", []).append("View Documents did not pass the guard: %r" % redact(label)[:60])
-            return
-        tabs_before = set(page.context.pages)
-        url_before = page.url
-        controls_before = {c["text"] for c in _page_summary(page)["controls"]}
-        loc.first.click(timeout=5000)
-        new_tabs = []
-        for _ in range(40):
-            page.wait_for_timeout(500)
-            new_tabs = [p for p in page.context.pages if p not in tabs_before]
-            if new_tabs:
-                break
-        if not new_tabs:
-            page.wait_for_timeout(dwell_ms)
-            after = _page_summary(page)
-            appeared = [c["text"] for c in after["controls"] if c["text"] not in controls_before]
-            report.setdefault("notes", []).append("View Documents opened no tab")
-            report["vendor_button"] = {"pressed": redact(label)[:60], "url_after": redact(page.url or "")[:160],
-                                       "url_changed": page.url != url_before, "appeared": appeared[:20]}
-            if page.url != url_before and is_safe_url(page.url or ""):
-                after["followed_from"] = label
-                report["pages"].append(after)
-            return
-        for extra in new_tabs:
-            try:
-                extra.wait_for_load_state("domcontentloaded", timeout=20000)
-            except Exception:
-                pass
-            # The vendor signs the person on through a redirect or two.
-            # Give it time, then read where it ended up.
-            for _ in range(20):
-                extra.wait_for_timeout(500)
-                if _vendor_tab(page) is not None:
-                    break
-            extra.wait_for_timeout(dwell_ms)
-            try:
-                host = urlsplit(extra.url or "").hostname or ""
-                tab = _page_summary(extra)
-                tab["opened_tab_from"] = label
-                tab["host"] = redact(host)
-                tab["off_host"] = not is_safe_url(extra.url or "")
-                tab["row_counts"] = {}
-                for name, sel in (("doc_row", FALLBACK["doc_row"]), ("table rows", "table tbody tr"),
-                                  ("pdf links", "a[href*='.pdf']"), ("download attrs", "a[download]"),
-                                  ("frames", "iframe")):
-                    try:
-                        tab["row_counts"][name] = extra.locator(sel).count()
-                    except Exception:
-                        tab["row_counts"][name] = "ERR"
-                try:
-                    tab["frames"] = [redact(f.url or "")[:120] for f in extra.frames if f != extra.main_frame][:8]
-                except Exception:
-                    pass
-                report["pages"].append(tab)
-            except Exception as e:
-                report.setdefault("notes", []).append("could not read the vendor tab: %s" % str(e)[:120])
-            try:
-                extra.close()
-            except Exception:
-                pass
-    except Exception as e:
-        report.setdefault("notes", []).append("vendor button survey failed: %s" % str(e)[:120])
 
 
 # ---------------------------------------------------------------------------
 # Host allowlist. Parsed, never a string prefix, so a lookalike host cannot
 # walk through.
 # ---------------------------------------------------------------------------
-# hepsiian.com is the document vendor the "View Documents" button signs
-# on to, seen in the first survey. The statements are listed there.
-ALLOWED_HOSTS = {"golden1.com", "hepsiian.com"}
+ALLOWED_HOSTS = {"adp.com"}
 
 
 def is_safe_url(url: str) -> bool:

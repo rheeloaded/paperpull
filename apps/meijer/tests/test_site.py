@@ -1,0 +1,117 @@
+"""The Meijer site layer, against the shape an orders page is likely to
+have. Every row here is made up. Nothing in them is a real order."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import storage  # noqa: F401  binds this provider's AppSpec
+import meijer_site as site
+from paperpull_core.models import ONLINE, Purchase
+
+ROW_WITH_LINKS = site.RawCard(
+    text="Pickup\nSep 13, 2026\nOrder #12345678\n14 items\n$86.42\nView order details\nView receipt",
+    links=[
+        {"text": "View order details", "href": "/shopping/orders/12345678.html", "label": "", "download": False},
+        {"text": "View receipt", "href": "/shopping/orders/12345678/receipt.pdf", "label": "", "download": True},
+        {"text": "Reorder", "href": "/shopping/reorder/12345678", "label": "", "download": False},
+    ])
+ROW_WITHOUT_LINKS = site.RawCard(text="In-store\n2026-08-13\nStore 123\n$23.10", links=[])
+ROW_NO_AMOUNT = site.RawCard(text="Date\nOrder\nTotal", links=[])
+
+
+def test_an_order_row_becomes_a_purchase_with_the_pdf_link_first_and_reorder_never():
+    p = site.card_to_purchase(ROW_WITH_LINKS)
+    assert p.purchase_type == ONLINE
+    assert p.purchase_date == "2026-09-13"
+    assert p.total == "$86.42"
+    assert p.order_number == "12345678"
+    assert p.receipt_url.endswith("/receipt.pdf"), "the download link comes before the details link"
+    links = site.receipt_links(ROW_WITH_LINKS)
+    assert [ln["text"] for ln in links] == ["View receipt", "View order details"]
+    assert all(ln["href"].startswith("https://www.meijer.com/") for ln in links)
+
+
+def test_a_row_without_links_still_gets_a_stable_key():
+    p = site.card_to_purchase(ROW_WITHOUT_LINKS)
+    assert p.purchase_date == "2026-08-13" and p.total == "$23.10"
+    assert p.order_number.startswith("p") and len(p.order_number) == 13
+    assert p.order_number == site.card_to_purchase(ROW_WITHOUT_LINKS).order_number
+    assert p.receipt_url == ""
+
+
+def test_a_header_row_without_an_amount_is_not_an_order():
+    assert site.card_to_purchase(ROW_NO_AMOUNT) is None
+
+
+def test_dates_in_the_forms_the_site_is_likely_to_print():
+    assert site.parse_date("Sep 13, 2026") == "2026-09-13"
+    assert site.parse_date("13 Sep 2026") == "2026-09-13"
+    assert site.parse_date("2026-09-13T00:00:00Z") == "2026-09-13"
+    assert site.parse_date("09/13/2026") == "2026-09-13"
+    assert site.parse_date("no date here") is None
+
+
+def test_nothing_that_shops_refunds_clips_or_refills_is_safe():
+    for t in ("Add to cart", "Add all to cart", "Reorder", "Buy again", "Start your order", "Cancel order",
+              "Request a refund", "Clip coupon", "Redeem rewards", "Refill prescription", "Pay now",
+              "Edit order", "Rate this order", "Contact us", "Sign out", "Update address", "Add a tip"):
+        assert not site.is_safe_control(t), t
+    for t in ("View receipt", "View order details", "Order details", "Order history", "My orders", "Load more", "Next"):
+        assert site.is_safe_control(t), t
+
+
+def test_only_meijer_hosts_and_every_candidate_passes():
+    assert site.is_safe_url("https://www.meijer.com/shopping/orders.html")
+    assert site.is_safe_url("https://accounts.meijer.com/x")
+    assert not site.is_safe_url("https://meijer.com.evil.test/x")
+    assert not site.is_safe_url("http://www.meijer.com/")
+    assert not site.is_safe_url("https://user@meijer.com/")
+    assert all(site.is_safe_url(u) for u in site.ORDER_CANDIDATES)
+
+
+class _Page:
+    url = "https://www.meijer.com/shopping/orders.html"
+
+    def __init__(self, text, has_main=True):
+        self._t = text
+        self._m = has_main
+
+    def title(self):
+        return "Orders"
+
+    def locator(self, sel):
+        page = self
+
+        class _L:
+            def count(self_):
+                return 1 if (page._m or sel == "body") else 0
+
+            @property
+            def first(self_):
+                return self_
+
+            def inner_text(self_, timeout=0):
+                return page._t
+        return _L()
+
+
+def test_the_empty_page_and_a_receipt_page_are_recognized():
+    assert site.history_state(_Page("Orders\nYou don't have any orders yet.")) == "empty"
+    assert site.history_state(_Page("Orders\nNo orders to show")) == "empty"
+    assert site.history_state(_Page("Orders\nPickup Sep 13, 2026 $86.42")) == ""
+    assert site.receipt_is_present(_Page("Receipt\nMilk $3.29\nBananas $1.18\nSubtotal $4.47\nTotal $4.47"))
+    assert not site.receipt_is_present(_Page("Account\nSettings"))
+
+
+def test_receipt_lines_give_items_without_the_totals():
+    p = site.extract_details(_Page("Receipt\nMeijer 2% Milk $3.29\nBananas $1.18\nSubtotal $4.47\nTax $0.00\nTotal $4.47"),
+                             Purchase(purchase_type=ONLINE, order_number="x"))
+    assert [i.name for i in p.items] == ["Meijer 2% Milk", "Bananas"]
+
+
+def test_the_diagnose_file_masks_numbers_emails_and_handles_and_keeps_json_shapes():
+    assert site.mask_text("Store 123, card 4242, pat@example.com, Sep 13, 2026") == "Store ###, card ####, <email>, Sep ##, ####"
+    assert site.mask_href("/shopping/orders/12345678/receipt.pdf?x=1") == "/shopping/orders/<id>/receipt.pdf?..."
+    assert site.json_shape({"orders": [{"id": 1, "total": 2.5, "items": [{"upc": "1"}]}], "page": 1}) == \
+        {"orders": ["list of 1", {"id": "int", "total": "float", "items": ["list of 1", {"upc": "str"}]}], "page": "int"}

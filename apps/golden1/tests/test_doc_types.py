@@ -122,3 +122,18 @@ def test_the_vendor_tab_is_found_among_the_open_tabs():
     assert site._vendor_tab(_P()).url.startswith("https://ebank.hepsiian.com")
     _Ctx.pages = _Ctx.pages[:1]
     assert site._vendor_tab(_P()) is None
+
+
+# -- round three, the survey presses View Documents itself (#35) -------------
+
+def test_the_vendor_button_matches_with_an_icons_word_after_it():
+    for t in ("View Documents", "View documents", "View Documents open_in_new", "View Documents\nlaunch"):
+        assert site.VENDOR_BUTTON_RE.match(t), t
+    assert not site.VENDOR_BUTTON_RE.match("View Activity")
+
+
+def test_the_survey_presses_the_vendor_button_and_reads_the_tab_on_any_host():
+    src = inspect.getsource(site._survey_vendor_button)
+    assert "off_host" in src and "row_counts" in src and "extra.close()" in src
+    assert ".screenshot(" not in src
+    assert "_survey_vendor_button(page, report" in inspect.getsource(site.survey)
