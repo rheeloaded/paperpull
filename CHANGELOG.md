@@ -7,6 +7,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Kroger, built and waiting for its tester (#41).** Receipts for the whole
+  Kroger family (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the
+  rest share one sign-in and one purchase history). Discovery makes the
+  same purchase-history API call the page makes, from inside the
+  signed-in page, a page at a time. Each finished purchase's receipt
+  page is opened by URL, cut down to its print area and rendered with
+  printToPDF. In-store and fuel go to In-Store, pickup and delivery to
+  Online, a pending order is recorded and revisited. Nothing is clicked.
+  Built against an account that had never bought anything, so the
+  sign-in, the history page, its API and the receipt route are verified
+  and the receipt's own lines are not. Diagnose writes a masked survey
+  of the list and one receipt page for the tester to attach. Port 9263,
+  real Edge or Chrome.
+
 ## [0.29.0] - 2026-09-21
 
 ### Added
