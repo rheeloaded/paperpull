@@ -226,7 +226,7 @@ open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ---
 
-## Tips (hard-won across thirty-three apps)
+## Tips (hard-won across thirty-four apps)
 
 - **If the site has a year picker, let a scoped run skip years.** Selecting
   a year is a round trip. Take `keep=None` in your collector, and when it

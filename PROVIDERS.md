@@ -10,12 +10,12 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (33, plus fourteen built and waiting for a tester)
+## Supported (34, plus thirteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
 | [`affirm`](apps/affirm) | Affirm | Loan agreements, one per loan; Affirm Money and Card statements not covered | Lender |
-| [`adp`](apps/adp) | ADP Workforce Now | Pay statements, W-2s. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #46. Being tested by @watling777 | Payroll |
+| [`adp`](apps/adp) | ADP Workforce Now | Pay statements and W-2s, everything the statement services list, nothing clicked | Payroll |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |

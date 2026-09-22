@@ -2,45 +2,54 @@
 
 When ADP changes its portal, repair this file only.
 
-STATUS: UNVERIFIED. This app was written without an ADP Workforce Now
-login, from the page the requester named (#46) and what is publicly known
-about how ADP's employee portal lists pay statements, so that someone who
-holds one can test it without writing code. Nothing below has run against
-the live signed-in site. On a first run it is deliberately cautious:
+How Workforce Now serves pay statements, mapped on 2026-09-21 against a
+signed-in employee account (a former employer's, still open):
 
-  * --login opens a real Edge or Chrome at ADP's sign-in, which the
-    employer's setup may route through its own identity provider. The
-    sign-in is the user's to complete.
-  * --diagnose surveys whatever the Pay and Annual Statements page turns
-    out to be, records its headings, its controls with the guard's verdict
-    on each, and the shape of every JSON response, with digit runs
-    masked, and takes no screenshot. That file is what a tester attaches
-    to the GitHub issue.
-  * --discover reads pay dates from any control that looks like a pay
-    statement or a W-2, wherever it sits on the page.
-  * --pilot tries to save the newest few, by fetching a PDF link the row
-    carries from inside the page, or by clicking the row's own control and
-    catching a download event, a PDF response or a new tab.
+* Sign-in is at online.adp.com and lands in the Workforce Now shell,
+  ``https://workforcenow.adp.com/theme/index.html#/...``. The page the
+  requester named (#46), ``#/Myself/PayandAnnualStatements``, is titled
+  "Pay & Tax Statements" and shows My Pay (hidden by default behind
+  "Hide My Pay") and Tax Statements (a W-2 card with "View statement").
+  The whole thing is web components in shadow roots, so nothing here
+  reads the DOM for data.
+* The page fills itself from ADP's myADP services on my.adp.com, called
+  with the session's cookies from inside the WFN page:
 
-The guesses that most need confirming from a survey are marked GUESS. The
-biggest one: Workforce Now's Myself pages are an Angular shell at
-workforcenow.adp.com/theme/index.html whose Pay and Annual Statements view
-fills itself from ADP's myADP services, which on other ADP products live
-at my.adp.com/myadp_prefix/v1_0/O/A/payStatements (one JSON list of pay
-dates, each with a link to its statement PDF) and .../annualStatements
-for W-2s. Whether Workforce Now calls the same services, from which host,
-is what the first survey's response shapes will show.
+      GET https://my.adp.com/myadp_prefix/payroll/v1/workers/<AOID>/pay-statements?adjustments=yes&numberoflastpaydates=160
+      GET https://my.adp.com/myadp_prefix/payroll/v1/workers/<AOID>/tax-statements
+
+  The first answers ``payStatements[]`` of {payDate, netPayAmount,
+  grossPayAmount, totalHours, payDetailUri, statementImageUri,
+  payAdjustmentIndicator}. The second answers ``workerTaxStatements[]``
+  of {statementID, statementName "2025 W-2", employerName, form.code,
+  statementYear.year, statementUri, statementImageUri}. Each
+  ``statementImageUri.href`` is a path under the same prefix and answers
+  the PDF itself (``https://my.adp.com/myadp_prefix`` + href, 200,
+  application/pdf). VERIFIED, 20 pay statements and one W-2.
+* ``<AOID>`` is the worker's associate id, a 16-character token. The page
+  knows it and leaves it in two places this app reads without asking
+  anything: the addresses of the calls the page already made (the
+  performance entries) and localStorage's
+  ``myadp-dashboard_pay-dashboard-wfn`` record. VERIFIED.
+* The older myADP list, ``/myadp_prefix/v1_0/O/A/payStatements``, also
+  answers here without an id, but its image links did not, so the
+  payroll/v1 services above are the ones used.
+
+Discovery is those two calls. Capture is a fetch of each statement's own
+PDF from inside the page. Nothing is clicked, and only my.adp.com and
+workforcenow.adp.com are ever asked.
 
 SAFETY (this is a payroll account that holds direct-deposit and tax
 withholding settings):
-  This module is strictly READ-ONLY. It opens the pay statements area,
-  reads the list, and saves the PDFs ADP already generated. It must NEVER
-  activate any control that changes direct deposit, tax withholding or a
-  W-4, requests time off, edits a timecard, enrolls in a benefit, changes
-  an address or a beneficiary, or edits any setting. FORBIDDEN_CONTROL_RE
-  is the guard. A control must ALSO look like a document action
-  (SAFE_DOC_CONTROL_RE) before it may be clicked. There is no code here
-  that submits a form or confirms a dialog.
+  This module is strictly READ-ONLY. It reads two lists and fetches the
+  PDFs ADP already generated. It must NEVER activate any control that
+  changes direct deposit, tax withholding or a W-4, requests time off,
+  edits a timecard, enrolls in a benefit, changes an address or a
+  beneficiary, or edits any setting. FORBIDDEN_CONTROL_RE is the guard
+  for the diagnostics and the repo-wide tests. There is no code here that
+  clicks, submits a form or confirms a dialog.
+
+Site layer verified working against the live site: 2026-09-21
 """
 
 from __future__ import annotations
@@ -59,19 +68,19 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 log = logging.getLogger("adp_docs.site")
 
 BASE = "https://workforcenow.adp.com"
-# The page the requester named, and GUESSES around it. Workforce Now's
-# Myself area is a hash-routed shell. The myADP statement services are
-# where other ADP products keep the same lists, so they are tried too, in
-# case Workforce Now answers there for this login.
+API_BASE = "https://my.adp.com/myadp_prefix"
+# The Pay & Tax Statements page. Opening it is what makes the session
+# call the statement services, which is how the worker id is learned.
 BILLING_CANDIDATES = [
     f"{BASE}/theme/index.html#/Myself/PayandAnnualStatements",
-    f"{BASE}/theme/index.html#/Myself/PayStatements",
-    "https://my.adp.com/static/redbox/#/pay/statements",
-    f"{BASE}/theme/index.html#/Myself",
 ]
-# The statement services, as myADP names them. GUESS that Workforce Now
-# uses them. The survey records whatever JSON the page does load.
-DOCS_API_RE = re.compile(r"/payStatements|/annualStatements|/payStatement/|/taxStatements", re.I)
+# The worker's associate id, sixteen characters starting with G, as the
+# page's own calls carry it.
+AOID_RE = re.compile(r"/workers/(G[0-9A-Z]{15})(?:/|\?|$)")
+PAY_STATEMENTS_PATH = "/payroll/v1/workers/{aoid}/pay-statements?adjustments=yes&numberoflastpaydates={n}"
+TAX_STATEMENTS_PATH = "/payroll/v1/workers/{aoid}/tax-statements"
+PAY_DATES_TO_ASK = 400
+DOCS_API_RE = re.compile(r"/pay-statements|/tax-statements", re.I)
 BILLING_URL = BILLING_CANDIDATES[0]
 URLS = {
     "home": f"{BASE}/theme/index.html#/Myself",
@@ -460,27 +469,137 @@ def _looks_like_billing(page) -> bool:
 
 
 def goto_documents(page) -> bool:
-    """Open Statements & Documents. The first candidate that is not a
-    sign-in page and shows something statement-shaped wins, and the URL it
-    lands on is remembered so a later call does not walk the list again."""
-    global BILLING_URL
-    dismiss_overlay(page)
-    if is_safe_url(page.url or "") and not looks_signed_out(page) and _looks_like_billing(page):
+    """Open the Pay & Tax Statements page and let it settle, which is
+    when the shell calls the statement services and the worker id can be
+    read. True unless the session is signed out."""
+    if (page.url or "").split("#")[0] == BILLING_URL.split("#")[0] and "PayandAnnualStatements" in (page.url or "") \
+            and not looks_signed_out(page) and _aoid_from_page(page):
         return True
-    for url in [BILLING_URL] + [u for u in BILLING_CANDIDATES if u != BILLING_URL]:
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
-        except Exception as e:
-            log.info("goto %s failed: %s", url, e)
-            continue
-        dismiss_overlay(page)
+    try:
+        page.goto(BILLING_URL, wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        log.info("goto %s failed: %s", BILLING_URL, e)
+        return False
+    for _ in range(20):
+        page.wait_for_timeout(1000)
         if looks_signed_out(page):
             return False
-        if _looks_like_billing(page):
-            BILLING_URL = url
-            return True
-    return False
+        if _aoid_from_page(page):
+            break
+    dismiss_overlay(page)
+    return not looks_signed_out(page)
+
+
+# ---------------------------------------------------------------------------
+# The statement services
+# ---------------------------------------------------------------------------
+
+_AOID_JS = r"""() => {
+  const rx = /\/workers\/(G[0-9A-Z]{15})(?:\/|\?|$)/;
+  for (const e of performance.getEntriesByType('resource')) {
+    const m = (e.name || '').match(rx);
+    if (m) return m[1];
+  }
+  try {
+    const raw = localStorage.getItem('myadp-dashboard_pay-dashboard-wfn');
+    if (raw) { const j = JSON.parse(raw); if (j && /^G[0-9A-Z]{15}$/.test(j.aoid || '')) return j.aoid; }
+  } catch (e) {}
+  return null;
+}"""
+
+
+def _aoid_from_page(page) -> str:
+    """The worker id the page already used, or ""."""
+    try:
+        return page.evaluate(_AOID_JS) or ""
+    except Exception:
+        return ""
+
+
+def worker_id(page) -> str:
+    """The signed-in worker's associate id, from the page's own calls."""
+    aoid = _aoid_from_page(page)
+    if not aoid and goto_documents(page):
+        aoid = _aoid_from_page(page)
+    return aoid
+
+
+_FETCH_JSON_JS = r"""async (url) => {
+  const res = await fetch(url, {credentials: 'include', headers: {Accept: 'application/json'}});
+  const text = await res.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch (e) {}
+  return {status: res.status, body, size: text.length};
+}"""
+
+
+def _api_get(page, path: str):
+    """One statement service, called from inside the signed-in page."""
+    url = API_BASE + path
+    if not is_safe_url(url):
+        return None
+    try:
+        out = page.evaluate(_FETCH_JSON_JS, url) or {}
+    except Exception as e:
+        log.warning("statement service %s failed: %s", redact(path)[:80], e)
+        return None
+    if out.get("status") != 200:
+        log.warning("statement service %s answered HTTP %s", redact(path)[:80], out.get("status"))
+        return None
+    return out.get("body")
+
+
+def fetch_pay_statements(page, aoid: str) -> list:
+    body = _api_get(page, PAY_STATEMENTS_PATH.format(aoid=aoid, n=PAY_DATES_TO_ASK))
+    return list((body or {}).get("payStatements") or []) if isinstance(body, dict) else []
+
+
+def fetch_tax_statements(page, aoid: str) -> list:
+    body = _api_get(page, TAX_STATEMENTS_PATH.format(aoid=aoid))
+    return list((body or {}).get("workerTaxStatements") or []) if isinstance(body, dict) else []
+
+
+def _image_url(rec: dict) -> str:
+    href = ((rec.get("statementImageUri") or {}).get("href") or "").strip()
+    # One leading slash, a path under the prefix, nothing that could be a
+    # host of its own.
+    if not re.match(r"^/(?!/)[A-Za-z0-9_./~%-]+$", href):
+        return ""
+    url = API_BASE + href
+    return url if is_safe_url(url) else ""
+
+
+def pay_statement_doc(rec: dict) -> Optional[RawDoc]:
+    """A RawDoc for one pay statement record. The title says adjustment
+    when ADP does, so two statements on one pay date stay apart."""
+    date = str(rec.get("payDate") or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        return None
+    title = "Pay Statement Adjustment" if rec.get("payAdjustmentIndicator") else "Pay Statement"
+    return RawDoc(title=title, date_text=date, href=_image_url(rec), kind="statement")
+
+
+def tax_statement_doc(rec: dict) -> Optional[RawDoc]:
+    """A RawDoc for one tax statement. Dated at the tax year's end, and the
+    employer's name kept in the title so two employers' forms stay apart."""
+    year = str((rec.get("statementYear") or {}).get("year") or "")
+    name = str(rec.get("statementName") or "").strip()
+    form = str((rec.get("form") or {}).get("code") or "").strip()
+    if not re.fullmatch(r"\d{4}", year):
+        m = re.search(r"\b(20\d{2})\b", name)
+        year = m.group(1) if m else ""
+    if not year:
+        return None
+    title = name or f"{year} {form or 'Tax Statement'}"
+    employer = re.sub(r"\s+", " ", str(rec.get("employerName") or "")).strip()
+    if employer:
+        title = f"{title} {employer}"
+    return RawDoc(title=title, date_text=f"{year}-12-31", href=_image_url(rec), kind="tax")
+
+
+# Every document seen this run, by (date, title), so a download can find
+# its PDF address without asking the services again.
+_PDF_BY_KEY: dict = {}
 
 
 def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
@@ -546,43 +665,27 @@ _ROW_OF_JS = r"""el => {
 
 
 def collect_download_docs(page) -> List[RawDoc]:
-    """Read every statement and tax document the page offers. Each
-    control's own name, or the row it sits in, carries the date."""
+    """Every pay statement and tax statement the services list. Nothing on
+    the page is read or clicked."""
+    aoid = worker_id(page)
+    if not aoid:
+        log.warning("could not learn the worker id from the page's own calls")
+        return []
     docs: List[RawDoc] = []
-    seen = set()
-    expand_all(page)
-    scroll_full_page(page)
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
-        except Exception:
-            name = ""
-        if not is_safe_control(name):
-            continue
-        try:
-            href = el.get_attribute("href") or ""
-        except Exception:
-            href = ""
-        row_text = ""
-        iso = parse_date(name)
-        if not iso:
-            try:
-                row_text = el.evaluate(_ROW_OF_JS) or ""
-            except Exception:
-                row_text = ""
-            iso = parse_date(row_text)
-        if not iso or iso in seen:
-            continue
-        seen.add(iso)
-        disp = _human_date(iso)
-        tax = bool(re.search(r"1099|1098|5498|tax", name + " " + row_text, re.I))
-        kind_title = "Tax Document" if tax else "Account Statement"
-        docs.append(RawDoc(title=f"{kind_title} - {disp}", date_text=iso,
-                           href=href if PDF_HREF_RE.search(href or "") else "",
-                           text=f"ADP Workforce Now {kind_title} {disp}", row_index=i,
-                           kind="tax" if tax else "statement"))
+    for rec in fetch_pay_statements(page, aoid):
+        d = pay_statement_doc(rec) if isinstance(rec, dict) else None
+        if d:
+            docs.append(d)
+    for rec in fetch_tax_statements(page, aoid):
+        d = tax_statement_doc(rec) if isinstance(rec, dict) else None
+        if d:
+            docs.append(d)
+    for d in docs:
+        if d.href:
+            _PDF_BY_KEY[(d.date_text, d.title)] = d.href
+            _PDF_BY_KEY.setdefault((d.date_text, ""), d.href)
+    log.info("statement services: %d pay statement(s), %d tax statement(s)",
+             sum(1 for d in docs if d.kind == "statement"), sum(1 for d in docs if d.kind == "tax"))
     return docs
 
 
@@ -836,49 +939,62 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 pass
 
 
+_FETCH_PDF_B64_JS = r"""async (url) => {
+  const res = await fetch(url, {credentials: 'include'});
+  if (!res.ok) return {status: res.status, b64: ''};
+  const buf = await res.arrayBuffer();
+  let bin = ''; const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return {status: res.status, type: res.headers.get('content-type') || '', b64: btoa(bin)};
+}"""
+
+
+def fetch_statement_pdf(page, url: str) -> Optional[bytes]:
+    """The statement's PDF, fetched from inside the signed-in page the way
+    the page's own viewer fetches it. None unless the answer is a PDF."""
+    if not is_safe_url(url):
+        return None
+    try:
+        out = page.evaluate(_FETCH_PDF_B64_JS, url) or {}
+        if out.get("b64"):
+            data = base64.b64decode(out["b64"])
+            if data[:5] == b"%PDF-":
+                return data
+        log.info("statement PDF answered HTTP %s", out.get("status"))
+    except Exception as e:
+        log.info("in-page PDF fetch failed: %s", e)
+    return _fetch_pdf(page, url)
+
+
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None) -> bool:
-    """Save the document dated `iso_date`. A PDF link on the row is fetched
-    from inside the page. Otherwise the row's own control is clicked, once
-    it has passed the guard, and whichever the site produces is caught, a
-    download event or a PDF response, in this tab or one it opens.
-
-    `dl_dir` is where the attached browser saves a download, watched
-    after every click."""
+    """Save the document dated `iso_date` with this `title`. Its PDF
+    address comes from the statement services, remembered from discovery
+    or asked for again, and is fetched from inside the page. No control
+    is clicked."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    if not goto_documents(page):
-        log.info("could not open the documents page for %s", iso_date)
-        return False
-    expand_all(page)
-
-    el, label = _control_for(page, iso_date)
-    if el is None:
-        log.info("no document control found for %s", iso_date)
-        return False
-    if not is_safe_control(label):
-        log.info("refusing unsafe control %r for %s", label, iso_date)
-        return False
-
-    try:
-        href = el.get_attribute("href") or ""
-    except Exception:
-        href = ""
-    if href and not href.lower().startswith(("javascript", "#")):
-        from urllib.parse import urljoin
-        target = urljoin(page.url, href)
-        # A link on the provider's own hosts is fetched through the session
-        # first. A PDF answer is the document. Anything else means the link
-        # is a page or a handoff, and the click below follows it.
-        if is_safe_url(target):
-            body = _fetch_pdf(page, target)
-            if body:
-                out_path.write_bytes(body)
-                return True
+    key = (iso_date, title or "")
+    url = _PDF_BY_KEY.get(key) or _PDF_BY_KEY.get((iso_date, ""))
+    if not url:
+        if not goto_documents(page):
             if trace is not None:
-                trace.append({"note": "the control's own link did not answer with a PDF",
-                              "url": redact(target)[:160]})
-    return _catch_pdf(page, el, label, out_path, trace, dl_dir)
+                trace.append({"note": "statements page not reached"})
+            return False
+        collect_download_docs(page)
+        url = _PDF_BY_KEY.get(key) or _PDF_BY_KEY.get((iso_date, ""))
+    if not url:
+        log.info("no statement listed for %s %r", iso_date, title)
+        if trace is not None:
+            trace.append({"note": "the statement services list nothing for this date", "date": iso_date})
+        return False
+    body = fetch_statement_pdf(page, url)
+    if body:
+        out_path.write_bytes(body)
+        return True
+    if trace is not None:
+        trace.append({"note": "the statement's PDF address did not answer with a PDF", "url": redact(url)[:160]})
+    return False
 
 
 # ---------------------------------------------------------------------------
