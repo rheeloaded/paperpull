@@ -139,11 +139,17 @@ try:
 except Exception:  # the shared core is optional at import time
     pass
 
+# "Orders & Returns" is the top nav, "Orders & Purchases" the left one and
+# the page heading. Both are Costco's own words, read off a signed-in
+# account, and the first recording refused both because this list had only
+# guessed at one of them.
 SAFE_DOC_CONTROL_RE = re.compile(
     r"(view\s+(receipt|invoice|details|order)|receipt|invoice|order\s+details|"
-    r"purchase\s+details|order\s+history|purchase\s+history|orders?\s+(and|&)\s+purchases|"
-    r"in.?warehouse|warehouse|online\s+orders?|view\s+more|load\s+more|show\s+more|"
-    r"next\s+page|page\s+\d+)", re.I)
+    r"purchase\s+details|order\s+history|purchase\s+history|"
+    r"orders?\s*(and|&|&amp;)\s*(purchases|returns)|"
+    r"in.?warehouse|warehouse|online\s+orders?|\bonline\b|"
+    r"view\s+more|load\s+more|show\s+more|next\s+page|page\s+\d+|"
+    r"last\s+\d+\s+months?|all\s+dates|date\s+range|showing)", re.I)
 
 SECURITY_CHALLENGE_MARKERS = [
     "enter the characters you see", "type the characters you see",

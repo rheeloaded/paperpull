@@ -137,6 +137,8 @@ def effects(step: dict) -> list:
     if eff.get("download"):
         got = eff.get("download_name") or ""
         out.append("a file downloaded%s" % (', called "%s"' % got if got else ""))
+    if eff.get("printed"):
+        out.append("the page asked the browser to print")
     try:
         n = int(eff.get("requests") or 0)
     except (TypeError, ValueError):
@@ -248,6 +250,11 @@ def notes(report: dict) -> list:
             out.append("%s went somewhere other than the provider and were "
                        "counted, not described."
                        % _plural(dropped["off_host_request"], "request"))
+    if any((s.get("effect") or {}).get("printed") for s in steps):
+        out.append("A step made the page call window.print(). The receipt "
+                   "here is printed, not downloaded, so render it with CDP "
+                   "printToPDF and never press the site's own Print button. "
+                   "Note which control did it.")
     if not reqs and steps:
         out.append("No JSON or PDF came back from the provider on any step, so "
                    "this site is likely rendered on the server. Read the page, "

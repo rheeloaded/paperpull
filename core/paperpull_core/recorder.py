@@ -27,6 +27,7 @@ WHAT IS RECORDED
     a navigation       when the address changed
     a new tab          and whether it was still on the provider's site
     a download         that a step set off
+    a print            when a step made the page ask to print
     the requests       each step caused, as names and shapes
 
 WHAT IS NOT, AND CANNOT BE
@@ -194,6 +195,22 @@ _CAPTURE_JS = r"""
 
   const send = (record) => { try { post(record); } catch (e) {} };
 
+  // A download run replaces window.print so it can keep the HTML the
+  // print view would have rendered, and it does that for every page in
+  // the browser. During a recording that means the person presses the
+  // site's Print button and nothing at all happens, which reads as a
+  // broken tool and steers them away from the one control that matters
+  // most on a receipt. So the real one goes back for the duration, and
+  // the fact that the page asked to print is kept, because for a receipt
+  // that is the single most useful thing a maintainer can be told.
+  try {
+    const realPrint = window.__paperpullOriginalPrint || window.print;
+    window.print = function () {
+      send({ action: "print", at: Date.now() });
+      try { return realPrint.apply(window, arguments); } catch (e) {}
+    };
+  } catch (e) {}
+
   document.addEventListener("click", (ev) => {
     const el = control(ev.target);
     if (!el) return;
@@ -298,6 +315,7 @@ class Recorder:
         if why:
             raise RuntimeError(why)
         self.page.expose_binding(self._binding, self._on_event)
+        self._arm()
         self._install()
         self.page.on("framenavigated", self._on_navigated)
         self.page.on("response", self._on_response)
@@ -308,9 +326,28 @@ class Recorder:
             pass
         self._started = True
 
+    def _arm(self) -> None:
+        """The capture script on every document this page loads from here
+        on, put there by the browser itself before any page script runs.
+
+        Re-installing it by hand when a navigation is noticed was not
+        enough and could not be. A click that navigates replaces the
+        document and takes its listeners with it, and the notice that it
+        happened arrives, if at all, after the next page is already in
+        front of the person. Costco's first click navigated and the
+        recording went silent for the next sixty-six seconds. Proved in a
+        browser against three pages that link to each other before this
+        was written."""
+        import json as _json
+        try:
+            self.page.add_init_script(
+                "(%s)(%s);" % (_CAPTURE_JS.strip(), _json.dumps(self._binding)))
+        except Exception:
+            pass
+
     def _install(self) -> None:
-        """The capture script, put back after every navigation because a new
-        document does not keep it. It is idempotent."""
+        """The same script on the document that is already here, which an
+        init script alone would not reach. It is idempotent."""
         try:
             self.page.evaluate(_CAPTURE_JS, self._binding)
         except Exception:
@@ -347,6 +384,11 @@ class Recorder:
         installed above. Nothing here trusts a type or a length. An
         exception raised in this handler would surface in the page and
         lose the step, so the whole thing is guarded."""
+        if self._stopped:
+            # An init script cannot be taken off a page once it is on, so
+            # a navigation after Stop arms the new document too. Stop has
+            # to mean stop on this side as well.
+            return
         try:
             self._record_event(record)
         except Exception:
@@ -356,6 +398,16 @@ class Recorder:
         if not isinstance(record, dict) or len(self.steps) >= _MAX_STEPS:
             return
         action = str(record.get("action") or "")
+        if action == "print":
+            # Not a step. Nobody clicks "print", they click a control and
+            # the page prints, so it belongs to that control.
+            step = self._current()
+            if step is not None:
+                step["effect"]["printed"] = True
+            else:
+                self.dropped["print_without_step"] = \
+                    self.dropped.get("print_without_step", 0) + 1
+            return
         if action not in ("click", "select", "check", "fill", "submit"):
             return
         loc = record.get("locator")
@@ -749,24 +801,56 @@ def page_to_watch(page, is_safe_url):
     return best or page
 
 
-def _wait_for_stop(stop_file, say) -> None:
+def _wait_for_stop(page, stop_file, say) -> None:
     """Enter at a console, or the panel's Stop button, whichever comes.
+
+    The waiting is done with the browser's own timer rather than
+    time.sleep, and Enter is read on a thread rather than here. Both for
+    the same reason. Playwright's sync API dispatches what the page
+    sends only while this thread is inside a Playwright call, so a
+    thread parked in sleep() or input() is a thread that hears nothing.
+    Navigations went unnoticed, so the capture was never put back, and
+    responses were read long after their bodies were gone. Costco
+    recorded two clicks and then sixty-six seconds of silence.
 
     The panel runs an app with its input closed, so there is nobody to
     press Enter and the sentinel file is the only way to say when to
     stop. can_ask() decides which, and the prompt is only printed when
-    somebody could answer it. input() on a closed stdin raises ValueError
-    rather than EOFError, which a live run found, so both are caught."""
+    somebody could answer it. input() on a closed stdin raises
+    ValueError rather than EOFError, which a live run found, so both are
+    caught."""
+    import threading
     say("")
-    if can_ask():
+    done = threading.Event()
+    no_console = threading.Event()
+    console = can_ask()
+    if console:
+
+        def read_enter():
+            try:
+                input()
+            except (EOFError, OSError, ValueError, RuntimeError):
+                # can_ask() said there was a console and there is not.
+                no_console.set()
+                return
+            done.set()
+
+        threading.Thread(target=read_enter, daemon=True).start()
+        # Long enough for an input() on a closed stdin to raise, which it
+        # does at once, so the person gets one instruction and it is the
+        # one that will work.
+        if no_console.wait(0.25):
+            console = False
+    say("Recording. Click through to a document, then press Enter here."
+        if console else
+        "Recording. Press Stop in the control panel when you are done.")
+    while not done.is_set() and not stop_file.exists():
         try:
-            input("Recording. Press Enter here when you are done... ")
-            return
-        except (EOFError, OSError, ValueError, RuntimeError):
-            pass
-    say("Recording. Press Stop in the control panel when you are done.")
-    while not stop_file.exists():
-        time.sleep(0.5)
+            page.wait_for_timeout(400)
+        except Exception:
+            # The page is gone, or this is not a real one. Either way
+            # there is nothing left to hear.
+            time.sleep(0.4)
 
 
 def record_session(page, site, diagnostics_dir, provider: str = "",
@@ -817,7 +901,7 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
     except OSError:
         pass
     try:
-        _wait_for_stop(stop_file, say)
+        _wait_for_stop(page, stop_file, say)
     except KeyboardInterrupt:
         say("\nStopped.")
     finally:
