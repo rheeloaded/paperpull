@@ -18,18 +18,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   marked, and listens for the sign-on calls across every tab (#35).
 
 ### Added
-- **Three more apps built and waiting for their testers.** Meijer (#42),
+- **ADP Workforce Now.** Pay statements and W-2s, requested in #46. The
+  Pay & Tax Statements page fills itself from ADP's statement services on
+  my.adp.com, and the app makes the same two calls from inside the
+  signed-in page, reads the two lists, and fetches each statement's own
+  PDF address. The worker id the calls need is read from the addresses
+  the page already called. Nothing is clicked. Run against a real
+  account, 20 pay statements and two W-2s, a second run downloaded
+  nothing. Port 9265, real Edge or Chrome, since the sign-in usually
+  goes through the employer's own identity provider.
+- **Two more apps built and waiting for their testers.** Meijer (#42),
   order receipts and, where mPerks lists them, in-store digital receipts,
   cut from the GitHub receipt scaffold with a walk of the likely routes
   and a record of the shape of every JSON answer the page loads.
   American Family Insurance (#45), billing statements, policy documents,
   declarations pages and ID cards, cut from the document scaffold with
-  the insurer's guard. ADP Workforce Now (#46), pay statements and W-2s,
-  cut from the document scaffold with a payroll guard that refuses
-  anything about direct deposit, withholding, time or benefits, and the
-  myADP statement services as routes to try. None has an account behind
-  it here. Each has a Diagnose that writes a masked survey for the
-  tester. Ports 9266, 9267 and 9265.
+  the insurer's guard. Neither has an account behind it here. Each has a
+  Diagnose that writes a masked survey for the tester. Ports 9266 and
+  9267.
 
 ## [0.30.0-github.1] - 2026-09-21
 

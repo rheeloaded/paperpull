@@ -1,4 +1,4 @@
-"""ADP Workforce Now statement and tax document downloader (local, supervised). UNVERIFIED, see adp_site.py.
+"""ADP Workforce Now pay statement and W-2 downloader (local, supervised).
 
 This app was written without a ADP Workforce Now account so that someone who holds one
 can test it without writing code. The orchestrator below is the same one
@@ -680,8 +680,8 @@ class App:
         self.stats["mode"] = "diagnose"
         import json as _json
         page = self.page()
-        info = {"timestamp": now_iso(), "unverified": True,
-                "note": "ADP Workforce Now app built without an account. This survey is what "
+        info = {"timestamp": now_iso(), "unverified": False,
+                "note": "ADP Workforce Now survey, for when the portal changes. This is what "
                         "the maintainer repairs the site layer against."}
         try:
             found = site.goto_documents(page)

@@ -46,9 +46,9 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Thirty-two providers are supported today, all built on the same pattern.
-Fourteen more, AT&T, Wells Fargo, SBA, Verizon Mobile, SMUD, Golden 1, E*TRADE,
-State Farm, Newrez, Kroger, GitHub, Meijer, American Family and ADP Workforce Now, are built and waiting for someone with an account to
+Thirty-four providers are supported today, all built on the same pattern.
+Thirteen more, AT&T, Wells Fargo, SBA, Verizon Mobile, SMUD, Golden 1, E*TRADE,
+State Farm, Newrez, Kroger, GitHub, Meijer and American Family, are built and waiting for someone with an account to
 test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 [#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -61,13 +61,12 @@ test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
 [#41](https://github.com/rheeloaded/paperpull/issues/41),
 [#43](https://github.com/rheeloaded/paperpull/issues/43),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
-[#45](https://github.com/rheeloaded/paperpull/issues/45),
-[#46](https://github.com/rheeloaded/paperpull/issues/46)):
+[#45](https://github.com/rheeloaded/paperpull/issues/45)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
 | [`affirm`](apps/affirm) | Affirm | Loan agreements (Truth in Lending), one per loan | JSON API from inside the page, nothing clicked; no monthly statement exists for a pay-over-time account |
-| [`adp`](apps/adp) | ADP Workforce Now | Pay statements, W-2s | **Untested, built without an account. Have one? [Help test it](apps/adp/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`adp`](apps/adp) | ADP Workforce Now | Pay statements, W-2s | Statement services from inside the page, nothing clicked, real Edge/Chrome. Requested in [#46](https://github.com/rheeloaded/paperpull/issues/46) |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy docs | ASP.NET WebForms; one documented disclosure dialog |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
@@ -198,7 +197,7 @@ ever clicked, and all site interaction lives in `provider_site.py` where it can
 be read in one sitting. Every app that clicks enforces this deny-by-default, a
 control must clear a blocklist (`FORBIDDEN_CONTROL_RE`) *and* match a document
 allowlist (`SAFE_DOC_CONTROL_RE`), and the app's host allowlist refuses any
-stored URL that points elsewhere. Fifteen apps click nothing at all (Affirm, Amazon,
+stored URL that points elsewhere. Sixteen apps click nothing at all (ADP, Affirm, Amazon,
 Anthem, Citi, eBay, Fidelity, Gap, GitHub, Kroger, Meijer, myPay, NetBenefits, Paylocity, TSP, UKG), they read a JSON API or render a
 page they navigated to. A repo-wide test checks every app's guard.
 [SECURITY.md](SECURITY.md) spells out which app does which.
@@ -475,8 +474,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **thirty-three** apps pass their tests, and the fourteen scaffolds theirs, more than 1,500 of them across the
-  repo. Twenty-five are in regular use by the author. The other seven (Ally,
+- ✅ All **thirty-four** apps pass their tests, and the thirteen scaffolds theirs, more than 1,500 of them across the
+  repo. Twenty-six are in regular use by the author. The other seven (Ally,
   Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
   by people who hold those accounts, and the four marked in the table above
   are awaiting a fresh live pilot since they were ported.

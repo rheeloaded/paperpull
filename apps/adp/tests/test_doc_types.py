@@ -95,8 +95,62 @@ def test_only_the_providers_own_hosts():
     assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
 
 
-def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
+def test_the_verified_status_is_stated_where_a_reader_will_see_it():
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "UNVERIFIED" in src.split('"""')[1]
+    assert "UNVERIFIED" not in src.split('"""')[1]
+    assert "verified working against the live site" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "Not yet tested against a real account" in readme
+    assert "Not yet tested" not in readme
+
+
+# -- the statement services, as the live site answered on 2026-09-21 ---------
+
+PAY_RECORD = {
+    "payDate": "2025-06-13",
+    "netPayAmount": {"amountValue": 1234.56, "currencyCode": "USD"},
+    "grossPayAmount": {"amountValue": 2345.67, "currencyCode": "USD"},
+    "totalHours": 40.0,
+    "payDetailUri": {"href": "/payroll/v1/workers/G000000000000000/pay-statements/ABC123"},
+    "statementImageUri": {"href": "/payroll/v1/workers/G000000000000000/pay-statements/ABC123/images/ABC123.pdf"},
+    "payAdjustmentIndicator": False,
+}
+TAX_RECORD = {
+    "statementID": "TAX123",
+    "statementName": "2025 W-2",
+    "employerName": "EXAMPLE EMPLOYER INC",
+    "form": {"code": "W2"},
+    "statementYear": {"year": "2025"},
+    "statementUri": {"href": "/payroll/v1/workers/G000000000000000/tax-statements/TAX123"},
+    "statementImageUri": {"href": "/payroll/v1/workers/G000000000000000/tax-statements/TAX123/images/TAX123.pdf"},
+}
+
+
+def test_a_pay_statement_record_becomes_a_dated_statement_with_its_pdf_address():
+    d = site.pay_statement_doc(PAY_RECORD)
+    assert d.title == "Pay Statement" and d.date_text == "2025-06-13" and d.kind == "statement"
+    assert d.href == "https://my.adp.com/myadp_prefix/payroll/v1/workers/G000000000000000/pay-statements/ABC123/images/ABC123.pdf"
+    adj = site.pay_statement_doc({**PAY_RECORD, "payAdjustmentIndicator": True})
+    assert adj.title == "Pay Statement Adjustment"
+    assert site.pay_statement_doc({"payDate": "nonsense"}) is None
+
+
+def test_a_tax_statement_record_is_filed_at_the_years_end_with_the_employer_in_its_title():
+    d = site.tax_statement_doc(TAX_RECORD)
+    assert d.title == "2025 W-2 EXAMPLE EMPLOYER INC" and d.date_text == "2025-12-31" and d.kind == "tax"
+    assert d.href.endswith("/tax-statements/TAX123/images/TAX123.pdf")
+    cat, summary, _ = doc_types.classify_document(d.title, RULES)
+    assert cat == doc_types.TAX and summary == "W-2 Tax Form"
+    assert site.tax_statement_doc({"statementName": "W-2"}) is None
+
+
+def test_an_image_address_off_the_prefix_is_refused():
+    assert site._image_url({"statementImageUri": {"href": "https://evil.test/x.pdf"}}) == ""
+    assert site._image_url({"statementImageUri": {"href": "//evil.test/x.pdf"}}) == ""
+    assert site._image_url({}) == ""
+
+
+def test_the_worker_id_is_read_from_the_pages_own_calls():
+    assert site.AOID_RE.search("https://my.adp.com/myadp_prefix/hr/v2/workers/GABCDEFGHJKLMNP1").group(1) == "GABCDEFGHJKLMNP1"
+    assert site.AOID_RE.search("/payroll/v1/workers/GABCDEFGHJKLMNP1/pay-statements?x=1").group(1) == "GABCDEFGHJKLMNP1"
+    assert site.AOID_RE.search("/workers/notanid/") is None
+    assert "performance.getEntriesByType" in site._AOID_JS and "myadp-dashboard_pay-dashboard-wfn" in site._AOID_JS
