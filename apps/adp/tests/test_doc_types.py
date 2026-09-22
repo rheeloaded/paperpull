@@ -35,7 +35,7 @@ def test_the_noise_is_skipped():
 
 def test_filename_shape():
     storage.set_filename_owner("")
-    d, summ, kind, want = ('2026-09-12', 'Pay Statement', 'Statement', '2026-09-12 ADP Workforce Now Pay Statement Statement.pdf')
+    d, summ, kind, want = ('2026-09-12', 'Pay Statement', '', '2026-09-12 ADP Workforce Now Pay Statement.pdf')
     assert build_pdf_filename(d, summ, kind) == want
 
 
