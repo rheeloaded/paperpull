@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.29.0] - 2026-09-21
 
 ### Added
 - **eBay.** Order receipts from the purchase history, requested in #44.
