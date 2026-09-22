@@ -2,7 +2,7 @@
 
 When E*TRADE changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round three, repaired from two surveys (#36). Written
+STATUS: UNVERIFIED, round four, repaired from three surveys (#36). Written
 without an E*TRADE account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
@@ -21,6 +21,17 @@ signed-in site. On a first run it is deliberately cautious:
 
 The guesses that most need confirming from a survey are marked GUESS.
 The routes are the biggest one.
+
+Round four, from the third survey. Discovery found nothing although the
+page listed one statement in its default ninety days, so the searchItems
+answer was caught and its documentDate was not read. The date is now read
+in every form E*TRADE could send it, an ISO date, an ISO date-time, or an
+epoch in seconds or milliseconds, and the survey records the exact shape
+of the dates it saw, digits masked. The period picker offers the years
+back to 2019 and nothing wider, the tester's screenshot showed, so when
+no "all" or "last N years" period exists the app chooses each year in
+turn, applies it, and gathers every list. One filter click per year, the
+only clicks outside a document row.
 
 SAFETY (this is a brokerage account that can trade and move money):
   This module is strictly READ-ONLY. It opens the documents area, reads
@@ -151,7 +162,7 @@ DATE_PATTERNS = [
                 r"Dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4})", re.I), "mdY"),
     (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"), "mdy_slash"),
     (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{2})\b"), "mdy_slash2"),
-    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "iso"),
+    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!\d)"), "iso"),
 ]
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
@@ -543,6 +554,29 @@ _ROW_OF_JS = r"""el => {
 }"""
 
 
+def parse_api_date(value) -> Optional[str]:
+    """A date as an API might send it, an ISO date or date-time, an epoch
+    in seconds or milliseconds (as a number or a string), or the words a
+    page prints. None when it is none of those."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) or (isinstance(value, str) and re.fullmatch(r"\d{10,13}", value.strip())):
+        try:
+            n = float(value)
+            if n > 1e11:
+                n = n / 1000.0
+            from datetime import datetime, timezone
+            return datetime.fromtimestamp(n, tz=timezone.utc).strftime("%Y-%m-%d")
+        except (ValueError, OverflowError, OSError):
+            return None
+    return parse_date(str(value))
+
+
+def date_shape(value) -> str:
+    """What a date looked like, digits masked, for the survey."""
+    return re.sub(r"\d", "#", str(value))[:40]
+
+
 def _docs_from_api(body: dict) -> List[dict]:
     """The documents in one searchItems answer, as {date, title, kind,
     hint, account}. The guid rides as the hint. It names a document, not
@@ -551,7 +585,7 @@ def _docs_from_api(body: dict) -> List[dict]:
     for e in (body or {}).get("defaultDocumentList") or (body or {}).get("resultList") or []:
         if not isinstance(e, dict):
             continue
-        iso = parse_date(str(e.get("documentDate") or ""))
+        iso = parse_api_date(e.get("documentDate")) or parse_api_date(e.get("documentLoadDate"))
         if not iso:
             continue
         title = str(e.get("documentTitle") or e.get("documentDisplayName") or e.get("documentTypeName") or "Document").strip()
@@ -632,8 +666,42 @@ def widen_date_filter(page, capture: list, trace: Optional[list] = None) -> bool
             if choice:
                 break
         if not choice:
+            years = sorted({t.strip() for t in options if re.fullmatch(r"\s*(19|20)\d{2}\s*", t)}, reverse=True)
+            if not years:
+                page.keyboard.press("Escape")
+                return False
+            # No period wider than a year is offered (the third survey's
+            # picker ran from this year back to 2019). Each year in turn,
+            # then, gathering every list the page loads.
             page.keyboard.press("Escape")
-            return False
+            page.wait_for_timeout(500)
+            got_any = False
+            for year in years:
+                got_any = _choose_period(page, year, capture, trace) or got_any
+            return got_any
+        return _choose_period(page, choice, capture, trace)
+    except Exception as e:
+        log.info("could not widen the date filter: %s", e)
+        return False
+
+
+def _choose_period(page, choice: str, capture: list, trace: Optional[list] = None) -> bool:
+    """Open the period picker if it is closed, choose `choice`, apply it,
+    and catch the list the page then loads. True when a list arrived."""
+    try:
+        opened = False
+        for role in ("menuitem", "option", "button", "link"):
+            opt = page.get_by_role(role, name=re.compile("^\\s*" + re.escape(choice) + "\\s*$", re.I))
+            if opt.count() and opt.first.is_visible():
+                opened = True
+                break
+        if not opened:
+            picker = page.get_by_role("button", name=DATE_FILTER_RE)
+            if picker.count() == 0:
+                return False
+            picker.first.click(timeout=5000)
+            page.wait_for_timeout(1200)
+        before = len(capture)
 
         def on_response(res):
             try:
@@ -644,7 +712,7 @@ def widen_date_filter(page, capture: list, trace: Optional[list] = None) -> bool
         page.on("response", on_response)
         try:
             for role in ("menuitem", "option", "button", "link"):
-                opt = page.get_by_role(role, name=re.compile("^" + re.escape(choice) + "$", re.I))
+                opt = page.get_by_role(role, name=re.compile("^\\s*" + re.escape(choice) + "\\s*$", re.I))
                 if opt.count():
                     opt.first.click(timeout=5000)
                     break
@@ -654,7 +722,7 @@ def widen_date_filter(page, capture: list, trace: Optional[list] = None) -> bool
                 apply.first.click(timeout=5000)
             for _ in range(30):
                 page.wait_for_timeout(500)
-                if capture:
+                if len(capture) > before:
                     break
             page.wait_for_timeout(1500)
         finally:
@@ -663,11 +731,11 @@ def widen_date_filter(page, capture: list, trace: Optional[list] = None) -> bool
             except Exception:
                 pass
         if trace is not None:
-            trace.append({"note": "period chosen", "period": choice})
-        log.info("date filter widened to %r", choice)
-        return bool(capture)
+            trace.append({"note": "period chosen", "period": choice, "lists": len(capture) - before})
+        log.info("date filter set to %r, %d list(s)", choice, len(capture) - before)
+        return len(capture) > before
     except Exception as e:
-        log.info("could not widen the date filter: %s", e)
+        log.info("could not choose the period %r: %s", choice, e)
         return False
 
 
@@ -1205,7 +1273,12 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
                 entry["query"] = q[:240]
             if "json" in ct:
                 try:
-                    entry["shape"] = _shape(res.json())
+                    body = res.json()
+                    entry["shape"] = _shape(body)
+                    if DOCS_API_RE.search(url):
+                        items = (body or {}).get("defaultDocumentList") or (body or {}).get("resultList") or []
+                        entry["date_shapes"] = sorted({date_shape(e.get("documentDate")) for e in items if isinstance(e, dict)})[:5]
+                        entry["read_as"] = sorted({str(parse_api_date(e.get("documentDate"))) for e in items if isinstance(e, dict)})[:5]
                 except Exception:
                     entry["shape"] = "unreadable"
             seen.append(entry)

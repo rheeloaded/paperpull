@@ -151,3 +151,27 @@ def test_the_documents_page_is_reloaded_when_it_is_already_open():
     src = inspect.getsource(site.goto_docs_capturing)
     assert "page.reload(" in src and "already" in src
     assert site.DOCS_URL.endswith("#/documents")
+
+
+# -- round four, dates in every form and a picker of years (#36) -------------
+
+def test_an_api_date_is_read_in_every_form_etrade_could_send():
+    assert site.parse_api_date("2026-09-15") == "2026-09-15"
+    assert site.parse_api_date("2026-09-15T00:00:00.000Z") == "2026-09-15"
+    assert site.parse_api_date("1789516800000") == "2026-09-16"
+    assert site.parse_api_date(1789516800) == "2026-09-16"
+    assert site.parse_api_date("09/15/2026") == "2026-09-15"
+    assert site.parse_api_date(None) is None and site.parse_api_date("soon") is None
+    assert site.date_shape("1789516800000") == "#############"
+    docs = site._docs_from_api({"defaultDocumentList": [
+        {"documentDate": "1789516800000", "documentTitle": "Brokerage Statement", "documentTypeName": "Statements",
+         "documentGuid": "g1", "documentId": "d1", "displayMultipleAccounts": "Individual ...1234"}]})
+    assert docs and docs[0]["date"] == "2026-09-16" and docs[0]["hint"] == "g1|d1"
+
+
+def test_years_count_as_periods_and_the_year_walk_exists():
+    for t in ("2026", "2019", "Last 90 Days", "Year to Date"):
+        assert site.is_date_filter(t), t
+    assert not site.is_date_filter("Apply") and not site.is_date_filter("Download")
+    src = inspect.getsource(site.widen_date_filter)
+    assert "_choose_period(page, year, capture, trace)" in src

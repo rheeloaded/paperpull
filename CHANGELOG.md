@@ -7,6 +7,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **PG&E, round three.** Every bill row on the tester's history read
+  "View Bill PDF" and handed over no control, so the words are on
+  something that is not an anchor, a button or a lightning-button. A
+  row's controls are now found by their own text, innermost element first,
+  whatever kind it is and through shadow roots, and a row that still
+  hands over nothing prints its outline in the log. The Jump to picker
+  opened without listing its options, so the page jump is also asked of
+  the picker through its own value and change event, the way its parent
+  hears a choice (#33).
+- **E*TRADE, round four.** Discovery found nothing although the page
+  listed a statement, so the caught searchItems answer's documentDate
+  was in a form the app did not read. Dates are now read as an ISO date,
+  an ISO date-time or an epoch in seconds or milliseconds, and the survey
+  records the shape of the dates it saw. The period picker offers the
+  years back to 2019 and nothing wider, so when no wider period exists
+  the app chooses each year in turn and gathers every list (#36).
+
 ## [0.30.0] - 2026-09-21
 
 ### Fixed
