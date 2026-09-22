@@ -143,11 +143,13 @@ In practice that first step is `paperpull <app> login` (or the app's own
 Chromium for most apps, or your own installed Edge/Chrome for the few sites
 whose bot detection turns a fresh Chromium away (Walmart, Verizon, Chase).
 Each app gets its own profile and its own debugging port, so several
-signed-in browsers can sit open at once without colliding. That profile is
-separate from your everyday browser on purpose, so it starts with no
-extensions and no saved logins. It is a real browser profile, though, so a
-password manager installed into it once, from the extension store in the
-window Login opens, stays there for every Login after.
+signed-in browsers can sit open at once without colliding. Those profiles
+are separate from your everyday browser on purpose, so each starts with no
+extensions and no saved logins. They are real browser profiles, though, so
+a password manager installed into one, from the extension store in the
+window Login opens, stays there for every Login of that provider after.
+It is one profile per provider, so the extension goes in once for each
+provider you set up, not once for all of them.
 
 **Everything a provider knows lives in one file.** `provider_site.py` holds
 every selector, URL and download quirk for that site. The orchestrator around

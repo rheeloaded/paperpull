@@ -7,6 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **The README said a password manager installed into the sign-in profile
+  stays for every provider.** It stays for that provider. Each provider has
+  its own profile so several can be signed in at once on their own ports,
+  so the extension goes in once per provider (#40).
+
 ## [0.30.0-kroger.1] - 2026-09-21
 
 A prerelease for the Kroger tester. Latest stays 0.29.0.
