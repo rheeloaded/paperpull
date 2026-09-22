@@ -21,7 +21,7 @@ instead of clicking through each site by hand.
 
 ![The PaperPull control panel after a pilot run on a sample archive. Every name and amount is invented.](docs/panel.png)
 
-**Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html) and the [Paperless-ngx tutorial](https://paperpull.net/paperless.html). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon, Linux from source.
+**Watch it:** a [75-second demo](https://youtu.be/_wZToSSMRPU) on the real panel with made-up accounts. **Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html) and the [Paperless-ngx tutorial](https://paperpull.net/paperless.html). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon, Linux from source.
 
 **It also turns those PDFs into spreadsheets.** Your receipts become one
 long table of every item you have ever bought, across every store and every
