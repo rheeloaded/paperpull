@@ -286,6 +286,40 @@ def test_the_panel_offers_record_and_tucks_it_behind_more():
     assert app_module.ACTIONS["record"]["flags"] == ["--record"]
     assert "record" in app_module.MORE_ACTIONS
 
+
+def test_renaming_is_two_buttons_because_it_is_two_steps():
+    """The first changes nothing and prints what it would do. A panel
+    with one button would show a preview and leave nowhere to go."""
+    assert app_module.ACTIONS["rename"]["flags"] == ["--rename"]
+    assert app_module.ACTIONS["rename_apply"]["flags"] == ["--rename", "--apply"]
+    for key in ("rename", "rename_apply"):
+        assert key in app_module.MORE_ACTIONS, key
+
+
+def test_the_preview_is_the_one_that_reads_as_harmless():
+    """Whichever of the two is pressed by somebody not reading closely
+    should be the one that changes nothing."""
+    assert app_module.ACTIONS["rename"]["label"] == "Rename preview"
+    assert "apply" in app_module.ACTIONS["rename_apply"]["label"].lower()
+    assert "--apply" not in app_module.ACTIONS["rename"]["flags"]
+
+
+def test_the_panel_says_what_the_two_buttons_do():
+    text = app_module.HTML
+    assert "Rename preview</b> shows what this app would call" in text
+    assert "Apply renames" in text
+    assert "this app downloaded are touched" in text
+    assert "Nothing is downloaded either way" in text
+
+
+def test_a_rename_gets_the_flags_the_app_understands(settings, tmp_path):
+    meta = {"accounts": ["primary"], "login_flag": "--login",
+            "python": "py", "script": str(tmp_path / "x_receipts.py")}
+    for action, expected in (("rename", ["--rename"]),
+                             ("rename_apply", ["--rename", "--apply"])):
+        cmd = app_module._build_cmd(meta, "primary", action)
+        assert cmd[2:] == expected, action
+
 # ---------------------------------------------------------------------------
 # What adding a provider leaves behind
 #

@@ -240,11 +240,18 @@ ACTIONS = {
     # and captures no keystroke. It is the one-round version of Diagnose:
     # a survey guesses which control matters, a recording knows.
     "record": {"label": "Record", "flags": ["--record"]},
+    # Renaming what is already downloaded, so a naming improvement reaches
+    # the files you already have without asking the provider for them
+    # again. Two buttons because it is two steps: the first one changes
+    # nothing and prints what it would do, the second does it. A panel
+    # with one button would show a preview and leave nowhere to go.
+    "rename": {"label": "Rename preview", "flags": ["--rename"]},
+    "rename_apply": {"label": "Apply renames", "flags": ["--rename", "--apply"]},
 }
 # The actions for when something is off, kept behind a "more" link so the
 # main panel stays the four a normal day needs. Verify re-checks saved PDFs,
 # Diagnose surveys the page. Both are harmless and both are rarely wanted.
-MORE_ACTIONS = ("verify", "diagnose", "record")
+MORE_ACTIONS = ("verify", "diagnose", "record", "rename", "rename_apply")
 ENTRY_RE = re.compile(r".*_(receipts|docs)\.py$")
 
 # Every app takes the same three scope flags. The panel passes them through
@@ -1746,6 +1753,10 @@ HTML = r"""<!doctype html>
       <p class="morehint"><b>Verify</b> re-checks every saved PDF. <b>Diagnose</b> reads the
          provider's page and writes a survey to its Diagnostics folder, downloading nothing.
          Attach that file to an issue when a provider needs a repair or a first test.</p>
+      <p class="morehint"><b>Rename preview</b> shows what this app would call the files you
+         already have, and changes nothing. <b>Apply renames</b> then renames them where they
+         sit. Nothing is downloaded either way, nothing moves between folders, and only files
+         this app downloaded are touched.</p>
     </div>
     <p class="hint">1. <b>Login</b> opens a browser. Sign in yourself and leave it open.<br>
        2. <b>Pilot</b> tests the newest few.<br>
