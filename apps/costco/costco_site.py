@@ -967,13 +967,13 @@ def open_warehouse_receipt(page, purchase: Purchase) -> None:
     tab, forward to the quarter the date falls in, then the row whose
     date and total are this purchase's.
 
-    Always on a freshly loaded page. Saving the one before it hid every
-    element on this page except the dialog, because that is what makes a
-    printable receipt out of a modal sitting on top of a shop, and
-    nothing puts them back. The list was still in the document and none
-    of it could be clicked, so the first receipt of a run worked and
-    every one after it failed to open. A live run found that twice
-    before the cause was clear."""
+    The page is asked for fresh, and no longer has to be. Saving the one
+    before it used to hide every element on this page except the dialog
+    and leave them that way, so the first receipt of a run worked and
+    every one after it failed to open. A capture puts the page back now,
+    in a finally, and this reload is belt as well as braces, because a
+    quarter that has been paged through is not in the state a lookup
+    expects either."""
     _note("op", "open_item", "open a warehouse receipt")
     close_dialog(page)
     goto_orders(page, fresh=True)
