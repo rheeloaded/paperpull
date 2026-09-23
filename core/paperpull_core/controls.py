@@ -196,3 +196,58 @@ SETTINGS_CONTROL_RE = re.compile(
     r"\breallocate\b|\bliquidat(e|es|ed|ing|ion)\b|"
     r"\bbuy\b|\bsell\b|\bschedule\s+(a\s+)?(payment|transfer)\b",
     re.I)
+
+
+# -- reading the controls on a page -------------------------------------------
+#
+# Both of these were identical in the eleven apps cut from one scaffold, so
+# every provider added since made another copy. The pattern that says which
+# words finish a download stays with the app, because AT&T's menu says
+# things nobody else's does, and so does the app's own is_safe_control.
+
+def control_texts(page, roles=("button", "link", "menuitem"), limit: int = 120) -> set:
+    """The visible words of every control on the page, tidied and cut short.
+
+    Used to tell what a click revealed: take this before and after, and the
+    difference is what appeared. Anything that will not answer is skipped
+    rather than raised, because a page mid-render is normal and a survey
+    that stops is worth less than a partial one.
+    """
+    out = set()
+    for role in roles:
+        try:
+            loc = page.get_by_role(role)
+            for i in range(min(loc.count(), limit)):
+                try:
+                    t = (loc.nth(i).inner_text(timeout=200) or "").strip()
+                except Exception:
+                    continue
+                if t:
+                    out.add(re.sub(r"\s+", " ", t)[:60])
+        except Exception:
+            pass
+    return out
+
+
+def second_step(page, appeared: set, pattern: Pattern, is_safe_control):
+    """A control the click revealed whose text says it finishes a download,
+    as (locator, text), or (None, "").
+
+    Several providers answer a Download button with a small menu, so the
+    document arrives only after a second click. The ones that read like the
+    plain choice are tried first, because "Regular PDF" is the bill and
+    "Itemized PDF" is a different document. Whatever is picked still has to
+    pass the app's own guard.
+    """
+    ranked = sorted(appeared,
+                    key=lambda t: (0 if re.search(r"regular|standard|full|^download", t, re.I) else 1, t))
+    for text in ranked:
+        if pattern.match(text) and is_safe_control(text):
+            for role in ("button", "link", "menuitem"):
+                try:
+                    loc = page.get_by_role(role, name=re.compile("^" + re.escape(text) + "$", re.I))
+                    if loc.count() and loc.first.is_visible():
+                        return loc.first, text
+                except Exception:
+                    continue
+    return None, ""
