@@ -96,6 +96,25 @@ from paperpull_core.redact import private_words, set_private_words  # noqa: F401
 
 log = logging.getLogger("costco_receipts.site")
 
+# The run's journal, handed over by the orchestrator. None when nobody
+# set one, and every use below is guarded, because a journal must never
+# be the reason a working provider stops working.
+_journal = None
+
+
+def set_journal(journal) -> None:
+    global _journal
+    _journal = journal
+
+
+def _note(method, *a, **kw):
+    """Write to the journal if there is one, and never fail."""
+    try:
+        if _journal is not None:
+            getattr(_journal, method)(*a, **kw)
+    except Exception:
+        pass
+
 # ---------------------------------------------------------------------------
 # URLs
 # ---------------------------------------------------------------------------
@@ -495,6 +514,7 @@ def open_tab(page, name: str) -> bool:
 
     Switching does not navigate, it asks the API and redraws, so the only
     thing to wait on is the page going quiet."""
+    _note("op", "switch_tab", "open a tab")
     if not is_safe_control(name):
         raise ValueError("refusing to click a control called %r" % name)
     try:
@@ -507,8 +527,10 @@ def open_tab(page, name: str) -> bool:
         tab.click(timeout=15000)
     except Exception as e:
         log.warning("Could not open the %s tab: %s", name, e)
+        _note("result", "could not open the tab", error=e)
         return False
     settle(page)
+    _note("checkpoint", "the tab is open", page)
     return True
 
 
@@ -566,8 +588,10 @@ def select_range(page, option: str) -> bool:
         sel.select_option(label=option, timeout=15000)
     except Exception as e:
         log.warning("Could not choose the range %r: %s", option, e)
+        _note("result", "could not choose the range", error=e)
         return False
     settle(page)
+    _note("checkpoint", "the range is chosen", page)
     return True
 
 
@@ -692,7 +716,9 @@ def read_rows(page, wait_ms: int = 20000) -> List[dict]:
     except Exception as e:
         log.warning("Could not read the rows on this tab: %s", e)
         return []
-    return [r for r in rows if isinstance(r, dict)]
+    rows = [r for r in rows if isinstance(r, dict)]
+    _note("op", "read_rows", "read the rows", rows=len(rows))
+    return rows
 
 
 def fetch_history(page, max_pages: int = 200, year: str = "") -> dict:
@@ -948,8 +974,10 @@ def open_warehouse_receipt(page, purchase: Purchase) -> None:
     of it could be clicked, so the first receipt of a run worked and
     every one after it failed to open. A live run found that twice
     before the cause was clear."""
+    _note("op", "open_item", "open a warehouse receipt")
     close_dialog(page)
     goto_orders(page, fresh=True)
+    _note("checkpoint", "back on the list", page)
     if not open_tab(page, TAB_WAREHOUSE):
         raise RuntimeError("could not open the Warehouse tab")
     log.debug("Back on the Warehouse tab, looking for %s", purchase.purchase_date)
@@ -989,6 +1017,12 @@ def press_view_receipt(page, index: int) -> None:
     checked against the guard first, because a control in that place
     saying something else is a page this app no longer understands."""
     button = page.locator('[data-pp-row="%d"]' % int(index)).first
+    # Both numbers, named. Counting one collection and pressing the nth
+    # of another is the bug this records, and it reads from outside
+    # exactly like a page that did not load.
+    _note("chose", "receipt_button", "rows the reader marked",
+          candidates=page.locator("[data-pp-row]").count(),
+          ordinal=int(index), precondition="visible")
     if button.count() == 0:
         raise RuntimeError("that row is no longer on the page")
     name = (button.inner_text(timeout=2000) or "").strip()

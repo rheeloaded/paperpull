@@ -469,7 +469,7 @@ def _step(value) -> str:
 
 def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
                   page=None, selectors=None, provider: str = "",
-                  version: str = "", error=None, extra=None,
+                  version: str = "", error=None, extra=None, journal=None,
                   say=print, **ignored) -> Optional[str]:
     """One file, written where the run already writes everything else.
 
@@ -498,6 +498,15 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
             report["selectors"] = census(page, selectors)
         if isinstance(extra, dict):
             report["extra"] = _only_safe(extra)
+        if journal is not None:
+            # The census says what the page looked like when the run
+            # gave up. This says what it looked like on the way there,
+            # which is the only thing that can speak for a layer the run
+            # never reached.
+            try:
+                report["journal"] = journal.report()
+            except Exception:
+                pass
         report["note"] = (
             "Written automatically because a step failed. It holds counts "
             "and states and no text from the page, so there is nothing in "
@@ -617,6 +626,9 @@ def summarize(report: dict) -> list:
     if kept.get("box") == [0, 0]:
         said.append("The block it kept measured nought by nought, so it "
                     "rendered nothing.")
+    from .journal import summarize as _journal_said
+    said.extend(_journal_said(report.get("journal") or {}))
+
     parser = extra.get("parser") or {}
     if parser.get("candidates") and not parser.get("accepted"):
         why = parser.get("rejected") or {}

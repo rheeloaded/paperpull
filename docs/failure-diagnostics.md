@@ -173,6 +173,38 @@ nothing.
 Twenty one of twenty one clean now, and the canary is a test that runs
 whenever the schema changes.
 
+## The journal and the checkpoints
+
+The census says what the page looked like when a run gave up. It cannot
+say anything about a state the run never reached, and that is what makes
+the bugs stack. So there is a second thing, kept as the run goes.
+
+`core/paperpull_core/journal.py`. Three kinds of entry and nothing else.
+
+    an operation    the app was about to do something it named
+    a choice        it found N candidates and took the nth of them
+    a checkpoint    the page's state at a transition
+
+**A choice is the one a census cannot replace.** Counting one collection
+and acting on the nth of another reads, from outside, exactly like a
+page that did not load. That bug took two live runs to find with a
+browser in front of me. Recorded, it is two lines naming different
+collections with different counts, side by side.
+
+**A checkpoint is what carries an earlier layer.** A list that was
+visible at one checkpoint and is still present but no longer visible at
+the next is a page something hid and did not put back, stated while the
+run is still going, long before the symptom appears.
+
+The address is the exception worth explaining. Whether it changed, and
+in which part, is the difference between a page that reloaded and one
+that did not, which was a bug of its own. The journal keeps the last
+address to compare against and never writes it down. What comes out is
+one of same, hash, query, path, host.
+
+Everything in it goes through the same allowlist as the export, and the
+canary runs over the journal too.
+
 ## What this does not fix
 
 - A provider that only breaks on an account with something unusual on
