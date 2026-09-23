@@ -1719,7 +1719,7 @@ HTML = r"""<!doctype html>
   <div id="paneout" style="display:flex; flex-direction:column; min-height:0; flex:1;">
     <div class="status"><span class="dot" id="dot"></span><span id="statustext">idle</span></div>
     <pre class="console" id="console"></pre>
-    <p class="hint" id="failnote" style="display:none;margin:6px 0 0">
+    <p class="hint warn" id="failnote" style="display:none;margin:6px 0 0">
        This run wrote a file about what went wrong. It holds counts and states
        and no text from your account. Read it, then attach it to this
        provider&#39;s issue.
