@@ -48,6 +48,8 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core.dates import checked as _checked_date
+
 log = logging.getLogger("pge_docs.site")
 
 BASE = "https://myaccount.pge.com"
@@ -217,7 +219,7 @@ MONTH_YEAR_RE = re.compile(
 YEAR_RE = re.compile(r"\b(19|20)(\d{2})\b")
 
 
-def parse_date(raw: str) -> str:
+def _parse_date_from_page(raw: str) -> str:
     """Parse date text into ISO YYYY-MM-DD or empty string if unparseable."""
     if not raw:
         return ""
@@ -236,6 +238,15 @@ def parse_date(raw: str) -> str:
             elif fmt == "iso":
                 return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
     return ""
+
+
+def parse_date(text):
+    """The date this provider's page is showing, as YYYY-MM-DD.
+
+    The reading is below, unchanged. This only refuses to believe a result
+    that names a day which does not exist, because a reference number is
+    shaped like a date and used to be taken for one."""
+    return _checked_date(_parse_date_from_page(text), "")
 
 
 def parse_period_date(raw: str) -> Tuple[str, str]:

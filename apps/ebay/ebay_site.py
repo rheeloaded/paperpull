@@ -66,6 +66,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from paperpull_core.models import ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.dates import checked as _checked_date
 from storage import now_iso
 
 log = logging.getLogger("ebay_receipts.site")
@@ -223,7 +224,7 @@ STATUS_WORDS_RE = re.compile(
     r"processing|paid|awaiting\s+shipment|order\s+placed|unpaid|payment\s+failed)\b", re.I)
 
 
-def parse_date(text: str) -> Optional[str]:
+def _parse_date_from_page(text: str) -> Optional[str]:
     if not text:
         return None
     for pattern, kind in DATE_PATTERNS:
@@ -241,6 +242,15 @@ def parse_date(text: str) -> Optional[str]:
         except (KeyError, ValueError):
             continue
     return None
+
+
+def parse_date(text):
+    """The date this provider's page is showing, as YYYY-MM-DD.
+
+    The reading is below, unchanged. This only refuses to believe a result
+    that names a day which does not exist, because a reference number is
+    shaped like a date and used to be taken for one."""
+    return _checked_date(_parse_date_from_page(text), None)
 
 
 def parse_money(text: str) -> str:

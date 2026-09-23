@@ -20,6 +20,7 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.dates import checked as _checked_date
 from storage import now_iso
 
 log = logging.getLogger("target_receipts.site")
@@ -157,7 +158,7 @@ STATUS_WORDS_RE = re.compile(
 STORE_TRIP_RE = re.compile(r"store\s+trip\s+at\s+([^\n]+)", re.I)
 
 
-def parse_date(text: str) -> Optional[str]:
+def _parse_date_from_page(text: str) -> Optional[str]:
     """Extract the first date in *text* as YYYY-MM-DD."""
     if not text:
         return None
@@ -176,6 +177,15 @@ def parse_date(text: str) -> Optional[str]:
         except (KeyError, ValueError):
             continue
     return None
+
+
+def parse_date(text):
+    """The date this provider's page is showing, as YYYY-MM-DD.
+
+    The reading is below, unchanged. This only refuses to believe a result
+    that names a day which does not exist, because a reference number is
+    shaped like a date and used to be taken for one."""
+    return _checked_date(_parse_date_from_page(text), None)
 
 
 def parse_money(text: str) -> str:

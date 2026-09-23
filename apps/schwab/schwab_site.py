@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.dates import checked as _checked_date
 
 ALLOWED_HOSTS = {'client.schwab.com', 'ausgateway.schwab.com'}
 
@@ -168,7 +169,7 @@ MDY_RE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
 ISO_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
 
-def parse_date(text: str) -> Optional[str]:
+def _parse_date_from_page(text: str) -> Optional[str]:
     if not text:
         return None
     m = MDY_RE.search(text)
@@ -178,6 +179,15 @@ def parse_date(text: str) -> Optional[str]:
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
     return None
+
+
+def parse_date(text):
+    """The date this provider's page is showing, as YYYY-MM-DD.
+
+    The reading is below, unchanged. This only refuses to believe a result
+    that names a day which does not exist, because a reference number is
+    shaped like a date and used to be taken for one."""
+    return _checked_date(_parse_date_from_page(text), None)
 
 
 def mdy(iso: str) -> str:

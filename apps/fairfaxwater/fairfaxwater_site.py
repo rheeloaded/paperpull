@@ -54,6 +54,7 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
+from paperpull_core.dates import checked as _checked_date
 
 log = logging.getLogger("fairfaxwater_docs.site")
 
@@ -241,7 +242,7 @@ ROW_ANCESTOR = ("xpath=ancestor::*[self::tr or contains(@class,'mx-listview-item
 SHOW_MORE_ROUNDS = 40           # 5 rows a click, so 200 bills, fifty years of quarters
 
 
-def parse_date(text: str) -> str:
+def _parse_date_from_page(text: str) -> str:
     """'02/09/2026' or '2026-02-09' -> '2026-02-09', else ''."""
     s = (text or "").strip()
     if re.match(r"^\d{4}-\d{2}-\d{2}", s):
@@ -250,6 +251,15 @@ def parse_date(text: str) -> str:
     if m:
         return "%s-%02d-%02d" % (m.group(3), int(m.group(1)), int(m.group(2)))
     return ""
+
+
+def parse_date(text):
+    """The date this provider's page is showing, as YYYY-MM-DD.
+
+    The reading is below, unchanged. This only refuses to believe a result
+    that names a day which does not exist, because a reference number is
+    shaped like a date and used to be taken for one."""
+    return _checked_date(_parse_date_from_page(text), "")
 
 
 def parse_row(text: str) -> Optional[dict]:

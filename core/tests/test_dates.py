@@ -46,3 +46,55 @@ def test_anything_it_cannot_read_comes_back_unchanged():
     """A label that is merely unexpected beats a run that stops."""
     for odd in ("", "not a date", "2026", "2026-13-01", "2026-08-31T09:00:00"):
         assert human_date(odd) == odd
+
+
+# -- a date that is merely shaped like one -------------------------------------
+
+def test_a_real_day_is_real():
+    from paperpull_core.dates import is_real_date
+    for iso in ("2026-08-31", "2024-02-29", "2026-01-01", "2026-12-31"):
+        assert is_real_date(iso), iso
+
+
+def test_a_day_that_does_not_exist():
+    from paperpull_core.dates import is_real_date
+    for iso in ("2026-02-30", "2026-13-45", "2026-00-10", "2026-04-31",
+                "2026-11-31", "2026-13-13", "2026-99-99"):
+        assert not is_real_date(iso), iso
+
+
+def test_february_the_twenty_ninth_only_in_a_leap_year():
+    from paperpull_core.dates import is_real_date
+    assert is_real_date("2024-02-29")
+    assert not is_real_date("2026-02-29")
+    assert not is_real_date("1900-02-29")
+    assert is_real_date("2000-02-29")
+
+
+def test_a_reference_number_is_not_a_date():
+    """The one that sent thirty-seven apps filing documents under it."""
+    from paperpull_core.dates import is_real_date
+    for not_a_date in ("1234-56-78", "0000-00-00", "9999-99-99", ""):
+        assert not is_real_date(not_a_date), not_a_date
+
+
+def test_nothing_useful_is_not_a_date():
+    from paperpull_core.dates import is_real_date
+    for junk in (None, "not a date", "2026", "2026-08", "2026-08-31T09:00", 20260831):
+        assert not is_real_date(junk), junk
+
+
+def test_checked_keeps_a_real_date_and_drops_an_impossible_one():
+    from paperpull_core.dates import checked
+    assert checked("2026-08-31") == "2026-08-31"
+    assert checked("1234-56-78") is None
+    assert checked(None) is None
+
+
+def test_checked_answers_the_way_the_app_already_did():
+    """Six apps say "" for no date and the rest say None. A date they
+    should never have believed has to look like the one they know."""
+    from paperpull_core.dates import checked
+    assert checked("1234-56-78", "") == ""
+    assert checked("", "") == ""
+    assert checked("2026-08-31", "") == "2026-08-31"
