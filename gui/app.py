@@ -798,6 +798,23 @@ _TEMPLATE_SKIP = {".venv", "__pycache__", ".pytest_cache", "tests", "Backups",
                   "progress.json", "discovery.json"}
 
 
+def _is_someones_own(name: str) -> bool:
+    """A file that belongs to whoever set that folder up, not to the code.
+
+    config.json was listed by name, and a second person's account is
+    config.<label>.json, which no list knew about. In a checkout used as
+    the template root, one of those on disk would have been copied into
+    every install as though it were part of the app, handing them an
+    account nobody asked for, pointing at somebody else's folders and
+    carrying their name. config.example.json is the one that does ship,
+    because it is the template for a config rather than one.
+    """
+    low = name.lower()
+    if low == "config.example.json":
+        return False
+    return low.startswith("config.") and low.endswith(".json")
+
+
 def _templates_root() -> Path | None:
     """Where the shipped app code lives. templates/apps in a package, apps/ in
     a checkout. None when neither exists."""
@@ -890,7 +907,8 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
         # named <slug>-browser-profile, and in a repo checkout it can be
         # sitting there signed in. The test that copies a fake one with a
         # Cookies file inside is what caught this.
-        if any(part in _TEMPLATE_SKIP or "browser-profile" in part.lower()
+        if any(part in _TEMPLATE_SKIP or _is_someones_own(part)
+               or "browser-profile" in part.lower()
                or part.lower().endswith(".pdf")
                for part in rel.parts):
             continue
@@ -938,7 +956,8 @@ def _template_files(src: Path):
         if item.is_dir():
             continue
         rel = item.relative_to(src)
-        if any(part in _TEMPLATE_SKIP or "browser-profile" in part.lower()
+        if any(part in _TEMPLATE_SKIP or _is_someones_own(part)
+               or "browser-profile" in part.lower()
                or part.lower().endswith(".pdf") for part in rel.parts):
             continue
         if skip_launchers and item.suffix.lower() in LAUNCHER_SUFFIXES:

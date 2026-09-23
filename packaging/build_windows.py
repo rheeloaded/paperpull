@@ -146,8 +146,13 @@ def wanted(rel: str) -> bool:
     if parts[0] == "apps":
         # code, rules and launchers only. The example config is the only
         # config that ships, and it is the only one git tracks anyway.
-        name = parts[-1]
-        if name in ("config.json", "progress.json", "discovery.json"):
+        name = parts[-1].lower()
+        if name in ("progress.json", "discovery.json"):
+            return False
+        # Any config but the example. config.json was named here, and a
+        # second person's account is config.<label>.json, which this did
+        # not know about. Nothing of that shape is ever part of the app.
+        if name.startswith("config.") and name.endswith(".json")                 and name != "config.example.json":
             return False
     return True
 
