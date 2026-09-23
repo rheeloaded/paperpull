@@ -132,6 +132,17 @@ def test_nothing_can_be_run_while_looking_at_it(panel):
     assert "nothing to download" in why
 
 
+def test_the_refusal_says_where_the_sign_in_step_can_be_seen(panel):
+    """It is the one part of the program the sample cannot show, and it
+    needs no account to watch, so nobody should be left thinking it is
+    untestable."""
+    _sample(True)
+    why = app_module.setup_needed({"dir": str(app_module._sample_dest() / "Chase Statements")})
+    assert "leave the sample" in why.lower()
+    assert "Login" in why
+    assert "never sees what you type" in why
+
+
 def test_the_archive_cannot_be_changed_while_looking_at_it(panel):
     """Create, add a person, remove and change-the-root all write into the
     root, and the root is the sample."""

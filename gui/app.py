@@ -350,8 +350,10 @@ def setup_needed(meta: dict) -> str:
                 "Everything already in it was invented to show what a real "
                 "archive looks like. The Status tab and both spreadsheets "
                 "work on it exactly as they would on yours.\n\n"
-                "Leave the sample, at the top of the page, to get back to "
-                "your own archive.")
+                "To see the sign-in step, leave the sample, add a provider, "
+                "and press Login. Your own browser opens on that provider's "
+                "sign-in page. Nothing is downloaded until you have signed "
+                "in there yourself, and PaperPull never sees what you type.")
     if _is_packaged() or _venv_python(Path(meta["dir"])) is not None:
         return ""
     script = "setup.command" if sys.platform != "win32" else "setup.bat"
@@ -1420,10 +1422,15 @@ def api_run(app: str, account: str = "primary", action: str = "pilot",
         # that cannot import it. The page already carries a warning, and
         # a warning above the buttons is not what somebody reads when a
         # button has just produced a traceback.
+        # A missing venv is a failure and is reported as one. Being in the
+        # sample is not, so it does not get a red dot and an exit code, or
+        # the first thing anyone tries there looks like a broken program.
+        code = 0 if _SAMPLE is not None else 1
+
         async def refuse():
             for line in blocked.splitlines():
                 yield "data: %s\n\n" % line
-            yield "event: done\ndata: 1\n\n"
+            yield "event: done\ndata: %d\n\n" % code
         return StreamingResponse(refuse(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
                                           "X-Accel-Buffering": "no"})
