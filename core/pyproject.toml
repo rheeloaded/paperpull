@@ -17,6 +17,19 @@ dependencies = [
     "pypdf[crypto]>=4.0",
 ]
 
+# What the test suite needs beyond the runtime dependency. Without these
+# several suites SKIP themselves rather than fail, and one of them is the
+# privacy canary, the only test holding the promise that a failure file
+# carries no page content. tools/run_all_tests.py refuses to report success
+# when that one is among the skips.
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "playwright>=1.44",
+    "openpyxl>=3.1",
+    "pdfplumber>=0.11",
+]
+
 [project.urls]
 Homepage = "https://github.com/rheeloaded/paperpull"
 

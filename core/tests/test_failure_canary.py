@@ -25,7 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from paperpull_core import failure
 
 sync_playwright = pytest.importorskip(
-    "playwright.sync_api", reason="needs a browser").sync_playwright
+    "playwright.sync_api",
+    reason="needs a browser, and WITHOUT IT NOTHING CHECKS THAT A FAILURE "
+           "FILE CARRIES NO PAGE CONTENT. tools/run_all_tests.py refuses to "
+           "report success when this is the reason for a skip."
+).sync_playwright
 
 PAGE = """<!doctype html>
 <title>Orders for CANARYNAME CANARYSURNAME</title>
