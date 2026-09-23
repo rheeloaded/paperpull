@@ -163,6 +163,10 @@ MONTH_YEAR_RE = re.compile(
     r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
     r"\s+(\d{4})", re.I)
 YEAR_RE = re.compile(r"\b(19|20)(\d{2})\b")
+# "09/2026", a month and a year without a day. Without this a page that
+# dates its statements that way collapses every one of them onto the last
+# day of the year and all but one is dropped as a duplicate (#38).
+MONTH_SLASH_YEAR_RE = re.compile(r"\b(0?[1-9]|1[0-2])/((?:19|20)\d{2})\b")
 _LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
              7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
@@ -203,6 +207,10 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
     if m:
         month = _MONTHS[m.group(1)[:3].lower()]
         year = int(m.group(2))
+        return f"{year:04d}-{month:02d}-{_last_day(year, month):02d}", m.group(0)
+    m = MONTH_SLASH_YEAR_RE.search(text)
+    if m:
+        month, year = int(m.group(1)), int(m.group(2))
         return f"{year:04d}-{month:02d}-{_last_day(year, month):02d}", m.group(0)
     m = YEAR_RE.search(text)
     if m:
@@ -546,15 +554,24 @@ class RawDoc:
 # the nearest enclosing row or card whose text carries a date, up to six
 # levels up. Returned with the container's text so a repair can see what
 # the row looked like.
+# The row a control sits in, found by walking up until the text carries
+# something that dates it.
+#
+# Round three asked for a full date and a mortgage statement list does
+# not print one. The tester's page is nine statements, each a View and a
+# Download whose address is `javascript:void(0)`, and discovery reported
+# nothing at all because no ancestor of any of them held a day of a
+# month. A month and a year dates a monthly statement, and a year alone
+# dates a 1098, so both count now (#38).
 _ROW_OF_JS = r"""el => {
-  const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/i;
-  let node = el, depth = 0;
-  while (node && depth < 6) {
+  const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{1,2}\/(19|20)\d{2}\b|\b(19|20)\d{2}\b/i;
+  let node = el, depth = 0, widest = '';
+  while (node && depth < 8) {
     const txt = (node.innerText || '').trim();
-    if (dateRe.test(txt)) return txt.slice(0, 300);
+    if (dateRe.test(txt)) { widest = txt.slice(0, 300); break; }
     node = node.parentElement; depth++;
   }
-  return '';
+  return widest;
 }"""
 
 
@@ -603,13 +620,16 @@ def _read_rows(page, docs: List[RawDoc], seen: set) -> None:
         except Exception:
             href = ""
         row_text = ""
-        iso = parse_date(name)
+        # A month and a year is a date for a monthly statement, and a year
+        # alone is one for a 1098, so the period reader is used rather than
+        # the one that insists on a day (#38).
+        iso, _period = parse_period_date(name)
         if not iso:
             try:
                 row_text = el.evaluate(_ROW_OF_JS) or ""
             except Exception:
                 row_text = ""
-            iso = parse_date(row_text)
+            iso, _period = parse_period_date(row_text)
         if not iso or iso in seen:
             continue
         seen.add(iso)
@@ -632,10 +652,10 @@ def _control_for(page, iso: str):
             name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
         except Exception:
             name = ""
-        found = parse_date(name)
+        found, _period = parse_period_date(name)
         if not found:
             try:
-                found = parse_date(el.evaluate(_ROW_OF_JS) or "")
+                found, _period = parse_period_date(el.evaluate(_ROW_OF_JS) or "")
             except Exception:
                 found = None
         if found == iso:

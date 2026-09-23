@@ -35,7 +35,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms; Document Access Hub API, nothing clicked | Brokerage |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
 | [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery. UNTESTED, built against an account with no purchases. Have one? Run Diagnose and attach the file to issue #41. Being tested by @jpfieber | Retail |
-| [`github`](apps/github) | GitHub | Payment receipts for Pro, Copilot, Actions, Sponsors and anything else GitHub charged. UNTESTED, built against an account with no payments. Have one? Run Diagnose and attach the file to issue #43. Being tested by @jpfieber | Software services |
+| [`github`](apps/github) | GitHub | Payment receipts for Pro, Copilot, Actions, Sponsors and anything else GitHub charged. Confirmed by @jpfieber on issue #43, whose Pilot saved five of the twenty-three receipts his account holds | Software services |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #35. Being tested by @watling777 | Credit union |
 | [`meijer`](apps/meijer) | Meijer | Order receipts, and in-store digital receipts where mPerks lists them. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #42. Being tested by @jpfieber | Retail |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
@@ -49,7 +49,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098. UNTESTED, built without an account. Have an SBA loan? Run Diagnose and attach the file to issue #28 | Government loan servicing |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Brokerage |
-| [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #34. Being tested by @watling777 | Utility |
+| [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills. Confirmed by @watling777 on issue #34, whose Pilot took the newest five and whose full run took the rest of the history | Utility |
 | [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents. UNTESTED, built without an account. Have a policy? Run Diagnose and attach the file to issue #37. Being tested by @watling777 | Insurance |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
 | [`tsp`](apps/tsp) | Thrift Savings Plan (tsp.gov) | Participant statements, 1099-R | Federal retirement (government system) |

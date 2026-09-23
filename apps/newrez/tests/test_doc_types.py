@@ -136,3 +136,46 @@ def test_the_loan_number_comes_off_the_servicing_address_and_is_never_in_the_cod
     assert site.STATEMENT_PAGES == ("/statements/monthly", "/statements/yearly")
     assert site.is_safe_url("https://servicing.newrez.com/servicing/1/statements/monthly")
     assert site.is_safe_control("Account Details") and site.ACCOUNT_DETAILS_RE.match("Account Details")
+
+
+# -- round four, nine rows and no full date on any of them (#38) -------------
+
+def test_a_month_and_a_year_dates_a_statement_and_a_year_dates_a_1098():
+    """His page lists nine statements, each a View and a Download whose
+    address is `javascript:void(0)`, and discovery reported none. Round
+    three asked every row for a day of a month, which a mortgage
+    statement list does not print."""
+    assert site.parse_period_date("September 2026")[0] == "2026-09-30"
+    assert site.parse_period_date("Sep 2026")[0] == "2026-09-30"
+    assert site.parse_period_date("2025")[0] == "2025-12-31"
+    # a day, when there is one, still wins
+    assert site.parse_period_date("Statement Sep 5, 2026")[0] == "2026-09-05"
+
+
+def test_a_month_written_with_a_slash_is_not_every_statement_of_that_year():
+    """09/2026 used to fall through to the year rule, so twelve
+    statements became one date and eleven were dropped as duplicates."""
+    assert site.parse_period_date("09/2026")[0] == "2026-09-30"
+    assert site.parse_period_date("12/2025")[0] == "2025-12-31"
+    assert site.parse_period_date("01/2026")[0] == "2026-01-31"
+    assert site.parse_period_date("02/2024")[0] == "2024-02-29", "a leap year"
+    # not a month, so it is only a year
+    assert site.parse_period_date("13/2026")[0] == "2026-12-31"
+
+
+def test_the_row_walk_looks_for_a_period_and_not_only_for_a_full_date():
+    js = site._ROW_OF_JS
+    assert "depth < 8" in js
+    assert r"\d{4}" in js
+    for part in ("Jan|Feb", "19|20"):
+        assert part in js, part
+
+
+def test_discovery_and_capture_agree_on_how_a_row_is_dated():
+    """They match rows the same way or capture looks for a document
+    discovery never saw."""
+    import inspect
+    for fn in (site._read_rows, site._control_for):
+        src = inspect.getsource(fn)
+        assert "parse_period_date" in src, fn.__name__
+        assert "parse_date(" not in src, fn.__name__

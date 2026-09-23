@@ -7,6 +7,54 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.31.2] - 2026-09-23
+
+Five repairs, every one of them from a sentence a tester wrote rather
+than from anything the code said about itself.
+
+### Fixed
+- **A greeting gave up your surname.** The rule that takes a name out of
+  a survey stopped after two words, so "Welcome, John Q Watling" lost the
+  first name and the middle initial and kept the surname, which is what a
+  tester found in a file he was about to attach. It takes the whole name
+  now. Every word after the first has to begin with a capital, so it
+  stops at the end of the name rather than eating the sentence it stands
+  in, and the case-insensitive match that would have made that check mean
+  nothing is scoped away. The other half of the same report is that his
+  install had no account holder name at all, which 0.31.0 fixed by asking
+  for one when an install is made (#38).
+- **Target was the only app of forty-eight that could not use a browser
+  you already have.** It drove Playwright's own Chromium and nothing
+  else, so on the packaged Mac build, which carries no such copy, Login
+  failed there while every other provider worked. It uses an installed
+  Chrome, Edge or Brave when there is no bundled copy, in a profile of
+  its own as before. Anyone whose Target app works today keeps the
+  browser it works with (#48).
+- **Newrez found none of nine statements.** Each row is a View and a
+  Download whose address is `javascript:void(0)`, and the date is a month
+  and a year, which the row reader would not accept because it asked for
+  a day of a month. A month and a year dates a statement now and a year
+  alone dates a 1098, discovery and capture agree on how a row is dated,
+  and a month written as `09/2026` is that month rather than the end of
+  that year, which would have collapsed twelve statements onto one date
+  and dropped eleven of them (#38).
+- **AT&T named the account you were not looking at.** The switcher lists
+  every account and the one in focus is listed first, and round nine read
+  the lines backwards. It reads them forwards now. When the switcher is
+  not a button named "Account", which is what the fiber account turned
+  out to have, the page itself is asked and what it marks as selected
+  comes first. The survey records what it decided from, so a wrong
+  filename can be read rather than guessed at (#26).
+- **State Farm found four documents and saved none, and said nothing
+  about why.** The document list gave no file address for any of them,
+  and the page carried no control for their dates either, and neither of
+  those wrote a line, so the file a tester sent had an empty list of
+  responses in it, which reads exactly like a run that never started.
+  Both say so in a sentence now, along with the dates the page's controls
+  did carry. The year walk stops after two years running with nothing in
+  them rather than always asking for seven, since State Farm keeps two
+  (#37).
+
 ## [0.31.1] - 2026-09-23
 
 ### Fixed

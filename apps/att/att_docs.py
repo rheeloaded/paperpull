@@ -767,6 +767,15 @@ class App:
             bills = site.collect_download_docs(page) if found else []
             info["bills_recognized"] = [{"date": b.date_text, "has_pdf_link": bool(b.href)}
                                         for b in bills[:40]]
+            # Which account the filename will say, and what the page gave
+            # to decide it. Round nine got the kind from the switcher and
+            # the fiber account's files came out with no kind at all, so
+            # this says why rather than leaving it to be guessed (#26).
+            info["account_label"] = site.current_account_label(page)
+            info["switcher"] = [{"tag": c.get("tag"), "selected": c.get("selected"),
+                                 "label": site.redact(c.get("label") or "")[:80],
+                                 "text": site.redact(c.get("text") or "")[:200]}
+                                for c in site.switcher_candidates(page)[:6]]
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)
             info["samples"] = []
