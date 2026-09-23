@@ -424,12 +424,22 @@ class JsonStore:
 
     def load(self) -> Dict[str, dict]:
         if self.path.exists():
+            broken = False
             try:
                 with open(self.path, "r", encoding="utf-8") as f:
                     raw = json.load(f)
                 if isinstance(raw, dict):
                     self.data = raw
+                else:
+                    # Valid JSON of the wrong shape, a list or a bare null.
+                    # This used to fall through and leave data empty, so the
+                    # next save replaced the file with {} and the record of
+                    # everything ever downloaded went with it. It is as
+                    # unusable as a truncated file, so it is treated as one.
+                    broken = True
             except (json.JSONDecodeError, OSError):
+                broken = True
+            if broken:
                 # Corrupt file: preserve it for inspection, start fresh,
                 # try latest backup.
                 if self.backups_dir is not None:
