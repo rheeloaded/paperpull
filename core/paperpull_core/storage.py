@@ -261,10 +261,21 @@ def title_case(text: str) -> str:
     return " ".join(out)
 
 
-def unique_path(directory: Path, filename: str, max_path_length: int = 240) -> Path:
+def unique_path(directory: Path, filename: str, max_path_length: int = 240,
+                distinguisher: str = "") -> Path:
     """Return a path in *directory* that does not collide with any existing
-    file, case-insensitively. Collisions get ' (2)', ' (3)', ... suffixes.
-    Never returns a path to an existing file."""
+    file, case-insensitively. Never returns a path to an existing file.
+
+    Two purchases on one day are one name, because a date and a summary are
+    all most rows give. The old answer was ' (2)', which says nothing about
+    which purchase it is and is not even stable, since it depends on what
+    is in the folder at the moment it is written. Delete the first file and
+    the next run gives that name to a different receipt.
+
+    So when the caller knows something that tells the two apart, an order
+    number or a payment id, that goes in the name instead and ' (2)' stays
+    as the last resort. Nothing changes for a name that does not collide
+    (#49, and the same complaint on #43)."""
     directory = Path(directory)
     existing = {p.name.lower() for p in directory.iterdir()} if directory.exists() else set()
     stem, ext = os.path.splitext(filename)
@@ -296,6 +307,23 @@ def unique_path(directory: Path, filename: str, max_path_length: int = 240) -> P
     candidate = stem + ext
     if len(candidate) > room:
         candidate = shorten(stem, "")
+
+    # What tells this one from the other, when the caller knows. It is
+    # sanitized like any other part of a name, and it is not used when the
+    # stem already carries it, which is how an app that puts the order
+    # number in the summary itself avoids saying it twice.
+    # sanitize_component turns an empty string into "Unnamed", which as a
+    # distinguisher would tell two files apart by telling you nothing.
+    raw_token = str(distinguisher or "").strip()
+    token = sanitize_component(raw_token).strip(" .") if raw_token else ""
+    if candidate.lower() in existing and token and token.lower() not in stem.lower():
+        with_token = "%s %s" % (stem, token)
+        candidate = with_token + ext
+        if len(candidate) > room:
+            candidate = shorten(with_token, "")
+        if candidate.lower() not in existing:
+            return directory / candidate
+        stem = with_token
 
     n = 1
     while candidate.lower() in existing:

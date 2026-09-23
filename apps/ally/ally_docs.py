@@ -21,6 +21,7 @@ sent to any external service.
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -770,6 +771,17 @@ class App:
         print(f"Resuming: {len(docs)} document(s) remaining.")
         self.process(docs, dry_run=self.args.dry_run)
 
+
+    def cmd_rename(self):
+        """Rename what is already downloaded, without downloading it again.
+
+        A naming scheme improves and the files on disk keep the old one.
+        Nothing about them needs fetching, only their names are wrong, so
+        nothing is asked of the provider here (#43, #49). A preview
+        unless --apply is given."""
+        self.stats["mode"] = "rename"
+        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+
     def cmd_verify(self):
         self.stats["mode"] = "verify"
         rows = self.index_csv.read_all()
@@ -1033,10 +1045,13 @@ def build_parser() -> argparse.ArgumentParser:
             ("all", "download everything in scope (asks for confirmation)"),
             ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
+            ("rename", "rename downloaded files to this app's current naming"),
             ("diagnose", "dump the Documents page structure (no downloads)"),
             ("record", "record your own path to a document, so this app can be repaired (downloads nothing)"),
             ]:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)
+    ap.add_argument("--apply", action="store_true",
+                    help="with --rename, actually rename (default is a preview)")
     ap.add_argument("--dry-run", action="store_true",
                     help="plan filenames but download nothing")
     ap.add_argument("--year", type=int)
@@ -1077,6 +1092,8 @@ def main(argv=None):
             app.cmd_resume()
         elif args.verify:
             app.cmd_verify()
+        elif args.rename:
+            app.cmd_rename()
         elif args.record:
             app.cmd_record()
         elif args.diagnose:
