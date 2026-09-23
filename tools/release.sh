@@ -53,6 +53,19 @@ fi
   exit 2
 }
 
+# Under WSL that CLI is a Windows program, and a Windows program cannot
+# follow /mnt/c. Handed one, it wrote 326 MB of artifacts into a folder
+# called mnt off the root of the drive and reported nothing wrong, and the
+# upload then had nothing to upload. Every path it is given is translated
+# now. Git Bash does that translation itself, so there it is left alone.
+GH_WANTS_WINDOWS_PATHS=0
+case "$GH" in
+  /mnt/*) command -v wslpath >/dev/null 2>&1 && GH_WANTS_WINDOWS_PATHS=1 ;;
+esac
+winpath() {
+  if [ "$GH_WANTS_WINDOWS_PATHS" = 1 ]; then wslpath -w "$1"; else printf '%s' "$1"; fi
+}
+
 TAG="v$VERSION"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$HERE/.release/$VERSION"
@@ -73,25 +86,57 @@ for name in "Windows package" "macOS package"; do
     || { echo "$name run $id did not succeed" >&2; exit 1; }
   echo "  $name run $id: success"
   rm -rf "$WORK/$name"; mkdir -p "$WORK/$name"
-  "$GH" run download "$id" -D "$WORK/$name" >/dev/null
+  "$GH" run download "$id" -D "$(winpath "$WORK/$name")" >/dev/null
+  # A download that landed somewhere else says nothing, so it is caught
+  # here rather than at the end with an empty folder to upload.
+  [ -n "$(find "$WORK/$name" -type f -print -quit)" ] \
+    || { echo "$name downloaded no file into $WORK/$name" >&2; exit 1; }
 done
 
-echo "checking the files against the checksums the runs published ..."
-mkdir -p "$WORK/flat"
-find "$WORK" -name "SHA256SUMS.txt" | while read -r sums; do
-  (cd "$(dirname "$sums")" && sha256sum -c --ignore-missing SHA256SUMS.txt)
-done
+rm -rf "$WORK/flat"; mkdir -p "$WORK/flat"
 for f in "$WORK"/*/*/PaperPull-"$VERSION"-setup.exe \
          "$WORK"/*/*/PaperPull-"$VERSION".zip \
          "$WORK"/*/*/PaperPull-"$VERSION"-arm64.dmg; do
   [ -f "$f" ] && cp "$f" "$WORK/flat/"
 done
+
+# Each artifact comes down into a folder of its own, and one run's list of
+# checksums covers files that are now in three of them, so the checking is
+# done where the files about to be uploaded are. The Windows run writes its
+# list with carriage returns on the ends of the lines, which made every
+# name in it a name no file has, and a check that verifies nothing at all
+# reports success at having found nothing to do. So the line endings come
+# off, and a list that verified nothing is an error here.
+echo "checking the files against the checksums the runs published ..."
+SUMS="$(find "$WORK" -name "SHA256SUMS.txt")"
+[ -n "$SUMS" ] || { echo "nothing that came down carries a SHA256SUMS.txt" >&2; exit 1; }
+CHECKED=0
+while IFS= read -r sums; do
+  [ -n "$sums" ] || continue
+  tr -d '\r' < "$sums" > "$WORK/flat/.sums"
+  wanted=$(cd "$WORK/flat" && awk '{print $NF}' .sums | while read -r n; do
+             [ -f "$n" ] && echo "$n"; done | wc -l)
+  if [ "$wanted" -gt 0 ]; then
+    (cd "$WORK/flat" && sha256sum -c --ignore-missing .sums)
+    CHECKED=$((CHECKED + wanted))
+  fi
+  rm -f "$WORK/flat/.sums"
+done <<SUMSLIST
+$SUMS
+SUMSLIST
+[ "$CHECKED" -gt 0 ] || { echo "no file was checked against a published checksum" >&2; exit 1; }
+
+ASSETS=()
+for f in "$WORK/flat"/*; do
+  [ -f "$f" ] && ASSETS+=("$(winpath "$f")")
+done
+[ "${#ASSETS[@]}" -gt 0 ] || { echo "nothing to upload from $WORK/flat" >&2; exit 1; }
 ls -1 "$WORK/flat"
 
 echo
 echo "publishing $TAG ..."
-"$GH" release create "$TAG" --title "PaperPull $VERSION" --notes-file "$NOTES" \
-  "${EXTRA[@]}" "$WORK/flat/"*
+"$GH" release create "$TAG" --title "PaperPull $VERSION" --notes-file "$(winpath "$NOTES")" \
+  ${EXTRA[@]+"${EXTRA[@]}"} "${ASSETS[@]}"
 
 "$GH" release view "$TAG" --json isDraft,isPrerelease,assets \
   --jq '{draft: .isDraft, prerelease: .isPrerelease, assets: [.assets[].name]}'
