@@ -2068,8 +2068,11 @@ async function load() {
   $('samplebar').style.display = inSample ? 'flex' : 'none';
   $('root').innerHTML = 'apps root: ' + esc(META.apps_root) +
     (inSample ? ' <span class="hint">(the sample)</span>'
-     : META.root_source === 'environment' ? ' <span class="hint">(from APPS_ROOT)</span>'
-     : ' <a href="#" onclick="changeRoot(); return false;" style="color:var(--accent)">change</a>');
+     : (META.root_source === 'environment' ? ' <span class="hint">(from APPS_ROOT)</span>'
+        : ' <a href="#" onclick="changeRoot(); return false;" style="color:var(--accent)">change</a>')
+       // Reachable with an archive already open, not just from the welcome
+       // screen, or the only people who could ever see it are new ones.
+       + ' <a href="#" onclick="openSample(); return false;" style="color:var(--muted)">see the sample</a>');
   const fresh = Object.keys(META.refreshed || {});
   if (fresh.length) {
     $('root').innerHTML += '<br><span class="hint">updated to this version\'s code: ' +
