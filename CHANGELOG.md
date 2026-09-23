@@ -7,7 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.31.0] - 2026-09-22
 
 ### Added
 - **Record, so a provider is built from what a person did rather than
@@ -44,6 +44,38 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the installer to the issue comment. Every untested provider's README
   now points at it.
 
+- **Costco, the 48th app, and the first one written from a recording.** A
+  member signed in, pressed Record once and clicked through to two
+  warehouse receipts and one online invoice, and the app is that path
+  written down rather than a guess at it. Orders & Purchases is two tabs,
+  Warehouse and Online, and they are two different lists. How far back a
+  member can see is a picker holding quarters that opens on the last
+  three months, so a run that never touches it sees a quarter, and this
+  walks them. A warehouse receipt is a dialog with no address of its own,
+  so it is keyed on what its row shows, the date, the total and the
+  warehouse. Neither print control is ever pressed, since both call
+  `window.print()`, which opens a dialog no program can dismiss, and the
+  receipt is rendered with printToPDF instead. Against the live account,
+  34 purchases back to July 2024, four warehouse receipts saved as one
+  readable page each and three online invoices (#47).
+- **A failing run writes down what the page looked like, without anybody
+  having to ask it to.** The expensive half of adding a provider is that
+  the maintainer cannot run it, so a tester sends back a sentence and a
+  round goes by. Diagnose does not close that, because it walks the page
+  through the app's own code and can only see as far as the app already
+  works. On a provider that does not work yet it says "found nothing". A
+  failure now takes a census of the selectors the app declares, while the
+  page is still on screen, saying for each one how many nodes matched and
+  how many of those were visible. Matched none means the page had not
+  drawn or the selector is wrong. Matched one and visible none means the
+  thing found is not the thing on screen. Everything invisible means
+  something hid the page and never put it back. Invalid means it was
+  written in Playwright's dialect, which a browser does not speak. Those
+  four lines state five of the eight bugs Costco cost, including the
+  hidden modal that took a day. All 48 apps write one, at the first
+  failure, four kilobytes, and a look-only run writes none because it has
+  nothing to fail at.
+
 ### Fixed
 - **A run that only looked at the page no longer wipes the record of the
   last one that downloaded.** Setting a run's mode causes a run summary
@@ -67,8 +99,38 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - A JSON response over 2 MB is recorded as too large rather than read,
   since reading a body is a round trip to the browser and a year of
   transactions has the same shape as a month of them.
+- **An install made by the panel could not import the shared core.**
+  `setup.bat` installs it from the repo two folders up, which is true
+  only when the install sits inside the repo, so an install in somebody's
+  Documents folder finished cleanly and left a venv that died on its
+  first import. The panel knew where the core was the whole time and
+  would only ever update a copy that already existed, never put one
+  there. It seeds one now.
+- **An install made by the panel had no account holder name.** An app
+  asks for that on its first run at a console, and the panel closes an
+  app's stdin, so it could not ask and the name stayed empty forever. An
+  empty name is the one thing that stops redaction taking a person's own
+  name out of a survey or a recording, which matters most for exactly the
+  people who use the panel. It is asked for once when the install is
+  made, where somebody is looking at a screen.
+- **A provider with no environment yet says so in words rather than in a
+  traceback.** Adding a provider and pressing Login gave `No module named
+  'paperpull_core'`, a true sentence about the wrong interpreter that
+  tells a tester nothing. The run is refused before anything starts, and
+  the output pane gets the folder to open, the file to double-click, and
+  the reload that puts the shared code in place.
+- **Record watches the tab you are already on.** An app that attaches to
+  a browser already running hands out a fresh page, which is right for a
+  download run and useless for a recording, so a recording on any of the
+  twenty-six providers that attach refused with "this is not a page on
+  the provider's own site" while the person sat looking at the tab that
+  was. It looks past the page it was given at the others in the same
+  context, takes the provider's own, brings it to the front and says
+  which one it picked.
 
 ## [0.30.2] - 2026-09-22
+
+Tagged and built, never published. Everything in it is in 0.31.0.
 
 ### Added
 - **ADP asks for an identity check before a tax statement, and the app
