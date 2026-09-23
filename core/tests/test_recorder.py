@@ -138,6 +138,33 @@ def test_an_app_that_says_signed_out_refuses_the_recording():
         r.start()
 
 
+def test_a_page_that_cannot_be_checked_refuses_the_recording():
+    """The password check is the backstop. A backstop that cannot run is
+    not one, so a page that will not answer the question is refused rather
+    than assumed innocent."""
+    class Unreadable(FakePage):
+        def locator(self, sel):
+            raise RuntimeError("target closed")
+
+    r = Recorder(Unreadable(), is_safe_url=safe)
+    assert "could not be checked" in r.refusal()
+    with pytest.raises(RuntimeError, match="could not be checked"):
+        r.start()
+    assert r.page.bindings == {}, "nothing may be installed on a page we cannot read"
+
+
+def test_a_provider_whose_own_check_is_unwell_does_not_lose_the_feature():
+    """looks_signed_out belongs to the app and may be broken. That alone
+    does not refuse, because the password check below it still runs."""
+    def broken(_page):
+        raise RuntimeError("this app's check is wrong")
+
+    r = Recorder(FakePage(), is_safe_url=safe, looks_signed_out=broken)
+    assert r.refusal() is None
+    r.start()
+    assert "__ppRecorderPost" in r.page.bindings
+
+
 def test_a_signed_in_provider_page_is_allowed():
     r = Recorder(FakePage(), is_safe_url=safe, looks_signed_out=lambda p: False)
     assert r.refusal() is None

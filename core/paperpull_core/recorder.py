@@ -303,7 +303,12 @@ class Recorder:
                 return ("there is a password field on this page, so recording "
                         "will not start here. Finish signing in first.")
         except Exception:
-            pass
+            # This is the backstop, and a backstop that cannot run is not one.
+            # The check above it swallows its own failure on purpose, because a
+            # provider's looks_signed_out being unwell should not take the
+            # feature away. Nothing is left under this one, so it refuses.
+            return ("the page could not be checked for a sign-in form just "
+                    "now, so recording will not start. Try again in a moment.")
         return None
 
     # -- running -----------------------------------------------------------
