@@ -44,3 +44,31 @@ def human_date(iso: str) -> str:
         return "%s %d, %s" % (MONTH_NAMES[int(m) - 1], int(d), y)
     except Exception:
         return iso
+
+
+def is_real_date(iso: str) -> bool:
+    """Whether `YYYY-MM-DD` names a day that exists.
+
+    A date pattern finds four digits, a dash, two digits, a dash and two
+    more, which a reference number is also shaped like. Thirty-seven apps
+    read `Reference 1234-56-78` as a date and filed a document under it.
+    A statement dated 1234-56-78 sorts after everything, never matches the
+    month it belongs to, and leaves a gap where it should have been.
+    """
+    try:
+        y, m, d = (int(p) for p in str(iso).split("-"))
+    except (TypeError, ValueError):
+        return False
+    if not (1900 <= y <= 2200 and 1 <= m <= 12):
+        return False
+    return 1 <= d <= last_day(y, m)
+
+
+def checked(iso, empty=None):
+    """`iso` when it names a day that exists, and `empty` when it does not.
+
+    `empty` is whatever that app already answers with when it finds no
+    date, so a date it should never have believed is indistinguishable
+    from one it never found.
+    """
+    return iso if iso and is_real_date(iso) else empty

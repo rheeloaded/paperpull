@@ -74,6 +74,7 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
+from paperpull_core.dates import checked as _checked_date
 
 log = logging.getLogger("tsp_docs.site")
 
@@ -244,12 +245,21 @@ _MONTHS = {m: i + 1 for i, m in enumerate(
     ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])}
 
 
-def parse_date(text: str) -> str:
+def _parse_date_from_page(text: str) -> str:
     """'Feb 9, 2026' -> '2026-02-09'. Anything else -> ''."""
     m = _DATE_RE.match((text or "").strip())
     if not m or m.group(1) not in _MONTHS:
         return ""
     return "%s-%02d-%02d" % (m.group(3), _MONTHS[m.group(1)], int(m.group(2)))
+
+
+def parse_date(text):
+    """The date this provider's page is showing, as YYYY-MM-DD.
+
+    The reading is below, unchanged. This only refuses to believe a result
+    that names a day which does not exist, because a reference number is
+    shaped like a date and used to be taken for one."""
+    return _checked_date(_parse_date_from_page(text), "")
 
 
 # Runs inside the page. Reads the two session headers and makes one GET.

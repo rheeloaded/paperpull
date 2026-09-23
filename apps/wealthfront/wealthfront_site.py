@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
+from paperpull_core.dates import checked as _checked_date
 
 log = logging.getLogger("wealthfront_docs.site")
 
@@ -114,7 +115,7 @@ MONTH_YEAR_RE = re.compile(
 QUARTER_RE = re.compile(r"\bQ([1-4])\s*[' ]?\s*(\d{4})\b", re.I)
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
 
-def parse_date(text: str) -> Optional[str]:
+def _parse_date_from_page(text: str) -> Optional[str]:
     """Full date if present."""
     if not text:
         return None
@@ -133,6 +134,15 @@ def parse_date(text: str) -> Optional[str]:
         except (KeyError, ValueError):
             continue
     return None
+
+
+def parse_date(text):
+    """The date this provider's page is showing, as YYYY-MM-DD.
+
+    The reading is below, unchanged. This only refuses to believe a result
+    that names a day which does not exist, because a reference number is
+    shaped like a date and used to be taken for one."""
+    return _checked_date(_parse_date_from_page(text), None)
 
 
 def parse_period_date(text: str) -> Tuple[Optional[str], str]:
