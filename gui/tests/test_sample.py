@@ -1,7 +1,7 @@
 """The sample archive.
 
-A folder of invented documents that ships with the program, so the Status
-tab and both spreadsheets can be seen working without an account anywhere.
+A folder of invented documents, written on request, so the Status tab and
+both spreadsheets can be seen working without an account anywhere.
 It is a mode this process is in, not a saved setting, and while it is on
 nothing may be downloaded, created, renamed or removed.
 
