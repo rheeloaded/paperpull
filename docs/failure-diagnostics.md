@@ -205,6 +205,40 @@ one of same, hash, query, path, host.
 Everything in it goes through the same allowlist as the export, and the
 canary runs over the journal too.
 
+## The eleven that drive an API
+
+Eleven of the forty eight declare no selectors, because they read a JSON
+API rather than a page. The selector census had nothing to say about
+them, so a quarter of the catalogue got a page state and little else.
+
+`core/paperpull_core/api_census.py` is their half. It listens rather
+than asking, on Playwright's response event, so it works whatever way an
+app makes its call and no app had to change how it calls anything. Page
+driven apps get it too, because they call APIs as well.
+
+Per call, the path with anything id shaped in it masked, the method, the
+status, the kind, the names of the query parameters, and the shape of a
+JSON answer.
+
+**The shape is the point and it is the risk.** A maintainer needs the
+field names, because an API that renamed `documents` to `items` looks
+from outside exactly like an account with nothing in it. Those names are
+the provider's schema, the same for every customer.
+
+Except when they are not. An object keyed by account number exists, and
+there the keys are the values. So a key that looks like an identifier is
+masked the way a path segment is, and no value is ever kept, only the
+name of its type.
+
+    /v1/accounts/12345678/documents  ->  /v1/accounts/#/documents
+    ?year=2026&token=SECRET          ->  query_keys [token, year]
+    {"88213344": {"balance": 99.99}} ->  {"#": {"balance": "number"}}
+
+The sentence it exists to write is the one that costs a round every
+time. **An empty list at status 200 is an empty account or a filter that
+excluded everything, and those are different problems.** It says which
+it cannot tell, rather than leaving a maintainer to guess.
+
 ## What this does not fix
 
 - A provider that only breaks on an account with something unusual on

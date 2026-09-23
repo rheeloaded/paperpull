@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core.journal import Journal
+from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
 
 import argparse
@@ -67,6 +68,7 @@ def ask(prompt: str) -> str:
 
 class App:
     _journal = None
+    _requests = None
 
     def __init__(self, args):
         self.args = args
@@ -191,6 +193,7 @@ class App:
             self._work_page.add_init_script(receipt_pdf.PRINT_SUPPRESS_INIT_SCRIPT)
         except Exception:
             pass
+        self.requests
         return self._work_page
 
     def close(self):
@@ -921,6 +924,20 @@ class App:
             print("CSV files and progress.json updated.")
 
     @property
+    def requests(self):
+        """Which of the provider's own calls happened, and what came back.
+
+        Made on first use like the journal, and started at once, because
+        it only sees what arrives after it starts listening. An app that
+        drives an API rather than a page has no selectors for the census
+        to count, and this is what it has instead."""
+        if self._requests is None:
+            self._requests = Requests(getattr(self, "_work_page", None),
+                                      getattr(site, "is_safe_url", None))
+            self._requests.start()
+        return self._requests
+
+    @property
     def journal(self):
         """The run's journal, made the first time anything writes to it.
 
@@ -955,6 +972,7 @@ class App:
             page=getattr(self, "_work_page", None),
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
+            requests=self._requests,
             provider='eBay', text=text, extra=extra)
         if not path:
             return
