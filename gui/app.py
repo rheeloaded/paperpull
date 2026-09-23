@@ -582,7 +582,11 @@ def api_export_transactions(provider: str = "", csv: str = ""):
     async def stream():
         global _LAST_EXPORT
         yield f"data: $ export_transactions.py {' '.join(cmd[3:])}\n\n"
-        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+        # The version goes to the app so that a file it writes says which
+        # build wrote it. Every failure file so far has carried an empty
+        # version, which is the one field that says what a tester ran.
+        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
+                   PAPERPULL_VERSION=VERSION)
         try:
             proc = subprocess.Popen(cmd, cwd=str(tool.parent), stdin=subprocess.DEVNULL,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -1443,7 +1447,11 @@ def api_run(app: str, account: str = "primary", action: str = "pilot",
     # cleanup below would never run and a closed tab left the downloader going.
     async def stream():
         yield f"data: $ {' '.join(cmd)}\n\n"
-        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+        # The version goes to the app so that a file it writes says which
+        # build wrote it. Every failure file so far has carried an empty
+        # version, which is the one field that says what a tester ran.
+        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
+                   PAPERPULL_VERSION=VERSION)
         try:
             _RUNNING.add(app)
             proc = subprocess.Popen(

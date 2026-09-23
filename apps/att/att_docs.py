@@ -384,7 +384,18 @@ class App:
             return 1
         # refresh which page the doc's download link lives on, and the
         # statement hint the site layer keeps beside it
-        self.discovery.update(doc.key, {"source_url": source_url, "href": r.href or ""}, save=False)
+        patch = {"source_url": source_url, "href": r.href or ""}
+        # And the name it will be saved under, when it has not been saved
+        # yet. A bill discovered in an earlier round kept the summary it
+        # was given then, so on an account whose kind the app only learned
+        # to read later, the filename came out without it however many
+        # times the reading was fixed (#26). A bill that already has a
+        # file keeps its name, because the file on disk is named already
+        # and renaming it is not this code's job.
+        known = self.discovery.get(doc.key) or {}
+        if summary and not known.get("downloaded_ok") and known.get("summary") != summary:
+            patch["summary"] = summary
+        self.discovery.update(doc.key, patch, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:

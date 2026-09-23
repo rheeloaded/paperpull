@@ -46,6 +46,7 @@ import re
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import urlsplit
 
 log = logging.getLogger("pge_docs.site")
 
@@ -677,6 +678,59 @@ def _describe_row(row) -> str:
         mask(text), [mask(x) for x in labels], "\n    ".join(outline))
 
 
+def _url_shape(url: str) -> str:
+    """Enough of an address to say what kind of page it is, and no more.
+    This goes in the output a tester copies into an issue."""
+    try:
+        parts = urlsplit(url or "")
+    except ValueError:
+        return "a page"
+    if (url or "").startswith("blob:"):
+        return "a blob"
+    tail = (parts.path or "/").rsplit("/", 1)[-1]
+    kind = "a PDF" if tail.lower().endswith(".pdf") else "a page"
+    return "%s on %s" % (kind, parts.netloc or "this site")
+
+
+def _pdf_from_here(page) -> Optional[bytes]:
+    """The PDF the tab is standing on, or the one inside it.
+
+    PG&E can answer View Bill PDF by moving the tab to its own viewer,
+    which is an iframe around the file. Rendering that gives one blank
+    sheet, because a viewer is a program and not a document. The file
+    itself is fetched through the signed-in session instead, first at the
+    address the tab is on and then at whatever its frames hold."""
+    seen = []
+    url = page.url or ""
+    if url and not url.startswith("blob:") and is_safe_url(url):
+        seen.append(url)
+    try:
+        for frame in page.frames:
+            f_url = frame.url or ""
+            if f_url and f_url not in seen and not f_url.startswith("about:") and is_safe_url(f_url):
+                seen.append(f_url)
+    except Exception as e:
+        log.info("frames: %s", e)
+    try:
+        for src in page.eval_on_selector_all(
+                "iframe, embed, object",
+                "els => els.map(e => e.src || e.data || '').filter(Boolean)") or []:
+            if src not in seen and is_safe_url(src):
+                seen.append(src)
+    except Exception as e:
+        log.info("embedded sources: %s", e)
+    for candidate in seen[:6]:
+        try:
+            res = page.request.get(candidate, timeout=60000)
+            body = res.body() if res.ok else b""
+        except Exception as e:
+            log.info("fetch %s: %s", _url_shape(candidate), e)
+            continue
+        if body[:5] == b"%PDF-":
+            return body
+    return None
+
+
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
     """Download a bill PDF for specified doc dictionary handling downloads, popups, fetches, and network responses."""
     try:
@@ -743,6 +797,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
             print(f"  [site] Direct href fetch note: {e_href}")
 
         existing_pages = set(page.context.pages)
+        history_url = page.url or ""
         captured_download = [None]
         captured_response_bytes = [None]
 
@@ -760,9 +815,13 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 pass
 
         page.on("download", handle_download)
-        page.on("response", handle_response)
+        # On the context, not on this page. A PDF that loads in the tab
+        # PG&E opens never reaches a listener on the tab it was opened
+        # from, so the answer that carried the bill went unheard.
+        page.context.on("response", handle_response)
 
         popup = None
+        blob_url = None
         try:
             try:
                 link.scroll_into_view_if_needed(timeout=3000)
@@ -803,7 +862,37 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
             print(f"  [site] Link click warning: {e_click}")
         finally:
             page.remove_listener("download", handle_download)
-            page.remove_listener("response", handle_response)
+            try:
+                page.context.remove_listener("response", handle_response)
+            except Exception:
+                pass
+
+        # The control need not open a tab at all. It can move THIS one to
+        # PG&E's viewer, and then there is no popup, no download and no
+        # response this tab was listening for, and the run ends standing on
+        # a page where nothing it knows about exists.
+        #
+        # That is what a tester's failure file showed, a page with one
+        # iframe, six inputs, two dialogs and not one of the app's own
+        # selectors matching anything at all (#33). So a tab that moved is
+        # read where it stands, by asking for the PDF through the session
+        # rather than by rendering a viewer, which renders nothing.
+        if not (captured_response_bytes[0] or captured_download[0] or blob_url):
+            moved = (page.url or "") != history_url
+            if moved:
+                print("  [site] the tab moved to %s rather than opening one" % _url_shape(page.url))
+                body = _pdf_from_here(page)
+                if body:
+                    captured_response_bytes[0] = body
+                    print("  [site] the bill came from the page the tab moved to")
+            # and put the tab back on the history either way, or every bill
+            # after this one is looked for on a page that does not hold it
+            if moved:
+                try:
+                    page.goto(history_url, wait_until="domcontentloaded", timeout=45000)
+                    wait_for_rows(page, seconds=20)
+                except Exception as e_back:
+                    log.info("could not return to the history: %s", e_back)
 
         if captured_response_bytes[0]:
             print("  [site] Captured PDF from network response!")

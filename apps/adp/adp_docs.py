@@ -519,6 +519,13 @@ class App:
             print("\n  ADP says: " + str(e)[:400])
             print("  Sign out of ADP in the browser window, sign in again, and run this")
             print("  app once more. The pay statements already downloaded are untouched.")
+            # And write it down. A tester signed out, signed back in, ran
+            # Resume twice, saw this message both times and had nothing in
+            # the Diagnostics folder to send, because a run that reaches a
+            # provider's own refusal is not a run that failed by its own
+            # reckoning and so wrote no file (#46).
+            self.write_failure('reach the tax statements',
+                               'ADP refused them for this session')
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="ADP blocked tax statements for this session")
             self._write_row(doc, "Blocked by ADP", "Needs Manual Review")
@@ -531,6 +538,8 @@ class App:
             self._tax_blocked = True
             print("  ADP did not accept a verification in time, so the tax forms are")
             print("  left for the next run. The pay statements are unaffected.")
+            self.write_failure('answer the identity check',
+                               'the check went unanswered in time')
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="ADP's identity check was not completed")
             self._write_row(doc, "Identity check not completed", "Needs Manual Review")

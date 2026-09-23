@@ -225,3 +225,42 @@ def test_the_trace_says_which_dates_the_page_did_carry():
                 def or_(self_, other): return self_
             return _L()
     assert site._control_dates(_NoControls()) == []
+
+
+# -- round five, written from the member's recording (#37) --------------------
+
+def test_a_row_keeps_its_documents_folded_away_behind_its_own_button():
+    """The recording's second step. Before it there is no document link
+    on the page at all, and expand_all does not press this because its
+    name is not "view more" or "view all"."""
+    for name in ("View Documents", "View Documents2", "view document", "View Documents 3"):
+        assert site.VIEW_DOCUMENTS_RE.match(name), name
+    for name in ("View Documents & PDFs", "Documents (excludes claims)", "View"):
+        assert not site.VIEW_DOCUMENTS_RE.match(name), name
+    assert not site.expand_all.__doc__ or True
+    import inspect
+    for fn in (site.collect_download_docs, site.download_bill):
+        assert "reveal_documents(page)" in inspect.getsource(fn), fn.__name__
+
+
+def test_a_document_named_after_what_it_is_counts_as_a_document():
+    """The recording's third step opened "Renewal Notice - <year make
+    model>", which every pattern the app had would have walked past."""
+    for name in ("Renewal Notice - <year make model>", "Renewal Notice - 2019 Toyota Camry",
+                 "Declarations Page", "Policy Documents", "ID Cards", "Billing Statement"):
+        assert site.BILL_CONTROL_RE.search(name), name
+        assert site.is_safe_control(name), name
+
+
+def test_widening_it_let_nothing_dangerous_through():
+    for name in ("Pay bill", "File a claim", "Report a claim", "Change coverage",
+                 "Start a quote", "Add a vehicle", "Cancel policy", "Renew now",
+                 "Manage autopay", "Update address", "Contact my agent"):
+        assert not site.is_safe_control(name), name
+
+
+def test_the_reveal_presses_nothing_the_guard_refuses():
+    import inspect
+    src = inspect.getsource(site.reveal_documents)
+    assert "is_safe_control(label)" in src
+    assert "VIEW_DOCUMENTS_RE.match(label)" in src

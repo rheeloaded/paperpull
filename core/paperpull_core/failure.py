@@ -109,6 +109,9 @@ ERROR_KINDS = (
 )
 
 _MAX_NODES = 5
+# How many matches of a Playwright-dialect selector are looked at one
+# by one, which is a round trip to the browser each.
+_MAX_COUNTED = 30
 _MAX_SELECTORS = 40
 _MAX_COUNT = 100000
 
@@ -338,11 +341,36 @@ def census(page, selectors: Optional[dict]) -> list:
         name, sel = str(name)[:40], str(sel or "")
         bad = playwright_only(sel)
         if bad:
-            out.append({"name": name, "declared_engine": "playwright",
-                        "evaluation": "playwright_only_syntax",
-                        "syntax": bad,
-                        "note": "valid for page.locator, a syntax error "
-                                "inside the page"})
+            # It cannot be asked inside the page, and Playwright itself
+            # speaks that dialect, so it is counted through the locator
+            # instead of skipped. The first failure file a tester sent
+            # had exactly one selector in this state, and it was the one
+            # that fetches the document, so the census said nothing about
+            # the thing that had just failed (#33). Only the counts come
+            # back, which is what every other entry carries.
+            entry = {"name": name, "declared_engine": "playwright",
+                     "evaluation": "counted_by_playwright", "syntax": bad,
+                     "note": "valid for page.locator, a syntax error "
+                             "inside the page, so it is counted here"}
+            try:
+                loc = page.locator(sel)
+                matched = int(loc.count())
+                entry["matched"] = min(matched, _MAX_COUNTED)
+                looked = min(matched, _MAX_COUNTED)
+                seen = 0
+                for i in range(looked):
+                    try:
+                        if loc.nth(i).is_visible():
+                            seen += 1
+                    except Exception:
+                        break
+                entry["visible"] = seen
+                # So that "visible 0 of 40" is never read as "none of them"
+                # when only the first few were looked at.
+                entry["counted"] = looked
+            except Exception as e:
+                entry["evaluation"] = error_kind(e)
+            out.append(entry)
             continue
         pairs.append([name, sel])
     if pairs:
@@ -467,6 +495,39 @@ def _step(value) -> str:
     return v if _STEP_RE.match(v) else "unnamed step"
 
 
+_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]{1,12})?$")
+
+
+def app_version() -> str:
+    """Which build wrote this file, or "" when there is no way to tell.
+
+    The first failure files sent in carried an empty version, because it
+    was a parameter no app passed, and that is the one field that says
+    what a tester was running. So it is worked out here instead of being
+    asked for forty-eight times.
+
+    The panel puts it in the environment when it starts a run, which
+    covers a tester, and a checkout is found by the VERSION file above
+    the app. It has to look like a version or it is not used, since this
+    goes in a file somebody posts in public.
+    """
+    import os
+    from pathlib import Path
+    found = (os.environ.get("PAPERPULL_VERSION") or "").strip()
+    if not _VERSION_RE.match(found):
+        found = ""
+        here = Path(__file__).resolve()
+        for base in [Path.cwd()] + list(here.parents)[:6]:
+            try:
+                text = (base / "VERSION").read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+            if _VERSION_RE.match(text):
+                found = text
+                break
+    return found[:20]
+
+
 def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
                   page=None, selectors=None, provider: str = "",
                   version: str = "", error=None, extra=None, journal=None,
@@ -485,7 +546,7 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
             "kind": "paperpull-failure",
             "schema": 2,
             "provider": str(provider)[:40],
-            "version": str(version)[:20],
+            "version": (str(version)[:20] if version else app_version()),
             "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "command": re.sub(r"[^a-z-]+", "", str(command).lower())[:20] or "run",
             "step": _step(step),
@@ -577,7 +638,13 @@ def summarize(report: dict) -> list:
     page = report.get("page") or {}
 
     for e in entries:
-        if e.get("evaluation") == "playwright_only_syntax":
+        if e.get("evaluation") == "counted_by_playwright":
+            said.append("%s is written in Playwright's dialect (%s), so it was "
+                        "counted through the locator rather than inside the "
+                        "page. It matched %s and %s of those were on screen."
+                        % (e.get("name"), e.get("syntax"), e.get("matched"),
+                           e.get("visible")))
+        elif e.get("evaluation") == "playwright_only_syntax":
             said.append("%s is written in Playwright's dialect (%s). That is "
                         "valid for page.locator and a syntax error inside the "
                         "page, so it matches nothing there and says nothing "

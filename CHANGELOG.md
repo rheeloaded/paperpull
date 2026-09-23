@@ -7,39 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
-
-### Added
-- **A sample archive, so you can see what PaperPull produces before you
-  point it at a bank.** The welcome screen now offers *See a sample
-  archive*. It builds a folder of invented statements and receipts, five
-  providers, and opens the panel on it. The Status tab fills in, with one
-  archive overdue and a two-month gap in the middle of another, and both
-  spreadsheet buttons build real workbooks from it, 479 transactions read
-  out of the PDFs and reconciled against their own printed balances, and
-  468 purchases across 190 orders. A yellow bar says what you are looking
-  at, nothing can be downloaded, created or removed while you are in it,
-  and *Leave the sample* puts you back on your own archive, which was
-  never touched. Every document in it says on its face that it is a sample
-  and that every name, amount and date is invented.
-
-  It is also the answer to a fair question from anyone reviewing the
-  program, including the Microsoft Store, who cannot test a downloader
-  without an account at a bank. Nobody should have to hand over real
-  banking credentials to see this work.
-
-  The archive is written by `tools/make_sample.py` when you ask for it,
-  from a fixed seed, in about a tenth of a second. Nothing generated is
-  committed or carried in the installer, because a tree of files named and
-  shaped exactly like real statements is the thing this repository's
-  .gitignore exists to keep out.
-
-## [0.32.0] - 2026-09-22
+## [0.32.0] - 2026-09-23
 
 0.31.1 built a file that a failing run writes by itself and gave it to
 one app. This gives it to all forty eight, gives the eleven that drive an
 API rather than a page something to put in it, and tells the person
-running the app that it exists, which 0.31.1 did not.
+running the app that it exists, which 0.31.1 did not. Seven testers'
+reports are repaired here too, two of them from the first recordings
+anybody has sent in.
 
 ### Added
 - **Every app keeps a journal.** 0.31.1 wired one into Costco only. All
@@ -81,10 +56,93 @@ running the app that it exists, which 0.31.1 did not.
   if a provider asks for a tester without telling them, which is how this
   went out unnoticed the first time.
 
+- **A sample archive, so you can see what PaperPull produces before you
+  point it at a bank.** The welcome screen now offers *See a sample
+  archive*. It builds a folder of invented statements and receipts, five
+  providers, and opens the panel on it. The Status tab fills in, with one
+  archive overdue and a two-month gap in the middle of another, and both
+  spreadsheet buttons build real workbooks from it, 479 transactions read
+  out of the PDFs and reconciled against their own printed balances, and
+  468 purchases across 190 orders. A yellow bar says what you are looking
+  at, nothing can be downloaded, created or removed while you are in it,
+  and *Leave the sample* puts you back on your own archive, which was
+  never touched. Every document in it says on its face that it is a sample
+  and that every name, amount and date is invented.
+
+  It is also the answer to a fair question from anyone reviewing the
+  program, including the Microsoft Store, who cannot test a downloader
+  without an account at a bank. Nobody should have to hand over real
+  banking credentials to see this work.
+
+  The archive is written by `tools/make_sample.py` when you ask for it,
+  from a fixed seed, in about a tenth of a second. Nothing generated is
+  committed or carried in the installer, because a tree of files named and
+  shaped exactly like real statements is the thing this repository's
+  .gitignore exists to keep out.
+
 ### Fixed
 - **SMUD said two different things about itself.** The README called it
   working and the panel called it untested. They agree now, and a test
   checks that they agree for every provider rather than for that one.
+- **Every failure file so far said nothing about which build wrote it.**
+  The version was a parameter no app passed, in all forty-eight of them,
+  and it is the one field that says what a tester was running. It is
+  worked out instead of asked for, from the panel when the panel started
+  the run and from the checkout otherwise, and anything that does not
+  look like a version is not written down.
+- **PG&E would not save a bill it had found.** Discovery reads all
+  twenty-five now, and capture then pressed View Bill PDF and lost what
+  came back. The control can move the tab itself rather than open one,
+  and then there is no popup, no download and no answer this tab was
+  listening for. A tester's failure file showed a page with one iframe,
+  six inputs and not one of the app's own selectors matching anything at
+  all. A tab that moved is read where it stands, the PDF is asked for
+  through the session rather than rendered, since a viewer renders one
+  blank sheet, answers are listened for on the whole context rather than
+  on one tab, and the tab goes back to the history afterwards so the next
+  bill is looked for where it lives (#33).
+- **E*TRADE said a row held nothing clickable while the row plainly held
+  a document.** The table is built from web components and the cell is a
+  `slot`, so a walk over each element's own children reached the slot and
+  stopped, because what a slot shows lives somewhere else. Shadow roots
+  and slots are walked now, pinned by tests in a real browser (#36).
+- **State Farm found four documents and could save none.** A row keeps
+  its documents folded away behind a button of its own, named "View
+  Documents", which is not "view more" or "view all" and so was never
+  pressed, leaving the page with no document link on it at all. A
+  recording the member made settled it in one round. The rows are opened
+  now, and a document named after what it is rather than after what
+  pressing it does, "Renewal Notice", "Declarations Page", "ID Cards", is
+  recognized as a document (#37).
+- **Newrez found none of nine statements, and the survey never said
+  why.** The survey records what each row says, with its digits masked,
+  and what the app makes of the date it finds there, so a page that dates
+  its rows in a way the app cannot read says so rather than reporting
+  nothing at all (#38).
+- **AT&T wrote a bare filename however many times the account label was
+  fixed.** A bill discovered in an earlier round kept the summary it was
+  given then, and a later run only ever refreshed where its link lived,
+  so a fiber bill found before the app could read the account's kind
+  stayed nameless. A bill that has not been saved yet takes the current
+  name. One that has keeps it, because the file on disk is named already
+  (#26).
+- **A selector written in Playwright's dialect is counted rather than
+  skipped.** The census asks a page its questions and a page cannot parse
+  `:has-text(`, so those were reported as unanswerable. In the first
+  failure file a tester sent, the one selector in that state was the one
+  that fetches the document, so the census was silent about the thing
+  that had just failed. Playwright speaks that dialect, so it is counted
+  through the locator, which brings back numbers and nothing else (#33).
+- **ADP's own refusal is written down and not only printed.** A tester
+  signed out, signed back in, ran Resume twice, saw the lock-out message
+  both times and had nothing in the Diagnostics folder to send, because a
+  run that reaches a provider's refusal has not failed by its own
+  reckoning and so wrote no file (#46).
+- **Golden 1 wrote a trace with nothing in it.** Whether the vendor's tab
+  opened, and which dates the page's own controls carry, are both in the
+  file now, since an empty trace cannot be told from a run that never
+  started (#35).
+
 
 ## [0.31.2] - 2026-09-23
 
