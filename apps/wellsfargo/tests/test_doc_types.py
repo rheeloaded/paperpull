@@ -76,7 +76,7 @@ def test_the_survey_masks_numbers_and_takes_no_screenshot():
         assert ".screenshot(" not in inspect.getsource(fn)
     docs_src = (Path(site.__file__).parent / "wellsfargo_docs.py").read_text(encoding="utf-8")
     assert ".screenshot(" not in docs_src
-    assert site._shape({"rows": [{"amount": 12.5}], "n": 3}) == {"rows": ["list of 1", {"amount": "float"}], "n": "int"}
+    assert site._shape({"rows": [{"amount": 12.5}], "n": 3}) == {"rows": ["1 item(s)", {"amount": "number"}], "n": "number"}
 
 
 def test_the_survey_follows_only_documents_links():

@@ -119,7 +119,7 @@ def test_account_numbers_are_masked_in_the_survey():
 
 def test_json_bodies_are_recorded_as_shape_not_values():
     shape = site._shape({"balance": 123456.78, "docs": [{"id": "abc", "date": "2026-06-30"}]})
-    assert shape == {"balance": "float", "docs": ["list of 1", {"id": "str", "date": "str"}]}
+    assert shape == {"balance": "number", "docs": ["1 item(s)", {"id": "string", "date": "string"}]}
 
 
 def test_the_content_call_only_ever_goes_to_the_myaccount_host():

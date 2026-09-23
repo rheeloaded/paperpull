@@ -102,7 +102,7 @@ def test_the_survey_masks_numbers_and_takes_no_screenshot():
     docs_src = (Path(site.__file__).parent / "verizonmobile_docs.py").read_text(encoding="utf-8")
     assert ".screenshot(" not in docs_src
     assert site._shape({"bills": [{"amount": 12.5, "date": "x"}], "n": 3}) == \
-        {"bills": ["list of 1", {"amount": "float", "date": "str"}], "n": "int"}
+        {"bills": ["1 item(s)", {"amount": "number", "date": "string"}], "n": "number"}
 
 
 def test_the_survey_follows_only_billing_links():
