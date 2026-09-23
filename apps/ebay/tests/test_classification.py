@@ -326,7 +326,14 @@ def test_a_card_with_no_details_link_is_still_an_order():
     p = site.card_to_purchase(card)
     assert p is not None and p.order_number == "25-12345-67890"
     js = site._COLLECT_CARDS_JS
-    assert r"order\s*number" in js and "childNodes" in js, "cards are found by their own order number too"
+    assert r"order\s*number" in js, "cards are found by their order number too"
+    # Round two read each element's OWN text nodes for it. eBay writes the
+    # number inside a nested element, so against the live purchase history
+    # that matched nothing at all, which is why round two changed nothing
+    # for the tester. A row's whole text is read now, taking the innermost
+    # element that carries one (#44).
+    assert "childNodes" not in js
+    assert "el.contains(other)" in js, "the innermost element carrying it is the card's"
     assert "_SHOW_MORE_RE" in Path(site.__file__).read_text(encoding="utf-8")
 
 

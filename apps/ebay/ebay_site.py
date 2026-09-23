@@ -64,6 +64,9 @@ from datetime import date as _date
 from typing import List, Optional
 from urllib.parse import parse_qs, urlsplit
 
+# Everything on its way into a diagnostic file goes through here.
+from paperpull_core.redact import redact, set_private_words  # noqa: F401
+
 from paperpull_core.models import ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
@@ -429,7 +432,12 @@ class RawCard:
 # share an id, and the first one seen keeps it.
 _COLLECT_CARDS_JS = r"""
 () => {
-  const LINK = "a[href*='order.ebay.com/ord/show']";
+  // Any anchor that carries an order id, not only one written as the
+  // details address. eBay wraps some of its own links, and a wrapped one
+  // still has orderId= in it while matching nothing that looks for the
+  // details host. The id is all that is taken from it either way, and the
+  // details address is built from the id (#44).
+  const LINK = "a[href*='/ord/show'], a[href*='orderId=']";
   const NUM = /order\s*number\s*:?\s*([0-9A-Za-z][0-9A-Za-z!-]{4,})/i;
   const idOf = (l) => { const m = (l.getAttribute('href') || '').match(/[?&]orderId=([0-9A-Za-z!-]+)/); return m ? m[1] : null; };
   const idsIn = (el) => {
@@ -445,15 +453,22 @@ _COLLECT_CARDS_JS = r"""
   // order, and the details address is built from the number (#44).
   const starts = [];
   for (const a of document.querySelectorAll(LINK)) starts.push({el: a, id: idOf(a), href: a.getAttribute('href') || ''});
-  const walk = (el) => {
-    for (const c of el.children) {
-      const own = Array.from(c.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join(' ');
-      const m = own.match(NUM);
-      if (m) starts.push({el: c, id: m[1], href: ''});
-      walk(c);
-    }
-  };
-  walk(document.body);
+  // A card that names its order in text. Round two read each element's
+  // OWN text nodes, and eBay writes "Order number:25-..." inside a nested
+  // element, so on a real history that found nothing at all. The innermost
+  // element carrying the number is the card's, and its whole text is what
+  // is read (#44).
+  const named = [];
+  for (const el of document.querySelectorAll('div,li,section,article,tr,span,p')) {
+    const t = (el.innerText || '');
+    if (t.length > 4000 || !NUM.test(t)) continue;
+    named.push(el);
+  }
+  for (const el of named) {
+    if (named.some(other => other !== el && el.contains(other))) continue;
+    const m = (el.innerText || '').match(NUM);
+    if (m) starts.push({el: el, id: m[1], href: ''});
+  }
   const out = [];
   const seen = new Set();
   for (const start of starts) {
@@ -537,6 +552,113 @@ def card_to_purchase(card: RawCard, purchase_type: str = "",
         discovered_at=now_iso(),
     )
 
+
+
+# ---------------------------------------------------------------------------
+# What the purchase history page actually holds
+# ---------------------------------------------------------------------------
+#
+# A tester reported two orders found out of nine he had made, twice, on two
+# different builds. Diagnose could not settle it because it inspects one
+# ORDER page and says nothing at all about the history the orders are read
+# from, so both repairs were guesses and both missed (#44).
+#
+# This counts the page instead. How many anchors point at an order, how many
+# elements carry an order number in their own text, how many cards the
+# collector makes of them, and what becomes of each one. Between them those
+# four numbers say which step is losing them, without anybody having to
+# guess which.
+
+_HISTORY_SURVEY_JS = r"""
+() => {
+  const LINK = "a[href*='/ord/show'], a[href*='orderId=']";
+  const STRICT = "a[href*='order.ebay.com/ord/show']";
+  const NUM = /order\s*number\s*:?\s*([0-9A-Za-z][0-9A-Za-z!-]{4,})/i;
+  const anchors = document.querySelectorAll(LINK);
+  const ids = new Set();
+  for (const a of anchors) {
+    const m = (a.getAttribute('href') || '').match(/[?&]orderId=([0-9A-Za-z!-]+)/);
+    if (m) ids.add(m[1]);
+  }
+  // A row is the INNERMOST element carrying an order date. Every ancestor
+  // of a card carries it too, because innerText runs down the tree, and
+  // counting those said twelve rows on a page holding five. A survey that
+  // inflates the number is worse than no survey, since it sends somebody
+  // looking for orders that were never there.
+  const DATE = /order\s+date\s*:?\s*[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}/i;
+  const hits = [];
+  for (const el of document.querySelectorAll('div,li,section,article,tr')) {
+    const t = (el.innerText || '');
+    if (t.length > 4000 || !DATE.test(t)) continue;
+    hits.push(el);
+  }
+  const rowsEls = hits.filter(el => !hits.some(other => other !== el && el.contains(other)));
+  // And an order number is read off a row's whole text, not off its own
+  // text nodes. eBay writes it inside a nested element, so asking each
+  // element for its own text found none of them on a real page.
+  const textIds = new Set();
+  for (const el of rowsEls) {
+    const m = (el.innerText || '').match(NUM);
+    if (m) textIds.add(m[1]);
+  }
+  const dated = rowsEls.slice(0, 40).map(el => ({
+    has_link: !!el.querySelector(LINK),
+    names_an_order: NUM.test(el.innerText || ''),
+    text_len: (el.innerText || '').length,
+  }));
+  const walked = hits.length;
+  const more = [];
+  for (const b of document.querySelectorAll('button,a')) {
+    const t = (b.innerText || '').trim();
+    if (t && /more|next|older|show/i.test(t) && t.length < 40) more.push(t);
+  }
+  return {
+    anchors_to_an_order: anchors.length,
+    // How many of those were written as the details address outright. A
+    // gap between the two is eBay wrapping its own links.
+    anchors_written_as_the_details_address: document.querySelectorAll(STRICT).length,
+    distinct_ids_in_links: ids.size,
+    distinct_ids_in_text: textIds.size,
+    elements_carrying_a_date_including_wrappers: walked,
+    rows_with_an_order_date: dated.length,
+    rows: dated.slice(0, 20),
+    controls_that_might_page: Array.from(new Set(more)).slice(0, 8),
+    body_scroll_height: document.body.scrollHeight,
+  };
+}
+"""
+
+
+def history_survey(page) -> dict:
+    """What the history page holds, and what this app makes of it.
+
+    Counts and shapes only. The one piece of text that comes back is an
+    order id, which is what the filenames already carry."""
+    out = {"url": redact(page.url or "")}
+    try:
+        out["page"] = page.evaluate(_HISTORY_SURVEY_JS)
+    except Exception as e:
+        out["page"] = {"error": str(e)[:120]}
+    cards = collect_cards(page)
+    out["cards_collected"] = len(cards)
+    became, no_date, no_id = [], 0, 0
+    for c in cards:
+        p = card_to_purchase(c)
+        if p is None:
+            no_id += 1
+            continue
+        if not p.purchase_date:
+            no_date += 1
+        became.append({"id": p.order_number, "date": p.purchase_date or "no date",
+                       "total": "yes" if p.total else "no",
+                       "status": p.status or "none",
+                       "has_title": bool(p.items),
+                       "details": "built" if p.details_url else "none"})
+    out["became_purchases"] = len(became)
+    out["dropped_for_no_order_id"] = no_id
+    out["purchases_with_no_date"] = no_date
+    out["purchases"] = became[:25]
+    return out
 
 # ---------------------------------------------------------------------------
 # Details page = the receipt
