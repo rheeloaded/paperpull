@@ -121,6 +121,13 @@ SAFE_DOC_CONTROL_RE = re.compile(
 BILL_CONTROL_RE = re.compile(
     r"((download|view|print|open|get)\s*(my\s+|the\s+|this\s+|your\s+)?(statement|document|pdf|tax|letter|notice|1099|1098)|"
     r"(statement|document|tax\s+form|1099|1098|5498)\s*\(?\s*pdf\s*\)?|\bpdf\b|"
+    # A document here is named after what it is rather than after what
+    # pressing it does. A recording showed the member opening one called
+    # "Renewal Notice - <year make model>", which none of the wording
+    # above matches, so once the row was open there was still nothing the
+    # app would recognize as a document (#37).
+    r"^\s*(renewal\s+(notice|bill)|declarations?(\s+page)?|policy\s+documents?|"
+    r"id\s+cards?|insurance\s+cards?|premium\s+notice|billing\s+statement)\b|"
     r"^\s*(view|download|open)\s*$)", re.I)
 
 # A link that points straight at a PDF, from a row's href.
@@ -496,6 +503,50 @@ def expand_all(page) -> None:
             break
 
 
+# A row on the Document Center keeps its documents folded away behind a
+# button of its own, and a recording showed the member pressing one
+# before any document link existed to press (#37). "View Documents2" is
+# how the second row's button names itself, so the number at the end is
+# part of the name and not part of the question.
+VIEW_DOCUMENTS_RE = re.compile(r"^\s*view\s+documents?\s*\d*\s*$", re.I)
+
+
+def reveal_documents(page, limit: int = 20) -> int:
+    """Press each row's own View Documents, so the document links exist.
+
+    Returns how many were pressed. Without this the page holds no link to
+    any document, `expand_all` does not press it because its name is not
+    "view more" or "view all", and a run reported finding four documents
+    and no control on the page for any of them."""
+    pressed = 0
+    try:
+        for role in ("button", "link"):
+            loc = page.get_by_role(role, name=VIEW_DOCUMENTS_RE)
+            count = min(loc.count(), limit)
+            for i in range(count):
+                el = loc.nth(i)
+                try:
+                    if not el.is_visible():
+                        continue
+                    label = (el.get_attribute("aria-label")
+                             or el.inner_text(timeout=800) or "").strip()
+                except Exception:
+                    continue
+                if not VIEW_DOCUMENTS_RE.match(label) or not is_safe_control(label):
+                    continue
+                try:
+                    el.click(timeout=5000)
+                    pressed += 1
+                    page.wait_for_timeout(1200)
+                except Exception as e:
+                    log.info("view documents: %s", e)
+    except Exception as e:
+        log.info("reveal documents: %s", e)
+    if pressed:
+        log.info("opened %d row(s) of documents", pressed)
+    return pressed
+
+
 @dataclass
 class RawDoc:
     title: str
@@ -639,6 +690,7 @@ def collect_download_docs(page) -> List[RawDoc]:
                            kind="insurance" if insurance else "statement"))
     if docs:
         return docs
+    reveal_documents(page)
     expand_all(page)
     scroll_full_page(page)
     ctrls = _bill_controls(page)
@@ -989,6 +1041,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             except Exception as e:
                 if trace is not None:
                     trace.append({"note": "filePathUrl fetch failed", "error": str(e)[:160]})
+    reveal_documents(page)
     expand_all(page)
 
     el, label = _control_for(page, iso_date)

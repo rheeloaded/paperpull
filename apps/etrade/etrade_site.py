@@ -1121,6 +1121,26 @@ _ROW_BY_DATE_JS = r"""([dates, title]) => {
     const t = (row.innerText || '');
     if (tag === 'tr' || tag === 'li' || role === 'row' || (title && t.includes(title) && t.includes(dates[0]) && row.children.length > 1)) break;
   }
+  // A row's own children are not all of it. E*TRADE's table is built
+  // from web components, so the cell that holds the document's link is a
+  // <slot>, and what the slot shows lives somewhere else entirely. A walk
+  // over children alone reached the slot and stopped, and the trace came
+  // back saying the row holds nothing clickable while the row plainly
+  // held a document (#36). This goes through a shadow root and through a
+  // slot to whatever it is showing.
+  const inside = (el) => {
+    const out = [];
+    try {
+      if (el.tagName && el.tagName.toLowerCase() === 'slot' && el.assignedElements) {
+        for (const a of el.assignedElements({flatten: true})) out.push(a);
+      }
+    } catch (e) { /* an older slot, or none */ }
+    if (el.shadowRoot) {
+      for (const c of el.shadowRoot.children) out.push(c);
+    }
+    for (const c of el.children) out.push(c);
+    return out;
+  };
   const outline = [];
   const desc = (el, d) => {
     if (d > 6 || outline.length > 80) return;
@@ -1133,14 +1153,14 @@ _ROW_BY_DATE_JS = r"""([dates, title]) => {
     const aria = el.getAttribute('aria-label') || '';
     const cursor = getComputedStyle(el).cursor;
     outline.push('  '.repeat(d) + tag + (cls ? '.' + cls : '') + (role ? ' [' + role + ']' : '') + (type ? ' type=' + type : '') + (aria ? ' aria=' + aria.slice(0, 30) : '') + (own(el) ? ' = ' + own(el).slice(0, 40) : '') + (href ? ' href=' + href.slice(0, 60) : '') + (cursor === 'pointer' ? ' {pointer}' : ''));
-    for (const c of el.children) desc(c, d + 1);
+    for (const c of inside(el)) desc(c, d + 1);
   };
   desc(row, 0);
   // candidates, innermost first: the title's element, anchors, buttons,
   // anything the cursor says is clickable, and a checkbox
   const cands = [];
   const collect = (el) => {
-    for (const c of el.children) {
+    for (const c of inside(el)) {
       const tag = c.tagName.toLowerCase();
       const role = c.getAttribute('role') || '';
       const t = (c.innerText || '').trim();

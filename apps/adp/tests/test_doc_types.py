@@ -279,3 +279,16 @@ def test_the_statement_the_viewer_fetches_during_the_wait_is_caught():
             return _L()
     body = site.wait_for_tax_access(_Page(), "https://my.adp.com/myadp_prefix/x.pdf", None, seconds=5)
     assert body == b"%PDF-1.4 a real one"
+
+
+def test_adps_own_refusal_is_written_down_and_not_only_printed():
+    """He signed out, signed back in, ran Resume twice, saw the lock-out
+    message both times, and had nothing in Diagnostics to send. A run
+    that reaches a provider's refusal is not a run that failed by its own
+    reckoning, so it wrote no file (#46)."""
+    from pathlib import Path as _P
+    src = (_P(site.__file__).parent / "adp_docs.py").read_text(encoding="utf-8")
+    blocked = src.split("except site.TaxAccessBlocked")[1][:900]
+    assert "self.write_failure(" in blocked
+    not_done = src.split("except site.StepUpNotDone")[1][:900]
+    assert "self.write_failure(" in not_done

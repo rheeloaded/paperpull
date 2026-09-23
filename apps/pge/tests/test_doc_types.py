@@ -281,3 +281,97 @@ def test_a_row_whose_pdf_control_is_not_an_anchor_still_hands_it_over():
     assert site.pick_document_control(ctrls)._text == "View Bill PDF"
     assert site.pick_document_control(ctrls)._text == "View Bill PDF"
     assert "View Bill PDF" in site._describe_row(_Row())
+
+
+# -- round five, the tab moves instead of opening one (#33) -------------------
+
+class _Res:
+    def __init__(self, body, ok=True):
+        self._b, self.ok = body, ok
+
+    def body(self):
+        return self._b
+
+
+class _Request:
+    def __init__(self, bodies):
+        self._bodies = bodies
+        self.asked = []
+
+    def get(self, url, timeout=0):
+        self.asked.append(url)
+        if url not in self._bodies:
+            raise RuntimeError("not found")
+        return _Res(self._bodies[url])
+
+
+class _Frame:
+    def __init__(self, url):
+        self.url = url
+
+
+class _MovedPage:
+    """Where the tester's run was standing when it gave up. One iframe,
+    a viewer, and nothing the app knows about."""
+
+    def __init__(self, url, frames=(), embeds=(), bodies=None):
+        self.url = url
+        self.frames = [_Frame(url)] + [_Frame(f) for f in frames]
+        self._embeds = list(embeds)
+        self.request = _Request(bodies or {})
+
+    def eval_on_selector_all(self, sel, js):
+        return self._embeds
+
+
+PDF = b"%PDF-1.7 a bill"
+
+
+def test_the_pdf_is_taken_from_the_tab_the_control_moved():
+    page = _MovedPage("https://myaccount.pge.com/viewer/bill.pdf",
+                      bodies={"https://myaccount.pge.com/viewer/bill.pdf": PDF})
+    assert site._pdf_from_here(page) == PDF
+
+
+def test_a_viewer_is_not_rendered_but_asked_for_what_is_inside_it():
+    """Rendering a viewer gives one blank sheet, because a viewer is a
+    program and not a document."""
+    inner = "https://myaccount.pge.com/docs/9/bill.pdf"
+    page = _MovedPage("https://myaccount.pge.com/MyAccount/s/billview",
+                      frames=[inner],
+                      bodies={inner: PDF})
+    assert site._pdf_from_here(page) == PDF
+    assert inner in page.request.asked
+
+
+def test_an_embedded_source_counts_too_and_an_html_answer_does_not():
+    inner = "https://myaccount.pge.com/embed/bill.pdf"
+    page = _MovedPage("https://myaccount.pge.com/MyAccount/s/billview",
+                      embeds=[inner],
+                      bodies={"https://myaccount.pge.com/MyAccount/s/billview": b"<html>viewer</html>",
+                              inner: PDF})
+    assert site._pdf_from_here(page) == PDF
+
+
+def test_nothing_off_pge_is_ever_fetched():
+    page = _MovedPage("https://myaccount.pge.com/MyAccount/s/billview",
+                      frames=["https://evil.test/bill.pdf"],
+                      embeds=["http://myaccount.pge.com/insecure.pdf"],
+                      bodies={"https://evil.test/bill.pdf": PDF,
+                              "http://myaccount.pge.com/insecure.pdf": PDF})
+    assert site._pdf_from_here(page) is None
+    assert "https://evil.test/bill.pdf" not in page.request.asked
+
+
+def test_a_page_with_no_pdf_anywhere_says_so_rather_than_saving_something_else():
+    page = _MovedPage("https://myaccount.pge.com/MyAccount/s/billview",
+                      bodies={"https://myaccount.pge.com/MyAccount/s/billview": b"<html>not a bill</html>"})
+    assert site._pdf_from_here(page) is None
+
+
+def test_the_capture_listens_on_the_context_and_puts_the_tab_back():
+    import inspect
+    src = inspect.getsource(site.download_bill)
+    assert "page.context.on(\"response\"" in src, "a popup's answer never reaches this tab's listener"
+    assert "_pdf_from_here(page)" in src
+    assert "page.goto(history_url" in src, "the next bill is looked for on the history page"

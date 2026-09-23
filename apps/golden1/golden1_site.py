@@ -898,6 +898,39 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 pass
 
 
+def _host_of(url: str) -> str:
+    """Which site a page is on, and nothing else about it."""
+    from urllib.parse import urlsplit
+    try:
+        return urlsplit(url or "").netloc or "nowhere"
+    except ValueError:
+        return "nowhere"
+
+
+def _control_dates(page, limit: int = 30) -> list:
+    """The dates this page's own document controls carry, for the trace
+    when the one that was wanted is not among them. Dates only (#35)."""
+    out = []
+    try:
+        ctrls = _bill_controls(page)
+        for i in range(min(ctrls.count(), limit)):
+            el = ctrls.nth(i)
+            try:
+                name = (el.get_attribute("aria-label") or el.inner_text(timeout=500) or "").strip()
+            except Exception:
+                name = ""
+            found = parse_date(name)
+            if not found:
+                try:
+                    found = parse_date(el.evaluate(_ROW_OF_JS) or "")
+                except Exception:
+                    found = None
+            out.append(found or "no date")
+    except Exception as e:
+        log.info("control dates: %s", e)
+    return out[:limit]
+
+
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None) -> bool:
     """Save the document dated `iso_date`. A PDF link on the row is fetched
@@ -911,16 +944,36 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
         log.info("could not open the documents page for %s", iso_date)
+        if trace is not None:
+            trace.append({"note": "the documents page would not open"})
         return False
-    page = open_vendor(page) or page
+    # The documents themselves are on the bank's vendor, behind a button
+    # on this page. A run that never got there and then found no control
+    # wrote a trace with nothing in it at all, which is what a tester
+    # sent, and an empty trace cannot be told from a run that never
+    # started (#35).
+    vendor = open_vendor(page)
+    if trace is not None:
+        trace.append({"note": ("the vendor's tab opened" if vendor
+                               else "the vendor's tab did not open, so the bank's own "
+                                    "page is all there is to look at"),
+                      "on": _host_of(vendor.url if vendor else page.url)})
+    page = vendor or page
     expand_all(page)
 
     el, label = _control_for(page, iso_date)
     if el is None:
         log.info("no document control found for %s", iso_date)
+        if trace is not None:
+            trace.append({"note": "no control on this page carries that date",
+                          "date": iso_date,
+                          "dates_here": _control_dates(page)})
         return False
     if not is_safe_control(label):
         log.info("refusing unsafe control %r for %s", label, iso_date)
+        if trace is not None:
+            trace.append({"note": "the control for that date is one the guard refuses",
+                          "control": redact(label)[:60]})
         return False
 
     try:

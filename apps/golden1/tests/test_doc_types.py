@@ -179,3 +179,34 @@ def test_a_tab_the_bank_opened_is_adopted_and_its_host_allowed_for_the_run():
     assert not site.is_safe_url("http://edocs.example.test/x")
     site.ALLOWED_HOSTS.discard("edocs.example.test")
     site._VENDOR_HOSTS_SEEN.clear()
+
+
+# -- round five, an empty trace says nothing (#35) ---------------------------
+
+def test_the_trace_says_whether_the_vendors_tab_opened():
+    import inspect
+    src = inspect.getsource(site.download_bill)
+    assert "the vendor's tab did not open" in src
+    assert "no control on this page carries that date" in src
+    assert "_control_dates(page)" in src
+
+
+def test_the_host_is_all_that_is_said_about_where_it_was():
+    assert site._host_of("https://ebank.example.com/docs/12345?token=abc") == "ebank.example.com"
+    assert site._host_of("https://digitalbanking.golden1.com/accounts/documents") == \
+        "digitalbanking.golden1.com"
+    assert site._host_of("") == "nowhere"
+    assert site._host_of("not a url") == "nowhere"
+
+
+def test_the_dates_a_page_carries_come_back_as_dates_and_nothing_else():
+    class _L:
+        def count(self_): return 0
+        def nth(self_, i): return self_
+        def or_(self_, other): return self_
+
+    class _P:
+        url = "https://digitalbanking.golden1.com/accounts/documents"
+
+        def get_by_role(self, *a, **k): return _L()
+    assert site._control_dates(_P()) == []

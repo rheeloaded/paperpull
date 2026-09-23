@@ -1044,7 +1044,43 @@ def _page_summary(page) -> dict:
             pass
     out["controls"] = controls
     out["bill_controls"] = sum(1 for c in controls if c["bill"])
+    # What the row around a bill control says, with its digits masked.
+    # Two rounds went by on a page holding nine statements the app never
+    # took, because nothing in the survey said how those rows are dated
+    # and the app was asking each for a day of a month it does not print.
+    # The mask keeps the shape, which is the whole question (#38).
+    out["bill_rows"] = _bill_row_shapes(page)
     return out
+
+
+def _bill_row_shapes(page, limit: int = 6) -> list:
+    """The row each bill control sits in, masked, and what the app makes
+    of its date. Digits are masked, so "September 2026" comes back as
+    "September ####", which says how a row is dated without saying which
+    account it belongs to."""
+    rows = []
+    try:
+        ctrls = _bill_controls(page)
+        for i in range(min(ctrls.count(), limit)):
+            el = ctrls.nth(i)
+            try:
+                text = (el.evaluate(_ROW_OF_JS) or "").strip()
+            except Exception:
+                text = ""
+            if not text:
+                try:
+                    text = (el.evaluate(
+                        "el => ((el.closest('tr, li, [role=row]') || el.parentElement"
+                        " || el).innerText || '')") or "").strip()
+                except Exception:
+                    text = ""
+            iso, period = parse_period_date(text)
+            rows.append({"row": redact(text).replace("\n", " / ")[:160],
+                         "read_as": iso or "no date the app can read",
+                         "from": period})
+    except Exception as e:
+        log.info("bill row shapes: %s", e)
+    return rows
 
 
 def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:

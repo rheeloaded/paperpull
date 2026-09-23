@@ -543,3 +543,13 @@ def test_a_due_date_is_never_a_bill_date():
     assert site._date_not_due("Current balance $88.05\nDue Sep 30, 2026") is None
     assert site._date_not_due("Amount due Sep 30, 2026\nBill date Sep 11, 2026") == "2026-09-11"
     assert site._date_not_due("no date") is None
+
+
+def test_a_bill_discovered_before_the_label_existed_takes_the_new_name():
+    """Ten rounds in, the reading was right and the filename was still
+    bare, because his fiber bills were found in an earlier round and a
+    refresh only ever updated where the link lived (#26)."""
+    src = (Path(site.__file__).parent / "att_docs.py").read_text(encoding="utf-8")
+    block = src.split("# refresh which page the doc's download link lives on")[1][:1200]
+    assert 'patch["summary"] = summary' in block
+    assert "downloaded_ok" in block, "a bill that already has a file keeps its name"

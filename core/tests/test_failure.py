@@ -33,6 +33,7 @@ class FakePage:
         self._bad = set(bad_selectors)
         self._kept = kept
         self.asked = []
+        self.located = []
 
     def evaluate(self, script, arg=None):
         self.asked.append(script[:50])
@@ -56,6 +57,23 @@ class FakePage:
             return self._kept
         return None
 
+    def locator(self, sel):
+        """Playwright understands its own dialect, so a selector the page
+        cannot parse is counted through this instead of skipped."""
+        self.located.append(sel)
+        found = self.nodes.get(sel, [])
+
+        class _L:
+            def count(self_):
+                return len(found)
+
+            def nth(self_, i):
+                class _N:
+                    def is_visible(self__):
+                        return bool(found[i].get("on_screen"))
+                return _N()
+        return _L()
+
     def _one(self, name, sel):
         if sel in self._bad:
             return {"name": name, "evaluation": "invalid_css_selector"}
@@ -76,14 +94,38 @@ def node(on_screen=True, **kw):
 
 # -- bug one, a selector the browser cannot parse ------------------------------
 
-def test_a_playwright_selector_is_named_without_asking_the_page():
-    """It can never work inside the page, so the answer needs no page.
-    This one was silent for a whole build, and every list read empty."""
-    page = FakePage()
+def test_a_playwright_selector_is_counted_through_the_locator():
+    """It cannot be asked inside the page, and Playwright speaks that
+    dialect, so it is counted rather than skipped.
+
+    The first failure file a tester sent had exactly one selector in this
+    state and it was the one that fetches the document, so the census was
+    silent about the thing that had just failed (#33)."""
+    page = FakePage(nodes={"button:has-text('View')": [
+        node(on_screen=True), node(on_screen=False)]})
     out = failure.census(page, {"receipt_button": "button:has-text('View')"})
-    assert out[0]["evaluation"] == "playwright_only_syntax"
+    assert out[0]["evaluation"] == "counted_by_playwright"
     assert out[0]["syntax"] == ":has-text("
-    assert page.asked == [], "it asked the page about one that cannot work"
+    assert out[0]["matched"] == 2 and out[0]["visible"] == 1
+    assert page.asked == [], "it is never handed to the page, which cannot parse it"
+    assert page.located == ["button:has-text('View')"]
+
+
+def test_counting_one_never_brings_back_anything_but_numbers():
+    page = FakePage(nodes={"button:has-text('View')": [node(on_screen=True)]})
+    out = failure.census(page, {"receipt_button": "button:has-text('View')"})
+    assert set(out[0]) <= {"name", "declared_engine", "evaluation", "syntax",
+                           "note", "matched", "visible", "counted"}
+    assert "nodes" not in out[0], "a locator brings back no description of an element"
+
+
+def test_a_page_that_cannot_be_counted_says_so_rather_than_nought():
+    class _NoLocator(FakePage):
+        def locator(self, sel):
+            raise RuntimeError("execution context was destroyed")
+    out = failure.census(_NoLocator(), {"receipt_button": "button:has-text('View')"})
+    assert out[0]["evaluation"] == "detached"
+    assert "matched" not in out[0], "nought matches would read as a page that has not drawn"
 
 
 def test_every_playwright_only_form_is_caught():
@@ -107,11 +149,13 @@ def test_a_selector_the_browser_rejects_keeps_its_category():
     assert "matched" not in out[0]
 
 
-def test_the_summary_says_a_selector_is_the_wrong_dialect():
+def test_the_summary_says_a_selector_is_the_wrong_dialect_and_what_it_found():
     said = " ".join(failure.summarize({"selectors": failure.census(
-        FakePage(), {"receipt_button": "button:has-text('View')"})}))
+        FakePage(nodes={"button:has-text('View')": [node(on_screen=False)]}),
+        {"receipt_button": "button:has-text('View')"})}))
     assert "Playwright's dialect" in said
-    assert "syntax error inside the page" in said
+    assert "counted through the locator" in said
+    assert "matched 1" in said and "0 of those were on screen" in said
 
 
 # -- bug four, the hidden copy a framework leaves in the markup ----------------
@@ -439,3 +483,41 @@ def test_no_page_script_uses_a_playwright_selector():
                          for ln in getattr(failure, name).splitlines())
         for bad in failure.PLAYWRIGHT_ONLY:
             assert bad not in code, "%s carries %s" % (name, bad)
+
+
+# -- which build wrote the file (the first real one said nothing) ------------
+
+def test_the_file_says_which_build_wrote_it(tmp_path, monkeypatch):
+    """The first failure file a tester sent had an empty version in it,
+    because it was a parameter no app passed. It is worked out now."""
+    monkeypatch.setenv("PAPERPULL_VERSION", "0.32.0")
+    path = failure.write_failure(tmp_path, command="pilot", step="capture the document",
+                                 reason="the document would not render", say=lambda *a: None)
+    assert path
+    report = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert report["version"] == "0.32.0"
+
+
+def test_a_version_the_app_passes_still_wins(tmp_path, monkeypatch):
+    monkeypatch.setenv("PAPERPULL_VERSION", "0.32.0")
+    path = failure.write_failure(tmp_path, command="pilot", step="open the page",
+                                 version="9.9.9", say=lambda *a: None)
+    assert json.loads(Path(path).read_text(encoding="utf-8"))["version"] == "9.9.9"
+
+
+def test_anything_that_is_not_a_version_is_not_written_down(monkeypatch):
+    """It goes in a file people post in public, so it has to look like a
+    version or it does not go in at all."""
+    for junk in ("", "   ", "not a version", "<script>alert(1)</script>",
+                 "0.32.0 and some words", "../../etc/passwd", "0" * 80):
+        monkeypatch.setenv("PAPERPULL_VERSION", junk)
+        got = failure.app_version()
+        assert got != junk.strip() or got == "", junk
+        assert len(got) <= 20
+        assert not got or failure._VERSION_RE.match(got), got
+
+
+def test_a_checkout_with_no_panel_still_knows(monkeypatch):
+    monkeypatch.delenv("PAPERPULL_VERSION", raising=False)
+    got = failure.app_version()
+    assert failure._VERSION_RE.match(got), got
