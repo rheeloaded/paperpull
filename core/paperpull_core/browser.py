@@ -298,6 +298,49 @@ def can_ask() -> bool:
         return False
 
 
+def ask_or_none(prompt: str):
+    """The answer to a question, or None when there is nobody to ask.
+
+    `can_ask` is the right test under the control panel, which closes a
+    pipe so that stdin reports itself as not a terminal. It is not enough
+    on its own, because a Windows process handed DEVNULL reports
+    `isatty()` as True and then raises at the first read. Both are
+    handled here so that no caller has to remember either.
+    """
+    if not can_ask():
+        return None
+    try:
+        return input(prompt)
+    except (EOFError, KeyboardInterrupt, OSError):
+        return None
+
+
+def pause_for_sign_in(say=print, next_step: str = "Discover or Pilot") -> bool:
+    """Hold while the person signs in, when there is somebody to hold for.
+
+    Returns True if it waited, False if there was nobody to ask.
+
+    An app that opens its own browser used to call input() here. Under the
+    control panel, which closes an app's stdin so a stray prompt cannot
+    hang a run, that read end-of-file and took the whole process down with
+    it, which closed the browser window the person was about to sign in
+    to. A tester saw the window open and vanish, and the output said "No
+    interactive console available", which is true and is about the wrong
+    thing (#48).
+
+    Nothing is granted by not waiting. The browser stays open and the
+    person is told what to press next.
+    """
+    if ask_or_none("Press Enter here AFTER you have finished signing in... ") is not None:
+        return True
+    say("")
+    say("Sign in to the browser window that just opened, and leave it open.")
+    say("Then come back to the panel and press %s." % next_step)
+    say("Your sign-in is kept in this app's own browser profile, so it is")
+    say("only asked for again when the provider expires it.")
+    return False
+
+
 def browser_install_command():
     """The command that downloads a browser, or None if this build cannot.
 

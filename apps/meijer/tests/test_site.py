@@ -145,3 +145,36 @@ def test_a_pdf_icon_with_no_text_is_still_the_receipt_control():
     js = site._ROW_CONTROLS_JS
     assert "aria-label" in js and "cursor" in js and "pdf|receipt|download" in js
     assert "out.sort" in js, "the PDF icon is tried before anything else in the row"
+
+
+# -- round three, from the tester's recording (#42) ---------------------------
+
+def test_the_receipt_control_is_a_link_that_says_what_it_is():
+    """His recording pressed a link reading "view receipt pdf", twice, and
+    each press opened a tab. Round two was built for a PDF icon carrying
+    no text at all."""
+    for name in ("view receipt pdf", "View Receipt PDF", "View receipt"):
+        assert site.RECEIPT_LINK_RE.match(name), name
+    for name in ("Add Paper Receipt", "Reorder", "View order details"):
+        assert not site.RECEIPT_LINK_RE.match(name), name
+
+
+def test_a_controls_own_words_decide_whether_it_looks_like_the_receipt():
+    js = site._ROW_CONTROLS_JS
+    assert "c.innerText" in js.split("looksPdf")[1][:400], \
+        "the control's own text is part of the test, not just its label and class"
+
+
+def test_the_empty_message_is_only_believed_after_both_tabs_were_read():
+    """The online tab is the one the page opens on, and it says "You
+    haven't placed any orders yet" to somebody whose receipts are all
+    behind the other tab. He was told his account has no orders, twice."""
+    import inspect
+    from pathlib import Path
+    src = (Path(site.__file__).parent / "meijer_receipts.py").read_text(encoding="utf-8")
+    block = src.split("for page_no in range(1, 60):")[1][:900]
+    collect_at = block.index("collect_both_tabs")
+    empty_at = block.index('history_state(page) == "empty"')
+    assert collect_at < empty_at, "the tabs are read before the page is believed"
+    assert "not found and" in block, "and the message needs both tabs to be empty"
+    assert inspect.getsource(site.collect_both_tabs)

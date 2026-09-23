@@ -276,6 +276,9 @@ class Recorder:
         self.dropped = {"repeat": 0, "unresolved": 0, "off_host_request": 0,
                         "malformed": 0}
         self._binding = "__ppRecorderPost"
+        # Every tab being recorded, the one this started on and any the
+        # provider opened from it.
+        self._watched: list = []
         self._started = False
         self._stopped = False
 
@@ -325,6 +328,7 @@ class Recorder:
         self.page.on("framenavigated", self._on_navigated)
         self.page.on("response", self._on_response)
         self.page.on("download", self._on_download)
+        self._watched.append(self.page)
         try:
             self.page.context.on("page", self._on_new_tab)
         except Exception:
@@ -361,11 +365,18 @@ class Recorder:
     def stop(self) -> dict:
         if self._stopped:
             return self.report()
-        for event, handler in (("framenavigated", self._on_navigated),
-                               ("response", self._on_response),
-                               ("download", self._on_download)):
+        for watched in list(self._watched):
+            for event, handler in (("framenavigated", self._on_navigated),
+                                   ("response", self._on_response),
+                                   ("download", self._on_download)):
+                try:
+                    watched.remove_listener(event, handler)
+                except Exception:
+                    pass
+            # Its capture script is told to stop posting too, or a tab the
+            # provider opened keeps talking to a recording that has ended.
             try:
-                self.page.remove_listener(event, handler)
+                watched.evaluate("() => { window.__ppRecorderPost = () => {}; }")
             except Exception:
                 pass
         try:
@@ -515,13 +526,63 @@ class Recorder:
 
     def _on_new_tab(self, page) -> None:
         step = self._current()
-        if step is None:
-            return
-        step["effect"]["new_tab"] = True
+        on_host = True
         try:
-            step["effect"]["new_tab_off_host"] = not self._is_safe_url(page.url or "")
+            on_host = self._is_safe_url(page.url or "")
         except Exception:
             pass
+        if step is not None:
+            step["effect"]["new_tab"] = True
+            step["effect"]["new_tab_off_host"] = not on_host
+        self._watch(page)
+
+    def _watch(self, page) -> None:
+        """Record what happens in a tab the provider opened, as well as in
+        the one it was opened from.
+
+        A recording used to note that a tab had opened and then hear
+        nothing more, because every listener and the binding the capture
+        script calls were on the first tab alone. A tester pressed Billing
+        & Payments, that opened a tab, and his recording is one step long
+        (#45). Everything a provider does after that point was invisible,
+        which on a site that opens a tab is everything worth recording.
+
+        A tab on somebody else's host is left alone. The refusal to start
+        outside the provider's own site applies just as much to a tab it
+        opened, and a payment processor is exactly the kind of place a
+        checkout opens."""
+        if page is None or page in self._watched:
+            return
+        try:
+            if not self._is_safe_url(page.url or ""):
+                # It may still be about:blank while it loads, so it is
+                # looked at again once it has somewhere to be.
+                if (page.url or "") not in ("", "about:blank"):
+                    return
+        except Exception:
+            return
+        self._watched.append(page)
+        import json as _json
+        try:
+            page.expose_binding(self._binding, self._on_event)
+        except Exception:
+            pass                      # already exposed, which is fine
+        try:
+            page.add_init_script(
+                "(%s)(%s);" % (_CAPTURE_JS.strip(), _json.dumps(self._binding)))
+        except Exception:
+            pass
+        try:
+            page.evaluate(_CAPTURE_JS, self._binding)
+        except Exception:
+            pass
+        for event, handler in (("framenavigated", self._on_navigated),
+                               ("response", self._on_response),
+                               ("download", self._on_download)):
+            try:
+                page.on(event, handler)
+            except Exception:
+                pass
 
     def _on_download(self, download) -> None:
         step = self._current()

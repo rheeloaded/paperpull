@@ -547,3 +547,47 @@ def test_readiness_means_devtools_answered_not_just_the_port():
         assert browser.wait_for_debug_port(str(srv.server_port), timeout=1) is False
     finally:
         srv.shutdown()
+
+
+# -- a prompt nobody can answer (#48) ----------------------------------------
+
+def test_a_question_with_nobody_to_ask_comes_back_as_none(monkeypatch):
+    """The panel closes an app's stdin so a stray prompt cannot hang a
+    run. An app that asked anyway read end-of-file and took the process
+    down, which closed the browser window the person was signing in to."""
+    monkeypatch.setattr(browser, "can_ask", lambda: False)
+    assert browser.ask_or_none("anything? ") is None
+
+
+def test_a_windows_null_stdin_claims_to_be_a_terminal_and_is_still_handled(monkeypatch):
+    """A process handed DEVNULL on Windows reports isatty() as True and
+    then raises at the first read, so can_ask alone is not enough."""
+    monkeypatch.setattr(browser, "can_ask", lambda: True)
+
+    def boom(prompt=""):
+        raise EOFError()
+    monkeypatch.setattr("builtins.input", boom)
+    assert browser.ask_or_none("anything? ") is None
+
+
+def test_an_answer_comes_back_when_there_is_somebody(monkeypatch):
+    monkeypatch.setattr(browser, "can_ask", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "  yes  ")
+    assert browser.ask_or_none("anything? ") == "  yes  "
+
+
+def test_signing_in_without_a_console_says_what_to_press_and_does_not_wait(monkeypatch):
+    monkeypatch.setattr(browser, "can_ask", lambda: False)
+    said = []
+    assert browser.pause_for_sign_in(say=said.append, next_step="Pilot") is False
+    text = " ".join(said)
+    assert "leave it open" in text
+    assert "Pilot" in text
+
+
+def test_signing_in_with_a_console_waits(monkeypatch):
+    monkeypatch.setattr(browser, "can_ask", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    said = []
+    assert browser.pause_for_sign_in(say=said.append) is True
+    assert said == [], "nothing is explained when somebody was there to ask"

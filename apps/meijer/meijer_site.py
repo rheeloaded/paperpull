@@ -250,6 +250,11 @@ def orders_url(page_no: int = 1) -> str:
 
 # The two tabs, and the folder a purchase from each belongs in.
 TAB_IN_STORE_RE = re.compile(r"^\s*in-?store\s+receipts?\s*$", re.I)
+# A row's receipt control, as a recording found it. It is a LINK reading
+# "view receipt pdf", and pressing it opens a tab rather than downloading
+# anything, which is what the page's own pop-up blocker warning is about.
+# Round two guessed a PDF icon carrying no text at all (#42).
+RECEIPT_LINK_RE = re.compile(r"^\s*view\s+receipt(\s+pdf)?\s*$", re.I)
 TAB_ONLINE_RE = re.compile(r"^\s*online\s+orders?\s*$", re.I)
 IN_STORE_ROW_RE = re.compile(r"\bin-?store\b\s*:", re.I)
 
@@ -410,7 +415,12 @@ _ROW_CONTROLS_JS = r"""([text, money]) => {
       const cls = (c.className || '').toString();
       const clickable = tag === 'a' || tag === 'button' || role === 'button' || role === 'link' ||
                         getComputedStyle(c).cursor === 'pointer';
-      const looksPdf = /pdf|receipt|download/i.test(label + ' ' + cls + ' ' + (c.getAttribute('href') || ''));
+      // Its own words count too. A recording showed the control is a link
+      // that reads "view receipt pdf", and round two looked only at the
+      // label, the class and the address, so the one control on the row
+      // that says what it is did not rank as the one to press (#42).
+      const looksPdf = /pdf|receipt|download/i.test(
+        label + ' ' + cls + ' ' + (c.getAttribute('href') || '') + ' ' + (c.innerText || '').slice(0, 40));
       if (clickable || looksPdf) {
         out.push({el: c, text: (c.innerText || '').trim().slice(0, 40), label: label.slice(0, 40),
                   href: c.getAttribute('href') || '', pdf: looksPdf});
