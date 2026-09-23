@@ -137,6 +137,42 @@ cannot run the thing, and no diagnostic changes that. But three rounds
 is a week rather than a month, and a volunteer will still be answering
 after three.
 
+## What the research changed, and the canary proved
+
+The first version of this collected what looked useful and ran it
+through redaction. That was the wrong trust boundary, and a canary page
+said so outright.
+
+Build a page carrying a distinctive fake secret in every channel a
+browser offers. Visible text, a hidden input, an aria-label, a class, an
+id, a URL path, a query string, a fragment, a title attribute, a test
+id, a console log, an uncaught exception. Produce an export and assert
+that none of them comes out.
+
+**Eleven of twenty one came out.** A name through the page title. A
+street and a card tail through the receipt's own text, because they are
+words and the masking knew about digits. An element id and a class,
+straight out. Costco passing an audit earlier was luck, because its
+receipt happened to be mostly digits.
+
+So the export is now built the other way around. **Only an enum, a
+boolean, a bounded count, a duration, or a word from our own source may
+leave.** Everything else the browser can give is denied, and a field
+that is not on the list does not reach the file, so a provider added
+tomorrow cannot widen it by accident. An exception becomes one word from
+a fixed list rather than its message. A step is lowercase prose written
+in the source, and a capital letter is enough to refuse it, because page
+text has capitals and our own steps do not.
+
+The one thing allowed out of a class attribute is whichever of a fixed
+vocabulary of layout words it contains, whole tokens only. That keeps
+`div.modal.fade`, which was the answer to the bug that cost a day, and
+throws away everything else. A class of `customer-4821-panel` reduces to
+nothing.
+
+Twenty one of twenty one clean now, and the canary is a test that runs
+whenever the schema changes.
+
 ## What this does not fix
 
 - A provider that only breaks on an account with something unusual on

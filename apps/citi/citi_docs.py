@@ -489,7 +489,7 @@ class App:
                 self._record(doc, State.NEEDS_MANUAL_REVIEW,
                              notes="Downloaded archive contained no PDF")
                 self._write_row(doc, "Archive with no PDF", "Needs Manual Review")
-                self.write_failure('open the downloaded archive', 'the archive held no PDF')
+                self.write_failure('open the downloaded archive', 'the archive held no pdf')
                 self.stats["manual_review"] += 1
                 print("  !! Download was an archive with no PDF - manual review.")
                 return
@@ -517,7 +517,7 @@ class App:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes=f"PDF validation failed: {result.reason}")
             self._write_row(doc, "Validation failed", "Needs Manual Review")
-            self.write_failure('validate the saved PDF', 'the saved PDF did not validate')
+            self.write_failure('validate the saved pdf', 'the saved pdf did not validate')
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return

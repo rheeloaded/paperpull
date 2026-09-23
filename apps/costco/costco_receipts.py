@@ -452,7 +452,8 @@ class App:
                     self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
                                        notes="Receipt page failed to load twice")
                     self.stats["manual_review"] += 1
-                    self.write_failure("open the receipt", str(e))
+                    self.write_failure("open the receipt", "it would not open twice",
+                                       error=e)
                     return
                 time.sleep(5)
                 site.goto_orders(page)
@@ -548,8 +549,8 @@ class App:
             self.stats["no_receipt"] += 1
             self.stats["manual_review"] += 1
             print(f"  {why} - marked for manual review.")
-            self.write_failure("render the receipt", why,
-                               text=site.receipt_text(page))
+            self.write_failure("render the receipt",
+                               "the receipt did not render")
             return False
 
         purchase.document_type = "Receipt"
