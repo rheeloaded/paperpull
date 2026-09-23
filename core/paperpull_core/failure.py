@@ -470,7 +470,7 @@ def _step(value) -> str:
 def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
                   page=None, selectors=None, provider: str = "",
                   version: str = "", error=None, extra=None, journal=None,
-                  say=print, **ignored) -> Optional[str]:
+                  requests=None, say=print, **ignored) -> Optional[str]:
     """One file, written where the run already writes everything else.
 
     `step` and `reason` are written by the app, in its own source, and
@@ -498,6 +498,14 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
             report["selectors"] = census(page, selectors)
         if isinstance(extra, dict):
             report["extra"] = _only_safe(extra)
+        if requests is not None:
+            # The eleven apps that drive an API declare no selectors, so
+            # the census above has nothing to say about them. This is
+            # their half of it.
+            try:
+                report["requests"] = requests.report()
+            except Exception:
+                pass
         if journal is not None:
             # The census says what the page looked like when the run
             # gave up. This says what it looked like on the way there,
@@ -626,6 +634,9 @@ def summarize(report: dict) -> list:
     if kept.get("box") == [0, 0]:
         said.append("The block it kept measured nought by nought, so it "
                     "rendered nothing.")
+    from .api_census import summarize as _requests_said
+    said.extend(_requests_said(report.get("requests") or {}))
+
     from .journal import summarize as _journal_said
     said.extend(_journal_said(report.get("journal") or {}))
 

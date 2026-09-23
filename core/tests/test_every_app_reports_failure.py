@@ -138,3 +138,31 @@ def test_the_app_marks_a_document_it_saved(entry):
     that never saved anything."""
     assert re.search(r"self\.journal\.checkpoint\(", source(entry)), \
         "nothing in this app records a document going well"
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_the_app_counts_the_calls_the_provider_answered(entry):
+    """Eleven of these drive an API and declare no selectors, so the
+    selector census has nothing to say about them. This is their half,
+    and it is on every app because a page-driven one calls an API too."""
+    text = source(entry)
+    assert "from paperpull_core.api_census import Requests" in text
+    assert "def requests(self)" in text
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_it_starts_listening_where_the_page_is_made(entry):
+    """It only sees what arrives after it starts, so starting it at the
+    first failure would be starting it too late."""
+    text = source(entry)
+    m = re.search(r"\n    def page\(self.*?(?=\n    def )", text, re.S)
+    assert m, "no page method"
+    assert "self.requests" in m.group(0), \
+        "nothing starts the request census when the page is made"
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_the_failure_file_carries_the_calls(entry):
+    m = re.search(r"def write_failure\(self.*?(?=\n    def )",
+                  source(entry), re.S)
+    assert "requests=self._requests" in m.group(0)
