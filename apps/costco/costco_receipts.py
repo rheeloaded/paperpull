@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core.journal import Journal
+from paperpull_core.restore import restoring
 from paperpull_core.run_reporting import report_run_result
 
 import argparse
@@ -605,10 +606,22 @@ class App:
         so printing the page as-is captures the nav, the banners and a
         grey backdrop around a letterbox of receipt.
         site.isolate_receipt hides everything except the purchase-summary
-        block first - a live-DOM display change only, discarded on the next
-        navigation - which leaves a clean one-page receipt for CDP
+        block first, which leaves a clean one-page receipt for CDP
         Page.printToPDF.
+
+        All of it inside `restoring`, which puts every style back
+        afterwards whatever happens, including when the render raises.
+        This app does not navigate between warehouse receipts, so the
+        hiding is not thrown away by a page load the way it is
+        elsewhere, and the second receipt of a run was being looked for
+        on a page where nothing could be clicked. From outside that is
+        a page that did not load, and it cost two live runs to find.
         """
+        with restoring(target_page, journal=self.journal):
+            self._render(target_page, out_path)
+
+    def _render(self, target_page, out_path: Path) -> None:
+        """The capture itself. Always called with the page remembered."""
         # Strip the site chrome so only the receipt is printed.
         site.isolate_receipt(target_page)
         try:

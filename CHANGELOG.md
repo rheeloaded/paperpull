@@ -7,6 +7,59 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.31.1] - 2026-09-23
+
+### Fixed
+- **The failure file 0.31.0 added could carry your name.** It gathered
+  what looked useful and then scrubbed it, taking out emails, amounts,
+  long runs of digits and the account holder's name. A test built for
+  the purpose proved that was the wrong way round. Put a distinctive
+  fake secret into every channel a browser offers, a name in the page
+  title, a street and a card tail in a receipt's own text, an element
+  id, a class, an order number in an address, a token in a query
+  string, a hidden input, a console message, an uncaught exception,
+  then produce the file and see what survives. Eleven of twenty one
+  survived. The name came through the title. The street and the card
+  tail came through the receipt's text, because they are words and the
+  scrubbing knew about digits. **If you are on 0.31.0 and a run has
+  failed, update before attaching the file it wrote to anything.**
+- **Nothing is scrubbed now.** The file is built from a list of what
+  may leave, and only a count, a boolean, a word from a fixed list, a
+  duration or a name written in PaperPull's own source ever does. A
+  field not on that list does not reach the file, so a provider added
+  tomorrow cannot widen it by accident. An exception becomes one word
+  rather than its message. Page text, titles, addresses, attributes and
+  console output are gone entirely. One exception is kept and proved
+  rather than assumed, a framework's own layout words in a class, since
+  `div.modal.fade` is what identified a hidden dialog that had cost a
+  day. A class of `customer-4821-panel` reduces to nothing. Twenty one
+  of twenty one clean, held by a test that runs a real browser over
+  that page whenever the format changes.
+- **A capture puts the page back.** Saving a document takes everything
+  except the document off the screen. Where a provider navigates
+  between documents that costs nothing, because the next load discards
+  it. Where it does not, the second document is looked for on a page
+  where nothing can be clicked, so the first of a run works and every
+  one after it fails. Every element's own style is remembered before a
+  capture and restored afterwards in a finally, so a render that raises
+  leaves the page as it found it, and the run records whether the
+  restoring worked rather than assuming it.
+
+### Added
+- **A run keeps a journal.** What the app was about to do, which
+  collection it chose from and which item of it, and the state of the
+  page at each transition. The choice is the part a census cannot
+  replace, because counting one collection and acting on the nth of
+  another reads from outside exactly like a page that did not load, and
+  that bug took two runs against a real account to find with a browser
+  open. A pair of checkpoints is what carries an earlier problem
+  forward, since a list that was visible at one and is present but not
+  visible at the next is a page something hid and did not put back.
+  Whether the address changed, and in which part, is the difference
+  between a page that reloaded and one that did not, so the journal
+  keeps the last address to compare against and never writes it down.
+- Costco keeps one, through the tabs, the quarters and each receipt.
+
 ## [0.31.0] - 2026-09-22
 
 ### Added
