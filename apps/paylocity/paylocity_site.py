@@ -85,6 +85,13 @@ SECURITY_CHALLENGE_MARKERS = [
     "challenge question", "security question",
 ]
 
+# Throttling, which every other app watches for and these two did not. A
+# payroll site is the worst place to keep asking after it has said no.
+RATE_LIMIT_MARKERS = [
+    "too many requests", "rate limit", "try again later",
+    "temporarily unavailable", "http error 429", "unusual traffic",
+]
+
 # Controls that must NEVER be activated. A payroll site can redirect where
 # someone's wages land, so this matters more here than on any retail site.
 FORBIDDEN_CONTROL_RE = re.compile(
@@ -150,13 +157,24 @@ def looks_signed_out(page) -> bool:
 
 
 def detect_security_challenge(page) -> Optional[str]:
+    """Names the passcode prompt or the throttling notice on screen, or
+    None. The title counts as well as the body, because a site that has
+    stopped answering often says so there first."""
+    try:
+        title = (page.title() or "").lower()
+    except Exception:
+        title = ""
     try:
         body = page.locator("body").inner_text(timeout=5000).lower()
     except Exception:
-        return None
+        body = ""
+    hay = title + "\n" + body
     for marker in SECURITY_CHALLENGE_MARKERS:
-        if marker in body:
+        if marker in hay:
             return f"Sign-in verification step detected: '{marker}'"
+    for marker in RATE_LIMIT_MARKERS:
+        if marker in hay:
+            return f"Possible rate limiting detected: '{marker}'"
     return None
 
 
