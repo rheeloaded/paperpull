@@ -46,20 +46,17 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Thirty-four providers are supported today, all built on the same pattern.
-Thirteen more, AT&T, Wells Fargo, SBA, Verizon Mobile, SMUD, Golden 1, E*TRADE,
-State Farm, Newrez, Kroger, GitHub, Meijer and American Family, are built and waiting for someone with an account to
-test them ([#26](https://github.com/rheeloaded/paperpull/issues/26),
-[#27](https://github.com/rheeloaded/paperpull/issues/27),
+Thirty-six providers are supported today, all built on the same pattern.
+Ten more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
+Newrez, Kroger, Meijer and American Family, are built and waiting for someone with an account to
+test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#31](https://github.com/rheeloaded/paperpull/issues/31),
-[#34](https://github.com/rheeloaded/paperpull/issues/34),
 [#35](https://github.com/rheeloaded/paperpull/issues/35),
 [#36](https://github.com/rheeloaded/paperpull/issues/36),
 [#37](https://github.com/rheeloaded/paperpull/issues/37),
 [#38](https://github.com/rheeloaded/paperpull/issues/38),
 [#41](https://github.com/rheeloaded/paperpull/issues/41),
-[#43](https://github.com/rheeloaded/paperpull/issues/43),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
 [#45](https://github.com/rheeloaded/paperpull/issues/45)):
 
@@ -486,11 +483,11 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **thirty-four** apps pass their tests, and the thirteen scaffolds theirs, more than 1,500 of them across the
-  repo. Twenty-six are in regular use by the author. The other seven (Ally,
-  Anthem, Capital One, Discover, PG&E, Schwab, U.S. Bank) were contributed
-  by people who hold those accounts, and the four marked in the table above
-  are awaiting a fresh live pilot since they were ported.
+- ✅ All **forty-eight** apps pass their tests, the thirty-six that are
+  supported and the ten still waiting for a tester, 3,487 of them across
+  the repo. Most are in regular use by the author. The rest were built or
+  confirmed by people who hold those accounts, named in the table above
+  and in [Thanks](#thanks).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,
   both built by GitHub Actions from the tagged commit, with checksums. A
   Microsoft Store listing and free open-source code signing for Windows are
@@ -530,7 +527,7 @@ Team roles, current status and the full policy are in
 PaperPull is free and open source, and it costs real money and real time
 to develop. There is a server and domain names to keep paid, developer
 accounts for the signed and notarized Mac build and for the Microsoft Store
-listing, and the tools it is built with. Every one of the thirty-odd
+listing, and the tools it is built with. Every one of the forty-odd
 providers took evenings to build, and each one needs repairing when its
 site changes, which they do.
 

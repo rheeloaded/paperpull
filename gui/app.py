@@ -144,9 +144,10 @@ def root_source() -> str:
 
 # -- the sample archive -------------------------------------------------------
 #
-# A folder of invented statements and receipts that ships with the program,
-# so somebody who has just installed it can see a filled Status tab and
-# build both spreadsheets before deciding whether to point this at a bank.
+# A folder of invented statements and receipts, written on request rather
+# than carried around, so somebody who has just installed the program can
+# see a filled Status tab and build both spreadsheets before deciding
+# whether to point this at a bank.
 # It is also the only way to see the program work without an account, which
 # is what a reviewer with no account of their own needs.
 #
@@ -403,11 +404,10 @@ def discover_apps():
             "login_flag": _login_flag(script),
             "accounts": _accounts(d),
             "has_venv": _venv_python(d) is not None,
-            # The packaged app has no per-app venv and needs none, the
-            # interpreter it falls back to carries everything. Only a
-            # checkout should be told to run setup.
-            # Nothing in the sample is ever run, so "run setup.bat first"
-            # is advice about a problem that does not exist there.
+            # Only a checkout is ever told to run setup. The packaged app
+            # has no per-app venv and needs none, the interpreter it falls
+            # back to carries everything, and nothing in the sample is ever
+            # run, so there it is advice about a problem that cannot arise.
             "needs_setup": (_SAMPLE is None and _venv_python(d) is None
                             and not _is_packaged()),
         }
