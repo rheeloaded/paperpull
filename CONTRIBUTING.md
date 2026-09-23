@@ -445,9 +445,19 @@ actually takes, rather than the app's guess at it.
 what the site answered, and the locator lines to start from. The tester's half
 of this is [Testing a provider](docs/testing-a-provider.md).
 
+A run that stops early has already done half of this for you. Before it
+gives up it writes `Diagnostics/failure-<command>-<timestamp>.json`, which
+carries the selector census, the journal of what the app did and how many
+times, the census of which of the provider's calls answered and what shape
+came back, a page state, and the restoration check. Read that first. It
+usually names the step, and `summarize` at the bottom of each of those
+modules says in sentences what a reader should notice. The design and what is
+deliberately left out of it is
+[docs/failure-diagnostics.md](docs/failure-diagnostics.md).
+
 If you cannot fix it but can see what changed, that alone is worth an issue.
-Say what `diagnose` or `record` reported. Someone else can take it from
-there.
+Say what the failure file, `diagnose`, or `record` reported. Someone else can
+take it from there.
 
 ---
 

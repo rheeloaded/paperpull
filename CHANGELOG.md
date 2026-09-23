@@ -7,6 +7,58 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.32.0] - 2026-09-22
+
+0.31.1 built a file that a failing run writes by itself and gave it to
+one app. This gives it to all forty eight, gives the eleven that drive an
+API rather than a page something to put in it, and tells the person
+running the app that it exists, which 0.31.1 did not.
+
+### Added
+- **Every app keeps a journal.** 0.31.1 wired one into Costco only. All
+  forty eight record what the app was about to do, which collection it
+  chose from and which item of it, how many times each step had already
+  run, and the state of the page at each checkpoint. A run that opened
+  twelve documents and rendered none stopped between opening and
+  rendering, which is one line in the file rather than a round of
+  guessing.
+- **A census of the provider's own calls, for the eleven apps that drive
+  an API instead of a page.** Those apps look for nothing on a page, so
+  the selector census had nothing to say about them and their failure
+  file carried a page state and little else. They now record which calls
+  answered and what came back. The address with anything account-shaped
+  in it replaced by a hash mark, the method, the status, the kind of
+  answer, the names of the query parameters, and the field names of a
+  JSON answer with the type of each value. That tells a session that
+  ended from an address that moved, and an account with nothing in it
+  from a filter that excluded everything, neither of which could be told
+  apart from outside before. Field names are the provider's schema and
+  the same for every customer, except when the keys are account numbers,
+  which happens, so a key that looks like an identifier is masked the way
+  a path segment is. No value is kept, only the name of its type, and a
+  response from anywhere but the provider is counted and never described.
+  Thirty five tests, one of which puts a fake secret in every position a
+  JSON body has and fails if any of them reaches the file.
+- **The tester is told the file exists.** This was the half of 0.31.1
+  that was missing and the half that mattered. The file wrote itself, the
+  run printed a path, and nothing else said a word. The walkthrough did
+  not mention it, none of the forty eight app pages mentioned it, and the
+  three lines a failing run printed did not say to send it anywhere. The
+  run now says what the file is, reads out what it noticed, and says to
+  attach it to the provider's issue. The control panel shows a **Show the
+  file to attach** button when a run leaves one, which opens the folder
+  with the file selected rather than leaving a path on screen. The
+  walkthrough has a section on what is in the file, what is deliberately
+  not in it, and how to read it before sending it, and every provider
+  still looking for a tester says the same on its own page. A test fails
+  if a provider asks for a tester without telling them, which is how this
+  went out unnoticed the first time.
+
+### Fixed
+- **SMUD said two different things about itself.** The README called it
+  working and the panel called it untested. They agree now, and a test
+  checks that they agree for every provider rather than for that one.
+
 ## [0.31.2] - 2026-09-23
 
 Five repairs, every one of them from a sentence a tester wrote rather

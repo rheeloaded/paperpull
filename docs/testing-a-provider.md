@@ -21,8 +21,9 @@ because somebody with an account did what this page describes.
 7. [Read the file before you send it](#read-the-file-before-you-send-it)
 8. [Send it](#send-it)
 9. [What happens next](#what-happens-next)
-10. [What Record captures, exactly](#what-record-captures-exactly)
-11. [When something goes wrong](#when-something-goes-wrong)
+10. [If a run fails, send the file it wrote](#if-a-run-fails-send-the-file-it-wrote)
+11. [What Record captures, exactly](#what-record-captures-exactly)
+12. [When something goes wrong](#when-something-goes-wrong)
 
 ---
 
@@ -207,6 +208,63 @@ which used to take three rounds on a good site and eight on a bad one. Making
 it work is a separate job, because a recording cannot show what happens when
 a program tries the same path twice, and that is where the awkward bugs live.
 Costco took one recording and then several Pilot runs.
+
+The next section is how to make those rounds short.
+
+---
+
+## If a run fails, send the file it wrote
+
+**This is the single most useful thing you can do after the first recording.**
+
+When a run stops early, PaperPull writes a file about why before it gives up,
+and prints where it put it. You will see something like this at the end of the
+run.
+
+```
+  This run wrote a file about what went wrong:
+    ...\Costco Receipts\Diagnostics\failure-pilot-20260922-174903.json
+  It holds counts and states and no text from your account, so
+  there is nothing in it from your statements or receipts.
+  What it noticed:
+    - The page has 0 of the 4 things this app looks for.
+    - open_item ran 12 time(s) and render_item ran 0, so it stopped
+      between opening a document and rendering it.
+  Read it through, then attach it to this provider's issue on
+  GitHub. It is the one thing that saves a round of guessing.
+```
+
+**Attach that file to the issue.** You do not have to understand it. It is the
+difference between a maintainer knowing which step broke and a maintainer
+guessing, and guessing is what turns two rounds into six.
+
+**It is written whether or not you ask.** There is no button and no setting.
+Every run that fails leaves one in the provider's `Diagnostics` folder, named
+after the command that failed and the time it failed.
+
+**What is in it.** The same kind of thing a Diagnose file holds, which is
+counts, states, and words written by us rather than by the site.
+
+* how many of the things the app looks for were on the page, and how many
+  were visible
+* what the app was doing when it stopped, step by step, and how many times it
+  had done each step before that
+* which of the provider's own web addresses answered, with account numbers in
+  them replaced by `#`, and what kind of answer came back
+* the names of the fields in an answer, never the contents of any of them
+* whether the window was still where the app left it
+
+**What is not in it.** No text from the page. No document, no name, no
+address, no account number, no balance, no amount, no email, no password, no
+cookie, no screenshot, no web address of your own. Everything that could be
+read off one of your statements is left out by design, and there is a test in
+the project that fills a page with fake secrets and fails if any of them
+reaches the file.
+
+You can open it in Notepad and read the whole thing before you send it. If
+anything in there looks like it came from your account rather than from the
+program, that is a bug worth reporting on its own, and say so instead of
+attaching it.
 
 ---
 
