@@ -55,9 +55,16 @@ _PATH_TOKEN_RE = re.compile(
 
 # "Welcome, ALEX", "Hi Jane", "Good evening, Sam": a greeting names the
 # person, and a survey has no use for the name.
+#
+# It takes the whole name rather than a fixed couple of words. A tester
+# reported a file that had masked his first name and his middle initial
+# and left his surname standing, which is what a rule that stopped after
+# two words did to "Welcome, John Q Watling". Every further word has to
+# start with a capital, so the rule stops at the end of a name and does
+# not walk into the sentence after it (#38).
 _GREETING_RE = re.compile(
     r"\b((?:welcome(?:\s+back)?|hello|hi|hey|good\s+(?:morning|afternoon|evening)),?)"
-    r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)?", re.I)
+    r"\s+(?!back\b)[A-Za-z][A-Za-z'.-]*(?:\s+(?-i:[A-Z])[A-Za-z'.-]*){0,4}", re.I)
 
 # An amount is a balance or a payment, and a survey has no use for either.
 _MONEY_RE = re.compile(r"[$€£]\s?-?\d[\d,]*(?:\.\d{2})?")

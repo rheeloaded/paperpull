@@ -591,6 +591,7 @@ def _years_from(page, url: str, first_year: int) -> List[dict]:
     inside the page. The year is the only thing changed in the address."""
     from datetime import date as _date
     out = []
+    empty = 0
     this_year = _date.today().year
     for year in range(this_year, this_year - YEARS_BACK - 1, -1):
         if year == first_year:
@@ -603,8 +604,15 @@ def _years_from(page, url: str, first_year: int) -> List[dict]:
         except Exception as e:
             log.info("year %d: %s", year, e)
             continue
-        if body:
-            out.extend(_docs_from_api(body))
+        got = _docs_from_api(body) if body else []
+        out.extend(got)
+        # The tester's menu only offers back to 2023 and State Farm only
+        # keeps two years, so asking for seven is seven calls for nothing.
+        # Two empty years in a row is the end of what is kept (#37).
+        empty = 0 if got else empty + 1
+        if empty >= 2:
+            log.info("two years running with nothing in them, so that is the end of the history")
+            break
     return out
 
 
@@ -686,6 +694,30 @@ def _control_for(page, iso: str):
         if found == iso:
             return el, name
     return None, ""
+
+
+def _control_dates(page) -> list:
+    """The dates the page's own controls carry, for the trace when the one
+    that was wanted is not among them. Dates and nothing else (#37)."""
+    out = []
+    try:
+        ctrls = _bill_controls(page)
+        for i in range(min(ctrls.count(), 30)):
+            el = ctrls.nth(i)
+            try:
+                name = (el.get_attribute("aria-label") or el.inner_text(timeout=500) or "").strip()
+            except Exception:
+                name = ""
+            found = parse_date(name)
+            if not found:
+                try:
+                    found = parse_date(el.evaluate(_ROW_OF_JS) or "")
+                except Exception:
+                    found = None
+            out.append(found or "no date")
+    except Exception as e:
+        log.info("control dates: %s", e)
+    return out[:30]
 
 
 def _fetch_pdf(page, href: str) -> Optional[bytes]:
@@ -933,6 +965,15 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         return False
     # The document's own address from the API, fetched from inside the
     # page. Only on statefarm.com, and only a PDF counts.
+    #
+    # A run that had no address and then found no control on the page
+    # wrote a trace with nothing in it at all, which is what a tester
+    # sent, and an empty trace cannot be told apart from a run that never
+    # started. Both of those now say so in a sentence (#37).
+    if trace is not None and not (hint and "/" in hint):
+        trace.append({"note": "the document list gave no file address for this document",
+                      "have": ("an id and no address" if hint else "neither an id nor an address"),
+                      "so": "the row's own control on the page is the only way left"})
     if hint and "/" in hint:
         from urllib.parse import urljoin
         target = urljoin(page.url, hint)
@@ -953,9 +994,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     el, label = _control_for(page, iso_date)
     if el is None:
         log.info("no document control found for %s", iso_date)
+        if trace is not None:
+            trace.append({"note": "no control on the page carries this date",
+                          "date": iso_date, "page": redact(page.url or "")[:160],
+                          "controls_seen": _control_dates(page)})
         return False
     if not is_safe_control(label):
         log.info("refusing unsafe control %r for %s", label, iso_date)
+        if trace is not None:
+            trace.append({"note": "the control for this date is one the guard refuses",
+                          "control": redact(label)[:60]})
         return False
 
     try:

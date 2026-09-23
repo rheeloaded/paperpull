@@ -122,17 +122,31 @@ class App:
         if self._context is not None:
             return self._context
         from playwright.sync_api import sync_playwright
-        # This app drives Playwright's own Chromium directly rather than
-        # attaching to a browser the user launched, so an installed Edge or
-        # Chrome is no substitute here. Ask before Playwright raises its own
-        # error, which tells somebody to run a command rather than explaining
-        # what is missing or how large the download is.
+        # This app drives a browser directly, in a profile of its own,
+        # rather than attaching to one the person launched.
+        #
+        # It used to insist on Playwright's own Chromium and nothing else,
+        # which made it the only app of the forty-eight that could not run
+        # on a machine with Chrome or Edge installed and no bundled copy.
+        # On the packaged Mac build that is every machine, so Login failed
+        # there and every other provider worked, which is exactly what the
+        # report said (#48). An installed browser is used when the bundled
+        # one is absent. Anyone whose bundled copy is already there keeps
+        # using it, so a setup that works today is not changed underneath
+        # them.
         from paperpull_core import browser as browser_launcher
+        executable = None
         if not browser_launcher.bundled_chromium_present():
-            if not browser_launcher.fetch_bundled_chromium():
+            name, path = browser_launcher.find_browser(prefer_real=True)
+            if path:
+                executable = path
+                print(f"Using the {name} installed on this computer, in a "
+                      f"profile of this app's own.")
+            elif not browser_launcher.fetch_bundled_chromium():
                 raise SystemExit(
-                    "This app needs its own copy of Chromium and one is not "
-                    "installed.")
+                    "This app needs a Chromium-based browser and none was "
+                    "found. Install Chrome or Edge, or run this from a "
+                    "terminal to be offered the download.")
         self._pw = sync_playwright().start()
         profile = Path(self.config["profile_dir"]).expanduser().resolve()
         profile.mkdir(parents=True, exist_ok=True)
@@ -141,6 +155,7 @@ class App:
             headless=False,
             accept_downloads=True,
             viewport={"width": 1400, "height": 950},
+            **({"executable_path": executable} if executable else {}),
         )
         self._context.add_init_script(receipt_pdf.PRINT_SUPPRESS_INIT_SCRIPT)
         self._context.set_default_timeout(30000)

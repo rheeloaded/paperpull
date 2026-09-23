@@ -493,6 +493,51 @@ def test_the_accounts_kind_is_read_off_the_switcher_and_leads_nowhere_else():
     assert site.current_account_label(_SwitcherPage("Account\n123456789")) == ""
 
 
+# -- round ten, two accounts in the switcher (#26) ----------------------------
+
+class _NoSwitcherPage:
+    """A page whose switcher is not a button named "Account", which is
+    what the fiber account turned out to have."""
+
+    def __init__(self, found):
+        self._found = found
+
+    def get_by_role(self, role, name=None):
+        class _L:
+            def count(self_): return 0
+            def nth(self_, i): return self_
+            def inner_text(self_, timeout=0): return ""
+        return _L()
+
+    def evaluate(self, js, *a):
+        return self._found
+
+
+def test_the_account_in_focus_is_the_first_one_the_switcher_lists():
+    """His note is that the order changes, with the account he is on
+    listed first. Round nine read the lines backwards and so named the
+    other account."""
+    both = "Account\n123456789\nFiber\nAccount\n987654321\nWireless"
+    assert site.current_account_label(_SwitcherPage(both)) == "Fiber"
+    flipped = "Account\n987654321\nWireless\nAccount\n123456789\nFiber"
+    assert site.current_account_label(_SwitcherPage(flipped)) == "Wireless"
+
+
+def test_a_switcher_that_is_not_a_button_named_account_is_still_read():
+    page = _NoSwitcherPage([{"text": "Account 123456789 Internet", "tag": "div",
+                             "label": "", "selected": True, "top": 10, "left": 0}])
+    assert site.current_account_label(page) == "Internet"
+    assert site.current_account_label(_NoSwitcherPage([])) == ""
+    # and the survey can show what it was deciding from
+    assert site.switcher_candidates(_NoSwitcherPage([{"text": "x"}])) == [{"text": "x"}]
+
+
+def test_the_switcher_reader_asks_the_page_and_presses_nothing():
+    js = site._SWITCHER_JS
+    assert ".click(" not in js and "submit" not in js, "the survey presses nothing"
+    assert "aria-selected" in js and "getBoundingClientRect" in js
+
+
 def test_a_due_date_is_never_a_bill_date():
     assert site._date_not_due("Bill issued Sep 11, 2026") == "2026-09-11"
     assert site._date_not_due("Current balance $88.05\nDue Sep 30, 2026") is None

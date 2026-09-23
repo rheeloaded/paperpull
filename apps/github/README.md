@@ -1,12 +1,13 @@
 # GitHub Receipts Downloader (local, supervised)
 
-**Not yet tested against an account with payments.** This app was built
-against a GitHub account that has never paid GitHub anything, so the
-sign-in and the Payment history page were mapped for real, and the shape
-of a payment row and its receipt come from GitHub's own documentation,
-marked GUESS in `github_site.py`. What it needs is a Diagnose file from
-an account with payments, which contains no personal data. The
-conversation is [issue #43](https://github.com/rheeloaded/paperpull/issues/43).
+**Working, confirmed on a real account.** This app was built against a
+GitHub account that has never paid GitHub anything, so the shape of a
+payment row came from GitHub's own documentation, and a tester with
+payments then ran it. His survey read twenty-three rows and his Pilot
+saved five receipts. Two receipts bought on one day used to write one
+filename, since a payment row says nothing about what was bought, and
+GitHub's own payment id is in the name now. The conversation is
+[issue #43](https://github.com/rheeloaded/paperpull/issues/43).
 
 Downloads the receipts from your GitHub **Payment history** (Pro, Team,
 Copilot, Codespaces, Actions, storage, Sponsors payments, anything GitHub

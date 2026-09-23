@@ -469,6 +469,54 @@ ACCOUNT_KIND_RE = re.compile(
     r"\b(wireless|mobility|mobile|fiber|internet|home\s+phone|phone|tv|u-?verse|directv|prepaid|business)\b", re.I)
 
 
+def _kind_from_line(line: str) -> str:
+    """"Wireless" from a line of the switcher, or "" if it names no kind."""
+    m = ACCOUNT_KIND_RE.search(line or "")
+    if not m or re.fullmatch(r"account", (line or "").strip(), re.I):
+        return ""
+    kind = m.group(1).lower()
+    return {"mobility": "Wireless", "mobile": "Wireless",
+            "u-verse": "TV", "uverse": "TV"}.get(kind, kind.title())
+
+
+# The switcher, whatever the page calls it. Round nine asked for a button
+# whose accessible name begins with "account", and on the fiber account
+# the filename came out with no kind in it at all, so that name is not
+# what this page gives it. These are tried in turn and the first that
+# names a kind wins (#26).
+_SWITCHER_JS = r"""() => {
+  const want = /\b(wireless|mobility|mobile|fiber|internet|home\s+phone|tv|u-?verse|directv|prepaid|business)\b/i;
+  const out = [];
+  const nodes = document.querySelectorAll(
+    '[class*="switch" i],[id*="switch" i],[class*="account" i],[id*="account" i],' +
+    '[aria-label*="account" i],button,[role="button"],[role="tab"],[role="menuitem"]');
+  for (const el of nodes) {
+    const t = (el.innerText || '').trim();
+    if (!t || t.length > 300 || !want.test(t)) continue;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    out.push({text: t, tag: el.tagName.toLowerCase(),
+              label: (el.getAttribute('aria-label') || '').slice(0, 80),
+              selected: (el.getAttribute('aria-selected') === 'true' ||
+                         el.getAttribute('aria-current') !== null ||
+                         /(^|\s)(active|selected|current)(\s|$)/i.test(el.className || '')),
+              top: Math.round(r.top), left: Math.round(r.left)});
+  }
+  out.sort((a, b) => (b.selected - a.selected) || (a.top - b.top) || (a.left - b.left));
+  return out.slice(0, 8);
+}"""
+
+
+def switcher_candidates(page) -> list:
+    """What the page says about which account is in focus. For the survey,
+    so a round that gets the kind wrong can be read rather than guessed at."""
+    try:
+        return page.evaluate(_SWITCHER_JS) or []
+    except Exception as e:
+        log.info("account switcher: %s", e)
+        return []
+
+
 def current_account_label(page) -> str:
     """The kind of account in focus, "Wireless" or "Internet", read off
     the account switcher's own text. Nothing is clicked. "" when the page
@@ -477,14 +525,23 @@ def current_account_label(page) -> str:
         loc = page.get_by_role("button", name=re.compile(r"switch\s+account|^\s*account\b", re.I))
         for i in range(min(loc.count(), 6)):
             text = (loc.nth(i).inner_text(timeout=800) or "")
-            for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
-                m = ACCOUNT_KIND_RE.search(line)
-                if m and not re.fullmatch(r"account", line, re.I):
-                    kind = m.group(1).lower()
-                    return {"mobility": "Wireless", "mobile": "Wireless", "u-verse": "TV", "uverse": "TV"}.get(
-                        kind, kind.title().replace("Home Phone", "Home Phone"))
+            # The switcher lists every account, and the tester's note is
+            # that the one in focus is listed first, the order changing as
+            # he switches. Round nine read the lines backwards and so took
+            # the kind of the account he was not looking at (#26).
+            for line in [ln.strip() for ln in text.splitlines() if ln.strip()]:
+                kind = _kind_from_line(line)
+                if kind:
+                    return kind
     except Exception as e:
         log.info("account switcher: %s", e)
+    # The button was not there under that name. Ask the page itself, the
+    # one it marks as selected first.
+    for cand in switcher_candidates(page):
+        for line in [ln.strip() for ln in (cand.get("text") or "").splitlines() if ln.strip()]:
+            kind = _kind_from_line(line)
+            if kind:
+                return kind
     return ""
 
 

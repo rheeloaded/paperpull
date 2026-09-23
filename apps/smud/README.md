@@ -1,11 +1,10 @@
 # SMUD document downloader
 
-**Not yet tested against a real account.** This app was built without
-a SMUD electric account, so that someone who holds one can test it without
-writing code. It runs, its guards are tested, and every guess about
-smud.org is marked in `smud_site.py`. What it needs is a survey from a
-signed-in account, which the Diagnose button produces and which contains
-no personal data. The conversation is
+**Working, confirmed on a real account.** This app was built without a
+SMUD electric account and repaired across three rounds from the surveys
+and traces one tester sent. His Pilot saved the five most recent bills
+and his full run saved the rest of the twenty-four SMUD keeps. The
+conversation is
 [issue #34](https://github.com/rheeloaded/paperpull/issues/34).
 
 Downloads your SMUD **monthly bills** as PDFs. Read-only,

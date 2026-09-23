@@ -55,6 +55,21 @@ def test_a_greeting_with_nobody_after_it_is_left_alone():
     assert redact("Welcome back") == "Welcome back"
 
 
+def test_a_greeting_takes_the_whole_name_and_not_the_first_two_words_of_it():
+    """A tester's file had masked his first name and his middle initial
+    and left his surname standing (#38). Every word after the first has
+    to start with a capital, so the rule stops at the end of the name."""
+    assert redact("Welcome John Q Watling") == "Welcome [name]"
+    assert redact("Hi, Jane Marie Doe-Smith") == "Hi, [name]"
+    assert redact("Welcome back, J. R. R. Tolkien") == "Welcome back, [name]"
+    # and it stops at the end of the name rather than eating the sentence
+    # it is standing in, which is what a case-insensitive [A-Z] would do
+    assert redact("Hi Joseph! Your order shipped") == "Hi [name]! Your order shipped"
+    assert redact("Hello Sam, your statement is ready") == "Hello [name], your statement is ready"
+    assert redact("Welcome back, Dana and here are your 4 documents") == \
+        "Welcome back, [name] and here are your 4 documents"
+
+
 def test_an_id_shaped_path_segment_goes():
     assert redact("https://x.example/accounts/d11-Kz9Rc8vQ7m/statements") == \
         "https://x.example/accounts/.../statements"

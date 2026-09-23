@@ -158,3 +158,70 @@ def test_the_download_takes_a_hint_and_only_fetches_it_on_statefarm():
     import inspect
     assert "hint" in inspect.signature(site.download_bill).parameters
     assert "is_safe_url(target)" in inspect.getsource(site.download_bill)
+
+
+# -- round four, four found and none saved (#37) ------------------------------
+
+class _YearPage:
+    """The Document Center's own call, answering with nothing."""
+
+    url = "https://edocuments.statefarm.com/DocumentCenterUI/"
+
+    def __init__(self, per_year=None):
+        self.asked = []
+        self._per_year = per_year or {}
+
+    def evaluate(self, js, target=None):
+        import re as _re
+        m = _re.search(r"year=(\d{4})", target or "")
+        year = int(m.group(1)) if m else 0
+        self.asked.append(year)
+        return self._per_year.get(year, {})
+
+
+def test_the_year_walk_stops_when_the_history_runs_out():
+    """His menu only goes back to 2023 and State Farm keeps two years,
+    so asking for seven was five calls for nothing."""
+    from datetime import date
+    this_year = date.today().year
+    url = f"https://edocuments.statefarm.com/DocumentCenterProxyV1/customerMetadata?year={this_year}"
+    page = _YearPage()
+    site._years_from(page, url, this_year)
+    assert len(page.asked) == 2, f"stopped after two empty years, asked {page.asked}"
+    assert this_year not in page.asked, "the year the page already loaded is not asked for again"
+
+
+def test_a_year_with_documents_in_it_does_not_end_the_walk():
+    from datetime import date
+    this_year = date.today().year
+    one = {"data": {"attributes": [{"availableDate": "2026-06-12", "type": "Renewal Notice",
+                                    "category": "Auto", "documentId": "abc123",
+                                    "filePathUrl": "/docs/abc123.pdf"}]}}
+    page = _YearPage({this_year - 1: one, this_year - 2: one})
+    url = f"https://edocuments.statefarm.com/DocumentCenterProxyV1/customerMetadata?year={this_year}"
+    got = site._years_from(page, url, this_year)
+    assert len(page.asked) == 4, page.asked
+    assert len(got) == 2
+
+
+def test_a_document_with_no_file_address_says_so_rather_than_writing_an_empty_trace():
+    """His download-attempt file had an empty list of responses in it,
+    which reads the same as a run that never started."""
+    import inspect
+    src = inspect.getsource(site.download_bill)
+    assert "gave no file address" in src
+    assert "no control on the page carries this date" in src
+    assert "_control_dates(page)" in src
+
+
+def test_the_trace_says_which_dates_the_page_did_carry():
+    class _NoControls:
+        url = "https://edocuments.statefarm.com/DocumentCenterUI/"
+
+        def get_by_role(self, *a, **k):
+            class _L:
+                def count(self_): return 0
+                def nth(self_, i): return self_
+                def or_(self_, other): return self_
+            return _L()
+    assert site._control_dates(_NoControls()) == []
