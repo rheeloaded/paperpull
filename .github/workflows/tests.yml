@@ -1,0 +1,48 @@
+# Runs every test in the repository.
+#
+# Nothing did, before this. Four thousand tests lived here and the only
+# workflows were the two that package a release, so whether a tag shipped
+# with a passing suite depended on the person cutting it remembering to run
+# one. A release cannot be the first time the tests are asked.
+#
+# It runs on a push to main, on a pull request, and on a version tag, so the
+# packaging workflows and this one both answer for the same commit.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install what every suite needs
+        # A missing library here does not fail a suite, it makes the suite
+        # skip itself quietly, which is the thing this workflow exists to
+        # stop. The runner below refuses to pass while the privacy canary
+        # is one of the skips.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest playwright "pypdf[crypto]" openpyxl pdfplumber fastapi uvicorn
+          python -m pip install ./core
+
+      - name: Install the browser the privacy canary needs
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run every suite
+        run: python tools/run_all_tests.py

@@ -77,3 +77,23 @@ tool cannot break because something changed elsewhere.
 ```bat
 pytest
 ```
+
+That runs this package's own suite. To run everything in the repository,
+the core, the control panel and all forty-eight apps, from the root:
+
+```bat
+python tools/run_all_tests.py
+```
+
+Several suites skip themselves when a library is missing, and a skip is a
+quiet line nobody reads. One of them is `test_failure_canary.py`, the only
+test holding the promise that a failure file carries no page content, and
+it skips when Playwright is absent. So install the test extras:
+
+```bat
+pip install -e ".[test]"
+python -m playwright install chromium
+```
+
+`run_all_tests.py` prints every skip at the end and refuses to report
+success while the canary is one of them.
