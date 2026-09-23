@@ -198,13 +198,13 @@ def test_a_dropdown_keeps_its_option_because_that_is_the_signal():
 
 
 def test_an_option_carrying_something_private_is_still_redacted():
-    set_private_words(["Bryan"])
+    set_private_words(["Dana"])
     r, page = rec()
     page.fire({"action": "select", "locator": {"how": "id", "value": "acct"},
-               "label": "Account", "option": "Bryan's checking 998877665",
+               "label": "Account", "option": "Dana's checking 998877665",
                "at": 1})
     out = r.steps[0]["option"]
-    assert "Bryan" not in out and "998877665" not in out
+    assert "Dana" not in out and "998877665" not in out
 
 
 # -- 3. no session can reach the file ------------------------------------------

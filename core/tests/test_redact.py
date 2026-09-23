@@ -96,10 +96,10 @@ def test_a_masked_tail_is_the_end_of_an_account_number():
 # -- the owner's own name ------------------------------------------------------
 
 def test_the_owner_name_goes_in_every_part_and_any_case():
-    set_private_words(["Bryan Rhee"])
-    assert redact("Bryan Rhee's documents") == "[name] [name]'s documents"
-    assert redact("BRYAN") == "[name]"
-    assert redact("welcome rhee") == "welcome [name]"
+    set_private_words(["Dana Whitlock"])
+    assert redact("Dana Whitlock's documents") == "[name] [name]'s documents"
+    assert redact("DANA") == "[name]"
+    assert redact("welcome whitlock") == "welcome [name]"
 
 
 def test_a_title_or_suffix_is_not_a_name():
@@ -134,11 +134,11 @@ def test_none_and_empty_are_survivable():
 # -- a real survey line, end to end --------------------------------------------
 
 def test_a_line_carrying_several_at_once():
-    set_private_words(["Bryan Rhee"])
-    line = ("Hi Bryan, your account ....4321 balance $2,105.44 "
+    set_private_words(["Dana Whitlock"])
+    line = ("Hi Dana, your account ....4321 balance $2,105.44 "
             "https://bank.example/acct/9M2kd7Qx1p/detail?sid=ZZZ 100200300")
     out = redact(line)
-    for gone in ("Bryan", "4321", "2,105.44", "9M2kd7Qx1p", "sid", "ZZZ", "100200300"):
+    for gone in ("Dana", "4321", "2,105.44", "9M2kd7Qx1p", "sid", "ZZZ", "100200300"):
         assert gone not in out, gone
 
 
