@@ -81,6 +81,8 @@ from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import take_same_tab as _core_take_same_tab
+from paperpull_core.controls import control_texts as _control_texts
+from paperpull_core.controls import second_step as _core_second_step
 
 log = logging.getLogger("etrade_docs.site")
 
@@ -783,42 +785,16 @@ def _click_text(page, text: str) -> bool:
     return False
 
 
-def _control_texts(page) -> set:
-    out = set()
-    for role in ("button", "link", "menuitem"):
-        try:
-            loc = page.get_by_role(role)
-            for i in range(min(loc.count(), 120)):
-                try:
-                    t = (loc.nth(i).inner_text(timeout=200) or "").strip()
-                except Exception:
-                    continue
-                if t:
-                    out.add(re.sub(r"\s+", " ", t)[:60])
-        except Exception:
-            pass
-    return out
-
-
 _SECOND_STEP_RE = re.compile(
     r"^\s*(download|download\s+(pdf|now|file|statement|document)|save|save\s+(as\s+)?pdf|"
     r"(regular|standard|full|detailed)\s+pdf|pdf|view\s*/\s*print\s+pdf|print|open\s+pdf)\s*$", re.I)
 
 
 def _second_step(page, appeared: set):
-    """A control the click revealed whose text says it finishes a
-    download, once it has passed the guard, or None."""
-    ranked = sorted(appeared, key=lambda t: (0 if re.search(r"regular|standard|full|^download", t, re.I) else 1, t))
-    for text in ranked:
-        if _SECOND_STEP_RE.match(text) and is_safe_control(text):
-            for role in ("button", "link", "menuitem"):
-                try:
-                    loc = page.get_by_role(role, name=re.compile("^" + re.escape(text) + "$", re.I))
-                    if loc.count() and loc.first.is_visible():
-                        return loc.first, text
-                except Exception:
-                    continue
-    return None, ""
+    """A control the click revealed whose text says it finishes a download,
+    once it has passed the guard, or None. The choosing is the core's, the
+    words this provider uses and the guard are this app's."""
+    return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control)
 
 
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
