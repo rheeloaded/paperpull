@@ -20,6 +20,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core.journal import Journal
 from paperpull_core.run_reporting import report_run_result
 
 import argparse
@@ -60,6 +61,8 @@ def ask(prompt: str) -> str:
 # ---------------------------------------------------------------------------
 
 class App:
+    _journal = None
+
     def __init__(self, args):
         self.args = args
         # --config lets one copy of the code serve several people/accounts:
@@ -520,6 +523,7 @@ class App:
                            notes=("Low classification confidence" if review_needed else ""))
         if review_needed:
             self.stats["manual_review"] += 1
+        self.journal.checkpoint('a document is saved')
         self.stats["receipts_downloaded"] += 1
         print(f"  Saved: {purchase.pdf_filename}")
 
@@ -1057,6 +1061,20 @@ class App:
             self.order_csv.rewrite(order_rows)
             print("CSV files and progress.json updated.")
 
+    @property
+    def journal(self):
+        """The run's journal, made the first time anything writes to it.
+
+        Lazy, because a run that never opens a page has nothing to say
+        and an app that fails before the browser is up must not fail
+        differently because of this. It watches every selector the app
+        declares, since choosing between them is a decision nobody can
+        make before the first failure."""
+        if self._journal is None:
+            self._journal = Journal(getattr(self, "_work_page", None),
+                                    getattr(site, "FALLBACK", None))
+        return self._journal
+
     def write_failure(self, step: str, reason: str, text: str = "",
                       postmortem: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
@@ -1077,6 +1095,7 @@ class App:
             step=step, reason=reason,
             page=getattr(self, "_work_page", None),
             selectors=getattr(site, "FALLBACK", None),
+            journal=self._journal,
             provider='Amazon', text=text, extra=extra)
         if not path:
             return

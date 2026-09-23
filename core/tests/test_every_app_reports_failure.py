@@ -103,3 +103,38 @@ def test_no_app_writes_a_failure_file_from_a_look_only_run():
             if m:
                 assert "self.write_failure(" not in m.group(0), \
                     "%s calls it from %s" % (entry.parent.name, mode)
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_the_app_keeps_a_journal(entry):
+    """The census says what the page looked like when a run gave up. The
+    journal is the only thing that can speak for a layer it got past."""
+    text = source(entry)
+    assert "from paperpull_core.journal import Journal" in text
+    assert "def journal(self)" in text
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_the_journal_is_made_only_when_something_writes_to_it(entry):
+    """A run that never opens a page has nothing to say, and must not
+    fail differently because of this."""
+    m = re.search(r"def journal\(self\).*?(?=\n    def )", source(entry), re.S)
+    assert m, "no property to check"
+    assert "if self._journal is None:" in m.group(0)
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_the_failure_file_carries_the_journal(entry):
+    m = re.search(r"def write_failure\(self.*?(?=\n    def )",
+                  source(entry), re.S)
+    assert "journal=self._journal" in m.group(0), \
+        "a failure file with nothing about how the run got there"
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_the_app_marks_a_document_it_saved(entry):
+    """The entry a later failure is read against. Without one, a run
+    that saved three documents and then broke looks the same as a run
+    that never saved anything."""
+    assert re.search(r"self\.journal\.checkpoint\(", source(entry)), \
+        "nothing in this app records a document going well"

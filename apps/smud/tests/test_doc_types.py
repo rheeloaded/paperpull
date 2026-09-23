@@ -94,11 +94,24 @@ def test_only_the_providers_own_hosts():
     assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
 
 
-def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
+def test_the_status_is_stated_the_same_way_in_both_places():
+    """Whether an app has been run against a real account is the first
+    thing a reader needs, and it is written twice, in the site module and
+    in the README. They disagreed once, when a tester confirmed this app
+    and only the README was updated, and the test that should have
+    noticed was checking for one exact sentence rather than for the
+    disagreement."""
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "UNVERIFIED" in src.split('"""')[1]
+    status = src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "Not yet tested against a real account" in readme
+
+    site_says_working = "STATUS: WORKING" in status
+    readme_says_working = "Working, confirmed on a real account" in readme
+    assert site_says_working == readme_says_working, (
+        "the site module and the README disagree about whether this app "
+        "has been run against a real account")
+    assert site_says_working, "a tester confirmed this app in #34"
+    assert "UNVERIFIED" not in status
 
 
 # -- round two, from the first survey --------------------------------------

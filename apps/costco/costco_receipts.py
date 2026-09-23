@@ -64,7 +64,7 @@ def ask(prompt: str) -> str:
 # ---------------------------------------------------------------------------
 
 class App:
-    journal = None
+    _journal = None
 
     def __init__(self, args):
         self.args = args
@@ -190,11 +190,6 @@ class App:
         except Exception:
             pass
         failure.watch_errors(self._work_page)
-        # The list and the receipt are the two things whose visibility
-        # answers most questions, so they are counted at every
-        # checkpoint.
-        self.journal = Journal(self._work_page, getattr(site, "FALLBACK", None),
-                               watch=("order_link", "receipt_area"))
         site.set_journal(self.journal)
         return self._work_page
 
@@ -441,11 +436,10 @@ class App:
             self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
-        if self.journal:
-            n = self.stats.get("receipts_downloaded", 0)
-            self.journal.op("next_item" if n else "open_item",
-                            "take the next document", ordinal=n)
-            self.journal.checkpoint("before opening a document")
+        n = self.stats.get("receipts_downloaded", 0)
+        self.journal.op("next_item" if n else "open_item",
+                        "take the next document", ordinal=n)
+        self.journal.checkpoint("before opening a document")
         # ---- an order still pending has no receipt yet ----
         if "Pending order" in (purchase.notes or "") or (purchase.status or "").lower() == "pending":
             # Not a terminal state, so the next run looks at it again.
@@ -520,6 +514,7 @@ class App:
                            notes=("Low classification confidence" if review_needed else ""))
         if review_needed:
             self.stats["manual_review"] += 1
+        self.journal.checkpoint('a document is saved')
         self.stats["receipts_downloaded"] += 1
         print(f"  Saved: {purchase.pdf_filename}")
 
@@ -568,8 +563,7 @@ class App:
                                "the receipt did not render")
             return False
 
-        if self.journal:
-            self.journal.checkpoint("the receipt is on screen")
+        self.journal.checkpoint("the receipt is on screen")
         purchase.document_type = "Receipt"
         folder = self.paths.folder_for(purchase.purchase_type,
                                        purchase.document_type)
@@ -584,12 +578,10 @@ class App:
         try:
             self._capture_document(page, purchase, out_path)
             ok = self._finish_pdf(page, purchase, out_path, source_page=page)
-            if self.journal:
-                self.journal.checkpoint("the document is saved")
-                self.journal.result("saved the document" if ok
-                                    else "could not save the document",
-                                    bytes_written=out_path.stat().st_size
-                                    if out_path.exists() else 0)
+            self.journal.result("saved the document" if ok
+                                else "could not save the document",
+                                bytes_written=out_path.stat().st_size
+                                if out_path.exists() else 0)
             return ok
         except Exception as e:
             log.exception("PDF generation failed for %s", purchase.key)
@@ -929,6 +921,20 @@ class App:
             self.order_csv.rewrite(order_rows)
             print("CSV files and progress.json updated.")
 
+    @property
+    def journal(self):
+        """The run's journal, made the first time anything writes to it.
+
+        Lazy, because a run that never opens a page has nothing to say
+        and an app that fails before the browser is up must not fail
+        differently because of this. It watches every selector the app
+        declares, since choosing between them is a decision nobody can
+        make before the first failure."""
+        if self._journal is None:
+            self._journal = Journal(getattr(self, "_work_page", None),
+                                    getattr(site, "FALLBACK", None))
+        return self._journal
+
     def write_failure(self, step: str, reason: str, text: str = "",
                       postmortem: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
@@ -949,7 +955,7 @@ class App:
             step=step, reason=reason,
             page=getattr(self, "_work_page", None),
             selectors=getattr(site, "FALLBACK", None),
-            journal=getattr(self, "journal", None),
+            journal=self._journal,
             provider='Costco', text=text, extra=extra)
         if not path:
             return

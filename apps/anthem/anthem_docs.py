@@ -21,6 +21,7 @@ sent to any external service.
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core.journal import Journal
 from paperpull_core.run_reporting import report_run_result
 
 import argparse
@@ -106,6 +107,8 @@ class Document:
 
 
 class App:
+    _journal = None
+
     def __init__(self, args):
         self.args = args
         # --config lets one copy of the code serve several people/accounts:
@@ -530,6 +533,7 @@ class App:
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
         self._record(doc, State.COMPLETED)
+        self.journal.checkpoint('a document is saved')
         self._write_row(doc, "Downloaded", "Completed")
         self.stats["new_files"].append(str(out_path))
         if doc.date:
@@ -839,6 +843,20 @@ class App:
         self.index_csv.rewrite(rows)
         print(f"\nVerified {len(rows)} index rows; {bad} problem(s).")
 
+    @property
+    def journal(self):
+        """The run's journal, made the first time anything writes to it.
+
+        Lazy, because a run that never opens a page has nothing to say
+        and an app that fails before the browser is up must not fail
+        differently because of this. It watches every selector the app
+        declares, since choosing between them is a decision nobody can
+        make before the first failure."""
+        if self._journal is None:
+            self._journal = Journal(getattr(self, "_work_page", None),
+                                    getattr(site, "FALLBACK", None))
+        return self._journal
+
     def write_failure(self, step: str, reason: str, text: str = "",
                       postmortem: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
@@ -859,6 +877,7 @@ class App:
             step=step, reason=reason,
             page=getattr(self, "_work_page", None),
             selectors=getattr(site, "FALLBACK", None),
+            journal=self._journal,
             provider='Anthem', text=text, extra=extra)
         if not path:
             return
