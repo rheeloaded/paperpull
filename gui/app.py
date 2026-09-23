@@ -289,6 +289,25 @@ _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]", ""}
 
 
 def _same_origin_only(request: Request) -> None:
+    """Refuse anything a different site set off.
+
+    Origin and Referer answer this whenever they are sent, and a page can
+    arrange for neither to be. An <img> does not carry an Origin, and a
+    page that declares `no-referrer` strips the other, which left a plain
+    GET able to reach this panel from a website somebody was merely
+    visiting. /api/run is a GET, and it starts a download.
+
+    Sec-Fetch-Site is the one that closes it. Every current browser sends
+    it on every request, page script cannot set it, and it says plainly
+    where the request came from: same-origin for the panel's own page,
+    cross-site for somebody else's, none for an address typed in. It is
+    absent from curl and from browsers old enough not to know it, and
+    those are allowed through, because the header being missing is not
+    the same as it saying cross-site.
+    """
+    site = (request.headers.get("sec-fetch-site") or "").lower()
+    if site and site not in ("same-origin", "none"):
+        raise HTTPException(403, "cross-origin request refused")
     for header in ("origin", "referer"):
         value = request.headers.get(header)
         if not value:
