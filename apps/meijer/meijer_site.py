@@ -60,6 +60,7 @@ from storage import now_iso
 
 from paperpull_core.redact import private_words, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 
 log = logging.getLogger("meijer_receipts.site")
 
@@ -509,17 +510,6 @@ def card_to_purchase(card: RawCard, purchase_type: str = "", base_url: str = BAS
 # Capture
 # ---------------------------------------------------------------------------
 
-_FETCH_AS_B64 = r"""
-async (url) => {
-  const res = await fetch(url, {credentials: 'include', redirect: 'follow'});
-  if (!res.ok) return {status: res.status, type: res.headers.get('content-type') || '', b64: ''};
-  const buf = await res.arrayBuffer();
-  let bin = ''; const bytes = new Uint8Array(buf);
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return {status: res.status, type: res.headers.get('content-type') || '', url: res.url, b64: btoa(bin)};
-}
-"""
-
 
 def fetch_receipt_bytes(page, url: str) -> Optional[bytes]:
     """The receipt link fetched from inside the signed-in page. Bytes when
@@ -528,7 +518,7 @@ def fetch_receipt_bytes(page, url: str) -> Optional[bytes]:
     if not is_safe_url(url):
         return None
     try:
-        out = page.evaluate(_FETCH_AS_B64, url) or {}
+        out = _fetch_as_b64(page, url) or {}
     except Exception as e:
         log.info("fetch of %s failed: %s", url[:80], e)
         return None
@@ -604,7 +594,7 @@ def press_row_receipt(page, purchase, trace=None):
                         body = fetch_receipt_bytes(extra, u) if not u.startswith("blob:") else None
                         if not body:
                             try:
-                                body = extra.evaluate(_FETCH_AS_B64, u)
+                                body = _fetch_as_b64(extra, u)
                                 body = base64.b64decode(body["b64"]) if body.get("b64") else None
                             except Exception:
                                 body = None
@@ -894,7 +884,7 @@ def survey_receipt(page, url: str) -> dict:
         out["kind"] = "refused, not a Meijer host"
         return out
     try:
-        res = page.evaluate(_FETCH_AS_B64, url) or {}
+        res = _fetch_as_b64(page, url) or {}
     except Exception as e:
         out["kind"] = "fetch failed " + mask_text(str(e))[:80]
         return out

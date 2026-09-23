@@ -56,6 +56,10 @@ from paperpull_core.dates import human_date as _human_date
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
 from paperpull_core.capture import take_new_pdf as _take_new_pdf
+from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
+from paperpull_core.capture import take_new_tab as _core_take_new_tab
+from paperpull_core.capture import take_same_tab as _core_take_same_tab
+from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 
 log = logging.getLogger("statefarm_docs.site")
 
@@ -307,39 +311,11 @@ def is_safe_control(name: str) -> bool:
 # click and nothing arriving.
 # ---------------------------------------------------------------------------
 
-_FETCH_AS_B64 = r"""async (u) => {
-    const r = await fetch(u, {credentials: 'include'});
-    if (!r.ok) return null;
-    const buf = new Uint8Array(await r.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
-    return btoa(s);
-}"""
-
 
 def _take_new_tab(page, new_pages, out_path: Path) -> bool:
-    """A PDF that a click opened in a new tab, read out of that tab and
-    written to `out_path`. A blob: tab was minted by the page itself and
-    is read through the page that made it. Any other address is host
-    checked before its bytes are fetched with the session."""
-    for extra in new_pages:
-        try:
-            extra.wait_for_load_state("domcontentloaded", timeout=15000)
-            url = extra.url or ""
-            if url.startswith("blob:"):
-                b64 = page.evaluate(_FETCH_AS_B64, url)
-            elif is_safe_url(url):
-                b64 = extra.evaluate(_FETCH_AS_B64, url)
-            else:
-                continue
-            if not b64:
-                continue
-            data = base64.b64decode(b64)
-            if data[:5] == b"%PDF-":
-                out_path.write_bytes(data)
-                return True
-        except Exception as e:
-            log.info("tab capture failed: %s", e)
-    return False
+    """A PDF a click opened in a new tab. The core does the reading, this
+    app's guard decides which addresses it may read."""
+    return _core_take_new_tab(page, new_pages, out_path, is_safe_url)
 
 
 # ---------------------------------------------------------------------------
@@ -722,56 +698,15 @@ def _control_dates(page) -> list:
 
 
 def _fetch_pdf(page, href: str) -> Optional[bytes]:
-    """A PDF link fetched from inside the signed-in page, cookies and all,
-    only on statefarm.com. None unless the answer is a PDF."""
-    if not is_safe_url(href):
-        return None
-    try:
-        resp = page.context.request.get(href, timeout=60000)
-        body = resp.body() if resp.ok else b""
-    except Exception as e:
-        log.info("fetch %s failed: %s", redact(href)[:80], e)
-        return None
-    return body if body[:5] == b"%PDF-" else None
+    """A PDF link fetched from inside the signed-in page, cookies and all.
+    The fetching is the core's, the hosts are this app's."""
+    return _core_fetch_pdf(page, href, is_safe_url)
 
 
-def _take_same_tab(page, start_url: str, out_path: Path, trace: Optional[list]) -> bool:
-    """A PDF the click opened in this very tab, the way SMUD's vendor does
-    it. The tab's address moved to a document, its bytes are fetched
-    through the session, and the tab is sent back where it was."""
-    url = page.url or ""
-    if not url or url == start_url or not is_safe_url(url):
-        return False
-    kind = ""
-    try:
-        kind = (page.evaluate("() => document.contentType || ''") or "").lower()
-    except Exception:
-        pass
-    if trace is not None:
-        trace.append({"note": "the tab moved", "url": redact(url)[:160], "content_type": kind[:40]})
-    if "pdf" not in kind and not url.lower().split("?")[0].endswith(".pdf"):
-        return False
-    body = b""
-    try:
-        resp = page.context.request.get(url, timeout=60000)
-        body = resp.body() if resp.ok else b""
-    except Exception as e:
-        log.info("same-tab fetch failed: %s", e)
-    if body[:5] != b"%PDF-":
-        try:
-            b64 = page.evaluate(_FETCH_AS_B64, url)
-            body = base64.b64decode(b64) if b64 else b""
-        except Exception:
-            body = b""
-    try:
-        page.go_back(wait_until="domcontentloaded", timeout=15000)
-        page.wait_for_timeout(1500)
-    except Exception:
-        pass
-    if body[:5] == b"%PDF-":
-        out_path.write_bytes(body)
-        return True
-    return False
+def _take_same_tab(page, start_url: str, out_path: Path, trace) -> bool:
+    """A PDF the click opened in this very tab. The core does the reading,
+    this app's guard decides which addresses it may read."""
+    return _core_take_same_tab(page, start_url, out_path, trace, is_safe_url)
 
 
 def _control_texts(page) -> set:
@@ -980,7 +915,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         target = urljoin(page.url, hint)
         if is_safe_url(target):
             try:
-                b64 = page.evaluate(_FETCH_AS_B64, target)
+                b64 = _fetch_as_b64(page, target)
                 data = base64.b64decode(b64) if b64 else b""
                 if data[:5] == b"%PDF-":
                     out_path.write_bytes(data)

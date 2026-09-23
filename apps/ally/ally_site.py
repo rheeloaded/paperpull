@@ -78,6 +78,7 @@ from typing import List, Optional, Tuple
 from paperpull_core import controls as _controls
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import last_day as _last_day
+from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 
 log = logging.getLogger("ally_docs.site")
 
@@ -884,13 +885,6 @@ def ally_collect(page) -> List[dict]:
 # session cookies). Whichever wins, the bytes are checked for %PDF- before the
 # file is written.
 # ---------------------------------------------------------------------------
-_FETCH_AS_B64 = r"""async (u) => {
-    const r = await fetch(u, {credentials: 'include'});
-    if (!r.ok) return null;
-    const buf = new Uint8Array(await r.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-    return btoa(s);
-}"""
 
 
 def _write_if_pdf(data: bytes, out_path: Path) -> bool:
@@ -1112,7 +1106,7 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
             log.error("refusing an href that is not on Ally's host")
             return False
         try:
-            b64 = page.evaluate(_FETCH_AS_B64, url)
+            b64 = _fetch_as_b64(page, url)
             if b64 and _write_if_pdf(base64.b64decode(b64), out_path):
                 log.info("captured via direct href")
                 return True
@@ -1151,8 +1145,8 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
     try:
         new_page.wait_for_load_state("domcontentloaded", timeout=15000)
         url = new_page.url or ""
-        b64 = page.evaluate(_FETCH_AS_B64, url) if url.startswith("blob:") else \
-            new_page.evaluate(_FETCH_AS_B64, url)
+        b64 = _fetch_as_b64(page, url) if url.startswith("blob:") else \
+            _fetch_as_b64(new_page, url)
         if b64:
             ok = _write_if_pdf(base64.b64decode(b64), out_path)
             if ok:
