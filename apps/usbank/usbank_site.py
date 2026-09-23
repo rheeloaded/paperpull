@@ -18,20 +18,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from urllib.parse import urlsplit
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.urls import is_safe_url as _host_allows
 
 ALLOWED_HOSTS = {'www.usbank.com', 'onlinebanking.usbank.com'}
 
 
 def is_safe_url(url: str) -> bool:
-    try:
-        parts = urlsplit(url or "")
-        return (parts.scheme == "https" and parts.hostname in ALLOWED_HOSTS
-                and parts.port in (None, 443) and not parts.username
-                and not parts.password)
-    except (TypeError, ValueError):
-        return False
+    """True only for an https URL on exactly one of this provider's own
+    hosts, never a subdomain of one.
+
+    The check itself lives in the core, so all of them answer the same way.
+    This app keeps the hosts and its refusal to follow subdomains, which is
+    how it has always behaved."""
+    return _host_allows(url, ALLOWED_HOSTS, subdomains=False)
 
 
 log = logging.getLogger("usbank_docs.site")

@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
+from paperpull_core.urls import is_safe_url as _host_allows
 from storage import now_iso
 
 log = logging.getLogger("walmart_receipts.site")
@@ -769,15 +770,8 @@ ALLOWED_HOSTS = {'walmart.com'}
 
 
 def is_safe_url(url: str) -> bool:
-    """True only for an https URL on one of this provider's own hosts."""
-    from urllib.parse import urlparse
-    try:
-        got = urlparse(url or "")
-    except ValueError:
-        return False
-    if got.scheme != "https" or not got.hostname:
-        return False
-    if got.username or got.password:
-        return False
-    host = got.hostname.lower().rstrip(".")
-    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)
+    """True only for an https URL on one of this provider's own hosts.
+
+    The check itself lives in the core, so all of them answer the same way.
+    This app keeps the hosts, which is the part that really is its own."""
+    return _host_allows(url, ALLOWED_HOSTS)

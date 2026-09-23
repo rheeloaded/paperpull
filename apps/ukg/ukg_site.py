@@ -169,6 +169,7 @@ def is_safe_url(url: str) -> bool:
       path, so /c/hcm/EDIT/EePayrollDirectDepositSummary is refused while
       /c/hcm/VIEW/PayStatements is allowed.
     """
+    from paperpull_core.urls import is_safe_url as _host_allows
     if not BASE:
         return False
     try:
@@ -176,15 +177,10 @@ def is_safe_url(url: str) -> bool:
         got = urlparse(url or "")
     except ValueError:
         return False
-    if got.scheme != want.scheme or not got.hostname:
-        return False
-    if (got.hostname or "").lower() != (want.hostname or "").lower():
-        return False
-    if got.port != want.port:
-        return False
-    # credentials in a URL are never legitimate here and are a classic way to
-    # disguise the real host
-    if got.username or got.password:
+    # The host half is the core's, so this app answers it the same way as
+    # the other forty-seven. The tenant is one host and never a subdomain of
+    # it, because the configured address is the whole address.
+    if not _host_allows(url, {want.hostname or ""}, subdomains=False):
         return False
     if re.search(r"/c/hcm/(EDIT|ADD|DELETE)/", got.path or "", re.I):
         return False

@@ -290,19 +290,14 @@ def is_safe_control(name: str) -> bool:
 
 
 def is_safe_url(url: str) -> bool:
-    """On Anthem's own hosts, by parsed comparison, never a string prefix."""
-    from urllib.parse import urlparse
-    try:
-        got = urlparse(url or "")
-    except ValueError:
-        return False
-    if got.scheme != "https" or not got.hostname:
-        return False
-    if (got.hostname or "").lower() not in ALLOWED_HOSTS:
-        return False
-    if got.username or got.password:
-        return False
-    return True
+    """True only for an https URL on exactly one of this provider's own
+    hosts, never a subdomain of one.
+
+    The check itself lives in the core, so all of them answer the same way.
+    This app keeps the hosts and its refusal to follow subdomains, which is
+    how it has always behaved."""
+    from paperpull_core.urls import is_safe_url as _host_allows
+    return _host_allows(url, ALLOWED_HOSTS, subdomains=False)
 
 
 def is_anthem_frame(frame) -> bool:

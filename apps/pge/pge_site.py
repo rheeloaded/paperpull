@@ -164,21 +164,12 @@ def is_page_option(label: str, target_page: int) -> bool:
 
 
 def is_safe_url(url: str) -> bool:
-    """Returns True ONLY if url is an HTTPS URL (or blob:https URL) on an allowed PG&E domain."""
-    from urllib.parse import urlparse
-    try:
-        raw = url or ""
-        if raw.startswith("blob:"):
-            raw = raw[5:]
-        got = urlparse(raw)
-    except ValueError:
-        return False
-    if got.scheme != "https" or not got.hostname:
-        return False
-    if got.username or got.password:
-        return False
-    host = got.hostname.lower().rstrip(".")
-    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)
+    """True only for an https URL on one of this provider's own hosts.
+
+    The check itself lives in the core, so all of them answer the same way.
+    This app keeps the hosts, which is the part that really is its own."""
+    from paperpull_core.urls import is_safe_url as _host_allows
+    return _host_allows(url, ALLOWED_HOSTS)
 
 
 SECURITY_CHALLENGE_MARKERS = [

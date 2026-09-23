@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -125,23 +124,12 @@ def is_safe_control(name: str) -> bool:
 
 
 def is_safe_url(url: str) -> bool:
-    """On Paylocity's own host, by parsed comparison, never a string prefix.
+    """True only for an https URL on one of this provider's own hosts.
 
-    The UKG app's tenant guard was once walked through by both a suffix host
-    and a userinfo host because it compared with startswith. Parse and
-    compare, and refuse embedded credentials outright.
-    """
-    try:
-        got = urlparse(url or "")
-    except ValueError:
-        return False
-    if got.scheme != "https" or not got.hostname:
-        return False
-    if (got.hostname or "").lower() not in ALLOWED_HOSTS:
-        return False
-    if got.username or got.password:
-        return False
-    return True
+    The check itself lives in the core, so all of them answer the same way.
+    This app keeps the hosts, which is the part that really is its own."""
+    from paperpull_core.urls import is_safe_url as _host_allows
+    return _host_allows(url, ALLOWED_HOSTS)
 
 
 def looks_signed_out(page) -> bool:

@@ -54,6 +54,7 @@ from paperpull_core.models import ONLINE, Item, Purchase
 from storage import now_iso
 
 from paperpull_core.redact import private_words, set_private_words  # noqa: F401
+from paperpull_core.urls import is_safe_url as _host_allows
 
 log = logging.getLogger("github_receipts.site")
 
@@ -198,16 +199,11 @@ ALLOWED_HOSTS = {"github.com", "githubusercontent.com"}
 
 
 def is_safe_url(url: str) -> bool:
-    """Only https URLs on github.com, or the user-content host its
-    downloads are served from."""
-    try:
-        u = urlsplit(url or "")
-    except ValueError:
-        return False
-    if u.scheme != "https" or not u.hostname or u.username or u.password:
-        return False
-    host = u.hostname.lower()
-    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)
+    """True only for an https URL on one of this provider's own hosts.
+
+    The check itself lives in the core, so all of them answer the same way.
+    This app keeps the hosts, which is the part that really is its own."""
+    return _host_allows(url, ALLOWED_HOSTS)
 
 
 # ---------------------------------------------------------------------------
