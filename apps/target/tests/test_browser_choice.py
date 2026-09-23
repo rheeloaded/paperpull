@@ -42,3 +42,41 @@ def test_the_dead_end_message_is_gone():
     """It said the app needs its own copy of Chromium, which was true and
     is the thing that changed."""
     assert "needs its own copy of Chromium" not in SRC
+
+
+# -- the next wall the browser fix revealed (#48) -----------------------------
+
+LOGIN = inspect.getsource(target_receipts.App.cmd_login)
+SESSION = inspect.getsource(target_receipts.App.check_session)
+
+
+def test_login_does_not_wait_at_a_prompt_nobody_can_answer():
+    """On 0.32.0 the window opened and shut again. The browser fix worked
+    and the app then asked "Press Enter here AFTER you have finished
+    signing in", read end-of-file, and exited 3 with the window still
+    open behind it."""
+    assert "pause_for_sign_in()" in LOGIN
+    assert "ask(" not in LOGIN, "no prompt is left in Login"
+
+
+def test_login_leaves_the_browser_open_when_it_could_not_ask():
+    """Closing it is what made the window vanish, and it is the window
+    the person was about to sign in to."""
+    before, _, after = LOGIN.partition("pause_for_sign_in()")
+    assert "self.close()" not in before
+    next_two = " ".join(after.strip().splitlines()[:2])
+    assert "return" in next_two, "it returns before anything is checked or closed"
+
+
+def test_a_run_that_meets_a_challenge_stops_instead_of_dying():
+    assert "ask_or_none(" in SESSION
+    assert "raise SystemExit(0)" in SESSION, "a clean stop, not a crash"
+    assert "press Resume" in SESSION
+    assert SESSION.count("ask_or_none(") == 2, "the challenge and the sign-out both"
+
+
+def test_the_confirmations_that_should_still_refuse_are_untouched():
+    """A prompt that guards something destructive must keep refusing when
+    there is nobody to answer it."""
+    src = inspect.getsource(target_receipts)
+    assert 'if ask("> ").strip().upper() != "YES"' in src

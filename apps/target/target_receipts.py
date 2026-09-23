@@ -38,6 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from paperpull_core import browser as browser_launcher
 from paperpull_core import classification, receipt_pdf, scope
 import target_site as site
 from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
@@ -193,18 +194,29 @@ class App:
 
     def check_session(self, page) -> None:
         """Raise/pause on sign-out or security challenges."""
+        # Both of these used to wait at a prompt. Under the panel there is
+        # nobody to answer, and waiting there took the run down with an
+        # end-of-file rather than saying what had happened, so when there
+        # is no console the run stops on its own terms and says what to do
+        # about it. Progress is already saved either way (#48).
         challenge = site.detect_security_challenge(page)
         if challenge:
             self.progress.save(backup=True)
             print(f"\n!! {challenge}")
             print("Processing stopped. Please resolve the challenge yourself in the")
             print("browser window. I will NOT attempt to bypass it.")
-            ask("Press Enter once the page looks normal again (or Ctrl+C to quit)... ")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page looks normal again (or Ctrl+C to quit)... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
             print("\n!! Target appears to have signed you out.")
             print("Please sign in manually in the open browser window.")
-            ask("Press Enter after you are signed in again... ")
+            if browser_launcher.ask_or_none(
+                    "Press Enter after you are signed in again... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
             site.goto_orders(page)
 
     # -- commands -----------------------------------------------------------
@@ -215,7 +227,13 @@ class App:
         print("This tool never touches your credentials.\n")
         page = self.page()
         page.goto(site.URLS["home"], wait_until="domcontentloaded", timeout=60000)
-        ask("Press Enter here AFTER you have finished signing in... ")
+        # Under the panel there is no console to press Enter at, and this
+        # used to read end-of-file and take the process down, which closed
+        # the window the person was about to sign in to (#48). Nothing is
+        # checked in that case, because there is nothing to check yet, and
+        # the browser is deliberately left open.
+        if not browser_launcher.pause_for_sign_in():
+            return
         site.goto_orders(page)
         if site.looks_signed_out(page):
             print("It still looks like you are signed out; the orders page bounced to login.")

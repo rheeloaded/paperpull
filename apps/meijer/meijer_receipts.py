@@ -296,10 +296,15 @@ class App:
         for page_no in range(1, 60):
             site.goto_orders(page, page_no)
             self.check_session(page)
-            if page_no == 1 and site.history_state(page) == "empty":
-                print("\nMeijer says this account has no orders to show.")
-                break
             found = site.collect_both_tabs(page) if page_no == 1 else site.collect_cards(page)
+            # "You haven't placed any orders yet" is the ONLINE tab saying
+            # so, and that is the tab this page opens on. A tester who only
+            # shops in the store has every receipt behind the other tab and
+            # was told his account has no orders, twice, because this asked
+            # the page before anything opened the tab that holds them (#42).
+            if page_no == 1 and not found and site.history_state(page) == "empty":
+                print("\nMeijer says this account has no orders on either tab.")
+                break
             fresh = [c for c in found if c.text not in seen_texts]
             log.info("Orders page %d: %d row(s), %d new", page_no, len(found), len(fresh))
             if not fresh:
