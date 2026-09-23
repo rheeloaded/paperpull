@@ -251,3 +251,15 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control):
                 except Exception:
                     continue
     return None, ""
+
+
+def controls_named(page, name_re: Pattern, roles=("button", "link")):
+    """Every control on the page whose name matches, as one locator.
+
+    A document is offered as a button on one provider and a link on the
+    next, and the row it sits in supplies the date either way.
+    """
+    loc = page.get_by_role(roles[0], name=name_re)
+    for role in roles[1:]:
+        loc = loc.or_(page.get_by_role(role, name=name_re))
+    return loc
