@@ -20,6 +20,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -583,7 +584,8 @@ class App:
         folder = self.paths.online
         filename = build_pdf_filename(purchase.purchase_date, purchase.summary,
                                       purchase.document_type)
-        out_path = unique_path(folder, filename, self.config["max_path_length"])
+        out_path = unique_path(folder, filename, self.config["max_path_length"],
+                               distinguisher=purchase.order_number)
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
@@ -612,7 +614,8 @@ class App:
         def target(i: int) -> Path:
             filename = build_pdf_filename(purchase.purchase_date, purchase.summary,
                                           purchase.document_type, part=(i, n))
-            path = unique_path(folder, filename, self.config["max_path_length"])
+            path = unique_path(folder, filename, self.config["max_path_length"],
+                               distinguisher=purchase.order_number)
             if path.name != filename:
                 self.stats["duplicate_filenames"] += 1
             return path
@@ -884,6 +887,17 @@ class App:
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
+
+
+    def cmd_rename(self):
+        """Rename what is already downloaded, without downloading it again.
+
+        A naming scheme improves and the files on disk keep the old one.
+        Nothing about them needs fetching, only their names are wrong, so
+        nothing is asked of the provider here (#43, #49). A preview
+        unless --apply is given."""
+        self.stats["mode"] = "rename"
+        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
@@ -1248,6 +1262,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("all", "process every order (asks for confirmation)"),
         ("resume", "resume incomplete purchases"),
         ("verify", "re-validate every indexed PDF"),
+        ("rename", "rename downloaded files to this app's current naming"),
         ("review-names", "interactively fix low-confidence names"),
         ("reparse-items", "re-read item prices from saved receipt PDFs, offline"),
         ("diagnose", "inspect one order, write diagnostics"),
@@ -1255,6 +1270,8 @@ def build_parser() -> argparse.ArgumentParser:
     ]
     for name, help_text in modes:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)
+    ap.add_argument("--apply", action="store_true",
+                    help="with --rename, actually rename (default is a preview)")
     ap.add_argument("--dry-run", action="store_true",
                     help="extract and plan filenames but save no PDFs/CSVs")
     ap.add_argument("--year", type=int)
@@ -1296,6 +1313,8 @@ def main(argv=None):
             app.cmd_resume()
         elif args.verify:
             app.cmd_verify()
+        elif args.rename:
+            app.cmd_rename()
         elif getattr(args, "review_names"):
             app.cmd_review_names()
         elif getattr(args, "reparse_items"):

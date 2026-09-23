@@ -143,3 +143,76 @@ def test_collision_suffixes_stay_unique_even_when_truncated(tmp_path):
         p.write_bytes(b"x")
         names.append(p.name)
     assert len(set(names)) == len(names), names
+
+
+# -- two purchases on one day (#49, and the same complaint on #43) ------------
+
+NAME = "2026-09-23 Testco Computer Accessories Receipt.pdf"
+
+
+def test_a_collision_is_told_apart_by_the_order_number(tmp_path):
+    """A date and a summary are all most rows give, so two purchases on
+    one day are one name. ' (2)' says nothing about which is which."""
+    first = unique_path(tmp_path, NAME, distinguisher="112-7124528-9515453")
+    first.write_bytes(b"%PDF-")
+    assert first.name == NAME, "nothing changes for a name that does not collide"
+
+    second = unique_path(tmp_path, NAME, distinguisher="114-2233445-6677889")
+    assert second.name == \
+        "2026-09-23 Testco Computer Accessories Receipt 114-2233445-6677889.pdf"
+    assert "(2)" not in second.name
+
+
+def test_the_numbered_suffix_is_still_there_as_a_last_resort(tmp_path):
+    (tmp_path / NAME).write_bytes(b"%PDF-")
+    assert unique_path(tmp_path, NAME).name == \
+        "2026-09-23 Testco Computer Accessories Receipt (2).pdf"
+
+
+def test_nothing_that_is_not_an_identifier_gets_into_a_name(tmp_path):
+    """sanitize_component turns an empty string into "Unnamed", which as a
+    distinguisher would tell two files apart by telling you nothing."""
+    (tmp_path / NAME).write_bytes(b"%PDF-")
+    for empty in ("", "   ", None):
+        assert unique_path(tmp_path, NAME, distinguisher=empty).name == \
+            "2026-09-23 Testco Computer Accessories Receipt (2).pdf"
+
+
+def test_an_identifier_is_sanitized_like_any_other_part_of_a_name(tmp_path):
+    (tmp_path / NAME).write_bytes(b"%PDF-")
+    got = unique_path(tmp_path, NAME, distinguisher=r"a/b\c:d*e")
+    assert "/" not in got.name and "\\" not in got.name and ":" not in got.name
+    assert got.parent == tmp_path
+
+
+def test_an_order_number_already_in_the_name_is_not_said_twice(tmp_path):
+    """GitHub's fix put the payment id in the summary itself. That name
+    must not grow a second copy of it."""
+    named = "2026-09-23 Testco Payment 1EAX6IX2 Receipt.pdf"
+    (tmp_path / named).write_bytes(b"%PDF-")
+    got = unique_path(tmp_path, named, distinguisher="1EAX6IX2")
+    assert got.name == "2026-09-23 Testco Payment 1EAX6IX2 Receipt (2).pdf"
+
+
+def test_a_distinguished_name_that_is_too_long_is_still_shortened(tmp_path):
+    (tmp_path / NAME).write_bytes(b"%PDF-")
+    got = unique_path(tmp_path, NAME, max_path_length=len(str(tmp_path)) + 60,
+                      distinguisher="112-7124528-9515453")
+    assert len(str(got)) <= len(str(tmp_path)) + 60
+    assert got.name.endswith(".pdf")
+    assert not got.exists()
+
+
+def test_every_receipt_app_hands_over_what_tells_two_purchases_apart():
+    """An order number the app already has, at the one call that names a
+    receipt. Without it the app falls back to ' (2)', which is the thing
+    two testers reported (#43, #49)."""
+    import re
+    repo = Path(__file__).resolve().parents[2]
+    missing = []
+    for app in sorted(repo.glob("apps/*/*_receipts.py")):
+        text = app.read_text(encoding="utf-8", errors="ignore")
+        for m in re.finditer(r"def _save_receipt\(.*?(?=\n    def |\Z)", text, re.S):
+            if "unique_path(" in m.group(0) and "distinguisher=" not in m.group(0):
+                missing.append(app.parent.name)
+    assert not missing, "names a receipt without anything to tell it apart: " + ", ".join(missing)
