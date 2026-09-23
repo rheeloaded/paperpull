@@ -59,6 +59,7 @@ from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import take_same_tab as _core_take_same_tab
 from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
+from paperpull_core.controls import controls_named as _controls_named
 
 log = logging.getLogger("newrez_docs.site")
 
@@ -342,10 +343,9 @@ def dismiss_overlay(page) -> None:
 
 
 def _bill_controls(page):
-    """Every control on the page whose name says it fetches a document, as
-    a button or a link. The row it sits in supplies the date."""
-    return page.get_by_role("button", name=BILL_CONTROL_RE).or_(
-        page.get_by_role("link", name=BILL_CONTROL_RE))
+    """Every control on the page whose name says it fetches a document.
+    The words are this provider's, the rest is the core's."""
+    return _controls_named(page, BILL_CONTROL_RE)
 
 
 def _looks_like_billing(page) -> bool:
