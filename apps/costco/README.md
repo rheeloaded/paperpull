@@ -39,13 +39,16 @@ contributed to anything, is
 4. Click **Pilot**. It takes the newest few from each tab. Say whether
    PDFs landed in `In-Warehouse\` and `Online\`, and whether they are
    readable, which is the one thing nobody has checked yet.
-5. If anything is wrong, click **more**, then **Diagnose**, and attach
-   that file. It says what the app sees on both tabs. A fresh **Record**
-   helps too, if the path it takes has changed.
-6. Read any file through before you attach it. A recording ends by
+5. If a run stops early it writes a `failure-*.json` in `Diagnostics`
+   by itself and prints where. Attach that. It names the step that broke
+   and holds no text from your account.
+6. If a run finishes but the PDFs are wrong, click **more**, then
+   **Diagnose**, and attach that file. It says what the app sees on both
+   tabs. A fresh **Record** helps too, if the path it takes has changed.
+7. Read any file through before you attach it. A recording ends by
    printing anything worth a second look. Delete any line you do not
    like.
-7. Attach both to [issue #47](https://github.com/rheeloaded/paperpull/issues/47)
+8. Attach both to [issue #47](https://github.com/rheeloaded/paperpull/issues/47)
    with a sentence about whether warehouse receipts and online orders are
    on the same page or behind separate tabs, and how far back the list
    goes. Do not attach a screenshot of a receipt. Those carry your

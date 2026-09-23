@@ -528,9 +528,11 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
     except Exception:
         return None
     try:
-        say("  Wrote %s" % out)
-        say("  That file says what the page looked like when this failed.")
-        say("  It holds counts and states, and no text from your account.")
+        say("")
+        say("  This run wrote a file about what went wrong:")
+        say("    %s" % out)
+        say("  It holds counts and states and no text from your account, so")
+        say("  there is nothing in it from your statements or receipts.")
     except Exception:
         pass
     return str(out)

@@ -721,8 +721,12 @@ class App:
                 Path(path).read_text(encoding="utf-8")))
         except Exception:
             said = []
-        for line in said[:6]:
-            print("  - %s" % line)
+        if said:
+            print("  What it noticed:")
+            for line in said[:6]:
+                print("    - %s" % line)
+        print("  Read it through, then attach it to this provider's issue on")
+        print("  GitHub. It is the one thing that saves a round of guessing.")
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"

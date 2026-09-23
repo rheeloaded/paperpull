@@ -46,6 +46,15 @@ delete-safe, part of [PaperPull](../../README.md).
 A Diagnose file and one recording together are usually enough to get a
 provider working in a single round. Diagnose on its own takes two or three.
 
+**If a run stops early, send the file it wrote.** Every failed run leaves a
+`failure-*.json` in the `Diagnostics` folder and prints where it put it. It
+says which step broke and what the page looked like at the time, as counts and
+states, with no text from your account in it. Attach it to the issue the same
+way. It is what keeps the rounds after the first one short, and it is
+described in full on the
+[Testing a provider](../../docs/testing-a-provider.md#if-a-run-fails-send-the-file-it-wrote)
+page.
+
 ## Setup, for a checkout
 
 ```bat

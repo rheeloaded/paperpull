@@ -1139,6 +1139,66 @@ def _diagnostics_of(meta: dict) -> Path:
     return base / "Diagnostics"
 
 
+def _latest_failure(meta: dict):
+    """The newest failure file an app wrote, if it wrote one recently.
+
+    A run that stops early writes one of these by itself. It is the most
+    useful thing a tester can attach and the easiest to never notice, so
+    the panel offers it rather than leaving a path in a console.
+
+    Recent means this hour. An older one belongs to a run nobody is
+    looking at any more, and offering that would have somebody attach the
+    wrong failure to the right issue."""
+    import time
+    try:
+        found = sorted(_diagnostics_of(meta).glob("failure-*.json"))
+    except OSError:
+        return None
+    for path in reversed(found):
+        try:
+            if time.time() - path.stat().st_mtime < 3600:
+                return path
+        except OSError:
+            continue
+    return None
+
+
+@app.get("/api/failure/latest", dependencies=[Depends(_same_origin_only)])
+def api_failure_latest(app: str = ""):
+    """Whether the run that just stopped left a file worth attaching."""
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "unknown app")
+    found = _latest_failure(apps[app])
+    if found is None:
+        return {"found": False}
+    return {"found": True, "name": found.name}
+
+
+@app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only)])
+async def api_failure_reveal(request: Request):
+    """Show that file in the file manager. Takes no path from the page,
+    only the app name, and finds the file here the same way."""
+    body = await request.json()
+    name = str((body or {}).get("app") or "")
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "unknown app")
+    found = _latest_failure(apps[name])
+    if found is None:
+        raise HTTPException(404, "no recent failure file")
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", str(found)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(found)])
+        else:
+            subprocess.Popen(["xdg-open", str(found.parent)])
+    except Exception as e:
+        raise HTTPException(500, "could not open the folder, %s" % e)
+    return {"ok": True}
+
+
 @app.post("/api/record/stop", dependencies=[Depends(_same_origin_only)])
 async def api_record_stop(request: Request):
     """End a recording that is waiting on us.
@@ -1528,6 +1588,11 @@ HTML = r"""<!doctype html>
   <div id="paneout" style="display:flex; flex-direction:column; min-height:0; flex:1;">
     <div class="status"><span class="dot" id="dot"></span><span id="statustext">idle</span></div>
     <pre class="console" id="console"></pre>
+    <p class="hint" id="failnote" style="display:none;margin:6px 0 0">
+       This run wrote a file about what went wrong. It holds counts and states
+       and no text from your account. Read it, then attach it to this
+       provider&#39;s issue.
+       <button id="failreveal" onclick="revealFailure()">Show the file to attach</button></p>
   </div>
   <div id="panest" class="stwrap" style="display:none;">
     <p><button onclick="loadStatus()">Refresh</button>
@@ -1967,6 +2032,7 @@ function run(action) {
   const q = new URLSearchParams({ app, account, action });
   if (s.year) q.set('year', s.year); else { if (s.start) q.set('start', s.start); if (s.end) q.set('end', s.end); }
   $('console').textContent = '';
+  $('failnote').style.display = 'none';
   const scoped = s.year ? ` (${s.year})` : (s.start || s.end) ? ` (${s.start || '…'} to ${s.end || '…'})` : '';
   setStatus('run', `running ${action} on ${app} / ${account}${scoped}`);
   // Only the buttons this run locked are unlocked at the end. The Spreadsheet
@@ -2004,8 +2070,25 @@ function run(action) {
     recordingApp = null;
     unlockButtons();
     es.close(); es = null;
+    if (code !== '0' || (result && result.attention)) checkFailure(app);
   });
   es.onerror = () => { if (es) { setStatus('err','connection lost'); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; } };
+}
+let failureApp = null;
+async function checkFailure(app) {
+  try {
+    const r = await fetch(`/api/failure/latest?app=${encodeURIComponent(app)}`);
+    const d = await r.json();
+    if (d.found) { failureApp = app; $('failnote').style.display = ''; }
+  } catch (e) {}
+}
+async function revealFailure() {
+  if (!failureApp) return;
+  try {
+    await fetch('/api/failure/reveal', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app: failureApp }) });
+  } catch (e) {}
 }
 let recordingApp = null;
 async function stopRecording() {
