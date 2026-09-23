@@ -217,6 +217,13 @@ spouse` does every app at once.
 
 ## Quick start
 
+**Want to see it first?** The panel's welcome screen offers **See a sample
+archive**, a folder of invented statements and receipts. The Status tab
+fills in and both spreadsheets build from it, so you can see exactly what
+PaperPull produces before you sign in to anything. Nothing downloads while
+you are in it, and *Leave the sample* puts you back. Every document in it
+says on its face that it is invented.
+
 ![Quick start](docs/quickstart.gif)
 
 **One-shot setup** (creates a venv for every app + the GUI, installs the browser):

@@ -7,6 +7,33 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **A sample archive, so you can see what PaperPull produces before you
+  point it at a bank.** The welcome screen now offers *See a sample
+  archive*. It builds a folder of invented statements and receipts, five
+  providers, and opens the panel on it. The Status tab fills in, with one
+  archive overdue and a two-month gap in the middle of another, and both
+  spreadsheet buttons build real workbooks from it, 479 transactions read
+  out of the PDFs and reconciled against their own printed balances, and
+  468 purchases across 190 orders. A yellow bar says what you are looking
+  at, nothing can be downloaded, created or removed while you are in it,
+  and *Leave the sample* puts you back on your own archive, which was
+  never touched. Every document in it says on its face that it is a sample
+  and that every name, amount and date is invented.
+
+  It is also the answer to a fair question from anyone reviewing the
+  program, including the Microsoft Store, who cannot test a downloader
+  without an account at a bank. Nobody should have to hand over real
+  banking credentials to see this work.
+
+  The archive is written by `tools/make_sample.py` when you ask for it,
+  from a fixed seed, in about a tenth of a second. Nothing generated is
+  committed or carried in the installer, because a tree of files named and
+  shaped exactly like real statements is the thing this repository's
+  .gitignore exists to keep out.
+
 ## [0.32.0] - 2026-09-22
 
 0.31.1 built a file that a failing run writes by itself and gave it to

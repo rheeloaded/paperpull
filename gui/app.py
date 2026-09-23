@@ -116,6 +116,8 @@ def _write_settings(data: dict) -> None:
 
 
 def apps_root() -> Path:
+    if _SAMPLE is not None:
+        return _SAMPLE
     env = os.environ.get("APPS_ROOT")
     if env:
         return Path(env).expanduser()
@@ -131,11 +133,70 @@ def apps_root() -> Path:
 
 
 def root_source() -> str:
+    if _SAMPLE is not None:
+        return "sample"
     if os.environ.get("APPS_ROOT"):
         return "environment"
     if _read_settings().get("apps_root"):
         return "settings"
     return "default"
+
+
+# -- the sample archive -------------------------------------------------------
+#
+# A folder of invented statements and receipts that ships with the program,
+# so somebody who has just installed it can see a filled Status tab and
+# build both spreadsheets before deciding whether to point this at a bank.
+# It is also the only way to see the program work without an account, which
+# is what a reviewer with no account of their own needs.
+#
+# Looking at it is a mode this process is in, not a saved setting. Nothing
+# is written to the settings file, and restarting the panel leaves it.
+
+_SAMPLE: Optional[Path] = None
+
+
+def _sample_builder() -> Optional[Path]:
+    """tools/make_sample.py, which writes the archive rather than the
+    archive itself being carried around. It is a few hundred lines of plain
+    Python against a fixed seed, so the same folder comes out every time,
+    and the repository never has to hold a tree of files that look exactly
+    like the real statements .gitignore exists to keep out."""
+    for cand in (HERE.parent / "tools" / "make_sample.py",
+                 HERE / "make_sample.py"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _sample_dest() -> Path:
+    """Where the sample lives once built. Beside the settings file, because
+    the install folder is replaced by an upgrade and macOS will not let
+    anything write inside it, and spreadsheets get built into this."""
+    return _settings_path().parent / "sample"
+
+
+def _open_sample() -> Path:
+    """Build the sample once, and answer with it."""
+    dest = _sample_dest()
+    if (dest / "README.txt").is_file():
+        return dest
+    builder = _sample_builder()
+    if builder is None:
+        raise HTTPException(500, "this copy of PaperPull did not ship the sample archive")
+    if dest.exists():
+        shutil.rmtree(dest, ignore_errors=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location("paperpull_make_sample", builder)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.build(dest)
+    except Exception as e:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise HTTPException(500, "could not build the sample archive: %s" % e)
+    return dest
 
 
 def _looks_like_installs(root: Path) -> int:
@@ -236,6 +297,15 @@ def _same_origin_only(request: Request) -> None:
             raise HTTPException(403, "cross-origin request refused")
 
 
+def _not_in_sample() -> None:
+    """Anything that changes an archive is refused while the panel is
+    looking at the sample. Reading it and building spreadsheets from it are
+    the point, so those are not guarded."""
+    if _SAMPLE is not None:
+        raise HTTPException(409, "the panel is looking at the sample archive. "
+                                 "Leave the sample first.")
+
+
 def _entry_script(app_dir: Path):
     for p in sorted(app_dir.glob("*.py")):
         if ENTRY_RE.match(p.name):
@@ -272,8 +342,16 @@ def _python_for(app_dir: Path) -> str:
 def setup_needed(meta: dict) -> str:
     """Why this app cannot be run yet, or "".
 
-    Only ever true in a checkout. The packaged build has no venv
-    anywhere and does not need one."""
+    Only ever true in a checkout, apart from the sample archive. The
+    packaged build has no venv anywhere and does not need one."""
+    if _SAMPLE is not None:
+        return ("This is the sample archive, so there is nothing to sign in "
+                "to and nothing to download.\n\n"
+                "Everything already in it was invented to show what a real "
+                "archive looks like. The Status tab and both spreadsheets "
+                "work on it exactly as they would on yours.\n\n"
+                "Leave the sample, at the top of the page, to get back to "
+                "your own archive.")
     if _is_packaged() or _venv_python(Path(meta["dir"])) is not None:
         return ""
     script = "setup.command" if sys.platform != "win32" else "setup.bat"
@@ -605,6 +683,27 @@ def api_status():
 
 
 
+@app.post("/api/sample", dependencies=[Depends(_same_origin_only)])
+async def api_sample(request: Request):
+    """Look at the sample archive, or stop looking at it.
+
+    Takes {"on": true} or {"on": false}. Turning it on copies the shipped
+    sample somewhere writable the first time and points the panel there.
+    Turning it off puts the panel back on whatever root it had, which was
+    never changed, because this is a mode and not a setting.
+    """
+    global _SAMPLE, _STATUS_MOD, _EXPORT_MOD
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    _SAMPLE = _open_sample() if (body or {}).get("on", True) else None
+    _STATUS_MOD = None      # both are looked for relative to the root
+    _EXPORT_MOD = None
+    return {"sample": _SAMPLE is not None, "root": str(apps_root()),
+            "apps": _looks_like_installs(apps_root())}
+
+
 @app.get("/api/root", dependencies=[Depends(_same_origin_only)])
 def api_root_get():
     root = apps_root()
@@ -613,7 +712,7 @@ def api_root_get():
             "settings_file": str(_settings_path())}
 
 
-@app.post("/api/root", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/root", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
 async def api_root_set(request: Request):
     """Remember where the downloaders live.
 
@@ -926,6 +1025,12 @@ def refresh_installs(force: bool = False) -> dict:
     once per panel run per root. Returns {install folder: [files]} for the
     ones that changed. An install is matched to its template by the entry
     script's name, so a renamed folder still gets its provider's code."""
+    if _SAMPLE is not None:
+        # The sample's entry scripts are stubs and its folders are named
+        # after providers, so this would happily fill it with real app code
+        # and a Backups folder. Nothing in it is ever run, so nothing in it
+        # needs updating.
+        return {}
     root = apps_root()
     key = str(root)
     seeded = _seed_missing_cores(root)
@@ -998,7 +1103,7 @@ def api_providers():
             "suggested_root": str(Path.home() / "Documents" / "PaperPull")}
 
 
-@app.post("/api/create", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/create", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
 async def api_create(request: Request):
     """Make installs for the chosen providers under the chosen folder, and
     remember that folder. The folder is created if it does not exist, since a
@@ -1080,7 +1185,7 @@ def _account_module():
     return None
 
 
-@app.post("/api/account", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/account", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
 async def api_account(request: Request):
     """Make config.<label>.json for one app, a second person's account with
     its own folder beside the first one's, its own browser profile and its
@@ -1248,7 +1353,7 @@ def _removal_summary(folder: Path) -> dict:
     return {"pdfs": pdfs, "history": history, "profile": profile}
 
 
-@app.post("/api/remove", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
 async def api_remove(request: Request):
     """Move an install out of the list. The name must be one the panel
     itself discovered, so nothing outside the root can ever be named."""
@@ -1500,6 +1605,11 @@ HTML = r"""<!doctype html>
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff; grid-column:1/3; }
   button:disabled { opacity:.5; cursor:not-allowed; }
   .hint { font-size:12px; color:var(--muted); margin-top:16px; }
+  .samplebar { display:none; align-items:center; gap:12px; flex-wrap:wrap;
+    padding:8px 20px; font-size:13px; background:#2a2411; color:#ffcf6b;
+    border-bottom:1px solid #4a3f1c; }
+  .samplebar b { color:#ffe1a3; }
+  .samplebar button { font:inherit; font-size:12px; padding:3px 12px; }
   .warn { color:#ffcf6b; }
   .console { background:#0b0d11; margin:0; padding:16px 20px; overflow:auto;
              font:13px/1.55 ui-monospace,Consolas,monospace; white-space:pre-wrap; }
@@ -1515,6 +1625,11 @@ HTML = r"""<!doctype html>
   <h1>PaperPull <span class="ver">v__VERSION__</span><span class="tag"> &middot; Receipt &amp; Statement Downloader</span></h1>
   <p id="root">control panel</p>
 </header>
+<div id="samplebar" class="samplebar">
+  <span><b>Sample archive.</b> Every document here is invented. Nothing signs
+  in and nothing downloads, and your own archive is untouched.</span>
+  <button onclick="leaveSample()">Leave the sample</button>
+</div>
 <section id="setup" class="setup" style="display:none">
   <div id="newuser">
     <h2>Welcome to PaperPull</h2>
@@ -1531,6 +1646,12 @@ HTML = r"""<!doctype html>
     </div>
   </div>
   <p class="hint" style="margin-top:26px">
+    <a href="#" onclick="openSample(); return false;" style="color:var(--accent)">Not ready to sign in to anything? See a sample archive</a><br>
+    Invented statements and receipts, so you can try the Status tab and both
+    spreadsheets before you point this at a real account. Nothing is
+    downloaded and nothing of yours is touched.
+  </p>
+  <p class="hint" style="margin-top:18px">
     <a href="#" onclick="toggleExisting(); return false;" style="color:var(--accent)">Already have PaperPull downloaders from before?</a>
   </p>
   <div id="existing" style="display:none">
@@ -1657,6 +1778,17 @@ function changeRoot() {
   $('rootinput').value = META.apps_root || '';
   $('rootinput').focus();
 }
+
+async function setSample(on) {
+  const r = await fetch('/api/sample', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                        body: JSON.stringify({on: on})});
+  if (!r.ok) { alert(((await r.json()).detail) || 'could not switch'); return; }
+  STATUS_LOADED = false; XL_LOADED = false;
+  showTab('out');
+  await load();
+}
+const openSample = () => setSample(true);
+const leaveSample = () => setSample(false);
 
 let PROVIDERS = null;
 
@@ -1932,8 +2064,11 @@ const $ = id => document.getElementById(id);
 
 async function load() {
   META = await (await fetch('/api/apps')).json();
+  const inSample = META.root_source === 'sample';
+  $('samplebar').style.display = inSample ? 'flex' : 'none';
   $('root').innerHTML = 'apps root: ' + esc(META.apps_root) +
-    (META.root_source === 'environment' ? ' <span class="hint">(from APPS_ROOT)</span>'
+    (inSample ? ' <span class="hint">(the sample)</span>'
+     : META.root_source === 'environment' ? ' <span class="hint">(from APPS_ROOT)</span>'
      : ' <a href="#" onclick="changeRoot(); return false;" style="color:var(--accent)">change</a>');
   const fresh = Object.keys(META.refreshed || {});
   if (fresh.length) {
@@ -1954,8 +2089,11 @@ async function load() {
     return;
   }
   showSetup(false);
-  $('addlink').style.display = '';
-  $('removelink').style.display = '';
+  // Nothing in the sample can be added to, renamed or removed, so the links
+  // that would try are not offered.
+  $('addlink').style.display = inSample ? 'none' : '';
+  $('removelink').style.display = inSample ? 'none' : '';
+  $('addacct').style.display = inSample ? 'none' : '';
   for (const k of keys) appSel.append(new Option(META.apps[k].name, k));
   appSel.onchange = onApp;
   fillScope();
