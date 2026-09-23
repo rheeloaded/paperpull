@@ -362,3 +362,16 @@ def test_an_app_that_clicks_in_a_real_browser_watches_a_download_folder(app):
     reads_another_way = "fetch_as_b64" in site.lower()
     assert watches or reads_another_way, \
         "%s waits for a download event a real browser never sends" % app.name
+
+
+@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
+def test_every_app_notices_throttling(app):
+    """Paylocity and UKG, the two payroll apps, watched for a passcode
+    prompt and not for a site that had stopped answering. A payroll system
+    is the worst place to keep asking after it has said no, and the other
+    forty-six already knew to stop."""
+    site = (app / ("%s_site.py" % app.name)).read_text(encoding="utf-8")
+    if "detect_security_challenge" not in site:
+        return
+    assert "RATE_LIMIT_MARKERS" in site, \
+        "%s cannot tell it is being throttled" % app.name
