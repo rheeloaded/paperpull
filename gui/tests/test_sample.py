@@ -143,6 +143,18 @@ def test_the_refusal_says_where_the_sign_in_step_can_be_seen(panel):
     assert "never sees what you type" in why
 
 
+def test_the_sample_is_not_told_to_run_setup(panel):
+    """Its folders have no .venv, which in a checkout means the panel warns
+    that setup.bat has to be run first. Nothing in the sample is ever run,
+    so that is a warning about a problem that does not exist, and it makes
+    the sample look broken to the one person most likely to be looking at
+    it for the first time."""
+    _sample(True)
+    apps = app_module.discover_apps()
+    assert apps
+    assert not any(a["needs_setup"] for a in apps.values())
+
+
 def test_the_archive_cannot_be_changed_while_looking_at_it(panel):
     """Create, add a person, remove and change-the-root all write into the
     root, and the root is the sample."""

@@ -406,7 +406,10 @@ def discover_apps():
             # The packaged app has no per-app venv and needs none, the
             # interpreter it falls back to carries everything. Only a
             # checkout should be told to run setup.
-            "needs_setup": _venv_python(d) is None and not _is_packaged(),
+            # Nothing in the sample is ever run, so "run setup.bat first"
+            # is advice about a problem that does not exist there.
+            "needs_setup": (_SAMPLE is None and _venv_python(d) is None
+                            and not _is_packaged()),
         }
     return apps
 
@@ -2211,6 +2214,8 @@ function run(action) {
       setStatus('warn', `finished, needs attention (${details.join(', ')})`);
     } else if (result) {
       setStatus('ok', 'finished, no issues reported');
+    } else if (META && META.root_source === 'sample') {
+      setStatus('ok', 'nothing to run in the sample');
     } else {
       setStatus('warn', 'finished, check output (no run summary)');
     }
