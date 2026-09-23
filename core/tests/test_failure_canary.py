@@ -178,5 +178,66 @@ def test_the_schema_is_versioned(export):
     assert json.loads(export)["schema"] == 2
 
 
+# -- the journal, in a real browser -------------------------------------------
+
+def test_the_journal_sees_a_page_hidden_between_two_checkpoints(tmp_path):
+    """The bug a census cannot see. Saving a document hides the page and
+    nothing puts it back, so by the time a run gives up there is nothing
+    left on screen to explain why. Only the pair of checkpoints has it."""
+    from paperpull_core.journal import Journal, summarize as journal_said
+
+    html = tmp_path / "page.html"
+    html.write_text(PAGE, encoding="utf-8")
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(html.as_uri())
+            j = Journal(page, {"row": "a, p", "dialog": "[role=dialog]"},
+                        watch=("row", "dialog"))
+            j.checkpoint("the list is open")
+            # Exactly what saving a document does, and does not undo.
+            page.evaluate("() => { for (const el of document.querySelectorAll("
+                          "'body > *')) el.style.display = 'none'; }")
+            j.checkpoint("back for the second")
+            browser.close()
+    except Exception as e:  # pragma: no cover
+        pytest.skip("no browser available: %s" % e)
+
+    said = " ".join(journal_said(j.report()))
+    assert "stopped being visible while still being there" in said
+    assert "did not put it back" in said
+
+    body = json.dumps(j.report())
+    for canary in CANARIES:
+        assert canary not in body, "%s leaked into the journal" % canary
+
+
+def test_the_journal_never_writes_the_address_down(tmp_path):
+    from paperpull_core.journal import Journal
+
+    html = tmp_path / "page.html"
+    html.write_text(PAGE, encoding="utf-8")
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(html.as_uri())
+            j = Journal(page, {"row": "a"}, watch=("row",))
+            j.checkpoint("the list is open")
+            page.evaluate("() => { location.hash = 'CANARYHASH'; }")
+            page.wait_for_timeout(100)
+            j.checkpoint("the receipt is open")
+            browser.close()
+    except Exception as e:  # pragma: no cover
+        pytest.skip("no browser available: %s" % e)
+
+    report = j.report()
+    assert report["entries"][-1]["route_change"] == "hash"
+    body = json.dumps(report)
+    assert "CANARYHASH" not in body
+    assert "file:" not in body and "page.html" not in body
+
+
 def test_the_file_is_small_enough_to_paste(export):
     assert len(export) < 60000

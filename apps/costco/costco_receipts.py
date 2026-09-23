@@ -22,6 +22,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core.journal import Journal
 from paperpull_core.run_reporting import report_run_result
 
 import argparse
@@ -62,6 +63,8 @@ def ask(prompt: str) -> str:
 # ---------------------------------------------------------------------------
 
 class App:
+    journal = None
+
     def __init__(self, args):
         self.args = args
         # --config lets one copy of the code serve several people/accounts:
@@ -186,6 +189,12 @@ class App:
         except Exception:
             pass
         failure.watch_errors(self._work_page)
+        # The list and the receipt are the two things whose visibility
+        # answers most questions, so they are counted at every
+        # checkpoint.
+        self.journal = Journal(self._work_page, getattr(site, "FALLBACK", None),
+                               watch=("order_link", "receipt_area"))
+        site.set_journal(self.journal)
         return self._work_page
 
     def close(self):
@@ -431,6 +440,11 @@ class App:
             self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+        if self.journal:
+            n = self.stats.get("receipts_downloaded", 0)
+            self.journal.op("next_item" if n else "open_item",
+                            "take the next document", ordinal=n)
+            self.journal.checkpoint("before opening a document")
         # ---- an order still pending has no receipt yet ----
         if "Pending order" in (purchase.notes or "") or (purchase.status or "").lower() == "pending":
             # Not a terminal state, so the next run looks at it again.
@@ -553,6 +567,8 @@ class App:
                                "the receipt did not render")
             return False
 
+        if self.journal:
+            self.journal.checkpoint("the receipt is on screen")
         purchase.document_type = "Receipt"
         folder = self.paths.folder_for(purchase.purchase_type,
                                        purchase.document_type)
@@ -567,6 +583,12 @@ class App:
         try:
             self._capture_document(page, purchase, out_path)
             ok = self._finish_pdf(page, purchase, out_path, source_page=page)
+            if self.journal:
+                self.journal.checkpoint("the document is saved")
+                self.journal.result("saved the document" if ok
+                                    else "could not save the document",
+                                    bytes_written=out_path.stat().st_size
+                                    if out_path.exists() else 0)
             return ok
         except Exception as e:
             log.exception("PDF generation failed for %s", purchase.key)
@@ -914,6 +936,7 @@ class App:
             step=step, reason=reason,
             page=getattr(self, "_work_page", None),
             selectors=getattr(site, "FALLBACK", None),
+            journal=getattr(self, "journal", None),
             provider='Costco', text=text, extra=extra)
         if not path:
             return
