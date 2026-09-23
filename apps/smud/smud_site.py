@@ -38,9 +38,7 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -55,6 +53,10 @@ from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import human_date as _human_date
+# re-exported: this app's docs module calls it as site.set_download_dir
+from paperpull_core.capture import set_download_dir  # noqa: F401
+from paperpull_core.capture import snapshot as _snapshot
+from paperpull_core.capture import take_new_pdf as _take_new_pdf
 
 log = logging.getLogger("smud_docs.site")
 
@@ -281,49 +283,6 @@ def is_safe_control(name: str) -> bool:
 # AT&T's fourth round found it again, with a trace that showed a clean
 # click and nothing arriving.
 # ---------------------------------------------------------------------------
-
-def set_download_dir(page, dirpath) -> None:
-    """Point the attached browser's downloads at `dirpath`, via CDP."""
-    try:
-        Path(dirpath).mkdir(parents=True, exist_ok=True)
-        cdp = page.context.new_cdp_session(page)
-        cdp.send("Browser.setDownloadBehavior",
-                 {"behavior": "allow", "downloadPath": str(dirpath), "eventsEnabled": True})
-    except Exception as e:
-        log.info("set_download_dir failed: %s", e)
-
-
-def _snapshot(dl_dir) -> set:
-    try:
-        return set(os.listdir(dl_dir)) if dl_dir else set()
-    except OSError:
-        return set()
-
-
-def _take_new_pdf(dl_dir, before: set, out_path: Path) -> bool:
-    """A finished PDF that appeared in `dl_dir` since `before`, moved to
-    `out_path`. A file still downloading (.crdownload, .partial) is not
-    finished."""
-    if not dl_dir:
-        return False
-    try:
-        names = [f for f in os.listdir(dl_dir) if f not in before
-                 and not f.lower().endswith((".crdownload", ".partial", ".tmp"))]
-    except OSError:
-        return False
-    for name in names:
-        src = Path(dl_dir) / name
-        try:
-            if src.stat().st_size == 0 or src.read_bytes()[:5] != b"%PDF-":
-                continue
-            if out_path.exists():
-                out_path.unlink()
-            shutil.move(str(src), str(out_path))
-            return True
-        except OSError:
-            continue
-    return False
-
 
 _FETCH_AS_B64 = r"""async (u) => {
     const r = await fetch(u, {credentials: 'include'});

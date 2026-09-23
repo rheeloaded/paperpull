@@ -30,6 +30,8 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import human_date as _human_date
+# re-exported: this app's docs module calls it as site.set_download_dir
+from paperpull_core.capture import set_download_dir  # noqa: F401
 
 log = logging.getLogger("verizon_docs.site")
 
@@ -250,17 +252,6 @@ def dismiss_overlay(page) -> None:
                 continue
     except Exception:
         pass
-
-
-def set_download_dir(page, dirpath) -> None:
-    """Point the attached browser's downloads at `dirpath` (via CDP)."""
-    try:
-        Path(dirpath).mkdir(parents=True, exist_ok=True)
-        cdp = page.context.new_cdp_session(page)
-        cdp.send("Browser.setDownloadBehavior",
-                 {"behavior": "allow", "downloadPath": str(dirpath), "eventsEnabled": True})
-    except Exception as e:
-        log.info("set_download_dir failed: %s", e)
 
 
 def goto_documents(page) -> bool:
