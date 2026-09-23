@@ -66,6 +66,7 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # they drifted into three different versions.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.api_census import shape_of as _shape
 
 log = logging.getLogger("fidelity_docs.site")
 
@@ -478,15 +479,6 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
     return True
-def _shape(obj, depth=0):
-    """The shape of a JSON body, never its values."""
-    if depth > 3:
-        return "..."
-    if isinstance(obj, dict):
-        return {k: _shape(v, depth + 1) for k, v in list(obj.items())[:25]}
-    if isinstance(obj, list):
-        return ["list of %d" % len(obj), _shape(obj[0], depth + 1) if obj else None]
-    return type(obj).__name__
 
 
 def _page_summary(page) -> dict:

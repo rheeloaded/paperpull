@@ -181,4 +181,4 @@ def test_account_numbers_are_masked_in_the_survey():
 
 def test_json_bodies_are_recorded_as_shape_not_values():
     shape = site._shape({"accounts": [{"number": "123456789", "balance": 12.5}]})
-    assert shape == {"accounts": ["list of 1", {"number": "str", "balance": "float"}]}
+    assert shape == {"accounts": ["1 item(s)", {"number": "string", "balance": "number"}]}

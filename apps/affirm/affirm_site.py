@@ -55,6 +55,7 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # they drifted into three different versions.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.api_census import shape_of as _shape
 
 log = logging.getLogger("affirm_docs.site")
 
@@ -338,15 +339,6 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
         return False
     receipt_pdf.print_html_to_pdf(page, html, out_path)
     return out_path.is_file() and out_path.stat().st_size > 1000
-def _shape(obj, depth=0):
-    """The shape of a JSON body, never its values."""
-    if depth > 3:
-        return "..."
-    if isinstance(obj, dict):
-        return {k: _shape(v, depth + 1) for k, v in list(obj.items())[:25]}
-    if isinstance(obj, list):
-        return ["list of %d" % len(obj), _shape(obj[0], depth + 1) if obj else None]
-    return type(obj).__name__
 
 
 def _page_summary(page) -> dict:
