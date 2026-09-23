@@ -353,5 +353,12 @@ def test_an_app_that_clicks_in_a_real_browser_watches_a_download_folder(app):
     site = (app / ("%s_site.py" % app.name)).read_text(encoding="utf-8")
     if "expect_download" not in site:
         return
-    assert "setDownloadBehavior" in site or "setDownloadBehavior" in (app / ("%s_docs.py" % app.name)).read_text(encoding="utf-8") \
-        or "_FETCH_AS_B64" in site, "%s waits for a download event a real browser never sends" % app.name
+    docs = (app / ("%s_docs.py" % app.name)).read_text(encoding="utf-8")
+    # set_download_dir and fetch_as_b64 both live in paperpull_core.capture
+    # now, so an app satisfies this by calling either, whether it still
+    # names the CDP call itself or reaches it through the core.
+    watches = ("setDownloadBehavior" in site or "setDownloadBehavior" in docs
+               or "set_download_dir" in site or "set_download_dir" in docs)
+    reads_another_way = "fetch_as_b64" in site.lower()
+    assert watches or reads_another_way, \
+        "%s waits for a download event a real browser never sends" % app.name
