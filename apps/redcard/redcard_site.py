@@ -32,6 +32,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core.dates import last_day as _last_day
+from paperpull_core.dates import human_date as _human_date
+
 log = logging.getLogger("redcard_docs.site")
 
 BASE = "https://mytargetcirclecard.target.com"
@@ -121,18 +124,6 @@ QUARTER_RE = re.compile(r"\bQ([1-4])\s*[' ]?\s*(\d{4})\b", re.I)
 YEAR_RE = re.compile(r"\b(19|20)(\d{2})\b")
 YEAR_ONLY_RE = re.compile(r"^20\d\d$")
 _MDY_DASH_RE = re.compile(r"\b(\d{2})-(\d{2})-(\d{4})\b")   # MM-DD-YYYY
-_LAST_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
-             7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
-
-_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
-                "August", "September", "October", "November", "December"]
-
-
-def _last_day(year: int, month: int) -> int:
-    if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
-        return 29
-    return _LAST_DAY[month]
-
 
 def parse_date(text: str) -> Optional[str]:
     if not text:
@@ -188,14 +179,6 @@ def _mdy_from_iso(iso: str) -> str:
     try:
         y, m, d = iso.split("-")
         return f"{m}-{d}-{y}"
-    except Exception:
-        return iso
-
-
-def _human_date(iso: str) -> str:
-    try:
-        y, m, d = iso.split("-")
-        return f"{_MONTH_NAMES[int(m) - 1]} {int(d)}, {y}"
     except Exception:
         return iso
 
