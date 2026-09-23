@@ -333,11 +333,19 @@ class App:
         if not cards:
             log.warning("No purchase cards found. If you are signed in and do "
                         "have purchases, run --diagnose to inspect the page.")
+        # Where the cards go, counted. A tester reported two found out of
+        # nine and the output said only "2 order(s)", which is true of
+        # every step of this and tells you nothing about which one lost
+        # them. Each way a card can be dropped is counted and said (#44).
+        dropped_no_id = 0
+        dropped_by_scope = 0
         for card in cards:
             purchase = site.card_to_purchase(card)
             if not purchase:
+                dropped_no_id += 1
                 continue
             if floor and purchase.purchase_date and purchase.purchase_date < floor:
+                dropped_by_scope += 1
                 continue  # before the cutoff: never record or download
             key = purchase.key
             if self.discovery.get(key) is None:
@@ -362,6 +370,14 @@ class App:
 
         if not quiet:
             print(f"\nDiscovery complete. Purchases known: {len(all_recs)}")
+            if dropped_no_id or dropped_by_scope:
+                print(f"  Of {len(cards)} card(s) read off the history, "
+                      f"{dropped_no_id} named no order and "
+                      f"{dropped_by_scope} fell outside the scope you set.")
+            if dropped_no_id:
+                print("  A card that names no order cannot be fetched. If you "
+                      "have more purchases than this found, run Diagnose, which "
+                      "writes what the history page holds.")
             by_year = {}
             for r in all_recs:
                 y = (r.get("purchase_date") or "?")[:4]
@@ -1010,6 +1026,27 @@ class App:
         page = self.page()
         if not self.discovery.data:
             self.cmd_discover(quiet=True)
+        # The history first. A survey of one ORDER page cannot say why a
+        # history of nine reported two, which is how this went two rounds
+        # without moving (#44).
+        try:
+            site.goto_orders(page, None)
+            before = site.history_survey(page)
+            site.scroll_all_orders(page)
+            after = site.history_survey(page)
+            history = {"before_scrolling": before, "after_scrolling": after}
+            for year in self._years_to_walk():
+                site.goto_orders(page, year)
+                site.scroll_all_orders(page)
+                history["year_%d" % year] = site.history_survey(page)
+            out = self.paths.diagnostics / "diagnose-history.json"
+            atomic_write_text(out, _json.dumps(history, indent=2))
+            print(f"  Wrote {out}")
+            print(f"  Purchase history: {after.get('cards_collected')} card(s) collected, "
+                  f"{after.get('became_purchases')} became purchases.")
+        except Exception as e:
+            print(f"  Could not survey the purchase history: {e}")
+
         for ptype in [ONLINE]:
             candidates = self._select_purchases(ptype, limit=1)
             if self.args.order_number:
