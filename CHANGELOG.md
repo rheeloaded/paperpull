@@ -7,6 +7,99 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.33.0] - 2026-09-23
+
+Two testers' reports, the tests running in CI at last, and four things
+found by looking rather than by anybody reporting them.
+
+### Added
+- **The tests run on every push.** Four thousand of them lived here and
+  nothing ran them, so whether a tag shipped with a passing suite
+  depended on whoever cut it remembering, and on which interpreter they
+  happened to use. A release cannot be the first time the tests are
+  asked. A run where the canary skipped is not counted as green either,
+  since the canary is what proves no secret escapes a diagnostic file.
+- **Renaming what is already downloaded.** Every app takes `--rename`,
+  and the panel offers it under "more" as two buttons, Rename preview
+  and Apply renames. A naming scheme improves and the files on disk keep
+  the old one. Nothing about them needs fetching, so nothing is asked of
+  the provider. It is a preview until you apply it, it only touches
+  files the app's own records know about, it never overwrites, nothing
+  moves between folders, and running it twice does nothing the second
+  time (#43, #49).
+- **A collision is told apart by the order number.** Two purchases on
+  one day were one name, settled with " (2)", which says nothing about
+  which purchase it is and is not stable, since it depends on what is in
+  the folder at that moment. Delete one file and the next run gives that
+  name to a different receipt. The order number goes in the name now and
+  the numbered suffix is the last resort. A name that does not collide
+  is untouched (#49, #43).
+- **A recording follows the provider into a tab it opens.** Every
+  listener was on the first tab alone, so a tester who pressed a control
+  that opened a tab sent a recording one step long, and everything after
+  that was invisible. On a site that opens a tab that is everything
+  worth recording. A tab on somebody else's host is still left alone,
+  because a checkout opens a payment processor (#45).
+
+### Fixed
+- **A website you are visiting could start a download run.** The panel
+  listens on 127.0.0.1, which keeps other machines out and does nothing
+  about the browser already running on this one. Its guard read Origin
+  and Referer and abstained when neither was there, and neither has to
+  be there. A request carrying no origin at all is refused now.
+- **One fetch in the project skipped the host check.** The headless
+  fallback renderer took an address that came from the page and opened
+  it carrying the signed-in state, with no check that it was the
+  provider's. It asks the app's own guard first now, like every other
+  fetch here.
+- **Thirty-seven apps would have filed a document under a reference
+  number.** A date is four digits, a dash, two, a dash and two, and so is
+  "Reference 1234-56-78". A date has to name a day that exists now, which
+  also rules out "Policy 2026-99-01" and a February the thirtieth.
+- **eBay found two of nine, and the repair for it could never have
+  worked.** It looked for a card's order number in each element's own
+  text nodes, and eBay writes it inside a nested element, so on a real
+  purchase history that matched nothing on any account. A row's whole
+  text is read now. Diagnose also surveys the purchase history itself,
+  which it never did, so a run that finds fewer orders than you made
+  says which step lost them rather than leaving it to be guessed (#44).
+- **Target opened a browser window and shut it again.** It asked you to
+  press Enter when you had signed in, the panel closes an app's stdin so
+  a stray prompt cannot hang a run, and that read end of file and took
+  the process down with the window still open behind it. Waiting for a
+  sign-in is one thing in the core now. With nobody to ask it grants
+  nothing, leaves the browser open and says which button to press next
+  (#48).
+- **Meijer told an account with receipts that it had no orders.** "You
+  haven't placed any orders yet" is the Online tab saying so, and that is
+  the tab the page opens on, so asking before opening the other tab
+  answered for the wrong one. A recording also corrected a guess, the
+  receipt control being a link reading "view receipt pdf" rather than the
+  icon with no text round two was built for (#42).
+- **A browser that would not start ended sign-in with a traceback**
+  rather than moving on to the next one sitting there ready to be tried.
+- **A recording could start on a sign-in page.** Of the three things
+  asked before it will, the last swallowed its own failure, so a page
+  that would not answer left the question unasked and recording began.
+- **A progress file of the wrong shape was quietly replaced.** A
+  truncated one was already recovered from a backup. Valid JSON of the
+  wrong shape, a list or a bare null, fell past the check with no backup
+  at all, and that file is the only thing that knows a document has
+  already been fetched.
+- **A second person's config travelled with the code.** An install is
+  brought up to the shipped version by copying, and three names were
+  excluded from that by hand. A second account is `config.<label>.json`
+  and no list knew about it.
+- **A button that works on one provider and not another.** The panel
+  sends the same flags to all forty-eight apps, and an app whose parser
+  had never heard of one answered with a usage message and exit code 2,
+  which reaches you as a button that does nothing.
+- **Paylocity and UKG could not tell when they were being throttled**,
+  so a payroll system that had said "too many requests" looked like an
+  ordinary page with no documents on it, and the run would keep asking.
+  A payroll system is the worst place to keep asking after it has said
+  no.
+
 ## [0.32.0] - 2026-09-23
 
 0.31.1 built a file that a failing run writes by itself and gave it to
