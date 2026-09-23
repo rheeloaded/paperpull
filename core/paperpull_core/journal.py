@@ -54,6 +54,11 @@ from .failure import _count, _enum, _only_safe, _step, error_kind
 # go first, because the question is almost always what happened last.
 MAX_ENTRIES = 300
 
+# How many of an app's selectors a checkpoint counts. They come back in
+# one round trip whatever the number, and a file listing forty of them
+# at every transition is a file nobody reads.
+MAX_WATCHED = 12
+
 # What a step was for, from a fixed list, so a phase cannot become a
 # sentence off a page.
 PHASES = frozenset("""
@@ -125,9 +130,11 @@ def _route_change(before: str, after: str) -> str:
 class Journal:
     """A bounded record of what a run did, kept as it goes.
 
-    `watch` names the entries of the app's own FALLBACK table worth
-    counting at every checkpoint, usually the list and the thing a
-    document opens into."""
+    `watch` names the entries of the app's own FALLBACK table to count
+    at every checkpoint. Left empty it counts all of them, up to a cap,
+    which is what every app does, because choosing per app is a decision
+    nobody has the knowledge to make before the first failure and the
+    cost of counting eight selectors is one round trip either way."""
 
     def __init__(self, page=None, selectors: Optional[dict] = None,
                  watch=(), limit: int = MAX_ENTRIES):
@@ -140,8 +147,11 @@ class Journal:
         self._pairs = []
         if isinstance(selectors, dict):
             from .failure import playwright_only
-            for name in watch:
+            names = list(watch) or list(selectors)
+            for name in names[:MAX_WATCHED]:
                 sel = selectors.get(name)
+                # One in Playwright's dialect is a syntax error inside
+                # the page, so it is left out rather than asked about.
                 if sel and not playwright_only(str(sel)):
                     self._pairs.append([str(name)[:40], str(sel)])
 

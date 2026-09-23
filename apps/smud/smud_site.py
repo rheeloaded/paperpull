@@ -2,10 +2,12 @@
 
 When SMUD changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round two, repaired from the first survey (#34). Written
-without an SMUD account, so that someone who holds one can
-test it without writing code. Nothing below has run against the live
-signed-in site. On a first run it is deliberately cautious:
+STATUS: WORKING, confirmed on a real account after three rounds (#34).
+Written without an SMUD account and repaired from the surveys and traces
+one tester sent. His Pilot saved the five most recent bills and his full
+run saved the rest of the twenty-four SMUD keeps. It stays cautious,
+because the account it was built against is still not one anybody here
+holds:
 
   * --login opens a real Edge or Chrome, since a utility portal is happiest in a real browser.
   * --diagnose surveys whatever the documents page turns out to be,
