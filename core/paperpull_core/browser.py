@@ -471,12 +471,22 @@ def _launch(exe: str, name: str, profile_dir, port: str,
     if sys.platform == "win32":
         detach["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
                                    | subprocess.DETACHED_PROCESS)
-    subprocess.Popen([exe, f"--user-data-dir={profile_path}",
-                      f"--remote-debugging-port={port}", "--no-first-run",
-                      "--no-default-browser-check", url],
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True,
-                     **detach)
+    try:
+        subprocess.Popen([exe, f"--user-data-dir={profile_path}",
+                          f"--remote-debugging-port={port}", "--no-first-run",
+                          "--no-default-browser-check", url],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True,
+                         **detach)
+    except OSError as e:
+        # This function's answer is a browser name or None, and the caller
+        # tries the next candidate on None. Letting the launch raise instead
+        # ended the whole sign-in step with a traceback while another browser
+        # sat there ready. The file was checked for before this, so a failure
+        # here is the interesting kind: security software holding an unsigned
+        # binary, a permission, an update swapping the executable out.
+        print("\n%s would not start (%s)." % (name, e))
+        return None
 
     # Launching is not the same as listening, and the difference used to be
     # invisible. When Edge or Chrome is ALREADY running, a new launch can hand
