@@ -61,6 +61,7 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # lives in core because seventeen apps each had their own copy and
 # they drifted into three different versions.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
+from paperpull_core.urls import is_safe_url as _host_allows
 
 log = logging.getLogger("netbenefits_docs.site")
 
@@ -86,17 +87,11 @@ class SessionExpired(RuntimeError):
 
 
 def is_safe_url(url: str) -> bool:
-    """https, on fidelity.com or a subdomain of it, no credentials in the URL."""
-    try:
-        parts = urlsplit(url or "")
-    except ValueError:
-        return False
-    host = (parts.hostname or "").lower().rstrip(".")
-    if parts.scheme != "https" or not host or parts.username or parts.password:
-        return False
-    if parts.port not in (None, 443):
-        return False
-    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)
+    """True only for an https URL on one of this provider's own hosts.
+
+    The check itself lives in the core, so all of them answer the same way.
+    This app keeps the hosts, which is the part that really is its own."""
+    return _host_allows(url, ALLOWED_HOSTS)
 
 
 # ---------------------------------------------------------------------------

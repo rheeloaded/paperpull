@@ -50,6 +50,7 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # lives in core because seventeen apps each had their own copy and
 # they drifted into three different versions.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
+from paperpull_core.urls import is_safe_url as _host_allows
 
 log = logging.getLogger("golden1_docs.site")
 
@@ -1298,15 +1299,8 @@ ALLOWED_HOSTS = {"golden1.com", "hepsiian.com"}  # the vendor's host is added wh
 
 
 def is_safe_url(url: str) -> bool:
-    """True only for an https URL on one of this provider's own hosts."""
-    from urllib.parse import urlparse
-    try:
-        got = urlparse(url or "")
-    except ValueError:
-        return False
-    if got.scheme != "https" or not got.hostname:
-        return False
-    if got.username or got.password:
-        return False
-    host = got.hostname.lower().rstrip(".")
-    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)
+    """True only for an https URL on one of this provider's own hosts.
+
+    The check itself lives in the core, so all of them answer the same way.
+    This app keeps the hosts, which is the part that really is its own."""
+    return _host_allows(url, ALLOWED_HOSTS)
