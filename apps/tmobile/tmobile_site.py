@@ -26,8 +26,10 @@ import html as _html
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Optional, Tuple
+
+from paperpull_core.delivery import DOWNLOAD, DocumentRequest
+from paperpull_core.identity import Identity
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import human_date as _human_date
@@ -361,40 +363,55 @@ def collect_download_docs(page) -> List[RawDoc]:
 def _btn_re_for(iso: str) -> Optional[re.Pattern]:
     """A regex matching the detailed-bill button for the bill dated `iso`. The
     button's name is like 'Aug 12, 2026 Download detailed bill PDF'."""
+    # The guard used to cover only the unpacking, which a date like
+    # "not-a-date" survives, because it splits into three parts too. The
+    # ValueError then came out of int() one line further down and took
+    # the run with it instead of skipping one bill.
     try:
         y, m, d = iso.split("-")
-    except Exception:
+        month, day = int(m), int(d)
+        mon = _MON_ABBR[month - 1]
+    except (ValueError, IndexError, AttributeError):
         return None
-    mon = _MON_ABBR[int(m) - 1]
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return None
     return re.compile(
-        rf"{mon}\w*\.?\s+0*{int(d)},?\s+{y}\b.*detailed\s+bill",
+        rf"{mon}\w*\.?\s+0*{day},?\s+{y}\b.*detailed\s+bill",
         re.I | re.S)
 
 
-def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
-    """Find the bill dated `iso_date` on the history page and click its
-    'Download detailed bill' button, capturing the real download event.
+def bill_request(page, iso_date: str) -> Optional[DocumentRequest]:
+    """Everything up to the click, for the bill dated `iso_date`.
 
-    `dl_dir` is unused - T-Mobile fires an ordinary download that Playwright's
-    expect_download captures directly (kept in the signature for parity with
-    the shared orchestrator)."""
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    Open the history page, dismiss whatever is over it, find that bill's
+    "Download detailed bill" button and check the control is a document
+    action. Then stop.
 
+    What happens after the click is not this app's business. T-Mobile
+    fires an ordinary download today and Playwright sees it, but a
+    provider is free to change that to an inline tab or a blob without
+    telling anyone, and the difference also depends on whether this is
+    driving its own browser or one the user launched. So the click is
+    handed to delivery.deliver, which arms every way of catching a
+    document before firing it once and says afterwards which one
+    answered.
+
+    None when the bill cannot be reached or its control is not one this
+    app is allowed to press."""
     if "/bill/historical" not in (page.url or ""):
         if not goto_documents(page):
             log.info("could not open bill history for %s", iso_date)
-            return False
+            return None
     dismiss_overlay(page)
 
     pat = _btn_re_for(iso_date)
     if pat is None:
         log.info("bad iso date %r", iso_date)
-        return False
+        return None
     btn = page.get_by_role("button", name=pat)
     if btn.count() == 0:
         log.info("detailed-bill button not found for %s", iso_date)
-        return False
+        return None
 
     # safety: the control must be a document action, never a forbidden one
     try:
@@ -404,21 +421,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
         label = ""
     if label and not is_safe_control(label):
         log.info("refusing unsafe control %r for %s", label, iso_date)
-        return False
+        return None
 
-    from paperpull_core.receipt_pdf import save_download
     try:
         btn.first.scroll_into_view_if_needed(timeout=4000)
     except Exception:
         pass
-    try:
-        with page.expect_download(timeout=60000) as dl:
-            btn.first.click()
-        save_download(dl.value, out_path)
-        return True
-    except Exception as e:
-        log.info("download click failed for %s: %s", iso_date, e)
-        return False
+    # A bill carries its date and nothing else this app knows about, so
+    # that is the one fact there is to check a saved file against. There
+    # is no amount and no document number on the history row.
+    return DocumentRequest(trigger=lambda: btn.first.click(),
+                           expect=Identity(date=iso_date),
+                           hints=(DOWNLOAD,))
 
 
 # ---------------------------------------------------------------------------

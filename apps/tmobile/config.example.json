@@ -14,5 +14,6 @@
   "max_path_length": 240,
   "delay_min_seconds": 2.5,
   "delay_max_seconds": 5.0,
-  "pilot_count": 5
+  "pilot_count": 5,
+  "verify_documents": true
 }
