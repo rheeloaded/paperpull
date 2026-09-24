@@ -33,6 +33,7 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.controls import click_next_page as _click_next_page
 
 log = logging.getLogger("navyfederal_docs.site")
 
@@ -345,19 +346,15 @@ def expand_all(page) -> None:
 
 
 def next_page(page) -> bool:
-    try:
-        loc = page.locator(FALLBACK["next_page"])
-        if loc.count() > 0 and loc.first.is_visible() and loc.first.is_enabled():
-            label = (loc.first.inner_text(timeout=800) or "") + \
-                (loc.first.get_attribute("aria-label") or "")
-            if FORBIDDEN_CONTROL_RE.search(label):
-                return False
-            loc.first.click()
-            page.wait_for_timeout(2500)
-            return True
-    except Exception:
-        pass
-    return False
+    """One page forward, through a control that says it pages forward.
+
+    Judged by an allowlist in the core rather than by FORBIDDEN_CONTROL_RE,
+    because that blocklist refuses the word "next". Correctly, since "Next"
+    is also what a wizard's commit button says, and fatally here, because it
+    meant this could never page forward at all and the run reported success
+    having seen only the first page.
+    """
+    return _click_next_page(page, FALLBACK["next_page"])
 
 
 @dataclass

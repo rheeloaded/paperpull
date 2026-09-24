@@ -1,6 +1,7 @@
 """Chase document classification + the READ-ONLY (credit card) safety guard."""
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -269,10 +270,49 @@ def test_a_statement_row_for_a_rewards_card_is_accepted():
 def test_pagination_never_clicks_an_unreadable_control():
     """The selector matched any element whose class merely contained "next",
     and an icon-only chevron has no text or aria-label for the blocklist to
-    judge, so it was clicked blind on a bank page."""
+    judge, so it was clicked blind on a bank page.
+
+    Asked of the behavior now rather than of the source. The first fix was a
+    line in this file and the test looked for that line, which then failed
+    when the decision moved into the core and got better. What must not
+    change is which controls get clicked.
+    """
     assert "class*='next'" not in site.FALLBACK["next_page"]
-    src = (Path(__file__).resolve().parents[1] / "chase_site.py").read_text(encoding="utf-8")
-    assert "if not label.strip() or FORBIDDEN_CONTROL_RE.search(label)" in src
+
+    class Control:
+        def __init__(self, text, aria=None):
+            self.text, self.aria, self.clicked = text, aria, 0
+
+        def inner_text(self, timeout=None):
+            return self.text
+
+        def get_attribute(self, name):
+            return self.aria if name in ("aria-label", "title") else None
+
+        def is_visible(self):
+            return True
+
+        def is_enabled(self):
+            return True
+
+        def click(self, timeout=None):
+            self.clicked += 1
+
+    def only(control):
+        handle = SimpleNamespace(count=lambda: 1, first=control,
+                                 nth=lambda i: control)
+        return SimpleNamespace(locator=lambda sel: handle,
+                               wait_for_timeout=lambda ms: None)
+
+    for label in ("", "   ", "Pay now", "Manage AutoPay"):
+        control = Control(label, label or None)
+        site.next_page(only(control))
+        assert control.clicked == 0, label
+
+    for label in ("Next", "Next page", ">"):
+        control = Control(label, "Next")
+        site.next_page(only(control))
+        assert control.clicked == 1, label
 
 
 def test_the_document_fetch_is_host_checked():
