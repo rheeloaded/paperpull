@@ -33,6 +33,9 @@ delete-safe, part of [PaperPull](../../README.md).
    headings, the names of buttons and links, and the shape of the data the
    page loads, no values. If anything in it looks personal, delete that
    line.
+   A recording also has a long `structure` block on each step. It holds
+   only element kinds, attribute names and counts, so there is nothing
+   in it to edit.
 7. Attach both files to [issue #34](https://github.com/rheeloaded/paperpull/issues/34)
    with a sentence about whether past bills are listed on the same page as the current one or behind a bill history link, and what the download control is called.
 8. When a new build is posted, click **Pilot** and say whether PDFs landed

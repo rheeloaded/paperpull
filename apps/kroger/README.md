@@ -54,6 +54,9 @@ recorded where the site says.
    masked values), the lines of one receipt with the numbers masked, and
    the names of the buttons on that page. If anything in it looks
    personal, delete that line.
+   A recording also has a long `structure` block on each step. It holds
+   only element kinds, attribute names and counts, so there is nothing
+   in it to edit.
 7. Attach both files to [issue #41](https://github.com/rheeloaded/paperpull/issues/41)
    with a sentence about what the receipt page looks like to you.
 8. When a new build is posted, click **Pilot** and say whether PDFs landed

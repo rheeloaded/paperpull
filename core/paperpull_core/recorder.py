@@ -70,6 +70,8 @@ import time
 from typing import Callable, Optional
 
 from .browser import can_ask
+from .failure import SAFE_TAGS as _SAFE_TAGS
+from .failure import _count
 from .redact import redact, safe_query, shape_of
 
 # The only thing a typed value is ever recorded as.
@@ -95,6 +97,62 @@ _MAX_REQUESTS = 300
 # and its shape is the same as a small one's, so anything over this is
 # recorded as having been too large to read rather than fetched.
 _MAX_BODY_BYTES = 2_000_000
+
+# ---------------------------------------------------------------------------
+# The shape of the page around a step
+# ---------------------------------------------------------------------------
+# What a maintainer writes a selector from is structure. Which element the
+# control sits in, what its neighbors are, whether the list beside it is
+# twelve rows of the same shape, whether any of it is inside a shadow root.
+# None of that needs a word off the page, so none is taken.
+#
+# Every field of a node is one of these. A tag from the list, "custom"
+# for an element a site defined, "other" for anything else. A role from
+# the ARIA list. Attribute names from the list below and never a value,
+# with every other attribute counted rather than named, because a site
+# chooses its own attribute names and one could carry a customer number.
+# Counts and booleans for the rest. Nothing is removed from a copy of the
+# page. Each node is built from these lists, in the page and again here,
+# and here is the one that counts, because any script on the provider's
+# page can call the binding and send whatever it likes.
+STRUCTURE_TAGS = frozenset(_SAFE_TAGS | set("""
+html head title meta link script style address blockquote br code form
+frame frameset main menu meter nav noscript object progress q s search
+slot source template track wbr
+""".split()) | {"custom", "other"})
+
+STRUCTURE_ROLES = frozenset("""
+alert alertdialog application article banner button cell checkbox
+columnheader combobox complementary contentinfo definition dialog
+directory document feed figure form grid gridcell group heading img link
+list listbox listitem log main marquee math menu menubar menuitem
+menuitemcheckbox menuitemradio navigation none note option presentation
+progressbar radio radiogroup region row rowgroup rowheader scrollbar
+search searchbox separator slider spinbutton status switch tab table
+tablist tabpanel term textbox timer toolbar tooltip tree treegrid
+treeitem other
+""".split())
+
+STRUCTURE_ATTRS = frozenset("""
+id class href src alt title name type value role for action method target
+rel tabindex disabled hidden checked selected readonly required
+placeholder lang style colspan rowspan scope download open multiple
+data-testid data-test-id data-test data-qa data-cy data-automation-id
+aria-label aria-labelledby aria-describedby aria-controls aria-expanded
+aria-selected aria-hidden aria-current aria-disabled aria-haspopup
+aria-modal aria-live aria-pressed aria-checked aria-owns aria-sort
+""".split())
+
+# How much one step carries. A page of a thousand rows is summarized as
+# the rows beside the control and a count of the rest, which is the part a
+# selector is written from.
+_SHAPE_MAX_NODES = 300
+_SHAPE_MAX_SIBLINGS = 25
+_SHAPE_MAX_DEPTH = 80
+_SHAPE_TARGET_DEPTH = 3
+# Steps that carry one. A recording is fourteen steps as a rule, and one
+# that runs to hundreds does not need a picture of every page.
+_SHAPE_MAX_STEPS = 80
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +251,102 @@ _CAPTURE_JS = r"""
     return start && start.nodeType === 1 ? start : null;
   };
 
+  // The shape of the page from the body down to the control, the
+  // control's neighbors at every level, and a little of what is inside
+  // it. Every field comes off a list or is a count or a yes or no. The
+  // only look at text is whether a node has any, and only the yes or no
+  // leaves this function.
+  const SHAPE_TAGS = new Set(__SHAPE_TAGS__);
+  const SHAPE_ROLES = new Set(__SHAPE_ROLES__);
+  const SHAPE_ATTRS = new Set(__SHAPE_ATTRS__);
+  const shapeOf = (ev, target) => {
+    try {
+      let budget = __SHAPE_MAX_NODES__, truncated = false;
+      const down = (ev.composedPath ? ev.composedPath() : [])
+        .filter((n) => n && n.nodeType === 1).reverse();
+      const start = down.findIndex((n) => n.tagName.toLowerCase() === "body");
+      if (start < 0 || down.indexOf(target) < 0) return null;
+      const kids = (el) => Array.from(el.shadowRoot ? el.shadowRoot.children
+                                                    : el.children);
+      const describe = (el) => {
+        budget--;
+        const tag = el.tagName.toLowerCase();
+        const node = { tag: SHAPE_TAGS.has(tag) ? tag
+                            : (tag.indexOf("-") > 0 ? "custom" : "other") };
+        const role = (el.getAttribute("role") || "").trim().split(/\s+/)[0]
+          .toLowerCase();
+        if (role) node.role = SHAPE_ROLES.has(role) ? role : "other";
+        const attrs = [];
+        let dataOther = 0, other = 0;
+        for (const a of el.getAttributeNames()) {
+          if (SHAPE_ATTRS.has(a)) attrs.push(a);
+          else if (a.startsWith("data-")) dataOther++;
+          else other++;
+        }
+        node.attrs = attrs.sort();
+        if (dataOther) node.data_other = dataOther;
+        if (other) node.other_attrs = other;
+        node.child_count = kids(el).length;
+        if (el.shadowRoot) node.shadow = true;
+        const box = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        node.visible = box.width >= 1 && box.height >= 1
+          && style.display !== "none" && style.visibility !== "hidden";
+        node.text = Array.from(el.childNodes).some(
+          (c) => c.nodeType === 3 && /\S/.test(c.data || ""));
+        return node;
+      };
+      const inside = (el, depth) => {
+        const node = describe(el);
+        const list = kids(el);
+        const children = [];
+        if (depth > 0) {
+          for (const c of list.slice(0, __SHAPE_MAX_SIBLINGS__)) {
+            if (budget <= 0) { truncated = true; break; }
+            children.push(inside(c, depth - 1));
+          }
+        }
+        if (children.length) node.children = children;
+        if (list.length > children.length) node.more = list.length - children.length;
+        return node;
+      };
+      const walk = (i) => {
+        const el = down[i];
+        if (el === target) {
+          const node = inside(el, __SHAPE_TARGET_DEPTH__);
+          node.target = true;
+          return node;
+        }
+        const node = describe(el);
+        const list = kids(el);
+        let next = -1;
+        for (let j = i + 1; j < down.length && next < 0; j++)
+          if (list.indexOf(down[j]) >= 0) next = j;
+        const children = [];
+        let shown = 0;
+        for (const c of list) {
+          if (next >= 0 && c === down[next]) {
+            if (next - start > __SHAPE_MAX_DEPTH__) { truncated = true; continue; }
+            children.push(walk(next));
+            continue;
+          }
+          if (budget <= 0) { truncated = true; continue; }
+          if (shown >= __SHAPE_MAX_SIBLINGS__) continue;
+          shown++;
+          children.push(describe(c));
+        }
+        if (children.length) node.children = children;
+        if (list.length > children.length) node.more = list.length - children.length;
+        return node;
+      };
+      const root = walk(start);
+      return { root: root, nodes: __SHAPE_MAX_NODES__ - budget,
+               truncated: truncated };
+    } catch (e) {
+      return null;
+    }
+  };
+
   const send = (record) => { try { post(record); } catch (e) {} };
 
   // A download run replaces window.print so it can keep the HTML the
@@ -217,7 +371,8 @@ _CAPTURE_JS = r"""
     const tag = el.tagName.toLowerCase();
     if (tag === "html" || tag === "body") return;   // a click on nothing
     send({ action: "click", locator: locate(el), tag: tag,
-           label: nameOf(el).slice(0, 120), at: Date.now() });
+           label: nameOf(el).slice(0, 120), at: Date.now(),
+           structure: shapeOf(ev, el) });
   }, true);
 
   document.addEventListener("change", (ev) => {
@@ -226,6 +381,7 @@ _CAPTURE_JS = r"""
     const tag = el.tagName.toLowerCase();
     const loc = locate(el);
     const label = nameOf(el).slice(0, 120);
+    const structure = shapeOf(ev, el);
     if (tag === "select") {
       const opt = el.options && el.options[el.selectedIndex];
       // The option's visible label. A statement picker's options are
@@ -233,29 +389,111 @@ _CAPTURE_JS = r"""
       // Python on the way out like everything else.
       send({ action: "select", locator: loc, label: label,
              option: opt ? (opt.textContent || "").trim().slice(0, 60) : "",
-             at: Date.now() });
+             at: Date.now(), structure: structure });
       return;
     }
     const type = (el.getAttribute("type") || "text").toLowerCase();
     if (type === "checkbox" || type === "radio") {
       send({ action: "check", locator: loc, label: label,
-             checked: !!el.checked, at: Date.now() });
+             checked: !!el.checked, at: Date.now(), structure: structure });
       return;
     }
     // A typed field. That it was typed into is the fact worth keeping.
     // What was typed is never read.
-    send({ action: "fill", locator: loc, label: label, at: Date.now() });
+    send({ action: "fill", locator: loc, label: label, at: Date.now(),
+           structure: structure });
   }, true);
 
   document.addEventListener("submit", (ev) => {
     const el = ev.target;
     send({ action: "submit", locator: el ? locate(el) : { how: "unresolved" },
-           at: Date.now() });
+           at: Date.now(), structure: el ? shapeOf(ev, el) : null });
   }, true);
 
   return "installed";
 }
 """
+
+
+def _fill_capture_js(js: str) -> str:
+    """The lists the page builds a shape from are the ones Python checks it
+    against, written in once, so the two cannot drift apart."""
+    import json as _json
+    for key, value in (
+            ("__SHAPE_TAGS__", _json.dumps(sorted(STRUCTURE_TAGS))),
+            ("__SHAPE_ROLES__", _json.dumps(sorted(STRUCTURE_ROLES))),
+            ("__SHAPE_ATTRS__", _json.dumps(sorted(STRUCTURE_ATTRS))),
+            ("__SHAPE_MAX_NODES__", str(_SHAPE_MAX_NODES)),
+            ("__SHAPE_MAX_SIBLINGS__", str(_SHAPE_MAX_SIBLINGS)),
+            ("__SHAPE_MAX_DEPTH__", str(_SHAPE_MAX_DEPTH)),
+            ("__SHAPE_TARGET_DEPTH__", str(_SHAPE_TARGET_DEPTH))):
+        js = js.replace(key, value)
+    return js
+
+
+_CAPTURE_JS = _fill_capture_js(_CAPTURE_JS)
+
+# The most nodes a shape may hold on the way out. The page keeps to
+# _SHAPE_MAX_NODES but always finishes the path down to the control, so
+# the ceiling here leaves room for that path. It exists for a page that
+# ignores the rules, not for one that follows them.
+_SHAPE_CEILING = _SHAPE_MAX_NODES + _SHAPE_MAX_DEPTH + 60
+
+
+def clean_structure(raw) -> Optional[dict]:
+    """A step's shape, rebuilt from the lists and nothing else.
+
+    What the page sent is read for its fields and never copied. A tag not
+    on the list is "other", a role not on the list is "other", an
+    attribute name not on the list is not there, a count is a bounded
+    count, and a yes or no is True only when it is exactly True. A string
+    the page invented has nowhere to go."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("root"), dict):
+        return None
+    budget = [_SHAPE_CEILING]
+    cut = [raw.get("truncated") is True]
+
+    def node(r, depth):
+        if not isinstance(r, dict):
+            return None
+        if budget[0] <= 0 or depth > _SHAPE_MAX_DEPTH + _SHAPE_TARGET_DEPTH:
+            cut[0] = True
+            return None
+        budget[0] -= 1
+        tag = r.get("tag")
+        out = {"tag": tag if isinstance(tag, str) and tag in STRUCTURE_TAGS
+               else "other"}
+        role = r.get("role")
+        if role is not None:
+            out["role"] = (role if isinstance(role, str)
+                           and role in STRUCTURE_ROLES else "other")
+        attrs = r.get("attrs")
+        out["attrs"] = sorted({a for a in attrs if isinstance(a, str)
+                               and a in STRUCTURE_ATTRS}) \
+            if isinstance(attrs, list) else []
+        for key in ("data_other", "other_attrs", "child_count", "more"):
+            if key in r:
+                out[key] = _count(r[key])
+        out["visible"] = r.get("visible") is True
+        for key in ("text", "target", "shadow"):
+            if r.get(key) is True:
+                out[key] = True
+        kids = r.get("children")
+        if isinstance(kids, list):
+            if len(kids) > _SHAPE_MAX_SIBLINGS + 1:
+                cut[0] = True
+            children = [c for c in (node(k, depth + 1)
+                                    for k in kids[:_SHAPE_MAX_SIBLINGS + 1])
+                        if c is not None]
+            if children:
+                out["children"] = children
+        return out
+
+    root = node(raw["root"], 0)
+    if root is None:
+        return None
+    return {"root": root, "nodes": _SHAPE_CEILING - budget[0],
+            "truncated": cut[0]}
 
 
 class Recorder:
@@ -480,6 +718,18 @@ class Recorder:
         if self._is_repeat(step):
             self.dropped["repeat"] += 1
             return
+        # The shape of the page around the step, for writing a selector
+        # from. Guarded on its own, so a shape that will not clean up
+        # costs the shape and never the step.
+        try:
+            if sum(1 for s in self.steps if "structure" in s) < _SHAPE_MAX_STEPS:
+                shape = clean_structure(record.get("structure"))
+                if shape is not None:
+                    step["structure"] = shape
+            elif record.get("structure") is not None:
+                self.dropped["structure"] = self.dropped.get("structure", 0) + 1
+        except Exception:
+            pass
         # A checkbox or a dropdown fires a click and then a change, and
         # the change is the one that says what happened. The click before
         # it on the same control is the same act, not a second one.
@@ -684,6 +934,9 @@ class Recorder:
             "dropped": self.dropped,
             "note": ("Typed values are never captured, only that a field was "
                      "typed into. No cookies, headers or storage are read. "
+                     "A step's structure is the page's shape around the "
+                     "control, element kinds, attribute names and counts, "
+                     "and never any text or attribute value. "
                      "Read this through before attaching it anywhere."),
         }
 

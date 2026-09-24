@@ -281,6 +281,53 @@ def _wrap(text: str, width: int = 74, indent: str = "  ") -> list:
     return out
 
 
+def outline(structure) -> list:
+    """A step's page shape as an indented outline, one element a line.
+
+    Everything in a shape is a word off the recorder's lists, a count or
+    a yes or no, so this prints it all. The control that was pressed is
+    marked with an arrow, so the path down to it and the neighbors at
+    each level read the way a selector gets written."""
+    if not isinstance(structure, dict) or not isinstance(
+            structure.get("root"), dict):
+        return []
+    lines = []
+
+    def walk(node, depth):
+        bits = [str(node.get("tag") or "other")]
+        if node.get("role"):
+            bits.append("role=%s" % node["role"])
+        if node.get("attrs"):
+            bits.append("[%s]" % " ".join(str(a) for a in node["attrs"]))
+        if node.get("data_other"):
+            bits.append("+%d data-*" % node["data_other"])
+        if node.get("other_attrs"):
+            bits.append("+%d other" % node["other_attrs"])
+        bits.append("%d child%s" % (node.get("child_count", 0),
+                                    "" if node.get("child_count") == 1
+                                    else "ren"))
+        if node.get("shadow"):
+            bits.append("shadow root")
+        if node.get("text"):
+            bits.append("has text")
+        if not node.get("visible"):
+            bits.append("hidden")
+        mark = "-> " if node.get("target") else "   "
+        lines.append("%s%s%s" % (mark, "  " * depth, " ".join(bits)))
+        for child in node.get("children") or []:
+            if isinstance(child, dict):
+                walk(child, depth + 1)
+        if node.get("more"):
+            lines.append("   %s... %d more not shown" % ("  " * (depth + 1),
+                                                         node["more"]))
+
+    walk(structure["root"], 0)
+    if structure.get("truncated"):
+        lines.append("   (cut short at %s elements, the page had more)"
+                     % structure.get("nodes", "?"))
+    return lines
+
+
 def render(report: dict) -> str:
     steps, reqs = steps_of(report), requests_of(report)
     by_step = {}
@@ -326,6 +373,18 @@ def render(report: dict) -> str:
         for s in steps:
             L.append("  %s" % step_code(s))
         L.append("")
+
+    shaped = [s for s in steps if isinstance(s, dict) and s.get("structure")]
+    if shaped:
+        L.append("THE PAGE AROUND EACH STEP")
+        L.append("")
+        L.append("  Element kinds, attribute names and counts only, never a")
+        L.append("  word or a value. The arrow is the control that was used.")
+        L.append("")
+        for s in shaped:
+            L.append("  step %s  %s" % (s.get("i", "?"), describe(s)))
+            L.extend("  " + line for line in outline(s["structure"]))
+            L.append("")
 
     told = notes(report)
     if told:

@@ -49,6 +49,21 @@ PAGE = """<!doctype html>
 <div role="dialog" class="modal show" style="width:600px;height:400px">
   <p>E 933402 CANARYITEM 7.29 3</p>
 </div>
+<section data-member="CANARYDATAATTR" data-canaryattrname="1"
+         aria-describedby="CANARYDESCBY" style="--member: CANARYSTYLE">
+  <x-canarytag data-row="CANARYROWATTR">
+    <div><div><div><div><div><div><div><div><div><div><div><div><div><div>
+      <div><span lang="CANARYLANG">CANARYDEEPTEXT</span></div>
+    </div></div></div></div></div></div></div></div></div></div></div></div></div></div>
+  </x-canarytag>
+  <div id="host"></div>
+  <ul><li data-order="CANARYLISTATTR">CANARYLISTTEXT</li><li>row</li></ul>
+  <button type="button" name="CANARYBTNNAME" value="CANARYBTNVALUE">Open</button>
+</section>
+<script>
+  document.getElementById('host').attachShadow({mode: 'open'}).innerHTML =
+    '<p data-x="CANARYSHADOWATTR">CANARYSHADOW</p>';
+</script>
 <script>
   console.log("console says CANARYCONSOLE");
   console.error("error says CANARYCONSOLEERR");
@@ -81,6 +96,27 @@ CANARIES = {
     "CANARYTHROWN": "an uncaught exception",
     "CANARYRECEIPTLINE": "a line in the hidden dialog",
     "CANARYITEM": "a line in the visible dialog",
+    "CANARYDATAATTR": "a data attribute's value",
+    "CANARYDESCBY": "an aria reference's value",
+    "CANARYSTYLE": "an inline style's value",
+    "CANARYROWATTR": "an attribute on a custom element",
+    "CANARYLANG": "an attribute sixteen levels down",
+    "CANARYDEEPTEXT": "text sixteen levels down",
+    "CANARYLISTATTR": "an attribute on a list row",
+    "CANARYLISTTEXT": "a list row's text",
+    "CANARYBTNNAME": "a button's name attribute",
+    "CANARYBTNVALUE": "a button's value attribute",
+    "CANARYSHADOWATTR": "an attribute inside a shadow root",
+    "CANARYSHADOW": "text inside a shadow root",
+}
+
+# Names the browser lowercases on the way in, so they are looked for
+# lowercased. A site chooses its own attribute and element names, and one
+# that put a customer's number in either would carry it into anything
+# that wrote those names down.
+LOWERCASED = {
+    "canaryattrname": "an attribute's name",
+    "canarytag": "a custom element's tag name",
 }
 
 SELECTORS = {
@@ -133,6 +169,12 @@ def export(tmp_path_factory):
 def test_the_canary_does_not_come_out(canary, export):
     assert canary not in export, \
         "%s leaked (%s)" % (canary, CANARIES[canary])
+
+
+@pytest.mark.parametrize("name", sorted(LOWERCASED), ids=sorted(LOWERCASED))
+def test_a_name_the_site_chose_does_not_come_out(name, export):
+    assert name not in export.lower(), \
+        "%s leaked (%s)" % (name, LOWERCASED[name])
 
 
 def test_the_export_is_still_worth_reading(export):
@@ -325,6 +367,73 @@ def test_a_forged_wait_result_cannot_carry_page_text_into_the_journal():
     assert entry["winner"] == "none"
     assert entry["attempts"][0] == {"strategy": "other", "outcome": "other",
                                     "ms": 0}
+
+
+# -- a recording's picture of the page ----------------------------------------
+
+@pytest.fixture(scope="module")
+def recording(tmp_path_factory):
+    """One recording on the canary page, one click on a harmless button
+    buried in the planted structure. The button's own name is "Open", so
+    anything secret in the file got there through the page's structure
+    and not through the step itself."""
+    from paperpull_core.recorder import Recorder
+
+    out_dir = tmp_path_factory.mktemp("canary-recording")
+    html = out_dir / "page.html"
+    html.write_text(PAGE, encoding="utf-8")
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(html.as_uri())
+            rec = Recorder(page, is_safe_url=lambda url: True,
+                           provider="Canary")
+            rec.start()
+            page.click("section button")
+            page.wait_for_timeout(300)
+            report = rec.stop()
+            browser.close()
+    except Exception as e:  # pragma: no cover
+        pytest.skip("no browser available: %s" % e)
+    return report
+
+
+@pytest.mark.parametrize("canary", sorted(CANARIES), ids=sorted(CANARIES))
+def test_the_canary_does_not_come_out_of_a_recording(canary, recording):
+    assert canary not in json.dumps(recording), \
+        "%s leaked into a recording (%s)" % (canary, CANARIES[canary])
+
+
+@pytest.mark.parametrize("name", sorted(LOWERCASED), ids=sorted(LOWERCASED))
+def test_a_name_the_site_chose_does_not_come_out_of_a_recording(
+        name, recording):
+    assert name not in json.dumps(recording).lower(), \
+        "%s leaked into a recording (%s)" % (name, LOWERCASED[name])
+
+
+def test_a_recorded_step_carries_the_shape_of_the_page_around_it(recording):
+    """A snapshot that says nothing passes every canary. This is the part
+    that makes it worth having. The clicked control is marked, the path
+    down to it is there, and the list next to it shows as two rows of the
+    same shape, which is what a selector is written from."""
+    step = recording["steps"][0]
+    shape = step.get("structure")
+    assert shape, "the step carries no structure"
+    nodes = []
+
+    def walk(node, depth=0):
+        nodes.append((depth, node))
+        for child in node.get("children") or []:
+            walk(child, depth + 1)
+    walk(shape["root"])
+    targets = [n for _, n in nodes if n.get("target")]
+    assert len(targets) == 1 and targets[0]["tag"] == "button"
+    assert "name" in targets[0]["attrs"] and "value" in targets[0]["attrs"]
+    lists = [n for _, n in nodes if n.get("tag") == "ul"]
+    assert lists and lists[0]["child_count"] == 2
+    assert any(n.get("tag") == "custom" for _, n in nodes)
+    assert any(n.get("shadow") for _, n in nodes)
 
 
 def test_the_file_is_small_enough_to_paste(export):

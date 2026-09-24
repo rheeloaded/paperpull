@@ -1021,3 +1021,105 @@ def test_waiting_uses_the_browsers_timer_so_the_page_is_heard():
     src = inspect.getsource(mod._wait_for_stop)
     assert "page.wait_for_timeout" in src
     assert "input()" in src and "threading.Thread" in src
+
+
+# -- 5. the shape of the page, and nothing on it -------------------------------
+
+from paperpull_core.recorder import (  # noqa: E402
+    STRUCTURE_ATTRS, STRUCTURE_ROLES, STRUCTURE_TAGS, clean_structure)
+
+_CLICK = {"action": "click", "label": "Statements", "at": 1,
+          "locator": {"how": "role", "role": "link", "name": "Statements"}}
+
+
+def _shape(root, **kw):
+    out = {"root": root, "nodes": 1, "truncated": False}
+    out.update(kw)
+    return out
+
+
+def test_a_shape_the_page_invented_comes_out_as_words_from_our_lists():
+    """The binding is on window, so any script on the provider's page can
+    send a step with a shape of its own making. Every field is rebuilt
+    from the lists, so a string the page chose has nowhere to land."""
+    hostile = _shape({
+        "tag": "Jane Doe 4111", "role": "account 8421997301",
+        "attrs": ["data-member-8421997301", "aria-label", {"x": 1}, 7],
+        "data_other": "lots", "other_attrs": -4, "child_count": 10**12,
+        "visible": "yes", "text": 1, "target": "true", "shadow": ["x"],
+        "secret": "4111 1111 1111 1111",
+        "children": [{"tag": "script", "value": "hunter2"}, "a string", None],
+    }, nodes="many", truncated="no")
+    got = clean_structure(hostile)
+    body = json.dumps(got)
+    for leak in ("Jane", "4111", "8421997301", "hunter2", "lots", "secret",
+                 "a string", "yes"):
+        assert leak not in body, leak
+    root = got["root"]
+    assert root["tag"] == "other" and root["role"] == "other"
+    assert root["attrs"] == ["aria-label"]
+    assert root["other_attrs"] == 0 and root["visible"] is False
+    assert "text" not in root and "target" not in root and "shadow" not in root
+    assert root["children"] == [{"tag": "script", "attrs": [],
+                                 "visible": False}]
+    assert got["truncated"] is False
+
+
+def test_the_page_and_the_check_use_the_same_lists():
+    """Written into the capture script from these sets, so a word allowed
+    in the page is a word allowed here and the other way round."""
+    for word in ("data-testid", "aria-controls", "tabpanel", "tbody"):
+        assert json.dumps(word) in _CAPTURE_JS
+    assert "__SHAPE_" not in _CAPTURE_JS
+    assert "data-testid" in STRUCTURE_ATTRS and "tabpanel" in STRUCTURE_ROLES
+    assert "custom" in STRUCTURE_TAGS and "other" in STRUCTURE_TAGS
+
+
+def test_the_capture_script_takes_attribute_names_and_never_their_values():
+    body = _CAPTURE_JS[_CAPTURE_JS.index("const shapeOf"):
+                       _CAPTURE_JS.index("const send")]
+    assert "getAttributeNames()" in body
+    assert "innerText" not in body and "textContent" not in body
+    assert ".value" not in body and "href" not in body.replace(
+        '"href"', "")
+    assert "attributes[" not in body and ".attributes" not in body
+
+
+def test_a_shape_that_goes_on_for_ever_is_cut_and_says_so():
+    node = {"tag": "div", "children": []}
+    deep = node
+    for _ in range(500):
+        child = {"tag": "div", "children": []}
+        deep["children"].append(child)
+        deep = child
+    got = clean_structure(_shape(node))
+    assert got["truncated"] is True
+
+    wide = {"tag": "ul", "children": [{"tag": "li"} for _ in range(5000)]}
+    got = clean_structure(_shape(wide))
+    assert got["truncated"] is True
+    assert len(got["root"]["children"]) <= 26
+    assert got["nodes"] <= 500
+
+
+def test_a_step_carries_its_shape_and_a_long_recording_stops_adding_them():
+    r, page = rec()
+    for i in range(100):
+        page.fire(dict(_CLICK, at=i * 1000, label="L%d" % i,
+                       locator={"how": "role", "role": "link",
+                                "name": "L%d" % i},
+                       structure=_shape({"tag": "a", "target": True})))
+    shaped = [s for s in r.steps if "structure" in s]
+    assert len(shaped) == 80
+    assert r.dropped["structure"] == 20
+    assert shaped[0]["structure"]["root"] == {"tag": "a", "attrs": [],
+                                              "visible": False,
+                                              "target": True}
+
+
+def test_a_shape_that_will_not_clean_up_costs_the_shape_not_the_step():
+    r, page = rec()
+    page.fire(dict(_CLICK, structure="not a shape"))
+    page.fire(dict(_CLICK, at=5000, structure={"root": ["no"]}))
+    assert len(r.steps) == 2
+    assert all("structure" not in s for s in r.steps)

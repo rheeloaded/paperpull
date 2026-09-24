@@ -51,6 +51,9 @@ contributed to anything, is
 7. Read any file through before you attach it. A recording ends by
    printing anything worth a second look. Delete any line you do not
    like.
+   A recording also has a long `structure` block on each step. It holds
+   only element kinds, attribute names and counts, so there is nothing
+   in it to edit.
 8. Attach both to [issue #47](https://github.com/rheeloaded/paperpull/issues/47)
    with a sentence about whether warehouse receipts and online orders are
    on the same page or behind separate tabs, and how far back the list

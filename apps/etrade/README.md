@@ -34,6 +34,9 @@ delete-safe, part of [PaperPull](../../README.md).
    headings, the names of buttons and links, and the shape of the data the
    page loads, no values. If anything in it looks personal, delete that
    line.
+   A recording also has a long `structure` block on each step. It holds
+   only element kinds, attribute names and counts, so there is nothing
+   in it to edit.
 7. Attach both files to [issue #36](https://github.com/rheeloaded/paperpull/issues/36)
    with a sentence about how statements, confirmations and tax forms are separated (tabs, a dropdown, one list), and how you choose the account.
 8. When a new build is posted, click **Pilot** and say whether PDFs landed
