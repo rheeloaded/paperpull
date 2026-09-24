@@ -99,8 +99,8 @@ def test_the_hint_says_this_provider_answers_in_a_tab(monkeypatch):
     assert delivery._order(req.hints)[0] == delivery.TAB
     # A hint reorders and never restricts, so a Navy Federal that starts
     # firing an ordinary download still works.
-    assert set(delivery._order(req.hints)) == {delivery.DOWNLOAD,
-                                               delivery.TAB, delivery.FOLDER}
+    assert set(delivery._order(req.hints)) == {
+        delivery.DOWNLOAD, delivery.RESPONSE, delivery.TAB, delivery.FOLDER}
 
 
 def test_the_statement_is_checked_against_its_date(monkeypatch):

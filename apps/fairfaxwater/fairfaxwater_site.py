@@ -43,8 +43,10 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 from typing import List, Optional
+
+from paperpull_core.delivery import RESPONSE, DocumentRequest
+from paperpull_core.identity import Identity
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
@@ -367,12 +369,33 @@ def _row_for(page, date: str, account_tail: str):
     return None
 
 
-def download_document(page, title: str, date: str, out_path: Path, occurrence: int = 0,
-                      item_hint: str = "", client_hint: str = "", account: str = "") -> bool:
-    """Click the row's View, catch the tab the portal opens, read the PDF out
-    of that tab's own response, write it, close the tab."""
+def bill_request(page, title: str, date: str, occurrence: int = 0,
+                 item_hint: str = "", client_hint: str = "",
+                 account: str = "") -> Optional[DocumentRequest]:
+    """Everything up to the View click, for the bill dated `date`.
+
+    Open the documents page, expand the history far enough back that the
+    row exists, find it, and hand over its View control.
+
+    What that click produces is not this app's business, and this app
+    used to make it its business at length. It listened at the context
+    for the answer, because a tab's first response can land before a
+    listener attached on the page event is in place and two of five
+    bills were lost that way on the first pilot. It re-asked for the
+    tab's address when the answer went by unread. It refused a tab that
+    went somewhere unexpected, and closed every tab it opened.
+
+    Every one of those is the interceptor's now, and the first of them
+    is why it grew a response mechanism at all.
+
+    The document does not come from this provider's own host. View opens
+    a tab on docsight.net, so the allowlist that travels with the
+    request is the thing that makes reading it safe, and it is this
+    app's rather than a guess from the provider's name.
+
+    None when the row cannot be found."""
     if not goto_documents(page):
-        return False
+        return None
     tail = (account or "")[-4:] if account else ""
     view = _row_for(page, date, tail)
     if view is None:
@@ -380,77 +403,12 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
         view = _row_for(page, date, tail)
     if view is None:
         log.warning("no row for %s %s", title, date)
-        return False
-    ctx = page.context
-    got: dict = {}
-
-    # Listen at the context, not on the new tab. A tab's first response can
-    # land before a listener attached on the "page" event is in place, and
-    # two of five bills were lost that way on the first pilot. The context
-    # sees every page's responses from the start.
-    def on_response(res):
-        try:
-            if got:
-                return
-            ct = (res.headers or {}).get("content-type", "")
-            if "pdf" not in ct and res.request.resource_type != "document":
-                return
-            if not (is_safe_url(res.url) or res.url.startswith("chrome-extension://")):
-                return
-            body = res.body()
-            if body[:4] == b"%PDF":
-                got["body"] = body
-                got["url"] = res.url
-        except Exception as e:
-            log.info("response not readable: %s", str(e)[:80])
-    ctx.on("response", on_response)
-    before = set(id(p) for p in ctx.pages)
-    try:
-        if not _guarded_click(view, timeout=15000):
-            return False
-        for _ in range(40):
-            if got:
-                break
-            page.wait_for_timeout(500)
-        if not got:
-            # The tab is open on the PDF but its response went by unread.
-            # Ask the same signed URL once more, on the session, host checked.
-            for p in list(ctx.pages):
-                if id(p) not in before and is_safe_url(p.url or "") and "docsight" in (p.url or ""):
-                    try:
-                        r = ctx.request.get(p.url, timeout=60000)
-                        if r.ok and r.body()[:4] == b"%PDF":
-                            got["body"] = r.body()
-                            got["url"] = p.url
-                    except Exception as e:
-                        log.info("re-fetch of the PDF tab failed: %s", str(e)[:80])
-                    break
-    finally:
-        try:
-            ctx.remove_listener("response", on_response)
-        except Exception:
-            pass
-        for p in list(ctx.pages):
-            if id(p) not in before and not p.is_closed():
-                # The tab the portal opened for the PDF. Only the site's own
-                # document host is expected here; anything else is closed
-                # unread, and refused.
-                if not is_safe_url(p.url or "") and not (p.url or "").startswith("chrome-extension://"):
-                    log.warning("the View tab went to an unexpected host, closed unread")
-                    got.clear()
-                try:
-                    p.close()
-                except Exception:
-                    pass
-    if not got:
-        # docsight answers "Document Not Found" for a bill it no longer holds,
-        # which happened for the oldest of the five on the account mapped.
-        log.warning("no PDF came back for %s %s, the portal's document host may no "
-                    "longer hold it", title, date)
-        return False
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(got["body"])
-    return True
+        return None
+    return DocumentRequest(
+        trigger=lambda: _guarded_click(view, timeout=15000),
+        expect=Identity(date=date),
+        close_new_tabs=True,
+        hints=(RESPONSE,))
 
 
 def _page_summary(page) -> dict:

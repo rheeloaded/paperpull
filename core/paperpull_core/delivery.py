@@ -77,11 +77,16 @@ log = logging.getLogger("paperpull.delivery")
 # the most direct evidence wins over the most incidental.
 ASK = "ask"
 DOWNLOAD = "download"
+# The bytes read off the answer as it went past, before anything had to
+# go and ask for them again. Fairfax Water lost two of five bills on its
+# first pilot to a listener attached one beat too late, which is why it
+# listens at the context rather than at the tab.
+RESPONSE = "response"
 TAB = "tab"
 FOLDER = "folder"
 # Not caught at all. Twelve providers have no file and are printed.
 RENDERED = "rendered"
-MECHANISMS = (ASK, DOWNLOAD, TAB, FOLDER, RENDERED)
+MECHANISMS = (ASK, DOWNLOAD, RESPONSE, TAB, FOLDER, RENDERED)
 
 # How a delivery ended.
 SAVED = "saved"
@@ -182,10 +187,12 @@ class _Armed:
     Playwright's own event loop, where an exception takes down the run
     rather than this capture."""
 
-    def __init__(self, page, dl_dir=None, close_new=False):
+    def __init__(self, page, dl_dir=None, close_new=False, is_safe_url=None):
         self.page = page
         self.dl_dir = dl_dir
         self.close_new = close_new
+        self.is_safe_url = is_safe_url or (lambda u: False)
+        self.body = b""
         self.download = None
         self.new_pages: list = []
         self.before: set = set()
@@ -209,6 +216,15 @@ class _Armed:
             self.armed.append(TAB)
         except Exception:
             self._ctx = None
+        if self._ctx is not None:
+            # At the context, never at the tab. A tab's first response
+            # can land before a listener attached on the page event is
+            # in place, and that is how bills get lost.
+            try:
+                self._ctx.on("response", self._on_response)
+                self.armed.append(RESPONSE)
+            except Exception:
+                pass
         if self.dl_dir:
             try:
                 self.before = capture.snapshot(self.dl_dir)
@@ -233,6 +249,10 @@ class _Armed:
                 self._ctx.remove_listener("page", self._on_page)
             except Exception:
                 pass
+            try:
+                self._ctx.remove_listener("response", self._on_response)
+            except Exception:
+                pass
         return False
 
     def _on_download(self, download):
@@ -245,6 +265,30 @@ class _Armed:
     def _on_page(self, page):
         try:
             self.new_pages.append(page)
+        except Exception:
+            pass
+
+    def _on_response(self, response):
+        """Keep the first PDF the provider sends, whichever tab it is for.
+
+        Guarded whole. This runs inside Playwright's event loop, where
+        an exception takes the run down rather than this capture."""
+        try:
+            if self.body:
+                return
+            url = response.url or ""
+            if not self.is_safe_url(url):
+                return
+            kind = (response.headers or {}).get("content-type", "")
+            if "pdf" not in kind.lower():
+                try:
+                    if response.request.resource_type != "document":
+                        return
+                except Exception:
+                    return
+            body = response.body()
+            if body[:5] == PDF_MAGIC:
+                self.body = body
         except Exception:
             pass
 
@@ -266,7 +310,7 @@ class _Armed:
 
     def anything(self) -> bool:
         """Whether the race has produced something to look at yet."""
-        if self.download is not None:
+        if self.download is not None or self.body:
             return True
         if any(self._has_address(p) for p in self.new_pages):
             return True
@@ -467,7 +511,7 @@ def _acquire(page, request, staged: Path, is_safe_url, dl_dir, settle_ms,
     if request.trigger is None:
         return "", armed, rejected
 
-    with _Armed(page, dl_dir, request.close_new_tabs) as watch:
+    with _Armed(page, dl_dir, request.close_new_tabs, is_safe_url) as watch:
         armed.extend(watch.armed)
         try:
             request.trigger()
@@ -527,6 +571,15 @@ def _read_race(page, watch, staged: Path, is_safe_url, request, rejected):
                 _clear(staged)
             except Exception as e:
                 log.info("saving the download failed: %s", e)
+        elif mechanism == RESPONSE and watch.body:
+            # Already in hand. No second request, which matters where the
+            # address was signed for one use.
+            try:
+                staged.write_bytes(watch.body)
+                yield RESPONSE
+                return
+            except OSError as e:
+                log.info("could not stage the answer read in flight: %s", e)
         elif mechanism == TAB:
             if watch.new_pages:
                 try:
@@ -560,7 +613,7 @@ def _order(hints) -> list:
 
     A hint never removes a mechanism. An app that believes it is
     folder-first and is wrong still gets its document."""
-    order = [DOWNLOAD, TAB, FOLDER]
+    order = [DOWNLOAD, RESPONSE, TAB, FOLDER]
     for hint in reversed([h for h in (hints or ()) if h in order]):
         order.remove(hint)
         order.insert(0, hint)
