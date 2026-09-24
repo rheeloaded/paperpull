@@ -156,7 +156,13 @@ def looks_signed_out(page) -> bool:
     try:
         url = (page.url or "").lower()
     except Exception:
-        return False
+        # A page that cannot say where it is is not a signed-in page. This
+        # answered False, which reads as "carry on", and it is the answer
+        # safe_selects asks before deciding whether any control on the page
+        # may be touched at all. The other forty-three apps let this raise,
+        # which that treats as a refusal, so False was the odd answer and
+        # the only unsafe one.
+        return True
     if any(m in url for m in LOGIN_URL_MARKERS):
         return True
     try:
