@@ -658,3 +658,90 @@ def test_a_stale_tab_from_a_previous_capture_is_never_read(monkeypatch,
     D.deliver(page, request(trigger=lambda: None), tmp_path / "d.pdf",
               is_safe_url=safe, settle_ms=500)
     assert seen.get("pages", []) == [] or stale not in seen["pages"]
+
+
+# -- a tab that opens blank and becomes the document a moment later -----------
+
+class _LatePage(FakePage):
+    """A tab that opens at about:blank and is given its real address a
+    few polls later, which is what a blob tab does."""
+
+    def __init__(self, becomes, after=4):
+        super().__init__("about:blank")
+        self._becomes, self._after, self._polls = becomes, after, 0
+
+    @property
+    def url(self):
+        self._polls += 1
+        return self._becomes if self._polls > self._after else "about:blank"
+
+
+def test_a_tab_that_is_still_blank_is_not_the_document_arriving(monkeypatch,
+                                                                tmp_path):
+    """The Navy Federal regression. A new tab appears at once and only
+    becomes the blob a moment later, so treating the tab opening as the
+    answer read a blank page and reported that nothing came back."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    late = _LatePage("blob:https://bank.example/abc")
+    read = []
+
+    def take(p, pages, out, s):
+        read.append([(pg.url or "") for pg in pages])
+        Path(out).write_bytes(PDF)
+        return True
+
+    monkeypatch.setattr(D.capture, "take_new_tab", take)
+    monkeypatch.setattr(D.capture, "take_same_tab", lambda *a, **k: False)
+
+    def trigger():
+        for fn in page.context.handlers.get("page", []):
+            fn(late)
+
+    got = D.deliver(page, request(trigger=trigger), tmp_path / "d.pdf",
+                    is_safe_url=safe, settle_ms=5000)
+    assert got.ok, "gave up while the tab was still blank"
+    assert read and not read[0][0].startswith("about:blank")
+
+
+def test_a_blank_tab_alone_never_ends_the_wait():
+    """The property underneath it. A tab with no address yet is not an
+    answer."""
+    page = FakePage()
+    watch = D._Armed(page)
+    watch.__enter__()
+    try:
+        watch.new_pages.append(FakePage("about:blank"))
+        assert not watch.anything()
+        watch.new_pages.append(FakePage("blob:https://bank.example/x"))
+        assert watch.anything()
+    finally:
+        watch.__exit__()
+
+
+def test_a_tab_with_no_readable_address_is_not_an_answer():
+    class Hostile:
+        @property
+        def url(self):
+            raise RuntimeError("gone")
+
+    page = FakePage()
+    watch = D._Armed(page)
+    watch.__enter__()
+    try:
+        watch.new_pages.append(Hostile())
+        assert not watch.anything()
+    finally:
+        watch.__exit__()
+
+
+def test_a_download_still_ends_the_wait_at_once():
+    """The common case must not get slower because of the blob case."""
+    page = FakePage()
+    watch = D._Armed(page)
+    watch.__enter__()
+    try:
+        watch.download = FakeDownload()
+        assert watch.anything()
+    finally:
+        watch.__exit__()

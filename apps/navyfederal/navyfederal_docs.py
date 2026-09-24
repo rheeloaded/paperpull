@@ -568,7 +568,7 @@ class App:
         if request is not None:
             got = delivery.deliver(
                 page, request, out_path,
-                is_safe_url=site.is_safe_url, journal=self._journal,
+                is_safe_url=site.is_safe_url, journal=self.journal,
                 strict=bool(self.config.get("refuse_wrong_documents", True)))
             print("  %s" % got.say())
         saved = bool(got and got.ok)

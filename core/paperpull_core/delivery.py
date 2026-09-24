@@ -248,9 +248,27 @@ class _Armed:
         except Exception:
             pass
 
+    @staticmethod
+    def _has_address(extra) -> bool:
+        """Whether a tab has been given an address yet.
+
+        A tab opens at about:blank and is pointed at the document a
+        moment later. Navy Federal's blob tab is there within half a
+        second and blank for a while after that, so counting the tab
+        itself as the answer meant reading a blank page and reporting
+        that nothing came back. Waiting for the address is the whole
+        difference, and it cost a live run to find."""
+        try:
+            url = extra.url or ""
+        except Exception:
+            return False
+        return bool(url) and url != "about:blank"
+
     def anything(self) -> bool:
         """Whether the race has produced something to look at yet."""
-        if self.download is not None or self.new_pages:
+        if self.download is not None:
+            return True
+        if any(self._has_address(p) for p in self.new_pages):
             return True
         if self.dl_dir:
             try:

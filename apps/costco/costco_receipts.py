@@ -647,7 +647,7 @@ class App:
             lambda staged: self._render(target_page, staged),
             out_path,
             expect=site.identity_for(purchase),
-            journal=self._journal,
+            journal=self.journal,
             strict=bool(self.config.get("refuse_wrong_documents", True)))
 
     def _refused(self, purchase: Purchase, got) -> bool:
