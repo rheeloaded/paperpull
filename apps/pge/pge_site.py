@@ -40,6 +40,7 @@ Lightning parent hears it, before giving up.
 """
 from __future__ import annotations
 
+import base64
 import html as _html
 import logging
 import re
@@ -49,6 +50,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.capture import fetch_with_status as _fetch_with_status
 from paperpull_core.controls import control_labels as _control_labels
 from paperpull_core.controls import is_next_control as _core_is_next
 
@@ -709,15 +711,27 @@ def _pdf_from_here(page) -> Optional[bytes]:
     which is an iframe around the file. Rendering that gives one blank
     sheet, because a viewer is a program and not a document. The file
     itself is fetched through the signed-in session instead, first at the
-    address the tab is on and then at whatever its frames hold."""
-    seen = []
+    address the tab is on and then at whatever its frames hold.
+
+    A bill that opened in a dialog is the same question asked of a page
+    that never went anywhere, and a viewer in a dialog often points at a
+    blob the page made rather than at an address on the site. A blob
+    belongs to the page, so only the page can fetch it, which is what the
+    in-page fetch is for."""
+    seen, blobs = [], []
     url = page.url or ""
-    if url and not url.startswith("blob:") and is_safe_url(url):
+    if url.startswith("blob:"):
+        blobs.append(url)
+    elif url and is_safe_url(url):
         seen.append(url)
     try:
         for frame in page.frames:
             f_url = frame.url or ""
-            if f_url and f_url not in seen and not f_url.startswith("about:") and is_safe_url(f_url):
+            if not f_url or f_url.startswith("about:"):
+                continue
+            if f_url.startswith("blob:") and f_url not in blobs:
+                blobs.append(f_url)
+            elif f_url not in seen and is_safe_url(f_url):
                 seen.append(f_url)
     except Exception as e:
         log.info("frames: %s", e)
@@ -725,16 +739,29 @@ def _pdf_from_here(page) -> Optional[bytes]:
         for src in page.eval_on_selector_all(
                 "iframe, embed, object",
                 "els => els.map(e => e.src || e.data || '').filter(Boolean)") or []:
-            if src not in seen and is_safe_url(src):
+            if src.startswith("blob:") and src not in blobs:
+                blobs.append(src)
+            elif src not in seen and is_safe_url(src):
                 seen.append(src)
     except Exception as e:
         log.info("embedded sources: %s", e)
+
     for candidate in seen[:6]:
         try:
             res = page.request.get(candidate, timeout=60000)
             body = res.body() if res.ok else b""
         except Exception as e:
             log.info("fetch %s: %s", _url_shape(candidate), e)
+            continue
+        if body[:5] == b"%PDF-":
+            return body
+
+    for candidate in blobs[:4]:
+        try:
+            got = _fetch_with_status(page, candidate)
+            body = base64.b64decode(got["b64"]) if got.get("b64") else b""
+        except Exception as e:
+            log.info("fetch a blob: %s", e)
             continue
         if body[:5] == b"%PDF-":
             return body
@@ -891,12 +918,22 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
             moved = (page.url or "") != history_url
             if moved:
                 print("  [site] the tab moved to %s rather than opening one" % _url_shape(page.url))
-                body = _pdf_from_here(page)
-                if body:
-                    captured_response_bytes[0] = body
-                    print("  [site] the bill came from the page the tab moved to")
-            # and put the tab back on the history either way, or every bill
-            # after this one is looked for on a page that does not hold it
+            else:
+                # It need not move at all. His second failure file showed
+                # the page standing still with one iframe and two dialogs
+                # on it and no request for a PDF anywhere in the run, which
+                # is a bill opened in a dialog rather than anywhere this
+                # was watching. Costco's receipt is the same shape. So the
+                # page is asked what it is holding whether or not it went
+                # anywhere (#33).
+                print("  [site] the control opened nothing this was watching, "
+                      "so the page itself is asked what it is holding")
+            body = _pdf_from_here(page)
+            if body:
+                captured_response_bytes[0] = body
+                print("  [site] the bill came from the page itself")
+            # and put the tab back on the history when it left, or every
+            # bill after this is looked for on a page that does not hold it
             if moved:
                 try:
                     page.goto(history_url, wait_until="domcontentloaded", timeout=45000)

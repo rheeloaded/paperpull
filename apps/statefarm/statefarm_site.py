@@ -522,7 +522,12 @@ def _docs_from_api(body: dict) -> List[dict]:
     for e in data.get("attributes") or []:
         if not isinstance(e, dict):
             continue
-        iso = parse_date(str(e.get("availableDate") or e.get("creationDate") or ""))
+        # creationDate is when the document was made. availableDate is how
+        # long it stays on the site, which a tester spotted as the source of
+        # a document filed under 2028, from the line "Sent by mail.
+        # Available online until 07/21/2028" under its title. The page's own
+        # controls carried 2026 dates for the same documents (#37).
+        iso = parse_date(str(e.get("creationDate") or e.get("availableDate") or ""))
         if not iso:
             continue
         kind = str(e.get("type") or "").strip()

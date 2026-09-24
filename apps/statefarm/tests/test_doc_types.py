@@ -264,3 +264,21 @@ def test_the_reveal_presses_nothing_the_guard_refuses():
     src = inspect.getsource(site.reveal_documents)
     assert "is_safe_control(label)" in src
     assert "VIEW_DOCUMENTS_RE.match(label)" in src
+
+
+def test_a_document_is_dated_when_it_was_made_not_how_long_it_stays_up():
+    """A tester found one filed under 2028, from "Sent by mail. Available
+    online until 07/21/2028" under its title, while the page's own
+    controls carried 2026 dates for the same documents (#37)."""
+    made = {"data": {"attributes": [{
+        "creationDate": "2026-07-22", "availableDate": "2028-07-21",
+        "type": "Renewal Notice", "category": "Auto"}]}}
+    [doc] = site._docs_from_api(made)
+    assert doc["date"] == "2026-07-22"
+
+
+def test_availability_is_still_used_when_there_is_nothing_better():
+    only = {"data": {"attributes": [{
+        "availableDate": "2026-04-16", "type": "Declarations", "category": "Auto"}]}}
+    [doc] = site._docs_from_api(only)
+    assert doc["date"] == "2026-04-16"

@@ -406,11 +406,19 @@ class Recorder:
             # to mean stop on this side as well.
             return
         try:
-            self._record_event(record)
+            # Which tab it came from, so a step can say whether it was on
+            # the provider's own site. The binding hands this over, which
+            # is surer than anything the payload could claim.
+            where = ""
+            try:
+                where = (source.get("page").url or "") if isinstance(source, dict) else ""
+            except Exception:
+                where = ""
+            self._record_event(record, where)
         except Exception:
             self.dropped["malformed"] = self.dropped.get("malformed", 0) + 1
 
-    def _record_event(self, record) -> None:
+    def _record_event(self, record, page_url: str = "") -> None:
         if not isinstance(record, dict) or len(self.steps) >= _MAX_STEPS:
             return
         action = str(record.get("action") or "")
@@ -460,6 +468,15 @@ class Recorder:
                 step["guard_allows"] = bool(self._is_safe_control(label))
             except Exception:
                 pass
+        # Which site this happened on. A tab the provider opened is
+        # recorded whatever host it lands on, because two providers here
+        # keep their documents on a vendor, and a reader should be able
+        # to see which steps were theirs and which were not (#35, #45).
+        try:
+            if page_url and not self._is_safe_url(page_url):
+                step["on_the_providers_own_site"] = False
+        except Exception:
+            pass
         if self._is_repeat(step):
             self.dropped["repeat"] += 1
             return
@@ -547,19 +564,25 @@ class Recorder:
         (#45). Everything a provider does after that point was invisible,
         which on a site that opens a tab is everything worth recording.
 
-        A tab on somebody else's host is left alone. The refusal to start
-        outside the provider's own site applies just as much to a tab it
-        opened, and a payment processor is exactly the kind of place a
-        checkout opens."""
+        A tab the provider opened is recorded whatever host it lands on,
+        and each step says whether it was on the provider's own site.
+
+        Refusing an off-host tab was tried first and it does not work,
+        for two reasons. It refused the wrong thing: two providers here
+        keep their documents on a vendor, so the tab that matters is the
+        one that is not theirs, and refusing it left one tester's
+        recording a single step long. And it refused inconsistently,
+        because a tab opens as about:blank and navigates afterwards, so
+        whether the check saw its real address was a race. One tester's
+        off-host tab was recorded and another's was not, on the same
+        build.
+
+        Nothing typed is captured anywhere, on any tab, so what this
+        gathers on a vendor's page is the same as anywhere else: the
+        controls pressed, named the way a person reads them. Recording
+        still refuses to START outside the provider's own site, and still
+        refuses a page with a password field on it."""
         if page is None or page in self._watched:
-            return
-        try:
-            if not self._is_safe_url(page.url or ""):
-                # It may still be about:blank while it loads, so it is
-                # looked at again once it has somewhere to be.
-                if (page.url or "") not in ("", "about:blank"):
-                    return
-        except Exception:
             return
         self._watched.append(page)
         import json as _json
