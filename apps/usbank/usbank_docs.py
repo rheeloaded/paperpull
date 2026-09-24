@@ -21,6 +21,8 @@ from paperpull_core import doc_types, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import usbank_site as site
 from paperpull_core.models import State
+from paperpull_core.keys import account_component as _account_component
+from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -81,7 +83,11 @@ class Document:
     def key(self) -> str:
         if self.document_id:
             return f"id:{self.document_id}"
-        acct = sanitize_component(self.account or "")[:40]
+        # Keep the last four. Cutting to forty characters made two cards
+        # of the same product collide, because the masked digits that say
+        # which one it is sit at the end, and the second card's whole
+        # history was then read as already downloaded and dropped.
+        acct = _account_component(sanitize_component(self.account or ""))
         return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
 
     def to_dict(self) -> dict:
@@ -90,6 +96,16 @@ class Document:
     @classmethod
     def from_dict(cls, d: dict) -> "Document":
         return cls(**d)
+
+
+def migrate_legacy_keys(records: dict) -> int:
+    """Move records written while the account was cut to forty characters.
+
+    Only a record whose key is exactly the new one with the last four taken
+    off is moved, so nothing is guessed. An archive whose account names were
+    short enough to fit has no such records and nothing happens.
+    """
+    return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
 class App:
@@ -115,6 +131,9 @@ class App:
         self.discovery = JsonStore(self.paths.discovery_json, self.paths.backups)
         self.progress.load()
         self.discovery.load()
+        for store in (self.progress, self.discovery):
+            if migrate_legacy_keys(store.data):
+                store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups)
         self.rules = doc_types.load_rules()
