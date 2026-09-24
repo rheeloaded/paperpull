@@ -25,12 +25,35 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "core"))
 
 from paperpull_core.keys import stable_occurrences  # noqa: E402
 
-COUNTERS = ("affirm", "fairfaxwater", "fidelity", "netbenefits", "tsp")
+def counts_them(app: Path) -> bool:
+    """An app whose document identity DEPENDS on the number, found by
+    reading its key rather than from a list.
+
+    A list is a blind spot with a date on it. Walmart's pagination was
+    missed by a fix that looked for one spelling of a function name, so
+    this asks the thing itself. Several apps carry an occurrence field and
+    never put it in the key, and those are not counting anything.
+    """
+    import ast
+    for pattern in ("*_docs.py", "*_receipts.py"):
+        for path in app.glob(pattern):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == "key":
+                    if "occurrence" in ast.unparse(node):
+                        return True
+    return False
+
+
 APPS = [d for d in sorted((REPO / "apps").iterdir())
-        if d.is_dir() and d.name in COUNTERS]
+        if d.is_dir() and counts_them(d)]
 
 
 def rows(*accounts, title="Quarterly Statement", date="2026-03-31"):
