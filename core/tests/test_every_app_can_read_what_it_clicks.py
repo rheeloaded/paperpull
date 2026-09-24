@@ -14,6 +14,7 @@ The click is the part that matters, so these watch for it rather than
 reading the source or trusting the return value.
 """
 import importlib
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -21,10 +22,28 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+
+# Found by what it does. Walmart calls its pagination _go_next_page, so
+# looking for "def next_page" missed it, and so did the fix this test was
+# written alongside. Its last resort was any element whose aria-label
+# merely contains "Next", clicked without reading it, which on an orders
+# page is as likely to be "Next day delivery" as the pagination.
+PAGES_FORWARD = re.compile(r"^def (\w*next\w*page\w*|\w*page\w*next\w*)\s*\(",
+                           re.M | re.I)
+
+
+def paginators(app: Path) -> list:
+    """Every function in this app that pages a list forward."""
+    source = (app / ("%s_site.py" % app.name)).read_text(
+        encoding="utf-8", errors="ignore")
+    names = [m.group(1) for m in PAGES_FORWARD.finditer(source)]
+    # has_next_page only looks, it does not click
+    return [n for n in names if not n.startswith("has_")]
+
+
 APPS = sorted(d for d in (REPO / "apps").iterdir()
               if d.is_dir() and (d / ("%s_site.py" % d.name)).exists()
-              and "def next_page" in
-              (d / ("%s_site.py" % d.name)).read_text(encoding="utf-8", errors="ignore"))
+              and paginators(d))
 
 UNREADABLE = ["", "   ", "\n\t "]
 
@@ -68,6 +87,18 @@ def page_showing(control):
     return page
 
 
+def run_each(site, app: Path, page):
+    """Every one of this app's paginators, against the same page."""
+    for name in paginators(app):
+        fn = getattr(site, name, None)
+        if fn is None:
+            continue
+        try:
+            fn(page)
+        except Exception:
+            pass
+
+
 def site_of(app: Path):
     for name in [m for m in list(sys.modules)
                  if m.endswith("_site") or m == "storage"]:
@@ -85,7 +116,7 @@ def test_a_control_with_no_readable_label_is_not_clicked(app, label):
     site = site_of(app)
     control = Control(text=label, aria=label)
     try:
-        site.next_page(page_showing(control))
+        run_each(site, app, page_showing(control))
     except Exception:
         pass
     assert control.clicked == 0, \
@@ -100,7 +131,7 @@ def test_a_control_that_commits_something_is_still_not_clicked(app):
     for label in ("Pay now", "Place Order", "Manage AutoPay"):
         control = Control(text=label, aria=label)
         try:
-            site.next_page(page_showing(control))
+            run_each(site, app, page_showing(control))
         except Exception:
             pass
         assert control.clicked == 0, \
@@ -116,7 +147,7 @@ def test_an_ordinary_next_control_is_still_clicked(app):
     for label in ("Next", "Next page", ">"):
         control = Control(text=label, aria="Next")
         try:
-            site.next_page(page_showing(control))
+            run_each(site, app, page_showing(control))
         except Exception:
             pass
         clicked += control.clicked
