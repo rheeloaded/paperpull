@@ -72,3 +72,27 @@ def checked(iso, empty=None):
     from one it never found.
     """
     return iso if iso and is_real_date(iso) else empty
+
+
+def full_year(two: int, today_year: int = 0) -> int:
+    """`26` as 2026 and `99` as 1999.
+
+    Eleven apps read a two digit year as 2000 plus the number, so a page
+    showing 12/31/99 gave 2099. A statement dated seventy-three years from
+    now sorts above everything real, is filed in a folder for a year that
+    has not happened, and passes every date filter, because 2099 is a date
+    that exists and nothing else about it is wrong.
+
+    A year is a year in the past or the one just starting, never decades
+    ahead, so the split is made there: up to the coming year is this
+    century, and anything beyond it belongs to the last one. That keeps
+    working as the years pass, rather than needing a hardcoded pivot moved
+    every so often the way strptime's 1969 does.
+    """
+    from datetime import date
+    two = int(two)
+    if not 0 <= two <= 99:
+        raise ValueError("a two digit year is 0 to 99, not %r" % two)
+    now = int(today_year or date.today().year)
+    guess = now - (now % 100) + two
+    return guess if guess <= now + 1 else guess - 100

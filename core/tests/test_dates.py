@@ -98,3 +98,42 @@ def test_checked_answers_the_way_the_app_already_did():
     assert checked("1234-56-78", "") == ""
     assert checked("", "") == ""
     assert checked("2026-08-31", "") == "2026-08-31"
+
+
+# -- a two digit year ----------------------------------------------------------
+
+def test_a_short_year_lands_in_the_century_it_belongs_to():
+    from paperpull_core.dates import full_year
+    assert full_year(26, today_year=2026) == 2026
+    assert full_year(27, today_year=2026) == 2027   # the coming year
+    assert full_year(28, today_year=2026) == 1928   # beyond it, so the last one
+    assert full_year(99, today_year=2026) == 1999
+    assert full_year(0, today_year=2026) == 2000
+
+
+def test_the_split_moves_with_the_years_rather_than_sitting_still():
+    """strptime's pivot is the fixed year 1969, which was wrong for a while
+    before it was fixed and will be wrong again. This one has no pivot to be
+    wrong: it is always the coming year."""
+    from paperpull_core.dates import full_year
+    assert full_year(99, today_year=2098) == 2099   # the coming year, in 2098
+    assert full_year(5, today_year=2098) == 2005
+    assert full_year(1, today_year=2101) == 2101
+    assert full_year(99, today_year=2101) == 2099
+    assert full_year(50, today_year=1975) == 1950
+    assert full_year(76, today_year=1975) == 1976   # the coming year, in 1975
+    assert full_year(77, today_year=1975) == 1877
+
+
+def test_a_number_that_is_not_a_two_digit_year_is_refused():
+    from paperpull_core.dates import full_year
+    import pytest as _pytest
+    for bad in (-1, 100, 1999):
+        with _pytest.raises(ValueError):
+            full_year(bad, today_year=2026)
+
+
+def test_it_takes_the_string_a_regex_hands_it():
+    from paperpull_core.dates import full_year
+    assert full_year("99", today_year=2026) == 1999
+    assert full_year("07", today_year=2026) == 2007

@@ -62,6 +62,7 @@ from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.dates import full_year as _full_year
 
 log = logging.getLogger("golden1_docs.site")
 
@@ -195,7 +196,7 @@ def _parse_date_from_page(text: str) -> Optional[str]:
             if kind == "mdy_slash":
                 return f"{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
             if kind == "mdy_slash2":
-                return f"{2000 + int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+                return f"{_full_year(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
             if kind == "iso":
                 return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
         except (KeyError, ValueError):
