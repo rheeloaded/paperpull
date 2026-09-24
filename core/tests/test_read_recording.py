@@ -415,3 +415,35 @@ def test_the_reader_never_puts_a_typed_value_in_its_output():
     r = report(steps=[step(action="fill", value="hunter2",
                            locator={"how": "name", "value": "password"})])
     assert "hunter2" not in rr.render(r)
+
+
+def test_the_page_around_a_step_reads_as_an_outline_with_the_control_marked():
+    shape = {"root": {"tag": "body", "attrs": [], "visible": True,
+                      "child_count": 2, "children": [
+                          {"tag": "ul", "attrs": ["class"], "visible": True,
+                           "child_count": 12, "more": 11, "children": [
+                               {"tag": "li", "attrs": [], "visible": True,
+                                "child_count": 1, "target": True,
+                                "text": True}]},
+                          {"tag": "custom", "attrs": [], "visible": False,
+                           "child_count": 0, "shadow": True,
+                           "data_other": 2}]},
+             "nodes": 4, "truncated": True}
+    lines = rr.outline(shape)
+    assert lines[0] == "   body 2 children"
+    assert lines[1] == "     ul [class] 12 children"
+    assert lines[2] == "->     li 1 child has text"
+    assert lines[3] == "       ... 11 more not shown"
+    assert lines[4] == "     custom +2 data-* 0 children shadow root hidden"
+    assert "cut short at 4 elements" in lines[-1]
+    text = rr.render({"kind": "paperpull-recording", "provider": "Bank",
+                      "steps": [step(structure=shape)], "requests": []})
+    assert "THE PAGE AROUND EACH STEP" in text
+    assert "->     li 1 child has text" in text
+
+
+def test_a_recording_from_before_shapes_existed_still_reads():
+    text = rr.render({"kind": "paperpull-recording", "provider": "Bank",
+                      "steps": [step()], "requests": []})
+    assert "THE PAGE AROUND EACH STEP" not in text
+    assert rr.outline(None) == [] and rr.outline({"root": "x"}) == []

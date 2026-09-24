@@ -155,6 +155,11 @@ knows it, and the values after the `?` in an address, keeping only the names of
 the settings so a maintainer can see there was a year filter without seeing
 which year. What is left should be page headings, the names of buttons and
 links, and the shapes of the data the site loaded, with no values in them.
+Each step also carries a `structure` block. It is long, and it holds only
+element kinds like `div` and `li`, attribute names like `aria-label`, and
+numbers, so there is nothing in it to edit. If you ever see a word in there
+that came off your page, that is a bug, and say so on the issue instead of
+sending the file.
 
 **The app points at what to check.** When the recording ends it prints a short
 list of things worth a look, quoting each one so you can find it. That list is
@@ -300,6 +305,14 @@ project, because the point of writing it down is that you can check it against
 - The addresses of the provider's own data requests and the **shape** of what
   came back, meaning the names of the fields and whether each one held a
   number or some text. Never the contents.
+- The **structure** of the page around each control you used. What kind of
+  element it sat in, what was next to it, how many rows a list had, which
+  parts were hidden. It reads like `ul 12 children` or
+  `button [name type] has text`. Element kinds and attribute names only,
+  taken from fixed lists in the source, so never a word from the page, never
+  an attribute's value and never an address. This is what the maintainer
+  writes the code that finds a button from, and it is the part of the file
+  that stops the next build guessing.
 
 **It does not record what you type.** Not the text, not a password, not a
 one-time code, not a search term. This is not a filter applied afterwards.

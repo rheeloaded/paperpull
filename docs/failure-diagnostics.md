@@ -328,6 +328,36 @@ Adopting it is per app and happens in each provider's next round, at the
 waits that are guesses. `test_every_app_waits_safely.py` checks every app
 that does passes its journal, a name, an invariant and a budget.
 
+## The page's shape, in a recording
+
+A recording names each control the way a person reads it, which is what
+a locator is written from, and nothing about where that control sits.
+Whether it is the third of twelve rows of the same shape, whether its
+parent is a custom element or a shadow root, whether a hidden twin sits
+beside it. Those are what a selector is actually written from, and every
+one cost Costco a round.
+
+So each recorded step now carries the structure around the control. The
+path from the body down to it, its neighbors at every level, and three
+levels inside it. Each element is a tag off a fixed list, `custom` for
+one the site defined and `other` for anything else, a role off the ARIA
+list, the names of the attributes it carries from a fixed list with the
+rest counted, how many children it has, whether it is visible, and
+whether it has any text of its own. Never the text, never a value, never
+an address.
+
+It is built on the allowlist twice. The page builds each node from the
+lists, and Python builds it again from what the page sent, because any
+script on a provider's page can call the recorder's binding. The canary
+page now plants secrets in attribute values, attribute names, a custom
+element's tag, an inline style, a shadow root and text sixteen levels
+down, and none reaches a recording or a failure file. A step's shape is
+capped at 300 elements and says when it was cut, and costs about a
+millisecond per click on a page of three thousand rows.
+
+`tools/read_recording.py` prints it as an outline with the control
+marked.
+
 ## What this does not fix
 
 - A provider that only breaks on an account with something unusual on

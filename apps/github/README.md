@@ -47,6 +47,9 @@ two-factor prompts.
    page's words with the numbers masked, every link on it with its kind,
    the rows the app would take, and whether the receipt link gave a PDF
    or a page. If anything in it looks personal, delete that line.
+   A recording also has a long `structure` block on each step. It holds
+   only element kinds, attribute names and counts, so there is nothing
+   in it to edit.
 7. Attach both files to [issue #43](https://github.com/rheeloaded/paperpull/issues/43)
    with a sentence about what a receipt looks like to you.
 8. When a new build is posted, click **Pilot** and say whether PDFs landed

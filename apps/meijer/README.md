@@ -45,6 +45,9 @@ touches your credentials and never bypasses CAPTCHAs or OTP.
    the rows the app would take, the shape of the page's data, and whether
    the receipt link gave a PDF or a page. If anything in it looks
    personal, delete that line.
+   A recording also has a long `structure` block on each step. It holds
+   only element kinds, attribute names and counts, so there is nothing
+   in it to edit.
 7. Attach both files to [issue #42](https://github.com/rheeloaded/paperpull/issues/42)
    with a sentence about what the orders page and a receipt look like to
    you, and whether your in-store purchases show up there or only under
