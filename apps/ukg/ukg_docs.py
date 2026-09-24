@@ -824,17 +824,13 @@ class App:
             info["title"] = page.title()
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            site.expand_all(page)
-            site.scroll_full_page(page)
-            info["row_counts"] = {}
-            for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
-                              ("table rows", "table tbody tr"),
-                              ("pdf links", "a[href*='.pdf']"),
-                              ("download attrs", "a[download]")]:
-                try:
-                    info["row_counts"][name] = page.locator(sel).count()
-                except Exception as e:
-                    info["row_counts"][name] = f"ERR {e}"
+            # UKG reads a JSON API and clicks nothing, so it has no
+            # selectors, no expand_all and no scroll_full_page. Those three
+            # came in with a diagnose copied from an app that scrapes a
+            # page, and the first of them raised AttributeError, which
+            # ended the survey five fields in. Everything below this point
+            # has never appeared in a UKG diagnose file.
+            info["row_counts"] = {"note": "UKG is read through its API, not the page"}
             docs = site.collect_documents(page)
             info["collected"] = len(docs)
             info["samples"] = []

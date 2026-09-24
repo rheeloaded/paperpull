@@ -912,6 +912,13 @@ def find_printing_frame(page, wait_ms: int = 2000):
     return None
 
 
+def find_receipt_iframe(page):
+    """Amazon's invoice is a page of its own, never an iframe. The other
+    seven receipt apps carry this same stub and Amazon did not, so its
+    Diagnose stopped here and wrote nothing after it."""
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Host allowlist. Added repo-wide after a review found this app would fetch or
 # navigate to whatever URL a stored record or a page attribute contained, using
