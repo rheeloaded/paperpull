@@ -158,7 +158,7 @@ _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
 _MONTHS = {m[:3].lower(): i + 1 for i, m in enumerate(_MONTH_NAMES)}
 DATE_PATTERNS = [
     (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"), "mdy_slash"),
-    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "iso"),
+    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!\d)"), "iso"),
     (re.compile(r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
                 r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
                 r"Dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4})", re.I), "mdY"),

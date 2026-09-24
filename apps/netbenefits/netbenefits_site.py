@@ -222,7 +222,7 @@ def ensure_statements(page) -> bool:
 def _parse_date_from_page(text: str) -> str:
     """'02/09/2026' or '2026-02-09' -> '2026-02-09', else ''."""
     s = (text or "").strip()
-    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+    if re.match(r"^\d{4}-\d{2}-\d{2}(?!\d)", s):
         return s[:10]
     m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
     if m:
