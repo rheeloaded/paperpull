@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.controls import safe_selects as _safe_selects
 from storage import now_iso
 
 log = logging.getLogger("target_receipts.site")
@@ -314,7 +315,8 @@ def get_year_options(page) -> List[str]:
     exists. Target's current history page uses 'Load more purchases' instead,
     so this usually returns [], that's fine and handled by the caller."""
     try:
-        for select in page.locator("select").all():
+        for select, _identity in _safe_selects(page, FORBIDDEN_CONTROL_RE,
+                                               signed_out=looks_signed_out):
             options = [o.strip() for o in select.locator("option").all_inner_texts()]
             candidate = [o for o in options if YEAR_OPTION_RE.fullmatch(o)]
             # only trust selects where most options look like years/ranges
@@ -329,7 +331,11 @@ def select_year_option(page, option_text: str) -> bool:
     """Choose a year / date-range option in the <select> filter that
     get_year_options() found. Select elements only, never clicks buttons."""
     try:
-        for select in page.locator("select").all():
+        # Every dropdown on the page is a candidate here, matched only by an
+        # option's text, so the filter comes first. On Ally this same shape of
+        # lookup once matched a money TRANSFER widget's <select> and set it.
+        for select, _identity in _safe_selects(page, FORBIDDEN_CONTROL_RE,
+                                               signed_out=looks_signed_out):
             options = select.locator("option").all_inner_texts()
             if any(option_text.strip() == o.strip() for o in options):
                 select.select_option(label=option_text.strip())

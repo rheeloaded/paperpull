@@ -29,6 +29,7 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.controls import safe_selects as _safe_selects
 
 log = logging.getLogger("wealthfront_docs.site")
 
@@ -474,9 +475,11 @@ def set_document_type(page, label: str) -> bool:
             return True
     except Exception:
         pass
-    # any native <select> offering that option
+    # any native <select> offering that option, which is every dropdown on
+    # the page, so the core's filter decides which may be touched at all
     try:
-        for sel in page.locator("select").all():
+        for sel, _identity in _safe_selects(page, FORBIDDEN_CONTROL_RE,
+                                            signed_out=looks_signed_out):
             options = [o.strip() for o in sel.locator("option").all_inner_texts()]
             if any(o.lower() == label.lower() for o in options):
                 sel.select_option(label=label)
