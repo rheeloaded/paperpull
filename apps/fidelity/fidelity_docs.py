@@ -808,8 +808,13 @@ class App:
             info["survey"] = site.survey(page)
             try:
                 docs = site.collect_documents(page)
-            except site.NotMapped as e:
-                info["collected"] = str(e)
+            except Exception as e:
+                # This read `except site.NotMapped`, a name no module in
+                # this repository defines. An except clause is evaluated
+                # only when something is raised, so it cost nothing until
+                # collection failed, and then it replaced the real error
+                # with an AttributeError about the handler itself.
+                info["collected"] = "%s: %s" % (type(e).__name__, e)
                 docs = []
             info["collected"] = len(docs)
             info["samples"] = []
