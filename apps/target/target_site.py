@@ -470,6 +470,13 @@ def card_to_purchase(card: RawCard, purchase_type: str,
     if purchase_type == ONLINE and m:
         order_number = m.group(1)
     url = card.href if card.href.startswith("http") else base_url + card.href
+    # "starts with http" says nothing about WHERE. An absolute href on the
+    # orders page is followed with the signed-in browser and then stored and
+    # followed again on later runs, so the host is checked here, once, before
+    # the address is ever written down.
+    if not is_safe_url(url):
+        log.warning("refusing an order link that leads off Target: %s", url[:80])
+        return None
     store = ""
     sm = STORE_TRIP_RE.search(card.text or "")
     if sm:
@@ -491,6 +498,13 @@ def card_to_purchase(card: RawCard, purchase_type: str,
 # ---------------------------------------------------------------------------
 
 def goto_details(page, purchase: Purchase) -> None:
+    # The address can also arrive from a record written by an older version,
+    # or from `details_url = page.url` after the site redirected somewhere.
+    # Raising is handled: the caller retries once and then files the purchase
+    # for manual review, which is the right outcome for a record like this.
+    if not is_safe_url(purchase.details_url):
+        raise ValueError("refusing to open an order page that is not on Target: %s"
+                         % (purchase.details_url or "")[:80])
     page.goto(purchase.details_url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3000)
 
