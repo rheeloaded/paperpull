@@ -29,7 +29,9 @@ import html as _html
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path
+
+from paperpull_core.delivery import DOWNLOAD, DocumentRequest
+from paperpull_core.identity import Identity
 from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
@@ -428,10 +430,16 @@ def _row_download_link(page, mdy: str):
     return None
 
 
-def _attempt_download(page, iso_date: str, out_path) -> Optional[bool]:
-    """One download attempt on the current page. Returns True on success, False
-    if the statement row/link can't be found, or None if we can't even reach a
-    signed-in Statements page (caller should reload / re-check the session)."""
+def statement_request(page, iso_date: str) -> Optional[DocumentRequest]:
+    """Everything up to the click, for the statement dated `iso_date`.
+
+    Reach the statements page, pick that statement's year in the
+    switcher, find its row's download link and check the control. Then
+    stop, and hand the click to delivery.deliver.
+
+    None when the page cannot be reached, the row is not there, or the
+    control is one this app will not press. The caller tells those apart
+    by asking looks_signed_out, the way it always did."""
     if "/statements" not in (page.url or ""):
         if not goto_documents(page):
             return None
@@ -442,13 +450,13 @@ def _attempt_download(page, iso_date: str, out_path) -> Optional[bool]:
     if year and not any(d.startswith(year) for d in _row_dates(page)):
         if not _select_year(page, year):
             log.info("could not select year %s for %s", year, iso_date)
-            return False
+            return None
 
     mdy = _mdy_from_iso(iso_date)
     link = _row_download_link(page, mdy)
     if link is None:
         log.info("statement row not found for %s (%s)", iso_date, mdy)
-        return False
+        return None
 
     # Safety. This used to read is_safe_control("Download PDF statement") with
     # that string hardcoded, which always returned True and therefore gated
@@ -472,51 +480,45 @@ def _attempt_download(page, iso_date: str, out_path) -> Optional[bool]:
     templated = ("{{" in label) or ("}}" in label)
     if label and not templated and not is_safe_control(label):
         log.error("refusing a control labeled %r", label[:60])
-        return False
+        return None
 
-    from paperpull_core.receipt_pdf import save_download
     try:
         link.scroll_into_view_if_needed(timeout=4000)
     except Exception:
         pass
-    with page.expect_download(timeout=45000) as dl:
-        link.click()
-    save_download(dl.value, out_path)
-    return True
+    # A statement row carries its date and nothing else this app reads,
+    # so that is the one fact a saved file can be checked against.
+    return DocumentRequest(trigger=link.click,
+                           expect=Identity(date=iso_date),
+                           hints=(DOWNLOAD,))
 
 
-def download_document(page, category, iso_date: str, out_path) -> bool:
-    """Download the billing statement dated `iso_date`. Selects that statement's
-    year in the switcher, finds its table row, and clicks the row's 'Download
-    pdf' link, capturing the real download event. `category` is unused (every
-    document here is a Statement).
+def resync(page) -> bool:
+    """Get back to a live statements page after a click did nothing.
 
-    TD's portal session is short-lived: when it expires the SPA keeps showing a
-    cached statements table, but download clicks silently do nothing. So if the
-    first attempt fails, hard-navigate to the Statements URL (which redirects to
-    the auth page if the session is truly dead, letting looks_signed_out catch
-    it) and retry once."""
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    TD's portal session is short-lived and dies quietly. The SPA keeps
+    showing a cached statements table while download clicks silently do
+    nothing, so a first attempt producing nothing is ordinary here
+    rather than exceptional.
 
-    try:
-        r = _attempt_download(page, iso_date, out_path)
-        if r:
-            return True
-    except Exception as e:
-        log.info("download attempt 1 failed for %s: %s", iso_date, e)
+    A fresh navigation refreshes a stale download token and surfaces a
+    dead session as a redirect to the auth page, which looks_signed_out
+    then catches. False means the session is gone and retrying would
+    only click at a page that cannot answer.
 
-    # Re-sync: a fresh navigation refreshes any stale download token and surfaces
-    # an expired session as a redirect to the auth page.
+    This is the app's own business. The interceptor fires a trigger
+    exactly once on purpose, because a click on somebody's bank is not
+    a thing to repeat, so a provider that needs another attempt builds
+    another request for it."""
     try:
         page.goto(STATEMENTS_URL, wait_until="domcontentloaded", timeout=45000)
         page.wait_for_timeout(3000)
         if looks_signed_out(page):
-            log.info("session expired while downloading %s (needs re-login)", iso_date)
+            log.info("the session expired, so a retry would not help")
             return False
-        return bool(_attempt_download(page, iso_date, out_path))
+        return True
     except Exception as e:
-        log.info("download click failed for %s: %s", iso_date, e)
+        log.info("could not get back to the statements page: %s", e)
         return False
 
 
