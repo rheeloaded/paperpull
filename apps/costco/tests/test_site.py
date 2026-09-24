@@ -713,3 +713,54 @@ def test_the_module_says_which_facts_came_from_the_recording():
     assert "SEEN" in doc
     assert doc.count("SEEN") >= 5
     assert not re.search(r"^GUESS", doc, re.M), "the guesses are gone now"
+
+
+# -- what proves a saved receipt is the purchase it was filed under -----------
+
+def test_a_warehouse_receipt_is_never_asked_for_its_invented_key():
+    """The trap in this app. Costco gives a warehouse receipt no number,
+    so warehouse_key invents one out of the date and the total, and that
+    string appears on no receipt ever printed. Handing it over as a fact
+    would refuse every warehouse receipt this app ever saves."""
+    p = Purchase(order_number=site.warehouse_key("2026-01-15", "$1,284.55",
+                                                 "Fairfax"),
+                 purchase_date="2026-01-15", total="1284.55")
+    assert p.order_number.startswith("wh-")
+    ident = site.identity_for(p)
+    assert ident.number == ""
+    assert sorted(ident.strong()) == ["date", "total"]
+
+
+def test_an_online_order_keeps_its_real_number():
+    """An online order's number is Costco's own and is printed on the
+    invoice, which makes it the best fact available."""
+    p = Purchase(order_number="8421997301", purchase_date="2026-01-15",
+                 total="1284.55")
+    ident = site.identity_for(p)
+    assert ident.number == "8421997301"
+    assert "number" in ident.strong()
+
+
+def test_a_purchase_with_nothing_on_its_row_checks_nothing():
+    """Better than inventing a fact. An unknown is reported as unchecked
+    rather than passed off as verified."""
+    assert not site.identity_for(Purchase()).is_checkable()
+
+
+def test_the_identity_tells_two_receipts_on_the_same_list_apart():
+    """The failure this is for. Two warehouse rows, and the app captures
+    the one below the one it is writing."""
+    from paperpull_core import identity as I
+
+    printed = ("Costco Wholesale  Fairfax\n"
+               "01/15/2026\n"
+               "TOTAL 1,284.55\n"
+               "Thank you for shopping. Member copy, retain for returns.\n")
+    january = Purchase(order_number="wh-20260115-128455-Fairfax",
+                       purchase_date="2026-01-15", total="1284.55")
+    february = Purchase(order_number="wh-20260209-7641-Fairfax",
+                        purchase_date="2026-02-09", total="76.41")
+    assert I.verify(None, site.identity_for(january),
+                    text=printed).outcome == I.VERIFIED
+    assert I.verify(None, site.identity_for(february),
+                    text=printed).outcome == I.REFUSED

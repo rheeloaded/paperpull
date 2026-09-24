@@ -11,5 +11,6 @@
   "delay_min_seconds": 2.0,
   "delay_max_seconds": 4.5,
   "pilot_online": 5,
-  "pilot_instore": 3
+  "pilot_instore": 3,
+  "verify_documents": true
 }

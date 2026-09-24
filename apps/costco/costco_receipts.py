@@ -21,6 +21,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core import delivery
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -598,7 +599,10 @@ class App:
         self._record_state(purchase, State.RECEIPT_LOCATED)
         purchase.receipt_url = page.url
         try:
-            self._capture_document(page, purchase, out_path)
+            with restoring(page, journal=self.journal):
+                got = self._capture_document(page, purchase, out_path)
+            if got.outcome == delivery.WRONG:
+                return self._refused(purchase, got)
             ok = self._finish_pdf(page, purchase, out_path, source_page=page)
             self.journal.result("saved the document" if ok
                                 else "could not save the document",
@@ -613,7 +617,7 @@ class App:
             return False
 
     def _capture_document(self, target_page, purchase: Purchase,
-                          out_path: Path, content_kind: str = "") -> None:
+                          out_path: Path, content_kind: str = ""):
         """Render the receipt on screen to PDF.
 
         A warehouse receipt is a dialog sitting on top of the whole site,
@@ -630,9 +634,48 @@ class App:
         elsewhere, and the second receipt of a run was being looked for
         on a page where nothing could be clicked. From outside that is
         a page that did not load, and it cost two live runs to find.
+
+        The render goes through `delivery.render`, so the receipt is
+        printed to a staging file beside the destination, read back, and
+        moved into place only if it is the purchase that was asked for.
+        A warehouse receipt is checked on its date and total, because
+        Costco gives one no number and the key this app invents for it
+        appears on no receipt ever printed. See site.identity_for.
         """
-        with restoring(target_page, journal=self.journal):
-            self._render(target_page, out_path)
+        return delivery.render(
+            target_page,
+            lambda staged: self._render(target_page, staged),
+            out_path,
+            expect=site.identity_for(purchase),
+            journal=self._journal,
+            strict=bool(self.config.get("verify_documents", True)))
+
+    def _refused(self, purchase: Purchase, got) -> bool:
+        """A receipt was printed, read back, and is not this purchase.
+
+        Nothing is quarantined because nothing was kept. The file was
+        destroyed at the staging path, which is the point of checking
+        before writing rather than after.
+
+        This is reported apart from an ordinary failure on purpose. A
+        run that saved nothing is a run that did not work. A run that
+        produced a document belonging to a different purchase is a run
+        whose other documents are now also in doubt."""
+        why = "the receipt that printed is not this purchase"
+        self._record_state(purchase, State.NEEDS_MANUAL_REVIEW, notes=why)
+        self._write_csv_rows(purchase, receipt_status="Wrong document",
+                             processing_status=State.NEEDS_MANUAL_REVIEW.value,
+                             notes_extra=why)
+        self.stats["manual_review"] += 1
+        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+        print("  !! %s" % got.say())
+        print("     Nothing was saved for it. The file was destroyed rather")
+        print("     than filed under this purchase's name.")
+        self.write_failure("save the receipt", why)
+        self.journal.result("refused the document",
+                            **{k: v for k, v in got.report().items()
+                               if k in ("outcome", "mechanism")})
+        return False
 
     def _render(self, target_page, out_path: Path) -> None:
         """The capture itself. Always called with the page remembered."""

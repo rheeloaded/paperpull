@@ -435,3 +435,85 @@ def test_the_canaries_are_checked_lowercased_too():
     for secret in ("CANARYORDER8421", "2026-01-15", "January"):
         assert secret not in body
         assert secret.lower() not in body.lower()
+
+
+# -- rendering, for the twelve providers with no file to catch ----------------
+
+def test_a_rendered_receipt_is_staged_checked_and_moved(monkeypatch, tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    out = tmp_path / "receipt.pdf"
+    got = D.render(FakePage(), lambda p: Path(p).write_bytes(PDF), out,
+                   expect=EXPECT)
+    assert got.ok and got.mechanism == D.RENDERED
+    assert out.read_bytes() == PDF
+    assert [p.name for p in tmp_path.iterdir()] == ["receipt.pdf"]
+
+
+def test_the_second_receipt_carrying_the_first_is_refused(monkeypatch, tmp_path):
+    """A dialog that never closed leaves the previous receipt on screen,
+    so the next capture prints it again under the next receipt's name.
+    That is a real Costco bug and it is invisible without this."""
+    patch_text(monkeypatch, RIGHT)
+    out = tmp_path / "February receipt.pdf"
+    got = D.render(FakePage(), lambda p: Path(p).write_bytes(PDF), out,
+                   expect=I.Identity(date="2026-02-09", total="76.41"))
+    assert got.outcome == D.WRONG
+    assert not out.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_blank_render_is_not_filed(monkeypatch, tmp_path):
+    """An open modal locks scrolling and printToPDF produces one blank
+    sheet. Another real Costco bug."""
+    monkeypatch.setattr(I, "_text_of", lambda path, pages: "")
+    out = tmp_path / "receipt.pdf"
+    got = D.render(FakePage(), lambda p: Path(p).write_bytes(PDF), out,
+                   expect=EXPECT)
+    # Nothing to read means nothing to disagree with, so it is kept and
+    # said out loud rather than refused.
+    assert got.verdict.outcome == I.UNREADABLE
+    assert out.exists()
+
+
+def test_a_render_that_raises_leaves_nothing_behind(tmp_path):
+    def boom(path):
+        Path(path).write_bytes(b"half a document")
+        raise RuntimeError("the modal went away")
+
+    out = tmp_path / "receipt.pdf"
+    got = D.render(FakePage(), boom, out, expect=EXPECT)
+    assert got.outcome == D.NOTHING
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_render_that_writes_nothing_is_reported(tmp_path):
+    got = D.render(FakePage(), lambda p: None, tmp_path / "r.pdf",
+                   expect=EXPECT)
+    assert got.outcome == D.NOTHING
+
+
+def test_a_render_that_produced_html_is_not_filed(monkeypatch, tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    out = tmp_path / "receipt.pdf"
+    got = D.render(FakePage(), lambda p: Path(p).write_bytes(NOT_PDF), out,
+                   expect=EXPECT)
+    assert got.outcome == D.NOT_A_PDF
+    assert not out.exists()
+
+
+def test_a_provider_with_nothing_to_check_still_renders(monkeypatch, tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    out = tmp_path / "receipt.pdf"
+    got = D.render(FakePage(), lambda p: Path(p).write_bytes(PDF), out)
+    assert got.ok and got.verdict.outcome == I.UNCHECKED
+
+
+def test_rendering_never_learns_how_to_print(tmp_path):
+    """The callable does the printing and this module is handed only a
+    path. If that ever changes, receipt_pdf's knowledge has leaked in
+    here and the two halves have become one."""
+    seen = []
+    D.render(FakePage(), lambda p: (seen.append(p), Path(p).write_bytes(PDF))[1],
+             tmp_path / "r.pdf", expect=EXPECT)
+    assert len(seen) == 1
+    assert str(seen[0]).endswith(".delivering")
