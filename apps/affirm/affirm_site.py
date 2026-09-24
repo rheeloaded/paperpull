@@ -231,7 +231,7 @@ _TEXT_JS = """async (url) => {
 def _parse_date_from_page(text: str) -> str:
     """'2025-11-29T23:17:45Z', '02/09/2026' or 'Feb 9, 2026' -> ISO date, else ''."""
     s = (text or "").strip()
-    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+    if re.match(r"^\d{4}-\d{2}-\d{2}(?!\d)", s):
         return s[:10]
     m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
     if m:

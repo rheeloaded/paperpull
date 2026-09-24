@@ -226,7 +226,7 @@ DATE_PATTERNS = [
     (re.compile(r"\b(\d{1,2})\.?\s+(" + _MONTH_WORDS + r")\.?\s+(\d{4})", re.I), "dMY"),
     # 01/05/2025, which is month first or day first by store, and 05.01.2025
     (re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b"), "slash"),
-    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "iso"),
+    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!\d)"), "iso"),
 ]
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}

@@ -166,7 +166,7 @@ TAX_YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
 
 
 MDY_RE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
-ISO_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+ISO_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!\d)")
 
 
 def _parse_date_from_page(text: str) -> Optional[str]:

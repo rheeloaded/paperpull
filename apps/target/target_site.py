@@ -143,7 +143,7 @@ DATE_PATTERNS = [
     # "06/05/2026"
     (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"), "mdy_slash"),
     # "2026-06-05"
-    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "iso"),
+    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!\d)"), "iso"),
 ]
 
 _MONTHS = {m: i + 1 for i, m in enumerate(
