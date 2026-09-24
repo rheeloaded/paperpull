@@ -21,6 +21,7 @@ service.
 """
 from __future__ import annotations
 
+from paperpull_core import delivery
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -497,6 +498,30 @@ class App:
                 self.stats["failed"] += 1
             self._delay()
 
+    def _deliver_statement(self, page, doc, out_path):
+        """One statement, with the one retry this provider needs.
+
+        Retried only when nothing came back at all, which is what a dead
+        TD session looks like. A document that arrived and was refused is
+        never retried, because that is a real file belonging to another
+        statement and clicking again would only hide it."""
+        for attempt in (1, 2):
+            request = site.statement_request(page, doc.date)
+            if request is None:
+                if attempt == 2 or not site.resync(page):
+                    return None
+                continue
+            got = delivery.deliver(
+                page, request, out_path,
+                is_safe_url=site.is_safe_url, journal=self.journal,
+                strict=bool(self.config.get("refuse_wrong_documents", True)))
+            print("  %s" % got.say())
+            if got.outcome != delivery.NOTHING or attempt == 2:
+                return got
+            if not site.resync(page):
+                return got
+        return None
+
     def download_one(self, page, doc: Document, filename: str):
         """Download one document PDF: navigate (by SPA clicks, never page.goto)
         to the Statements & Year End Summaries page, click the row's Download,
@@ -517,7 +542,23 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
-        saved = site.download_document(page, doc.category, doc.date, out_path)
+        # The site layer navigates, picks the year, finds the row's
+        # download link and guards it. Catching whatever the click
+        # produces, and checking it is this statement, is the
+        # interceptor's. The retry is ours, because TD's session dies
+        # quietly and the first click often does nothing at all.
+        got = self._deliver_statement(page, doc, out_path)
+        if got is not None and got.outcome == delivery.WRONG:
+            why = "the statement that downloaded is not the one it was listed as"
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+            self._write_row(doc, "Wrong document", "Needs Manual Review")
+            self.write_failure("save the document", why)
+            self.stats["manual_review"] += 1
+            self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+            print("  Nothing was saved for it. The file was destroyed rather")
+            print("  than filed under this statement's name.")
+            return
+        saved = bool(got and got.ok)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
