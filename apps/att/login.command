@@ -21,5 +21,6 @@ echo 'Your own Edge or Chrome will open, with a separate profile. Then:'
 echo '1. Sign in to AT&T (do all the 2FA / device approval yourself)'
 echo '2. Open your billing page (myAT&T, Billing, bill history)'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
+echo '4. Then run:  paperpull att diagnose   (a survey for the maintainer)'
 
 "$PY" att_docs.py --open-browser $CFG

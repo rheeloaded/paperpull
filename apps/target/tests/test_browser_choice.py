@@ -50,6 +50,43 @@ LOGIN = inspect.getsource(target_receipts.App.cmd_login)
 SESSION = inspect.getsource(target_receipts.App.check_session)
 
 
+# -- and the window still closed, because it was never ours to keep (#48) ----
+
+OPEN = inspect.getsource(target_receipts.App.cmd_open_browser)
+BROWSER = inspect.getsource(target_receipts.App.browser)
+
+
+def test_the_sign_in_window_is_not_a_child_of_this_process():
+    """The first repair stopped the crash and the window still vanished.
+    A browser Playwright launches is a child of the process that launched
+    it, so nothing done inside a command that is about to return can keep
+    it alive. It is started as its own process now, the way the other
+    forty-seven apps do it."""
+    assert "open_signin_browser" in OPEN
+    assert "launch_persistent_context" not in OPEN
+
+
+def test_the_app_attaches_to_the_window_you_signed_into():
+    assert "connect_over_cdp" in BROWSER
+    before, _, _after = BROWSER.partition("connect_over_cdp")
+    assert "cdp_url" in before, "attaching is what it tries first"
+
+
+def test_an_install_made_before_this_still_works():
+    """Nobody's setup changes under them. With no cdp_url it launches
+    here, exactly as it did."""
+    assert "launch_persistent_context" in BROWSER
+    assert "No cdp_url" in BROWSER or "no cdp_url" in BROWSER.lower()
+
+
+def test_the_panel_knows_which_flag_to_send():
+    """The panel reads the script for the literal flag and sends that
+    from its Login button, so declaring it only through the modes table
+    would have left Login opening nothing."""
+    src = inspect.getsource(target_receipts)
+    assert '"--open-browser"' in src
+
+
 def test_login_does_not_wait_at_a_prompt_nobody_can_answer():
     """On 0.32.0 the window opened and shut again. The browser fix worked
     and the app then asked "Press Enter here AFTER you have finished
@@ -59,13 +96,19 @@ def test_login_does_not_wait_at_a_prompt_nobody_can_answer():
     assert "ask(" not in LOGIN, "no prompt is left in Login"
 
 
-def test_login_leaves_the_browser_open_when_it_could_not_ask():
-    """Closing it is what made the window vanish, and it is the window
-    the person was about to sign in to."""
+def test_closing_the_connection_is_not_closing_the_window():
+    """This used to promise it left the browser open, which it could not
+    keep, because the browser was its own child. Now the window is a
+    separate process and closing the connection to it is just letting go
+    of the handle."""
+    assert "self.close()" in LOGIN
+    assert "connect_over_cdp" in BROWSER, "what close() lets go of is an attachment"
+
+
+def test_the_old_path_still_does_not_wait_where_nobody_can_answer():
     before, _, after = LOGIN.partition("pause_for_sign_in()")
-    assert "self.close()" not in before
-    next_two = " ".join(after.strip().splitlines()[:2])
-    assert "return" in next_two, "it returns before anything is checked or closed"
+    assert before, "the launch-here path is still there for an older install"
+    assert "return" in " ".join(after.strip().splitlines()[:2])
 
 
 def test_a_run_that_meets_a_challenge_stops_instead_of_dying():

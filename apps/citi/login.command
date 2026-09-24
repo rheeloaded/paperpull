@@ -21,5 +21,6 @@ echo 'Your own Edge or Chrome will open, with a separate profile. Then:'
 echo '1. Sign in to Citi (do all the 2FA / device approval yourself)'
 echo '2. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
 echo '3. Then run:  paperpull citi pilot   (the five newest statements)'
+echo 'READ-ONLY: this tool only downloads your statement PDFs. It NEVER'
 
 "$PY" citi_docs.py --open-browser $CFG

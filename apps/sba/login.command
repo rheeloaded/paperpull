@@ -19,7 +19,8 @@ echo 'SBA Documents - sign in'
 echo '============================================================'
 echo 'Your own Edge or Chrome will open, with a separate profile. Then:'
 echo '1. Sign in to SBA (do all the 2FA / device approval yourself)'
-echo '2. Open your loan's Statements page in the MySBA Loan Portal'
+echo '2. Open your loan'\''s Statements page in the MySBA Loan Portal'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
+echo '4. Then run:  paperpull sba diagnose   (a survey for the maintainer)'
 
 "$PY" sba_docs.py --open-browser $CFG
