@@ -7,7 +7,7 @@ taken nine to twelve rounds to fix through a tester.
 
 ## What the numbers actually say
 
-From this repo's own history.
+From this repo's own history, as it was remembered on 2026-09-22.
 
 | Provider | Rounds | Where it got to |
 |---|---|---|
@@ -19,9 +19,48 @@ From this repo's own history.
 
 Thirteen providers are marked untested today, and the three-round ones
 are on that list. **They are not cheaper than Costco. They are
-unfinished.** Costco is the only provider that has been driven all the
-way through this loop to a working Pilot, and it got there because the
-maintainer could run it himself.
+unfinished.** Costco got to a working app because the maintainer could
+run it himself.
+
+### The same numbers, counted from the record
+
+`tools/rounds.py` counts them from git and the issues rather than from
+memory, three ways, because each record is missing something. Shipped
+is releases linked on the issue that changed the app. Grouped is
+site-layer commits grouped by the tester reports between them. Named is
+the highest round a commit subject gave the provider. Read as of
+2026-09-22 the remembered numbers hold, AT&T 8, E\*TRADE 4, PG&E 3 and
+Golden 1 3 by name, and SMUD 3 by releases. State Farm and Newrez got
+their third round inside one commit that named seven providers and no
+numbers, so by name they show 2.
+
+Two things in the table above were wrong on the day. SMUD was not
+untested, its Pilot saved five bills on 2026-09-22 after three rounds,
+the first provider a tester took all the way. PG&E was not working, and
+its tester's latest Pilot still saved nothing. The tool also found one
+of its own mistakes. AT&T's issue linked 0.27.0, which carried nothing
+for AT&T, and counting it gave nine.
+
+The baseline on 2026-09-24, for item 6 to compare against.
+
+| Provider | Status | Shipped | To a working Pilot | Days |
+|---|---|---|---|---|
+| AT&T | Working | 11 | 8 | 2.1 |
+| SMUD | Working | 4 | 3 | 1.1 |
+| E\*TRADE | Working, newest statement only | 6 | 6 | 3.2 |
+| PG&E (repair) | In progress | 5 | | |
+| Golden 1, State Farm, Newrez | In progress | 5 each | | |
+| Meijer, GitHub, American Family, ADP | In progress | 3 each | | |
+| Kroger, eBay, Target (repair) | In progress | 2 each | | |
+| Costco | In progress with a tester | 1 | | |
+| Wells Fargo, SBA, Verizon Mobile | Untested, 4.2 days | 2 each | | |
+
+Three providers have reached a working Pilot through a tester, at a
+median of 6 rounds and a worst of 8, in a median of 2.1 days. Twelve are
+still going, at a median of 3 rounds so far and a worst of 5. The
+finding the tool was not asked for is who is waiting. Every one of the
+twelve in progress ended on a tester's report, so the loop is stalled
+on the maintainer, not on the testers.
 
 So Costco is not the hard case. Costco is the case we have ground truth
 for, and the ground truth is that the expensive half comes after the
@@ -277,3 +316,7 @@ them. The other eleven drive an API rather than a page, so their census
 comes back empty and the rest of the file, the page state and the text
 it was reading, still applies. A census of the request that failed and
 its status is what those eleven want, and is not built yet.
+
+The round count is `tools/rounds.py`. Run it with `--as-of` to read the
+record as it stood on an earlier day, which is how a before and after
+gets compared without trusting anybody's memory, including the tool's.
