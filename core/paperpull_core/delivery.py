@@ -109,6 +109,16 @@ class DocumentRequest:
     trigger: Optional[Callable[[], None]] = None
     url: str = ""
     expect: Optional[Identity] = None
+    # Called on every poll while waiting for the document to turn up.
+    # Navy Federal shows an inactivity modal that delays the blob tab
+    # from opening, so something has to keep dismissing it or the wait
+    # times out on a provider that was about to answer.
+    while_waiting: Optional[Callable[[], None]] = None
+    # Close tabs this capture opened once it is read. A provider that
+    # opens a blob tab per statement leaves one behind every time
+    # otherwise, and a full archive is hundreds of them. Off by default
+    # because a new tab is sometimes where the app wants to be.
+    close_new_tabs: bool = False
     # A route may say its provider is blob-first, or folder-first. It is
     # a preference for reading the race, never a restriction on arming.
     hints: tuple = field(default_factory=tuple)
@@ -122,6 +132,8 @@ class DocumentRequest:
         built from a page reach a file somebody posts publicly."""
         return {"has_trigger": self.trigger is not None,
                 "has_url": bool(self.url),
+                "waits_actively": self.while_waiting is not None,
+                "closes_tabs": bool(self.close_new_tabs),
                 "checkable": bool(self.expect and self.expect.is_checkable()),
                 "hints": sorted({h for h in (self.hints or ())
                                  if h in MECHANISMS})}
@@ -170,9 +182,10 @@ class _Armed:
     Playwright's own event loop, where an exception takes down the run
     rather than this capture."""
 
-    def __init__(self, page, dl_dir=None):
+    def __init__(self, page, dl_dir=None, close_new=False):
         self.page = page
         self.dl_dir = dl_dir
+        self.close_new = close_new
         self.download = None
         self.new_pages: list = []
         self.before: set = set()
@@ -205,6 +218,12 @@ class _Armed:
         return self
 
     def __exit__(self, *exc):
+        if self.close_new:
+            for extra in self.new_pages:
+                try:
+                    extra.close()
+                except Exception:
+                    pass
         try:
             self.page.remove_listener("download", self._on_download)
         except Exception:
@@ -430,7 +449,7 @@ def _acquire(page, request, staged: Path, is_safe_url, dl_dir, settle_ms,
     if request.trigger is None:
         return "", armed, rejected
 
-    with _Armed(page, dl_dir) as watch:
+    with _Armed(page, dl_dir, request.close_new_tabs) as watch:
         armed.extend(watch.armed)
         try:
             request.trigger()
@@ -447,6 +466,14 @@ def _acquire(page, request, staged: Path, is_safe_url, dl_dir, settle_ms,
         while waited < max(POLL_MS, int(settle_ms)):
             if watch.anything():
                 break
+            if request.while_waiting is not None:
+                # Guarded, and never a reason to stop waiting. A provider
+                # whose modal handler throws is still a provider that
+                # might be about to answer.
+                try:
+                    request.while_waiting()
+                except Exception as e:
+                    log.info("waiting-work raised, still waiting: %s", e)
             try:
                 page.wait_for_timeout(POLL_MS)
             except Exception:

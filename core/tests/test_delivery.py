@@ -517,3 +517,144 @@ def test_rendering_never_learns_how_to_print(tmp_path):
              tmp_path / "r.pdf", expect=EXPECT)
     assert len(seen) == 1
     assert str(seen[0]).endswith(".delivering")
+
+
+# -- a provider that needs work done while the wait happens -------------------
+
+def test_work_is_done_on_every_poll_while_waiting(monkeypatch, tmp_path):
+    """Navy Federal shows an inactivity modal that delays the blob tab
+    from opening. Something has to keep dismissing it or the wait times
+    out on a provider that was about to answer."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    dismissed = []
+    got = D.deliver(page, request(trigger=lambda: None,
+                                  while_waiting=lambda: dismissed.append(1)),
+                    tmp_path / "d.pdf", is_safe_url=safe, settle_ms=1000)
+    assert got.outcome == D.NOTHING
+    assert len(dismissed) >= 3, "the waiting work ran %d time(s)" % len(dismissed)
+
+
+def test_waiting_work_that_raises_does_not_stop_the_wait(monkeypatch, tmp_path):
+    """A provider whose modal handler throws is still a provider that
+    might be about to answer."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    calls = []
+
+    def boom():
+        calls.append(1)
+        raise RuntimeError("no modal today")
+
+    D.deliver(page, request(trigger=lambda: None, while_waiting=boom),
+              tmp_path / "d.pdf", is_safe_url=safe, settle_ms=1000)
+    assert len(calls) >= 3, "the wait stopped at the first raise"
+
+
+def test_no_waiting_work_is_the_normal_case(monkeypatch, tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    got = D.deliver(page, request(trigger=lambda: page.emit_download(
+        FakeDownload())), tmp_path / "d.pdf", is_safe_url=safe)
+    assert got.ok
+
+
+def test_waiting_work_stops_as_soon_as_something_arrives(monkeypatch, tmp_path):
+    """It is work done while waiting, not work done regardless."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    ran = []
+    D.deliver(page, request(trigger=lambda: page.emit_download(FakeDownload()),
+                            while_waiting=lambda: ran.append(1)),
+              tmp_path / "d.pdf", is_safe_url=safe, settle_ms=5000)
+    assert ran == [], "it kept working after the document had arrived"
+
+
+# -- tabs a capture opened -----------------------------------------------------
+
+class _ClosablePage(FakePage):
+    def __init__(self, url="blob:https://bank.example/abc"):
+        super().__init__(url)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_tabs_this_capture_opened_are_closed_when_asked(monkeypatch, tmp_path):
+    """A provider that opens a blob tab per statement leaves one behind
+    every time, and a full archive is hundreds of them."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    opened = _ClosablePage()
+    monkeypatch.setattr(D.capture, "take_new_tab",
+                        lambda p, pages, out, s: (Path(out).write_bytes(PDF), True)[1])
+
+    def trigger():
+        for fn in page.context.handlers.get("page", []):
+            fn(opened)
+
+    got = D.deliver(page, request(trigger=trigger, close_new_tabs=True),
+                    tmp_path / "d.pdf", is_safe_url=safe)
+    assert got.ok
+    assert opened.closed
+
+
+def test_tabs_are_left_alone_by_default(monkeypatch, tmp_path):
+    """A new tab is sometimes where the app wants to be, so closing one
+    is opt in."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    opened = _ClosablePage()
+    monkeypatch.setattr(D.capture, "take_new_tab",
+                        lambda p, pages, out, s: (Path(out).write_bytes(PDF), True)[1])
+
+    def trigger():
+        for fn in page.context.handlers.get("page", []):
+            fn(opened)
+
+    D.deliver(page, request(trigger=trigger), tmp_path / "d.pdf",
+              is_safe_url=safe)
+    assert not opened.closed
+
+
+def test_a_tab_that_will_not_close_does_not_fail_the_capture(monkeypatch,
+                                                             tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+
+    class Stubborn(_ClosablePage):
+        def close(self):
+            raise RuntimeError("already gone")
+
+    opened = Stubborn()
+    monkeypatch.setattr(D.capture, "take_new_tab",
+                        lambda p, pages, out, s: (Path(out).write_bytes(PDF), True)[1])
+
+    def trigger():
+        for fn in page.context.handlers.get("page", []):
+            fn(opened)
+
+    got = D.deliver(page, request(trigger=trigger, close_new_tabs=True),
+                    tmp_path / "d.pdf", is_safe_url=safe)
+    assert got.ok
+
+
+def test_a_stale_tab_from_a_previous_capture_is_never_read(monkeypatch,
+                                                           tmp_path):
+    """The bug Navy Federal hand-rolls around by closing old blob tabs
+    before it clicks. Arming after the fact means a tab opened by an
+    earlier capture was never collected, so it cannot be mistaken for
+    this document."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    stale = _ClosablePage("blob:https://bank.example/from-last-time")
+    page.context.pages = [stale]
+    seen = {}
+    monkeypatch.setattr(D.capture, "take_new_tab",
+                        lambda p, pages, out, s: (seen.setdefault("pages", list(pages)), False)[1])
+    monkeypatch.setattr(D.capture, "take_same_tab",
+                        lambda *a, **k: False)
+    D.deliver(page, request(trigger=lambda: None), tmp_path / "d.pdf",
+              is_safe_url=safe, settle_ms=500)
+    assert seen.get("pages", []) == [] or stale not in seen["pages"]

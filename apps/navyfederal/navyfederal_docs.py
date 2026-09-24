@@ -20,6 +20,7 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core import delivery
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -559,7 +560,28 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
-        saved = site.nfcu_download(page, page.context, doc.account, doc.date, out_path)
+        # The site layer navigates the accordions and the year picker and
+        # finds this row's View button. Catching the blob tab it opens,
+        # and checking the statement is this one, is the interceptor's.
+        request = site.statement_request(page, doc.account, doc.date)
+        got = None
+        if request is not None:
+            got = delivery.deliver(
+                page, request, out_path,
+                is_safe_url=site.is_safe_url, journal=self._journal,
+                strict=bool(self.config.get("refuse_wrong_documents", True)))
+            print("  %s" % got.say())
+        saved = bool(got and got.ok)
+        if got is not None and got.outcome == delivery.WRONG:
+            why = "the statement that opened is not the one it was listed as"
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+            self._write_row(doc, "Wrong document", "Needs Manual Review")
+            self.write_failure("save the document", why)
+            self.stats["manual_review"] += 1
+            self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+            print("  Nothing was saved for it. The file was destroyed rather")
+            print("  than filed under this statement's name.")
+            return
         if not saved:
             # A failed capture must not leave a file behind. Playwright's
             # save_as creates the target before the bytes arrive, so a
