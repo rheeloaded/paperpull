@@ -49,7 +49,7 @@ from typing import Dict, List, Optional, Tuple
 
 INDEX_SUFFIX = " Document Index.csv"
 CACHE_NAME = ".transactions-cache.json"
-CACHE_VERSION = 4      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32. 4: sidebar bleed, neighbor descriptions
+CACHE_VERSION = 5      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32. 4: sidebar bleed, neighbor descriptions. 5: dates checked against the period
 
 # -- shapes -----------------------------------------------------------------------
 _MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
@@ -498,8 +498,21 @@ def parse_statement(lines: List[str], doc_date: Optional[str] = None) -> dict:
     leftover = sum(len(s["txns"]) for s in sections if s["status"].endswith("outside the balance brackets"))
     if bracketed == 0 and leftover:
         status = "not reconciled, %d transaction(s) outside the balance brackets" % leftover
+    # Whether these transactions are even dated inside this statement.
+    # Reconciliation cannot tell, because it only weighs amounts against
+    # balances, and five statements once read "reconciled, signed amounts"
+    # with every date a year out (#29).
+    astray = dates_outside_period(all_txns, start, end)
+    if astray:
+        if len(astray) == len(all_txns):
+            status = ("not reconciled, every transaction is dated outside "
+                      "%s to %s" % (start, end))
+        else:
+            status += ", %d transaction(s) dated outside %s to %s" % (
+                len(astray), start, end)
     status += note
     return {"period_start": start, "period_end": end,
+            "outside_period": len(astray),
             "beginning": next((s["beginning"] for s in sections if s["beginning"] is not None), None),
             "ending": next((s["ending"] for s in reversed(sections) if s["ending"] is not None), None),
             "sections": [{"beginning": s["beginning"], "ending": s["ending"], "status": s["status"],
@@ -507,6 +520,40 @@ def parse_statement(lines: List[str], doc_date: Optional[str] = None) -> dict:
                           "sum": round(sum(s["signed"]), 2)} for s in sections],
             "transactions": all_txns, "status": status,
             "sum": round(sum(t["amount"] for t in all_txns), 2)}
+
+
+# How far outside its own period a transaction may be dated before it is
+# worth saying so. A card posts a purchase a day or two after the close,
+# and a statement sometimes carries the previous payment, so a few days
+# either side is ordinary. A year is not.
+PERIOD_SLACK_DAYS = 5
+
+
+def dates_outside_period(txns, start, end):
+    """The transactions dated outside this statement's own period.
+
+    Reconciliation says whether the amounts add up. It has nothing to say
+    about the dates, so five Chase statements once reported "reconciled,
+    signed amounts" with every transaction dated a year early (#29). This
+    is the question nobody was asking.
+    """
+    if not (start and end) or not txns:
+        return []
+    try:
+        from datetime import date, timedelta
+        first = date.fromisoformat(start) - timedelta(days=PERIOD_SLACK_DAYS)
+        last = date.fromisoformat(end) + timedelta(days=PERIOD_SLACK_DAYS)
+    except ValueError:
+        return []
+    out = []
+    for t in txns:
+        try:
+            when = date.fromisoformat(t.get("date") or "")
+        except ValueError:
+            continue
+        if when < first or when > last:
+            out.append(t)
+    return out
 
 
 def _bracketed_sections(txns: List[dict], marks: List[tuple]) -> Optional[List[dict]]:

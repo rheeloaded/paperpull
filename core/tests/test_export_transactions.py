@@ -392,3 +392,52 @@ def test_the_box_is_never_a_description_and_a_neighbor_loses_its_bleed():
         (24.00, "GREEN LEAF GROCER OAKTON"),
     ]
     assert xt.transaction_line("08/24 08/24 $100.00 ANNUAL MEMBERSHIP FEE")["description"] == "ANNUAL MEMBERSHIP FEE"
+
+
+# -- dates, which reconciliation has nothing to say about ----------------------
+
+def test_a_statement_whose_dates_are_a_year_out_does_not_read_as_reconciled():
+    """Issue #29. Five Chase statements came out with every transaction
+    dated a year early, because find_period returned the opening date as
+    period_end, and all five reported "reconciled, signed amounts".
+
+    The cause was fixed then. Nothing was added that would notice the next
+    one, and the report said exactly why: reconciliation only weighs
+    amounts against balances, so the dates can be anything at all."""
+    txns = [{"date": "2025-08-03"}, {"date": "2025-08-14"}, {"date": "2025-08-22"}]
+    astray = xt.dates_outside_period(txns, "2026-07-27", "2026-08-26")
+    assert len(astray) == 3
+
+
+def test_transactions_inside_their_own_period_are_left_alone():
+    txns = [{"date": "2026-07-28"}, {"date": "2026-08-10"}, {"date": "2026-08-26"}]
+    assert xt.dates_outside_period(txns, "2026-07-27", "2026-08-26") == []
+
+
+def test_a_posting_a_day_or_two_past_the_close_is_ordinary():
+    """A card posts a purchase after the close and a statement carries the
+    previous payment. A few days either side is not a defect, and a check
+    that calls it one gets turned off."""
+    txns = [{"date": "2026-07-25"}, {"date": "2026-08-29"}]
+    assert xt.dates_outside_period(txns, "2026-07-27", "2026-08-26") == []
+
+
+def test_one_stray_date_is_reported_without_condemning_the_statement():
+    txns = [{"date": "2026-08-01"}, {"date": "2026-08-15"}, {"date": "2019-04-02"}]
+    assert len(xt.dates_outside_period(txns, "2026-07-27", "2026-08-26")) == 1
+
+
+def test_no_period_and_no_dates_are_not_an_error():
+    """Plenty of statements print no period at all, and this must not turn
+    that into a complaint."""
+    assert xt.dates_outside_period([{"date": "2026-08-01"}], None, None) == []
+    assert xt.dates_outside_period([], "2026-07-27", "2026-08-26") == []
+    assert xt.dates_outside_period([{"date": ""}], "2026-07-27", "2026-08-26") == []
+    assert xt.dates_outside_period([{"date": "nonsense"}], "2026-07-27", "2026-08-26") == []
+    assert xt.dates_outside_period([{"date": "2026-08-01"}], "bad", "worse") == []
+
+
+def test_the_cache_version_moved_with_the_shape_of_a_parse():
+    """The cache is keyed on path, size and mtime, so an old parse survives
+    a change to the parser and hides it. #32 said so explicitly."""
+    assert xt.CACHE_VERSION >= 5
