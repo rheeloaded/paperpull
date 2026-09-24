@@ -274,7 +274,10 @@ class App:
             return False
         if a.year and not (doc.date or "").startswith(str(a.year)):
             return False
-        if a.start_date and (not doc.date or doc.date < a.start_date):
+        # Hard floor: never process documents before the configured start date
+        # (an archive that already holds the older years never re-fetches them).
+        floor = a.start_date or self.config.get("default_start_date")
+        if floor and (not doc.date or doc.date < floor):
             return False
         if a.end_date and (not doc.date or doc.date > a.end_date):
             return False

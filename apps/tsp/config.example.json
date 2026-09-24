@@ -8,6 +8,7 @@
     "Statement",
     "Tax Document"
   ],
+  "default_start_date": "",
   "min_pdf_bytes": 2000,
   "max_path_length": 240,
   "delay_min_seconds": 2.5,

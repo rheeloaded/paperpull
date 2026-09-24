@@ -9,6 +9,7 @@
     "Trade Confirmation",
     "Report"
   ],
+  "default_start_date": "",
   "account_labels": {},
   "min_pdf_bytes": 2000,
   "max_path_length": 240,
@@ -16,5 +17,6 @@
   "delay_max_seconds": 5.0,
   "pilot_count": 5,
   "profile_dir": "./browser-profile",
+  "browser": "auto",
   "cdp_url": "http://127.0.0.1:9245"
 }

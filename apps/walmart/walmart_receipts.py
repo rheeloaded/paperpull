@@ -371,6 +371,12 @@ class App:
             purchases = [p for p in purchases if p.order_number == args.order_number]
         if args.year:
             purchases = [p for p in purchases if p.purchase_date.startswith(str(args.year))]
+        # Hard floor: never process orders before the configured start date, so
+        # an archive that already holds the older years never walks them again.
+        floor = args.start_date or self.config.get("default_start_date")
+        if floor:
+            purchases = [p for p in purchases
+                         if p.purchase_date and p.purchase_date >= floor]
         if args.start_date:
             purchases = [p for p in purchases if p.purchase_date and p.purchase_date >= args.start_date]
         if args.end_date:

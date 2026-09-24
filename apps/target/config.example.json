@@ -3,6 +3,7 @@
   "owner_in_filename": false,
   "output_dir": ".",
   "profile_dir": "./browser-profile",
+  "default_start_date": "",
   "min_pdf_bytes": 3000,
   "max_path_length": 240,
   "include_invoices": true,
