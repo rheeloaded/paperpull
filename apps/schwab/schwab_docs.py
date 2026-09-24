@@ -16,6 +16,7 @@ from paperpull_core import browser as browser_launcher
 import schwab_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
+from paperpull_core.keys import stable_occurrences as _stable_occurrences
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core import failure
 from paperpull_core import renaming
@@ -387,7 +388,15 @@ class App:
         raw = site.collect_documents(page)
         log.info("Schwab: %d document(s) across all accounts", len(raw))
         n_new = 0
-        for d in raw:
+        # Which of several documents sharing a type, a title, a date and an
+        # account this is. The site numbers them as it walks the answer, so
+        # a different order next time would hand one document the other's
+        # number, and the one already downloaded would be skipped as done
+        # while the other arrived beside it. A number already given stays
+        # with the document it was given to.
+        for d, occ in zip(raw, _stable_occurrences(
+                raw, self.discovery.data, fields=("doc_type", "title", "date"))):
+            d["occurrence"] = occ
             n_new += self._record_schwab_doc(d, charitable_ids)
 
         self.discovery.save()
