@@ -121,8 +121,18 @@ cost its own round as a result.
 
 `Diagnostics/failure-<command>-<time>.json`, carrying the census, the
 postmortem, the last twenty log lines, the console errors, and the
-app's version. Through the same redaction as everything else, and
-printed for reading before it is attached.
+app's version. Built on the list of what may leave, and printed for
+reading before it is attached.
+
+Diagnose writes the same survey on purpose, as
+`Diagnostics/survey-diagnose-<time>.json`, and that is the file to
+attach when a provider needs a first test or a repair rather than
+having failed. The other file Diagnose writes,
+`diagnose-<provider>.json`, is the detailed one. It carries the page's
+title, the URL with its query string, the text of the rows and the
+labels of the controls, and in half the apps a full page screenshot
+sits beside it. That is what a repair is actually read from and it is
+not something to attach anywhere. The panel used to say to attach it.
 
 ## What this would have cost Costco
 

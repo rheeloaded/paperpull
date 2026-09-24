@@ -970,6 +970,26 @@ class App:
         print("  Read it through, then attach it to this provider's issue on")
         print("  GitHub. It is the one thing that saves a round of guessing.")
 
+    def write_survey(self) -> None:
+        """The survey Diagnose is safe to send.
+
+        Diagnose writes a detailed file for repairing this provider, and
+        that file holds the page's own title, the URL with its query
+        string, the text of the rows it found and the labels of the
+        controls. The panel said to attach it to an issue, which is not
+        something that file is for.
+
+        So this is written beside it, on the same list of what may leave
+        that the failure file uses, and it is the one to send.
+        """
+        failure.write_survey(
+            self.paths.diagnostics,
+            page=getattr(self, "_work_page", None),
+            selectors=getattr(site, "FALLBACK", None),
+            journal=self._journal,
+            requests=self._requests,
+            provider='Kroger')
+
     def cmd_diagnose(self):
         """The purchase history and one receipt page, as this browser sees
         them, written to Diagnostics/diagnose-kroger.json with every number
@@ -1005,6 +1025,9 @@ class App:
         out = self.paths.diagnostics / "diagnose-kroger.json"
         atomic_write_text(out, site.to_json(info))
         print(f"  Wrote {out}")
+        print("  That is the detailed file, for repairing this provider. It")
+        print("  carries the page's own words, so it stays on this machine")
+        print("  unless you decide to send it.")
         h = info.get("history") or {}
         print(f"  History: state={h.get('state') or 'has purchases'} api={h.get('api')}")
         r = info.get("receipt") or {}
@@ -1141,6 +1164,7 @@ def main(argv=None):
             app.cmd_record()
         elif args.diagnose:
             app.cmd_diagnose()
+            app.write_survey()
         elif args.dry_run:
             app.cmd_run([ONLINE, IN_STORE], "dry-run")
         else:
