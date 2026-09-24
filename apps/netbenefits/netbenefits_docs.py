@@ -44,6 +44,7 @@ from paperpull_core import browser as browser_launcher
 import netbenefits_site as site
 import storage
 from paperpull_core.models import State
+from paperpull_core.keys import stable_occurrences as _stable_occurrences
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -371,11 +372,13 @@ class App:
                                      config=self.config)
         log.info("NetBenefits: %d statement period(s)", len(raw))
         n_new = 0
-        seen: dict = {}
-        for d in raw:
-            pair = (d.get("title"), d.get("date"))
-            occ = seen.get(pair, 0)
-            seen[pair] = occ + 1
+        # Which of several documents sharing a title and a date this is.
+        # The number used to follow the order the provider answered in, so
+        # if that order ever changed, the document already downloaded took
+        # the other one's number and was skipped as done while the other was
+        # fetched again beside it. A number already given now stays with the
+        # document it was given to.
+        for d, occ in zip(raw, _stable_occurrences(raw, self.discovery.data)):
             n_new += self._record_statement_doc(d, occ)
         self.discovery.save()
         self.stats["discovered"] = len(self.discovery.data)

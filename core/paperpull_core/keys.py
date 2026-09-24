@@ -94,3 +94,67 @@ def migrate_account_keys(records: dict, key_of) -> int:
         del records[old_key]
         changed += 1
     return changed
+
+
+# ---------------------------------------------------------------------------
+# Which one of several documents that share a title and a date
+# ---------------------------------------------------------------------------
+
+def stable_occurrences(rows, existing=None, fields=("title", "date")):
+    """Number the rows that share a title and a date, the same way every run.
+
+    Five apps have no account in the document's key and tell two documents
+    of the same title and date apart by counting them: the first is 0, the
+    next is 1. The counting followed the order the provider's API happened
+    to answer in.
+
+    Two accounts at Fidelity both have a Quarterly Statement for the same
+    quarter. If that answer ever comes back the other way around, the one
+    already downloaded takes the other's number, so it is skipped as done
+    and the other is fetched again beside it, with the archive now wrong
+    about which is which.
+
+    A number already given to a document keeps it, which is looked up by
+    what the document IS rather than where it appeared. Only a document
+    nobody has seen takes a new number, the lowest one still free. An
+    archive that already exists therefore keeps every key it has.
+    """
+    def tidy(value):
+        # The stored record has been through the app's own cleanup and the
+        # raw row has not, so both sides are tidied before being compared.
+        return re.sub(r"\s+", " ", str(value or "")).strip()
+
+    def what_it_is(item):
+        return tuple(tidy(item.get(f, "")) for f in fields) + (tidy(item.get("account")),)
+
+    rows = list(rows)
+    known = {}
+    for record in (existing or {}).values():
+        if not isinstance(record, dict):
+            continue
+        what = what_it_is(record)
+        if what not in known:
+            known[what] = record.get("occurrence", 0) or 0
+
+    taken = {}
+    out = [None] * len(rows)
+    for i, row in enumerate(rows):
+        group = tuple(tidy(row.get(f, "")) for f in fields)
+        what = what_it_is(row)
+        if what in known:
+            occurrence = known.pop(what)
+            if occurrence not in taken.setdefault(group, set()):
+                taken[group].add(occurrence)
+                out[i] = occurrence
+
+    for i, row in enumerate(rows):
+        if out[i] is not None:
+            continue
+        group = tuple(tidy(row.get(f, "")) for f in fields)
+        used = taken.setdefault(group, set())
+        occurrence = 0
+        while occurrence in used:
+            occurrence += 1
+        used.add(occurrence)
+        out[i] = occurrence
+    return out
