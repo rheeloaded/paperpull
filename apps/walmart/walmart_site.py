@@ -33,6 +33,7 @@ from typing import List, Optional
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.dates import checked as _checked_date
 from storage import now_iso
 
@@ -280,21 +281,17 @@ def select_history_tab(page, purchase_type: str) -> bool:
 
 def _go_next_page(page) -> bool:
     """Advance to the next page of the paginated order list. Returns False
-    when there is no next page."""
-    for getter in (
-        lambda: page.get_by_role("link", name=re.compile(r"^\s*next\s*$", re.I)),
-        lambda: page.get_by_role("button", name=re.compile(r"^\s*next\s*$", re.I)),
-        lambda: page.locator("[aria-label*='Next' i]"),
-    ):
-        try:
-            loc = getter()
-            if loc.count() > 0 and loc.first.is_visible() and loc.first.is_enabled():
-                loc.first.scroll_into_view_if_needed()
-                loc.first.click()
-                page.wait_for_timeout(2500)
-                return True
-        except Exception:
-            continue
+    when there is no next page.
+
+    The last of the three ways this looked used to be any element whose
+    aria-label merely contains "Next", clicked without reading it, which
+    on an orders page is as likely to be "Next day delivery" as the
+    pagination. The allowlist in the core decides now, the same one the
+    nine document apps page forward through.
+    """
+    for selector in ("[aria-label*='Next' i]", "a, button"):
+        if _click_next_page(page, selector):
+            return True
     return False
 
 
