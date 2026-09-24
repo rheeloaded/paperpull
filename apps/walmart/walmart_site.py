@@ -418,6 +418,14 @@ def card_to_purchase(card: RawCard, purchase_type: str,
 # ---------------------------------------------------------------------------
 
 def goto_details(page, purchase: Purchase) -> None:
+    # Built from the order number against a fixed base, so it is safe when it
+    # is made. It does not stay that way: `details_url = page.url` overwrites
+    # it with wherever the browser actually landed, and that is what a later
+    # run opens. Raising is handled, the caller retries once and then files
+    # the purchase for manual review.
+    if not is_safe_url(purchase.details_url):
+        raise ValueError("refusing to open an order page that is not on Walmart: %s"
+                         % (purchase.details_url or "")[:80])
     page.goto(purchase.details_url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3000)
 

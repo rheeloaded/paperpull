@@ -526,8 +526,15 @@ def wait_for_hydration(page, timeout_ms: int = 45000) -> bool:
 def goto_details(page, purchase: Purchase) -> None:
     """Open the order-details page and wait for it to hydrate. That page is
     both where the order data is read AND what gets saved as the receipt."""
-    page.goto(order_details_url(purchase.order_number),
-              wait_until="domcontentloaded", timeout=60000)
+    url = order_details_url(purchase.order_number)
+    # Built from the order number against a fixed base, so today this can only
+    # refuse if the base changes. It is here because the same function in the
+    # Target app started out built the same way and later took an address off
+    # the page instead, and nothing noticed the guard had stopped applying.
+    if not is_safe_url(url):
+        raise ValueError("refusing to open an order page that is not on Gap: %s"
+                         % url[:80])
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
     wait_for_hydration(page)
 
 

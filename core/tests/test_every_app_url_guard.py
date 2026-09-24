@@ -126,3 +126,54 @@ def test_the_provider_s_own_host_is_allowed(guard):
     if slug == "ukg":
         pytest.skip("its paths carry the verb, so a bare host is not enough")
     assert _ok(fn, "https://%s/" % host) is True
+
+
+# -- and that something actually asks it ---------------------------------------
+
+def _calls_outside_its_own_definition(app_dir: Path) -> list:
+    """Every place this app asks the guard, not counting the guard's one line
+    of delegation to the core."""
+    import ast
+    found = []
+    for path in sorted(app_dir.glob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        own = [(n.lineno, n.end_lineno) for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "is_safe_url"]
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+            if name not in ("is_safe_url", "_host_allows"):
+                continue
+            if any(a <= node.lineno <= b for a, b in own):
+                continue
+            found.append("%s:%d" % (path.name, node.lineno))
+    return found
+
+
+APP_DIRS = sorted(d for d in (Path(__file__).resolve().parents[2] / "apps").iterdir()
+                  if d.is_dir() and (d / ("%s_site.py" % d.name)).exists())
+
+
+@pytest.mark.parametrize("app", APP_DIRS, ids=lambda d: d.name)
+def test_this_app_actually_asks_its_guard_somewhere(app):
+    """A guard nothing calls is decoration, and it passes every check above.
+
+    Four apps had one. Target and Walmart each opened an order page at an
+    address that came off the page or out of a stored record, Wealthfront
+    followed a document link the same way, and Gap had simply never needed
+    to ask. All four answered this battery correctly the whole time, because
+    nothing here was asking whether anybody consulted the answer.
+
+    The same question was asked once about is_safe_control, after six apps
+    turned out to have a control guard nothing called. It was never asked
+    about this one.
+    """
+    calls = _calls_outside_its_own_definition(app)
+    assert calls, (
+        "%s defines is_safe_url and nothing ever calls it, so every URL this "
+        "app opens is unchecked" % app.name)

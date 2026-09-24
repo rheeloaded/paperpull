@@ -480,8 +480,19 @@ class App:
 
         saved = False
         # --- preferred: direct document URL -------------------------------
+        url = ""
         if doc.href:
-            url = doc.href if doc.href.startswith("http") else site.BASE + doc.href
+            # The href is read off the page, or out of a record written from
+            # one, and "starts with http" says nothing about where it points.
+            # Everything in this app reaches Wealthfront's own hosts, so an
+            # address that does not is a reason to stop rather than follow it.
+            candidate = doc.href if doc.href.startswith("http") else site.BASE + doc.href
+            if site.is_safe_url(candidate):
+                url = candidate
+            else:
+                log.warning("refusing a document URL that is not on Wealthfront: %s",
+                            candidate[:80])
+        if url:
             try:
                 with page.expect_download(timeout=45000) as dl:
                     # Navigating to a file URL makes goto() raise
@@ -590,6 +601,10 @@ class App:
         for n, href in enumerate(extra_hrefs, start=2):
             try:
                 url = href if href.startswith("http") else site.BASE + href
+                if not site.is_safe_url(url):
+                    log.warning("refusing an extra file URL that is not on "
+                                "Wealthfront: %s", url[:80])
+                    continue
                 with page.expect_download(timeout=45000) as dl:
                     try:
                         page.goto(url)
