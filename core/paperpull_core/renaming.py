@@ -339,9 +339,18 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
         say("Nothing downloaded yet, so there is nothing to rename.")
         return Result()
 
+    # What the app calls a document TODAY, which is not what the index
+    # says. The index row was written when the file was downloaded, and an
+    # app that has since learned to read something better, the kind of
+    # account a bill belongs to for instance, keeps that in the record it
+    # discovers from. Reading the row alone gave back the name the file
+    # already had, so a rename reported that everything was already named
+    # correctly while the filenames plainly lacked the new part (#26).
+    current = _summaries_now(app)
+
     def build_name(row):
-        return build_pdf_filename(_first(row, _DATE_KEYS),
-                                  _first(row, _SUMMARY_KEYS),
+        summary = current.get(_record_key(row)) or _first(row, _SUMMARY_KEYS)
+        return build_pdf_filename(_first(row, _DATE_KEYS), summary,
                                   _first(row, _TYPE_KEYS))
 
     changes = plan(primary_rows, build_name,
@@ -368,3 +377,43 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
     if result.failed:
         say("%d could not be renamed and were left alone." % result.failed)
     return result
+
+
+def _record_key(row: dict):
+    """How a ledger row is matched to the record the app discovers from.
+
+    A receipt is its order number. A document has none, so it is its date
+    and its title, which is what a document app already keys on."""
+    order = _first(row, _ID_KEYS)
+    if order:
+        return ("order", order)
+    return ("doc", _first(row, _DATE_KEYS), (row.get("Document Title") or "").strip())
+
+
+def _summaries_now(app) -> dict:
+    """The summary each document would be given today, by row key.
+
+    Discovery first, because that is the one an app refreshes when it
+    learns to read a page better. Progress after it, for anything
+    discovery no longer lists."""
+    out = {}
+    for store_name in ("progress", "discovery"):
+        store = getattr(app, store_name, None)
+        data = getattr(store, "data", None)
+        if not isinstance(data, dict):
+            continue
+        for rec in data.values():
+            if not isinstance(rec, dict):
+                continue
+            summary = (rec.get("summary") or "").strip()
+            if not summary:
+                continue
+            order = (rec.get("order_number") or "").strip()
+            if order:
+                out[("order", order)] = summary
+                continue
+            date = (rec.get("date") or rec.get("purchase_date") or "").strip()
+            title = (rec.get("title") or "").strip()
+            if date:
+                out[("doc", date, title)] = summary
+    return out

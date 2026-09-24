@@ -405,15 +405,19 @@ class App:
         # refresh which page the doc's download link lives on, and the
         # statement hint the site layer keeps beside it
         patch = {"source_url": source_url, "href": r.href or ""}
-        # And the name it will be saved under, when it has not been saved
-        # yet. A bill discovered in an earlier round kept the summary it
-        # was given then, so on an account whose kind the app only learned
-        # to read later, the filename came out without it however many
-        # times the reading was fixed (#26). A bill that already has a
-        # file keeps its name, because the file on disk is named already
-        # and renaming it is not this code's job.
+        # And what it would be called today. A bill discovered in an
+        # earlier round kept the summary it was given then, so on an
+        # account whose kind the app only learned to read later, the name
+        # came out without it however many times the reading was fixed.
+        #
+        # This guarded itself on downloaded_ok, which a discovery record
+        # never carries, since that marker is written to the run state
+        # when a file lands. So the guard did nothing, which turned out to
+        # be the behavior worth having: the summary is brought up to date
+        # whether or not a file exists, and the file follows when you ask
+        # for it with --rename (#26).
         known = self.discovery.get(doc.key) or {}
-        if summary and not known.get("downloaded_ok") and known.get("summary") != summary:
+        if summary and known.get("summary") != summary:
             patch["summary"] = summary
         self.discovery.update(doc.key, patch, save=False)
         return 0
