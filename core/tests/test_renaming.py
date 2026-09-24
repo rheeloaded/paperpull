@@ -156,3 +156,93 @@ def test_an_untouched_row_is_not_rewritten(tmp_path):
     r = {PATH: "", NAME: "", "Notes": "keep me"}
     assert renaming.update_rows([r], renaming.Result(), note="renamed") == 0
     assert r["Notes"] == "keep me"
+
+
+# -- the index says what it was called, not what it is called now (#26) -------
+
+class _Store:
+    def __init__(self, data):
+        self.data = data
+
+    def update(self, key, patch, save=True):
+        self.data.setdefault(key, {}).update(patch)
+
+    def save(self, backup=False):
+        pass
+
+
+class _App:
+    """Enough of an app for run_for, with the two ledgers it reads."""
+
+    def __init__(self, tmp_path, rows, discovery=None, progress=None):
+        self.config = {"max_path_length": 240}
+        self.index_csv = _Csv(tmp_path / "index.csv", rows)
+        self.order_csv = None
+        self.discovery = _Store(discovery or {})
+        self.progress = _Store(progress or {})
+
+
+class _Csv:
+    columns = ["PDF Filename", "PDF Full Path", "Document Date",
+               "Document Summary", "Document Title", "Notes"]
+
+    def __init__(self, path, rows):
+        self.path = path
+        self._rows = rows
+        self.rewritten = None
+
+    def read_all(self):
+        return self._rows
+
+    def rewrite(self, rows):
+        self.rewritten = rows
+
+
+def test_a_summary_the_app_has_since_improved_is_what_the_file_is_named_for(tmp_path):
+    """His bills were discovered before the app could read which account
+    they belonged to. Discovery learned it, the index kept the old
+    summary, and Rename preview said everything was already named
+    correctly while every filename plainly lacked the account."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from paperpull_core.storage import set_filename_owner
+    set_filename_owner("")
+
+    name = "2026-09-05 Testco Monthly Statement.pdf"
+    f = tmp_path / name
+    f.write_bytes(b"%PDF-")
+    rows = [{"PDF Filename": name, "PDF Full Path": str(f),
+             "Document Date": "2026-09-05",
+             "Document Summary": "Monthly Statement",
+             "Document Title": "Monthly Statement - September 5, 2026",
+             "Notes": ""}]
+    app = _App(tmp_path, rows, discovery={
+        "Statement:2026-09-05:Monthly Statement - September 5, 2026:": {
+            "date": "2026-09-05",
+            "title": "Monthly Statement - September 5, 2026",
+            "summary": "Internet Monthly Statement"}})
+
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append)
+    text = " ".join(said)
+    assert "already named" not in text, text
+    assert "Internet Monthly Statement" in text
+
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert (tmp_path / "2026-09-05 Testco Internet Monthly Statement.pdf").exists()
+    assert not f.exists()
+    assert rows[0]["PDF Filename"] == "2026-09-05 Testco Internet Monthly Statement.pdf"
+
+
+def test_the_index_is_still_used_when_the_app_knows_nothing_better(tmp_path):
+    from paperpull_core.storage import set_filename_owner
+    set_filename_owner("")
+    name = "wrong.pdf"
+    f = tmp_path / name
+    f.write_bytes(b"%PDF-")
+    rows = [{"PDF Filename": name, "PDF Full Path": str(f),
+             "Document Date": "2026-09-05", "Document Summary": "Monthly Statement",
+             "Document Title": "t", "Notes": ""}]
+    app = _App(tmp_path, rows)
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert (tmp_path / "2026-09-05 Testco Monthly Statement.pdf").exists()
