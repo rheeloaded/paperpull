@@ -33,6 +33,7 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.controls import safe_selects as _safe_selects
 from paperpull_core.controls import click_next_page as _click_next_page
 
 log = logging.getLogger("navyfederal_docs.site")
@@ -559,14 +560,19 @@ def collect_group_rows(page):
 
 def year_select(page):
     """The 'Previous Statements' archive has a year dropdown (2021..2026).
-    Return (locator, [years]) if such a <select> is present, else (None, [])."""
-    loc = page.locator("select")
-    for i in range(min(loc.count(), 12)):
-        s = loc.nth(i)
+    Return (locator, [years]) if such a <select> is present, else (None, []).
+
+    Every dropdown on the page is a candidate, which is why they go through
+    the core's filter first. On Ally the same lookup once matched a money
+    TRANSFER widget's <select> and set it, on a page that had not even been
+    confirmed as the right one. This is a credit union.
+    """
+    for s, _identity in _safe_selects(page, FORBIDDEN_CONTROL_RE,
+                                      signed_out=looks_signed_out):
         try:
             opts = [o.strip() for o in s.locator("option").all_inner_texts()]
         except Exception:
-            opts = []
+            continue
         years = [o for o in opts if re.fullmatch(r"20\d{2}", o)]
         if years:
             return s, years
