@@ -3,6 +3,7 @@
   "owner_in_filename": false,
   "output_dir": ".",
   "profile_dir": "./browser-profile",
+  "browser": "auto",
   "cdp_url": "http://127.0.0.1:9234",
   "//": "YOUR employer's UKG address. Every company has its own, and the",
   "//2": "product differs too - UKG Pro/UltiPro, UKG Ready, or Workforce",
@@ -13,6 +14,7 @@
     "Statement",
     "Tax Document"
   ],
+  "default_start_date": "",
   "min_pdf_bytes": 2000,
   "max_path_length": 240,
   "delay_min_seconds": 2.5,

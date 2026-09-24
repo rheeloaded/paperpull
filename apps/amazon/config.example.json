@@ -4,6 +4,8 @@
   "marketplace": "amazon.com",
   "output_dir": ".",
   "profile_dir": "./browser-profile",
+  "browser": "auto",
+  "default_start_date": "",
   "cdp_url": "http://127.0.0.1:9223",
   "min_pdf_bytes": 3000,
   "max_path_length": 240,
