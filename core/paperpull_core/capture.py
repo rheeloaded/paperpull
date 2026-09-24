@@ -119,6 +119,58 @@ FETCH_AS_B64 = r"""async ({url, hosts, subdomains, noRedirect}) => {
 }"""
 
 
+# The same fetch, answering with what came back as well as the bytes.
+#
+# Four call sites in two apps asked this for a dictionary and got a
+# string, because each app used to carry its own copy that answered with
+# one and the shared version answers with base64 alone. One of them read
+# `.get("b64")` off it and a tester's full run died on the thirteenth
+# receipt with AttributeError (#43).
+#
+# The dictionary is kept rather than the call sites flattened, because
+# two of the four are survey code, and the status and the content type
+# are exactly what settles a round when a link answers with something
+# other than a document.
+FETCH_WITH_STATUS = r"""async ({url, hosts, subdomains, noRedirect}) => {
+    if (hosts && hosts.length) {
+        const target = new URL(url, location.href);
+        const origin = target.protocol === "blob:" ? new URL(url.slice(5)) : target;
+        const host = (origin.hostname || "").toLowerCase().replace(/\.$/, "");
+        const allowed = hosts.some(h => host === h || (subdomains && host.endsWith("." + h)));
+        if (origin.protocol !== "https:" || origin.username || origin.password
+                || (origin.port && origin.port !== "443") || !allowed) {
+            throw new Error("Refusing an off-host document request");
+        }
+    }
+    const opts = noRedirect ? {redirect: 'error', credentials: 'include'}
+                            : {credentials: 'include'};
+    const r = await fetch(url, opts);
+    const out = {status: r.status, type: (r.headers.get('content-type') || '')};
+    if (!r.ok) return out;
+    const buf = new Uint8Array(await r.arrayBuffer());
+    let s = '';
+    for (let i = 0; i < buf.length; i += 0x8000) {
+        s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    }
+    out.b64 = btoa(s);
+    return out;
+}"""
+
+
+def fetch_with_status(page, url: str, hosts=(), *, subdomains: bool = True,
+                      no_redirect: bool = False) -> dict:
+    """What `url` answered with, as {status, type, b64}, fetched by the
+    page with its own session. Always a dictionary, so a caller reading a
+    key off it cannot meet a string."""
+    got = page.evaluate(FETCH_WITH_STATUS, {
+        "url": url,
+        "hosts": [str(h).lower().rstrip(".") for h in hosts],
+        "subdomains": bool(subdomains),
+        "noRedirect": bool(no_redirect),
+    })
+    return got if isinstance(got, dict) else {}
+
+
 def fetch_as_b64(page, url: str, hosts=(), *, subdomains: bool = True,
                  no_redirect: bool = False):
     """The bytes of `url`, fetched by the page with its own session, as

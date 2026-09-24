@@ -55,7 +55,7 @@ from storage import now_iso
 
 from paperpull_core.redact import private_words, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
-from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
+from paperpull_core.capture import fetch_with_status as _fetch_with_status
 from paperpull_core.dates import checked as _checked_date
 
 log = logging.getLogger("github_receipts.site")
@@ -382,7 +382,7 @@ def fetch_receipt_bytes(page, url: str) -> Optional[bytes]:
     if not is_safe_url(url):
         return None
     try:
-        out = _fetch_as_b64(page, url) or {}
+        out = _fetch_with_status(page, url)
     except Exception as e:
         log.info("fetch of %s failed: %s", url[:80], e)
         return None
@@ -596,7 +596,7 @@ def survey_receipt(page, url: str) -> dict:
         out["kind"] = "refused, not a GitHub host"
         return out
     try:
-        res = _fetch_as_b64(page, url) or {}
+        res = _fetch_with_status(page, url)
     except Exception as e:
         out["kind"] = "fetch failed " + mask_text(str(e))[:80]
         return out

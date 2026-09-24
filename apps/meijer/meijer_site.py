@@ -60,7 +60,7 @@ from storage import now_iso
 
 from paperpull_core.redact import private_words, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
-from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
+from paperpull_core.capture import fetch_with_status as _fetch_with_status
 from paperpull_core.dates import checked as _checked_date
 
 log = logging.getLogger("meijer_receipts.site")
@@ -342,10 +342,35 @@ _COLLECT_ROWS_JS = r"""
 (rowSel) => {
   const cands = Array.from(document.querySelectorAll(rowSel));
   const money = /\$\s*-?[\d,]+\.\d{2}/;
-  const rows = cands.filter(e => money.test(e.innerText || ''));
+  const dated = /\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}/i;
+  const withMoney = cands.filter(e => money.test(e.innerText || ''));
+  // The innermost element holding an amount, and then up from there
+  // until the text also carries a date.
+  //
+  // His receipts read "In-Store: 09/19/2026" on one line and "$31.23 6
+  // items" on the next, as separate elements. Keeping the innermost
+  // element with an amount took the second of those, so ninety-six rows
+  // were found and every one of them parsed with no date at all, which
+  // put every one outside the scope he had set (#42).
+  //
+  // It stops climbing at an element holding more than one amount, since
+  // that is no longer one receipt.
+  const rows = [];
+  for (const r of withMoney) {
+    if (withMoney.some(o => o !== r && r.contains(o))) continue;
+    let best = r, el = r;
+    for (let up = 0; up < 5 && el && el.parentElement; up += 1) {
+      if (dated.test(best.innerText || '')) break;
+      el = el.parentElement;
+      const t = el.innerText || '';
+      if ((t.match(new RegExp(money.source, 'g')) || []).length > 1) break;
+      best = el;
+    }
+    if (!rows.some(o => o === best)) rows.push(best);
+  }
   const out = [];
   for (const r of rows) {
-    if (rows.some(o => o !== r && r.contains(o))) continue;   // keep the innermost
+    if (rows.some(o => o !== r && r.contains(o))) continue;
     const links = Array.from(r.querySelectorAll('a')).map(a => ({
       text: (a.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80),
       href: a.getAttribute('href') || '',
@@ -538,7 +563,7 @@ def fetch_receipt_bytes(page, url: str) -> Optional[bytes]:
     if not is_safe_url(url):
         return None
     try:
-        out = _fetch_as_b64(page, url) or {}
+        out = _fetch_with_status(page, url)
     except Exception as e:
         log.info("fetch of %s failed: %s", url[:80], e)
         return None
@@ -614,8 +639,8 @@ def press_row_receipt(page, purchase, trace=None):
                         body = fetch_receipt_bytes(extra, u) if not u.startswith("blob:") else None
                         if not body:
                             try:
-                                body = _fetch_as_b64(extra, u)
-                                body = base64.b64decode(body["b64"]) if body.get("b64") else None
+                                got = _fetch_with_status(extra, u)
+                                body = base64.b64decode(got["b64"]) if got.get("b64") else None
                             except Exception:
                                 body = None
                         if body and body[:5] == b"%PDF-":
@@ -904,7 +929,7 @@ def survey_receipt(page, url: str) -> dict:
         out["kind"] = "refused, not a Meijer host"
         return out
     try:
-        res = _fetch_as_b64(page, url) or {}
+        res = _fetch_with_status(page, url)
     except Exception as e:
         out["kind"] = "fetch failed " + mask_text(str(e))[:80]
         return out

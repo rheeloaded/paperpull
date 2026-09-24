@@ -72,3 +72,31 @@ def test_no_download_folder_is_not_an_error(tmp_path):
     assert take_new_pdf(tmp_path / "missing", set(), tmp_path / "out.pdf") is False
     assert snapshot(None) == set()
     assert snapshot(tmp_path / "missing") == set()
+
+
+# -- a caller that reads a key off the answer (#43) --------------------------
+
+def test_the_two_fetches_answer_with_different_shapes_on_purpose():
+    """Each app used to carry its own copy of this, answering with a
+    dictionary. The shared one answers with base64 alone, and two apps
+    kept reading .get("b64") off it. A tester's full run died on the
+    thirteenth receipt with AttributeError."""
+    from paperpull_core import capture
+    assert "return btoa(s)" in capture.FETCH_AS_B64
+    assert "out.b64 = btoa(s)" in capture.FETCH_WITH_STATUS
+    assert "status: r.status" in capture.FETCH_WITH_STATUS
+
+
+def test_no_app_reads_a_key_off_the_one_that_returns_a_string():
+    import re
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    offenders = []
+    for site in sorted(repo.glob("apps/*/*_site.py")):
+        text = site.read_text(encoding="utf-8", errors="ignore")
+        for m in re.finditer(r"(\w+)\s*=\s*_?fetch_as_b64\([^\n]*\)", text):
+            after = text[m.end():m.end() + 400]
+            if re.search(r"\b%s\s*\.\s*get\s*\(" % re.escape(m.group(1)), after):
+                offenders.append(site.parent.name)
+    assert not offenders, ("reads a key off base64, which is a string: "
+                           + ", ".join(sorted(set(offenders))))
