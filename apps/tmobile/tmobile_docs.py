@@ -501,7 +501,12 @@ class App:
         download link and clicking it (T-Mobile fires a real download event)."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        out_path = unique_path(folder, filename, self.config["max_path_length"])
+        # The last of the document id, used only if the name is taken.
+        # Two documents on one day used to differ by " (2)", which says
+        # nothing about which is which and moves between them when a file
+        # is deleted (#49, and the same complaint on #43).
+        out_path = unique_path(folder, filename, self.config["max_path_length"],
+                               distinguisher=(doc.document_id or "")[-6:])
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
