@@ -531,7 +531,8 @@ def app_version() -> str:
 def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
                   page=None, selectors=None, provider: str = "",
                   version: str = "", error=None, extra=None, journal=None,
-                  requests=None, say=print, kind: str = "paperpull-failure",
+                  requests=None, identity=None,
+                  say=print, kind: str = "paperpull-failure",
                   stem: str = "failure", note: str = "", told=None,
                   **ignored) -> Optional[str]:
     """One file, written where the run already writes everything else.
@@ -561,6 +562,18 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
             report["selectors"] = census(page, selectors)
         if isinstance(extra, dict):
             report["extra"] = _only_safe(extra)
+        if identity is not None:
+            # A document that was saved and then refused is the one
+            # failure that leaves a plausible file behind, so the reason
+            # has to be written down where a reader will find it rather
+            # than inferred from a run that looked like it worked. The
+            # verdict reports field names and outcomes, never a value.
+            try:
+                report["identity"] = (identity.report()
+                                      if hasattr(identity, "report")
+                                      else _only_safe(identity))
+            except Exception:
+                pass
         if requests is not None:
             # The eleven apps that drive an API declare no selectors, so
             # the census above has nothing to say about them. This is
@@ -707,6 +720,9 @@ def summarize(report: dict) -> list:
     if kept.get("box") == [0, 0]:
         said.append("The block it kept measured nought by nought, so it "
                     "rendered nothing.")
+    from .identity import summarize as _identity_said
+    said.extend(_identity_said(report.get("identity") or {}))
+
     from .api_census import summarize as _requests_said
     said.extend(_requests_said(report.get("requests") or {}))
 
@@ -732,8 +748,8 @@ SURVEY_NOTE = (
 
 
 def write_survey(diagnostics_dir, page=None, selectors=None, provider="",
-                 journal=None, requests=None, extra=None, say=print,
-                 **ignored) -> Optional[str]:
+                 journal=None, requests=None, identity=None, extra=None,
+                 say=print, **ignored) -> Optional[str]:
     """The same survey as a failure file, asked for on purpose.
 
     Diagnose already wrote a second file next to this one, holding the

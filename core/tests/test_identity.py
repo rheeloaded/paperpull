@@ -1,0 +1,308 @@
+"""Is this the document we asked for.
+
+The failure this exists to catch is silent. A row index off by one, or a
+modal that did not close so the next capture re-read the last document,
+writes a perfectly valid PDF to a correct-looking path and reports
+success. Nobody finds out until a tax year is being reconciled.
+
+So these tests are mostly about the two ways the check itself could be
+worse than useless. Passing a document it should have refused, which
+returns us to no check at all, and refusing one it should have passed,
+which would break forty eight working apps at once.
+"""
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from paperpull_core import identity as I
+
+
+PAD = ("\nPage 1 of 1. This statement is provided for your records. "
+       "Questions about this document may be directed to member services.\n")
+
+
+def verdict(expect, text):
+    """Padded, because verify concludes nothing from less text than a
+    real document carries, and every fixture here is one line."""
+    return I.verify(None, expect, text=(text or "") + PAD)
+
+
+PAGE = """
+    Costco Wholesale
+    Warehouse #1234
+    Order Number 8421997301
+    January 15, 2026
+    Subtotal            1,204.18
+    Total              $1,284.55
+"""
+
+
+# -- the question it is actually for ------------------------------------------
+
+def test_the_right_document_is_verified():
+    v = verdict(I.Identity(date="2026-01-15", total="1284.55",
+                           number="8421997301"), PAGE)
+    assert v.outcome == I.VERIFIED
+    assert set(v.matched) == {"date", "total", "number"}
+
+
+def test_the_neighboring_document_is_refused():
+    """The realistic failure. An index off by one captures the receipt
+    below the one being written, and every other check passes."""
+    v = verdict(I.Identity(date="2026-02-09", total="76.41",
+                           number="8421997999"), PAGE)
+    assert v.outcome == I.REFUSED
+    assert v.matched == ()
+    assert not v.ok
+
+
+def test_one_strong_fact_is_enough():
+    """A provider that renders an amount as an image still prints the
+    order number, and a document that agrees about its number is not the
+    wrong document."""
+    v = verdict(I.Identity(date="2026-09-09", total="9.99",
+                           number="8421997301"), PAGE)
+    assert v.outcome == I.VERIFIED
+    assert v.matched == ("number",)
+
+
+# -- the check must not be satisfied by something every document carries ------
+
+def test_the_provider_name_alone_does_not_verify_anything():
+    """This is the hole in validate_pdf's expect_tokens. Every page of
+    every statement says Costco, so satisfying the check with it means
+    the check passes always."""
+    v = verdict(I.Identity(kind="Costco Wholesale"), PAGE)
+    assert v.outcome == I.UNCHECKED
+    assert v.checked == ()
+
+
+def test_a_zero_total_is_not_a_fact():
+    """A statement with nothing on it shows 0.00, so it tells two
+    documents apart exactly never."""
+    assert I.amount_variants("0.00") == []
+    assert verdict(I.Identity(total="0.00"), PAGE).outcome == I.UNCHECKED
+
+
+def test_a_short_number_is_not_a_fact():
+    """Looking for 12 in a statement finds 2012, 120.00 and page 12."""
+    assert I.number_variants("12") == []
+    assert I.number_variants("8421997301") != []
+
+
+def test_a_placeholder_number_is_not_a_fact():
+    assert I.number_variants("0000000") == []
+    assert I.number_variants("XXXXXXXX") == []
+
+
+def test_a_kind_is_recorded_and_never_decides():
+    v = verdict(I.Identity(kind="Statement", number="8421997301"), PAGE)
+    assert "kind" not in v.checked
+    assert v.outcome == I.VERIFIED
+
+
+# -- the ways a provider prints a date, which is where this breaks -----------
+
+def test_an_iso_date_is_found_however_the_provider_prints_it():
+    for printed in ("2026-01-15", "01/15/2026", "1/15/2026", "01/15/26",
+                    "January 15, 2026", "Jan 15, 2026", "Jan. 15, 2026",
+                    "15 January 2026", "2026/01/15", "01.15.2026"):
+        v = verdict(I.Identity(date="2026-01-15"), "Statement for " + printed)
+        assert v.outcome == I.VERIFIED, printed
+
+
+def test_day_first_is_deliberately_not_matched():
+    """15/01/2026 would make 01/02/2026 match both January 2nd and
+    February 1st. A check that matches the wrong document is worse than
+    no check."""
+    v = verdict(I.Identity(date="2026-01-15"), "Statement for 15/01/2026 only")
+    assert v.outcome == I.REFUSED
+
+
+def test_a_statement_dated_by_month_is_matched_by_period():
+    for printed in ("January 2026", "Jan 2026", "01/2026", "2026-01"):
+        v = verdict(I.Identity(period="2026-01"), "Billing period " + printed)
+        assert v.outcome == I.VERIFIED, printed
+
+
+def test_a_nonsense_date_supplies_no_fact():
+    for bad in ("", "not a date", "2026-13-01", "2026-01-99", "01/15/2026"):
+        assert I.date_variants(bad) == [], bad
+
+
+# -- amounts ------------------------------------------------------------------
+
+def test_an_amount_is_found_grouped_or_plain_or_with_a_sign():
+    for printed in ("1284.55", "1,284.55", "$1,284.55", "$1284.55"):
+        v = verdict(I.Identity(total="1284.55"), "Amount due " + printed)
+        assert v.outcome == I.VERIFIED, printed
+
+
+def test_an_amount_given_the_way_a_page_showed_it_still_works():
+    assert verdict(I.Identity(total="$1,284.55"), PAGE).outcome == I.VERIFIED
+
+
+def test_a_credit_matches_its_own_magnitude():
+    assert verdict(I.Identity(total="-1284.55"), PAGE).outcome == I.VERIFIED
+
+
+# -- a till prints one letter at a time ---------------------------------------
+
+def test_text_spaced_out_per_letter_is_still_matched():
+    """A warehouse receipt renders as T o t a l 1 2 8 4 . 5 5 and no
+    ordinary search finds anything in it."""
+    spaced = "O r d e r  8 4 2 1 9 9 7 3 0 1  T o t a l  1 2 8 4 . 5 5"
+    v = verdict(I.Identity(number="8421997301"), spaced + " " * 40)
+    assert v.outcome == I.VERIFIED
+
+
+# -- the three answers that are not yes or no ---------------------------------
+
+def test_a_scan_is_unreadable_rather_than_wrong():
+    """An image-only PDF disagrees with nothing, which is not the same as
+    agreeing, and refusing it would throw away every provider that scans.
+
+    Unpadded on purpose. These are the cases about there being too little
+    text to conclude from, so the helper that supplies text would remove
+    the thing being tested."""
+    v = I.verify(None, I.Identity(number="8421997301"), text="")
+    assert v.outcome == I.UNREADABLE
+    assert v.ok
+
+
+def test_a_nearly_empty_render_is_unreadable_too():
+    v = I.verify(None, I.Identity(number="8421997301"), text="1")
+    assert v.outcome == I.UNREADABLE
+
+
+def test_no_expectation_at_all_is_unchecked_and_says_so():
+    assert I.verify(None, None, text=PAGE).outcome == I.UNCHECKED
+    assert not I.Identity().is_checkable()
+
+
+def test_unchecked_and_unreadable_both_allow_the_file_and_only_refused_does_not():
+    assert verdict(I.Identity(), PAGE).ok
+    assert I.verify(None, I.Identity(number="8421997301"), text="").ok
+    assert not verdict(I.Identity(number="8421997999"), PAGE).ok
+
+
+# -- it may never take a run down ---------------------------------------------
+
+def test_a_file_that_cannot_be_read_does_not_raise():
+    v = I.verify("C:/nowhere/not-a-file.pdf", I.Identity(number="8421997301"))
+    assert v.outcome == I.UNREADABLE
+
+
+def test_rubbish_in_the_fields_does_not_raise():
+    v = verdict(I.Identity(date=None, total=object(), number=b"\xff"), PAGE)
+    assert v.outcome in (I.UNCHECKED, I.REFUSED, I.VERIFIED)
+
+
+# -- what a reader is told ----------------------------------------------------
+
+def test_a_refusal_says_something_captured_the_wrong_document():
+    said = " ".join(I.summarize(
+        verdict(I.Identity(number="8421997999"), PAGE).report()))
+    assert "wrong document" in said
+
+
+def test_an_unreadable_document_is_named_as_two_possibilities():
+    said = " ".join(I.summarize(
+        I.verify(None, I.Identity(number="8421997301"), text="").report()))
+    assert "scan" in said and "blank" in said
+
+
+def test_nothing_to_check_against_is_worth_saying_out_loud():
+    said = " ".join(I.summarize(verdict(I.Identity(), PAGE).report()))
+    assert "would not have been noticed" in said
+
+
+def test_summarizing_something_that_is_not_a_report_is_empty():
+    assert I.summarize(None) == []
+    assert I.summarize("refused") == []
+
+
+# -- the canary. This report goes in a file a tester posts publicly -----------
+
+CANARY = """
+    CANARYNAME
+    123 CANARYSTREET
+    Order Number CANARY8421997301
+    Card ending CANARY4821
+    January 15, 2026
+    Total $1,284.55
+"""
+
+
+def test_no_value_reaches_the_report():
+    """The point of reporting rather than returning what was seen. That a
+    date disagreed is ours to publish. The date is not."""
+    v = I.verify(None, I.Identity(date="2026-01-15", total="1284.55",
+                                  number="CANARY8421997301",
+                                  kind="CANARYKIND"), text=CANARY)
+    body = json.dumps(v.report())
+    for secret in ("CANARY", "8421997301", "1284.55", "1,284.55",
+                   "2026-01-15", "January", "4821", "CANARYSTREET"):
+        assert secret not in body, secret
+
+
+def test_the_report_carries_the_field_names_because_that_is_the_point():
+    v = I.verify(None, I.Identity(date="2026-01-15", number="8421997301"),
+                 text=PAGE)
+    body = json.dumps(v.report())
+    assert "date" in body and "number" in body and "verified" in body
+
+
+def test_the_sentence_a_reader_sees_carries_no_value_either():
+    for expect in (I.Identity(number="CANARY8421997301"),
+                   I.Identity(date="2026-01-15", total="1284.55")):
+        for text in (CANARY, "", "nothing like it at all, but long enough  "):
+            assert "CANARY" not in I.verify(None, expect, text=text).say()
+            assert "1284" not in I.verify(None, expect, text=text).say()
+
+
+# -- and through the failure file, which is the file that gets posted --------
+
+def test_a_verdict_reaches_the_failure_file_without_its_values(tmp_path):
+    """write_failure is what a tester attaches. The verdict travels in
+    it, so the canary has to hold on that path too and not only on
+    Verdict.report."""
+    from paperpull_core import failure
+
+    v = I.verify(None, I.Identity(date="2026-01-15", total="1284.55",
+                                  number="CANARY8421997301"), text=CANARY)
+    path = failure.write_failure(tmp_path, "pilot", "save the document",
+                                 provider="Testco", identity=v,
+                                 say=lambda *a, **k: None)
+    assert path, "no failure file was written"
+    body = Path(path).read_text(encoding="utf-8")
+    for secret in ("CANARY", "8421997301", "1284.55", "2026-01-15"):
+        assert secret not in body, secret
+    # The canary text carries the matching values on purpose, so this is
+    # the harder direction. A verdict that found all three has held all
+    # three in its hand and must still write none of them down.
+    assert "identity" in body
+    assert "verified" in body
+
+
+def test_the_failure_file_says_something_captured_the_wrong_document(tmp_path):
+    from paperpull_core import failure
+
+    v = I.verify(None, I.Identity(number="8421997999"), text=PAGE + PAD)
+    path = failure.write_failure(tmp_path, "pilot", "save the document",
+                                 provider="Testco", identity=v,
+                                 say=lambda *a, **k: None)
+    said = " ".join(failure.summarize(json.loads(Path(path).read_text("utf-8"))))
+    assert "wrong document" in said
+
+
+def test_a_failure_file_with_no_verdict_is_unchanged(tmp_path):
+    """Forty eight apps write one of these today without an identity, and
+    every one of them has to keep working."""
+    from paperpull_core import failure
+
+    path = failure.write_failure(tmp_path, "pilot", "read the rows",
+                                 provider="Testco", say=lambda *a, **k: None)
+    assert "identity" not in json.loads(Path(path).read_text("utf-8"))
