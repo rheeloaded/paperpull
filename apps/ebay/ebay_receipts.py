@@ -232,12 +232,18 @@ class App:
             print(f"\n!! {challenge}")
             print("Processing stopped. Please resolve the challenge yourself in the")
             print("browser window. I will NOT attempt to bypass it.")
-            ask("Press Enter once the page looks normal again (or Ctrl+C to quit)... ")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page looks normal again (or Ctrl+C to quit)... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
             print("\n!! eBay appears to have signed you out.")
             print("Please sign in manually in the open browser window.")
-            ask("Press Enter after you are signed in again... ")
+            if browser_launcher.ask_or_none(
+                    "Press Enter after you are signed in again... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
             site.goto_orders(page)
 
     # -- commands -----------------------------------------------------------
@@ -285,7 +291,13 @@ class App:
         print("This tool never touches your credentials.\n")
         page = self.page()
         page.goto(site.URLS["home"], wait_until="domcontentloaded", timeout=60000)
-        ask("Press Enter here AFTER you have finished signing in... ")
+        # Under the panel there is no console to press Enter at, and this
+        # used to read end-of-file and stop the run before it could check
+        # anything, with a message about .bat files (#48). Nothing is
+        # checked in that case because there is nothing to check yet, and
+        # the browser is deliberately left open.
+        if not browser_launcher.pause_for_sign_in():
+            return
         site.goto_orders(page)
         if site.looks_signed_out(page):
             print("It still looks like you are signed out; the orders page bounced to login.")

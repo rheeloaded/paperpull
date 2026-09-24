@@ -261,18 +261,29 @@ class App:
     # -- session safety ----------------------------------------------------
 
     def check_session(self, page) -> None:
+        # Both of these used to wait at a prompt. Under the panel there is
+        # nobody to answer, and waiting there took the run down with an
+        # end-of-file rather than saying what had happened, so when there
+        # is no console the run stops on its own terms and says what to do
+        # about it. Progress is already saved either way (#48).
         challenge = site.detect_security_challenge(page)
         if challenge:
             self.progress.save(backup=True)
             print(f"\n!! {challenge}")
             print("Stopped. Please resolve it yourself in the browser window.")
             print("I will NOT attempt to bypass any security check.")
-            ask("Press Enter once the page looks normal (or Ctrl+C to quit)... ")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page looks normal (or Ctrl+C to quit)... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
             print("\n!! SMUD appears to have signed you out.")
             print("Please sign in again in the open browser window.")
-            ask("Press Enter after you are signed in... ")
+            if browser_launcher.ask_or_none(
+                    "Press Enter after you are signed in... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
             site.goto_documents(page)
 
     # -- commands ----------------------------------------------------------
