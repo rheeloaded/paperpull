@@ -149,3 +149,64 @@ def test_describe_selects_key_names_are_a_contract():
         assert set(row) == {"identity", "refused"}, sorted(row)
     assert rows[0]["refused"] is True
     assert rows[1]["refused"] is False
+
+
+# -- paging forward ------------------------------------------------------------
+
+def test_the_next_allowlist_takes_what_a_pagination_control_says():
+    from paperpull_core.controls import is_next_control
+    for label in ("Next", "next", "Next page", "Next >", "Next 20",
+                  "Go to next page", ">", ">>", "\u203a", "\u00bb", "\u2192",
+                  "Older", "Older statements"):
+        assert is_next_control(label), label
+
+
+def test_the_next_allowlist_refuses_everything_else():
+    from paperpull_core.controls import is_next_control
+    for label in ("", "   ", "NextNext", "Next Payment Due", "Next Steps",
+                  "Pay now", "Place Order", "Continue", "nextish",
+                  "Submit next payment", None):
+        assert not is_next_control(label), label
+
+
+def test_the_blocklists_cannot_answer_this_question_which_is_why_there_is_a_list():
+    """Every app's blocklist refuses the word next, for the wizard button
+    that also says it. Handing a pagination control to that blocklist is how
+    eight apps ended up unable to page forward at all."""
+    import re
+    blocklist = re.compile(r"(send\b|submit|confirm|continue|next|agree)", re.I)
+    assert blocklist.search("Next")          # the thing that went wrong
+    from paperpull_core.controls import is_next_control
+    assert is_next_control("Next")           # and the answer that is right
+
+
+class _Label:
+    def __init__(self, text=None, aria=None, title=None, takes_timeout=True):
+        self._text, self._aria, self._title = text, aria, title
+        self._takes_timeout = takes_timeout
+
+    def inner_text(self, timeout=None):
+        if timeout is not None and not self._takes_timeout:
+            raise TypeError("inner_text() got an unexpected keyword argument")
+        if self._text is None:
+            raise RuntimeError("no text")
+        return self._text
+
+    def get_attribute(self, name):
+        return {"aria-label": self._aria, "title": self._title}.get(name)
+
+
+def test_each_label_a_control_carries_is_kept_apart():
+    from paperpull_core.controls import control_labels
+    assert control_labels(_Label("Next", "Next page")) == ["Next", "Next page"]
+    assert control_labels(_Label("Next", "Next")) == ["Next"]
+    assert control_labels(_Label("", "Next page")) == ["Next page"]
+    assert control_labels(_Label(None, None)) == []
+
+
+def test_an_element_handle_that_takes_no_timeout_still_has_a_label():
+    """A Locator takes one and an ElementHandle does not. Asking the wrong
+    one raises TypeError, which would come back as a control with no label,
+    which is a control that never gets clicked."""
+    from paperpull_core.controls import control_labels
+    assert control_labels(_Label("Next", takes_timeout=False)) == ["Next"]

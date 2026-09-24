@@ -49,6 +49,8 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.controls import control_labels as _control_labels
+from paperpull_core.controls import is_next_control as _core_is_next
 
 log = logging.getLogger("pge_docs.site")
 
@@ -468,10 +470,13 @@ def _wait_for_page_change(page, before: tuple, target_page: int, seconds: int) -
 
 
 def is_next_control(label: str) -> bool:
-    """The history's Next page control, and nothing that commits anything."""
-    label = (label or "").strip()
-    return bool(re.match(r"^(next(\s+page)?|>|›|»)$", label, re.I)) and not (
-        FORBIDDEN_CONTROL_RE.search(label))
+    """The history's Next page control, and nothing else.
+
+    The allowlist lives in the core now, because eight other apps needed
+    one and had been handing this question to their commit blocklist, which
+    refuses the word "next" and so refused every Next control they had.
+    """
+    return _core_is_next(label)
 
 
 def next_page(page) -> bool:
@@ -480,8 +485,11 @@ def next_page(page) -> bool:
     before = _rows_signature(page)
     try:
         for cand in page.query_selector_all(FALLBACK["next_page"]):
-            label = all_labels(cand)
-            if not is_next_control(label):
+            # Each label on its own. all_labels joins them for a log line,
+            # and a control whose text is "Next" and whose aria-label is
+            # "Next page" reads "Next | Next page" joined, which is not
+            # what either of them says and matched nothing.
+            if not any(is_next_control(part) for part in _control_labels(cand)):
                 continue
             try:
                 if cand.get_attribute("disabled") is not None or (cand.get_attribute("aria-disabled") or "") == "true":

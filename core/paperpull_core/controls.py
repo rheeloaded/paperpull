@@ -263,3 +263,106 @@ def controls_named(page, name_re: Pattern, roles=("button", "link")):
     for role in roles[1:]:
         loc = loc.or_(page.get_by_role(role, name=name_re))
     return loc
+
+
+# ---------------------------------------------------------------------------
+# Paging forward
+#
+# Pagination needs its own judgement, and finding that out took a while.
+# Every blocklist here refuses the word "next", correctly, because "Next" is
+# what a wizard's commit button says. Eight apps then handed a pagination
+# control to that same blocklist, so a control labeled "Next" was refused and
+# they could not page forward at all. The run finished, reported success, and
+# had seen the first page.
+#
+# Before that was noticed the hole went the other way: the label was empty for
+# an icon-only chevron, an empty string matches no blocklist, and the control
+# was clicked blind on a bank page.
+#
+# Both stop being possible if the label has to SAY it pages forward, matched
+# whole rather than searched, so nothing else can ride along inside it.
+# ---------------------------------------------------------------------------
+
+NEXT_LABEL_RE = re.compile(
+    r"^(?:next(?:\s+(?:page|month|period|\d{1,4}|>|»|›))?"
+    r"|(?:go\s+to\s+)?next\s+page"
+    r"|older(?:\s+(?:documents?|statements?|activity))?"
+    r"|>|>>|\u203a|\u203a\u203a|\u00bb|\u2192)$", re.I)
+
+
+def is_next_control(label: str) -> bool:
+    """Whether this label means one page forward, and nothing else.
+
+    An allowlist, matched against the whole label, because the blocklists
+    cannot help here: they all refuse "next" for the commit button that
+    also says it. "Next", "Next page" and a bare chevron pass. "Next
+    Payment Due", "Pay now" and an empty label do not.
+    """
+    return bool(NEXT_LABEL_RE.match(re.sub(r"\s+", " ", (label or "").strip())))
+
+
+def control_labels(el) -> list:
+    """Each label a control carries, separately.
+
+    Separately is the point, twice over. These were built by adding the
+    text to the aria-label with nothing in between, so a control with both
+    read "NextNext", a word no rule can be written against. Joining them
+    with a space instead only moves the problem: a chevron whose text is
+    "Next" and whose aria-label is "Next page" would read "Next Next page",
+    which is not what either of them says.
+    """
+    def text_of():
+        # A Locator takes a timeout, an ElementHandle does not, and both
+        # turn up here. Asking the wrong one raises TypeError, which would
+        # have come back as a control with no label at all.
+        try:
+            return el.inner_text(timeout=800)
+        except TypeError:
+            return el.inner_text()
+
+    out = []
+    for read in (text_of,
+                 lambda: el.get_attribute("aria-label"),
+                 lambda: el.get_attribute("title")):
+        try:
+            text = (read() or "").strip()
+        except Exception:
+            text = ""
+        text = re.sub(r"\s+", " ", text)
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def control_label(el) -> str:
+    """The same labels as one string, for a log line or a message."""
+    return " | ".join(control_labels(el))
+
+
+def click_next_page(page, selector: str, settle_ms: int = 2500,
+                    limit: int = 8) -> bool:
+    """Page forward once, through the first control that says it does that.
+
+    Every candidate is looked at rather than only the first, because the
+    selectors here are broad enough to catch an unrelated element whose
+    class merely contains "next", and stopping at that one meant never
+    reaching the real control behind it.
+    """
+    try:
+        loc = page.locator(selector)
+        count = loc.count()
+    except Exception:
+        return False
+    for i in range(min(count, limit)):
+        try:
+            el = loc.nth(i)
+            if not (el.is_visible() and el.is_enabled()):
+                continue
+            if not any(is_next_control(part) for part in control_labels(el)):
+                continue
+            el.click()
+            page.wait_for_timeout(settle_ms)
+            return True
+        except Exception:
+            continue
+    return False
