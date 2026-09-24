@@ -1,6 +1,8 @@
 {
   "owner": "",
   "owner_in_filename": false,
+  "cdp_url": "http://127.0.0.1:9269",
+  "browser": "auto",
   "output_dir": ".",
   "profile_dir": "./browser-profile",
   "default_start_date": "",

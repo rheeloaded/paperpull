@@ -1,7 +1,8 @@
 """Target purchase-history & receipt downloader (local, supervised).
 
 Usage:
-    python target_receipts.py --login
+    python target_receipts.py --open-browser   sign in (leave the window open)
+    python target_receipts.py --login          check that connection
     python target_receipts.py --discover
     python target_receipts.py --pilot            (5 newest Online + 3 newest In-store)
     python target_receipts.py --pilot-online
@@ -100,6 +101,8 @@ class App:
 
         self._pw = None
         self._context = None
+        self._browser = None
+        self._cdp_mode = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "online_discovered": 0, "instore_discovered": 0,
@@ -125,23 +128,51 @@ class App:
         time.sleep(random.uniform(lo, hi))
 
     def browser(self):
-        """Launch (or return) the persistent, headed, supervised browser."""
+        """The supervised browser, attached to or launched.
+
+        Attaching is the way every other app here works, and this one is
+        the reason why. It launched its own browser through Playwright,
+        which makes that browser a child of this process, so the window
+        closed the moment a command returned. A tester saw it open and
+        vanish and could not sign in at all, and the first repair only
+        stopped the crash, because nothing done inside a process that is
+        about to exit can keep its child alive (#48).
+
+        `login.bat` now starts an ordinary browser that outlives it, on
+        this config's own debugging port, and this attaches to the window
+        the person signed into. An older config with no `cdp_url` keeps
+        the launched-here behavior, so nobody's working setup changes
+        under them.
+        """
         if self._context is not None:
             return self._context
         from playwright.sync_api import sync_playwright
-        # This app drives a browser directly, in a profile of its own,
-        # rather than attaching to one the person launched.
-        #
-        # It used to insist on Playwright's own Chromium and nothing else,
-        # which made it the only app of the forty-eight that could not run
-        # on a machine with Chrome or Edge installed and no bundled copy.
-        # On the packaged Mac build that is every machine, so Login failed
-        # there and every other provider worked, which is exactly what the
-        # report said (#48). An installed browser is used when the bundled
-        # one is absent. Anyone whose bundled copy is already there keeps
-        # using it, so a setup that works today is not changed underneath
-        # them.
         from paperpull_core import browser as browser_launcher
+
+        cdp_url = self.config.get("cdp_url")
+        if cdp_url:
+            self._pw = sync_playwright().start()
+            try:
+                self._browser = self._pw.chromium.connect_over_cdp(cdp_url)
+            except Exception as e:
+                self._pw.stop()
+                self._pw = None
+                raise SystemExit(
+                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
+                    f"Press Login first, and leave that browser window OPEN.\n"
+                    f"({e})")
+            if not self._browser.contexts:
+                raise SystemExit("That browser has no tab open. Open one and try again.")
+            self._context = self._browser.contexts[0]
+            self._cdp_mode = True
+            try:
+                self._context.add_init_script(receipt_pdf.PRINT_SUPPRESS_INIT_SCRIPT)
+            except Exception:
+                pass
+            self._context.set_default_timeout(30000)
+            return self._context
+
+        # No cdp_url: the old way, kept for an install made before this.
         executable = None
         if not browser_launcher.bundled_chromium_present():
             name, path = browser_launcher.find_browser(prefer_real=True)
@@ -222,17 +253,51 @@ class App:
 
     # -- commands -----------------------------------------------------------
 
+    def cmd_open_browser(self):
+        """Open a sign-in window that outlives this command.
+
+        The browser is started as its own process on this config's own
+        debugging port, so closing this command does not close it. That
+        is the whole point, and the reason this app moved to the same
+        model as the other forty-seven (#48)."""
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9269")
+        profile = self.config["profile_dir"]
+        url = site.URLS.get("orders") or site.URLS["home"]
+        name = browser_launcher.open_signin_browser(
+            profile, port, url, prefer_real=True,
+            mode=self.config.get("browser", "auto"))
+        if not name:
+            return
+        print(f"Opened a sign-in window on port {port} ({name}).")
+        print(f"Profile: {profile}")
+        print("Sign in to Target, leave that window OPEN, then press Discover or Pilot.")
+
     def cmd_login(self):
+        # With a cdp_url this checks the window you signed into rather
+        # than opening one. Opening it is --open-browser, which is a
+        # separate process so that it outlives the command (#48).
+        if self.config.get("cdp_url"):
+            print("Checking the connection to your signed-in Target browser...\n")
+            page = self.page()
+            site.goto_orders(page)
+            if site.looks_signed_out(page):
+                print("Connected, but Target shows the signed-out page.")
+                print("Sign in in that window, keep it OPEN, and press Login again.")
+            else:
+                print("Connected to your signed-in Target session.")
+                print("Keep that window open, then press Discover or Pilot.")
+            self.close()
+            return
+
         print("Opening Target.com in a dedicated supervised browser profile.")
         print("Sign in manually (username, password, any verification codes).")
         print("This tool never touches your credentials.\n")
         page = self.page()
         page.goto(site.URLS["home"], wait_until="domcontentloaded", timeout=60000)
-        # Under the panel there is no console to press Enter at, and this
-        # used to read end-of-file and take the process down, which closed
-        # the window the person was about to sign in to (#48). Nothing is
-        # checked in that case, because there is nothing to check yet, and
-        # the browser is deliberately left open.
+        # An install made before this app moved to attaching has no
+        # cdp_url, and its browser is a child of this process, so there is
+        # nothing to keep open once this returns. It waits where there is
+        # somebody to wait for, and says what to do where there is not.
         if not browser_launcher.pause_for_sign_in():
             return
         site.goto_orders(page)
@@ -1187,6 +1252,8 @@ def build_parser() -> argparse.ArgumentParser:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)
     ap.add_argument("--apply", action="store_true",
                     help="with --rename, actually rename (default is a preview)")
+    ap.add_argument("--open-browser", action="store_true",
+                    help="open a sign-in window that outlives this command")
     ap.add_argument("--dry-run", action="store_true",
                     help="extract and plan filenames but save no PDFs/CSVs")
     ap.add_argument("--year", type=int)
@@ -1232,6 +1299,8 @@ def main(argv=None):
             app.cmd_run([ONLINE, IN_STORE], "all")
         elif args.resume:
             app.cmd_resume()
+        elif getattr(args, "open_browser", False):
+            app.cmd_open_browser()
         elif args.verify:
             app.cmd_verify()
         elif args.rename:

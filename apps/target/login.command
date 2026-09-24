@@ -14,6 +14,11 @@ if [ ! -x "$PY" ]; then
     exit 1
 fi
 
+echo '============================================================'
+echo 'Target Receipts - sign in'
+echo '============================================================'
+echo 'A browser window will open. Then:'
+echo '1. Sign in to Target (handle any code or puzzle yourself)'
+echo '2. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
 
-
-"$PY" target_receipts.py --login $CFG
+"$PY" target_receipts.py --open-browser $CFG

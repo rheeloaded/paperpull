@@ -19,7 +19,7 @@ echo 'Costco Receipts - sign in'
 echo '============================================================'
 echo 'A browser window will open. Then:'
 echo '1. Sign in to your Costco account (handle any code or passkey yourself)'
-echo '2. Open Orders & Purchases and confirm you can see your purchases'
+echo '2. Open Orders ^& Purchases and confirm you can see your purchases'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
 echo '4. Run:  paperpull costco record   and click your way to one receipt'
 

@@ -329,12 +329,33 @@ class App:
 
         cards = []
         empty_run = 0
+        # The unfiltered history first, because eBay's own year filter is
+        # not to be trusted. A tester's survey showed twenty-five orders
+        # on the unfiltered page, every count agreeing at every step, and
+        # two on the same page filtered to this year. He had made nine.
+        # So the filter, not the reading, is what lost them, and two
+        # repairs aimed at the reading changed nothing for him (#44).
+        #
+        # The filter is still walked afterwards, because it is how the
+        # history reaches back past what the unfiltered page will show,
+        # and a card already seen is dropped by its order id.
+        site.goto_orders(page, None)
+        self.check_session(page)
+        site.scroll_all_orders(page)
+        unfiltered = site.collect_cards(page)
+        log.info("Purchase history, unfiltered: %d order(s)", len(unfiltered))
+        cards.extend(unfiltered)
+
         for year in self._years_to_walk():
             site.goto_orders(page, year)
             self.check_session(page)
+            site.scroll_all_orders(page)
             found = site.collect_cards(page)
-            log.info("Purchase history %d: %d order(s)", year, len(found))
-            cards.extend(found)
+            fresh = [c for c in found
+                     if c.order_id not in {x.order_id for x in cards}]
+            log.info("Purchase history %d: %d order(s), %d not already seen",
+                     year, len(found), len(fresh))
+            cards.extend(fresh)
             if found:
                 empty_run = 0
             else:

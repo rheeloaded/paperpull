@@ -104,3 +104,31 @@ def test_diagnose_surveys_the_history_before_it_surveys_an_order():
     assert "diagnose-history.json" in block
     assert block.index("history_survey") < block.index("goto_details"), \
         "the history first, since that is what could not be explained"
+
+
+# -- the year filter is what lost them (#44) ---------------------------------
+
+def test_discovery_reads_the_unfiltered_history_before_any_year():
+    """His survey showed twenty-five orders on the unfiltered page, every
+    count agreeing at every step, and two on the same page filtered to
+    this year. He had made nine. So the filter lost them, and two repairs
+    aimed at the card reading changed nothing for him."""
+    src = (Path(site.__file__).parent / "ebay_receipts.py").read_text(encoding="utf-8")
+    block = src.split("def cmd_discover")[1][:2600]
+    unfiltered = block.index("goto_orders(page, None)")
+    by_year = block.index("for year in self._years_to_walk()")
+    assert unfiltered < by_year, "the unfiltered page is read first"
+    assert "not already seen" in block, "a year adds only what the unfiltered page missed"
+
+
+def test_a_year_still_reaches_back_past_what_one_page_shows():
+    src = (Path(site.__file__).parent / "ebay_receipts.py").read_text(encoding="utf-8")
+    block = src.split("def cmd_discover")[1][:2600]
+    assert "_years_to_walk()" in block, "the filter is still walked for older history"
+    assert block.count("scroll_all_orders(page)") >= 2, "both passes scroll"
+
+
+def test_a_control_that_pages_is_found_by_its_label_as_well_as_its_words():
+    js = site._HISTORY_SURVEY_JS
+    assert "aria-label" in js
+    assert "page" in js.lower()

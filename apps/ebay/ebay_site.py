@@ -607,10 +607,19 @@ _HISTORY_SURVEY_JS = r"""
     text_len: (el.innerText || '').length,
   }));
   const walked = hits.length;
+  // Anything that might turn a page, by its words or by its accessible
+  // name. A tester said his history is three pages and the app kept
+  // reading the first, and the words alone found nothing that pages, so
+  // the label is looked at too (#44).
   const more = [];
-  for (const b of document.querySelectorAll('button,a')) {
+  for (const b of document.querySelectorAll('button,a,[role=button],[role=link]')) {
     const t = (b.innerText || '').trim();
-    if (t && /more|next|older|show/i.test(t) && t.length < 40) more.push(t);
+    const label = (b.getAttribute('aria-label') || '').trim();
+    for (const text of [t, label]) {
+      if (text && /more|next|older|show|page\s*\d/i.test(text) && text.length < 40) {
+        more.push(text);
+      }
+    }
   }
   return {
     anchors_to_an_order: anchors.length,
