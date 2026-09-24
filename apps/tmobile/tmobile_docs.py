@@ -20,6 +20,7 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core import delivery
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -510,12 +511,33 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Open the bill-history page and click this bill's "Download detailed
-        # bill" button; Playwright captures the resulting download event.
+        # The site layer navigates, finds this bill's "Download detailed
+        # bill" button and guards it. Catching whatever the click produces
+        # is the interceptor's job, and it checks the saved file is this
+        # bill before putting it in place.
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
-        saved = site.download_bill(page, self._dl_dir, doc.date, out_path)
+        request = site.bill_request(page, doc.date)
+        got = None
+        if request is not None:
+            got = delivery.deliver(
+                page, request, out_path,
+                is_safe_url=site.is_safe_url, dl_dir=self._dl_dir,
+                journal=self._journal,
+                strict=bool(self.config.get("verify_documents", True)))
+            print("  %s" % got.say())
+        saved = bool(got and got.ok)
+        if got is not None and got.outcome == delivery.WRONG:
+            why = "the bill that downloaded is not the one it was listed as"
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+            self._write_row(doc, "Wrong document", "Needs Manual Review")
+            self.write_failure("save the document", why)
+            self.stats["manual_review"] += 1
+            self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+            print("  Nothing was saved for it. The file was destroyed rather")
+            print("  than filed under this bill's name.")
+            return
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
