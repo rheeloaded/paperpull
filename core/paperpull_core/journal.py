@@ -12,11 +12,13 @@ failure carries the evidence for several defects at once.
 
 WHAT AN ENTRY IS
 
-Three kinds, and nothing else.
+Four kinds, and nothing else.
 
     an operation    the app was about to do something it named
     a choice        it found N candidates and took the nth of them
     a checkpoint    the page's state at a transition, before and after
+    a wait          which of several ways of waiting got the page ready,
+                    written by paperpull_core.ready
 
 A choice is the one that matters most and is the cheapest to get wrong.
 Counting one collection and acting on the nth of another is a bug that
@@ -219,6 +221,34 @@ class Journal:
         except Exception:
             pass
 
+    def waited(self, name: str, readiness) -> None:
+        """Which of the maintainer's guesses at a wait got the page ready.
+
+        Written by paperpull_core.ready. Strategy names and outcomes come
+        from its fixed lists and anything else is written as "other", so
+        the only free word is the wait's own name from the source."""
+        try:
+            from .ready import OUTCOMES, STRATEGIES
+            attempts = []
+            for a in list(getattr(readiness, "attempts", ()))[:12]:
+                attempts.append({
+                    "strategy": _enum(getattr(a, "strategy", ""),
+                                      STRATEGIES),
+                    "outcome": _enum(getattr(a, "outcome", ""), OUTCOMES),
+                    "ms": _count(getattr(a, "ms", 0)),
+                })
+            winner = getattr(readiness, "winner", "")
+            self._add({
+                "kind": "waited",
+                "name": _step(name),
+                "ready": bool(getattr(readiness, "ready", False)),
+                "winner": _enum(winner, STRATEGIES, "none"),
+                "elapsed_ms": _count(getattr(readiness, "elapsed_ms", 0)),
+                "attempts": attempts,
+            })
+        except Exception:
+            pass
+
     def checkpoint(self, name: str, page=None) -> dict:
         """The page's state at a transition.
 
@@ -323,6 +353,32 @@ def summarize(journal: dict) -> list:
                         "open dialog does and what makes a rendered document "
                         "come out as one blank screen." % e.get("name"))
             break
+
+    # Which wait each page needed, once per wait. This is what the next
+    # round hard-codes, so it is said even when the run went fine.
+    told = set()
+    for e in entries:
+        if e.get("kind") != "waited" or e.get("name") in told:
+            continue
+        told.add(e.get("name"))
+        tried = ", ".join(a.get("strategy", "other")
+                          for a in e.get("attempts") or []
+                          if a.get("strategy") != "already") or "nothing"
+        if not e.get("ready"):
+            said.append("\"%s\" never became ready. Tried %s, for %d ms in "
+                        "all." % (e.get("name"), tried,
+                                  e.get("elapsed_ms", 0)))
+        elif e.get("winner") == "already":
+            said.append("\"%s\" was ready before anything waited."
+                        % e.get("name"))
+        elif e.get("winner") == "late":
+            said.append("\"%s\" came right only after every wait had "
+                        "finished without it (%s). None of them is the "
+                        "right one." % (e.get("name"), tried))
+        else:
+            said.append("\"%s\" was ready after %s, in %d ms. Tried %s."
+                        % (e.get("name"), e.get("winner"),
+                           e.get("elapsed_ms", 0), tried))
 
     if not any(e.get("phase") == "next_item" for e in entries
                if e.get("kind") == "op"):

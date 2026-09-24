@@ -203,6 +203,20 @@ If they did, you get a line in the README under Thanks, with your GitHub
 username, and the provider stops being marked untested. If they did not, say
 what came out wrong and the next build will fix it.
 
+**Copy any lines that begin with `Waited for`.** A build written without an
+account often has to guess how long a page takes to be ready, so it tries a
+few ways of waiting and prints which one worked, like this.
+
+```
+Waited for order rows, ready after count_reached in 1520 ms (tried loaded, network_idle, count_reached)
+```
+
+Paste those lines into your comment even when the run worked. A run that
+worked writes no file, so this line is the only place the answer turns up,
+and the next build keeps that one way of waiting and drops the guesses. The
+line holds the app's own name for the wait, a few fixed words, and a number
+of milliseconds, never anything from the page.
+
 **Expect a few of those.** The recording gets the provider written in one go,
 which used to take three rounds on a good site and eight on a bad one. Making
 it work is a separate job, because a recording cannot show what happens when

@@ -243,5 +243,89 @@ def test_the_journal_never_writes_the_address_down(tmp_path):
     assert "file:" not in body and "page.html" not in body
 
 
+def test_a_wait_writes_which_guess_worked_and_nothing_off_the_page(
+        tmp_path, caplog):
+    """paperpull_core.ready puts the winning wait in the journal, and the
+    journal goes into the file a tester attaches. The page below changes
+    its address to a canary and draws a canary row while the waits run,
+    so anything that copied the address or a match into the entry would
+    carry one out."""
+    from paperpull_core import ready as ready_module
+    from paperpull_core.journal import Journal
+    from paperpull_core.ready import (count_reaches, count_settles, has,
+                                      network_idle, ready, url_changes)
+
+    ready_module._told.clear()
+    caplog.set_level("INFO", logger="paperpull_core.ready")
+    html = tmp_path / "page.html"
+    html.write_text(PAGE, encoding="utf-8")
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(html.as_uri())
+            j = Journal(page, {"row": "a"}, watch=("row",))
+            page.evaluate("""() => setTimeout(() => {
+                location.hash = 'CANARYHASH';
+                const p = document.createElement('p');
+                p.className = 'CANARYCLASS late';
+                p.textContent = 'CANARYNAME CANARYAMOUNT';
+                document.body.appendChild(p);
+            }, 300)""")
+            got = ready(page, [url_changes(), network_idle(),
+                               count_reaches("p.late"),
+                               count_settles("p.late", quiet_ms=200)],
+                        invariant=has("p.late"), budget_ms=5000,
+                        journal=j, name="the late row")
+            path = failure.write_failure(
+                tmp_path, command="pilot", step="read the rows",
+                reason="testing the wait entry", page=page,
+                selectors=SELECTORS, provider="Canary", version="0.0.0",
+                journal=j, say=lambda *a: None)
+            browser.close()
+    except Exception as e:  # pragma: no cover
+        pytest.skip("no browser available: %s" % e)
+
+    assert got.ready and got.winner == "url_changed"
+    body = Path(path).read_text(encoding="utf-8")
+    for canary in CANARIES:
+        assert canary not in body, "%s leaked through a wait" % canary
+    assert "file:" not in body and "page.html" not in body
+    said = " ".join(failure.summarize(json.loads(body)))
+    assert "\"the late row\" was ready after url_changed" in said
+    # The line printed for a tester to paste goes through the same rules.
+    assert "Waited for the late row, ready after url_changed" in caplog.text
+    for canary in CANARIES:
+        assert canary not in caplog.text, "%s leaked into the output" % canary
+
+
+def test_a_forged_wait_result_cannot_carry_page_text_into_the_journal():
+    """The journal takes what ready() hands it, and ready() only ever
+    hands it names from its own lists. This is the case where that
+    stopped being true, a result built by hand with a canary in every
+    field. Each one has to come out as a word from the fixed list or not
+    at all."""
+    from paperpull_core.journal import Journal
+
+    class Forged:
+        ready = "CANARYINPUT"
+        winner = "CANARYTOKEN"
+        elapsed_ms = "CANARYAMOUNT"
+        attempts = [type("A", (), {"strategy": "CANARYNAME",
+                                   "outcome": "CANARYHIDDEN",
+                                   "ms": "CANARYCARD"})()]
+
+    j = Journal()
+    j.waited("CANARYSTREET CANARYCITY", Forged())
+    j.waited("Welcome back CANARYNAME", Forged())
+    body = json.dumps(j.report())
+    for canary in CANARIES:
+        assert canary not in body, "%s leaked through a forged wait" % canary
+    entry = j.report()["entries"][0]
+    assert entry["winner"] == "none"
+    assert entry["attempts"][0] == {"strategy": "other", "outcome": "other",
+                                    "ms": 0}
+
+
 def test_the_file_is_small_enough_to_paste(export):
     assert len(export) < 60000

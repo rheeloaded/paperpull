@@ -39,6 +39,9 @@ contributed to anything, is
 4. Click **Pilot**. It takes the newest few from each tab. Say whether
    PDFs landed in `In-Warehouse\` and `Online\`, and whether they are
    readable, which is the one thing nobody has checked yet.
+   If the run printed any lines that begin with `Waited for`, copy
+   those into your comment as well. They say which way of waiting
+   each page needed, which is the thing the next build keeps.
 5. If a run stops early it writes a `failure-*.json` in `Diagnostics`
    by itself and prints where. Attach that. It names the step that broke
    and holds no text from your account.

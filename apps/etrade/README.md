@@ -38,6 +38,9 @@ delete-safe, part of [PaperPull](../../README.md).
    with a sentence about how statements, confirmations and tax forms are separated (tabs, a dropdown, one list), and how you choose the account.
 8. When a new build is posted, click **Pilot** and say whether PDFs landed
    in `Statements\` or `Tax Documents\`, then attach a fresh Diagnose file.
+   If the run printed any lines that begin with `Waited for`, copy
+   those into your comment as well. They say which way of waiting
+   each page needed, which is the thing the next build keeps.
 
 A Diagnose file and one recording together are usually enough to get a
 provider working in a single round. Diagnose on its own takes two or three.

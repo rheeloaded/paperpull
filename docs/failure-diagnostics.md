@@ -288,6 +288,46 @@ time. **An empty list at status 200 is an empty account or a filter that
 excluded everything, and those are different problems.** It says which
 it cannot tell, rather than leaving a maintainer to guess.
 
+## Guessing the wait, and finding out which guess was right
+
+Two of Costco's eight bugs were the wrong kind of wait. Rows read before
+they were drawn, and a hash-only change of address that loads nothing.
+Written blind, the right wait is a guess, so `paperpull_core.ready` takes
+several guesses in order and reports which one got the page ready.
+
+```python
+got = ready(page, [network_idle(), count_reaches("tr.order", 1),
+                   count_settles("tr.order")],
+            invariant=has("tr.order"), budget_ms=20000,
+            journal=_journal, name="order rows")
+```
+
+The rules are the reason it is safe.
+
+* Every strategy only waits. None clicks, reloads, navigates or goes back,
+  so trying one and then the next changes nothing on the page. A strategy
+  can only be built by the module, and handing it a function is refused.
+* The invariant is required and decides. A wait that returned has not
+  proved anything, and a page already ready costs one question and no
+  wait, which measured the same as the bare count it replaces.
+* One budget for the whole call. Nine guesses do not turn a ten second
+  failure into a ninety second one. `within_ms` caps a guess that could
+  hang, a change of address that never comes.
+* Nothing raises. A closed page, an invariant that threw, a selector in
+  Playwright's dialect, each is an outcome in the answer.
+
+The answer goes to two places. The journal records every attempt, its
+outcome and its milliseconds, as words from fixed lists, and the failure
+file says in a sentence which wait worked. A run that worked writes no
+file, so the first answer for each wait is also printed once, as a
+`Waited for` line, and the tester guide and every tester README ask for
+those lines to be pasted. The next round keeps the winner and drops the
+rest.
+
+Adopting it is per app and happens in each provider's next round, at the
+waits that are guesses. `test_every_app_waits_safely.py` checks every app
+that does passes its journal, a name, an invariant and a budget.
+
 ## What this does not fix
 
 - A provider that only breaks on an account with something unusual on
