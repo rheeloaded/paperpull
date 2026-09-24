@@ -91,7 +91,19 @@ def is_safe_url(url: str) -> bool:
 # bank account, never take a loan, never change a setting.
 # ---------------------------------------------------------------------------
 FORBIDDEN_CONTROL_RE = re.compile(
-    r"(\bpay\b|payment|autopay|auto-?pay|\bcard\b|bank\s+account|debit|checking|savings|"
+    r"(\bpay\b|payment|autopay|auto-?pay|bank\s+account|debit|checking|savings|"
+    # A verb reaching the noun, rather than the noun on its own.
+    # "card" and "account" used to be refused by themselves, and on a
+    # card portal those are what the DOCUMENT is called. The verb is
+    # what makes it dangerous, and the words in between are why an
+    # exact phrase is not enough: "Add a new card", "Manage my card".
+    # Same shape as the verb "edit" matching inside the noun "Credit".
+    r"(add|manage|activate|deactivate|replace|lock|unlock|freeze|link|"
+    r"unlink|remove|delete|close|open|report|order|request|upgrade|"
+    r"set\s*up)\b[\w'\s]{0,18}\b(card|account)s?\b|"
+    r"(card|account)s?\b[\w'\s]{0,12}\b(settings?|services?|preferences?|details)\b|"
+    r"virtual\s+card|lost\s+or\s+stolen|card\s+is\s+lost|"
+
     r"routing|wallet|\bapply\b|\bborrow|new\s+loan|prequalif|pre-?approv|\bshop\b|\bbuy\b|"
     r"checkout|virtual\s+card|\brefinanc|\bextend|defer|hardship|dispute|\bclose\b|"
     # Word boundaries on both sides of the verb stems. "edit" inside
