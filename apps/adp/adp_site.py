@@ -826,14 +826,14 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         try:
             el.click(timeout=8000)
             if trace is not None:
-                trace.append({"note": "clicked", "control": label[:60]})
+                trace.append({"note": "clicked", "control": redact(label)[:60]})
         except Exception as e:
             if trace is not None:
-                trace.append({"note": "click failed", "control": label[:60], "error": str(e)[:160]})
+                trace.append({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
             try:
                 el.evaluate("el => el.click()")
                 if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead", "control": label[:60]})
+                    trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
             except Exception as e2:
                 if trace is not None:
                     trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
@@ -853,10 +853,10 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             try:
                 step.click(timeout=8000)
                 if trace is not None:
-                    trace.append({"note": "second step clicked", "control": step_label[:60]})
+                    trace.append({"note": "second step clicked", "control": redact(step_label)[:60]})
             except Exception as e:
                 if trace is not None:
-                    trace.append({"note": "second step click failed", "control": step_label[:60],
+                    trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
                                   "error": str(e)[:160]})
             if wait_for_pdf(20):
                 return True
@@ -923,7 +923,11 @@ def fetch_statement_pdf(page, url: str, trace: Optional[list] = None, accept: st
             if kind:
                 LAST_REFUSAL.update({"kind": kind, "message": human})
                 if trace is not None:
-                    trace.append({"note": "ADP refused this document", "kind": kind, "message": human[:300]})
+                    # On screen the person sees ADP's words as ADP wrote
+                    # them. The copy in the trace is attached to an issue, and
+                    # a step-up message names where the code was sent.
+                    trace.append({"note": "ADP refused this document", "kind": kind,
+                                  "message": redact(human)[:300]})
         log.info("statement PDF answered HTTP %s %s", out.get("status"), (out.get("type") or "")[:30])
     except Exception as e:
         log.info("in-page PDF fetch failed: %s", e)

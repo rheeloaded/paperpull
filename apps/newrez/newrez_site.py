@@ -702,14 +702,14 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         try:
             el.click(timeout=8000)
             if trace is not None:
-                trace.append({"note": "clicked", "control": label[:60]})
+                trace.append({"note": "clicked", "control": redact(label)[:60]})
         except Exception as e:
             if trace is not None:
-                trace.append({"note": "click failed", "control": label[:60], "error": str(e)[:160]})
+                trace.append({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
             try:
                 el.evaluate("el => el.click()")
                 if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead", "control": label[:60]})
+                    trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
             except Exception as e2:
                 if trace is not None:
                     trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
@@ -729,10 +729,10 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             try:
                 step.click(timeout=8000)
                 if trace is not None:
-                    trace.append({"note": "second step clicked", "control": step_label[:60]})
+                    trace.append({"note": "second step clicked", "control": redact(step_label)[:60]})
             except Exception as e:
                 if trace is not None:
-                    trace.append({"note": "second step click failed", "control": step_label[:60],
+                    trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
                                   "error": str(e)[:160]})
             if wait_for_pdf(20):
                 return True
