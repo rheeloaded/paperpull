@@ -258,10 +258,31 @@ def controls_named(page, name_re: Pattern, roles=("button", "link")):
 
     A document is offered as a button on one provider and a link on the
     next, and the row it sits in supplies the date either way.
+
+    A control is matched on its ACCESSIBLE NAME, which is what a screen
+    reader would say and is usually what is written on it. Usually. A
+    tester's survey counted eighteen controls on a page by what they say
+    and this found none of them, so discovery reported no documents on a
+    page holding nine. Whatever the cause on that page, a control whose
+    own words match is a control, so when the accessible name finds
+    nothing the words are asked instead (#38).
     """
     loc = page.get_by_role(roles[0], name=name_re)
     for role in roles[1:]:
         loc = loc.or_(page.get_by_role(role, name=name_re))
+    try:
+        if loc.count():
+            return loc
+    except Exception:
+        return loc
+    by_text = page.locator("a, button, [role=button], [role=link]").filter(has_text=name_re)
+    try:
+        if by_text.count():
+            log.info("no control matched by its accessible name, %d matched by its words",
+                     by_text.count())
+            return by_text
+    except Exception:
+        pass
     return loc
 
 
