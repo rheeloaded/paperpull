@@ -608,6 +608,16 @@ def widen_date_filter(page, capture: list, trace: Optional[list] = None) -> bool
         return False
 
 
+def _row_count(page) -> int:
+    """How many document rows the page is showing, for when applying a
+    period reloads the page instead of fetching a list."""
+    try:
+        return int(page.evaluate(
+            "sel => document.querySelectorAll(sel).length", FALLBACK["doc_row"]) or 0)
+    except Exception:
+        return 0
+
+
 def _choose_period(page, choice: str, capture: list, trace: Optional[list] = None) -> bool:
     """Open the period picker if it is closed, choose `choice`, apply it,
     and catch the list the page then loads. True when a list arrived."""
@@ -645,10 +655,21 @@ def _choose_period(page, choice: str, capture: list, trace: Optional[list] = Non
                 page.remove_listener("response", on_response)
             except Exception:
                 pass
+        # Applying a period can submit a form rather than fetch a list.
+        # A recording shows exactly that, a submit after Apply and the
+        # page reloading with the results in it, and counting only the
+        # API answers meant a period that worked was reported as one that
+        # had not, so nothing older than the default was ever read (#36).
+        got_list = len(capture) > before
+        rows_now = _row_count(page)
+        if not got_list and rows_now:
+            log.info("date filter %r brought no list, but the page shows %d row(s)",
+                     choice, rows_now)
         if trace is not None:
-            trace.append({"note": "period chosen", "period": choice, "lists": len(capture) - before})
+            trace.append({"note": "period chosen", "period": choice,
+                          "lists": len(capture) - before, "rows_on_the_page": rows_now})
         log.info("date filter set to %r, %d list(s)", choice, len(capture) - before)
-        return len(capture) > before
+        return got_list or bool(rows_now)
     except Exception as e:
         log.info("could not choose the period %r: %s", choice, e)
         return False

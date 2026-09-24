@@ -92,11 +92,18 @@ def test_the_step_still_says_a_tab_was_opened(context):
     assert first["effect"]["new_tab_off_host"] is False
 
 
-def test_a_tab_on_somebody_elses_host_is_not_recorded(context):
-    """The refusal to record outside the provider's own site applies to a
-    tab it opened. A checkout opens a payment processor."""
+def test_a_tab_on_somebody_elses_host_is_recorded_and_marked(context):
+    """Refusing it was tried first and it refused the wrong thing. Two
+    providers here keep their documents on a vendor, so the tab that
+    matters is the one that is not theirs, and refusing it left a
+    tester's recording a single step long (#35, #45).
+
+    It refused inconsistently as well. A tab opens as about:blank and
+    navigates afterwards, so whether the check ever saw its real address
+    was a race, and one tester's off-host tab was recorded while
+    another's was not on the same build."""
     context.route("https://elsewhere.test/**", lambda route: route.fulfill(
-        status=200, content_type="text/html", body="<button id='x'>Card number</button>"))
+        status=200, content_type="text/html", body="<button id='x'>View PDF</button>"))
     page, rec = _start(context)
     with context.expect_page() as info:
         page.click("#away")
@@ -105,8 +112,34 @@ def test_a_tab_on_somebody_elses_host_is_not_recorded(context):
     away.click("#x")
     away.wait_for_timeout(300)
     report = rec.stop()
-    assert "Card number" not in [s.get("label") for s in report["steps"]]
-    assert report["steps"][0]["effect"]["new_tab_off_host"] is True
+
+    labels = [s.get("label") for s in report["steps"]]
+    assert "View PDF" in labels, "the vendor's page is where the document is"
+    vendor = next(s for s in report["steps"] if s.get("label") == "View PDF")
+    assert vendor["on_the_providers_own_site"] is False, "and the file says so"
+    first = report["steps"][0]
+    assert first["effect"]["new_tab_off_host"] is True
+    assert "on_the_providers_own_site" not in first, "the provider's own steps are unmarked"
+
+
+def test_nothing_typed_is_captured_on_a_vendors_page_either(context):
+    """Which is why recording one is defensible. There is no value in a
+    recording to leak, on any tab."""
+    context.route("https://elsewhere.test/**", lambda route: route.fulfill(
+        status=200, content_type="text/html",
+        body="<input id='c' aria-label='Card number'>"))
+    page, rec = _start(context)
+    with context.expect_page() as info:
+        page.click("#away")
+    away = info.value
+    away.wait_for_load_state("domcontentloaded")
+    away.fill("#c", "4111111111111111")
+    away.wait_for_timeout(300)
+    report = rec.stop()
+    import json
+    assert "4111111111111111" not in json.dumps(report)
+    for step in report["steps"]:
+        assert step.get("value", "[REDACTED]") == "[REDACTED]"
 
 
 def test_stopping_lets_every_tab_go(context):
