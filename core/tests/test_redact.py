@@ -168,3 +168,24 @@ def test_every_app_that_redacts_imports_it_from_core():
         if uses and "from paperpull_core.redact import" not in text:
             missing.append(site.parent.name)
     assert not missing, "uses redaction without importing core's: " + ", ".join(missing)
+
+
+def test_a_masked_phone_tail_goes_the_way_a_masked_account_tail_does():
+    """A step-up message says where the code was sent, and the separator
+    between the mask and the last four is a hyphen rather than nothing.
+    "(...1234)" was masked and "(***) ***-4821" went through untouched."""
+    for text in ("Enter the code we sent to (***) ***-4821",
+                 "a code was sent to xxx-xxx-9182",
+                 "card ****-5678", "account ....9012"):
+        out = redact(text)
+        assert "####" in out, text
+        for digits in ("4821", "9182", "5678", "9012"):
+            assert digits not in out or digits not in text, text
+
+
+def test_a_number_that_is_not_after_a_mask_still_survives():
+    """The masking must not reach an ordinary count or date, because a
+    survey with no numbers in it says nothing."""
+    for text in ("2 of 3 pages", "Download 2026 Q1 Statement", "page 12",
+                 "17 rows matched", "2026-03-04"):
+        assert redact(text) == text, text

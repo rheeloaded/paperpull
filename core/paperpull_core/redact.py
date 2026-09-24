@@ -69,8 +69,11 @@ _GREETING_RE = re.compile(
 # An amount is a balance or a payment, and a survey has no use for either.
 _MONEY_RE = re.compile(r"[$€£]\s?-?\d[\d,]*(?:\.\d{2})?")
 
-# A number after dots or stars is the tail of an account.
-_MASKED_TAIL_RE = re.compile(r"([.*•xX]{2,}\s*)\d{2,}")
+# A number after dots or stars is the tail of an account. The separator
+# between them may be a hyphen or a bracket, because "(***) ***-4821" is
+# how a step-up message writes a phone, and that tail went through
+# untouched while "(...1234)" did not.
+_MASKED_TAIL_RE = re.compile(r"([.*•xX]{2,}[\s)\]-]{0,3})\d{2,}")
 
 # The account holder's own name, given by the orchestrator from the
 # config, so a heading or a profile button that shows it never reaches
