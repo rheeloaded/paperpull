@@ -43,12 +43,18 @@ after. A refused document is deleted and never existed.
 
 That ordering is the entire reason identity verification was built first.
 
-WHAT THIS DOES NOT DO
+THE OTHER HALF, FOR PROVIDERS WITH NO FILE
 
-It does not render. Twelve providers have no file to catch and are
-printed from a page by `receipt_pdf`, and five of those also catch real
-files for other documents, so one app needs both at once. Rendering is a
-sibling of this module and not a mode of it.
+Twelve providers hand over nothing and are printed from a page, and five
+of those also catch real files for other documents, so one app needs
+both at once. `render` is that half. It never learns how to print, which
+stays in `receipt_pdf` and the app, and it exists only to give a printed
+receipt the same ordering. Staged, checked, then moved.
+
+That is why `deliver` and `render` are two functions over one `_finish`
+rather than one function with a mode.
+
+WHAT THIS DOES NOT DO
 
 It does not decide what to click. A provider's route navigates, handles
 its own intercepts, finds the control and hands over a `DocumentRequest`.
@@ -73,7 +79,9 @@ ASK = "ask"
 DOWNLOAD = "download"
 TAB = "tab"
 FOLDER = "folder"
-MECHANISMS = (ASK, DOWNLOAD, TAB, FOLDER)
+# Not caught at all. Twelve providers have no file and are printed.
+RENDERED = "rendered"
+MECHANISMS = (ASK, DOWNLOAD, TAB, FOLDER, RENDERED)
 
 # How a delivery ended.
 SAVED = "saved"
@@ -297,6 +305,18 @@ def deliver(page, request: DocumentRequest, out_path, *, is_safe_url,
         return Delivery(outcome, rejected[0] if rejected else "",
                         armed=tuple(armed))
 
+    return _finish(staged, out_path, request.expect, strict, mechanism,
+                   armed, note)
+
+
+def _finish(staged: Path, out_path: Path, expect, strict: bool,
+            mechanism: str, armed, note) -> Delivery:
+    """Check what was staged and either put it in place or destroy it.
+
+    The one part that is the same whether the bytes were caught off a
+    network or printed from a page, and the only part worth having. A
+    document reaches the archive after it has been checked and never
+    before."""
     if not _looks_like_pdf(staged):
         # A site that answers an expired link with an HTML error page
         # still produces a file, and it still has a plausible size.
@@ -306,7 +326,7 @@ def deliver(page, request: DocumentRequest, out_path, *, is_safe_url,
         return Delivery(NOT_A_PDF, mechanism, armed=tuple(armed),
                         bytes_len=size)
 
-    verdict = verify(staged, request.expect)
+    verdict = verify(staged, expect)
     size = _size(staged)
     note("verify", outcome=verdict.outcome, mechanism=mechanism,
          checked=len(verdict.checked), matched=len(verdict.matched))
@@ -326,6 +346,51 @@ def deliver(page, request: DocumentRequest, out_path, *, is_safe_url,
         return Delivery(NOTHING, mechanism, verdict, tuple(armed), size)
 
     return Delivery(SAVED, mechanism, verdict, tuple(armed), size)
+
+
+def render(page, draw, out_path, *, expect: Optional[Identity] = None,
+           journal=None, strict: bool = True) -> Delivery:
+    """For the twelve providers where there is no file to catch.
+
+    Costco, Gap, Amazon, Walmart, eBay, Kroger, Target, Affirm, Anthem,
+    NetBenefits, Meijer and GitHub show a receipt as a web page and it is
+    printed. Nothing is intercepted, so this is not `deliver` with a
+    different mechanism. It is the other half of the same discipline.
+
+    `draw(path)` does the printing and this module never learns how.
+    That knowledge is `receipt_pdf`'s and the app's, and keeping it there
+    is why rendering is a sibling rather than a mode.
+
+    What it adds is the ordering. A rendered receipt is staged, checked
+    and moved, so the second receipt of a run coming out blank because a
+    dialog never closed, or carrying the first receipt because a page
+    never changed, is caught here rather than filed."""
+    out_path = Path(out_path)
+    staged = _stage(out_path)
+    _clear(staged)
+
+    def note(phase, **facts):
+        if journal is not None:
+            try:
+                journal.op(phase, "render", **facts)
+            except Exception:
+                pass
+
+    note("render_item", checkable=bool(expect and expect.is_checkable()))
+    try:
+        draw(staged)
+    except Exception as e:
+        log.info("rendering the document failed: %s", e)
+        _clear(staged)
+        note("verify", outcome=NOTHING, mechanism=RENDERED)
+        return Delivery(NOTHING, RENDERED, armed=(RENDERED,))
+
+    if not staged.exists():
+        note("verify", outcome=NOTHING, mechanism=RENDERED)
+        return Delivery(NOTHING, RENDERED, armed=(RENDERED,))
+
+    return _finish(staged, out_path, expect, strict, RENDERED,
+                   (RENDERED,), note)
 
 
 def _size(path) -> int:

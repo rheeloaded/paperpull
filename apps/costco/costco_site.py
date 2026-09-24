@@ -89,6 +89,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from paperpull_core.identity import Identity
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
 
@@ -192,6 +193,29 @@ def warehouse_key(date: str, total: str, where: str = "") -> str:
     day = re.sub(r"[^0-9]", "", date or "")
     where = re.sub(r"[^A-Za-z0-9]", "", (where or ""))[:12]
     return "-".join(p for p in ("wh", day, money, where) if p)
+
+
+def identity_for(purchase) -> Identity:
+    """What would prove a saved receipt is this purchase and not the one
+    below it on the list.
+
+    The trap here is `order_number`. For an online order it is Costco's
+    own number, printed on the invoice, and it is the best fact there
+    is. For a warehouse receipt there is no number anywhere on the list,
+    so `warehouse_key` invents one out of the date and the total, and
+    that invented string appears on no receipt ever printed. Handing it
+    over as a fact would have every warehouse receipt looking for a
+    number that cannot be there.
+
+    So a synthetic key is dropped and the date and the total carry it,
+    which a till receipt does print.
+    """
+    number = str(getattr(purchase, "order_number", "") or "")
+    if number.startswith("wh-"):
+        number = ""
+    return Identity(date=str(getattr(purchase, "purchase_date", "") or "")[:10],
+                    total=str(getattr(purchase, "total", "") or ""),
+                    number=number)
 
 
 # ---------------------------------------------------------------------------
