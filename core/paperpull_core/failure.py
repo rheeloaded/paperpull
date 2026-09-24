@@ -531,7 +531,9 @@ def app_version() -> str:
 def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
                   page=None, selectors=None, provider: str = "",
                   version: str = "", error=None, extra=None, journal=None,
-                  requests=None, say=print, **ignored) -> Optional[str]:
+                  requests=None, say=print, kind: str = "paperpull-failure",
+                  stem: str = "failure", note: str = "", told=None,
+                  **ignored) -> Optional[str]:
     """One file, written where the run already writes everything else.
 
     `step` and `reason` are written by the app, in its own source, and
@@ -543,7 +545,7 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
     from pathlib import Path
     try:
         report = {
-            "kind": "paperpull-failure",
+            "kind": kind,
             "schema": 2,
             "provider": str(provider)[:40],
             "version": (str(version)[:20] if version else app_version()),
@@ -576,13 +578,13 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
                 report["journal"] = journal.report()
             except Exception:
                 pass
-        report["note"] = (
+        report["note"] = note or (
             "Written automatically because a step failed. It holds counts "
             "and states and no text from the page, so there is nothing in "
             "it from your account. Read it through before attaching it.")
 
-        out = Path(diagnostics_dir) / ("failure-%s-%s.json" % (
-            report["command"], time.strftime("%Y%m%d-%H%M%S")))
+        out = Path(diagnostics_dir) / ("%s-%s-%s.json" % (
+            stem, report["command"], time.strftime("%Y%m%d-%H%M%S")))
         out.parent.mkdir(parents=True, exist_ok=True)
         from .storage import atomic_write_text
         atomic_write_text(out, json.dumps(report, indent=2))
@@ -590,10 +592,12 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
         return None
     try:
         say("")
-        say("  This run wrote a file about what went wrong:")
-        say("    %s" % out)
-        say("  It holds counts and states and no text from your account, so")
-        say("  there is nothing in it from your statements or receipts.")
+        for line in (told(out) if callable(told) else (
+                "  This run wrote a file about what went wrong:",
+                "    %s" % out,
+                "  It holds counts and states and no text from your account, so",
+                "  there is nothing in it from your statements or receipts.")):
+            say(line)
     except Exception:
         pass
     return str(out)
@@ -717,3 +721,40 @@ def summarize(report: dict) -> list:
                     % (parser["candidates"],
                        ", all of them for %s" % top.replace("_", " ") if top else ""))
     return said[:20]
+
+
+SURVEY_NOTE = (
+    "Written because you asked for a survey with Diagnose. It holds counts "
+    "and states and no text from the page, so there is nothing in it from "
+    "your account. This is the file to attach to an issue. The other file "
+    "Diagnose writes, and its screenshot, are the detailed ones and they "
+    "stay on this machine.")
+
+
+def write_survey(diagnostics_dir, page=None, selectors=None, provider="",
+                 journal=None, requests=None, extra=None, say=print,
+                 **ignored) -> Optional[str]:
+    """The same survey as a failure file, asked for on purpose.
+
+    Diagnose already wrote a second file next to this one, holding the
+    page's own title, the URL with its query string, the text of the rows
+    it found and the labels of the controls, and in half the apps a full
+    page screenshot of a signed-in provider. That file is what a repair is
+    actually read from, and it is not something to attach anywhere.
+
+    The panel used to point at it anyway, in as many words. So Diagnose now
+    writes this as well, built on the list of what may leave rather than on
+    scrubbing, and this is the one it names.
+    """
+    def told(out):
+        return ("  Diagnose wrote a survey that is safe to send:",
+                "    %s" % out,
+                "  It holds counts and states and no text from your account.",
+                "  Read it through, then attach it to this provider's issue.",
+                "  The detailed file beside it stays on this machine.")
+
+    return write_failure(
+        diagnostics_dir, command="diagnose", step="survey the page",
+        reason="", page=page, selectors=selectors, provider=provider,
+        journal=journal, requests=requests, extra=extra, say=say,
+        kind="paperpull-survey", stem="survey", note=SURVEY_NOTE, told=told)

@@ -1751,8 +1751,11 @@ HTML = r"""<!doctype html>
     <div id="morebox" style="display:none">
       <div class="actions more" id="moreactions"></div>
       <p class="morehint"><b>Verify</b> re-checks every saved PDF. <b>Diagnose</b> reads the
-         provider's page and writes a survey to its Diagnostics folder, downloading nothing.
-         Attach that file to an issue when a provider needs a repair or a first test.</p>
+         provider's page and writes two files to its Diagnostics folder, downloading nothing.
+         The one whose name starts with <b>survey-</b> holds counts and states and no text
+         from your account, and that is the one to attach to an issue. The detailed
+         file beside it, and its screenshot, carry the page's own words, so
+         they stay on this machine unless you decide to send them.</p>
       <p class="morehint"><b>Rename preview</b> shows what this app would call the files you
          already have, and changes nothing. <b>Apply renames</b> then renames them where they
          sit. Nothing is downloaded either way, nothing moves between folders, and only files
