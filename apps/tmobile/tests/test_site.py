@@ -96,8 +96,8 @@ def test_the_hint_says_this_provider_fires_an_ordinary_download(monkeypatch):
     req = site.bill_request(_Page(), "2026-08-12")
     assert req.hints == (delivery.DOWNLOAD,)
     assert delivery._order(req.hints)[0] == delivery.DOWNLOAD
-    assert set(delivery._order(req.hints)) == {delivery.DOWNLOAD,
-                                               delivery.TAB, delivery.FOLDER}
+    assert set(delivery._order(req.hints)) == {
+        delivery.DOWNLOAD, delivery.RESPONSE, delivery.TAB, delivery.FOLDER}
 
 
 def test_a_date_that_splits_into_three_parts_but_is_not_a_date():

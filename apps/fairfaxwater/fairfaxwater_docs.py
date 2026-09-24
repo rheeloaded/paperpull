@@ -23,6 +23,7 @@ auth, and the one side effect (a downloaded message is marked read).
 """
 from __future__ import annotations
 
+from paperpull_core import delivery
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -505,11 +506,35 @@ class App:
             self.check_session(page)
             site.ensure_statements(page)
         try:
-            saved = site.download_document(page, doc.title, doc.date, out_path,
-                                           item_hint=doc.item_id,
-                                           client_hint=doc.client_id,
-                                           occurrence=doc.occurrence,
-                                           account=doc.account)
+            # The site layer opens the documents page, expands the
+            # history and finds this bill's View control. Catching what
+            # the click opens on docsight.net, the portal's third-party
+            # document host, is the interceptor's, with this app's own
+            # allowlist travelling with the request.
+            request = site.bill_request(page, doc.title, doc.date,
+                                        item_hint=doc.item_id,
+                                        client_hint=doc.client_id,
+                                        occurrence=doc.occurrence,
+                                        account=doc.account)
+            got = None
+            if request is not None:
+                got = delivery.deliver(
+                    page, request, out_path,
+                    is_safe_url=site.is_safe_url, journal=self.journal,
+                    strict=bool(self.config.get("refuse_wrong_documents", True)))
+                print("  %s" % got.say())
+            saved = bool(got and got.ok)
+            if got is not None and got.outcome == delivery.WRONG:
+                why = "the bill that opened is not the one it was listed as"
+                self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+                self._write_row(doc, "Wrong document", "Needs Manual Review")
+                self.write_failure("save the document", why)
+                self.stats["manual_review"] += 1
+                self.stats["wrong_document"] = self.stats.get(
+                    "wrong_document", 0) + 1
+                print("  Nothing was saved for it. The file was destroyed")
+                print("  rather than filed under this bill's name.")
+                return
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as "manual review" and finish looking successful while

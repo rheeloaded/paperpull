@@ -13,5 +13,6 @@
   "delay_min_seconds": 2.5,
   "delay_max_seconds": 5.0,
   "pilot_count": 5,
-  "browser": "auto"
+  "browser": "auto",
+  "refuse_wrong_documents": true
 }

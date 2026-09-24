@@ -286,9 +286,10 @@ def test_the_watched_folder_is_the_last_resort(monkeypatch, tmp_path):
 
 def test_a_hint_moves_a_mechanism_first_and_removes_none():
     assert D._order((D.FOLDER,))[0] == D.FOLDER
-    assert set(D._order((D.FOLDER,))) == {D.DOWNLOAD, D.TAB, D.FOLDER}
-    assert D._order(()) == [D.DOWNLOAD, D.TAB, D.FOLDER]
-    assert D._order(("nonsense",)) == [D.DOWNLOAD, D.TAB, D.FOLDER]
+    raced = {D.DOWNLOAD, D.RESPONSE, D.TAB, D.FOLDER}
+    assert set(D._order((D.FOLDER,))) == raced
+    assert D._order(()) == [D.DOWNLOAD, D.RESPONSE, D.TAB, D.FOLDER]
+    assert D._order(("nonsense",)) == [D.DOWNLOAD, D.RESPONSE, D.TAB, D.FOLDER]
 
 
 def test_a_wrong_hint_still_finds_the_document(monkeypatch, tmp_path):
@@ -745,3 +746,126 @@ def test_a_download_still_ends_the_wait_at_once():
         assert watch.anything()
     finally:
         watch.__exit__()
+
+
+# -- the answer read as it went past -------------------------------------------
+
+class _Response:
+    def __init__(self, url, body=PDF, ctype="application/pdf", kind="document",
+                 raises=False):
+        self.url, self._body, self._raises = url, body, raises
+        self.headers = {"content-type": ctype}
+        self.request = type("R", (), {"resource_type": kind})()
+
+    def body(self):
+        if self._raises:
+            raise RuntimeError("body already consumed")
+        return self._body
+
+
+def _emit(page, response):
+    for fn in page.context.handlers.get("response", []):
+        fn(response)
+
+
+def test_a_pdf_answer_is_kept_as_it_goes_past(monkeypatch, tmp_path):
+    """Fairfax Water lost two of five bills to a listener attached one
+    beat too late. Reading the answer in flight needs no second request,
+    which matters where the address was signed for one use."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    got = D.deliver(page, request(trigger=lambda: _emit(
+        page, _Response("https://bank.example/doc.pdf"))),
+        tmp_path / "d.pdf", is_safe_url=safe)
+    assert got.ok and got.mechanism == D.RESPONSE
+    assert (tmp_path / "d.pdf").read_bytes() == PDF
+
+
+def test_it_listens_at_the_context_not_at_the_tab(monkeypatch, tmp_path):
+    """A tab's first answer can land before a listener attached on the
+    page event exists. The context sees every page's answers from the
+    start, which is the whole point."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    seen = {}
+
+    def trigger():
+        seen["on_context"] = len(page.context.handlers.get("response", []))
+        seen["on_page"] = len(page.handlers.get("response", []))
+        _emit(page, _Response("https://bank.example/doc.pdf"))
+
+    D.deliver(page, request(trigger=trigger), tmp_path / "d.pdf",
+              is_safe_url=safe)
+    assert seen["on_context"] == 1
+    assert seen["on_page"] == 0
+
+
+def test_an_answer_from_another_host_is_never_read(monkeypatch, tmp_path):
+    """A document is not always on the provider's own host, so the app's
+    allowlist decides, and anything outside it is not even opened."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    hostile = _Response("https://somewhere-else.example/doc.pdf")
+    got = D.deliver(page, request(trigger=lambda: _emit(page, hostile)),
+                    tmp_path / "d.pdf", is_safe_url=safe, settle_ms=500)
+    assert got.outcome == D.NOTHING
+
+
+def test_an_answer_that_is_not_a_pdf_is_ignored(monkeypatch, tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    got = D.deliver(page, request(trigger=lambda: _emit(
+        page, _Response("https://bank.example/page", body=b"<html>hi</html>"))),
+        tmp_path / "d.pdf", is_safe_url=safe, settle_ms=500)
+    assert got.outcome == D.NOTHING
+
+
+def test_the_first_pdf_answer_wins_and_later_ones_do_not_replace_it(
+        monkeypatch, tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    other = b"%PDF-1.7 a different document" + b"y" * 4000
+
+    def trigger():
+        _emit(page, _Response("https://bank.example/first.pdf"))
+        _emit(page, _Response("https://bank.example/second.pdf", body=other))
+
+    D.deliver(page, request(trigger=trigger), tmp_path / "d.pdf",
+              is_safe_url=safe)
+    assert (tmp_path / "d.pdf").read_bytes() == PDF
+
+
+def test_an_answer_whose_body_cannot_be_read_does_not_raise(monkeypatch,
+                                                            tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    got = D.deliver(page, request(trigger=lambda: _emit(
+        page, _Response("https://bank.example/doc.pdf", raises=True))),
+        tmp_path / "d.pdf", is_safe_url=safe, settle_ms=500)
+    assert got.outcome == D.NOTHING
+
+
+def test_a_download_still_wins_over_an_answer_seen_in_flight(monkeypatch,
+                                                             tmp_path):
+    """Order matters. A real download event is the least ambiguous thing
+    a provider can do."""
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+
+    def trigger():
+        _emit(page, _Response("https://bank.example/doc.pdf"))
+        page.emit_download(FakeDownload())
+
+    got = D.deliver(page, request(trigger=trigger), tmp_path / "d.pdf",
+                    is_safe_url=safe)
+    assert got.mechanism == D.DOWNLOAD
+
+
+def test_the_response_listener_is_removed_afterwards(monkeypatch, tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    page = FakePage()
+    for _ in range(3):
+        D.deliver(page, request(trigger=lambda: _emit(
+            page, _Response("https://bank.example/doc.pdf"))),
+            tmp_path / "d.pdf", is_safe_url=safe)
+    assert page.context.handlers.get("response", []) == []
