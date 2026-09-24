@@ -106,11 +106,17 @@ class DocumentRequest:
     hints: tuple = field(default_factory=tuple)
 
     def describe(self) -> dict:
-        """For the journal. What kind of request this was, never where."""
+        """For the journal. What kind of request this was, never where.
+
+        A hint is reported only when it names a mechanism this module
+        knows. `_order` already ignores anything else, so writing an
+        unrecognized one down buys nothing and would let a string an app
+        built from a page reach a file somebody posts publicly."""
         return {"has_trigger": self.trigger is not None,
                 "has_url": bool(self.url),
                 "checkable": bool(self.expect and self.expect.is_checkable()),
-                "hints": [str(h)[:24] for h in (self.hints or ())][:6]}
+                "hints": sorted({h for h in (self.hints or ())
+                                 if h in MECHANISMS})}
 
 
 @dataclass(frozen=True)

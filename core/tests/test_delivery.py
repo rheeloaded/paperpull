@@ -414,3 +414,24 @@ def test_no_path_or_url_reaches_the_report(monkeypatch, tmp_path):
     for secret in ("CANARY", "bank.example", str(tmp_path), "statement.pdf"):
         assert secret not in body, secret
     assert got.report()["outcome"] in (D.SAVED, D.WRONG, D.NOTHING)
+
+
+def test_a_hint_that_is_not_a_mechanism_is_never_written_down():
+    """_order already ignores one, so recording it buys nothing and
+    would let a string an app built from a page reach a file somebody
+    posts publicly."""
+    d = D.DocumentRequest(hints=(D.FOLDER, "CANARY-from-the-page"))
+    assert d.describe()["hints"] == [D.FOLDER]
+    assert "CANARY" not in json.dumps(d.describe())
+
+
+def test_the_canaries_are_checked_lowercased_too():
+    """A report that lowercased a value before writing it would slip
+    past a canary that only looks for the original casing. Nothing here
+    lowercases, and this is what proves it stays that way."""
+    patched = I.Identity(date="2026-01-15", number="CANARYORDER8421")
+    v = I.verify(None, patched, text="CANARYORDER8421 January 15, 2026 " * 4)
+    body = json.dumps(v.report())
+    for secret in ("CANARYORDER8421", "2026-01-15", "January"):
+        assert secret not in body
+        assert secret.lower() not in body.lower()
