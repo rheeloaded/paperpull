@@ -29,6 +29,9 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from paperpull_core.delivery import TAB, DocumentRequest
+from paperpull_core.identity import Identity
 from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
@@ -453,13 +456,6 @@ def download_by_id(page, document_id: str, document_date: str, out_path) -> bool
     return False
 GROUP_SEL = "[class*='product-kind-description-row']"
 
-_NFCU_BLOB_FETCH = r"""async (u) => {
-    const r = await fetch(u);
-    const buf = new Uint8Array(await r.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-    return btoa(s);
-}"""
-
 
 def dismiss_timeout(page) -> None:
     """Click the 'Continue Session' keep-alive if the inactivity modal is up."""
@@ -612,12 +608,26 @@ def nfcu_collect(page):
     return docs
 
 
-def nfcu_download(page, ctx, account: str, date: str, out_path) -> bool:
-    """Expand the account group, click the View button on the row dated `date`,
-    capture the blob PDF that opens in a new tab, and save it."""
-    import base64
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+def statement_request(page, account: str, date: str):
+    """Everything up to the View click, for the statement dated `date`.
+
+    Expand the account group, dismiss the inactivity modal, pick the
+    year if the archive hides rows behind one, and find that row's View
+    button. Then stop.
+
+    What the click produces is not this app's business. Navy Federal
+    renders the PDF into a blob tab today, and the bytes of a blob can
+    only be read by the page that minted it, which delivery.take_new_tab
+    already knows. Handing the click over means a change to a download
+    or an inline tab needs no round here.
+
+    Two things this provider needs that a plain click does not. The
+    inactivity modal reappears while the blob tab is opening and delays
+    it, so it is dismissed on every poll. And the blob tab is closed
+    once read, because a full archive is hundreds of statements and
+    each one used to leave a tab behind.
+
+    None when the row cannot be reached."""
     if not expand_only(page, account):
         expand_only(page, account.split()[0] if account else account)
     dismiss_timeout(page)
@@ -646,51 +656,18 @@ def nfcu_download(page, ctx, account: str, date: str, out_path) -> bool:
         pass
     if btn is None:
         log.info("statement row not found for %s %s", account, date)
-        return False
+        return None
 
-    # close any stale blob tab so we capture THIS statement's blob, not a prior one
-    for p in list(ctx.pages):
-        if (p.url or "").startswith("blob:"):
-            try:
-                p.close()
-            except Exception:
-                pass
-
-    try:
-        btn.click()
-    except Exception as e:
-        log.info("view click failed for %s %s: %s", account, date, e)
-        return False
-
-    # the PDF opens as a blob in a new tab; poll for it (dismissing the
-    # inactivity modal while we wait, which can otherwise delay the open)
-    blob_page = None
-    for _ in range(24):                 # up to ~12s
-        page.wait_for_timeout(500)
-        dismiss_timeout(page)
-        for p in ctx.pages:
-            if (p.url or "").startswith("blob:"):
-                blob_page = p
-                break
-        if blob_page:
-            break
-    if blob_page is None:
-        log.info("no blob tab opened for %s %s", account, date)
-        return False
-
-    ok = False
-    try:
-        data = base64.b64decode(page.evaluate(_NFCU_BLOB_FETCH, blob_page.url))
-        ok = data[:5] == b"%PDF-"
-        if ok:
-            out_path.write_bytes(data)
-    except Exception as e:
-        log.info("blob fetch failed for %s %s: %s", account, date, e)
-    try:
-        blob_page.close()
-    except Exception:
-        pass
-    return ok
+    # Closing stale blob tabs before clicking is no longer needed. The
+    # interceptor collects only the tabs that open after it starts
+    # listening, so a tab left by an earlier statement cannot be read as
+    # this one. That was the whole reason for the old sweep.
+    return DocumentRequest(
+        trigger=btn.click,
+        expect=Identity(date=date),
+        while_waiting=lambda: dismiss_timeout(page),
+        close_new_tabs=True,
+        hints=(TAB,))
 
 
 # ---------------------------------------------------------------------------
