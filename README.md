@@ -387,6 +387,22 @@ remembered in a cache beside the installs, so the first build of a big
 archive takes minutes and the next takes seconds. The panel's Spreadsheet
 tab has this too, under Statements, streaming its progress.
 
+## Naming your files your way
+
+Files are named `2026-03-09 Target Coffee Receipt.pdf` unless you say
+otherwise. The panel's **File names** tab builds your own pattern from
+parts, the date in the shape you like, the provider, the order or
+document number, the account, the total and more, each shown with how
+many of your own files carry it. A part can be skipped when a document
+does not have it, so no name ends in a stray dash, and the three newest
+files you already have are shown under the new pattern as you type.
+
+One pattern covers every receipts app or every statements app, or any
+single app can have its own. After you save, the tab offers to rename
+the files you already have to match, a preview first and then the
+rename, and nothing is downloaded again. The pattern language is in
+[docs/file-naming.md](docs/file-naming.md).
+
 ## Windows and macOS
 
 **Both have a package.** Every release on the
@@ -485,8 +501,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **forty-eight** apps pass their tests, the thirty-six that are
-  supported and the ten still waiting for a tester, 3,487 of them across
+- ✅ All **forty-nine** apps pass their tests, the thirty-six that are
+  supported and the eleven still waiting for a tester, 7,595 of them across
   the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
