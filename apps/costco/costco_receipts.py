@@ -512,13 +512,18 @@ class App:
 
         # ---- classify (local, deterministic) ----
         cls = classification.classify_items(purchase.items, self.rules)
-        purchase.summary = cls.summary
-        purchase.confidence = cls.confidence
-        review_needed = cls.confidence == classification.LOW
+        # Unless Costco has already said what this purchase is. A fuel
+        # stop has no item to classify, so it was being filed as Mixed
+        # Purchases while its own PDF says Gas Station Receipt (#47).
+        told = site.summary_from_kind(purchase.store_info)
+        purchase.summary = told or cls.summary
+        purchase.confidence = classification.HIGH if told else cls.confidence
+        review_needed = (not told) and cls.confidence == classification.LOW
         notes_extra = f"Items: {'; '.join(i.name for i in purchase.items[:12])}" \
             if review_needed and purchase.items else ""
-        print(f"  {len(purchase.items)} item(s); summary: {cls.summary} "
-              f"[{cls.confidence}] ({cls.notes})")
+        print(f"  {len(purchase.items)} item(s); summary: {purchase.summary} "
+              f"[{purchase.confidence}] "
+              f"({'Costco names this kind itself' if told else cls.notes})")
 
         # ---- canceled orders: record, no receipt expected ----
         if re.search(r"cancell?ed", purchase.status or "", re.I):

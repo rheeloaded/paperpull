@@ -278,7 +278,14 @@ RATE_LIMIT_MARKERS = [
 # rejected by the browser's querySelectorAll. Discovery runs in the page,
 # so it matches on these instead. A live run against a real account is
 # what found that out.
-RECEIPT_CONTROL_TEXT = r"view\s+receipt"
+# One optional word, because a return's control reads "View Return
+# Receipt" and a tester's return never downloaded at all. The word
+# is not enumerated, since Costco may label a car wash or a pharmacy
+# visit the same way. A control still passes is_safe_control before
+# it is pressed, and that guard refuses "Return Item" and "Start a
+# Return" while allowing "View Return Receipt", which is the
+# distinction that matters (#47).
+RECEIPT_CONTROL_TEXT = r"view\s+(?:[a-z]+\s+)?receipt"
 DETAILS_CONTROL_TEXT = r"view\s+order\s+details|order\s+details"
 PRINT_CONTROL_TEXT = r"print\s*(receipt|invoice)?"
 
@@ -353,6 +360,28 @@ def purchase_kind(purchase_type: str) -> str:
     filed as an online order, because that is the one a person can always
     get at themselves if this guessed wrong."""
     return PURCHASE_TYPE_LABELS.get((purchase_type or "").upper(), ("", ONLINE))[1]
+
+
+# Labels that describe what was bought rather than merely where. A
+# warehouse or an online purchase says nothing a filename wants, since
+# almost everything is one of those, but a fuel stop or a pharmacy visit
+# is the whole answer.
+SELF_DESCRIBING = frozenset((
+    "Gas Station", "Car Wash", "Gas and Car Wash", "Pharmacy", "Optical",
+    "Travel", "Photo",
+))
+
+
+def summary_from_kind(store_info: str) -> str:
+    """What to call a purchase Costco has already named.
+
+    A fuel receipt carries one pump line and no item this app can
+    classify, so guessing made it "Mixed Purchases" while the PDF says
+    Gas Station Receipt across the top. The API's purchaseType is not a
+    guess. Empty for the kinds that describe a place rather than a
+    purchase, which are left to the classifier (#47)."""
+    label = (store_info or "").strip()
+    return label if label in SELF_DESCRIBING else ""
 
 
 def purchase_label(purchase_type: str) -> str:
