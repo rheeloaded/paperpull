@@ -731,13 +731,16 @@ def _pdf_from_here(page, before=()) -> Optional[bytes]:
     belongs to the page, so only the page can fetch it, which is what the
     in-page fetch is for.
 
-    `before` is what the viewers pointed at before the press. What is
-    new is tried first, so a viewer left open by an earlier bill cannot
-    be fetched ahead of this one and saved under its name."""
+    `before` is what the viewers pointed at before the press, and none of
+    it is ever fetched. Putting it last was not enough. When a press
+    brought nothing new, the fetch fell through to the viewer an earlier
+    bill had left open and saved that bill under this one's date, and a
+    review before release reproduced exactly that. Nothing new means
+    nothing, which fails and says so."""
     seen, blobs = _viewer_sources(page)
     old = set(before or ())
-    seen = sorted(seen, key=lambda s: s in old)
-    blobs = sorted(blobs, key=lambda s: s in old)
+    seen = [s for s in seen if s not in old]
+    blobs = [s for s in blobs if s not in old]
 
     for candidate in seen[:6]:
         try:
