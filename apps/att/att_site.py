@@ -92,6 +92,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import safe_selects as _safe_selects
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -975,9 +976,13 @@ def widen_range(page, iso_date: str, trace: Optional[list] = None,
     note = {"note": "date range", "wanted": iso_date}
     # A plain select first, since choosing in one clicks nothing.
     try:
-        sels = page.locator("select")
-        for i in range(min(sels.count(), 6)):
-            sel = sels.nth(i)
+        # Through the shared filter, which refuses every dropdown on a page
+        # that is not signed in and any whose surroundings name a payment
+        # or a transfer. A dropdown whose options look like spans of time
+        # is not reason enough to set it on a page nobody has confirmed.
+        for sel, _identity in _safe_selects(page, FORBIDDEN_CONTROL_RE,
+                                            signed_out=looks_signed_out,
+                                            limit=6):
             labels = [re.sub(r"\s+", " ", t).strip() for t in
                       (sel.evaluate("s => Array.from(s.options).map(o => o.text)")
                        or [])]

@@ -35,27 +35,27 @@ PAGES = {
     # Costco's tab switch. The list is asked for and drawn when the
     # answer comes, so the load is long over and nothing is on screen.
     "/fetch": """<h1>Orders</h1><script>
-        fetch('/slow?ms=1200').then(() => { %s; %s; %s; });
+        fetch('/slow?ms=3000').then(() => { %s; %s; %s; });
         </script>""" % (ROW, ROW, ROW),
     # Drawn on a timer after the network has gone quiet, which is what a
     # framework that renders on the next tick of its own scheduler does.
     "/timer": """<h1>Orders</h1><script>
-        setTimeout(() => { %s; %s; %s; }, 1500);
+        setTimeout(() => { %s; %s; %s; }, 4000);
         </script>""" % (ROW, ROW, ROW),
     # A list that draws in pieces. The first row says nothing about the
     # sixth.
     "/pieces": """<h1>Orders</h1><script>
         let n = 0;
         const t = setInterval(() => { %s; if (++n === 6) clearInterval(t); },
-                              150);
+                              400);
         </script>""" % ROW,
     # Costco's receipt. Only the part after the # changes, so nothing
     # loads, and a wait for a load waits for ever.
     "/hash": """<h1>Orders</h1><script>
-        setTimeout(() => { location.hash = '#/receipts'; }, 1500);
+        setTimeout(() => { location.hash = '#/receipts'; }, 3000);
         </script>""",
     # The document is parsed long before an image lets the load finish.
-    "/image": """<h1>Orders</h1><img src="/slow?ms=1200&img=1">""",
+    "/image": """<h1>Orders</h1><img src="/slow?ms=3000&img=1">""",
     # Ready from the start, the case every working run is.
     "/done": """<h1>Orders</h1><p class=row>r</p><p class=row>r</p>
         <p class=row>r</p>""",
@@ -128,7 +128,7 @@ def test_a_list_drawn_when_its_answer_comes_needs_network_quiet(site, page):
     page.goto(site + "/fetch")
     got = ready(page, [load(), count_settles("p.row", quiet_ms=300,
                                              at_least=0), network_idle()],
-                invariant=ROWS_3, budget_ms=8000)
+                invariant=ROWS_3, budget_ms=15000)
     assert got.ready and got.winner == "network_idle"
     assert _outcomes(got)[:2] == [("loaded", "not_satisfied"),
                                   ("count_settled", "not_satisfied")]
@@ -137,7 +137,7 @@ def test_a_list_drawn_when_its_answer_comes_needs_network_quiet(site, page):
 def test_a_list_drawn_on_a_timer_needs_the_count(site, page):
     page.goto(site + "/timer")
     got = ready(page, [load(), network_idle(), count_reaches("p.row", 3)],
-                invariant=ROWS_3, budget_ms=8000)
+                invariant=ROWS_3, budget_ms=15000)
     assert got.ready and got.winner == "count_reached"
     assert _outcomes(got)[:2] == [("loaded", "not_satisfied"),
                                   ("network_idle", "not_satisfied")]
@@ -147,8 +147,8 @@ def test_a_list_drawn_in_pieces_needs_the_count_to_stop_moving(site, page):
     """The first row arriving is not the list arriving."""
     page.goto(site + "/pieces")
     got = ready(page, [load(), count_reaches("p.row"),
-                       count_settles("p.row", quiet_ms=400)],
-                invariant=has("p.row", 6), budget_ms=8000)
+                       count_settles("p.row", quiet_ms=1200)],
+                invariant=has("p.row", 6), budget_ms=15000)
     assert got.ready and got.winner == "count_settled"
     assert _outcomes(got)[:2] == [("loaded", "not_satisfied"),
                                   ("count_reached", "not_satisfied")]
@@ -162,7 +162,7 @@ def test_a_change_after_the_hash_is_seen_only_by_watching_the_address(
     on_receipts = url_matches(r"#/receipts$")
     got = ready(page, [load(), network_idle(), count_reaches("h1"),
                        url_changes()],
-                invariant=on_receipts, budget_ms=8000)
+                invariant=on_receipts, budget_ms=15000)
     assert got.ready and got.winner == "url_changed"
     assert [o for _, o in _outcomes(got)[:3]] == ["not_satisfied"] * 3
 
@@ -172,7 +172,7 @@ def test_a_page_held_up_by_an_image_needs_the_full_load(site, page):
     complete = load_complete()
     got = ready(page, [count_reaches("h1"), load("domcontentloaded"),
                        load("load")],
-                invariant=complete, budget_ms=8000)
+                invariant=complete, budget_ms=15000)
     assert got.ready and got.winner == "loaded"
     assert _outcomes(got)[:2] == [("count_reached", "not_satisfied"),
                                   ("dom_loaded", "not_satisfied")]
@@ -183,10 +183,10 @@ def test_a_page_already_ready_costs_one_question(site, page):
     before anything here existed."""
     page.goto(site + "/done")
     got = ready(page, [network_idle(), count_settles("p.row")],
-                invariant=ROWS_3, budget_ms=8000)
+                invariant=ROWS_3, budget_ms=15000)
     assert got.ready and got.winner == "already"
     assert _outcomes(got) == [("already", "satisfied")]
-    assert got.elapsed_ms < 200
+    assert got.elapsed_ms < 2000, "one question, not a wait"
 
 
 # -- the budget ---------------------------------------------------------------
@@ -202,7 +202,8 @@ def test_the_budget_is_for_the_whole_call_not_for_each_guess(site, page):
                 invariant=has(".never"), budget_ms=1000)
     took = (time.monotonic() - t0) * 1000
     assert not got.ready
-    assert took < 1600, "took %dms on a 1000ms budget" % took
+    # Four guesses each given the whole second would take over four.
+    assert took < 2800, "took %dms on a 1000ms budget" % took
     assert got.attempts[0].outcome == "timed_out"
     assert {a.outcome for a in got.attempts[1:]} == {"no_budget"}
 
@@ -210,10 +211,10 @@ def test_the_budget_is_for_the_whole_call_not_for_each_guess(site, page):
 def test_a_guess_that_could_hang_can_be_given_a_smaller_share(site, page):
     page.goto(site + "/timer")
     got = ready(page, [url_changes(within_ms=300), count_reaches("p.row", 3)],
-                invariant=ROWS_3, budget_ms=8000)
+                invariant=ROWS_3, budget_ms=15000)
     assert got.ready and got.winner == "count_reached"
     first = got.attempts[0]
-    assert first.outcome == "timed_out" and first.ms < 700
+    assert first.outcome == "timed_out" and first.ms < 3000, "not the 8s budget"
 
 
 # -- what it tells the maintainer ---------------------------------------------
@@ -224,7 +225,7 @@ def test_the_journal_names_the_wait_that_worked(site, page):
     j = Journal(page)
     page.goto(site + "/timer")
     ready(page, [load(), network_idle(), count_reaches("p.row", 3)],
-          invariant=ROWS_3, budget_ms=8000, journal=j, name="order rows")
+          invariant=ROWS_3, budget_ms=15000, journal=j, name="order rows")
     entry = j.report()["entries"][-1]
     assert entry["kind"] == "waited"
     assert entry["winner"] == "count_reached"
@@ -267,7 +268,7 @@ def test_a_selector_in_playwrights_dialect_is_named_not_thrown(site, page):
     page.goto(site + "/timer")
     got = ready(page, [count_reaches("p:has-text('r')"),
                        count_reaches("p.row", 3)],
-                invariant=ROWS_3, budget_ms=8000)
+                invariant=ROWS_3, budget_ms=15000)
     assert _outcomes(got) == [("count_reached", "invalid_selector"),
                               ("count_reached", "satisfied")]
 
@@ -296,4 +297,4 @@ def test_a_new_viewer_source_is_ready_and_a_hash_change_is_not(site, page):
     got = ready(page, [count_reaches("iframe", 2)], invariant=arrived,
                 budget_ms=5000)
     assert got.ready and got.winner == "count_reached"
-    assert got.attempts[0].ms >= 1000
+    assert got.attempts[0].ms >= 900

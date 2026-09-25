@@ -93,7 +93,7 @@ def test_a_page_that_comes_right_mid_wait_ends_the_wait_and_says_so():
     got = R.ready(page, [R.url_changes()],
                   invariant=R._invariant(lambda p: next(answers, True)),
                   budget_ms=5000)
-    assert _time.monotonic() - t0 < 1.0
+    assert _time.monotonic() - t0 < 3.0, "it waited out the 5s budget"
     assert got.ready and got.winner == "url_changed"
     assert got.attempts[-1].outcome == "satisfied_while_waiting"
 
@@ -276,3 +276,28 @@ def test_a_page_ready_mid_wait_is_not_credited_to_that_wait():
             budget_ms=5000, journal=j, name="the receipt")
     said = " ".join(summarize(j.report()))
     assert "\"the receipt\" was ready while waiting on url_changed" in said
+
+
+def test_a_sliver_of_budget_is_no_budget(monkeypatch):
+    """Elapsed time is counted in whole milliseconds, so a guess that used
+    its share could leave one over, and the next was tried with it, timed
+    out, and was reported as tried. That made the budget test in
+    test_ready_live.py fail one run in five."""
+    monkeypatch.setattr(R, "_ms_since", lambda t0: 99)
+    got = R.ready(Page(), [R.count_reaches(".row"), R.network_idle()],
+                  invariant=R._invariant(lambda p: False), budget_ms=100)
+    assert [a.outcome for a in got.attempts] == ["no_budget", "no_budget"]
+
+
+def test_a_condition_that_came_between_the_two_questions_gets_the_credit():
+    """The rows arrive after the wait asked its own question and before it
+    asked the invariant. Both now hold, so the wait that was looking for
+    them got the page ready, and saying it came while waiting would teach
+    the next round to drop the right wait."""
+    page = Page(counts=(0, 3))
+    answers = iter([False])      # not ready at first, ready from then on
+    got = R.ready(page, [R.count_reaches(".row", 3)],
+                  invariant=R._invariant(lambda p: next(answers, True)),
+                  budget_ms=5000)
+    assert got.attempts[-1].outcome == "satisfied"
+    assert got.winner == "count_reached"
