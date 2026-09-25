@@ -126,6 +126,19 @@ SAFE_DOC_CONTROL_RE = re.compile(
     r"1099|1098|5498|tax\s+(form|document)|history|"
     r"e-?statements?|see\s+(more|all|older)|show\s+(more|all|older)|load\s+more)", re.I)
 
+# A control whose whole label is a date. On the vendor's Statement
+# History that is what a statement is called, and nothing else.
+#
+# A recording caught this. The member pressed a link reading "07/31/26"
+# to open a statement, and the step came back guard_allows false, so the
+# app would have refused to press the one control that fetches the
+# document. Nothing destructive can be labelled with only a date, and
+# the forbidden words are still checked first (#35).
+DATE_ONLY_CONTROL_RE = re.compile(
+    r"^\s*(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})\s*$",
+    re.I)
+
 # A control that fetches one document. GUESS at the wording, wide on
 # purpose. "View", "Download", "View PDF", "Statement", "1099-INT".
 BILL_CONTROL_RE = re.compile(
@@ -301,6 +314,8 @@ def is_safe_control(name: str) -> bool:
         return False
     if SETTINGS_CONTROL_RE.search(name) or AUTH_CONTROL_RE.search(name):
         return False
+    if DATE_ONLY_CONTROL_RE.match(name):
+        return True
     return bool(SAFE_DOC_CONTROL_RE.search(name))
 
 
@@ -351,6 +366,20 @@ def dismiss_overlay(page) -> None:
 
 
 def _bill_controls(page):
+    """Every control that fetches a document, including one whose whole
+    label is a date, which is what the vendor's Statement History calls a
+    statement (#35)."""
+    named = _controls_named(page, BILL_CONTROL_RE)
+    dated = _controls_named(page, DATE_ONLY_CONTROL_RE)
+    try:
+        if dated.count():
+            return named.or_(dated)
+    except Exception:
+        pass
+    return named
+
+
+def _bill_controls_by_name_only(page):
     """Every control on the page whose name says it fetches a document.
     The words are this provider's, the rest is the core's."""
     return _controls_named(page, BILL_CONTROL_RE)
@@ -542,12 +571,41 @@ def open_vendor(page):
     return None
 
 
+STATEMENT_HISTORY_RE = re.compile(r"^\s*(statement|document|e-?statement)s?\s+history\s*$", re.I)
+
+
+def open_statement_history(page) -> bool:
+    """Press the vendor's own Statement History, so the older statements
+    exist on the page. It changes nothing and fetches nothing."""
+    try:
+        for role in ("link", "button", "tab"):
+            loc = page.get_by_role(role, name=STATEMENT_HISTORY_RE)
+            for i in range(min(loc.count(), 3)):
+                el = loc.nth(i)
+                if not el.is_visible():
+                    continue
+                label = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
+                if not STATEMENT_HISTORY_RE.match(label) or not is_safe_control(label):
+                    continue
+                el.click(timeout=5000)
+                page.wait_for_timeout(2000)
+                log.info("opened the vendor's statement history")
+                return True
+    except Exception as e:
+        log.info("statement history: %s", e)
+    return False
+
+
 def collect_download_docs(page) -> List[RawDoc]:
     """Read every statement and tax document the vendor's page offers.
     Each control's own name, or the row it sits in, carries the date."""
     page = open_vendor(page) or page
     docs: List[RawDoc] = []
     seen = set()
+    # The vendor opens on the current statement, and the rest are behind
+    # its own Statement History, which the recording shows the member
+    # pressing before any dated link existed to press (#35).
+    open_statement_history(page)
     expand_all(page)
     scroll_full_page(page)
     ctrls = _bill_controls(page)
@@ -828,6 +886,14 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                                     "page is all there is to look at"),
                       "on": _host_of(vendor.url if vendor else page.url)})
     page = vendor or page
+    # The same step discovery takes. The vendor opens on the current
+    # statement and the rest are behind its own Statement History, so a
+    # capture that skipped it would find nothing for any date but the
+    # newest (#35).
+    opened_history = open_statement_history(page)
+    if trace is not None:
+        trace.append({"note": ("the vendor's statement history opened" if opened_history
+                               else "no statement history control on the vendor's page")})
     expand_all(page)
 
     el, label = _control_for(page, iso_date)
