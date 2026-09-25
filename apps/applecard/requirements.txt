@@ -1,0 +1,3 @@
+playwright>=1.44
+pypdf>=4.2
+pytest>=8.0

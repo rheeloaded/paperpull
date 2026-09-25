@@ -45,6 +45,7 @@ unclassified rather than guessed at.
 | amazon |  |  |  |  |  | x | x |
 | amex | x |  |  |  | x | x |  |
 | amfam | x | x | x |  |  | x |  |
+| applecard | x | x | x |  |  | x |  |
 | anthem |  |  |  |  |  | x | x |
 | att | x | x | x |  | x | x |  |
 | capitalone |  |  |  |  |  | x |  |

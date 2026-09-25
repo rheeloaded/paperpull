@@ -76,6 +76,7 @@ PROVIDERS = [
     ("amfam", ("American Family", "AmFam"), (45,), "new"),
     ("adp", ("ADP",), (46,), "new"),
     ("costco", ("Costco",), (47,), "new"),
+    ("applecard", ("Apple Card",), (52,), "new"),
     ("wellsfargo", ("Wells Fargo",), (27,), "new"),
     ("sba", ("SBA",), (28,), "new"),
     ("verizonmobile", ("Verizon Mobile",), (31,), "new"),

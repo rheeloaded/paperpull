@@ -1,0 +1,42 @@
+{
+  "_comment": "Editable rules mapping Apple Card document titles to filename summaries. Checked in order: tax, then statement. The site layer titles each document by the section it was found in, so a Savings statement is never filed as a card statement. Repair after a Record from a real account.",
+  "tax_rules": [
+    {
+      "pattern": "1099[\\s-]*int",
+      "summary": "1099-INT Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement)",
+      "summary": "Tax Document"
+    }
+  ],
+  "statement_rules": [
+    {
+      "pattern": "savings",
+      "summary": "Savings Statement"
+    },
+    {
+      "pattern": "apple\\s+card\\s+statement|card\\s+statement",
+      "summary": "Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "customer\\s+agreement",
+    "\\bcsv\\b",
+    "\\bofx\\b",
+    "\\bqfx\\b",
+    "export",
+    "marketing",
+    "\\boffers?\\b"
+  ]
+}

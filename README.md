@@ -47,8 +47,8 @@ signed installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Thirty-six providers are supported today, all built on the same pattern.
-Ten more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
-Newrez, Kroger, Meijer and American Family, are built and waiting for someone with an account to
+Eleven more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
+Newrez, Kroger, Meijer, American Family and Apple Card, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#31](https://github.com/rheeloaded/paperpull/issues/31),
@@ -58,7 +58,8 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#38](https://github.com/rheeloaded/paperpull/issues/38),
 [#41](https://github.com/rheeloaded/paperpull/issues/41),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
-[#45](https://github.com/rheeloaded/paperpull/issues/45)):
+[#45](https://github.com/rheeloaded/paperpull/issues/45),
+[#52](https://github.com/rheeloaded/paperpull/issues/52)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -71,6 +72,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Pilot confirmed by [@watling777](https://github.com/watling777) in round eight.** The full run and a second account are the rounds still open ([#26](https://github.com/rheeloaded/paperpull/issues/26)) |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
+| [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms | **Untested, built without an account. Have one? [Help test it](apps/applecard/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). Requested in [#52](https://github.com/rheeloaded/paperpull/issues/52) |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |

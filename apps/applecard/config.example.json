@@ -1,0 +1,18 @@
+{
+  "owner": "",
+  "owner_in_filename": false,
+  "output_dir": ".",
+  "profile_dir": "./browser-profile",
+  "browser": "auto",
+  "cdp_url": "http://127.0.0.1:9270",
+  "document_types": [
+    "Statement",
+    "Tax Document"
+  ],
+  "default_start_date": "",
+  "min_pdf_bytes": 2000,
+  "max_path_length": 240,
+  "delay_min_seconds": 2.5,
+  "delay_max_seconds": 5.0,
+  "pilot_count": 5
+}
