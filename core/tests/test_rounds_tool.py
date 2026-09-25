@@ -219,3 +219,40 @@ def test_a_provider_issue_missing_from_the_table_is_reported():
               50: {"title": "[Feature Request] Custom File Naming"}}
     assert rounds.unmapped_issues(issues) == [
         (999, "[Provider request] Somebody New")]
+
+
+# -- from the review ------------------------------------------------------------
+
+def test_a_reply_without_a_build_is_the_maintainers_move_made():
+    """Kroger and ADP ended on a maintainer's answer that linked no new
+    release, and the tool said they were waiting on the maintainer."""
+    issue = _issue(_ship(1, "0.1.0"), _post("tester", 2, "found 0"),
+                   _post("owner", 3, "Could you send the Diagnose file?"))
+    row = _analyze(issue, now_hours=27)
+    assert (row.owed, row.shipped, row.waiting_days) == ("tester", 1, 1.0)
+
+
+def test_a_repair_does_not_count_the_commits_that_built_it():
+    built = rounds.Commit(T0 - timedelta(days=30), "Add it",
+                          ["apps/att/att_site.py"])
+    fixed = rounds.Commit(T0 + timedelta(hours=3), "Fix it",
+                          ["apps/att/att_site.py"])
+    issue = _issue(_ship(4, "0.2.0"))
+    row = rounds.analyze("att", "repair", (1,), {1: issue}, [built, fixed],
+                         "owner", NAMES, T0 + timedelta(days=2))
+    assert row.grouped == 1 and row.site_commits == 1
+
+
+@pytest.mark.parametrize("body", [
+    "No success yet, Pilot found 0",
+    "Pilot got an error on the second bill",
+    "Pilot pulled up the login page again",
+    "no luck\n~~~\nPilot downloaded 3 then failed\n~~~",
+    "no luck, log below\n\n    Pilot downloaded 3 of 5",
+])
+def test_words_that_look_like_working_and_are_not(body):
+    assert not rounds.says_working(body)
+
+
+def test_a_run_that_saved_statements_without_saying_pilot_is_working():
+    assert rounds.says_working("downloaded 24 statements successfully")

@@ -447,3 +447,10 @@ def test_a_recording_from_before_shapes_existed_still_reads():
                       "steps": [step()], "requests": []})
     assert "THE PAGE AROUND EACH STEP" not in text
     assert rr.outline(None) == [] and rr.outline({"root": "x"}) == []
+
+
+def test_an_outline_of_a_hand_edited_file_does_not_raise():
+    shape = {"root": {"tag": "body", "child_count": "12", "target": True,
+                      "children": [{"tag": "div", "more": "x"}]}}
+    lines = rr.outline(shape)
+    assert lines and lines[0].startswith("-> body")

@@ -145,7 +145,9 @@ def _count(value) -> int:
     """A count, bounded, or zero. Never a length that encodes a secret."""
     try:
         n = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # Infinity comes through a binding as a float, and int() of it
+        # raised, which cost a recording its whole shape.
         return 0
     return max(0, min(n, _MAX_COUNT))
 

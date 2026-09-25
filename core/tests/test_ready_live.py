@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from paperpull_core.journal import Journal, summarize
 from paperpull_core.ready import (count_reaches, count_settles, has, load,
-                                  network_idle, ready, url_changes)
+                                  load_complete, network_idle, ready,
+                                  url_changes, url_matches)
 
 sync_playwright = pytest.importorskip(
     "playwright.sync_api", reason="needs a browser").sync_playwright
@@ -158,7 +159,7 @@ def test_a_change_after_the_hash_is_seen_only_by_watching_the_address(
     """Costco's receipt route. Nothing loads, so the load wait comes back
     at once and a count of what was already there proves nothing."""
     page.goto(site + "/hash")
-    on_receipts = lambda p: p.url.endswith("#/receipts")  # noqa: E731
+    on_receipts = url_matches(r"#/receipts$")
     got = ready(page, [load(), network_idle(), count_reaches("h1"),
                        url_changes()],
                 invariant=on_receipts, budget_ms=8000)
@@ -168,8 +169,7 @@ def test_a_change_after_the_hash_is_seen_only_by_watching_the_address(
 
 def test_a_page_held_up_by_an_image_needs_the_full_load(site, page):
     page.goto(site + "/image", wait_until="commit")
-    complete = lambda p: p.evaluate(  # noqa: E731
-        "() => document.readyState") == "complete"
+    complete = load_complete()
     got = ready(page, [count_reaches("h1"), load("domcontentloaded"),
                        load("load")],
                 invariant=complete, budget_ms=8000)
@@ -270,3 +270,30 @@ def test_a_selector_in_playwrights_dialect_is_named_not_thrown(site, page):
                 invariant=ROWS_3, budget_ms=8000)
     assert _outcomes(got) == [("count_reached", "invalid_selector"),
                               ("count_reached", "satisfied")]
+
+
+def test_a_new_viewer_source_is_ready_and_a_hash_change_is_not(site, page):
+    """The PG&E draft counted the page's own address as a source, so a
+    hash change right after the click read as the viewer arriving, three
+    seconds before it did. Only a viewer pointing somewhere new counts."""
+    from paperpull_core.ready import new_source, sources_of
+
+    page.goto(site + "/done")
+    page.evaluate("""() => {
+        document.body.insertAdjacentHTML('beforeend',
+            '<iframe src="about:blank#keepalive"></iframe>');
+    }""")
+    before = sources_of(page, "iframe, embed, object")
+    page.evaluate("""() => {
+        location.hash = '#/bill';
+        setTimeout(() => document.body.insertAdjacentHTML('beforeend',
+            '<div role=dialog><iframe src="' + URL.createObjectURL(
+                new Blob(['%PDF-1.4'], {type: 'application/pdf'})) +
+            '"></iframe></div>'), 1500);
+    }""")
+    arrived = new_source("iframe, embed, object", before)
+    assert not arrived(page), "a hash change and an old frame are not a bill"
+    got = ready(page, [count_reaches("iframe", 2)], invariant=arrived,
+                budget_ms=5000)
+    assert got.ready and got.winner == "count_reached"
+    assert got.attempts[0].ms >= 1000

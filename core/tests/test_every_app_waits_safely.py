@@ -29,9 +29,25 @@ def sources(app):
         yield path, io.open(path, encoding="utf-8", errors="ignore").read()
 
 
+def _dotted(node):
+    """a.b.c for an attribute chain, or "" when it is not one."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
 def ready_calls(tree):
-    """Calls to ready() imported from paperpull_core.ready, by any name."""
-    names, modules = set(), set()
+    """Calls to ready() from paperpull_core.ready, however it was reached.
+
+    from ... import ready, from paperpull_core import ready as a module,
+    import paperpull_core.ready as R, and the whole dotted path written
+    out. The review found the last two passing unseen."""
+    names, modules = set(), {"paperpull_core.ready"}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
                 "paperpull_core.ready"):
@@ -42,6 +58,10 @@ def ready_calls(tree):
             for alias in node.names:
                 if alias.name == "ready":
                     modules.add(alias.asname or "ready")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "paperpull_core.ready" and alias.asname:
+                    modules.add(alias.asname)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -49,20 +69,31 @@ def ready_calls(tree):
         if isinstance(f, ast.Name) and f.id in names:
             yield node
         elif (isinstance(f, ast.Attribute) and f.attr == "ready"
-              and isinstance(f.value, ast.Name) and f.value.id in modules):
+              and _dotted(f.value) in modules):
             yield node
+
+
+# What only paperpull_core.ready may build with. Importing any of these is
+# the way round the rule that a strategy or an invariant cannot be one of
+# the app's own functions.
+PRIVATE = {"Strategy", "Invariant", "_strategy", "_invariant", "_BUILDER"}
 
 
 def test_there_are_apps_to_check():
     assert len(APPS) >= 48
 
 
-def test_the_reader_finds_a_call_it_is_shown():
-    """A guard that finds nothing proves nothing, so it is shown one."""
-    tree = ast.parse(
-        "from paperpull_core.ready import ready as wait_until\n"
-        "wait_until(page,\n    [a],\n    invariant=x,\n    budget_ms=1)\n")
-    assert len(list(ready_calls(tree))) == 1
+@pytest.mark.parametrize("source", [
+    "from paperpull_core.ready import ready as wait_until\n"
+    "wait_until(page,\n    [a],\n    invariant=x,\n    budget_ms=1)\n",
+    "import paperpull_core.ready as R\nR.ready(page, [a], x, 1)\n",
+    "import paperpull_core.ready\npaperpull_core.ready.ready(page, [a], x, 1)\n",
+    "from paperpull_core import ready as waits\nwaits.ready(page, [a], x, 1)\n",
+])
+def test_the_reader_finds_a_call_however_it_was_imported(source):
+    """A guard that finds nothing proves nothing, so it is shown one of
+    each shape, including the two the review found it missed."""
+    assert len(list(ready_calls(ast.parse(source)))) == 1
 
 
 @pytest.mark.parametrize("app", APPS, ids=IDS)
@@ -90,13 +121,33 @@ def test_every_wait_says_what_ready_means_and_how_long_to_try(app):
 
 
 @pytest.mark.parametrize("app", APPS, ids=IDS)
-def test_no_app_builds_its_own_strategy(app):
-    """A strategy made outside the module is where a click or a reload
-    between guesses would get in."""
+def test_no_app_builds_its_own_strategy_or_invariant(app):
+    """One made outside the module is where a click or a reload between
+    guesses would get in, whether it is imported by name or reached
+    through the module."""
     for path, text in sources(app):
         tree = ast.parse(text)
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and (
                     node.module or "").endswith("paperpull_core.ready"):
-                assert "Strategy" not in {a.name for a in node.names}, \
-                    path.name
+                assert not PRIVATE & {a.name for a in node.names}, path.name
+            # The underscored names are this module's own and nothing
+            # else's, so reaching one through any alias is the way round.
+            if isinstance(node, ast.Attribute) and node.attr in PRIVATE and \
+                    node.attr.startswith("_"):
+                raise AssertionError("%s:%d reaches into paperpull_core.ready"
+                                     % (path.name, node.lineno))
+
+
+def test_the_private_check_catches_both_ways_in():
+    for source in ("from paperpull_core.ready import _invariant\n",
+                   "import paperpull_core.ready as R\nR._strategy('x', f, 1)\n"):
+        tree = ast.parse(source)
+        hit = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and PRIVATE & {
+                    a.name for a in node.names}:
+                hit = True
+            if isinstance(node, ast.Attribute) and node.attr in PRIVATE:
+                hit = True
+        assert hit, source
