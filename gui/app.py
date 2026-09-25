@@ -1621,6 +1621,215 @@ def api_run(app: str, account: str = "primary", action: str = "pilot",
                                       "X-Accel-Buffering": "no"})
 
 
+# -- file names from a pattern (#50) ------------------------------------------
+#
+# The page that sets how files are named. The engine is paperpull_core.naming
+# and the apps already build every name through it, so this only reads an
+# app's records to preview with and writes the pattern into its config.
+# Nothing here renames a file. That is Rename preview and Apply renames,
+# which already ask the app what each file should be called.
+
+_NAMING = None
+SHARED_KEYS = {"receipts": "filename_pattern_receipts",
+               "statements": "filename_pattern_statements"}
+OWN_KEY = "filename_pattern"
+
+
+def _naming():
+    """paperpull_core.naming, from the core the panel ships beside, or
+    None, in which case the page says it is unavailable and nothing else
+    is affected."""
+    global _NAMING
+    if _NAMING is None:
+        core = HERE.parent / "core"
+        if (core / "paperpull_core" / "naming.py").is_file() and str(core) not in sys.path:
+            sys.path.insert(0, str(core))
+        try:
+            from paperpull_core import naming as mod
+            _NAMING = mod
+        except Exception:
+            _NAMING = False
+    return _NAMING or None
+
+
+def _storage_src(d: Path) -> str:
+    try:
+        return (d / "storage.py").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def _naming_kind(d: Path) -> str:
+    """From the app's own spec, the same kind storage uses to pick which
+    pattern applies, so the page and a run never disagree."""
+    k = _KIND_RE.search(_storage_src(d))
+    return "receipts" if k and k.group(1) == "RECEIPT" else "statements"
+
+
+def _provider_name(d: Path) -> str:
+    m = _PROVIDER_RE.search(_storage_src(d))
+    return m.group(1) if m else d.name
+
+
+def _read_json(p: Path):
+    try:
+        return json.loads(p.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+
+
+def _config_files(d: Path) -> list:
+    """Every account's config in an install, the first person's first."""
+    out = [d / "config.json"] if (d / "config.json").is_file() else []
+    out += [p for p in sorted(d.glob("config.*.json")) if p.name != "config.example.json"]
+    return out
+
+
+def _naming_records(d: Path) -> list:
+    """The first person's records, for the preview and the fill rates.
+    Read from the output folder the config names, since that is where a
+    run keeps them, and it is not always the install."""
+    cfg = _read_json(d / "config.json") or {}
+    # The same default load_config gives an absent output_dir.
+    out = Path(cfg.get("output_dir") or (Path.home() / "Downloads" / _provider_name(d)))
+    if not out.is_absolute():
+        out = d / out
+    data = _read_json(out / "progress.json")
+    if isinstance(data, dict):
+        data = list(data.values())
+    return [r for r in (data or []) if isinstance(r, dict)]
+
+
+def _newest_saved(records, n=3):
+    saved = [r for r in records if r.get("pdf_filename")]
+    saved.sort(key=lambda r: str(r.get("date") or r.get("purchase_date") or ""),
+               reverse=True)
+    return saved[:n]
+
+
+def _naming_app(name: str) -> Path:
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "no such app")
+    return Path(apps[name]["dir"])
+
+
+def _write_config(cfg_path: Path, key: str, value: str, stamp: str) -> bool:
+    """Set or clear one key, backed up first and written in one step, so a
+    crash part way leaves the old file whole."""
+    current = _read_json(cfg_path)
+    if not isinstance(current, dict):
+        return False
+    if (current.get(key) or "") == value:
+        return False
+    if value:
+        current[key] = value
+    else:
+        current.pop(key, None)
+    try:
+        bak = cfg_path.parent / "Backups" / ("naming-" + stamp) / cfg_path.name
+        bak.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cfg_path, bak)
+        tmp = cfg_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, cfg_path)
+    except OSError:
+        return False
+    return True
+
+
+@app.get("/api/naming", dependencies=[Depends(_same_origin_only)])
+def api_naming(app: str):
+    naming = _naming()
+    d = _naming_app(app)
+    if naming is None:
+        return {"available": False}
+    kind = _naming_kind(d)
+    cfg = _read_json(d / "config.json") or {}
+    records = _naming_records(d)
+    return {
+        "available": True,
+        "kind": kind,
+        "provider": _provider_name(d),
+        "fields": list(naming.FIELDS),
+        "default": naming.DEFAULT_RECEIPTS,
+        "shared": cfg.get(SHARED_KEYS[kind]) or "",
+        "own": cfg.get(OWN_KEY) or "",
+        "fill": naming.fill_rates(records, receipts=(kind == "receipts")),
+    }
+
+
+@app.post("/api/naming/preview", dependencies=[Depends(_same_origin_only)])
+async def api_naming_preview(request: Request):
+    body = await request.json()
+    naming = _naming()
+    d = _naming_app(str(body.get("app") or ""))
+    if naming is None:
+        raise HTTPException(503, "file naming is not available in this install")
+    pattern = str(body.get("pattern") or "").strip()
+    if pattern == naming.DEFAULT_RECEIPTS:
+        # Under the default a name is what the app built at the time,
+        # which is the name already on disk.
+        pattern = ""
+    problem = naming.check(pattern) if pattern else None
+    kind = _naming_kind(d)
+    cfg = _read_json(d / "config.json") or {}
+    provider = _provider_name(d)
+    names = []
+    for r in _newest_saved(_naming_records(d)):
+        current = str(r.get("pdf_filename") or "")
+        new = current
+        if pattern and not problem:
+            try:
+                new = naming.preview(
+                    pattern, r, provider=provider, owner=cfg.get("owner") or "",
+                    receipts=(kind == "receipts"),
+                    document_type=(str(r.get("document_type") or "Receipt")
+                                   if kind == "receipts" else ""))
+            except Exception:
+                new = current
+        names.append({"current": current, "new": new})
+    return {"problem": problem, "names": names}
+
+
+@app.post("/api/naming/save",
+          dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+async def api_naming_save(request: Request):
+    """Write a pattern where it applies. "shared" goes into every install of
+    this app's kind, every account's config, so all receipts apps or all
+    statements apps name alike. "own" goes into this app's configs only
+    and wins over the shared one. An empty pattern clears it, which is
+    the default. Nothing is renamed."""
+    body = await request.json()
+    naming = _naming()
+    d = _naming_app(str(body.get("app") or ""))
+    if naming is None:
+        raise HTTPException(503, "file naming is not available in this install")
+    scope = body.get("scope")
+    if scope not in ("shared", "own"):
+        raise HTTPException(400, "scope is shared or own")
+    pattern = str(body.get("pattern") or "").strip()
+    if pattern == naming.DEFAULT_RECEIPTS:
+        pattern = ""
+    if pattern:
+        problem = naming.check(pattern)
+        if problem:
+            raise HTTPException(400, problem)
+    kind = _naming_kind(d)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if scope == "own":
+        targets, key = [d], OWN_KEY
+    else:
+        targets = [Path(a["dir"]) for a in discover_apps().values()
+                   if _naming_kind(Path(a["dir"])) == kind]
+        key = SHARED_KEYS[kind]
+    written = 0
+    for install in targets:
+        for cfg in _config_files(install):
+            written += _write_config(cfg, key, pattern, stamp)
+    return {"written": written, "installs": len(targets), "key": key}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return HTML.replace("__VERSION__", VERSION)
@@ -1653,6 +1862,10 @@ HTML = r"""<!doctype html>
   .setup p.lead { color:var(--muted); margin:0 0 22px; line-height:1.5; }
   .setup label { text-transform:none; letter-spacing:0; font-size:14px;
                  color:var(--fg); margin:16px 0 6px; }
+  #panenm label { text-transform:none; letter-spacing:0; font-size:14px; color:var(--fg); }
+  #nmpattern { width:100%; padding:8px 10px; background:var(--panel); color:var(--fg);
+               border:1px solid var(--line); border-radius:6px; font-size:14px;
+               font-family:ui-monospace,Consolas,monospace; }
   .setup input[type=text] { width:100%; font:inherit; padding:8px 10px;
                             background:var(--panel); color:var(--fg);
                             border:1px solid var(--line); border-radius:6px; }
@@ -1820,6 +2033,7 @@ HTML = r"""<!doctype html>
     <button id="tabout" class="on" onclick="showTab('out')">Output</button>
     <button id="tabst" onclick="showTab('st')">Status</button>
     <button id="tabxl" onclick="showTab('xl')">Spreadsheet</button>
+    <button id="tabnm" onclick="showTab('nm')">File names</button>
   </div>
   <div id="paneout" style="display:flex; flex-direction:column; min-height:0; flex:1;">
     <div class="status"><span class="dot" id="dot"></span><span id="statustext">idle</span></div>
@@ -1860,6 +2074,49 @@ HTML = r"""<!doctype html>
        <button id="txcsv" onclick="buildTransactions(true)">Build CSV instead</button>
        <button id="txreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
     <pre class="console" id="txlog" style="max-height:220px; display:none"></pre>
+  </div>
+  <div id="panenm" class="stwrap" style="display:none;">
+    <p class="hint" style="margin-top:0">How the files this app downloads are named. Add
+       the parts you want, in order. A part marked <b>skip if empty</b> is left out, with
+       the separator in front of it, whenever a document does not have it, so no name ends
+       in a stray dash. Nothing is renamed here. Files you already have keep their names
+       until you run <b>Rename preview</b> and then <b>Apply renames</b> under more.</p>
+    <p id="nmunavail" class="hint warn" style="display:none">File naming is not available
+       in this install. Update PaperPull to get it.</p>
+    <div id="nmbody">
+      <p><b id="nmapp"></b> <span class="hint" id="nmkind"></span></p>
+      <p><label style="display:inline"><input type="radio" name="nmscope" value="shared" checked
+           onchange="nmScope()"> <span id="nmsharedlabel">every app of this kind</span></label>
+         &nbsp; <label style="display:inline"><input type="radio" name="nmscope" value="own"
+           onchange="nmScope()"> <span id="nmownlabel">only this app</span></label></p>
+      <p style="margin:0 0 6px">
+        <span class="hint">Separator</span>
+        <select id="nmsep" style="width:auto; display:inline-block">
+          <option value=" ">space</option><option value=" - ">&nbsp;-&nbsp;</option>
+          <option value=" -- ">&nbsp;--&nbsp;</option><option value="_">_</option>
+          <option value="">none</option></select>
+        <span class="hint" style="margin-left:10px">Date as</span>
+        <select id="nmdate" style="width:auto; display:inline-block">
+          <option>yyyy-mm-dd</option><option>yyyymmdd</option><option>mm-dd-yyyy</option>
+          <option>dd mmm yyyy</option><option>mmmm d yyyy</option></select>
+        <label style="display:inline; margin-left:10px"><input type="checkbox" id="nmskip" checked>
+          skip if empty</label></p>
+      <p class="hint" style="margin:0 0 6px">Click a part to add it where the cursor is. The
+         number beside it is how many of your files from this app have one.</p>
+      <div id="nmfields" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px"></div>
+      <input id="nmpattern" type="text" spellcheck="false" autocomplete="off"
+             oninput="nmChanged()" placeholder="an empty box means the default">
+      <p class="hint warn" id="nmproblem" style="display:none; margin:6px 0 0"></p>
+      <div id="nmpreview" style="margin:10px 0"></div>
+      <p><button class="primary" onclick="nmSave()">Save</button>
+         <button onclick="nmDefault()">Back to the default</button>
+         <button onclick="nmClear()">Start empty</button>
+         <span class="hint" id="nmnote" style="margin-left:8px"></span></p>
+      <p class="hint">Written by hand, <code>{date:yyyymmdd}[ - {provider}][ -- {number|kind}]</code>
+         is the date, then the provider, then the order number, or the kind when there is
+         no number. Square brackets make a part that is skipped when empty, and
+         <code>{a|b}</code> takes the first that has a value.</p>
+    </div>
   </div>
   </div>
 </main>
@@ -2112,16 +2369,127 @@ async function revealSpreadsheet() {
   try { await fetch('/api/export/reveal', {method: 'POST'}); } catch (e) {}
 }
 function showTab(which) {
-  const isSt = which === 'st', isXl = which === 'xl';
-  $('paneout').style.display = (isSt || isXl) ? 'none' : 'flex';
+  const isSt = which === 'st', isXl = which === 'xl', isNm = which === 'nm';
+  const other = isSt || isXl || isNm;
+  $('paneout').style.display = other ? 'none' : 'flex';
   $('panest').style.display  = isSt ? 'block' : 'none';
   $('panexl').style.display  = isXl ? 'block' : 'none';
-  $('tabout').className = (isSt || isXl) ? '' : 'on';
+  $('panenm').style.display  = isNm ? 'block' : 'none';
+  $('tabout').className = other ? '' : 'on';
   $('tabst').className  = isSt ? 'on' : '';
   $('tabxl').className  = isXl ? 'on' : '';
+  $('tabnm').className  = isNm ? 'on' : '';
   if (isSt && !STATUS_LOADED) loadStatus();
   if (isXl && !XL_LOADED) { loadExportProviders(); loadTransactionProviders(); }
+  if (isNm) loadNaming();
 }
+
+// -- file names (#50) --------------------------------------------------------
+let NM = null, NM_TIMER = null;
+function nmScopeValue() { return document.querySelector('input[name=nmscope]:checked').value; }
+async function loadNaming() {
+  const app = $('app').value;
+  if (!app) return;
+  let d;
+  try { d = await (await fetch('/api/naming?app=' + encodeURIComponent(app))).json(); }
+  catch (e) { return; }
+  $('nmunavail').style.display = d.available ? 'none' : 'block';
+  $('nmbody').style.display = d.available ? 'block' : 'none';
+  if (!d.available) return;
+  NM = d;
+  const kind = d.kind === 'receipts' ? 'receipts' : 'statements';
+  $('nmapp').textContent = d.provider;
+  $('nmkind').textContent = 'a ' + kind + ' app';
+  $('nmsharedlabel').textContent = 'every ' + kind + ' app';
+  $('nmownlabel').textContent = 'only ' + d.provider;
+  document.querySelector('input[name=nmscope][value=' + (d.own ? 'own' : 'shared') + ']').checked = true;
+  $('nmpattern').value = d.own || d.shared || d.default;
+  $('nmnote').textContent = '';
+  const box = $('nmfields'); box.innerHTML = '';
+  const n = d.fill.records;
+  for (const f of d.fields) {
+    const b = document.createElement('button');
+    const got = d.fill.filled[f] || 0;
+    const rate = (n && f !== 'owner') ? ' ' + Math.round(100 * got / n) + '%' : '';
+    b.textContent = f + rate;
+    if (rate) {
+      b.title = got + ' of your ' + n + ' files from this app have it';
+      if (!got) b.style.opacity = '0.5';
+    }
+    b.onclick = () => nmInsert(f);
+    box.append(b);
+  }
+  nmChanged();
+}
+function nmScope() {
+  if (!NM) return;
+  $('nmpattern').value = (nmScopeValue() === 'own' ? NM.own : '') || NM.shared || NM.default;
+  nmChanged();
+}
+function nmInsert(field) {
+  const inp = $('nmpattern');
+  const text = inp.value;
+  const at = inp.selectionStart == null ? text.length : inp.selectionStart;
+  const sep = at > 0 ? $('nmsep').value : '';
+  const f = field === 'date' ? '{date:' + $('nmdate').value + '}' : '{' + field + '}';
+  // A date and a provider are always there, so they are never optional.
+  const skip = $('nmskip').checked && field !== 'date' && field !== 'provider';
+  const part = skip ? '[' + sep + f + ']' : sep + f;
+  inp.value = text.slice(0, at) + part + text.slice(at);
+  inp.focus();
+  inp.selectionStart = inp.selectionEnd = at + part.length;
+  nmChanged();
+}
+function nmChanged() {
+  clearTimeout(NM_TIMER);
+  NM_TIMER = setTimeout(nmPreview, 250);
+}
+async function nmPreview() {
+  const pattern = $('nmpattern').value;
+  let d;
+  try {
+    d = await (await fetch('/api/naming/preview', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({app: $('app').value, pattern})})).json();
+  } catch (e) { return; }
+  const pr = $('nmproblem');
+  pr.style.display = d.problem ? 'block' : 'none';
+  pr.textContent = d.problem || '';
+  const box = $('nmpreview'); box.innerHTML = '';
+  if (!d.names || !d.names.length) {
+    box.innerHTML = '<p class="hint">No files from this app yet, so there is nothing to preview.</p>';
+    return;
+  }
+  const t = document.createElement('table'); t.className = 'st';
+  t.innerHTML = '<thead><tr><th>Your newest files now</th><th>With this pattern</th></tr></thead>';
+  const tb = document.createElement('tbody');
+  for (const n of d.names) {
+    const tr = document.createElement('tr');
+    const a = document.createElement('td'); a.textContent = n.current;
+    const b = document.createElement('td'); b.textContent = n.new;
+    if (n.new !== n.current) b.style.fontWeight = '600';
+    tr.append(a, b); tb.append(tr);
+  }
+  t.append(tb); box.append(t);
+}
+async function nmSave() {
+  let r, d;
+  try {
+    r = await fetch('/api/naming/save', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({app: $('app').value, scope: nmScopeValue(),
+                            pattern: $('nmpattern').value})});
+    d = await r.json();
+  } catch (e) { $('nmnote').textContent = 'could not reach the control panel'; return; }
+  if (!r.ok) { $('nmnote').textContent = d.detail || 'not saved'; return; }
+  await loadNaming();
+  $('nmnote').textContent = d.written
+    ? 'Saved for ' + d.installs + (d.installs === 1 ? ' app' : ' apps') +
+      '. New downloads use it. Rename preview shows what your files would become.'
+    : 'Nothing to change.';
+}
+function nmDefault() { $('nmpattern').value = NM ? NM.default : ''; nmChanged(); }
+function nmClear() { $('nmpattern').value = ''; $('nmpattern').focus(); nmChanged(); }
 
 function pillClass(s) {
   if (s === 'OVERDUE') return 'overdue';
@@ -2239,6 +2607,7 @@ function showMore(on) {
 function toggleMore() { showMore($('morebox').style.display === 'none'); }
 function onApp() {
   const m = META.apps[$('app').value];
+  if ($('panenm').style.display === 'block') loadNaming();
   const accSel = $('account'); accSel.innerHTML = '';
   for (const a of m.accounts) accSel.append(new Option(a, a));
   const warn = $('venvwarn');

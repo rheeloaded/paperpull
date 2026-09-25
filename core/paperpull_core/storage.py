@@ -97,6 +97,10 @@ _FILENAME_OWNER = ""
 # The file naming pattern this run uses, or "" for the default of its kind.
 _FILENAME_PATTERN = ""
 _PATTERN_WARNED = set()
+# The account holder's name for a pattern that asks for {owner}. Under the
+# default the name appears only when owner_in_filename is on, as before,
+# and somebody who writes {owner} into a pattern of their own wants it.
+_PATTERN_OWNER = ""
 
 
 def set_filename_patterns(config: dict) -> str:
@@ -109,7 +113,8 @@ def set_filename_patterns(config: dict) -> str:
     default is used instead, because a typo in a setting must never be
     the reason a download run stops. Returns the pattern chosen."""
     from . import naming
-    global _FILENAME_PATTERN
+    global _FILENAME_PATTERN, _PATTERN_OWNER
+    _PATTERN_OWNER = str((config or {}).get("owner") or "").strip()
     receipts = spec().kind == RECEIPT if _SPEC is not None else False
     chosen = ""
     for key in ("filename_pattern",
@@ -291,6 +296,9 @@ def build_pdf_filename(purchase_date: str, summary: str,
                               kind=document_type, provider=spec().provider,
                               owner=(who_name or "").strip(), part=part,
                               receipts=receipts)
+    if (chosen not in (naming.DEFAULT_RECEIPTS, naming.DEFAULT_STATEMENTS)
+            and owner is None and not fields["owner"]):
+        fields["owner"] = _PATTERN_OWNER
     if chosen in (naming.DEFAULT_RECEIPTS, naming.DEFAULT_STATEMENTS):
         # The default says exactly what the call said, and nothing the
         # record adds. A statements app passes no kind, and filling it
