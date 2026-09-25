@@ -86,6 +86,13 @@ def server(pdfs):
     """
 
     class Handler(BaseHTTPRequestHandler):
+        # Keep-alive, so a browser reuses one connection rather than
+        # opening one per request. Every answer here carries its length.
+        # Closed after each request, the whole core suite left enough
+        # sockets waiting on a Windows CI runner that a navigation failed
+        # with ERR_NO_BUFFER_SPACE before this test had captured anything.
+        protocol_version = "HTTP/1.1"
+
         def do_GET(self):
             parts = urlparse(self.path)
             query = parse_qs(parts.query)
@@ -118,6 +125,7 @@ def server(pdfs):
     base = "http://127.0.0.1:%d" % httpd.server_address[1]
     yield base
     httpd.shutdown()
+    httpd.server_close()
 
 
 @pytest.fixture

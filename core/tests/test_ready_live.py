@@ -67,6 +67,10 @@ GIF = (b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9"
 
 
 class _Handler(BaseHTTPRequestHandler):
+    # Keep-alive, one connection reused rather than one per request, as in
+    # test_delivery_live.py. Every answer here carries its length.
+    protocol_version = "HTTP/1.1"
+
     def do_GET(self):
         parts = urlsplit(self.path)
         if parts.path == "/slow":
@@ -98,6 +102,7 @@ def site():
     thread.start()
     yield "http://127.0.0.1:%d" % server.server_address[1]
     server.shutdown()
+    server.server_close()
 
 
 @pytest.fixture(scope="module")
