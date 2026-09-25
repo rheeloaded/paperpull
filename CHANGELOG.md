@@ -7,6 +7,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.36.0] - 2026-09-25
+
+Two home improvement stores, each built on a real account and run in full
+against it, and Costco returns.
+
+### Added
+- **Lowe's.** Store purchases, online orders and returns, from the purchase
+  history back to 2023, each purchase's details page saved as its receipt
+  with the store, items, model numbers, discounts, card and totals. The
+  history is read by address with nothing pressed, and each receipt is
+  checked against the purchase it was opened for. 41 purchases found and
+  40 receipts saved on the account it was built on, the other a canceled
+  order. Home-improvement categories for the filenames.
+- **Home Depot.** Online orders, and store purchases where the history
+  lists them, Home Depot's own print receipt with model and store SKU
+  numbers, taken without ever opening the print dialog. Home Depot keeps
+  two years of orders online and refuses anything older, so the README
+  says to run it every few months. 8 orders found and 6 receipts saved,
+  the other 2 canceled, and a returned order keeps its receipt.
+
+### Fixed
+- **Costco collects a return (#47).** A return's control reads "View
+  Return Receipt" and the row reader looked only for "View Receipt", so
+  returns were never collected. A gas purchase Costco types as fuel is
+  named for it.
+- **A provider's name is read whole when it holds an apostrophe.** The
+  panel, the status tool and the migration tool read "Lowe's" as "Lowe".
+
 ## [0.35.0] - 2026-09-25
 
 Name your files your way, a forty-ninth provider, and three tester
