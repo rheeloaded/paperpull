@@ -832,6 +832,80 @@ def _wait_for_viewer(page, before: list):
                  budget_ms=15000, journal=_journal, name="bill viewer")
 
 
+# A PDF written out as base64 starts with these characters, "%PDF-".
+_B64_PDF = "JVBERi0"
+_AURA_PATH = "/sfsites/aura"
+
+
+def _pdf_from_value(value, depth: int = 0) -> Optional[bytes]:
+    """A PDF carried as base64 text anywhere in a decoded answer, or None.
+
+    Bounded in depth and only ever decodes a string that already starts
+    the way a base64 PDF starts, so a large answer costs a walk and not a
+    decode of everything in it."""
+    if depth > 8:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("data:application/pdf;base64,"):
+            text = text.split(",", 1)[1]
+        if text.startswith(_B64_PDF) and len(text) > 200:
+            try:
+                data = base64.b64decode(text, validate=False)
+            except Exception:
+                return None
+            return data if data[:5] == b"%PDF-" else None
+        return None
+    if isinstance(value, dict):
+        items = value.values()
+    elif isinstance(value, list):
+        items = value
+    else:
+        return None
+    for item in items:
+        found = _pdf_from_value(item, depth + 1)
+        if found:
+            return found
+    return None
+
+
+def _pdf_in_aura(res) -> Optional[bytes]:
+    """The bill, if it came back inside Salesforce's own answer.
+
+    PG&E's history is a Salesforce Lightning site, and pressing View Bill
+    PDF runs a server action whose answer comes back through /sfsites/aura
+    as JSON. His two failure files showed no request for a PDF anywhere,
+    and Apex actions answering with a text value of seven to fourteen
+    thousand characters, which is the size of a small PDF written out as
+    base64. A Lightning page often hands a generated file back exactly
+    that way and builds the viewer from it, which is why nothing that
+    looked for a PDF by its content type ever saw one (#33). Read only on
+    PG&E's own host, and only a string that decodes to a PDF counts."""
+    try:
+        url = res.url or ""
+        if _AURA_PATH not in url or not is_safe_url(url):
+            return None
+        if "json" not in (res.headers.get("content-type") or "").lower():
+            return None
+        # An aura answer can open with a guard like while(1); ahead of
+        # the JSON, so it is read from the first brace.
+        text = res.text() or ""
+        start = text.find("{")
+        if start < 0:
+            return None
+        import json as _json
+        body = _json.loads(text[start:])
+    except Exception:
+        return None
+    actions = body.get("actions") if isinstance(body, dict) else None
+    for action in actions or ():
+        if isinstance(action, dict) and action.get("state") == "SUCCESS":
+            found = _pdf_from_value(action.get("returnValue"))
+            if found:
+                return found
+    return None
+
+
 def _press_once(page, link, arrived, seconds: float = 6.0):
     """Press View Bill PDF once, and wait for a tab or anything else.
 
@@ -960,6 +1034,10 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 if "application/pdf" in ct or ".pdf" in res.url.lower():
                     b = res.body()
                     if b and b[:5] == b"%PDF-":
+                        captured_response_bytes[0] = b
+                elif captured_response_bytes[0] is None:
+                    b = _pdf_in_aura(res)
+                    if b:
                         captured_response_bytes[0] = b
             except Exception:
                 pass
