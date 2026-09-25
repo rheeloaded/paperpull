@@ -795,7 +795,9 @@ async def api_root_set(request: Request):
 # the providers they hold accounts with, and have the installs made for them
 # from the templates the package already ships.
 
-_PROVIDER_RE = re.compile(r"provider\s*=\s*[\"']([^\"']+)[\"']")
+# Either quote, and a double-quoted name may hold an apostrophe. The first
+# version stopped at any quote, which read provider="Lowe's" as "Lowe".
+_PROVIDER_RE = re.compile(r"""provider\s*=\s*["']((?<=")[^"]+(?=")|(?<=')[^']+(?='))""")
 _KIND_RE = re.compile(r"kind\s*=\s*(DOCUMENT|RECEIPT)")
 
 # Never copied into a new install. A template in a repo checkout can have all
