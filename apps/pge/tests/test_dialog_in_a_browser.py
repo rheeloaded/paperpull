@@ -200,3 +200,56 @@ def test_a_viewer_from_an_earlier_bill_is_not_read_first(page):
     }""")
     page.wait_for_timeout(200)
     assert site._pdf_from_here(page, before).startswith(b"%PDF-2.0 new")
+
+
+# -- round seven, a bill inside Salesforce's own answer (#33) ------------------
+
+import base64 as _b64  # noqa: E402
+import json as _json  # noqa: E402
+
+_PDF = b"%PDF-1.4\n" + b"0" * 400
+
+
+class _Res:
+    def __init__(self, url, body, ct="application/json;charset=UTF-8"):
+        self.url, self._text, self.headers = url, body, {"content-type": ct}
+
+    def text(self):
+        return self._text
+
+
+def _aura(value, state="SUCCESS", prefix=""):
+    return prefix + _json.dumps({"actions": [
+        {"id": "1;a", "state": state, "returnValue": value}]})
+
+
+AURA = "https://myaccount.pge.com/myaccount/s/sfsites/aura?r=12&aura.ApexAction.execute=1"
+
+
+def test_a_bill_handed_back_inside_an_apex_answer_is_read():
+    """His files showed no request for a PDF anywhere and Apex answers of
+    seven to fourteen thousand characters, the size of a small bill
+    written out as base64."""
+    encoded = _b64.b64encode(_PDF).decode()
+    for value in (encoded, {"returnValue": encoded},
+                  {"returnValue": "data:application/pdf;base64," + encoded}):
+        assert site._pdf_in_aura(_Res(AURA, _aura(value))) == _PDF
+    assert site._pdf_in_aura(_Res(AURA, _aura(encoded, prefix="while(1);\n"))) == _PDF
+
+
+def test_nothing_but_a_pdf_in_a_successful_answer_on_pge_counts():
+    encoded = _b64.b64encode(_PDF).decode()
+    assert site._pdf_in_aura(_Res(AURA, _aura("hello"))) is None
+    assert site._pdf_in_aura(_Res(AURA, _aura(encoded, state="ERROR"))) is None
+    assert site._pdf_in_aura(_Res(AURA.replace("myaccount.pge.com",
+                                               "evil.example"),
+                                  _aura(encoded))) is None
+    not_pdf = _b64.b64encode(b"JVBERi0 but not really" * 20).decode()
+    assert site._pdf_in_aura(_Res(AURA, _aura(not_pdf))) is None
+    assert site._pdf_in_aura(_Res(AURA, "not json at all")) is None
+
+
+def test_the_capture_listens_for_a_bill_inside_salesforces_answer():
+    import inspect
+    src = inspect.getsource(site.download_bill)
+    assert "_pdf_in_aura(res)" in src
