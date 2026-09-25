@@ -521,6 +521,10 @@ class App:
             got = delivery.deliver(
                 page, request, out_path,
                 is_safe_url=site.is_safe_url, rivals=rivals,
+                # What expect_download waited before the handover. Too
+                # short here and the retry below presses the statement a
+                # second time on a download that was coming.
+                settle_ms=45000,
                 journal=self.journal,
                 strict=bool(self.config.get("refuse_wrong_documents", False)))
             print("  %s" % got.say())

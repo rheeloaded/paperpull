@@ -43,6 +43,7 @@ docs/failure-diagnostics.md for why that boundary is drawn where it is.
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -143,7 +144,9 @@ def amount_variants(total) -> list:
         value = abs(float(str(total).replace(",", "").replace("$", "").strip()))
     except (TypeError, ValueError):
         return []
-    if value < 0.01:
+    # nan and inf parse as floats and print as words, and splitting
+    # "nan" on its point raised out of every check that asked.
+    if not math.isfinite(value) or value < 0.01:
         return []
     plain = "%.2f" % value
     whole, cents = plain.split(".")
@@ -364,7 +367,8 @@ def distinguish(path, expect: Optional[Identity], others=(), *,
     and every fact is its own."""
     if expect is None:
         return Verdict(UNCHECKED)
-    rivals = [o for o in others if isinstance(o, Identity) and o is not expect]
+    rivals = [o for o in (others or ()) if isinstance(o, Identity)
+              and o is not expect]
     if not rivals:
         return verify(path, expect, text=text, pages=pages)
 

@@ -611,7 +611,26 @@ class App:
                 got = self._capture_document(page, purchase, out_path)
             if got.outcome == delivery.WRONG:
                 return self._refused(purchase, got)
-            ok = self._finish_pdf(page, purchase, out_path, source_page=page)
+            if got.outcome != delivery.SAVED:
+                # Nothing checked reached the folder, so nothing is
+                # finished. _finish_pdf used to run anyway, find no file,
+                # and reprint the page straight to the final path outside
+                # both the isolation and the check, and the case where
+                # the checked render fails is the one where a stale
+                # receipt is still on screen.
+                self._record_state(purchase, State.FAILED,
+                                   notes="the receipt did not render: %s"
+                                   % got.outcome)
+                self._write_csv_rows(purchase,
+                                     receipt_status="Capture failed",
+                                     processing_status=State.FAILED.value)
+                self.stats["failed"] += 1
+                self.write_failure("save the receipt",
+                                   "the receipt did not render")
+                self.journal.result("could not save the document")
+                return False
+            ok = self._finish_pdf(page, purchase, out_path, source_page=page,
+                                  reprint=False)
             self.journal.result("saved the document" if ok
                                 else "could not save the document",
                                 bytes_written=out_path.stat().st_size
@@ -716,14 +735,20 @@ class App:
         receipt_pdf.print_page_to_pdf(target_page, out_path)
 
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
-                    popup=None, source_page=None) -> bool:
+                    popup=None, source_page=None, reprint: bool = True) -> bool:
+        """Validate what was saved, and file it or quarantine it.
+
+        reprint is off for a receipt that came through delivery.render. A
+        reprint there goes straight to the final path, unisolated and
+        unchecked, over a receipt that had been checked, so a file that
+        fails validation is quarantined as it is instead."""
         purchase.pdf_path = str(out_path)
         purchase.pdf_filename = out_path.name
         self._record_state(purchase, State.PDF_SAVED)
 
         tokens = receipt_pdf.expected_tokens_for(purchase)
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
-        if not result.ok:
+        if not result.ok and reprint:
             log.warning("Validation failed (%s); retrying once", result.reason)
             self.stats["validation_failures"] += 1
             try:

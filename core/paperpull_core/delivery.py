@@ -69,7 +69,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import capture
-from .identity import Identity, REFUSED, Verdict, distinguish
+from .identity import Identity, REFUSED, UNCHECKED, Verdict, distinguish
 
 log = logging.getLogger("paperpull.delivery")
 
@@ -355,7 +355,7 @@ def _clear(path: Path) -> None:
 
 def deliver(page, request: DocumentRequest, out_path, *, is_safe_url,
             dl_dir=None, journal=None, strict: bool = True,
-            settle_ms: int = SETTLE_MS) -> Delivery:
+            settle_ms: int = SETTLE_MS, rivals=()) -> Delivery:
     """Get the document `request` describes into `out_path`.
 
     `is_safe_url` is the app's own guard and is never derived here. A
@@ -366,7 +366,14 @@ def deliver(page, request: DocumentRequest, out_path, *, is_safe_url,
     With `strict`, a document that arrives and is not the one that was
     asked for is deleted rather than written. That is the whole point of
     the ordering here and it defaults on.
+
+    `rivals` is the same as `place` and `render` take, the other rows the
+    document could be confused with. Four apps passed it here in 0.34.0
+    when this did not accept it, and every document those four asked for
+    failed with a TypeError before anything was pressed. Given here it
+    wins over the request's own.
     """
+    rivals = tuple(rivals or ()) or tuple(request.rivals or ())
     out_path = Path(out_path)
     staged = _stage(out_path)
     _clear(staged)
@@ -395,7 +402,7 @@ def deliver(page, request: DocumentRequest, out_path, *, is_safe_url,
                         armed=tuple(armed))
 
     return _finish(staged, out_path, request.expect, strict, mechanism,
-                   armed, note, request.rivals)
+                   armed, note, rivals)
 
 
 def _finish(staged: Path, out_path: Path, expect, strict: bool,
@@ -415,7 +422,14 @@ def _finish(staged: Path, out_path: Path, expect, strict: bool,
         return Delivery(NOT_A_PDF, mechanism, armed=tuple(armed),
                         bytes_len=size)
 
-    verdict = distinguish(staged, expect, rivals)
+    try:
+        verdict = distinguish(staged, expect, rivals)
+    except Exception as e:
+        # A check that cannot be made is not a refusal. Letting it raise
+        # left the staged file behind and counted a working download as
+        # failed, which is the diagnostic taking the run down.
+        log.info("the document could not be checked: %s", type(e).__name__)
+        verdict = Verdict(UNCHECKED)
     size = _size(staged)
     note("verify", outcome=verdict.outcome, mechanism=mechanism,
          checked=len(verdict.checked), matched=len(verdict.matched))

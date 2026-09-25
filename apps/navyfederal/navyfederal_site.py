@@ -674,9 +674,16 @@ def statement_request(page, account: str, date: str):
     # interceptor collects only the tabs that open after it starts
     # listening, so a tab left by an earlier statement cannot be read as
     # this one. That was the whole reason for the old sweep.
+    # The same facts identity_for gives every other row. Built from the
+    # date alone, the one fact this statement shared with the other
+    # accounts billed that day cancelled out, and any account name a
+    # neighbor owned outweighed it, so a correct Checking statement that
+    # mentioned a Visa payment was refused and deleted. The measurement
+    # that turned refusal on used the account on both sides.
     return DocumentRequest(
         trigger=btn.click,
-        expect=Identity(date=date),
+        expect=Identity(date=str(date or "")[:10],
+                        label=str(account or "")),
         while_waiting=lambda: dismiss_timeout(page),
         close_new_tabs=True,
         hints=(TAB,))
