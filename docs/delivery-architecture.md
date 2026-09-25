@@ -61,6 +61,7 @@ unclassified rather than guessed at.
 | gap |  |  |  |  |  |  | x |
 | github |  |  |  | x |  | x | x |
 | golden1 | x | x | x |  |  | x |  |
+| homedepot |  |  |  |  |  |  | x |
 | kroger |  |  |  |  |  |  | x |
 | lowes |  |  |  |  |  |  | x |
 | meijer |  |  |  | x | x | x | x |
