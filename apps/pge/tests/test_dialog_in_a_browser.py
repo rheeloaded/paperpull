@@ -253,3 +253,15 @@ def test_the_capture_listens_for_a_bill_inside_salesforces_answer():
     import inspect
     src = inspect.getsource(site.download_bill)
     assert "_pdf_in_aura(res)" in src
+
+
+def test_an_earlier_bills_viewer_is_never_saved_as_this_one(page):
+    """A press that brought nothing new fell through to the viewer an
+    earlier bill left open, and saved bill A under bill B's date. Found by
+    the review before 0.34.2. Nothing new has to mean nothing."""
+    page.evaluate(BLOB)
+    page.wait_for_timeout(200)
+    before = site._viewers_now(page)
+    assert site._pdf_from_here(page, before) is None
+    # and with no before, the old behavior of reading what is there holds
+    assert (site._pdf_from_here(page) or b"").startswith(b"%PDF-")
