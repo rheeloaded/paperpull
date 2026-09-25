@@ -178,7 +178,17 @@ the three newest files you already have would be called, and each part
 shows how many of your files from that app have it. Save writes it to
 every receipts app or every statements app, every account's config in
 each, or to the chosen app alone. A copy of each config it changes goes
-in that app's `Backups` folder first. It renames nothing.
+in that app's `Backups` folder first. Saving renames nothing.
+
+After a save that changed something, the page offers to rename the files
+you already have, in every app and every account the save changed. An
+app with its own pattern is left out of a shared change, because the
+shared pattern does not name its files. **Preview renames** runs each
+app's `--rename` in turn and lists every file that would change, in the
+Output tab. **Rename them** is offered only once that preview has
+finished, asks once more, and runs `--rename --apply` the same way. If
+any app does not finish, the rest are not started and the page says
+which one stopped.
 
 A pattern can also be written into an app's config.json by hand.
 
@@ -198,7 +208,7 @@ line, preview first.
 
 ## What building it takes
 
-Steps 1 to 4 are built. The rename offer is next.
+All five steps are built.
 
 1. `core/paperpull_core/naming.py`, the parser and renderer, with its
    tests, including every example on #50 and a pattern of every error.
@@ -214,8 +224,14 @@ Steps 1 to 4 are built. The rename offer is next.
    on the three newest real files of the chosen app, with each field's
    fill rate.
 5. On a change, the panel offers "rename existing files to match", which
-   is `--rename`'s preview and then its apply. That needs nothing new,
-   because it already asks the app what a file should be called.
+   is `--rename`'s preview and then its apply. It was expected to need
+   nothing new, and it needed one fix. `--rename` built a name from the
+   ledger row alone, so under a pattern using a number, account, total,
+   store or type it would have named a file differently from a download.
+   It now hands the name builder the app's own record, found by the same
+   key on both sides, which also let apps known by a document id find
+   their records for the first time. The "(1 of 3)" of a split order is
+   kept.
 
 ## Not in the first version
 

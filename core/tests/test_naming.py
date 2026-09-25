@@ -177,7 +177,12 @@ def test_a_pattern_for_statements_reaches_the_records_own_fields(tmp_path, monke
 # -- every app hands over its record ---------------------------------------------
 
 REPO = Path(__file__).resolve().parents[2]
-APP_FILES = sorted(p for p in (REPO / "apps").glob("*/*.py"))
+# The core as well. --rename lives there, and it named files from the ledger
+# row alone for a whole step after every app had been fixed, because this
+# guard only looked at the apps.
+APP_FILES = sorted([*(REPO / "apps").glob("*/*.py"),
+                    *(p for p in (REPO / "core" / "paperpull_core").glob("*.py")
+                      if p.name != "storage.py")])
 
 
 def _calls(path):

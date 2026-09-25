@@ -1817,17 +1817,28 @@ async def api_naming_save(request: Request):
             raise HTTPException(400, problem)
     kind = _naming_kind(d)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    found = discover_apps()
     if scope == "own":
-        targets, key = [d], OWN_KEY
+        targets, key = {k: Path(a["dir"]) for k, a in found.items()
+                        if Path(a["dir"]) == d}, OWN_KEY
     else:
-        targets = [Path(a["dir"]) for a in discover_apps().values()
-                   if _naming_kind(Path(a["dir"])) == kind]
+        targets = {k: Path(a["dir"]) for k, a in found.items()
+                   if _naming_kind(Path(a["dir"])) == kind}
         key = SHARED_KEYS[kind]
     written = 0
-    for install in targets:
-        for cfg in _config_files(install):
-            written += _write_config(cfg, key, pattern, stamp)
-    return {"written": written, "installs": len(targets), "key": key}
+    changed = []
+    for name, install in targets.items():
+        wrote = sum(_write_config(cfg, key, pattern, stamp)
+                    for cfg in _config_files(install))
+        written += wrote
+        # What the page offers to rename. An app with its own pattern is
+        # not named by the shared one, so a shared change leaves its
+        # files as they are.
+        if wrote and not (scope == "shared" and
+                          (_read_json(install / "config.json") or {}).get(OWN_KEY)):
+            changed.append(name)
+    return {"written": written, "installs": len(targets), "key": key,
+            "changed": changed}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1862,6 +1873,10 @@ HTML = r"""<!doctype html>
   .setup p.lead { color:var(--muted); margin:0 0 22px; line-height:1.5; }
   .setup label { text-transform:none; letter-spacing:0; font-size:14px;
                  color:var(--fg); margin:16px 0 6px; }
+  .stwrap button.nmchip { display:inline-flex; flex-direction:column; align-items:flex-start;
+                          line-height:1.25; padding:5px 10px; text-align:left; }
+  .nmchip small { color:var(--muted); font-size:11px; }
+  .nmchip.nmnone { opacity:.5; }
   #panenm label { text-transform:none; letter-spacing:0; font-size:14px; color:var(--fg); }
   #nmpattern { width:100%; padding:8px 10px; background:var(--panel); color:var(--fg);
                border:1px solid var(--line); border-radius:6px; font-size:14px;
@@ -2079,8 +2094,8 @@ HTML = r"""<!doctype html>
     <p class="hint" style="margin-top:0">How the files this app downloads are named. Add
        the parts you want, in order. A part marked <b>skip if empty</b> is left out, with
        the separator in front of it, whenever a document does not have it, so no name ends
-       in a stray dash. Nothing is renamed here. Files you already have keep their names
-       until you run <b>Rename preview</b> and then <b>Apply renames</b> under more.</p>
+       in a stray dash. Saving renames nothing. Once you save, the page offers to rename
+       the files you already have, preview first.</p>
     <p id="nmunavail" class="hint warn" style="display:none">File naming is not available
        in this install. Update PaperPull to get it.</p>
     <div id="nmbody">
@@ -2101,8 +2116,9 @@ HTML = r"""<!doctype html>
           <option>dd mmm yyyy</option><option>mmmm d yyyy</option></select>
         <label style="display:inline; margin-left:10px"><input type="checkbox" id="nmskip" checked>
           skip if empty</label></p>
-      <p class="hint" style="margin:0 0 6px">Click a part to add it where the cursor is. The
-         number beside it is how many of your files from this app have one.</p>
+      <p class="hint" style="margin:0 0 6px">Click a part to add it where the cursor is.
+         Under each is how many of the files you already have from this app carry it. A
+         part on none of them would always come out empty, so it is shown faded.</p>
       <div id="nmfields" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px"></div>
       <input id="nmpattern" type="text" spellcheck="false" autocomplete="off"
              oninput="nmChanged()" placeholder="an empty box means the default">
@@ -2112,6 +2128,20 @@ HTML = r"""<!doctype html>
          <button onclick="nmDefault()">Back to the default</button>
          <button onclick="nmClear()">Start empty</button>
          <span class="hint" id="nmnote" style="margin-left:8px"></span></p>
+      <div id="nmoffer" style="display:none; border-left:3px solid var(--accent);
+           padding:2px 0 2px 12px; margin:6px 0 14px">
+        <p style="margin:4px 0"><b>Rename the files you already have to match?</b></p>
+        <p class="hint" style="margin:4px 0" id="nmofferapps"></p>
+        <p class="hint" style="margin:4px 0">Preview first. It lists every file that would
+           change, in the Output tab, and changes nothing. Renaming then does exactly that.
+           Nothing is downloaded or deleted, nothing moves between folders, and each app's
+           index follows its files, so nothing is ever downloaded twice. The preview can
+           also list files an app would now summarize better than when it saved them.</p>
+        <p style="margin:4px 0"><button id="nmprevbtn" onclick="nmRename(false)">Preview renames</button>
+           <button id="nmapplybtn" class="primary" onclick="nmRename(true)" disabled>Rename them</button>
+           <button onclick="nmOffer(null)">Not now</button>
+           <span class="hint" id="nmofferstate" style="margin-left:8px"></span></p>
+      </div>
       <p class="hint">Written by hand, <code>{date:yyyymmdd}[ - {provider}][ -- {number|kind}]</code>
          is the date, then the provider, then the order number, or the kind when there is
          no number. Square brackets make a part that is skipped when empty, and
@@ -2407,19 +2437,43 @@ async function loadNaming() {
   $('nmnote').textContent = '';
   const box = $('nmfields'); box.innerHTML = '';
   const n = d.fill.records;
+  const receipts = d.kind === 'receipts';
   for (const f of d.fields) {
+    // An order total, a store and online or in store are things a receipt
+    // has. On a statements app they would only ever come out empty.
+    if (!receipts && (f === 'total' || f === 'store' || f === 'type')) continue;
     const b = document.createElement('button');
+    b.className = 'nmchip';
     const got = d.fill.filled[f] || 0;
-    const rate = (n && f !== 'owner') ? ' ' + Math.round(100 * got / n) + '%' : '';
-    b.textContent = f + rate;
-    if (rate) {
-      b.title = got + ' of your ' + n + ' files from this app have it';
-      if (!got) b.style.opacity = '0.5';
-    }
+    const name = document.createElement('span');
+    name.textContent = nmLabel(f, receipts);
+    const how = document.createElement('small');
+    how.textContent = nmHowMany(f, got, n);
+    b.append(name, how);
+    b.title = 'Adds {' + f + '} to the pattern';
+    if (n && f !== 'owner' && f !== 'part' && !got) b.classList.add('nmnone');
     b.onclick = () => nmInsert(f);
     box.append(b);
   }
   nmChanged();
+}
+function nmLabel(f, receipts) {
+  return ({date: 'Date', year: 'Year', month: 'Month', provider: 'Provider',
+           owner: 'Account holder', kind: 'Document type', summary: 'Description',
+           number: receipts ? 'Order number' : 'Document number', account: 'Account',
+           total: 'Order total', store: 'Store', type: 'Online or in store',
+           part: 'Part, like 1 of 3'})[f] || f;
+}
+// How many of the files already downloaded have this part, in words, so
+// nobody builds a name on something this provider never gives.
+function nmHowMany(f, got, n) {
+  if (f === 'owner') return 'from your settings';
+  if (f === 'part') return 'only on a split order';
+  if (!n) return '';
+  if (got >= n) return 'on every file';
+  if (got === 0) return 'on none of your files';
+  const pct = Math.round(100 * got / n);
+  return pct >= 90 ? 'on almost every file' : 'on ' + got + ' of ' + n + ' files';
 }
 function nmScope() {
   if (!NM) return;
@@ -2483,10 +2537,73 @@ async function nmSave() {
   } catch (e) { $('nmnote').textContent = 'could not reach the control panel'; return; }
   if (!r.ok) { $('nmnote').textContent = d.detail || 'not saved'; return; }
   await loadNaming();
-  $('nmnote').textContent = d.written
-    ? 'Saved for ' + d.installs + (d.installs === 1 ? ' app' : ' apps') +
-      '. New downloads use it. Rename preview shows what your files would become.'
-    : 'Nothing to change.';
+  $('nmnote').textContent = d.written ? 'Saved. New downloads use it.' : 'Nothing to change.';
+  if (d.changed && d.changed.length) nmOffer(d.changed);
+}
+
+// The offer to bring files already on disk into line, one app and one
+// account at a time, through the app's own --rename. Renaming is never
+// offered until a preview of the same apps has finished cleanly.
+let NM_OFFER = null, NM_PREVIEWED = false;
+function nmOffer(apps) {
+  NM_OFFER = apps; NM_PREVIEWED = false;
+  $('nmoffer').style.display = apps ? 'block' : 'none';
+  if (!apps) return;
+  $('nmofferapps').textContent = (apps.length === 1 ? 'In ' : 'In these ' + apps.length + ' apps, ') +
+    apps.join(', ') + ', every account.';
+  $('nmapplybtn').disabled = true;
+  $('nmprevbtn').disabled = false;
+  $('nmofferstate').textContent = '';
+  $('nmoffer').scrollIntoView({block: 'nearest'});
+}
+function nmPairs() {
+  const pairs = [];
+  for (const a of NM_OFFER || []) {
+    const m = META.apps[a];
+    if (!m) continue;
+    for (const acc of (m.accounts && m.accounts.length ? m.accounts : ['primary'])) pairs.push([a, acc]);
+  }
+  return pairs;
+}
+function nmRename(apply) {
+  const pairs = nmPairs();
+  if (!pairs.length) return;
+  if (apply && !NM_PREVIEWED) return;
+  if (apply && !confirm('Rename the files the preview listed, in ' + NM_OFFER.length +
+      (NM_OFFER.length === 1 ? ' app?' : ' apps?') +
+      ' Nothing is downloaded or deleted, and each app\'s index follows its files.')) return;
+  const action = apply ? 'rename_apply' : 'rename';
+  showTab('out');
+  $('console').textContent = '';
+  let i = 0;
+  const next = (code) => {
+    if (code !== undefined && code !== '0') {
+      $('nmofferstate').textContent = 'Stopped at ' + pairs[i - 1].join(', ') +
+        ', which did not finish. Its output says why.';
+      return;
+    }
+    if (i >= pairs.length) {
+      if (apply) {
+        $('nmofferstate').textContent = 'Renamed. The Output tab lists each file.';
+        $('nmapplybtn').disabled = true; $('nmprevbtn').disabled = true;
+        loadNaming();
+      } else {
+        NM_PREVIEWED = true;
+        $('nmapplybtn').disabled = false;
+        $('console').textContent += '\n== That is the whole preview. Nothing has been changed. ' +
+          'To rename these files, go back to File names and press Rename them. ==\n';
+        $('console').scrollTop = $('console').scrollHeight;
+        $('nmofferstate').textContent = 'Preview done. Read it in the Output tab, then rename here.';
+      }
+      return;
+    }
+    const [app, account] = pairs[i++];
+    $('console').textContent += (i > 1 ? '\n' : '') + '== ' + app +
+      (account === 'primary' ? '' : ', ' + account) + ' ==\n';
+    run(action, {app, account, append: true, onDone: next});
+  };
+  $('nmofferstate').textContent = apply ? 'Renaming...' : 'Previewing...';
+  next();
 }
 function nmDefault() { $('nmpattern').value = NM ? NM.default : ''; nmChanged(); }
 function nmClear() { $('nmpattern').value = ''; $('nmpattern').focus(); nmChanged(); }
@@ -2647,22 +2764,27 @@ function onScope() {
   $('scopehint').textContent = text;
   try { localStorage.setItem('scope', JSON.stringify(s)); } catch (e) {}
 }
-function run(action) {
+// opts is for a run the page starts for itself rather than from a button,
+// the File names page's renames. It names the app and account, leaves the
+// Scope out, adds to the console instead of clearing it, and is told when
+// the run ends.
+function run(action, opts) {
+  opts = opts || {};
   if (es) es.close();
-  const app = $('app').value, account = $('account').value;
-  const s = scopeValues();
+  const app = opts.app || $('app').value, account = opts.account || $('account').value;
+  const s = opts.app ? {year: '', start: '', end: ''} : scopeValues();
   if (s.year === '' && s.start && s.end && s.start > s.end) {
     setStatus('err', 'the From date is after the To date'); return;
   }
   const q = new URLSearchParams({ app, account, action });
   if (s.year) q.set('year', s.year); else { if (s.start) q.set('start', s.start); if (s.end) q.set('end', s.end); }
-  $('console').textContent = '';
+  if (!opts.append) $('console').textContent = '';
   $('failnote').style.display = 'none';
   const scoped = s.year ? ` (${s.year})` : (s.start || s.end) ? ` (${s.start || '…'} to ${s.end || '…'})` : '';
   setStatus('run', `running ${action} on ${app} / ${account}${scoped}`);
   // Only the buttons this run locked are unlocked at the end. The Spreadsheet
   // tab's build buttons stay disabled when there is nothing to build from.
-  document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl):not(#stoprec):not(:disabled)')
+  document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl):not(#tabnm):not(#stoprec):not(:disabled)')
     .forEach(b => { b.disabled = true; b.dataset.runlock = '1'; });
   // A recording waits for the person, so it needs a way to say when. The
   // app this run belongs to is remembered here rather than read back off
@@ -2699,8 +2821,9 @@ function run(action) {
     unlockButtons();
     es.close(); es = null;
     if (code !== '0' || (result && result.attention)) checkFailure(app);
+    if (opts.onDone) opts.onDone(code);
   });
-  es.onerror = () => { if (es) { setStatus('err','connection lost'); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; } };
+  es.onerror = () => { if (es) { setStatus('err','connection lost'); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; if (opts.onDone) opts.onDone('lost'); } };
 }
 let failureApp = null;
 async function checkFailure(app) {

@@ -246,3 +246,57 @@ def test_the_index_is_still_used_when_the_app_knows_nothing_better(tmp_path):
     app = _App(tmp_path, rows)
     renaming.run_for(app, apply_changes=True, say=lambda *a: None)
     assert (tmp_path / "2026-09-05 Testco Monthly Statement.pdf").exists()
+
+
+# -- a rename names a file the way a download would (#50) ---------------------
+
+def test_a_pattern_field_from_the_record_reaches_the_rename(tmp_path, monkeypatch):
+    """Rename used to build a name from the row's date, summary and type
+    alone, so a pattern naming files for their order number renamed every
+    file without it while new downloads carried it."""
+    from paperpull_core import storage
+    storage.set_filename_owner("")
+    monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {number}")
+    name = "2026-09-05 Testco Order.pdf"
+    f = tmp_path / name
+    f.write_bytes(b"%PDF-")
+    rows = [{"PDF Filename": name, "PDF Full Path": str(f),
+             "Document Date": "2026-09-05", "Document Summary": "Order",
+             "Document Title": "", "Order or Receipt Number": "A-77", "Notes": ""}]
+    app = _App(tmp_path, rows, progress={"A-77": {
+        "order_number": "A-77", "purchase_date": "2026-09-05", "summary": "Order"}})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert (tmp_path / "2026-09-05 Testco A-77.pdf").exists()
+
+
+def test_a_document_known_by_its_id_finds_its_record(tmp_path):
+    """A row keyed by Document ID and a record keyed the same way are one
+    document. They used to be keyed differently, so the record was never
+    found and the improved summary never reached the file."""
+    from paperpull_core.storage import set_filename_owner
+    set_filename_owner("")
+    name = "2026-09-05 Testco Letter.pdf"
+    f = tmp_path / name
+    f.write_bytes(b"%PDF-")
+    rows = [{"PDF Filename": name, "PDF Full Path": str(f),
+             "Document Date": "2026-09-05", "Document Summary": "Letter",
+             "Document Title": "Letter", "Document ID": "D9", "Notes": ""}]
+    app = _App(tmp_path, rows, discovery={"D9": {
+        "document_id": "D9", "date": "2026-09-05", "title": "Letter",
+        "summary": "Annual Letter"}})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert (tmp_path / "2026-09-05 Testco Annual Letter.pdf").exists()
+
+
+def test_the_first_of_a_split_order_keeps_its_part(tmp_path):
+    from paperpull_core.storage import set_filename_owner
+    set_filename_owner("")
+    name = "2026-09-05 Testco Order (1 of 3).pdf"
+    f = tmp_path / name
+    f.write_bytes(b"%PDF-")
+    rows = [{"PDF Filename": name, "PDF Full Path": str(f),
+             "Document Date": "2026-09-05", "Document Summary": "Order",
+             "Document Title": "", "Notes": ""}]
+    said = []
+    renaming.run_for(_App(tmp_path, rows), apply_changes=False, say=said.append)
+    assert "already named" in " ".join(said), said
