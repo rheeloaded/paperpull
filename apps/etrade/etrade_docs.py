@@ -419,6 +419,14 @@ class App:
             site.goto_documents(page)
         self.check_session(page)
         docs = site.collect_download_docs(page)
+        # Period words, counts and dates only, so a report that says
+        # "found just 1" can be attached as it is (#36).
+        import json as _json
+        try:
+            atomic_write_text(self.paths.diagnostics / "discovery-trace.json",
+                              _json.dumps({"discovery": site.DISCOVERY_TRACE[:60]}, indent=2))
+        except Exception as e:
+            log.info("could not write the discovery trace: %s", e)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
@@ -494,6 +502,13 @@ class App:
             if dry_run:
                 print(f"  DRY RUN - would save: {filename}")
                 continue
+            # Which document the run is on, so a failure file says how far
+            # it got and whether it ever reached a second one.
+            try:
+                self.journal.op("next_item" if i > 1 else "open_item",
+                                "take a document", ordinal=i)
+            except Exception:
+                pass
             try:
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
@@ -770,6 +785,14 @@ class App:
         if self.stats.get("failure_files"):
             return
         extra = {"postmortem": postmortem} if postmortem else None
+        # A checkpoint at the moment it gave up. It is also what makes the
+        # journal when nothing had written to it yet, and every tester file
+        # sent in on 2026-09-25 came back without one for that reason.
+        try:
+            if getattr(self, "_work_page", None) is not None:
+                self.journal.checkpoint("when the run gave up")
+        except Exception:
+            pass
         path = failure.write_failure(
             self.paths.diagnostics,
             command=self.stats.get("mode") or "run",
@@ -849,6 +872,7 @@ class App:
             found_docs = site.collect_download_docs(page) if found else []
             info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_pdf_link": bool(b.href)}
                                             for b in found_docs[:40]]
+            info["discovery"] = site.DISCOVERY_TRACE[:60]
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)
             info["samples"] = []

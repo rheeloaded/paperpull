@@ -46,6 +46,16 @@ watches for a download, a PDF answer or a new tab, and every request the
 click causes is written to the trace so the next look sees the address
 the page uses.
 
+From the tester's recording on 0.33.0. The picker is a button named
+"Timeframe ,  Last 90 Days", and the app looked for one named exactly
+"Last 90 Days", so no period was ever chosen and discovery always read
+the default ninety days. Apply runs the search inside the page, no
+navigation, and a fresh searchItems answer arrives. The picker is now
+found by its label and its period, "Year To Date" and every year are
+applied in turn, and Discover writes discovery-trace.json saying what
+the picker offered, what was chosen, whether Apply navigated, the rows
+before and after and the dates each period brought.
+
 SAFETY (this is a brokerage account that can trade and move money):
   This module is strictly READ-ONLY. It opens the documents area, reads
   the list, and saves the PDFs E*TRADE already generated. It must NEVER
@@ -111,8 +121,26 @@ DOCS_URL = f"{BASE}/etx/pxy/accountdocs#/documents"
 # read as a period and nothing else. The widest period wins.
 DATE_FILTER_RE = re.compile(r"^\s*(last\s+\d+\s+(days|months|years?)|year\s+to\s+date|ytd|"
                             r"all(\s+(time|documents|dates))?|custom(\s+range)?|\d{4})\s*$", re.I)
-_WIDEST = [r"^all", r"last\s+(5|7|10)\s+years", r"last\s+\d+\s+years?", r"last\s+(24|36)\s+months",
-           r"last\s+12\s+months", r"year\s+to\s+date|ytd", r"last\s+\d+\s+months"]
+# Periods wider than a single year, then the narrow ones kept for a picker
+# that offers neither those nor years. Years sit between the two, because
+# "Year To Date" plus every year reaches further back than any of the
+# narrow ones. The old order took "Year To Date" over the years it sat
+# beside, and would have stopped discovery at January (#36).
+_WIDE_FIRST = [r"^all", r"last\s+(5|7|10)\s+years", r"last\s+\d+\s+years?", r"last\s+(24|36)\s+months"]
+_NARROW_LAST = [r"last\s+12\s+months", r"year\s+to\s+date|ytd", r"last\s+\d+\s+months"]
+_WIDEST = _WIDE_FIRST + _NARROW_LAST
+# The picker's accessible name carries its own label as well as the
+# period. The tester's recording named it "Timeframe ,  Last 90 Days"
+# (#36), and the finder looked for a button named exactly "Last 90 Days",
+# found none, and so no period was ever chosen in any round. The label
+# words and their commas are taken off before the period is judged.
+_PICKER_LABEL_RE = re.compile(r"\btime\s*frame\b|\bdate\s+range\b|\bperiod\b|[,:]", re.I)
+PICKER_NAME_RE = re.compile(r"time\s*frame|last\s+\d+\s+(days|months|years?)|year\s+to\s+date|"
+                            r"\b(19|20)\d{2}\b", re.I)
+# Apply is on the guard's list, since on most pages it commits something.
+# Here it is pressed only when its whole label is Apply, only right after
+# a period was chosen, and it only runs the search the period asks for.
+PERIOD_APPLY_RE = re.compile(r"^\s*apply(\s+filters?)?\s*$", re.I)
 BILLING_URL = BILLING_CANDIDATES[0]
 URLS = {
     "home": f"{BASE}/etx/pxy/dashboard",
@@ -560,57 +588,133 @@ def is_date_filter(label: str) -> bool:
     return bool(DATE_FILTER_RE.match(label)) and not FORBIDDEN_CONTROL_RE.search(label)
 
 
-def widen_date_filter(page, capture: list, trace: Optional[list] = None) -> bool:
-    """Open the period picker, choose the widest period it offers, and
-    apply it, catching the list the page then loads. The picker is the
-    button whose text is the current period. Every option seen is
-    recorded so the next round knows the vocabulary."""
+def picker_period(label: str) -> Optional[str]:
+    """The period a picker's name shows, "Last 90 Days" out of
+    "Timeframe ,  Last 90 Days", or None when the name holds anything
+    but the picker's own label and one period."""
+    label = label or ""
+    if FORBIDDEN_CONTROL_RE.search(label):
+        return None
+    text = re.sub(r"\s+", " ", _PICKER_LABEL_RE.sub(" ", label)).strip()
+    return text if is_date_filter(text) else None
+
+
+def is_period_apply(label: str) -> bool:
+    """The filter's own Apply, and nothing that merely starts with it."""
+    return bool(PERIOD_APPLY_RE.match(label or ""))
+
+
+def plan_periods(options) -> List[str]:
+    """The periods to apply, in order, from what the picker offered. One
+    period wider than a year when there is one. Otherwise "Year To Date"
+    and every year, newest first, since together they reach furthest
+    back. Otherwise the widest narrow one."""
+    opts: List[str] = []
+    for t in options or []:
+        t = re.sub(r"\s+", " ", t or "").strip()
+        if is_date_filter(t) and t not in opts:
+            opts.append(t)
+    for pat in _WIDE_FIRST:
+        for t in opts:
+            if re.search(pat, t, re.I):
+                return [t]
+    years = sorted({t for t in opts if re.fullmatch(r"(19|20)\d{2}", t)}, reverse=True)
+    if years:
+        ytd = [t for t in opts if re.fullmatch(r"year\s+to\s+date|ytd", t, re.I)][:1]
+        return ytd + years
+    for pat in _NARROW_LAST:
+        for t in opts:
+            if re.search(pat, t, re.I):
+                return [t]
+    return []
+
+
+def _find_picker(page):
+    """The period picker and the period it shows, or (None, ""). A button
+    whose name carries the picker's own label is preferred, so a year in
+    an open list is never taken for the picker."""
+    found = []
     try:
-        loc = page.get_by_role("button", name=re.compile(r"^\s*last\s+\d+\s+days\s*$", re.I))
-        if loc.count() == 0:
-            return False
-        picker = loc.first
-        current = (picker.inner_text(timeout=1000) or "").strip()
-        if not is_date_filter(current):
+        loc = page.get_by_role("button", name=PICKER_NAME_RE)
+        for i in range(min(loc.count(), 8)):
+            el = loc.nth(i)
+            try:
+                label = el.get_attribute("aria-label") or el.inner_text(timeout=800) or ""
+                period = picker_period(label)
+                if period and el.is_visible():
+                    found.append((not re.search(r"time\s*frame", label, re.I), i, el, period))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    if not found:
+        return None, ""
+    found.sort(key=lambda f: (f[0], f[1]))
+    return found[0][2], found[0][3]
+
+
+def _option_texts(page) -> set:
+    """The visible options of an open list, by role."""
+    out = set()
+    try:
+        loc = page.get_by_role("option")
+        for i in range(min(loc.count(), 40)):
+            el = loc.nth(i)
+            try:
+                if el.is_visible():
+                    out.add(re.sub(r"\s+", " ", el.inner_text(timeout=500) or "").strip())
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def widen_date_filter(page, capture: list, trace: Optional[list] = None) -> bool:
+    """Open the period picker, choose the periods plan_periods picks, and
+    apply each, catching the list the page then loads. The trace says
+    whether the picker was found, what it offered and what was chosen,
+    in period words only."""
+    note: dict = {"note": "period picker"}
+    if trace is not None:
+        trace.append(note)
+    try:
+        picker, current = _find_picker(page)
+        note["found"] = picker is not None
+        note["showing"] = current
+        if picker is None:
+            try:
+                note["buttons_named_like_a_period"] = page.get_by_role("button", name=PICKER_NAME_RE).count()
+            except Exception:
+                pass
             return False
         before = _control_texts(page)
         picker.click(timeout=5000)
         page.wait_for_timeout(1500)
-        appeared = sorted((_control_texts(page) | _short_visible_texts(page)) - before)
-        if trace is not None:
-            trace.append({"note": "period picker options", "options": [redact(t) for t in appeared[:20]]})
-        options = [t for t in appeared if is_date_filter(t)]
-        choice = None
-        for pat in _WIDEST:
-            for t in options:
-                if re.search(pat, t, re.I):
-                    choice = t
-                    break
-            if choice:
-                break
-        if not choice:
-            years = sorted({t.strip() for t in options if re.fullmatch(r"\s*(19|20)\d{2}\s*", t)}, reverse=True)
-            if not years:
-                page.keyboard.press("Escape")
-                return False
-            # No period wider than a year is offered (the third survey's
-            # picker ran from this year back to 2019). Each year in turn,
-            # then, gathering every list the page loads.
+        offered = _option_texts(page) | ((_control_texts(page) | _short_visible_texts(page)) - before)
+        periods = sorted({re.sub(r"\s+", " ", t).strip() for t in offered if is_date_filter(t)})
+        note["offered"] = periods[:30]
+        note["other_texts_that_appeared"] = len(offered) - len(periods)
+        plan = plan_periods(periods)
+        note["plan"] = plan
+        if not plan:
             page.keyboard.press("Escape")
-            page.wait_for_timeout(500)
-            got_any = False
-            for year in years:
-                got_any = _choose_period(page, year, capture, trace) or got_any
-            return got_any
-        return _choose_period(page, choice, capture, trace)
+            return False
+        got_any = False
+        for i, period in enumerate(plan):
+            # The list is still open for the first period. Each later one
+            # opens the picker again, once.
+            got_any = _choose_period(page, period, capture, trace, already_open=(i == 0)) or got_any
+        return got_any
     except Exception as e:
+        note["error"] = type(e).__name__
         log.info("could not widen the date filter: %s", e)
         return False
 
 
 def _row_count(page) -> int:
     """How many document rows the page is showing, for when applying a
-    period reloads the page instead of fetching a list."""
+    period brings no list the app could catch."""
     try:
         return int(page.evaluate(
             "sel => document.querySelectorAll(sel).length", FALLBACK["doc_row"]) or 0)
@@ -618,18 +722,27 @@ def _row_count(page) -> int:
         return 0
 
 
-def _choose_period(page, choice: str, capture: list, trace: Optional[list] = None) -> bool:
-    """Open the period picker if it is closed, choose `choice`, apply it,
-    and catch the list the page then loads. True when a list arrived."""
+def _choose_period(page, choice: str, capture: list, trace: Optional[list] = None,
+                   already_open: bool = False) -> bool:
+    """Open the period picker unless it is open, choose `choice`, apply it,
+    and catch the list the page then loads. True when a list arrived or
+    rows are showing. The trace entry says what each step saw, so a
+    report explains itself."""
+    entry: dict = {"note": "period chosen", "period": choice}
+    if trace is not None:
+        trace.append(entry)
     try:
-        opened = choice in _short_visible_texts(page)
-        if not opened:
-            picker = page.get_by_role("button", name=DATE_FILTER_RE)
-            if picker.count() == 0:
+        if not already_open:
+            picker, current = _find_picker(page)
+            entry["picker_showed"] = current
+            if picker is None:
+                entry["outcome"] = "picker not found"
                 return False
-            picker.first.click(timeout=5000)
+            picker.click(timeout=5000)
             page.wait_for_timeout(1200)
+        entry["rows_before"] = _row_count(page)
         before = len(capture)
+        navigations = [0]
 
         def on_response(res):
             try:
@@ -637,55 +750,89 @@ def _choose_period(page, choice: str, capture: list, trace: Optional[list] = Non
                     capture.append(res.json())
             except Exception:
                 pass
+
+        def on_navigated(frame):
+            try:
+                if frame == page.main_frame:
+                    navigations[0] += 1
+            except Exception:
+                pass
         page.on("response", on_response)
+        page.on("framenavigated", on_navigated)
         try:
-            if not _click_text(page, choice) and trace is not None:
-                trace.append({"note": "period option not found to click", "period": choice})
+            clicked = _click_text(page, choice)
+            entry["option_clicked"] = clicked
+            if not clicked:
+                entry["outcome"] = "option not found"
+                page.keyboard.press("Escape")
+                return False
             page.wait_for_timeout(1500)
-            apply = page.get_by_role("button", name=re.compile(r"^\s*apply\s*$", re.I))
+            entry["apply_clicked"] = False
+            apply = page.get_by_role("button", name=PERIOD_APPLY_RE)
             if apply.count() and apply.first.is_visible():
-                apply.first.click(timeout=5000)
+                label = apply.first.get_attribute("aria-label") or apply.first.inner_text(timeout=800) or ""
+                if is_period_apply(label):
+                    apply.first.click(timeout=5000)
+                    entry["apply_clicked"] = True
             for _ in range(30):
                 page.wait_for_timeout(500)
                 if len(capture) > before:
                     break
             page.wait_for_timeout(1500)
         finally:
-            try:
-                page.remove_listener("response", on_response)
-            except Exception:
-                pass
-        # Applying a period can submit a form rather than fetch a list.
-        # A recording shows exactly that, a submit after Apply and the
-        # page reloading with the results in it, and counting only the
-        # API answers meant a period that worked was reported as one that
-        # had not, so nothing older than the default was ever read (#36).
+            for event, fn in (("response", on_response), ("framenavigated", on_navigated)):
+                try:
+                    page.remove_listener(event, fn)
+                except Exception:
+                    pass
+        # The recording showed Apply submitting a form that the page
+        # handles itself, no navigation, and a fresh searchItems answer.
+        # Whether this run matched that is written down, and so is the
+        # period the picker shows afterwards, which says whether the
+        # choice held or was reset.
         got_list = len(capture) > before
         rows_now = _row_count(page)
+        entry["navigated"] = navigations[0] > 0
+        entry["lists"] = len(capture) - before
+        entry["rows_after"] = rows_now
+        entry["picker_shows"] = _find_picker(page)[1]
+        entry["dates"] = sorted({d["date"] for body in capture[before:] for d in _docs_from_api(body)},
+                                reverse=True)[:40]
         if not got_list and rows_now:
             log.info("date filter %r brought no list, but the page shows %d row(s)",
                      choice, rows_now)
-        if trace is not None:
-            trace.append({"note": "period chosen", "period": choice,
-                          "lists": len(capture) - before, "rows_on_the_page": rows_now})
         log.info("date filter set to %r, %d list(s)", choice, len(capture) - before)
         return got_list or bool(rows_now)
     except Exception as e:
+        entry["error"] = type(e).__name__
         log.info("could not choose the period %r: %s", choice, e)
         return False
 
 
+# What the last discovery saw, for the file Discover and Diagnose write.
+# Period words, counts and dates only.
+DISCOVERY_TRACE: list = []
+
+
 def collect_download_docs(page) -> List[RawDoc]:
-    """Every document the Documents page lists, from the API answer the
-    page loads with the widest period its picker offers, else the page's
-    own default period, else the rows."""
+    """Every document the Documents page lists, from the API answers the
+    page loads for its default period and for every period the picker is
+    set to, else the rows."""
     docs: List[RawDoc] = []
     seen = set()
     bodies: list = []
+    trace = DISCOVERY_TRACE
+    del trace[:]
     if goto_docs_capturing(page, bodies):
+        trace.append({"note": "default list", "lists": len(bodies),
+                      "dates": sorted({d["date"] for b in bodies for d in _docs_from_api(b)},
+                                      reverse=True)[:40]})
         wider: list = []
-        if widen_date_filter(page, wider):
-            bodies = wider
+        widen_date_filter(page, wider, trace)
+        # The default period's list is kept alongside the wider ones. A
+        # period that applied without a list the app caught used to leave
+        # nothing at all to read.
+        bodies = bodies + wider
         for body in bodies:
             for d in _docs_from_api(body):
                 key = (d["date"], d["title"])
@@ -696,6 +843,8 @@ def collect_download_docs(page) -> List[RawDoc]:
                 docs.append(RawDoc(title=d["title"], account=d["account"], date_text=d["date"],
                                    href=d["hint"], text=f"E*TRADE {d['title']} {_human_date(d['date'])}",
                                    kind="tax" if tax else "statement"))
+        trace.append({"note": "discovery result", "documents": len(docs),
+                      "dates": sorted({d.date_text for d in docs}, reverse=True)[:60]})
         if docs:
             return docs
     expand_all(page)
