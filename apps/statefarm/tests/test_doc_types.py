@@ -124,12 +124,12 @@ def test_the_documents_link_that_mentions_claims_is_followed_and_a_claim_is_not(
 
 def test_the_document_center_answer_gives_each_document_a_date_a_title_and_its_file():
     body = {"data": {"attributes": [
-        {"availableDate": "07/22/2026", "category": "Auto", "type": "Renewal Notice",
+        {"creationDate": "07/22/2026", "category": "Auto", "type": "Renewal Notice",
          "description": "Renewal Notice - 2019 SEDAN 1HGCM82633A123456", "documentId": "d1",
          "filePathUrl": "/DocumentCenterProxyV1/document/d1", "policyId": "p1"},
-        {"availableDate": "09/12/2026", "category": "Billing/Payments", "type": "Payment Receipt",
+        {"creationDate": "09/12/2026", "category": "Billing/Payments", "type": "Payment Receipt",
          "description": "Payment Receipt - Payment Receipt", "documentId": "d2", "filePathUrl": ""},
-        {"availableDate": "07/22/2026", "category": "Auto", "type": "ID Card", "description": "ID Card - 2019 SEDAN",
+        {"creationDate": "07/22/2026", "category": "Auto", "type": "ID Card", "description": "ID Card - 2019 SEDAN",
          "documentId": "d3", "filePathUrl": "/x/d3"},
         {"type": "no date"},
     ]}}
@@ -147,7 +147,7 @@ def test_the_year_is_the_only_thing_changed_in_the_metadata_address():
     class _P:
         def evaluate(self, js, url):
             calls.append(url)
-            return {"data": {"attributes": [{"availableDate": "01/05/" + url[-4:], "type": "Bill", "category": "Auto"}]}}
+            return {"data": {"attributes": [{"creationDate": "01/05/" + url[-4:], "type": "Bill", "category": "Auto"}]}}
     got = site._years_from(_P(), "https://documentcenterproxyv1-prod.statefarm.com/DocumentCenterProxyV1/customerMetadata?commId=null&year=2026", 2026)
     assert calls[0].endswith("year=2025") and all("year=" in c for c in calls)
     assert len(calls) == site.YEARS_BACK and got[0]["date"] == "2025-01-05"
@@ -194,7 +194,7 @@ def test_the_year_walk_stops_when_the_history_runs_out():
 def test_a_year_with_documents_in_it_does_not_end_the_walk():
     from datetime import date
     this_year = date.today().year
-    one = {"data": {"attributes": [{"availableDate": "2026-06-12", "type": "Renewal Notice",
+    one = {"data": {"attributes": [{"creationDate": "2026-06-12", "type": "Renewal Notice",
                                     "category": "Auto", "documentId": "abc123",
                                     "filePathUrl": "/docs/abc123.pdf"}]}}
     page = _YearPage({this_year - 1: one, this_year - 2: one})
@@ -237,10 +237,8 @@ def test_a_row_keeps_its_documents_folded_away_behind_its_own_button():
         assert site.VIEW_DOCUMENTS_RE.match(name), name
     for name in ("View Documents & PDFs", "Documents (excludes claims)", "View"):
         assert not site.VIEW_DOCUMENTS_RE.match(name), name
-    assert not site.expand_all.__doc__ or True
     import inspect
-    for fn in (site.collect_download_docs, site.download_bill):
-        assert "reveal_documents(page)" in inspect.getsource(fn), fn.__name__
+    assert "reveal_documents(page)" in inspect.getsource(site.collect_download_docs)
 
 
 def test_a_document_named_after_what_it_is_counts_as_a_document():
@@ -277,8 +275,110 @@ def test_a_document_is_dated_when_it_was_made_not_how_long_it_stays_up():
     assert doc["date"] == "2026-07-22"
 
 
-def test_availability_is_still_used_when_there_is_nothing_better():
+def test_a_document_with_only_an_availability_date_is_left_out_rather_than_misdated():
+    """0.34.0 still fell back to availableDate when creationDate was
+    missing, which is the 2028 date his next Pilot went looking for (#37).
+    A document must never be filed under the wrong date."""
     only = {"data": {"attributes": [{
-        "availableDate": "2026-04-16", "type": "Declarations", "category": "Auto"}]}}
-    [doc] = site._docs_from_api(only)
-    assert doc["date"] == "2026-04-16"
+        "availableDate": "2028-07-21", "type": "Declarations", "category": "Auto"}]}}
+    assert site._docs_from_api(only) == []
+
+
+def test_a_document_dated_in_the_future_is_never_listed():
+    """No document is issued in 2028. A date like that came from the wrong
+    field, whichever field it was (#37)."""
+    from datetime import date, timedelta
+    ahead = (date.today() + timedelta(days=400)).isoformat()
+    body = {"data": {"attributes": [
+        {"creationDate": ahead, "type": "Renewal Notice", "category": "Auto"},
+        {"creationDate": "2026-09-12", "type": "Payment Receipt", "category": "Billing/Payments"}]}}
+    assert [d["date"] for d in site._docs_from_api(body)] == ["2026-09-12"]
+    assert site.is_future(ahead)
+    assert not site.is_future(date.today().isoformat())
+    assert not site.is_future((date.today() + timedelta(days=1)).isoformat()), "a clock a day apart"
+    assert not site.is_future("not a date")
+
+
+# -- round seven, his 0.34.0 Pilot (#37) --------------------------------------
+
+def test_records_an_older_version_dated_2028_are_forgotten_on_discovery():
+    """0.33.0 left documents in discovery.json under their 2028 availability
+    date. They sorted newest, so his 0.34.0 Pilot tried them first and went
+    looking for 2028 on a page that only carries 2026 (#37)."""
+    import statefarm_docs
+    records = {
+        "Statement:2028-06-12:Payment Receipt - Billing/Payments:": {"date": "2028-06-12", "state": "needs_manual_review"},
+        "Statement:2026-09-12:Payment Receipt - Billing/Payments:": {"date": "2026-09-12", "state": "discovered"},
+        "Insurance:2028-07-21:kept:": {"date": "2028-07-21", "downloaded_ok": True},
+    }
+    assert statefarm_docs.drop_future_records(records) == 1
+    assert sorted(r["date"] for r in records.values()) == ["2026-09-12", "2028-07-21"], \
+        "a record that was ever downloaded is kept, so a deleted file never comes back"
+
+
+def test_a_future_date_is_never_selected_for_download():
+    """Resume reads discovery.json without discovering first, so the stale
+    2028 records have to be refused where documents are chosen too (#37)."""
+    import types
+    import statefarm_docs
+    app = statefarm_docs.App.__new__(statefarm_docs.App)
+    app.args = types.SimpleNamespace(type=None, year=None, start_date=None, end_date=None)
+    app.config = {}
+    future = statefarm_docs.Document(title="Payment Receipt - Billing/Payments",
+                                     category=doc_types.STATEMENT, date="2028-06-12")
+    real = statefarm_docs.Document(title="Payment Receipt - Billing/Payments",
+                                   category=doc_types.STATEMENT, date="2026-09-12")
+    assert app._in_scope(real)
+    assert not app._in_scope(future)
+
+
+def test_a_revealed_document_is_recognized_by_its_name():
+    """His Pilot pressed "View Documents1" and "Payment Receipt - Payment
+    Receipt" appeared, and nothing pressed it (#37). The recording showed
+    "Renewal Notice - <year make model>" in the same place."""
+    for name in ("Payment Receipt - Payment Receipt", "Renewal Notice - 2019 Toyota Camry",
+                 "Renewal Notice - <year make model>", "Auto ID Card - 2019 SEDAN",
+                 "Declarations Page - Homeowners"):
+        assert site.is_revealed_document(name), name
+    for name in ("View Documents 1", "View Documents1", "Payment Receipt",
+                 "Documents (excludes claims)", "View documents & PDFs", ""):
+        assert not site.is_revealed_document(name), name
+
+
+def test_a_revealed_control_that_pays_or_changes_anything_is_refused():
+    for name in ("Pay Now - Payment Receipt", "Make a payment - Auto", "File a claim - Auto",
+                 "Change coverage - Auto", "Cancel policy - Auto", "Autopay - Enroll",
+                 "Update address - Home", "Contact my agent - Auto", "Sign in - Auto",
+                 "Insurance Card - Replace"):
+        assert not site.is_revealed_document(name), name
+
+
+def test_the_document_pressed_is_the_one_of_the_wanted_type():
+    """A row can hold several documents, and pressing the wrong one would
+    save it under this document's name and date."""
+    assert site._type_key("Payment Receipt - Billing/Payments") == site._type_key(
+        "Payment Receipt - Payment Receipt") == "paymentreceipt"
+
+    class _Nothing:
+        def get_by_role(self, *a, **k):
+            raise AssertionError("nothing is looked for when the choice is not clear")
+        locator = get_by_role
+
+    two = {"Renewal Notice - 2019 SEDAN", "Renewal Notice - 2020 COUPE"}
+    el, _, why = site._revealed_document(_Nothing(), two, "Renewal Notice - Auto")
+    assert el is None and "2 revealed" in why
+    el, _, why = site._revealed_document(_Nothing(), {"ID Card - 2019 SEDAN"}, "Renewal Notice - Auto")
+    assert el is None and "0 revealed" in why
+    el, _, why = site._revealed_document(_Nothing(), set(), "Renewal Notice - Auto")
+    assert el is None and "nothing" in why
+
+
+def test_the_download_opens_the_wanted_row_once_and_never_every_row():
+    """Opening every row and then pressing the wanted row again pressed the
+    same button twice, which folds the row away (#37)."""
+    import inspect
+    src = inspect.getsource(site.download_bill)
+    assert "reveal_documents(page)" not in src
+    assert "_open_row_then_document(" in src
+    opener = inspect.getsource(site._open_row_then_document)
+    assert opener.count(".click(") == 1, "the row's button is pressed once"

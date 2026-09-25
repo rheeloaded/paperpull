@@ -130,6 +130,23 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+def drop_future_records(records: dict) -> int:
+    """Forget discovered documents dated in the future. Returns how many.
+
+    0.33.0 dated documents by how long they stay online, so a Pilot on
+    0.34.0 found them still in discovery.json under 2028, tried them first
+    because they sorted newest, and went looking for 2028 on a page that
+    only carries 2026 (#37). The same documents are discovered again under
+    the date they were made. A record that was ever downloaded is kept,
+    since that is what stops a deleted file from coming back."""
+    stale = [k for k, r in records.items()
+             if isinstance(r, dict) and not r.get("downloaded_ok")
+             and site.is_future(str(r.get("date") or ""))]
+    for k in stale:
+        del records[k]
+    return len(stale)
+
+
 class App:
     _journal = None
     _requests = None
@@ -340,6 +357,10 @@ class App:
             return False
         if a.end_date and (not doc.date or doc.date > a.end_date):
             return False
+        # A future date was read from the wrong field. Nothing is ever saved
+        # under one, and Resume reads records without discovering first (#37).
+        if doc.date and site.is_future(doc.date):
+            return False
         return True
 
     def _record_raw(self, r, tax_year: str = "") -> int:
@@ -394,6 +415,9 @@ class App:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
             date, _ = site.parse_period_date(title)
             date = date or ""
+        if date and site.is_future(date):
+            self.stats["skipped_out_of_scope"] += 1
+            return 0
         floor = self.args.start_date or self.config.get("default_start_date")
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
@@ -421,7 +445,10 @@ class App:
         docs = site.collect_download_docs(page)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
-        self.discovery.save()
+        dropped = drop_future_records(self.discovery.data)
+        if dropped:
+            log.info("forgot %d document(s) an older version dated in the future", dropped)
+        self.discovery.save(backup=bool(dropped))
         log.info("documents page: %d documents, %d new", len(docs), n_new)
 
         self.stats["discovered"] = len(self.discovery.data)

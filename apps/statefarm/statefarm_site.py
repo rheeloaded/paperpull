@@ -485,6 +485,142 @@ def reveal_documents(page, limit: int = 20) -> int:
     return pressed
 
 
+# What a row's View Documents reveals. The recording showed "Renewal Notice
+# - <year make model>" and a Pilot showed "Payment Receipt - Payment
+# Receipt", so a document is named "<type> - <description>" and opens in a
+# new tab (#37). Its own allowlist, narrow on purpose, and only ever pressed
+# when it appeared because this row was opened.
+REVEALED_DOC_RE = re.compile(r"^\s*[A-Za-z][A-Za-z0-9&/'(). ]{1,60}?\s+-\s+\S.{0,80}$")
+
+
+def is_revealed_document(label: str) -> bool:
+    """A document link a row revealed, once the guard has had its say.
+    The forbidden words are checked first, so "Pay Now - Payment Receipt"
+    is refused however well it is shaped."""
+    label = (label or "").strip()
+    if not label:
+        return False
+    if FORBIDDEN_CONTROL_RE.search(label):
+        return False
+    if SETTINGS_CONTROL_RE.search(label) or AUTH_CONTROL_RE.search(label):
+        return False
+    if VIEW_DOCUMENTS_RE.match(label):
+        return False
+    return bool(REVEALED_DOC_RE.match(label))
+
+
+def _type_key(text: str) -> str:
+    """The document type, the part before " - ", as bare letters and
+    digits. "Payment Receipt - Billing/Payments" from the list and
+    "Payment Receipt - Payment Receipt" on the page both give
+    "paymentreceipt"."""
+    return re.sub(r"[^a-z0-9]", "", (text or "").split(" - ")[0].lower())
+
+
+def _revealed_document(page, appeared: set, title: str):
+    """The one document link this row revealed that is the wanted type, as
+    (locator, label, why). None when there is not exactly one, because a
+    row can hold several and the wrong one would be saved under this
+    document's name."""
+    want = _type_key(title)
+    candidates = sorted(t for t in appeared if is_revealed_document(t))
+    if not candidates:
+        return None, "", "nothing the row revealed looks like a document"
+    if not want or want == "document":
+        return None, "", "this document has no type to match against"
+    same = [t for t in candidates if _type_key(t) == want]
+    if len(same) != 1:
+        return None, "", ("%d revealed documents are this type, and one is needed" % len(same))
+    text = same[0]
+    exact = re.compile("^" + re.escape(text) + "$", re.I)
+    found = []
+    for loc in (page.get_by_role("link", name=exact), page.get_by_role("button", name=exact),
+                page.locator("a, button, [role=button], [role=link]").filter(has_text=exact)):
+        try:
+            found = [loc.nth(i) for i in range(min(loc.count(), 5)) if loc.nth(i).is_visible()]
+        except Exception:
+            found = []
+        if found:
+            break
+    if len(found) != 1:
+        return None, "", ("%d visible controls carry that name, and one is needed" % len(found))
+    return found[0], text, ""
+
+
+def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
+                            trace: Optional[list], dl_dir) -> bool:
+    """Press the row's View Documents once, then the document it revealed.
+
+    A Pilot pressed View Documents, saw "Payment Receipt - Payment Receipt"
+    appear and stopped there, because nothing pressed the document itself
+    (#37). The row's button is pressed exactly once. Pressing it again
+    would fold the row away, so a row that is already open is left alone
+    and the trace says so."""
+    def note(entry):
+        if trace is not None:
+            trace.append(entry)
+
+    try:
+        expanded = el.get_attribute("aria-expanded")
+    except Exception:
+        expanded = None
+    if expanded == "true":
+        note({"note": "the row was already open, so its View Documents was not pressed again",
+              "control": redact(label)[:60]})
+        return False
+    before = _control_texts(page)
+    try:
+        el.scroll_into_view_if_needed(timeout=4000)
+    except Exception:
+        pass
+    try:
+        el.click(timeout=8000)
+        note({"note": "clicked", "control": redact(label)[:60]})
+    except Exception as e:
+        note({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
+        return False
+    appeared: set = set()
+    for _ in range(8):
+        page.wait_for_timeout(500)
+        appeared = _control_texts(page) - before
+        if any(is_revealed_document(t) for t in appeared):
+            break
+    try:
+        expanded_after = el.get_attribute("aria-expanded")
+    except Exception:
+        expanded_after = None
+    note({"note": "the row's documents", "wanted_type": redact(title.split(" - ")[0])[:40],
+          "appeared": [redact(t) for t in sorted(appeared)[:15]],
+          "look_like_documents": sum(1 for t in appeared if is_revealed_document(t)),
+          "expanded_before": expanded, "expanded_after": expanded_after})
+    doc_el, doc_label, why = _revealed_document(page, appeared, title)
+    if doc_el is None:
+        note({"note": "no revealed document was pressed", "why": why})
+        return False
+    return _catch_pdf(page, doc_el, doc_label, out_path, trace, dl_dir)
+
+
+def _fresh_list(page) -> None:
+    """Load the documents page again so every row starts folded.
+
+    Rows opened by an earlier document in the same run stay open, and
+    pressing an open row's View Documents folds it away. A fresh page is
+    the one state where one press opens exactly the row wanted (#37)."""
+    try:
+        page.goto(BILLING_URL, wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        log.info("reloading the documents page failed: %s", e)
+        return
+    for _ in range(20):
+        page.wait_for_timeout(500)
+        try:
+            if _bill_controls(page).count() > 0:
+                break
+        except Exception:
+            pass
+    dismiss_overlay(page)
+
+
 @dataclass
 class RawDoc:
     title: str
@@ -518,6 +654,7 @@ def _docs_from_api(body: dict) -> List[dict]:
     the title is the type and the category, and the description only
     rides along with its digits masked."""
     out = []
+    undated = future = 0
     data = (body or {}).get("data") or {}
     for e in data.get("attributes") or []:
         if not isinstance(e, dict):
@@ -527,8 +664,16 @@ def _docs_from_api(body: dict) -> List[dict]:
         # a document filed under 2028, from the line "Sent by mail.
         # Available online until 07/21/2028" under its title. The page's own
         # controls carried 2026 dates for the same documents (#37).
-        iso = parse_date(str(e.get("creationDate") or e.get("availableDate") or ""))
+        #
+        # availableDate used to stand in when creationDate was missing. That
+        # is the 2028 date again, so a document without its own date is left
+        # out and counted rather than filed under the wrong one.
+        iso = parse_date(str(e.get("creationDate") or ""))
         if not iso:
+            undated += 1
+            continue
+        if is_future(iso):
+            future += 1
             continue
         kind = str(e.get("type") or "").strip()
         cat = str(e.get("category") or "").strip()
@@ -536,7 +681,21 @@ def _docs_from_api(body: dict) -> List[dict]:
         title = " - ".join(x for x in (kind or "Document", cat) if x)
         out.append({"date": iso, "title": title, "kind": kind, "category": cat, "desc": desc,
                     "hint": str(e.get("documentId") or ""), "url": str(e.get("filePathUrl") or "")})
+    if undated or future:
+        log.info("left out %d document(s) with no creation date and %d dated in the future",
+                 undated, future)
     return out
+
+
+def is_future(iso: str) -> bool:
+    """True for a date after tomorrow. No document is issued in the future,
+    so a date like that was read from the wrong field. Tomorrow is allowed
+    because the site's clock and this machine's can sit a day apart (#37)."""
+    from datetime import date as _date, timedelta as _td
+    try:
+        return _date.fromisoformat(iso) > _date.today() + _td(days=1)
+    except (TypeError, ValueError):
+        return False
 
 
 def _capture_docs(page) -> Tuple[list, list]:
@@ -839,7 +998,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         if trace is not None:
             trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
                           "appeared": [redact(t) for t in sorted(appeared)[:15]],
-                          "new_tabs": len([p for p in ctx.pages if p not in before])})
+                          "new_tabs": len([p for p in ctx.pages if p not in before]),
+                          "tabs_opened": _describe_tabs([p for p in ctx.pages if p not in before])})
         step, step_label = _second_step(page, appeared)
         if step is not None:
             try:
@@ -875,6 +1035,28 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 extra.close()
             except Exception:
                 pass
+
+
+def _describe_tabs(pages) -> list:
+    """What each tab a click opened turned out to be, for the trace. The
+    recording showed a document opening in a new tab (#37), and when that
+    tab gives no PDF the next repair needs to know whether it was a viewer
+    page, a blob or somewhere off State Farm. Address without its query,
+    and the page's content type, nothing from the page itself."""
+    out = []
+    for p in pages[:3]:
+        try:
+            url = p.url or ""
+        except Exception:
+            url = ""
+        kind = ""
+        try:
+            kind = (p.evaluate("() => document.contentType || ''") or "")[:40]
+        except Exception:
+            pass
+        out.append({"url": "blob" if url.startswith("blob:") else redact(url)[:160],
+                    "on_statefarm": bool(is_safe_url(url)), "content_type": kind})
+    return out
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
@@ -917,7 +1099,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             except Exception as e:
                 if trace is not None:
                     trace.append({"note": "filePathUrl fetch failed", "error": str(e)[:160]})
-    reveal_documents(page)
+    # The rows are NOT all opened here any more. Opening every row and then
+    # pressing the wanted row's View Documents again pressed the same button
+    # twice, which folds the row away when it was the one left open. The
+    # rows' own buttons carry the dates, so the wanted row is found folded
+    # and opened once (#37).
+    _fresh_list(page)
     expand_all(page)
 
     el, label = _control_for(page, iso_date)
@@ -934,6 +1121,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             trace.append({"note": "the control for this date is one the guard refuses",
                           "control": redact(label)[:60]})
         return False
+    if VIEW_DOCUMENTS_RE.match(label):
+        return _open_row_then_document(page, el, label, title, out_path, trace, dl_dir)
 
     try:
         href = el.get_attribute("href") or ""
