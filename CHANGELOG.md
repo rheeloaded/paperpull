@@ -7,6 +7,55 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.34.1] - 2026-09-25
+
+A repair release. 0.34.0 broke four providers outright, and an
+independent review of the new code found more behind them. Every one
+was reproduced before it was fixed, and every fix has a test that fails
+without it.
+
+### Fixed
+- **T-Mobile, Navy Federal, Target RedCard and Fairfax Water failed
+  every document in 0.34.0.** Each passed a setting to the new capture
+  code that it did not accept, so every request raised an error before
+  anything was clicked and a whole run saved nothing. None of their own
+  tests called that path. A new test reads every app's calls into the
+  capture code and checks each against what it accepts.
+- **Navy Federal could refuse and delete a correct statement.** It was
+  checked against its date alone, which it shares with every account
+  billed that day, so a Checking statement that named the card it paid
+  lost to the card. It is checked against its account as well now, the
+  way the measurement that turned the check on was made.
+- **Costco could file a receipt that was never checked.** When the
+  checked print failed, a retry printed the page straight to the final
+  path, outside the check, and marked it verified.
+- **T-Mobile and RedCard gave up too soon.** The new capture code waited
+  twenty seconds where they had waited sixty and forty five, and RedCard
+  presses a statement again when nothing arrives.
+- **A locked folder read as nothing arriving.** A sync client or a virus
+  scanner holding the file made RedCard press the statement a second
+  time, and the move had already deleted the file it was replacing.
+- **A check that could not be made took the download down.** An amount
+  that was not a number raised, and left a half finished file behind.
+- **AT&T could not reach bills older than its history showed.** The
+  history lists the newest bills until its Date range is widened, and
+  four bills on each account failed. The Date range is opened now, and
+  only a narrow list of its own words may be pressed (#26).
+- **AT&T could save a bill under the date a year earlier.** A bill
+  button carries no year, and matching on the month and day alone meant
+  asking for August 2025 while August 2026 showed pressed 2026. Each
+  button's year is worked out from its place in the list now, and only
+  the exact date matches (#26).
+- **The wait helper let an app write its own check of readiness.** It
+  could have reloaded the page, or waited thirty seconds each time it
+  was asked, outside the time the wait was given. The checks are built
+  by the helper now, and a page that comes right early ends the wait.
+- **A recording lost its way inside a web component**, and a page could
+  write text into a recording through a step's time.
+- **The round count said the loop was stalled on the maintainer** when
+  two issues were waiting on their tester, and missed GitHub's first
+  working Pilot.
+
 ## [0.34.0] - 2026-09-24
 
 A document is checked against the row it was listed under before it is
