@@ -266,8 +266,17 @@ _CAPTURE_JS = r"""
         .filter((n) => n && n.nodeType === 1).reverse();
       const start = down.findIndex((n) => n.tagName.toLowerCase() === "body");
       if (start < 0 || down.indexOf(target) < 0) return null;
-      const kids = (el) => Array.from(el.shadowRoot ? el.shadowRoot.children
-                                                    : el.children);
+      // A slot's children are its fallback. What a person sees in it,
+      // and what a click inside a web component lands on, is what was
+      // assigned to it, and walking the fallback lost the path there.
+      const kids = (el) => {
+        if (el.tagName.toLowerCase() === "slot" && el.assignedElements) {
+          const given = el.assignedElements({ flatten: true });
+          if (given.length) return given;
+        }
+        return Array.from(el.shadowRoot ? el.shadowRoot.children : el.children);
+      };
+      let reached = false;
       const describe = (el) => {
         budget--;
         const tag = el.tagName.toLowerCase();
@@ -315,6 +324,7 @@ _CAPTURE_JS = r"""
         if (el === target) {
           const node = inside(el, __SHAPE_TARGET_DEPTH__);
           node.target = true;
+          reached = true;
           return node;
         }
         const node = describe(el);
@@ -340,8 +350,10 @@ _CAPTURE_JS = r"""
         return node;
       };
       const root = walk(start);
+      // A shape that never reached the control says so, rather than
+      // reading as a whole page with nothing pressed in it.
       return { root: root, nodes: __SHAPE_MAX_NODES__ - budget,
-               truncated: truncated };
+               truncated: truncated || !reached };
     } catch (e) {
       return null;
     }
@@ -440,6 +452,21 @@ _CAPTURE_JS = _fill_capture_js(_CAPTURE_JS)
 _SHAPE_CEILING = _SHAPE_MAX_NODES + _SHAPE_MAX_DEPTH + 60
 
 
+def _timestamp(value) -> Optional[int]:
+    """A step's time in milliseconds, or None.
+
+    Copied as the page sent it, any script on the page could write a card
+    number into the file through it, since the binding is on window. A
+    number in range is a time, and anything else is nothing."""
+    if isinstance(value, bool):
+        return None
+    try:
+        n = int(value) if isinstance(value, (int, float)) else None
+    except (OverflowError, ValueError):
+        return None
+    return n if n is not None and 0 <= n < 10 ** 14 else None
+
+
 def clean_structure(raw) -> Optional[dict]:
     """A step's shape, rebuilt from the lists and nothing else.
 
@@ -492,8 +519,14 @@ def clean_structure(raw) -> Optional[dict]:
     root = node(raw["root"], 0)
     if root is None:
         return None
+
+    def has_target(n):
+        return n.get("target") or any(has_target(c)
+                                       for c in n.get("children") or ())
+    # A shape with no control in it lost the path somewhere, and says so
+    # whatever the page claimed.
     return {"root": root, "nodes": _SHAPE_CEILING - budget[0],
-            "truncated": cut[0]}
+            "truncated": cut[0] or not has_target(root)}
 
 
 class Recorder:
@@ -690,7 +723,7 @@ class Recorder:
             "action": action,
             "locator": self._clean_locator(loc),
             "label": redact(label)[:120],
-            "at": record.get("at"),
+            "at": _timestamp(record.get("at")),
         }
         if action == "select":
             step["option"] = redact(str(record.get("option") or ""))[:60]

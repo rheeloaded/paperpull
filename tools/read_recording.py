@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 
-from paperpull_core.recorder import concerns  # noqa: E402,F401
+from paperpull_core.recorder import clean_structure, concerns  # noqa: E402,F401
 
 KIND = "paperpull-recording"
 
@@ -288,8 +288,11 @@ def outline(structure) -> list:
     a yes or no, so this prints it all. The control that was pressed is
     marked with an arrow, so the path down to it and the neighbors at
     each level read the way a selector gets written."""
-    if not isinstance(structure, dict) or not isinstance(
-            structure.get("root"), dict):
+    # Through the recorder's own check first. A file edited by hand, or
+    # one from before a field existed, carried a count as a string and
+    # the outline raised on it.
+    structure = clean_structure(structure)
+    if structure is None:
         return []
     lines = []
 

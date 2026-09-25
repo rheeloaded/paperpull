@@ -356,11 +356,19 @@ def summarize(journal: dict) -> list:
 
     # Which wait each page needed, once per wait. This is what the next
     # round hard-codes, so it is said even when the run went fine.
-    told = set()
+    # One sentence a wait, from the entry that matters. A wait that never
+    # came is what stopped the run, so it wins over an earlier one that
+    # was ready at once. Reading the first entry said "was ready before
+    # anything waited" about the wait that had just failed.
+    chosen: dict = {}
     for e in entries:
-        if e.get("kind") != "waited" or e.get("name") in told:
+        if e.get("kind") != "waited":
             continue
-        told.add(e.get("name"))
+        held = chosen.get(e.get("name"))
+        # the first failure is kept, otherwise the latest answer
+        if held is None or held.get("ready"):
+            chosen[e.get("name")] = e
+    for e in chosen.values():
         tried = ", ".join(a.get("strategy", "other")
                           for a in e.get("attempts") or []
                           if a.get("strategy") != "already") or "nothing"
@@ -375,6 +383,14 @@ def summarize(journal: dict) -> list:
             said.append("\"%s\" came right only after every wait had "
                         "finished without it (%s). None of them is the "
                         "right one." % (e.get("name"), tried))
+        elif (e.get("attempts") or [{}])[-1].get("outcome") == \
+                "satisfied_while_waiting":
+            # It came right while this wait was still waiting for its own
+            # condition, so that condition is not the answer either.
+            said.append("\"%s\" was ready while waiting on %s, in %d ms, "
+                        "before that wait's own sign came. Tried %s."
+                        % (e.get("name"), e.get("winner"),
+                           e.get("elapsed_ms", 0), tried))
         else:
             said.append("\"%s\" was ready after %s, in %d ms. Tried %s."
                         % (e.get("name"), e.get("winner"),

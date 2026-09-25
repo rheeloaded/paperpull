@@ -41,26 +41,37 @@ its tester's latest Pilot still saved nothing. The tool also found one
 of its own mistakes. AT&T's issue linked 0.27.0, which carried nothing
 for AT&T, and counting it gave nine.
 
-The baseline on 2026-09-24, for item 6 to compare against.
+The baseline, `tools/rounds.py --as-of 2026-09-24`, the day 0.34.0
+shipped the first of the features meant to move it. Item 6 compares
+against this.
 
 | Provider | Status | Shipped | To a working Pilot | Days |
 |---|---|---|---|---|
-| AT&T | Working | 11 | 8 | 2.1 |
+| AT&T | Working | 12 | 8 | 2.1 |
+| E\*TRADE | Working, newest statement only | 7 | 6 | 3.2 |
 | SMUD | Working | 4 | 3 | 1.1 |
-| E\*TRADE | Working, newest statement only | 6 | 6 | 3.2 |
-| PG&E (repair) | In progress | 5 | | |
-| Golden 1, State Farm, Newrez | In progress | 5 each | | |
-| Meijer, GitHub, American Family, ADP | In progress | 3 each | | |
-| Kroger, eBay, Target (repair) | In progress | 2 each | | |
+| GitHub | Working | 4 | 1 | 0.4 |
+| PG&E (repair) | In progress | 6 | | |
+| Golden 1, State Farm, Newrez | In progress | 6 each | | |
+| Meijer, American Family | In progress | 4 each | | |
+| eBay, ADP, Target (repair) | In progress | 3 each | | |
+| Kroger | In progress | 2 | | |
 | Costco | In progress with a tester | 1 | | |
-| Wells Fargo, SBA, Verizon Mobile | Untested, 4.2 days | 2 each | | |
+| Wells Fargo, SBA, Verizon Mobile | Untested, 4.6 days | 2 each | | |
 
-Three providers have reached a working Pilot through a tester, at a
-median of 6 rounds and a worst of 8, in a median of 2.1 days. Twelve are
-still going, at a median of 3 rounds so far and a worst of 5. The
-finding the tool was not asked for is who is waiting. Every one of the
-twelve in progress ended on a tester's report, so the loop is stalled
-on the maintainer, not on the testers.
+Four providers have reached a working Pilot through a tester, at a
+median of 4.5 rounds and a worst of 8, in a median of 1.6 days. Eleven
+are still going, at a median of 4 rounds so far and a worst of 6.
+
+This table was first written with three working and twelve in progress,
+all twelve owed by the maintainer. An independent review of the tool
+found both were its own bugs. GitHub's tester wrote that Pilot
+"successfully captures 5", which the first pattern for a working Pilot
+did not read, and a maintainer's reply that linked no new build was not
+counted as a move at all, so two issues waiting on their tester read as
+waiting on the maintainer. Both are fixed and tested. What was true on
+the afternoon it was written is that most issues in progress ended on a
+tester's report, and the evening's 0.34.0 answered them.
 
 So Costco is not the hard case. Costco is the case we have ground truth
 for, and the ground truth is that the expensive half comes after the
@@ -309,7 +320,14 @@ The rules are the reason it is safe.
   can only be built by the module, and handing it a function is refused.
 * The invariant is required and decides. A wait that returned has not
   proved anything, and a page already ready costs one question and no
-  wait, which measured the same as the bare count it replaces.
+  wait, which measured the same as the bare count it replaces. It is
+  built by the module too, `has`, `url_matches`, `new_source`,
+  `load_complete` or `all_of`, each one question that does not wait. A
+  check of the app's own could reload the page, or read text through a
+  locator and wait thirty seconds each time it was asked, outside the
+  budget. The polling waits ask it on every look, so a page that comes
+  right early ends the wait, and the journal says it came right while
+  waiting rather than crediting a wait that did not get it there.
 * One budget for the whole call. Nine guesses do not turn a ten second
   failure into a ninety second one. `within_ms` caps a guess that could
   hang, a change of address that never comes.

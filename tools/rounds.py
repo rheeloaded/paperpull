@@ -110,12 +110,23 @@ ROUND_BEFORE = re.compile(r"\b" + _ORDINAL + r"\s+round\b", re.I)
 
 TAG = re.compile(r"releases/tag/v(\d+(?:\.\d+)+)")
 
+# A Pilot that saved something. "Success" standing alone, not after a no
+# or a not. Or a Pilot, or the run, that downloaded or pulled a positive
+# number of documents, all of them, or "the" one. "Pilot got an error"
+# and "Pilot pulled up the login page" are not documents, and the review
+# found both read as working.
 WORKING = re.compile(
-    r"\bsuccess\b"
+    r"(?<!\bno )(?<!\bnot )(?<!\bwithout )\bsuccess(?:ful(?:ly)?)?\b"
+    r"(?!\s+yet)"
     r"|\bpilot\s+(?:downloaded|pulled|grabbed|got|saved)\s+"
-    r"(?!0\b|no\b|nothing\b|none\b|zero\b)",
+    r"(?:[1-9]\d*|all|the|both|every)\b(?!\s+(?:error|login|page|up)\b)"
+    r"|\b(?:downloaded|saved|pulled)\s+(?:[1-9]\d*|all)\s+"
+    r"(?:statements?|bills?|documents?|docs|pdfs?|receipts?)\b",
     re.I)
-FENCE = re.compile(r"```.*?(?:```|\Z)", re.S)
+# A pasted log in a ``` or ~~~ fence, or indented four spaces, says
+# "downloaded" in lines that failed.
+FENCE = re.compile(r"(```|~~~).*?(?:\1|\Z)", re.S)
+INDENTED = re.compile(r"^(?: {4}|\t).*$", re.M)
 
 
 # -- parsing, kept pure so the tests can feed it fixtures --------------------
@@ -170,7 +181,7 @@ def _version(tag: str) -> tuple[int, ...]:
 
 def says_working(body: str) -> bool:
     """True when a tester's own words say a Pilot saved something."""
-    text = FENCE.sub(" ", body or "")
+    text = INDENTED.sub(" ", FENCE.sub(" ", body or ""))
     text = "\n".join(line for line in text.splitlines()
                      if not line.lstrip().startswith(">"))
     return bool(WORKING.search(text))
@@ -179,7 +190,7 @@ def says_working(body: str) -> bool:
 @dataclass
 class Event:
     at: datetime
-    kind: str            # "ship" or "report"
+    kind: str            # "ship", "reply" or "report"
     tag: str = ""
     working: bool = False
 
@@ -206,6 +217,11 @@ def issue_events(issue: dict, owner: str) -> list[Event]:
             if tags and _version(tags[-1]) > newest:
                 newest = _version(tags[-1])
                 events.append(Event(at, "ship", tag=tags[-1]))
+            else:
+                # An answer with no new build is not a round, and it is
+                # still the maintainer's move made. Leaving it out said
+                # Kroger and ADP were waiting on a reply they had.
+                events.append(Event(at, "reply"))
         elif login:
             events.append(Event(at, "report", working=says_working(body)))
     return events
@@ -301,6 +317,14 @@ def analyze(app: str, kind: str, issue_numbers: tuple[int, ...],
     touched = [c for c in commits
                if any(f.startswith(f"apps/{app}/") for f in c.files)]
     site_times = [c.at for c in commits if site in c.files]
+    if kind == "repair":
+        # A repair's rounds start at the report of the breakage. The
+        # commits that built the provider in the first place were counted
+        # as a round of the repair, one too many for PG&E and Target.
+        opened = min((_when(issues[n]["createdAt"])
+                      for n in issue_numbers if n in issues), default=None)
+        if opened is not None:
+            site_times = [t for t in site_times if t >= opened]
     row.site_commits = len(site_times)
     report_times = [e.at for e in reports]
     row.grouped = grouped_rounds(site_times, report_times)
@@ -335,7 +359,7 @@ def analyze(app: str, kind: str, issue_numbers: tuple[int, ...],
         row.status = "in progress"
     if events and row.status != "working":
         last = events[-1]
-        row.owed = "tester" if last.kind == "ship" else "maintainer"
+        row.owed = "maintainer" if last.kind == "report" else "tester"
         # Untested counts from the first ship, since every later ship on
         # an unanswered issue is the maintainer talking to himself.
         since = ships[0].at if row.status == "untested" else last.at

@@ -25,20 +25,24 @@ carries the answer back, and the next round hard-codes it.
 
 ADDITIVE ONLY
 
-Every strategy here only waits. None clicks, reloads, navigates, goes
-back or restores anything, so trying one and then the next leaves the
-page exactly as the first found it plus however long it took. That is
-the whole reason this is safe to run against somebody's bank, and it is
-why a strategy can only be built by this module. Handing ready() a
-function of your own is a TypeError, because a function of your own is
-where a reload would get in.
+Every strategy and every invariant here only looks. None clicks,
+reloads, navigates, goes back or restores anything, so trying one and
+then the next leaves the page exactly as the first found it plus however
+long it took. That is the whole reason this is safe to run against
+somebody's bank, and it is why both are built only by this module.
+Handing ready() a function of your own, as a strategy or as the
+invariant, is a TypeError, because a function of your own is where a
+reload would get in.
 
 THE INVARIANT DECIDES
 
 A strategy that returned without raising has not succeeded. The page is
 ready when the invariant says so, and it is asked first, before any
 strategy, so a page that is already ready costs one question and no
-wait. That keeps a working run as fast as it was.
+wait. That keeps a working run as fast as it was. The polling strategies
+ask it on every look as well, so a page that comes right early stops the
+wait early, and the journal says it came right while waiting rather than
+crediting a wait that did not get it there.
 
 ONE BUDGET
 
@@ -46,17 +50,21 @@ The budget is for the whole call, not for each strategy. An app that
 failed in ten seconds must not start failing in ninety because it listed
 nine guesses. A strategy that could hang, a change of address that never
 comes, can be given a smaller share with within_ms so it cannot starve
-the ones after it.
+the ones after it. Every invariant is one question that does not wait,
+which is the other half of keeping to the budget. A check of your own
+that looked for text through a locator would wait thirty seconds each
+time it was asked.
 
 NOTHING HERE MAY RAISE
 
 Once the arguments are right, a failure inside a wait, a page that
-closed, an invariant that threw, is recorded and the next strategy is
-tried. The caller gets an answer, never an exception.
+closed, an invariant that could not be asked, is recorded and the next
+strategy is tried. The caller gets an answer, never an exception.
 """
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -72,8 +80,9 @@ STRATEGIES = frozenset((
 
 # How an attempt turned out, from a fixed list for the same reason.
 OUTCOMES = frozenset((
-    "satisfied",        # the strategy finished and the invariant held
-    "not_satisfied",    # the strategy finished and the invariant did not
+    "satisfied",        # the strategy's condition came and then the page was ready
+    "satisfied_while_waiting",  # ready before the strategy's own condition came
+    "not_satisfied",    # the strategy finished and the invariant did not hold
     "timed_out",        # the strategy's own condition never came
     "no_budget",        # the budget ran out before it was tried
     "invalid_selector", # a selector the browser cannot parse
@@ -85,6 +94,22 @@ OUTCOMES = frozenset((
 POLL_MS = 100
 
 _COUNT_JS = "(sel) => document.querySelectorAll(sel).length"
+
+# Where a viewer or an embedded document keeps what it shows. The
+# resolved property rather than the attribute, so a relative address
+# compares as the absolute one the browser fetched.
+_SOURCES_JS = """(sel) => Array.from(document.querySelectorAll(sel))
+  .map((e) => e.src || e.data || '').filter(Boolean)"""
+_NEW_SOURCE_JS = """([sel, before]) => {
+  const old = new Set(before);
+  return Array.from(document.querySelectorAll(sel))
+    .map((e) => e.src || e.data || '')
+    .some((s) => s && !old.has(s));
+}"""
+
+# What a polling wait returns when the page came right before its own
+# condition did.
+_EARLY = "early"
 
 
 @dataclass
@@ -110,6 +135,9 @@ class Readiness:
         return self.ready
 
 
+_BUILDER = object()
+
+
 class Strategy:
     """One way of waiting. Built only by the functions below."""
 
@@ -129,7 +157,21 @@ class Strategy:
         return "Strategy(%s)" % self.name
 
 
-_BUILDER = object()
+class Invariant:
+    """What ready means. Built only by the functions below, each one a
+    single question to the page that does not wait."""
+
+    __slots__ = ("_ask",)
+
+    def __init__(self, ask: Callable, _token=None):
+        if _token is not _BUILDER:
+            raise TypeError(
+                "An invariant is built by paperpull_core.ready, so that it "
+                "can neither change the page nor wait past the budget")
+        self._ask = ask
+
+    def __call__(self, page) -> bool:
+        return bool(self._ask(page))
 
 
 def _strategy(name: str, wait: Callable, within_ms) -> Strategy:
@@ -138,11 +180,9 @@ def _strategy(name: str, wait: Callable, within_ms) -> Strategy:
     return Strategy(name, wait, within_ms, _token=_BUILDER)
 
 
-# -- the strategies -----------------------------------------------------------
-#
-# Each wait takes the page, how long it may take, and what the page's
-# address was when ready() began, and returns True when its own condition
-# came, False when it did not. None of them may change the page.
+def _invariant(ask: Callable) -> Invariant:
+    return Invariant(ask, _token=_BUILDER)
+
 
 def _check_selector(selector: str) -> Optional[str]:
     """Why a selector cannot be counted, or None.
@@ -165,13 +205,36 @@ def _count(page, selector: str) -> int:
     return int(page.evaluate(_COUNT_JS, selector) or 0)
 
 
+def _poll(page, ms: int, done: Callable, condition: Callable):
+    """Look every POLL_MS until the condition comes, the page is ready
+    anyway, or the time is up. True, _EARLY or False."""
+    deadline = time.monotonic() + ms / 1000
+    while True:
+        if condition():
+            return True
+        if done():
+            return _EARLY
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        page.wait_for_timeout(min(POLL_MS, max(1, int(left * 1000))))
+
+
+# -- the strategies -----------------------------------------------------------
+#
+# Each wait takes the page, how long it may take, what the page's address
+# was when ready() began, and done(), which asks the invariant and never
+# raises. It returns True when its own condition came, _EARLY when the
+# page was ready first, False when neither happened in time. None of them
+# may change the page.
+
 def load(state: str = "load", within_ms=None) -> Strategy:
     """The document finished loading, to "domcontentloaded" or "load"."""
     if state not in ("load", "domcontentloaded"):
         raise ValueError("load() takes 'load' or 'domcontentloaded'")
     name = "loaded" if state == "load" else "dom_loaded"
 
-    def wait(page, ms, _start_url):
+    def wait(page, ms, _start_url, _done):
         page.wait_for_load_state(state, timeout=max(1, ms))
         return True
     return _strategy(name, wait, within_ms)
@@ -183,7 +246,7 @@ def network_idle(within_ms=None) -> Strategy:
     Right for a page that fetches and then draws. Wrong for one that
     draws on a timer after the fetch, which is what the invariant is for.
     """
-    def wait(page, ms, _start_url):
+    def wait(page, ms, _start_url, _done):
         page.wait_for_load_state("networkidle", timeout=max(1, ms))
         return True
     return _strategy("network_idle", wait, within_ms)
@@ -203,15 +266,8 @@ def url_changes(within_ms=None) -> Strategy:
     That case is the invariant's to catch, which is one more reason the
     invariant says what the new page looks like and not only that the
     address moved."""
-    def wait(page, ms, start_url):
-        deadline = time.monotonic() + ms / 1000
-        while True:
-            if (page.url or "") != start_url:
-                return True
-            left = deadline - time.monotonic()
-            if left <= 0:
-                return False
-            page.wait_for_timeout(min(POLL_MS, max(1, int(left * 1000))))
+    def wait(page, ms, start_url, done):
+        return _poll(page, ms, done, lambda: (page.url or "") != start_url)
     return _strategy("url_changed", wait, within_ms)
 
 
@@ -221,17 +277,10 @@ def count_reaches(selector: str, at_least: int = 1,
     problem = _check_selector(selector)
     need = max(1, int(at_least))
 
-    def wait(page, ms, _start_url):
+    def wait(page, ms, _start_url, done):
         if problem:
             raise _InvalidSelector(problem)
-        deadline = time.monotonic() + ms / 1000
-        while True:
-            if _count(page, selector) >= need:
-                return True
-            left = deadline - time.monotonic()
-            if left <= 0:
-                return False
-            page.wait_for_timeout(min(POLL_MS, max(1, int(left * 1000))))
+        return _poll(page, ms, done, lambda: _count(page, selector) >= need)
     return _strategy("count_reached", wait, within_ms)
 
 
@@ -247,34 +296,83 @@ def count_settles(selector: str, quiet_ms: int = 750, at_least: int = 1,
     need = max(0, int(at_least))
     quiet = max(POLL_MS, int(quiet_ms))
 
-    def wait(page, ms, _start_url):
+    def wait(page, ms, _start_url, done):
         if problem:
             raise _InvalidSelector(problem)
-        deadline = time.monotonic() + ms / 1000
-        last, since = None, time.monotonic()
-        while True:
+        seen = {"n": None, "since": time.monotonic()}
+
+        def settled():
             n = _count(page, selector)
             now = time.monotonic()
-            if n != last:
-                last, since = n, now
-            elif n >= need and (now - since) * 1000 >= quiet:
-                return True
-            left = deadline - now
-            if left <= 0:
+            if n != seen["n"]:
+                seen["n"], seen["since"] = n, now
                 return False
-            page.wait_for_timeout(min(POLL_MS, max(1, int(left * 1000))))
+            return n >= need and (now - seen["since"]) * 1000 >= quiet
+        return _poll(page, ms, done, settled)
     return _strategy("count_settled", wait, within_ms)
 
 
 # -- invariants ---------------------------------------------------------------
+#
+# Each is one question. A count, a comparison of the address, a list of
+# sources compared in the page. None waits and none changes anything.
 
-def has(selector: str, at_least: int = 1) -> Callable:
-    """An invariant, at least this many elements match."""
+def has(selector: str, at_least: int = 1) -> Invariant:
+    """At least this many elements match a CSS selector."""
     problem = _check_selector(selector)
     if problem:
         raise ValueError("invariant selector is %s" % problem)
     need = max(1, int(at_least))
-    return lambda page: _count(page, selector) >= need
+    return _invariant(lambda page: _count(page, selector) >= need)
+
+
+def url_matches(pattern: str) -> Invariant:
+    """The page's address matches a regular expression, read from the
+    page object without asking the browser anything."""
+    rx = re.compile(pattern)
+    return _invariant(lambda page: bool(rx.search(page.url or "")))
+
+
+def sources_of(page, selector: str) -> list:
+    """What the matching viewers point at now, for new_source() to compare
+    with later. Kept in memory by the caller and never written anywhere.
+    An empty list when the page cannot be asked."""
+    problem = _check_selector(selector)
+    if problem:
+        raise ValueError("sources selector is %s" % problem)
+    try:
+        return [str(s) for s in (page.evaluate(_SOURCES_JS, selector) or [])]
+    except Exception:
+        return []
+
+
+def new_source(selector: str, before: list) -> Invariant:
+    """A matching viewer points at something it did not point at before.
+
+    For a document that arrives in an iframe, an embed or an object. The
+    address of the page itself does not count, because a hash change or a
+    route that moved for its own reasons is not a document arriving, and
+    counting it called a viewer that had not loaded ready."""
+    problem = _check_selector(selector)
+    if problem:
+        raise ValueError("invariant selector is %s" % problem)
+    old = [str(s) for s in (before or [])]
+    return _invariant(
+        lambda page: bool(page.evaluate(_NEW_SOURCE_JS, [selector, old])))
+
+
+def load_complete() -> Invariant:
+    """The document and everything it was waiting on has loaded."""
+    return _invariant(lambda page: page.evaluate(
+        "() => document.readyState") == "complete")
+
+
+def all_of(*invariants: Invariant) -> Invariant:
+    """Every one of them holds."""
+    for inv in invariants:
+        if not isinstance(inv, Invariant):
+            raise TypeError("all_of() takes invariants built here")
+    return _invariant(lambda page: all(inv(page) for inv in invariants))
 
 
 # -- the call -----------------------------------------------------------------
@@ -288,7 +386,8 @@ def _holds(invariant, page) -> Optional[bool]:
     try:
         return bool(invariant(page))
     except Exception as e:
-        log.debug("ready: invariant raised %s", type(e).__name__)
+        log.debug("ready: invariant could not be asked, %s",
+                  type(e).__name__)
         return None
 
 
@@ -307,9 +406,11 @@ def ready(page, strategies, invariant, budget_ms: int, journal=None,
             raise TypeError(
                 "ready() takes strategies built by paperpull_core.ready, "
                 "got %r" % type(s).__name__)
-    if not callable(invariant):
-        raise TypeError("ready() needs an invariant. A strategy that did "
-                        "not raise has not proved the page is ready.")
+    if not isinstance(invariant, Invariant):
+        raise TypeError("ready() needs an invariant built by "
+                        "paperpull_core.ready, has() or new_source() or "
+                        "url_matches(). A strategy that did not raise has "
+                        "not proved the page is ready.")
     budget = max(0, int(budget_ms))
 
     t0 = time.monotonic()
@@ -319,7 +420,10 @@ def ready(page, strategies, invariant, budget_ms: int, journal=None,
     except Exception:
         start_url = ""
 
-    if _holds(invariant, page):
+    def done() -> bool:
+        return bool(_holds(invariant, page))
+
+    if done():
         result.ready, result.winner = True, "already"
         result.attempts.append(Attempt("already", "satisfied", _ms_since(t0)))
     else:
@@ -331,18 +435,20 @@ def ready(page, strategies, invariant, budget_ms: int, journal=None,
             share = left if s._within_ms is None else min(left, s._within_ms)
             began = time.monotonic()
             try:
-                came = s._wait(page, share, start_url)
-                outcome = "" if came else "timed_out"
+                came = s._wait(page, share, start_url, done)
+                if came == _EARLY:
+                    outcome = "satisfied_while_waiting"
+                else:
+                    outcome = "" if came else "timed_out"
             except _InvalidSelector:
                 outcome = "invalid_selector"
             except Exception as e:
                 outcome = ("timed_out" if "timeout" in type(e).__name__.lower()
                            else "error")
             if not outcome:
-                held = _holds(invariant, page)
-                outcome = "satisfied" if held else "not_satisfied"
+                outcome = "satisfied" if done() else "not_satisfied"
             result.attempts.append(Attempt(s.name, outcome, _ms_since(began)))
-            if outcome == "satisfied":
+            if outcome in ("satisfied", "satisfied_while_waiting"):
                 result.ready, result.winner = True, s.name
                 break
         else:
@@ -353,7 +459,7 @@ def ready(page, strategies, invariant, budget_ms: int, journal=None,
             # called late, not credited to a strategy that did not get it
             # there, and not called already, which would say no wait was
             # needed.
-            if strategies and _holds(invariant, page):
+            if strategies and done():
                 result.ready, result.winner = True, "late"
 
     result.elapsed_ms = _ms_since(t0)
@@ -391,9 +497,12 @@ def _say(name: str, result: Readiness) -> None:
         _told.add(key)
         tried = ", ".join(a.strategy for a in result.attempts
                           if a.strategy in STRATEGIES) or "nothing"
+        last = result.attempts[-1] if result.attempts else None
+        early = bool(last and last.outcome == "satisfied_while_waiting")
         if result.ready:
-            log.info("Waited for %s, ready after %s in %d ms (tried %s)",
-                     label, winner, result.elapsed_ms, tried)
+            log.info("Waited for %s, ready %s %s in %d ms (tried %s)",
+                     label, "while waiting on" if early else "after",
+                     winner, result.elapsed_ms, tried)
         else:
             log.info("Waited for %s, never ready in %d ms (tried %s)",
                      label, result.elapsed_ms, tried)

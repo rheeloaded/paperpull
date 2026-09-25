@@ -1062,7 +1062,9 @@ def test_a_shape_the_page_invented_comes_out_as_words_from_our_lists():
     assert "text" not in root and "target" not in root and "shadow" not in root
     assert root["children"] == [{"tag": "script", "attrs": [],
                                  "visible": False}]
-    assert got["truncated"] is False
+    # "target": "true" is a string, so no node is the control, and a
+    # shape with no control in it says it was cut whatever it claimed
+    assert got["truncated"] is True
 
 
 def test_the_page_and_the_check_use_the_same_lists():
@@ -1123,3 +1125,26 @@ def test_a_shape_that_will_not_clean_up_costs_the_shape_not_the_step():
     page.fire(dict(_CLICK, at=5000, structure={"root": ["no"]}))
     assert len(r.steps) == 2
     assert all("structure" not in s for s in r.steps)
+
+
+def test_a_page_cannot_write_into_the_file_through_the_time():
+    """The binding is on window, and at was copied as it came."""
+    r, page = rec()
+    page.fire(dict(_CLICK, at="acct 4111 1111 1111 1111 $9,301.22"))
+    page.fire(dict(_CLICK, at=float("inf"), label="Other",
+                   locator={"how": "role", "role": "link", "name": "Other"}))
+    body = json.dumps(r.report())
+    assert "4111" not in body and "9,301" not in body
+    assert r.steps[0]["at"] is None
+
+
+def test_an_infinite_count_costs_nothing_but_itself():
+    got = clean_structure(_shape({"tag": "ul", "target": True,
+                                  "child_count": float("inf")}))
+    assert got is not None and got["root"]["child_count"] == 0
+
+
+def test_a_shape_that_never_reached_the_control_says_it_was_cut():
+    got = clean_structure(_shape({"tag": "body", "children": [
+        {"tag": "div"}]}))
+    assert got["truncated"] is True
