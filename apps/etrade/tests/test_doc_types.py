@@ -173,5 +173,40 @@ def test_years_count_as_periods_and_the_year_walk_exists():
     for t in ("2026", "2019", "Last 90 Days", "Year to Date"):
         assert site.is_date_filter(t), t
     assert not site.is_date_filter("Apply") and not site.is_date_filter("Download")
-    src = inspect.getsource(site.widen_date_filter)
-    assert "_choose_period(page, year, capture, trace)" in src
+    assert site.plan_periods(["2024", "2026", "2025"]) == ["2026", "2025", "2024"]
+
+
+# -- round seven, the picker's name and the years beside Year To Date (#36) --
+
+def test_the_picker_is_known_by_the_name_his_recording_gave_it():
+    """The recording named the picker "Timeframe ,  Last 90 Days", and a
+    finder that wanted exactly "Last 90 Days" never found it (#36)."""
+    assert site.picker_period("Timeframe ,  Last 90 Days") == "Last 90 Days"
+    assert site.picker_period("Timeframe , Year To Date") == "Year To Date"
+    assert site.picker_period("Timeframe ,  2025") == "2025"
+    assert site.picker_period("Last 90 Days") == "Last 90 Days"
+    assert site.PICKER_NAME_RE.search("Timeframe ,  Last 90 Days")
+    for t in ("Timeframe , Transfer", "Timeframe ,  Last 90 Days Pay", "Trade", "",
+              "Al l Account", "Statements Document type"):
+        assert site.picker_period(t) is None, t
+
+
+def test_year_to_date_never_stands_in_for_the_years_beside_it():
+    """His picker offered Year To Date and the years back to 2019, and the
+    old choice took Year To Date alone, which reaches back to January (#36)."""
+    offered = ["Last 90 Days", "Year To Date", "2026", "2025", "2024", "2023",
+               "2022", "2021", "2020", "2019"]
+    assert site.plan_periods(offered) == ["Year To Date", "2026", "2025", "2024", "2023",
+                                          "2022", "2021", "2020", "2019"]
+    assert site.plan_periods(offered + ["Last 7 Years"]) == ["Last 7 Years"]
+    assert site.plan_periods(["Last 90 Days", "Year To Date", "Last 12 Months"]) == ["Last 12 Months"]
+    assert site.plan_periods(["Last 90 Days", "Apply", "Pay 2025"]) == []
+
+
+def test_apply_is_pressed_only_when_that_is_its_whole_label():
+    """Apply is on the guard's list, so the filter's own button has a rule
+    of its own and nothing that merely starts with the word gets by it."""
+    assert site.is_period_apply("Apply") and site.is_period_apply(" Apply filters ")
+    for t in ("Apply for margin", "Apply now", "Apply transfer", "Reset", ""):
+        assert not site.is_period_apply(t), t
+    assert site.FORBIDDEN_CONTROL_RE.search("Apply")
