@@ -899,9 +899,14 @@ def _bill_button_for(page, iso_date: str, anchor_year: Optional[int] = None,
 # checked first.
 RANGE_OPENER_RE = re.compile(
     r"^\s*((select|choose|filter\s+by)\s+)?(a\s+)?date(\s+range)?\s*$", re.I)
+# "6 months" and "Past 2 years" are guesses from the round that found the
+# menu and no option in it (#26), both still nothing but a span of time.
 RANGE_OPTION_RE = re.compile(
-    r"^\s*((last|past|previous)\s+(\d{1,2})\s+months?|((?:19|20)\d\d)|"
-    r"all(\s+(bills|dates|time|history))?|(this|current|last|previous|past)\s+year)"
+    r"^\s*(?:(?:(?:last|past|previous)\s+)?(\d{1,2})\s+months?|"
+    r"(?:last|past|previous)\s+([1-9])\s+years?|"
+    r"((?:19|20)\d\d)|"
+    r"(all)(?:\s+(?:bills|dates|time|history))?|"
+    r"(?:this|current|last|previous|past)\s+year)"
     r"\s*$", re.I)
 RANGE_APPLY_RE = re.compile(
     r"^\s*(apply|apply\s+filters?|done|show\s+results|view\s+results)\s*$", re.I)
@@ -933,12 +938,12 @@ def _range_choice(labels, iso_date: str, today=None):
         mm = RANGE_OPTION_RE.match(label or "")
         if not mm:
             continue
-        if mm.group(3):
-            months = int(mm.group(3))
+        if mm.group(1) or mm.group(2):
+            months = int(mm.group(1)) if mm.group(1) else 12 * int(mm.group(2))
             key, year = ((0, months), None) if back < months else (None, None)
-        elif mm.group(1).lower().startswith("all"):
+        elif mm.group(4):
             key, year = (1, 0), None
-        elif mm.group(4) and int(mm.group(4)) == y:
+        elif mm.group(3) and int(mm.group(3)) == y:
             key, year = (2, 0), y
         else:
             key, year = None, None
@@ -950,8 +955,8 @@ def _range_choice(labels, iso_date: str, today=None):
 def _range_options(page) -> list:
     """Every visible element that reads as a range option, with its text."""
     found, seen = [], set()
-    for role in ("option", "menuitemradio", "radio", "menuitem", "tab",
-                 "button", "link"):
+    for role in ("option", "menuitemradio", "radio", "menuitem",
+                 "menuitemcheckbox", "checkbox", "tab", "button", "link"):
         try:
             loc = page.get_by_role(role, name=RANGE_OPTION_RE)
             for i in range(min(loc.count(), 20)):
@@ -966,15 +971,105 @@ def _range_options(page) -> list:
     return found
 
 
-def widen_range(page, iso_date: str, trace: Optional[list] = None,
-                today=None):
-    """Open the history's date filter and choose a span that reaches
-    `iso_date`. Returns (chose, anchor_year). chose is False when there
-    was no filter or no option covering it, and the trace says which,
-    with the options it saw, so a wrong guess costs one report and not
-    a round of guessing."""
-    note = {"note": "date range", "wanted": iso_date}
-    # A plain select first, since choosing in one clicks nothing.
+def _range_texts(page, appeared_texts: set) -> list:
+    """Range options that are not controls at all, a list of plain divs,
+    found by their words. Only words that appeared when the opener was
+    pressed count, so a year printed as a heading on the history is never
+    taken for an option."""
+    found, seen = [], set()
+    try:
+        loc = page.get_by_text(RANGE_OPTION_RE)
+        for i in range(min(loc.count(), 20)):
+            el = loc.nth(i)
+            try:
+                text = re.sub(r"\s+", " ", el.inner_text(timeout=500) or "").strip()
+            except Exception:
+                continue
+            if (text and text not in seen and text in appeared_texts
+                    and is_range_control(text, RANGE_OPTION_RE) and el.is_visible()):
+                seen.add(text)
+                found.append((el, text))
+    except Exception:
+        pass
+    return found
+
+
+# What is showing, as the kind of each small visible element and its words,
+# so what pressing the opener brought up can be told apart from what was
+# there before. The words are cut short and masked before they leave, and
+# an input gives its type and whether it asks for a date, never its value.
+_SHAPE_JS = r"""() => {
+  const items = [];
+  const counts = {selects: 0, date_inputs: 0, other_inputs: 0, listboxes: 0,
+                  options: 0, comboboxes: 0, checkboxes: 0, radios: 0, dialogs: 0, menus: 0};
+  const shown = (e) => {
+    const r = e.getBoundingClientRect();
+    const cs = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none';
+  };
+  for (const e of document.querySelectorAll('body *')) {
+    if (!shown(e)) continue;
+    const tag = e.tagName.toLowerCase();
+    const role = e.getAttribute('role') || '';
+    const type = tag === 'input' ? (e.getAttribute('type') || 'text').toLowerCase() : '';
+    if (tag === 'select') counts.selects++;
+    if (role === 'combobox') counts.comboboxes++;
+    if (tag === 'input') {
+      const hint = [e.getAttribute('placeholder'), e.getAttribute('aria-label'),
+                    e.getAttribute('name')].join(' ');
+      if (type === 'date' || /date|mm.?dd|dd.?mm|start|end|from/i.test(hint)) counts.date_inputs++;
+      else if (type === 'checkbox') counts.checkboxes++;
+      else if (type === 'radio') counts.radios++;
+      else counts.other_inputs++;
+    }
+    if (role === 'listbox') counts.listboxes++;
+    if (role === 'option' || tag === 'option') counts.options++;
+    if (role === 'checkbox' || role === 'menuitemcheckbox') counts.checkboxes++;
+    if (role === 'radio' || role === 'menuitemradio') counts.radios++;
+    if (role === 'dialog' || tag === 'dialog') counts.dialogs++;
+    if (role === 'menu') counts.menus++;
+    if (e.children.length > 3) continue;
+    const text = tag === 'input' ? '' : (e.innerText || '').trim().replace(/\s+/g, ' ');
+    if (tag !== 'input' && tag !== 'select' && !role && (!text || text.length > 40)) continue;
+    if (text.length > 40) continue;
+    items.push({tag, role, type, text});
+    if (items.length >= 600) break;
+  }
+  return {items, counts};
+}"""
+
+
+def _page_shape(page) -> dict:
+    try:
+        return page.evaluate(_SHAPE_JS) or {"items": [], "counts": {}}
+    except Exception:
+        return {"items": [], "counts": {}}
+
+
+def _appeared(before: dict, after: dict) -> list:
+    """The elements in `after` that `before` did not have."""
+    def key(x):
+        return (x.get("tag", ""), x.get("role", ""), x.get("type", ""), x.get("text", ""))
+    had = {key(x) for x in before.get("items", [])}
+    return [x for x in after.get("items", []) if key(x) not in had]
+
+
+def _opener_state(el) -> dict:
+    """What the opener says about itself, never its text beyond the label
+    the allowlist already matched."""
+    try:
+        return el.evaluate(
+            "e => ({tag: e.tagName.toLowerCase(), role: e.getAttribute('role') || '',"
+            " expanded: e.getAttribute('aria-expanded') || '',"
+            " haspopup: e.getAttribute('aria-haspopup') || '',"
+            " controls: !!e.getAttribute('aria-controls')})") or {}
+    except Exception:
+        return {}
+
+
+def _try_range_selects(page, iso_date: str, today, note: dict):
+    """Choose the span in a plain select, through the shared filter.
+    (True, year) when one was set, None otherwise."""
     try:
         # Through the shared filter, which refuses every dropdown on a page
         # that is not signed in and any whose surroundings name a payment
@@ -994,11 +1089,30 @@ def widen_range(page, iso_date: str, trace: Optional[list] = None,
             if label and is_range_control(label, RANGE_OPTION_RE):
                 sel.select_option(label=label)
                 page.wait_for_timeout(2500)
-                if trace is not None:
-                    trace.append(note)
                 return True, year
     except Exception as e:
         log.info("date range select: %s", e)
+    return None
+
+
+def widen_range(page, iso_date: str, trace: Optional[list] = None,
+                today=None):
+    """Open the history's date filter and choose a span that reaches
+    `iso_date`. Returns (chose, anchor_year). chose is False when there
+    was no filter or no option covering it, and the trace says which,
+    with the options it saw, so a wrong guess costs one report and not
+    a round of guessing."""
+    note = {"note": "date range", "wanted": iso_date}
+
+    def done(result):
+        if trace is not None:
+            trace.append(note)
+        return result
+
+    # A plain select first, since choosing in one clicks nothing.
+    got = _try_range_selects(page, iso_date, today, note)
+    if got:
+        return done(got)
 
     opener = None
     for getter in (lambda: page.get_by_role("button", name=RANGE_OPENER_RE),
@@ -1019,28 +1133,59 @@ def widen_range(page, iso_date: str, trace: Optional[list] = None,
             break
     if opener is None:
         note["kind"] = "none found"
-        if trace is not None:
-            trace.append(note)
-        return False, None
+        return done((False, None))
+
+    # The 0.34.1 file found the opener and then no option at all, with the
+    # page's buttons unchanged (#26). Whether the menu opened, and what it
+    # is made of, is written down this time.
+    before = _page_shape(page)
+    note["opener"] = _opener_state(opener)
     try:
         opener.click(timeout=4000)
-        page.wait_for_timeout(1200)
+        note["opener_click"] = "ok"
     except Exception as e:
+        # A timed-out click may still have landed, so it is not pressed again.
+        note["opener_click"] = type(e).__name__
         log.info("date range opener: %s", e)
-    options = _range_options(page)
+
+    # The menu can open a moment after the click, so it is looked for a
+    # few times, and the opener is never pressed again.
+    options, kind, after = [], "menu", before
+    for _ in range(6):
+        page.wait_for_timeout(600)
+        options = _range_options(page)
+        if options:
+            break
+    after = _page_shape(page)
+    appeared = _appeared(before, after)
+    note["opener_after"] = _opener_state(opener).get("expanded", "")
+    note["appeared_count"] = len(appeared)
+    if not options:
+        # A select that only exists once the opener is pressed.
+        got = _try_range_selects(page, iso_date, today, note)
+        if got:
+            note["kind"] = "select after opener"
+            return done(got)
+    if not options:
+        options = _range_texts(page, {x.get("text", "") for x in appeared})
+        kind = "text"
     labels = [t for _, t in options]
     label, year = _range_choice(labels, iso_date, today)
-    note.update(kind="menu", options=[redact(t)[:40] for t in labels][:12],
+    note.update(kind=kind, options=[redact(t)[:40] for t in labels][:12],
                 chose=redact(label or "")[:40])
     if not label:
-        if trace is not None:
-            note["buttons"] = _buttons_seen(page)
-            trace.append(note)
+        note["appeared"] = [
+            {"tag": x.get("tag", ""), "role": x.get("role", ""),
+             "type": x.get("type", ""), "text": redact(x.get("text", ""))[:40]}
+            for x in appeared[:20]]
+        note["counts_before"] = before.get("counts", {})
+        note["counts_after"] = after.get("counts", {})
+        note["buttons"] = _buttons_seen(page)
         try:
             page.keyboard.press("Escape")
         except Exception:
             pass
-        return False, None
+        return done((False, None))
     el = next(e for e, t in options if t == label)
     try:
         el.click(timeout=4000)
@@ -1056,9 +1201,7 @@ def widen_range(page, iso_date: str, trace: Optional[list] = None,
         page.wait_for_timeout(2500)
     except Exception as e:
         log.info("date range option: %s", e)
-    if trace is not None:
-        trace.append(note)
-    return True, year
+    return done((True, year))
 
 
 def _buttons_seen(page, limit: int = 12) -> list:

@@ -685,3 +685,15 @@ def test_the_range_controls_have_their_own_narrow_allowlist():
             site.RANGE_OPENER_RE, site.RANGE_OPTION_RE, site.RANGE_APPLY_RE)), text
     # and the document guard still refuses them, it was not loosened
     assert not site.is_safe_control("Date range")
+
+
+def test_a_bare_span_of_months_or_years_is_a_range_option_too():
+    """Round eleven, after the 0.34.1 run opened Date range and found no
+    option it could read (#26)."""
+    assert site._range_choice(["6 months", "12 months"], "2025-10-05",
+                              _TODAY) == ("12 months", None)
+    assert site._range_choice(["Last 6 months", "Past 2 years"], "2025-01-05",
+                              _TODAY) == ("Past 2 years", None)
+    assert site._range_choice(["0 months"], "2025-10-05", _TODAY) == (None, None)
+    for text in ("12 months of payments", "Pay in 6 months", "2 years"):
+        assert not site.is_range_control(text, site.RANGE_OPTION_RE), text

@@ -130,6 +130,74 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+_DONE = (State.COMPLETED.value, State.PDF_VERIFIED.value)
+
+
+def _saved_size(rec: dict) -> str:
+    """The recorded PDF size of a finished record, or "" when there is none."""
+    if not (rec.get("downloaded_ok") or rec.get("state") in _DONE):
+        return ""
+    return str(rec.get("pdf_size") or "").strip()
+
+
+def find_wrong_year_copies(records: dict) -> List[tuple]:
+    """Records that 0.34.0 filled with the next year's bill, as
+    (key, record, the newer record's date).
+
+    A bill button carries no year, and 0.34.0 matched "Jul 22" alone, so a
+    2025 bill asked for while only 2026's were showing saved the 2026 bill
+    again under the 2025 date and marked it done for good (#26). The tester
+    found every 2025 file from May through September was one of these.
+
+    A record is a copy only when the record for the same account and kind,
+    same month and day, one year later, was saved with exactly the same
+    size, and the same page count when both have one. Two real bills a year
+    apart do not come out the same to the byte, so nothing else is touched.
+    """
+    newer = {}
+    for key, rec in records.items():
+        size, date = _saved_size(rec), str(rec.get("date") or "")
+        if size and re.fullmatch(r"\d{4}-\d\d-\d\d", date):
+            newer[(rec.get("account", ""), rec.get("category", ""), date)] = rec
+    found = []
+    for key, rec in records.items():
+        size, date = _saved_size(rec), str(rec.get("date") or "")
+        if not size or not re.fullmatch(r"\d{4}-\d\d-\d\d", date):
+            continue
+        later = f"{int(date[:4]) + 1}{date[4:]}"
+        other = newer.get((rec.get("account", ""), rec.get("category", ""), later))
+        if other is None or _saved_size(other) != size:
+            continue
+        pages, other_pages = (str(r.get("pdf_pages") or "").strip() for r in (rec, other))
+        if pages and other_pages and pages != other_pages:
+            continue
+        found.append((key, rec, later))
+    return found
+
+
+def clear_wrong_year_copies(progress: dict, discovery: dict) -> List[tuple]:
+    """Take the downloaded marker off every copy find_wrong_year_copies
+    names, so the next run fetches the real bill for that date.
+
+    This is the one exception to never downloading a bill twice, and it is
+    kept to records proved to hold the wrong bill. Everything that pointed
+    at the copy is cleared, so a cleared record cannot match again and
+    running this twice does nothing the second time. Returns what it
+    cleared, with the path the copy was saved at."""
+    cleared = []
+    for key, rec, later in find_wrong_year_copies(progress):
+        old_path = rec.get("pdf_path", "")
+        old_size = rec.get("pdf_size", "")
+        rec.update(downloaded_ok=False, state=State.DISCOVERED.value,
+                   pdf_path="", pdf_filename="", pdf_size="", pdf_pages="")
+        rec["notes"] = ((rec.get("notes") or "") + "; " if rec.get("notes") else "") + \
+            f"cleared, the file saved for this date was the {later} bill (#26)"
+        if key in discovery:
+            discovery[key]["state"] = State.DISCOVERED.value
+        cleared.append((key, rec.get("date", ""), later, old_path, old_size))
+    return cleared
+
+
 class App:
     _journal = None
     _requests = None
@@ -156,6 +224,7 @@ class App:
         for store in (self.progress, self.discovery):
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
+        self._clear_wrong_year_copies()
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups)
         self.rules = doc_types.load_rules()
@@ -173,6 +242,32 @@ class App:
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
             "validation_failures": 0, "dates": [], "new_files": [],
         }
+
+    def _clear_wrong_year_copies(self):
+        """Run the one repair for 0.34.0's wrong-year copies (#26), and
+        say what it did. A copy still on disk is moved to Manual Review
+        rather than deleted, so the real bill does not land beside it
+        under a second name and nothing of the user's is thrown away."""
+        cleared = clear_wrong_year_copies(self.progress.data, self.discovery.data)
+        if not cleared:
+            return
+        self.progress.save(backup=True)
+        self.discovery.save(backup=True)
+        print(f"Found {len(cleared)} bill(s) saved under the wrong year by 0.34.0. "
+              "They will be downloaded again.")
+        for key, date, later, old_path, old_size in cleared:
+            note = ""
+            p = Path(old_path) if old_path else None
+            try:
+                if p and p.is_file() and str(p.stat().st_size) == str(old_size):
+                    dest = unique_path(self.paths.manual_review, p.name,
+                                       self.config["max_path_length"])
+                    p.replace(dest)
+                    note = f", the copy was moved to {dest.name} in Manual Review"
+            except OSError as e:
+                log.info("could not move the copy for %s: %s", key, e)
+            print(f"  {date} held the {later} bill{note}")
+            log.info("cleared wrong-year copy %s (the %s bill)", key, later)
 
     # -- infrastructure ----------------------------------------------------
 
