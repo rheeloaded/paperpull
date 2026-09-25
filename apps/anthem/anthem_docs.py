@@ -464,7 +464,7 @@ class App:
                 print("  Already downloaded and verified - skipping.")
                 self.stats["skipped_completed"] += 1
                 continue
-            filename = build_pdf_filename(doc.date, doc.summary, "")
+            filename = build_pdf_filename(doc.date, doc.summary, "", record=doc)
             if dry_run:
                 print(f"  DRY RUN - would save: {filename}")
                 continue
@@ -722,7 +722,7 @@ class App:
                     continue
             fdate = r.get("date") or date.today().isoformat()
             if getattr(self.args, "dry_run", False):
-                print(f"  DRY RUN - would save: {build_pdf_filename(fdate, label, '')}")
+                print(f"  DRY RUN - would save: {build_pdf_filename(fdate, label, '', record=r)}")
                 continue
             try:
                 pdf = fetch_fn(self.page(), r)
@@ -742,7 +742,7 @@ class App:
                 continue
             folder = getattr(self.paths, r["folder_attr"])
             folder.mkdir(parents=True, exist_ok=True)
-            out_path = unique_path(folder, build_pdf_filename(fdate, label, ""),
+            out_path = unique_path(folder, build_pdf_filename(fdate, label, "", record=r),
                                    self.config["max_path_length"])
             try:
                 out_path.write_bytes(pdf)

@@ -149,19 +149,47 @@ always empty for them.
 
 ## Defaults that change nothing
 
-The two default patterns reproduce today's names exactly, so upgrading
-renames nothing.
+One default pattern, for both kinds, reproduces today's names exactly, so
+upgrading renames nothing.
 
 ```
-receipts    {date:yyyy-mm-dd}[ {owner}] {provider} {summary} {kind}[ ({part})]
-statements  {date:yyyy-mm-dd}[ {owner}] {provider} {summary}[ ({part})]
+{date:yyyy-mm-dd}[ {owner}] {provider} {summary}[ {kind}][ ({part})]
 ```
 
-A test renders every app's names both ways, today's builder and the
-default pattern, over real record shapes, and they must match to the
-character.
+The first draft had a statements default without `{kind}`, and the test
+that renders names both ways caught it. Statements carried whatever kind
+the app passed too, usually nothing and sometimes Tax Document, so leaving
+it out would have renamed those. Under the default, `{kind}` is exactly
+what the app passed and nothing the record adds, because a statement's
+record carries a category the old names never used.
+
+`core/tests/test_naming.py` holds the default to a frozen copy of the old
+builder across thousands of awkward inputs, empty dates, forbidden
+characters, reserved names, owners and split documents, for both kinds.
+Before it was committed the same comparison ran over every record in the
+maintainer's thirty real archives, 18,908 names, and none differed.
+
+## Setting a pattern today
+
+Until the panel's page exists, a pattern goes in an app's config.json.
+
+```
+"filename_pattern_receipts": "{date:yyyymmdd} - {provider}[ -- {number}]",
+"filename_pattern_statements": "{date:yyyy-mm-dd} {provider}[ {account}] {kind}",
+"filename_pattern": "..."
+```
+
+An app uses its own `filename_pattern` if it has one, then the one for
+its kind, then the default. A pattern that cannot be used is reported
+once when the run starts, with what is wrong and where, and the run goes
+on with the default, because a typo in a setting must never be why a
+download stops. `--rename` names files the same way a download does, so
+running it after setting a pattern brings files already on disk into
+line, preview first.
 
 ## What building it takes
+
+Steps 1 to 3 are built. The panel's page and the rename offer are next.
 
 1. `core/paperpull_core/naming.py`, the parser and renderer, with its
    tests, including every example on #50 and a pattern of every error.
