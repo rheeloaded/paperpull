@@ -79,3 +79,42 @@ def test_nothing_off_pge_is_fetched_even_from_a_dialog(page):
     page.set_content("<body><div role='dialog'>"
                      "<iframe src='https://elsewhere.test/bill.pdf'></iframe></div></body>")
     assert site._pdf_from_here(page) is None
+
+
+LATE_BLOB = BLOB.replace("() => {", "() => setTimeout(() => {", 1)[:-1] + "}, 2000)"
+
+
+def test_a_viewer_that_arrives_late_is_waited_for_not_missed(page):
+    """Round six read the page once, straight after the popup gave up. A
+    dialog whose viewer gets its source a moment later was read empty,
+    and that looks exactly like a bill that never opened."""
+    from paperpull_core.journal import Journal, summarize
+
+    before = site._sources_now(page)
+    page.evaluate(LATE_BLOB)
+    assert site._pdf_from_here(page) is None, "read at once, it is missed"
+
+    j = Journal(page)
+    site.set_journal(j)
+    try:
+        got = site._wait_for_viewer(page, before)
+    finally:
+        site.set_journal(None)
+    assert got.ready and got.winner != "already"
+    assert (site._pdf_from_here(page) or b"").startswith(b"%PDF-")
+    said = " ".join(summarize(j.report()))
+    assert "\"bill viewer\" was ready after" in said
+
+
+def test_a_frame_the_history_always_had_is_not_the_bill(page):
+    """Ready means an address that was not there before the click. A
+    frame the page carried all along would otherwise pass at once."""
+    page.set_content("<body><h1>history</h1><iframe "
+                     "src='https://myaccount.pge.com/myaccount/s/widget'>"
+                     "</iframe></body>")
+    page.wait_for_timeout(300)
+    before = site._sources_now(page)
+    got = site._wait_for_viewer(page, before)
+    assert not got.ready
+    assert [a.strategy for a in got.attempts] == [
+        "count_reached", "network_idle", "count_settled"]
