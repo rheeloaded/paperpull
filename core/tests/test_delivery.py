@@ -1007,3 +1007,25 @@ def test_how_many_rivals_is_reported_and_never_what_they_are():
     assert said["rivals"] == 2
     assert "Checking" not in json.dumps(said)
     assert "2026-08-24" not in json.dumps(said)
+
+
+def test_a_folder_that_refuses_the_file_is_not_nothing_arriving(
+        tmp_path, monkeypatch):
+    """A locked folder read as nothing arriving, and RedCard presses the
+    statement again after nothing. A second press on a real account is not
+    an answer to a sync client holding a file. The file that was already
+    in place is kept, too, since the move no longer deletes it first."""
+    import os as _os
+    from paperpull_core import delivery as D
+
+    out = tmp_path / "s.pdf"
+    out.write_bytes(b"%PDF-1.4 the one already filed")
+
+    def locked(*a, **kw):
+        raise PermissionError("in use by another process")
+    monkeypatch.setattr(_os, "replace", locked)
+    got = D.place(b"%PDF-1.4\n" + b"x" * 2000, out)
+    assert got.outcome == D.NOT_PLACED != D.NOTHING
+    assert out.read_bytes() == b"%PDF-1.4 the one already filed"
+    assert not list(tmp_path.glob("*.delivering"))
+    assert "folder" in got.say()

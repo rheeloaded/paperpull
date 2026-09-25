@@ -93,6 +93,7 @@ SAVED = "saved"
 NOTHING = "nothing"        # the trigger fired and nothing arrived
 NOT_A_PDF = "not a pdf"    # something arrived and it was an error page
 WRONG = "wrong document"   # it arrived, it is a PDF, it is not the one asked for
+NOT_PLACED = "not placed"  # it arrived and was checked, and the folder refused it
 
 PDF_MAGIC = b"%PDF-"
 
@@ -184,6 +185,10 @@ class Delivery:
         if self.outcome == NOT_A_PDF:
             return ("something arrived and it was not a PDF, which is what "
                     "an expired link and a signed-out session both look like")
+        if self.outcome == NOT_PLACED:
+            return ("the document arrived and was checked, and the folder "
+                    "would not take it, which a sync client or a virus "
+                    "scanner holding the file looks like")
         return ("the request was made and nothing came back, by any of the "
                 "ways this provider might have answered")
 
@@ -441,12 +446,18 @@ def _finish(staged: Path, out_path: Path, expect, strict: bool,
         return Delivery(WRONG, mechanism, verdict, tuple(armed), size)
 
     try:
-        _clear(out_path)
+        # os.replace overwrites in one step. Clearing the destination
+        # first meant a move that then failed had already deleted the
+        # file it was replacing.
         os.replace(str(staged), str(out_path))
     except OSError as e:
         log.info("could not put the document in place: %s", e)
         _clear(staged)
-        return Delivery(NOTHING, mechanism, verdict, tuple(armed), size)
+        # Not NOTHING. The document came and was checked, and a sync
+        # client or a scanner held the folder. RedCard presses the
+        # statement again after NOTHING, and a second press on a real
+        # account is not an answer to a locked file.
+        return Delivery(NOT_PLACED, mechanism, verdict, tuple(armed), size)
 
     return Delivery(SAVED, mechanism, verdict, tuple(armed), size)
 
@@ -702,6 +713,10 @@ def summarize(report) -> list:
         said.append("Something arrived by %s and was not a PDF. An expired "
                     "link and a signed-out session both look like this."
                     % (mechanism or "some route"))
+    elif outcome == NOT_PLACED:
+        said.append("A document arrived by %s and passed its check, and "
+                    "could not be moved into the folder. That is the disk, "
+                    "not the provider." % (mechanism or "some route"))
     elif outcome == NOTHING:
         said.append("The request was made and nothing came back. %s"
                     % (("These were watched, %s." % ", ".join(sorted(armed)))
