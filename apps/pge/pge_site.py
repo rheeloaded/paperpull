@@ -828,6 +828,54 @@ def _wait_for_viewer(page, before: set):
                  name="bill viewer")
 
 
+def _press_once(page, link, arrived, seconds: float = 6.0):
+    """Press View Bill PDF once, and wait for a tab or anything else.
+
+    It used to press, wait six seconds for a tab, and on no tab press
+    again. No tab is not a failed click. A bill that opens in a dialog,
+    or a site that is slow, opens no tab, and the second press opened a
+    second dialog, which is what his failure file showed (#33). A press
+    on somebody's account is not something to repeat on a guess.
+
+    So the tab is listened for before the press, which catches a late
+    one as well as a prompt one, and the element's own click is tried
+    only when the first press raised, which is the one case where it
+    did not happen. arrived() says whether a download or a response
+    came instead, so the wait ends as soon as anything does."""
+    popups = []
+
+    # A function of its own, since Playwright cannot wrap a list's
+    # append as a listener.
+    def heard(tab):
+        popups.append(tab)
+
+    page.on("popup", heard)
+    try:
+        try:
+            link.click(force=True, timeout=4000)
+        except Exception as e:
+            log.info("the press did not land, so the control's own click: %s", e)
+            try:
+                link.evaluate("el => el.click()")
+            except Exception as e2:
+                log.info("that did not land either: %s", e2)
+                return None
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            try:
+                if popups or arrived():
+                    break
+            except Exception:
+                pass
+            page.wait_for_timeout(300)
+        return popups[0] if popups else None
+    finally:
+        try:
+            page.remove_listener("popup", heard)
+        except Exception:
+            pass
+
+
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
     """Download a bill PDF for specified doc dictionary handling downloads, popups, fetches, and network responses."""
     try:
@@ -926,18 +974,8 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
             except Exception:
                 pass
             print("  [site] Clicking 'View Bill PDF' link...")
-            try:
-                with page.expect_popup(timeout=6000) as popup_info:
-                    link.click(force=True, timeout=4000)
-                popup = popup_info.value
-            except Exception:
-                # Fallback if popup didn't trigger via click
-                try:
-                    with page.expect_popup(timeout=6000) as popup_info:
-                        link.evaluate("el => el.click()")
-                    popup = popup_info.value
-                except Exception:
-                    pass
+            popup = _press_once(page, link, lambda: bool(
+                captured_download[0] or captured_response_bytes[0]))
 
             blob_url = None
             if popup:
@@ -950,12 +988,17 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                         blob_url = popup.url
 
             # Wait briefly if direct download or response happened instead
+            # Waited out through the browser's own timer. The download and
+            # the response are both set by listeners, and Playwright only
+            # hands a listener its event while this thread is inside a
+            # Playwright call, so a time.sleep here could never see either
+            # arrive and spun its five seconds for nothing.
             if not blob_url:
-                t_start = time.time()
-                while time.time() - t_start < 5.0:
+                t_start = time.monotonic()
+                while time.monotonic() - t_start < 5.0:
                     if captured_download[0] or captured_response_bytes[0]:
                         break
-                    time.sleep(0.3)
+                    page.wait_for_timeout(300)
         except Exception as e_click:
             print(f"  [site] Link click warning: {e_click}")
         finally:
