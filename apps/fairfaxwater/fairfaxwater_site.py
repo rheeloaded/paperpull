@@ -404,6 +404,16 @@ def bill_request(page, title: str, date: str, occurrence: int = 0,
     if view is None:
         log.warning("no row for %s %s", title, date)
         return None
+    # Measured against the live portal on 2026-09-24, and worth knowing
+    # before trusting this hint. The answer that crosses the context
+    # with content-type application/pdf was 536 bytes and not a PDF, and
+    # the one after it was the viewer's own page. The bytes never went
+    # past as a readable response at all, so the tab carried it, exactly
+    # as this app's old re-fetch fallback used to.
+    #
+    # The hint stays because reading an empty body costs nothing and
+    # this app's history says some bills did arrive that way. That the
+    # guess was wrong and cost nothing is the point of arming several.
     return DocumentRequest(
         trigger=lambda: _guarded_click(view, timeout=15000),
         expect=Identity(date=date),
