@@ -118,3 +118,55 @@ def test_a_frame_the_history_always_had_is_not_the_bill(page):
     assert not got.ready
     assert [a.strategy for a in got.attempts] == [
         "count_reached", "network_idle", "count_settled"]
+
+
+PRESS = """<body><button id=b>View Bill PDF</button><script>
+  window.presses = 0;
+  document.getElementById('b').addEventListener('click', () => {
+    window.presses++;
+    %s
+  });
+</script></body>"""
+
+
+def test_a_press_that_opens_no_tab_is_not_pressed_again(page):
+    """No tab is not a failed click. The old fallback pressed a second
+    time, and a bill in a dialog opened twice, which is the two dialogs
+    in his failure file (#33)."""
+    page.set_content(PRESS % "document.body.insertAdjacentHTML("
+                     "'beforeend', '<div role=dialog>bill</div>');")
+    popup = site._press_once(page, page.locator("#b"), lambda: False,
+                             seconds=1.0)
+    assert popup is None
+    assert page.evaluate("window.presses") == 1
+    assert page.locator("[role=dialog]").count() == 1
+
+
+def test_a_tab_that_opens_late_is_still_caught(page):
+    page.set_content(PRESS % "setTimeout(() => window.open('about:blank'), 1500);")
+    popup = site._press_once(page, page.locator("#b"), lambda: False)
+    assert popup is not None
+    assert page.evaluate("window.presses") == 1
+    popup.close()
+
+
+def test_the_wait_hears_a_listener_while_it_waits(page):
+    """A listener only gets its event while this thread is inside a
+    Playwright call. The old loop slept in time.sleep and could never see
+    a download or a response arrive, so it spun its full length."""
+    import time as _time
+    heard = []
+    page.on("console", lambda msg: heard.append(msg.text))
+    page.set_content(PRESS % "setTimeout(() => console.log('arrived'), 800);")
+    t0 = _time.monotonic()
+    site._press_once(page, page.locator("#b"), lambda: bool(heard))
+    took = _time.monotonic() - t0
+    assert heard and took < 3.0, "waited %.1fs for an event at 0.8s" % took
+
+
+def test_no_wait_in_the_site_layer_sleeps_through_an_event():
+    """The loops that wait on a listener's flag use the browser's timer."""
+    import inspect
+    src = inspect.getsource(site.download_bill) + inspect.getsource(site._press_once)
+    assert "time.sleep(" not in src
+    assert "expect_popup" not in src, "a timed-out expect_popup led to a second press"
