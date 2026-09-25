@@ -578,11 +578,25 @@ def _read_rows(page, docs: List[RawDoc], seen: set) -> None:
                            kind="tax" if tax else "statement"))
 
 
-def _control_for(page, iso: str):
+def _control_for(page, iso: str, info: Optional[dict] = None):
     """The control for the document dated `iso`, matched the same way
-    discovery found it, or None."""
+    discovery found it, or None.
+
+    A control on screen wins over a hidden copy of the same row. When the
+    accessible names match nothing the controls are found by their words,
+    and that finds a hidden twin of the list too (a phone layout kept in
+    the page, say), which cannot be clicked like a person would (#38).
+    `info` collects what was seen, for the trace."""
     ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
+    try:
+        n = ctrls.count()
+    except Exception:
+        n = 0
+    dates: list = []
+    visible = 0
+    shown_match = hidden_match = None
+    same_date = 0
+    for i in range(n):
         el = ctrls.nth(i)
         try:
             name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
@@ -594,9 +608,127 @@ def _control_for(page, iso: str):
                 found, _period = parse_period_date(el.evaluate(_ROW_OF_JS) or "")
             except Exception:
                 found = None
-        if found == iso:
-            return el, name
-    return None, ""
+        try:
+            shown = bool(el.is_visible())
+        except Exception:
+            shown = False
+        visible += shown
+        dates.append(found or "none")
+        if found != iso:
+            continue
+        same_date += 1
+        if shown and shown_match is None:
+            shown_match = (el, name)
+        elif not shown and hidden_match is None:
+            hidden_match = (el, name)
+    chosen = shown_match or hidden_match
+    if info is not None:
+        info.update({"controls": n, "visible": visible,
+                     "dates_read": [redact(d) for d in dates[:30]],
+                     "same_date": same_date})
+        if chosen:
+            info["chosen"] = redact(chosen[1])[:60]
+            info["chosen_visible"] = chosen is shown_match
+    return chosen if chosen else (None, "")
+
+
+# How long capture waits for the rows once a statements page is open.
+# Every page.goto reloads the servicing app, which signs in again through
+# Okta before it asks for the list. His failure file (#38) ends on exactly
+# that sign-in with no list requested yet, and capture looked for the row
+# five seconds after the load, where discovery reads the page ten seconds
+# or more after it. Four of his five were looked for too early.
+LIST_WAIT_S = 30
+
+
+def _note(trace: Optional[list], note: str, **fields) -> None:
+    if trace is not None:
+        trace.append(dict({"note": note}, **fields))
+
+
+def _where(page) -> str:
+    """The page's path and route with digits masked, never its query."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(page.url or "")
+    except ValueError:
+        return ""
+    route = parts.path + ("#" + parts.fragment.split("?")[0] if parts.fragment else "")
+    return redact(route)[:120]
+
+
+def _list_path_for(title: str) -> str:
+    """The statements page a document lives on. A 1098 sits on the yearly
+    page, and capture used to look for it on the monthly one."""
+    return STATEMENT_PAGES[1] if (title or "").startswith("Tax Document") else STATEMENT_PAGES[0]
+
+
+def _open_list(page, path: str, trace: Optional[list]) -> bool:
+    """Be on the statements page `path` of the servicing app. The run has
+    just opened the monthly page before calling capture, and loading it
+    again straight away starts the app's sign-in over, so a page already
+    there is kept."""
+    from urllib.parse import urlsplit
+    here = page.url or ""
+    try:
+        here_path = urlsplit(here).path.rstrip("/")
+    except ValueError:
+        here_path = ""
+    if loan_number(page) and is_safe_url(here) and here_path.endswith(path):
+        _note(trace, "already on the statements page", page=path, url=_where(page))
+        return True
+    if not goto_documents(page):
+        _note(trace, "could not open the statements page", url=_where(page),
+              signed_out=looks_signed_out(page))
+        return False
+    if path != STATEMENT_PAGES[0]:
+        loan = loan_number(page)
+        if not loan:
+            _note(trace, "no loan number in the address, so the yearly page cannot be opened",
+                  url=_where(page))
+            return False
+        try:
+            page.goto(f"{SERVICING}/servicing/{loan}{path}", wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(2000)
+            dismiss_overlay(page)
+        except Exception as e:
+            _note(trace, "could not open the yearly page", error=redact(str(e))[:160])
+            return False
+    _note(trace, "opened the statements page", page=path, url=_where(page))
+    return True
+
+
+def _wait_for_control(page, iso: str, trace: Optional[list]):
+    """The control for `iso`, waiting for the list to render. Once rows
+    are there and none is this date, the page is expanded and scrolled
+    once, as discovery does, and the wait ends when the count settles."""
+    counts: list = []
+    scrolled = False
+    waited = 0
+    info: dict = {}
+    el, label = None, ""
+    while True:
+        info = {}
+        el, label = _control_for(page, iso, info)
+        if el is not None:
+            break
+        n = info.get("controls", 0)
+        counts.append(n)
+        if waited >= LIST_WAIT_S:
+            break
+        if n and not scrolled:
+            expand_all(page)
+            scroll_full_page(page)
+            scrolled = True
+            waited += 5
+            continue
+        if n and scrolled and len(counts) >= 3 and len(set(counts[-3:])) == 1:
+            break
+        page.wait_for_timeout(1000)
+        waited += 1
+    _note(trace, "found the row" if el is not None else "no row on the page has this date",
+          date=iso, waited_s=waited, scrolled=scrolled, url=_where(page), **info)
+    return el, label
 
 
 def _fetch_pdf(page, href: str) -> Optional[bytes]:
@@ -743,6 +875,10 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
+        if trace is not None:
+            trace.append({"note": "no PDF arrived", "url": _where(page),
+                          "downloads": len(downloads),
+                          "new_tabs": len([p for p in ctx.pages if p not in before])})
         log.info("click on %r produced no PDF", label)
         return False
     finally:
@@ -772,16 +908,19 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     after every click."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    if not goto_documents(page):
+    # Every way out of here leaves a line in the trace. His attempt file
+    # came back with an empty list because only a click wrote to it, and
+    # four of his five never got as far as a click (#38).
+    if not _open_list(page, _list_path_for(title), trace):
         log.info("could not open the documents page for %s", iso_date)
         return False
-    expand_all(page)
 
-    el, label = _control_for(page, iso_date)
+    el, label = _wait_for_control(page, iso_date, trace)
     if el is None:
         log.info("no document control found for %s", iso_date)
         return False
     if not is_safe_control(label):
+        _note(trace, "refused the control, the guard said no", control=redact(label)[:60])
         log.info("refusing unsafe control %r for %s", label, iso_date)
         return False
 
