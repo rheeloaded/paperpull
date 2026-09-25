@@ -373,5 +373,5 @@ def test_the_capture_listens_on_the_context_and_puts_the_tab_back():
     import inspect
     src = inspect.getsource(site.download_bill)
     assert "page.context.on(\"response\"" in src, "a popup's answer never reaches this tab's listener"
-    assert "_pdf_from_here(page)" in src
+    assert "_pdf_from_here(page" in src
     assert "page.goto(history_url" in src, "the next bill is looked for on the history page"

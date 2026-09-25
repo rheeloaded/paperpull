@@ -64,12 +64,12 @@ def test_the_page_is_asked_whether_or_not_the_tab_moved():
     import inspect
     src = inspect.getsource(site.download_bill)
     block = src.split("captured_response_bytes[0] or captured_download[0] or blob_url")[1][:1200]
-    assert "_pdf_from_here(page)" in block
+    assert "_pdf_from_here(page" in block
     outside = block.split("if moved:")[0] + block.split("else:")[-1]
-    assert "_pdf_from_here(page)" in block
+    assert "_pdf_from_here(page" in block
     # and it is not nested under the moved branch any more
     moved_at = block.index("moved = ")
-    asked_at = block.index("_pdf_from_here(page)")
+    asked_at = block.index("_pdf_from_here(page")
     assert asked_at > moved_at
     assert "the page itself is asked" in block
     assert outside is not None
@@ -90,12 +90,13 @@ def test_a_viewer_that_arrives_late_is_waited_for_not_missed(page):
     and that looks exactly like a bill that never opened."""
     from paperpull_core.journal import Journal, summarize
 
-    before = site._sources_now(page)
+    before = site._viewers_now(page)
     page.evaluate(LATE_BLOB)
     assert site._pdf_from_here(page) is None, "read at once, it is missed"
 
     j = Journal(page)
     site.set_journal(j)
+    page.evaluate("() => { location.hash = '#/bill'; }")
     try:
         got = site._wait_for_viewer(page, before)
     finally:
@@ -113,7 +114,7 @@ def test_a_frame_the_history_always_had_is_not_the_bill(page):
                      "src='https://myaccount.pge.com/myaccount/s/widget'>"
                      "</iframe></body>")
     page.wait_for_timeout(300)
-    before = site._sources_now(page)
+    before = site._viewers_now(page)
     got = site._wait_for_viewer(page, before)
     assert not got.ready
     assert [a.strategy for a in got.attempts] == [
@@ -170,3 +171,32 @@ def test_no_wait_in_the_site_layer_sleeps_through_an_event():
     src = inspect.getsource(site.download_bill) + inspect.getsource(site._press_once)
     assert "time.sleep(" not in src
     assert "expect_popup" not in src, "a timed-out expect_popup led to a second press"
+
+
+def test_a_hash_change_after_the_press_is_not_the_bill_arriving(page):
+    """The draft counted the page's own address, so a hash change right
+    after the press read as ready while the viewer was still seconds
+    away, and the journal would have taught the next round that no wait
+    was needed."""
+    before = site._viewers_now(page)
+    page.evaluate("() => { location.hash = '#/bill'; }")
+    page.evaluate(LATE_BLOB)
+    got = site._wait_for_viewer(page, before)
+    assert got.ready and got.winner != "already"
+    assert got.elapsed_ms >= 1000
+
+
+def test_a_viewer_from_an_earlier_bill_is_not_read_first(page):
+    """What the viewers pointed at before the press goes to the back, so
+    an earlier bill left open is not saved under this one's name."""
+    page.evaluate(BLOB)
+    page.wait_for_timeout(200)
+    before = site._viewers_now(page)
+    page.evaluate("""() => {
+        const bytes = new Uint8Array([37,80,68,70,45,50,46,48,32,110,101,119]);
+        const u = URL.createObjectURL(new Blob([bytes], {type: 'application/pdf'}));
+        document.body.insertAdjacentHTML('beforeend',
+            '<div role="dialog"><iframe src="' + u + '"></iframe></div>');
+    }""")
+    page.wait_for_timeout(200)
+    assert site._pdf_from_here(page, before).startswith(b"%PDF-2.0 new")

@@ -54,7 +54,7 @@ from paperpull_core.capture import fetch_with_status as _fetch_with_status
 from paperpull_core.controls import control_labels as _control_labels
 from paperpull_core.controls import is_next_control as _core_is_next
 from paperpull_core.ready import (count_reaches, count_settles, network_idle,
-                                  ready)
+                                  new_source, ready, sources_of)
 
 log = logging.getLogger("pge_docs.site")
 
@@ -716,7 +716,7 @@ def _url_shape(url: str) -> str:
     return "%s on %s" % (kind, parts.netloc or "this site")
 
 
-def _pdf_from_here(page) -> Optional[bytes]:
+def _pdf_from_here(page, before=()) -> Optional[bytes]:
     """The PDF the tab is standing on, or the one inside it.
 
     PG&E can answer View Bill PDF by moving the tab to its own viewer,
@@ -729,8 +729,15 @@ def _pdf_from_here(page) -> Optional[bytes]:
     that never went anywhere, and a viewer in a dialog often points at a
     blob the page made rather than at an address on the site. A blob
     belongs to the page, so only the page can fetch it, which is what the
-    in-page fetch is for."""
+    in-page fetch is for.
+
+    `before` is what the viewers pointed at before the press. What is
+    new is tried first, so a viewer left open by an earlier bill cannot
+    be fetched ahead of this one and saved under its name."""
     seen, blobs = _viewer_sources(page)
+    old = set(before or ())
+    seen = sorted(seen, key=lambda s: s in old)
+    blobs = sorted(blobs, key=lambda s: s in old)
 
     for candidate in seen[:6]:
         try:
@@ -794,27 +801,24 @@ def _viewer_sources(page) -> Tuple[list, list]:
     return seen, blobs
 
 
-def _sources_now(page) -> set:
-    try:
-        seen, blobs = _viewer_sources(page)
-        return set(seen) | set(blobs)
-    except Exception:
-        return set()
+def _viewers_now(page) -> list:
+    """What the page's viewers point at, kept to compare with later."""
+    return sources_of(page, VIEWER_ELEMENTS)
 
 
-def _wait_for_viewer(page, before: set):
-    """Wait for the bill to arrive somewhere the page can be asked for it.
+def _wait_for_viewer(page, before: list):
+    """Wait for the bill to arrive in a viewer the page can be asked for.
 
     His second failure file showed a dialog and an iframe, and the page
     was read once, straight after the popup gave up, with no wait of its
     own. Whether a viewer in a dialog has its source by then is a guess,
     so this makes three of them and the run says which one it took (#33).
-    Ready means an address that was not there before the click, a moved
-    tab or a viewer's source, so a frame the history page always had
-    cannot pass for the bill."""
-    def arrived(p):
-        return bool(_sources_now(p) - before)
 
+    Ready means a viewer pointing somewhere it did not point before the
+    press. The page's own address is not counted, because a hash change
+    straight after the press read as the bill arriving seconds before it
+    did, which would have taught the next round that no wait was needed.
+    A frame the history always carried is not counted either."""
     try:
         viewers = int(page.evaluate(
             "(s) => document.querySelectorAll(s).length", VIEWER_ELEMENTS) or 0)
@@ -824,8 +828,8 @@ def _wait_for_viewer(page, before: set):
                  [count_reaches(VIEWER_ELEMENTS, viewers + 1, within_ms=6000),
                   network_idle(within_ms=8000),
                   count_settles(VIEWER_ELEMENTS, quiet_ms=1500)],
-                 invariant=arrived, budget_ms=15000, journal=_journal,
-                 name="bill viewer")
+                 invariant=new_source(VIEWER_ELEMENTS, before),
+                 budget_ms=15000, journal=_journal, name="bill viewer")
 
 
 def _press_once(page, link, arrived, seconds: float = 6.0):
@@ -943,7 +947,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
 
         existing_pages = set(page.context.pages)
         history_url = page.url or ""
-        before_click = _sources_now(page)
+        before_click = _viewers_now(page)
         captured_download = [None]
         captured_response_bytes = [None]
 
@@ -1033,7 +1037,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 print("  [site] the control opened nothing this was watching, "
                       "so the page itself is asked what it is holding")
             _wait_for_viewer(page, before_click)
-            body = _pdf_from_here(page)
+            body = _pdf_from_here(page, before_click)
             if body:
                 captured_response_bytes[0] = body
                 print("  [site] the bill came from the page itself")
