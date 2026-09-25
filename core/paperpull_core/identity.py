@@ -178,6 +178,12 @@ class Identity:
     total: str = ""       # the amount as the list showed it
     number: str = ""      # order, document or confirmation number
     kind: str = ""        # what it is called. Recorded, never decisive
+    # Words that name this document apart from its neighbours, such as
+    # the account a statement belongs to. Useless alone, because every
+    # statement of a kind carries the same ones, and decisive against a
+    # competing row that carries different ones. Only `distinguish`
+    # reads it.
+    label: str = ""
     extra: tuple = field(default_factory=tuple)   # app-supplied strong facts
 
     def strong(self) -> dict:
@@ -204,6 +210,18 @@ class Identity:
         return cls(date=getattr(purchase, "purchase_date", "") or "",
                    total=str(getattr(purchase, "total", "") or ""),
                    number=getattr(purchase, "order_number", "") or "")
+
+
+    def marks(self) -> dict:
+        """Every way this document might print, by fact name.
+
+        The strong facts plus the label, which is what `distinguish`
+        compares against a competing row."""
+        out = dict(self.strong())
+        text = str(self.label or "").strip()
+        if len(text) >= 3:
+            out["label"] = [text]
+        return out
 
 
 @dataclass(frozen=True)
@@ -280,6 +298,93 @@ def verify(path, expect: Optional[Identity], *, text: Optional[str] = None,
                     if contains(text, variants))
     outcome = VERIFIED if matched else REFUSED
     return Verdict(outcome, tuple(strong), matched, chars)
+
+
+def distinguish(path, expect: Optional[Identity], others=(), *,
+                text: Optional[str] = None, pages: int = 5) -> Verdict:
+    """Whether the saved PDF is `expect` rather than one of `others`.
+
+    The better question, and the one three real archives said `verify`
+    was answering badly.
+
+    A Navy Federal date carries a statement for every account, because
+    they are all billed on the same day. A Fairfax bill prints the
+    previous bill's date beside its own. In both, asking whether the
+    document mentions the row's date gets a yes from the wrong document.
+
+    So this asks which row the document matches BEST, not whether it
+    matches one at all. Only facts no competing row shares can count,
+    and then it is a matter of how many.
+
+        this row matches more of its own than any rival     verified
+        a rival matches more of its own than this row does  refused
+        nobody matches anything of their own                unchecked
+
+    Counting rather than requiring is what keeps it honest. The July
+    Fairfax bill carries April's date, so April scores one, but it also
+    carries July's amount, so July scores two and April is refused. A
+    TSP statement that prints neither date leaves everybody at zero and
+    is placed by nothing, which is not the same as belonging elsewhere.
+
+    It never refuses a document for failing to print something it never
+    prints, which is how a check starts throwing away good documents.
+
+    With no competitors this is `verify`, because then nothing is shared
+    and every fact is its own."""
+    if expect is None:
+        return Verdict(UNCHECKED)
+    rivals = [o for o in others if isinstance(o, Identity) and o is not expect]
+    if not rivals:
+        return verify(path, expect, text=text, pages=pages)
+
+    everyone = [expect] + rivals
+    marks = [i.marks() for i in everyone]
+    if not marks[0]:
+        return Verdict(UNCHECKED)
+
+    def pool(skip: int) -> set:
+        out = set()
+        for n, m in enumerate(marks):
+            if n == skip:
+                continue
+            for variants in m.values():
+                out.update(str(v).lower() for v in variants)
+        return out
+
+    # A variant somebody else also prints proves nothing about which of
+    # us this is, so it is taken away from both sides.
+    own = []
+    for n, m in enumerate(marks):
+        shared = pool(n)
+        kept = {name: [v for v in variants if str(v).lower() not in shared]
+                for name, variants in m.items()}
+        own.append({k: v for k, v in kept.items() if v})
+
+    mine = own[0]
+    if not mine and not any(own[1:]):
+        return Verdict(UNCHECKED, tuple(marks[0]), (), 0)
+
+    if text is None:
+        text = _text_of(path, pages)
+    chars = len(text or "")
+    if chars < MIN_TEXT:
+        return Verdict(UNREADABLE, tuple(mine), (), chars)
+
+    def score(kept) -> tuple:
+        hit = tuple(name for name, variants in kept.items()
+                    if contains(text, variants))
+        return len(hit), hit
+
+    my_count, matched = score(mine)
+    best = max((score(k)[0] for k in own[1:]), default=0)
+
+    if my_count and my_count >= best:
+        return Verdict(VERIFIED, tuple(mine), matched, chars)
+    if best > my_count:
+        # Somebody else's document, by their own marks rather than by
+        # the absence of ours.
+        return Verdict(REFUSED, tuple(mine), matched, chars)
+    return Verdict(UNCHECKED, tuple(mine), (), chars)
 
 
 def _text_of(path, pages: int) -> str:
