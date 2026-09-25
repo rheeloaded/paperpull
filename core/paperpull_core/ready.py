@@ -93,6 +93,10 @@ OUTCOMES = frozenset((
 # arrives is noticed within a frame or two, long enough to cost nothing.
 POLL_MS = 100
 
+# Less than this left of the budget is not enough to try a guess with,
+# since a guess cannot look even once in it.
+MIN_SHARE_MS = 50
+
 _COUNT_JS = "(sel) => document.querySelectorAll(sel).length"
 
 # Where a viewer or an embedded document keeps what it shows. The
@@ -213,7 +217,11 @@ def _poll(page, ms: int, done: Callable, condition: Callable):
         if condition():
             return True
         if done():
-            return _EARLY
+            # Asked again, because the page can change between the two
+            # questions. When the condition and the invariant are the
+            # same count, the rows arriving in between credited the win
+            # to nobody, and a test caught it one run in thirteen.
+            return True if condition() else _EARLY
         left = deadline - time.monotonic()
         if left <= 0:
             return False
@@ -429,7 +437,11 @@ def ready(page, strategies, invariant, budget_ms: int, journal=None,
     else:
         for s in strategies:
             left = budget - _ms_since(t0)
-            if left <= 0:
+            # A sliver is no budget. Elapsed time is counted in whole
+            # milliseconds, so a guess that used its whole share could
+            # leave one or two over, and the next guess was tried with
+            # them, timed out, and was reported as having been tried.
+            if left < MIN_SHARE_MS:
                 result.attempts.append(Attempt(s.name, "no_budget", 0))
                 continue
             share = left if s._within_ms is None else min(left, s._within_ms)

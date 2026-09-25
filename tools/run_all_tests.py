@@ -136,7 +136,7 @@ def main() -> int:
         if lack:
             under_equipped.append((name, lack))
         r = subprocess.run([str(py), "-m", "pytest", "-q", "--no-header",
-                            "-rs", "-p", "no:cacheprovider"],
+                            "-rsfE", "-p", "no:cacheprovider"],
                            cwd=d, capture_output=True, text=True, timeout=1800)
         out = (r.stdout or "") + (r.stderr or "")
         lines = [ln for ln in out.strip().splitlines() if ln.strip()]
@@ -153,6 +153,14 @@ def main() -> int:
         if not ok:
             broken.append((name, summary))
         print("%-4s %-16s %s" % ("ok" if ok else "FAIL", name, summary[:92]), flush=True)
+        if not ok:
+            # Which test, and what it asserted. A run in CI that said only
+            # "1 failed" in core could not be told apart from a flaky
+            # timing test or a real break without rerunning it by hand.
+            said = [ln for ln in out.splitlines()
+                    if ln.startswith(("FAILED ", "ERROR ", "E   "))]
+            for ln in said[:40]:
+                print("       " + ln.rstrip()[:160], flush=True)
 
     print("\n" + "=" * 72)
     print("%d passed, %d failed, %d skipped, in %.0fs"
