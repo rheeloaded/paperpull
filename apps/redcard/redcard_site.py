@@ -430,6 +430,11 @@ def _row_download_link(page, mdy: str):
     return None
 
 
+def identity_for(doc) -> Identity:
+    """What a statement's row carries, which is its date."""
+    return Identity(date=str(getattr(doc, "date", "") or "")[:10])
+
+
 def statement_request(page, iso_date: str) -> Optional[DocumentRequest]:
     """Everything up to the click, for the statement dated `iso_date`.
 

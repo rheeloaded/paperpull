@@ -369,6 +369,12 @@ def _row_for(page, date: str, account_tail: str):
     return None
 
 
+def identity_for(doc) -> Identity:
+    """A bill's row carries its date. The account is the same on every
+    bill here, so it separates nothing."""
+    return Identity(date=str(getattr(doc, "date", "") or "")[:10])
+
+
 def bill_request(page, title: str, date: str, occurrence: int = 0,
                  item_hint: str = "", client_hint: str = "",
                  account: str = "") -> Optional[DocumentRequest]:

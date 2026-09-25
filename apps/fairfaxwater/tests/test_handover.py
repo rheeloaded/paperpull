@@ -119,19 +119,21 @@ def test_the_old_entry_point_is_gone():
     assert hasattr(site, "bill_request")
 
 
-# -- why the refusal is off here ----------------------------------------------
+# -- what it took to make the refusal safe here -------------------------------
 
-def test_the_refusal_is_off_and_the_config_says_why():
-    """Not an oversight. Recorded here so nobody turns it on without
-    reading the reason, and so the reason survives this conversation."""
+def test_the_refusal_is_on_and_the_config_says_what_made_it_safe():
+    """On, and it was off. Every bill prints the previous bill's date
+    beside its own, which defeated a check that only asked whether the
+    date appeared. Comparing rows settles it, because July carries its
+    own amount and April's row does not."""
     import json
 
     cfg = json.load(open(Path(__file__).resolve().parents[1]
                          / "config.example.json", encoding="utf-8-sig"))
-    assert cfg["refuse_wrong_documents"] is False
+    assert cfg["refuse_wrong_documents"] is True
     why = " ".join(v for k, v in cfg.items() if k.startswith("//refuse"))
-    assert "PREVIOUS bill" in why
-    assert "adjacent quarters" in why
+    assert "PREVIOUS" in why
+    assert "10 of 12" in why, "the measurement that turned it on is not recorded"
 
 
 def test_a_bill_that_prints_the_previous_bills_date_defeats_a_date_check():
@@ -141,13 +143,17 @@ def test_a_bill_that_prints_the_previous_bills_date_defeats_a_date_check():
     both adjacent quarters, which is the wrong-document case this guard
     exists for.
 
-    Adding a second fact does NOT repair it, which is worth stating
-    because it was the obvious thing to reach for. verify is satisfied
-    when ANY strong fact matches, deliberately, so a provider rendering
-    its amount as an image stays checkable by its number. Here the date
-    matches wrongly, so it verifies whatever else is supplied.
-    Repairing this needs a mode where every supplied fact has to match,
-    and that mode does not exist."""
+    Adding a second fact does not repair it either, which is worth
+    keeping because it was the obvious thing to reach for. verify is
+    satisfied when ANY strong fact matches, deliberately, so a provider
+    rendering its amount as an image stays checkable by its number.
+    Here the date matches wrongly, so it verifies whatever else is
+    supplied.
+
+    What repairs it is asking which row the document matches BEST. The
+    July bill carries April's date, so April scores one, and it carries
+    July's amount as well, so July scores two. The bottom of this test
+    is that comparison, and it is why the refusal is on again."""
     from paperpull_core import identity as I
 
     july = ("Fairfax Water  Account 0718\n"
@@ -168,3 +174,11 @@ def test_a_bill_that_prints_the_previous_bills_date_defeats_a_date_check():
                      text=july)
     assert wrong.outcome == I.VERIFIED
     assert wrong.matched == ("date",)
+    # And the comparison that fixes it. July's row wins on its own
+    # amount, so April's row is refused rather than accepted.
+    july_row = I.Identity(date="2026-07-17", total="118.43")
+    april_row = I.Identity(date="2026-04-16", total="99.99")
+    assert I.distinguish(None, july_row, [april_row],
+                         text=july).outcome == I.VERIFIED
+    assert I.distinguish(None, april_row, [july_row],
+                         text=july).outcome == I.REFUSED

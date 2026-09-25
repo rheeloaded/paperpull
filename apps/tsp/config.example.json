@@ -15,12 +15,11 @@
   "delay_max_seconds": 5.0,
   "pilot_count": 5,
   "browser": "auto",
-  "//refuse": "Off here, measured against all 25 documents in a real",
-  "//refuse2": "archive before it was ever switched on. Eight of them do",
-  "//refuse3": "not mention their own date at all, because the date on a",
-  "//refuse4": "mailbox row is when TSP delivered the document, not a date",
-  "//refuse5": "printed on it. A quarterly statement delivered 04/04 covers",
-  "//refuse6": "the quarter before and prints that period instead. With",
-  "//refuse7": "this on, a third of the archive would be refused and lost.",
-  "refuse_wrong_documents": false
+  "//refuse": "On. It was off, because eight of 25 documents do not mention",
+  "//refuse2": "their own date, a mailbox row being dated when TSP delivered",
+  "//refuse3": "it. A rule requiring the date would have lost a third of the",
+  "//refuse4": "archive. The check compares rows now, so a document printing",
+  "//refuse5": "nothing is unchecked rather than refused. Measured over all",
+  "//refuse6": "25: none refused, 82 of 144 neighbour swaps caught.",
+  "refuse_wrong_documents": true
 }

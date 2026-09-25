@@ -15,12 +15,12 @@
   "delay_min_seconds": 2.5,
   "delay_max_seconds": 5.0,
   "pilot_count": 5,
-  "//refuse": "Off, and it was on until the whole archive was measured.",
-  "//refuse2": "Three statements said it worked. Sixty four said otherwise.",
-  "//refuse3": "Eight dates carry more than one statement, because every",
-  "//refuse4": "account is billed on the same day, and the date is the only",
-  "//refuse5": "fact a row here carries. A vehicle loan statement does not",
-  "//refuse6": "print the words on its own row, so no other fact separates",
-  "//refuse7": "them either, and 22 pairs cannot be told apart.",
-  "refuse_wrong_documents": false
+  "//refuse": "On. It was off, because asking whether a statement mentions",
+  "//refuse2": "its row date got a yes from the wrong one, and eight dates",
+  "//refuse3": "here carry a statement per account. The check compares rows",
+  "//refuse4": "now, and the account name separates them. Measured over all",
+  "//refuse5": "64 statements: none refused, 303 of 372 neighbour swaps",
+  "//refuse6": "caught. A statement naming no account is left unchecked",
+  "//refuse7": "rather than thrown away.",
+  "refuse_wrong_documents": true
 }

@@ -21,6 +21,7 @@ sent to any external service.
 from __future__ import annotations
 
 from paperpull_core import delivery
+from paperpull_core import identity
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -475,6 +476,10 @@ class App:
 
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
+        # Every row, so a capture can be checked against the ones it
+        # could have come back with instead. Built once rather than per
+        # document, because it is the same list every time.
+        all_rows = [site.identity_for(d) for d in docs]
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
@@ -487,7 +492,9 @@ class App:
                 print(f"  DRY RUN - would save: {filename}")
                 continue
             try:
-                self.download_one(page, doc, filename)
+                self.download_one(
+                    page, doc, filename,
+                    rivals=identity.rivals_for(all_rows, i - 1))
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
@@ -497,7 +504,8 @@ class App:
                 self.stats["failed"] += 1
             self._delay()
 
-    def download_one(self, page, doc: Document, filename: str):
+    def download_one(self, page, doc: Document, filename: str,
+                     rivals=()):
         """Download one document PDF by navigating to the page that holds its
         download link and clicking it (T-Mobile fires a real download event)."""
         self.check_session(page)
@@ -524,6 +532,7 @@ class App:
             got = delivery.deliver(
                 page, request, out_path,
                 is_safe_url=site.is_safe_url, dl_dir=self._dl_dir,
+                rivals=rivals,
                 journal=self.journal,
                 strict=bool(self.config.get("refuse_wrong_documents", False)))
             print("  %s" % got.say())

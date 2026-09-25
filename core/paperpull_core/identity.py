@@ -300,6 +300,37 @@ def verify(path, expect: Optional[Identity], *, text: Optional[str] = None,
     return Verdict(outcome, tuple(strong), matched, chars)
 
 
+def rivals_for(rows, index: int, *, span: int = 3) -> tuple:
+    """The rows this one could actually be confused with.
+
+    Not the whole list, and the reason is measurable. A fact a competing
+    row shares stops counting, so every extra rival takes evidence out of
+    play. Against all sixty four Navy Federal statements at once, sixteen
+    of them ended up placeable by nothing. Against their neighbours, far
+    fewer do.
+
+    Three things go wrong in practice and this covers all of them.
+
+        an index off by one          the rows either side
+        two documents on one date    every row sharing that date
+        a dialog that never closed   the row before, already included
+
+    `rows` is the whole ordered list as Identity objects, `index` is the
+    position of the one being captured."""
+    rows = list(rows or ())
+    if not (0 <= index < len(rows)):
+        return ()
+    mine = rows[index]
+    span = max(1, int(span))
+    near = set(range(max(0, index - span), min(len(rows), index + span + 1)))
+    date = str(getattr(mine, "date", "") or "")
+    if date:
+        near.update(n for n, r in enumerate(rows)
+                    if str(getattr(r, "date", "") or "") == date)
+    near.discard(index)
+    return tuple(rows[n] for n in sorted(near))
+
+
 def distinguish(path, expect: Optional[Identity], others=(), *,
                 text: Optional[str] = None, pages: int = 5) -> Verdict:
     """Whether the saved PDF is `expect` rather than one of `others`.

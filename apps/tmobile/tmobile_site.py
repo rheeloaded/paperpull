@@ -380,6 +380,12 @@ def _btn_re_for(iso: str) -> Optional[re.Pattern]:
         re.I | re.S)
 
 
+def identity_for(doc) -> Identity:
+    """What a bill's row carries. A date and nothing else. There is no
+    amount and no document number on the history page."""
+    return Identity(date=str(getattr(doc, "date", "") or "")[:10])
+
+
 def bill_request(page, iso_date: str) -> Optional[DocumentRequest]:
     """Everything up to the click, for the bill dated `iso_date`.
 
