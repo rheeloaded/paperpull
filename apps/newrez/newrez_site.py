@@ -876,7 +876,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
         if trace is not None:
-            trace.append({"note": "no PDF arrived", "url": _where(page),
+            trace.append({"note": "no PDF arrived", "url": redact(_where(page)),
                           "downloads": len(downloads),
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
         log.info("click on %r produced no PDF", label)
