@@ -169,9 +169,18 @@ characters, reserved names, owners and split documents, for both kinds.
 Before it was committed the same comparison ran over every record in the
 maintainer's thirty real archives, 18,908 names, and none differed.
 
-## Setting a pattern today
+## Setting a pattern
 
-Until the panel's page exists, a pattern goes in an app's config.json.
+The control panel's **File names** tab builds one. Pick an app, click the
+parts you want in order, choose a separator and a date shape, and tick
+"skip if empty" for a part some documents lack. The preview shows what
+the three newest files you already have would be called, and each part
+shows how many of your files from that app have it. Save writes it to
+every receipts app or every statements app, every account's config in
+each, or to the chosen app alone. A copy of each config it changes goes
+in that app's `Backups` folder first. It renames nothing.
+
+A pattern can also be written into an app's config.json by hand.
 
 ```
 "filename_pattern_receipts": "{date:yyyymmdd} - {provider}[ -- {number}]",
@@ -189,7 +198,7 @@ line, preview first.
 
 ## What building it takes
 
-Steps 1 to 3 are built. The panel's page and the rename offer are next.
+Steps 1 to 4 are built. The rename offer is next.
 
 1. `core/paperpull_core/naming.py`, the parser and renderer, with its
    tests, including every example on #50 and a pattern of every error.

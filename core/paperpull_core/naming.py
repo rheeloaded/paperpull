@@ -273,3 +273,44 @@ def fields_of(record, *, date: str = "", summary: str = "", kind: str = "",
     }
     return out
 
+
+
+def preview(pattern: str, record, *, provider: str, owner: str = "",
+            receipts: bool = False, document_type: str = "") -> str:
+    """A document's name under `pattern`, the way a run would build it,
+    without binding an app. For the control panel's preview.
+
+    Only for a pattern somebody wrote. Under the default the kind is what
+    the app passed at the time, which is not in the record, and the name
+    already on disk is the preview."""
+    from .storage import sanitize_component, title_case
+    date = ""
+    summary = ""
+    if isinstance(record, dict):
+        date = str(record.get("date") or record.get("purchase_date") or "")
+        summary = str(record.get("summary") or "")
+    fields = fields_of(record, date=(date or "0000-00-00").strip(),
+                       summary=title_case(summary or "Purchase"),
+                       kind=document_type, provider=provider,
+                       owner=(owner or "").strip(), receipts=receipts)
+    return sanitize_component(render(pattern, fields)) + ".pdf"
+
+
+def fill_rates(records, receipts: bool = False) -> dict:
+    """How many records fill each field, for the settings page. Counts
+    only, the page shows them beside each field so nobody builds a
+    pattern on one this provider never fills."""
+    counts = dict.fromkeys(FIELDS, 0)
+    n = 0
+    for r in records or ():
+        if not isinstance(r, dict):
+            continue
+        n += 1
+        f = fields_of(r, receipts=receipts, provider="x")
+        for name in FIELDS:
+            if name == "owner":
+                continue
+            if str(f.get(name) or "").strip():
+                counts[name] += 1
+    counts["provider"] = n
+    return {"records": n, "filled": counts}

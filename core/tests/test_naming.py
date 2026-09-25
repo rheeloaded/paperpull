@@ -202,3 +202,45 @@ def test_every_filename_is_built_with_its_record(path):
         assert any(k.arg == "record" for k in call.keywords), (
             "%s:%d names a file without handing over its record"
             % (path.name, call.lineno))
+
+
+# -- what the settings page leans on ----------------------------------------------
+
+def test_owner_in_a_pattern_of_your_own_is_the_configured_owner(tmp_path, monkeypatch):
+    """Under the default the owner's name appears only when
+    owner_in_filename is on, as it always has. Somebody who writes
+    {owner} into a pattern wants it whatever that switch says."""
+    spec = AppSpec(provider="Acme", project_dir=tmp_path, kind=RECEIPT)
+    monkeypatch.setattr(storage, "_SPEC", spec)
+    monkeypatch.setattr(storage, "_FILENAME_OWNER", "")
+    storage.set_filename_patterns({"owner": "Jane",
+                                   "filename_pattern_receipts": "{owner} {date}"})
+    assert storage.build_pdf_filename("2026-09-23", "x") == "Jane 2026-09-23.pdf"
+    storage.set_filename_patterns({"owner": "Jane"})
+    assert storage.build_pdf_filename("2026-09-23", "x") == \
+        _old_build("Acme", "2026-09-23", "x"), "the default stays as it was"
+    storage.set_filename_patterns({})
+
+
+def test_a_preview_is_the_name_a_run_would_build(tmp_path, monkeypatch):
+    record = {"purchase_date": "2026-09-23", "summary": "computer accessories",
+              "order_number": "112-7124528-9515453", "document_type": "Receipt"}
+    pattern = "{date:yyyymmdd} - {provider}[ -- {number}] {summary}"
+    spec = AppSpec(provider="Amazon", project_dir=tmp_path, kind=RECEIPT)
+    monkeypatch.setattr(storage, "_SPEC", spec)
+    built = storage.build_pdf_filename(record["purchase_date"], record["summary"],
+                                       "Receipt", record=record, pattern=pattern)
+    shown = naming.preview(pattern, record, provider="Amazon", receipts=True,
+                           document_type="Receipt")
+    assert shown == built == \
+        "20260923 - Amazon -- 112-7124528-9515453 Computer Accessories.pdf"
+
+
+def test_fill_rates_count_and_never_carry_a_value():
+    records = [{"date": "2026-01-31", "account": "Checking CANARY 1234",
+                "category": "Statement"},
+               {"date": "2026-02-28", "account": "", "category": "Statement"}]
+    got = naming.fill_rates(records)
+    assert got["records"] == 2
+    assert got["filled"]["account"] == 1 and got["filled"]["date"] == 2
+    assert "CANARY" not in str(got)
