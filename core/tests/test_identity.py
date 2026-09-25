@@ -306,3 +306,118 @@ def test_a_failure_file_with_no_verdict_is_unchanged(tmp_path):
     path = failure.write_failure(tmp_path, "pilot", "read the rows",
                                  provider="Testco", say=lambda *a, **k: None)
     assert "identity" not in json.loads(Path(path).read_text("utf-8"))
+
+
+# -- the comparative check, for rows that share a fact ------------------------
+
+NFCU_CHECKING = ("Navy Federal Credit Union\n"
+                 "Combined Checking and Savings Statement\n"
+                 "Statement date 08/24/2026\n" + "Member copy. " * 12)
+NFCU_LOAN = ("Navy Federal Credit Union\n"
+             "Account Statement\n"
+             "Statement date 08/24/2026\n" + "Member copy. " * 12)
+
+CHECKING = I.Identity(date="2026-08-24", label="Checking and Savings")
+LOAN = I.Identity(date="2026-08-24", label="New Vehicle Loan")
+
+
+def test_two_rows_on_one_date_are_told_apart_by_what_only_one_prints():
+    """Eight Navy Federal dates carry a statement per account, because
+    they are all billed on the same day. Asking whether the document
+    mentions the date gets a yes from both."""
+    v = I.distinguish(None, CHECKING, [LOAN], text=NFCU_CHECKING)
+    assert v.outcome == I.VERIFIED
+    assert v.matched == ("label",)
+
+
+def test_the_neighbours_statement_is_refused_rather_than_accepted():
+    """The capture came back with the checking statement while the loan
+    statement was being written. Under the old check both mentioned the
+    date and it passed."""
+    v = I.distinguish(None, LOAN, [CHECKING], text=NFCU_CHECKING)
+    assert v.outcome == I.REFUSED
+    assert not v.ok
+
+
+def test_a_document_printing_nothing_that_separates_them_says_so():
+    """The loan statement names neither account. That is a document this
+    cannot place, not a document belonging to the other row, and the
+    difference is the whole reason for a third answer."""
+    v = I.distinguish(None, LOAN, [CHECKING], text=NFCU_LOAN)
+    assert v.outcome == I.UNCHECKED
+    assert v.ok, "a document was refused for failing to print something it never prints"
+
+
+def test_a_shared_date_stops_counting_as_evidence():
+    """Both rows carry it, so it says nothing about which one this is."""
+    v = I.distinguish(None, CHECKING, [LOAN], text=NFCU_CHECKING)
+    assert "date" not in v.checked
+
+
+# -- the Fairfax shape, where the document prints the neighbour's date --------
+
+FAIRFAX_JULY = ("Fairfax Water  Account 0718\n"
+                "Bill date 07/17/26   Due 08/17/26\n"
+                "Previous bill 04/16/26\n"
+                "Amount due 118.43\n" + "Please retain this notice. " * 12)
+
+JULY = I.Identity(date="2026-07-17", total="118.43")
+APRIL = I.Identity(date="2026-04-16", total="96.12")
+
+
+def test_a_bill_that_prints_the_previous_date_is_still_placed_correctly():
+    v = I.distinguish(None, JULY, [APRIL], text=FAIRFAX_JULY)
+    assert v.outcome == I.VERIFIED
+
+
+def test_and_the_previous_quarters_row_is_refused():
+    """The case the old check got wrong. April's date is on the July
+    bill, so verify said yes. April's amount is not, and the comparison
+    is what notices."""
+    v = I.distinguish(None, APRIL, [JULY], text=FAIRFAX_JULY)
+    assert v.outcome == I.REFUSED
+
+
+# -- it never refuses for want of a fact the provider does not print ----------
+
+def test_a_document_that_prints_none_of_its_facts_is_unchecked_not_refused():
+    """Eight of twenty five TSP documents do not mention their own date,
+    because a mailbox row is dated when it was delivered. Under a plain
+    all-must-match rule every one of those would be thrown away."""
+    quarterly = ("Thrift Savings Plan\nQuarterly Participant Statement\n"
+                 "For the period January 1 to March 31, 2022\n" + "TSP. " * 20)
+    delivered = I.Identity(date="2022-04-04")
+    other = I.Identity(date="2022-07-05")
+    v = I.distinguish(None, delivered, [other], text=quarterly)
+    assert v.outcome == I.UNCHECKED
+    assert v.ok
+
+
+def test_with_no_competing_rows_it_is_the_plain_check():
+    assert I.distinguish(None, EXPECT_ONE, [], text=PAGE + PAD).outcome == \
+        I.verify(None, EXPECT_ONE, text=PAGE + PAD).outcome
+
+
+EXPECT_ONE = I.Identity(number="8421997301")
+
+
+def test_a_scan_is_unreadable_here_too():
+    v = I.distinguish(None, CHECKING, [LOAN], text="")
+    assert v.outcome == I.UNREADABLE
+
+
+def test_nothing_to_compare_with_is_unchecked():
+    assert I.distinguish(None, None, [LOAN], text=NFCU_LOAN).outcome == I.UNCHECKED
+    assert I.distinguish(None, I.Identity(), [LOAN],
+                         text=NFCU_LOAN).outcome == I.UNCHECKED
+
+
+def test_the_comparative_verdict_leaks_no_value_either():
+    secret = I.Identity(date="2026-08-24", label="CANARYACCOUNT")
+    rival = I.Identity(date="2026-08-24", label="CANARYOTHER")
+    v = I.distinguish(None, secret, [rival],
+                      text="CANARYACCOUNT statement 08/24/2026 " * 6)
+    body = json.dumps(v.report())
+    for leak in ("CANARYACCOUNT", "CANARYOTHER", "08/24/2026", "2026-08-24"):
+        assert leak not in body, leak
+    assert "label" in body

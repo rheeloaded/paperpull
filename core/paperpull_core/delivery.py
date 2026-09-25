@@ -69,7 +69,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import capture
-from .identity import Identity, REFUSED, Verdict, verify
+from .identity import Identity, REFUSED, Verdict, distinguish
 
 log = logging.getLogger("paperpull.delivery")
 
@@ -114,6 +114,13 @@ class DocumentRequest:
     trigger: Optional[Callable[[], None]] = None
     url: str = ""
     expect: Optional[Identity] = None
+    # The other rows this one could be confused with, usually the rest
+    # of the list the document was chosen from. Asking whether a file
+    # mentions its row's date gets a yes from the wrong document when a
+    # provider bills every account on one day, or prints the previous
+    # period beside the current one. Asking which row it matches best
+    # does not. Empty is allowed and means the plain check.
+    rivals: tuple = field(default_factory=tuple)
     # Called on every poll while waiting for the document to turn up.
     # Navy Federal shows an inactivity modal that delays the blob tab
     # from opening, so something has to keep dismissing it or the wait
@@ -140,6 +147,7 @@ class DocumentRequest:
                 "waits_actively": self.while_waiting is not None,
                 "closes_tabs": bool(self.close_new_tabs),
                 "checkable": bool(self.expect and self.expect.is_checkable()),
+                "rivals": min(len(self.rivals or ()), 999),
                 "hints": sorted({h for h in (self.hints or ())
                                  if h in MECHANISMS})}
 
@@ -387,11 +395,11 @@ def deliver(page, request: DocumentRequest, out_path, *, is_safe_url,
                         armed=tuple(armed))
 
     return _finish(staged, out_path, request.expect, strict, mechanism,
-                   armed, note)
+                   armed, note, request.rivals)
 
 
 def _finish(staged: Path, out_path: Path, expect, strict: bool,
-            mechanism: str, armed, note) -> Delivery:
+            mechanism: str, armed, note, rivals=()) -> Delivery:
     """Check what was staged and either put it in place or destroy it.
 
     The one part that is the same whether the bytes were caught off a
@@ -407,7 +415,7 @@ def _finish(staged: Path, out_path: Path, expect, strict: bool,
         return Delivery(NOT_A_PDF, mechanism, armed=tuple(armed),
                         bytes_len=size)
 
-    verdict = verify(staged, expect)
+    verdict = distinguish(staged, expect, rivals)
     size = _size(staged)
     note("verify", outcome=verdict.outcome, mechanism=mechanism,
          checked=len(verdict.checked), matched=len(verdict.matched))
@@ -430,7 +438,7 @@ def _finish(staged: Path, out_path: Path, expect, strict: bool,
 
 
 def place(data: bytes, out_path, *, expect: Optional[Identity] = None,
-          journal=None, strict: bool = True) -> Delivery:
+          rivals=(), journal=None, strict: bool = True) -> Delivery:
     """For the apps that already have the bytes.
 
     Thirty three of the forty eight ask the provider for a document
@@ -469,11 +477,12 @@ def place(data: bytes, out_path, *, expect: Optional[Identity] = None,
 
     note("download", mechanism=ASK, got=True,
          checkable=bool(expect and expect.is_checkable()))
-    return _finish(staged, out_path, expect, strict, ASK, (ASK,), note)
+    return _finish(staged, out_path, expect, strict, ASK, (ASK,), note,
+                   rivals)
 
 
 def render(page, draw, out_path, *, expect: Optional[Identity] = None,
-           journal=None, strict: bool = True) -> Delivery:
+           rivals=(), journal=None, strict: bool = True) -> Delivery:
     """For the twelve providers where there is no file to catch.
 
     Costco, Gap, Amazon, Walmart, eBay, Kroger, Target, Affirm, Anthem,
@@ -514,7 +523,7 @@ def render(page, draw, out_path, *, expect: Optional[Identity] = None,
         return Delivery(NOTHING, RENDERED, armed=(RENDERED,))
 
     return _finish(staged, out_path, expect, strict, RENDERED,
-                   (RENDERED,), note)
+                   (RENDERED,), note, rivals)
 
 
 def _size(path) -> int:

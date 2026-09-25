@@ -938,3 +938,72 @@ def test_a_decoded_document_is_checked_like_any_other(monkeypatch, tmp_path):
     trimmed = PDF
     assert trimmed.startswith(b"%PDF-")
     assert D.place(trimmed, tmp_path / "f.pdf", expect=EXPECT).ok
+
+
+# -- competing rows travel with the request -----------------------------------
+
+CHECKING_TEXT = ("Navy Federal  Combined Checking and Savings Statement\n"
+                 "Statement date 08/24/2026\n" + "Member copy. " * 12)
+CHECKING_ROW = I.Identity(date="2026-08-24", label="Checking and Savings")
+LOAN_ROW = I.Identity(date="2026-08-24", label="New Vehicle Loan")
+
+
+def test_a_neighbour_on_the_same_date_is_caught_when_the_rows_are_given(
+        monkeypatch, tmp_path):
+    """Eight Navy Federal dates carry a statement per account. Without
+    the other rows this passes, because the date is on both."""
+    monkeypatch.setattr(I, "_text_of", lambda path, pages: CHECKING_TEXT)
+    out = tmp_path / "vehicle loan.pdf"
+    got = D.place(PDF, out, expect=LOAN_ROW, rivals=(CHECKING_ROW,))
+    assert got.outcome == D.WRONG
+    assert not out.exists()
+
+
+def test_and_without_them_the_same_capture_is_accepted(monkeypatch, tmp_path):
+    """The measurement that made rivals necessary, kept as a test."""
+    monkeypatch.setattr(I, "_text_of", lambda path, pages: CHECKING_TEXT)
+    got = D.place(PDF, tmp_path / "vehicle loan.pdf", expect=LOAN_ROW)
+    assert got.ok
+
+
+def test_the_right_document_still_passes_with_rivals(monkeypatch, tmp_path):
+    monkeypatch.setattr(I, "_text_of", lambda path, pages: CHECKING_TEXT)
+    got = D.place(PDF, tmp_path / "checking.pdf", expect=CHECKING_ROW,
+                  rivals=(LOAN_ROW,))
+    assert got.ok
+
+
+def test_a_document_that_separates_from_nobody_is_never_refused(
+        monkeypatch, tmp_path):
+    """The loan statement names neither account, so nothing places it.
+    Refusing it would throw away a good document, which is what turned
+    this check off for two providers before it was built."""
+    loan_text = ("Navy Federal  Account Statement\n"
+                 "Statement date 08/24/2026\n" + "Member copy. " * 12)
+    monkeypatch.setattr(I, "_text_of", lambda path, pages: loan_text)
+    out = tmp_path / "vehicle loan.pdf"
+    got = D.place(PDF, out, expect=LOAN_ROW, rivals=(CHECKING_ROW,))
+    assert got.ok
+    assert got.verdict.outcome == I.UNCHECKED
+    assert out.exists()
+
+
+def test_rivals_reach_render_and_deliver_too(monkeypatch, tmp_path):
+    monkeypatch.setattr(I, "_text_of", lambda path, pages: CHECKING_TEXT)
+    got = D.render(FakePage(), lambda p: Path(p).write_bytes(PDF),
+                   tmp_path / "a.pdf", expect=LOAN_ROW, rivals=(CHECKING_ROW,))
+    assert got.outcome == D.WRONG
+    page = FakePage()
+    got = D.deliver(page, D.DocumentRequest(
+        trigger=lambda: page.emit_download(FakeDownload()),
+        expect=LOAN_ROW, rivals=(CHECKING_ROW,)),
+        tmp_path / "b.pdf", is_safe_url=safe)
+    assert got.outcome == D.WRONG
+
+
+def test_how_many_rivals_is_reported_and_never_what_they_are():
+    d = D.DocumentRequest(expect=LOAN_ROW, rivals=(CHECKING_ROW, CHECKING_ROW))
+    said = d.describe()
+    assert said["rivals"] == 2
+    assert "Checking" not in json.dumps(said)
+    assert "2026-08-24" not in json.dumps(said)
