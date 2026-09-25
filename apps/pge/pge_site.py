@@ -53,8 +53,20 @@ from paperpull_core.dates import checked as _checked_date
 from paperpull_core.capture import fetch_with_status as _fetch_with_status
 from paperpull_core.controls import control_labels as _control_labels
 from paperpull_core.controls import is_next_control as _core_is_next
+from paperpull_core.ready import (count_reaches, count_settles, network_idle,
+                                  ready)
 
 log = logging.getLogger("pge_docs.site")
+
+# The run's journal, handed over by the orchestrator. None when nobody
+# set one, and ready() is happy with None, so a journal is never the
+# reason a working run stops.
+_journal = None
+
+
+def set_journal(journal) -> None:
+    global _journal
+    _journal = journal
 
 BASE = "https://myaccount.pge.com"
 URLS = {
@@ -718,33 +730,7 @@ def _pdf_from_here(page) -> Optional[bytes]:
     blob the page made rather than at an address on the site. A blob
     belongs to the page, so only the page can fetch it, which is what the
     in-page fetch is for."""
-    seen, blobs = [], []
-    url = page.url or ""
-    if url.startswith("blob:"):
-        blobs.append(url)
-    elif url and is_safe_url(url):
-        seen.append(url)
-    try:
-        for frame in page.frames:
-            f_url = frame.url or ""
-            if not f_url or f_url.startswith("about:"):
-                continue
-            if f_url.startswith("blob:") and f_url not in blobs:
-                blobs.append(f_url)
-            elif f_url not in seen and is_safe_url(f_url):
-                seen.append(f_url)
-    except Exception as e:
-        log.info("frames: %s", e)
-    try:
-        for src in page.eval_on_selector_all(
-                "iframe, embed, object",
-                "els => els.map(e => e.src || e.data || '').filter(Boolean)") or []:
-            if src.startswith("blob:") and src not in blobs:
-                blobs.append(src)
-            elif src not in seen and is_safe_url(src):
-                seen.append(src)
-    except Exception as e:
-        log.info("embedded sources: %s", e)
+    seen, blobs = _viewer_sources(page)
 
     for candidate in seen[:6]:
         try:
@@ -766,6 +752,80 @@ def _pdf_from_here(page) -> Optional[bytes]:
         if body[:5] == b"%PDF-":
             return body
     return None
+
+
+# What a viewer sits in. CSS and not Playwright's dialect, because ready()
+# counts these inside the page.
+VIEWER_ELEMENTS = "iframe, embed, object"
+
+
+def _viewer_sources(page) -> Tuple[list, list]:
+    """Every address the tab and its viewers point at, on PG&E or a blob.
+
+    Split out of _pdf_from_here so the same reading can say, before a
+    click and after it, whether anything new arrived."""
+    seen, blobs = [], []
+    url = page.url or ""
+    if url.startswith("blob:"):
+        blobs.append(url)
+    elif url and is_safe_url(url):
+        seen.append(url)
+    try:
+        for frame in page.frames:
+            f_url = frame.url or ""
+            if not f_url or f_url.startswith("about:"):
+                continue
+            if f_url.startswith("blob:") and f_url not in blobs:
+                blobs.append(f_url)
+            elif f_url not in seen and is_safe_url(f_url):
+                seen.append(f_url)
+    except Exception as e:
+        log.info("frames: %s", e)
+    try:
+        for src in page.eval_on_selector_all(
+                VIEWER_ELEMENTS,
+                "els => els.map(e => e.src || e.data || '').filter(Boolean)") or []:
+            if src.startswith("blob:") and src not in blobs:
+                blobs.append(src)
+            elif src not in seen and is_safe_url(src):
+                seen.append(src)
+    except Exception as e:
+        log.info("embedded sources: %s", e)
+    return seen, blobs
+
+
+def _sources_now(page) -> set:
+    try:
+        seen, blobs = _viewer_sources(page)
+        return set(seen) | set(blobs)
+    except Exception:
+        return set()
+
+
+def _wait_for_viewer(page, before: set):
+    """Wait for the bill to arrive somewhere the page can be asked for it.
+
+    His second failure file showed a dialog and an iframe, and the page
+    was read once, straight after the popup gave up, with no wait of its
+    own. Whether a viewer in a dialog has its source by then is a guess,
+    so this makes three of them and the run says which one it took (#33).
+    Ready means an address that was not there before the click, a moved
+    tab or a viewer's source, so a frame the history page always had
+    cannot pass for the bill."""
+    def arrived(p):
+        return bool(_sources_now(p) - before)
+
+    try:
+        viewers = int(page.evaluate(
+            "(s) => document.querySelectorAll(s).length", VIEWER_ELEMENTS) or 0)
+    except Exception:
+        viewers = 0
+    return ready(page,
+                 [count_reaches(VIEWER_ELEMENTS, viewers + 1, within_ms=6000),
+                  network_idle(within_ms=8000),
+                  count_settles(VIEWER_ELEMENTS, quiet_ms=1500)],
+                 invariant=arrived, budget_ms=15000, journal=_journal,
+                 name="bill viewer")
 
 
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
@@ -835,6 +895,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
 
         existing_pages = set(page.context.pages)
         history_url = page.url or ""
+        before_click = _sources_now(page)
         captured_download = [None]
         captured_response_bytes = [None]
 
@@ -928,6 +989,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 # anywhere (#33).
                 print("  [site] the control opened nothing this was watching, "
                       "so the page itself is asked what it is holding")
+            _wait_for_viewer(page, before_click)
             body = _pdf_from_here(page)
             if body:
                 captured_response_bytes[0] = body

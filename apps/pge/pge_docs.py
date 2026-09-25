@@ -217,6 +217,9 @@ class App:
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self.requests
+        # The site layer waits through paperpull_core.ready, and which
+        # wait worked is only worth anything if it reaches the journal.
+        site.set_journal(self.journal)
         return self._work_page
 
     def close(self):
