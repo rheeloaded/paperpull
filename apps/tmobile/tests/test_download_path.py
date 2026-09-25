@@ -96,3 +96,28 @@ def test_the_stand_in_refuses_what_the_real_call_would():
         StrictDelivery()._fake("deliver")(
             object(), delivery.DocumentRequest(), "x.pdf",
             is_safe_url=lambda u: True, not_a_real_keyword=1)
+
+
+def test_a_run_that_saved_nothing_still_hands_the_failure_file_a_journal(
+        tmp_path, monkeypatch):
+    """Every tester file sent in on 2026-09-25 carried no journal, because
+    the only thing that made one was a document being saved. The real
+    write_failure runs here, with only the file writing caught."""
+    from paperpull_core import failure
+    StrictDelivery(outcome=delivery.NOTHING).install(monkeypatch)
+    app, _ = _app(tmp_path, monkeypatch)
+    del app.write_failure            # the real method, not the stub
+    app._journal = None              # as a real run starts
+    app._work_page = object()
+    app._requests = None
+    app.paths.diagnostics = tmp_path
+    handed = {}
+    monkeypatch.setattr(failure, "write_failure",
+                        lambda *a, **kw: handed.update(kw) or None)
+    app.process(_docs()[:2])
+    journal = handed.get("journal")
+    assert journal is not None, "the failure file was given no journal"
+    kinds = [(e["kind"], e.get("phase") or e.get("name"))
+             for e in journal.report()["entries"]]
+    assert ("op", "open_item") in kinds
+    assert ("checkpoint", "when the run gave up") in kinds
