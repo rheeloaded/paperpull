@@ -292,3 +292,27 @@ def test_every_naming_route_refuses_another_site():
 
 def test_saving_is_refused_in_the_sample():
     assert app_module._not_in_sample in _deps("/api/naming/save", "POST")
+
+
+# -- what the rename offer is made for -----------------------------------------
+
+def test_the_offer_names_every_app_a_shared_save_changed(apps):
+    r = save({"app": "target", "scope": "shared", "pattern": "{date} {provider}"})
+    assert sorted(r["changed"]) == ["target", "walmart"]
+
+
+def test_an_app_with_its_own_pattern_is_not_offered_after_a_shared_save(apps):
+    """Its files are named by its own pattern, so the shared one changed
+    nothing about them and renaming them would be for nothing."""
+    save({"app": "walmart", "scope": "own", "pattern": "{date} W"})
+    r = save({"app": "target", "scope": "shared", "pattern": "{date} {provider}"})
+    assert r["changed"] == ["target"]
+
+
+def test_an_own_save_offers_that_app_alone(apps):
+    assert save({"app": "target", "scope": "own", "pattern": "{date} {number}"})["changed"] == ["target"]
+
+
+def test_a_save_that_changed_nothing_offers_nothing(apps):
+    save({"app": "target", "scope": "own", "pattern": "{date} {number}"})
+    assert save({"app": "target", "scope": "own", "pattern": "{date} {number}"})["changed"] == []

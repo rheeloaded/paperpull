@@ -36,6 +36,7 @@ THE RULES
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
@@ -346,12 +347,18 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
     # discovers from. Reading the row alone gave back the name the file
     # already had, so a rename reported that everything was already named
     # correctly while the filenames plainly lacked the new part (#26).
-    current = _summaries_now(app)
+    current = _records_now(app)
 
     def build_name(row):
-        summary = current.get(_record_key(row)) or _first(row, _SUMMARY_KEYS)
+        # The whole record, not the row alone, because a pattern can name
+        # a file for its order number, account or total (#50), and a
+        # rename that left them out would name a file differently from a
+        # download under the very same pattern.
+        record = current.get(_record_key(row)) or {}
+        summary = (record.get("summary") or "").strip() or _first(row, _SUMMARY_KEYS)
         return build_pdf_filename(_first(row, _DATE_KEYS), summary,
-                                  _first(row, _TYPE_KEYS))
+                                  _first(row, _TYPE_KEYS), part=_part_of(row),
+                                  record=record)
 
     changes = plan(primary_rows, build_name,
                    distinguisher=lambda row: _first(row, _ID_KEYS),
@@ -390,12 +397,35 @@ def _record_key(row: dict):
     return ("doc", _first(row, _DATE_KEYS), (row.get("Document Title") or "").strip())
 
 
-def _summaries_now(app) -> dict:
-    """The summary each document would be given today, by row key.
+_PART = re.compile(r"\((\d+) of (\d+)\)\.pdf$", re.IGNORECASE)
 
-    Discovery first, because that is the one an app refreshes when it
-    learns to read a page better. Progress after it, for anything
-    discovery no longer lists."""
+
+def _part_of(row: dict):
+    """The "(1 of 3)" a file was given when its order came as several
+    invoices. Only the file knows it, and dropping it would rename the
+    first of a split order as though it were the whole."""
+    m = _PART.search((row.get("PDF Filename") or "").strip())
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _key_of_record(rec: dict):
+    """The same key _record_key gives a ledger row, from a record."""
+    order = str(rec.get("order_number") or rec.get("document_id") or "").strip()
+    if order:
+        return ("order", order)
+    date = str(rec.get("date") or rec.get("purchase_date") or "").strip()
+    if not date:
+        return None
+    return ("doc", date, str(rec.get("title") or "").strip())
+
+
+def _records_now(app) -> dict:
+    """What the app knows about each document today, by row key.
+
+    Progress first and discovery over it, because discovery is the one an
+    app refreshes when it learns to read a page better, and progress
+    still holds anything discovery no longer lists. A value discovery
+    leaves empty does not wipe one progress has."""
     out = {}
     for store_name in ("progress", "discovery"):
         store = getattr(app, store_name, None)
@@ -405,15 +435,9 @@ def _summaries_now(app) -> dict:
         for rec in data.values():
             if not isinstance(rec, dict):
                 continue
-            summary = (rec.get("summary") or "").strip()
-            if not summary:
+            key = _key_of_record(rec)
+            if key is None:
                 continue
-            order = (rec.get("order_number") or "").strip()
-            if order:
-                out[("order", order)] = summary
-                continue
-            date = (rec.get("date") or rec.get("purchase_date") or "").strip()
-            title = (rec.get("title") or "").strip()
-            if date:
-                out[("doc", date, title)] = summary
+            merged = out.setdefault(key, {})
+            merged.update({k: v for k, v in rec.items() if v not in (None, "")})
     return out
