@@ -7,6 +7,51 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.34.2] - 2026-09-25
+
+Five tester repairs from one night of reports, and the safeguard that
+would have stopped 0.34.0's breakage from ever shipping.
+
+### Fixed
+- **PG&E presses View Bill PDF once.** A press that opened no tab was
+  pressed again, which opened a second dialog on his account, and the
+  wait for a download slept through the events it was waiting for. It
+  now waits for the bill's viewer, and reads a bill that Salesforce
+  hands back as base64 text inside its own answer, which is the one
+  place nothing was looking (#33).
+- **Newrez waits for its statement list.** Each document reloaded the
+  page twice and read it before Newrez had finished signing back in, so
+  one statement in five happened to work. A 1098 is looked for on the
+  yearly page, where it lives (#38).
+- **State Farm no longer looks for documents from 2028.** Old records
+  filed under the date a document stays online were tried first. They
+  are cleared, nothing can be dated in the future, and the document that
+  appears under View Documents is pressed (#37).
+- **Golden 1 takes a statement's date only from the bank's dated
+  links.** A date printed near a View PDF control named a statement the
+  bank never listed, and a saved statement that does not show its date
+  goes to Manual Review instead of Statements (#35).
+- **AT&T brings back the 2025 bills that 0.34.0 filled with 2026
+  copies.** A record whose bill a year later has exactly the same size
+  and page count is cleared so the real bill is fetched, and the copy is
+  moved to Manual Review. The Date range control now records what it
+  shows when pressed (#26).
+- **AT&T's Date range goes through the dropdown filter** that every
+  other app uses, which 0.34.1 skipped.
+- **Costco counted a refused wrong receipt as an ordinary failure.**
+- **Two found by a review before this release.** PG&E could have saved
+  the viewer an earlier bill left open under the next bill's date when a
+  press brought nothing new, and it now fetches only what is new. AT&T's
+  Date range trace kept masked text of anything that appeared, which let
+  a name, a street and a phone number through in a test, and it now keeps
+  only a date filter's own words and reports everything else by length.
+
+### Added
+- **Every app on the shared capture code runs its real download path in
+  a test.** A stand-in for the capture holds every call to the real
+  arguments, so a mistake like 0.34.0's fails in the test suite instead
+  of on an account. A new check fails any app that captures without one.
+
 ## [0.34.1] - 2026-09-25
 
 A repair release. 0.34.0 broke four providers outright, and an
