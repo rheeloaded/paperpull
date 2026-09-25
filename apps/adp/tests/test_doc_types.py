@@ -292,3 +292,60 @@ def test_adps_own_refusal_is_written_down_and_not_only_printed():
     assert "self.write_failure(" in blocked
     not_done = src.split("except site.StepUpNotDone")[1][:900]
     assert "self.write_failure(" in not_done
+
+
+# -- a pilot that never reached the thing that can fail (#46) ----------------
+
+class _Disc:
+    def __init__(self, data):
+        self.data = data
+
+
+def _doc(date, category, title="x"):
+    return {"date": date, "category": category, "title": title, "summary": title}
+
+
+def _app_with(records):
+    import adp_docs as docs
+
+    class _A(docs.App):
+        def __init__(self):
+            self.discovery = _Disc({str(i): r for i, r in enumerate(records)})
+            self.args = type("a", (), {"max_docs": None, "year": None,
+                                       "start_date": None, "end_date": None,
+                                       "type": None})()
+            self.config = {"pilot_count": 5}
+
+        def _in_scope(self, d):
+            return True
+    return _A()
+
+
+def test_a_pilot_keeps_room_for_a_tax_form():
+    """Tax forms sort last so an unanswered identity check holds up no
+    pay statement. Taking the first five then meant a pilot was five pay
+    statements every time, and the check ADP puts in front of a W-2 was
+    the one thing a pilot never exercised."""
+    from paperpull_core import doc_types as dt
+    records = [_doc("2026-09-%02d" % (d + 1), dt.STATEMENT) for d in range(9)]
+    records += [_doc("2025-12-31", dt.TAX, "W-2"), _doc("2024-12-31", dt.TAX, "W-2")]
+    chosen = _app_with(records)._pilot_selection(5)
+    kinds = [d.category for d in chosen]
+    assert kinds.count(dt.TAX) == 1, "one tax form, not five"
+    assert len(chosen) == 5
+    assert kinds[-1] == dt.TAX, "and it still runs last"
+
+
+def test_an_account_with_no_tax_forms_pilots_as_before():
+    from paperpull_core import doc_types as dt
+    records = [_doc("2026-09-%02d" % (d + 1), dt.STATEMENT) for d in range(9)]
+    chosen = _app_with(records)._pilot_selection(5)
+    assert len(chosen) == 5
+    assert all(d.category == dt.STATEMENT for d in chosen)
+
+
+def test_a_pilot_of_one_still_proves_the_hard_part():
+    from paperpull_core import doc_types as dt
+    records = [_doc("2026-09-01", dt.STATEMENT), _doc("2025-12-31", dt.TAX, "W-2")]
+    chosen = _app_with(records)._pilot_selection(1)
+    assert [d.category for d in chosen][-1] == dt.TAX

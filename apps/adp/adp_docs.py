@@ -468,6 +468,29 @@ class App:
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
 
+    def _pilot_selection(self, limit: int) -> List[Document]:
+        """The newest few, and one tax form among them.
+
+        Tax forms sort last, so that an identity check going unanswered
+        holds up no pay statement. Taking the first few then meant a
+        pilot was five pay statements every time, and the one thing on
+        this provider that can fail, the check ADP puts in front of a W-2,
+        was the one thing a pilot never touched. A tester found that by
+        running Pilot, seeing it skip five statements he already had, and
+        then having to run All to learn whether tax forms worked (#46).
+
+        So a pilot keeps room for the newest tax form. It still runs
+        last, which is the property worth keeping."""
+        docs = self._select(limit=None)
+        if not limit:
+            return docs
+        tax = [d for d in docs if d.category == doc_types.TAX]
+        rest = [d for d in docs if d.category != doc_types.TAX]
+        if not tax:
+            return docs[:limit]
+        chosen = rest[:max(limit - 1, 1)] + tax[:1]
+        return chosen[:max(limit, 2)]
+
     def _already_done(self, doc: Document) -> bool:
         """Skip documents already handled. A document that was successfully
         downloaded once is done FOR GOOD - it is not re-downloaded even if you
@@ -695,7 +718,7 @@ class App:
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.\n")
         self.cmd_discover()
-        docs = self._select(limit=self.config.get("pilot_count", 5))
+        docs = self._pilot_selection(self.config.get("pilot_count", 5))
         if not docs:
             print("\nNo documents in scope to pilot. Run --diagnose.")
             return
