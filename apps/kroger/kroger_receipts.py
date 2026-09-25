@@ -438,6 +438,13 @@ class App:
                 print("  Already completed and PDF verified - skipping.")
                 self.stats["skipped_completed"] += 1
                 continue
+            # Which document the run is on, so a failure file says how far
+            # it got and whether it ever reached a second one.
+            try:
+                self.journal.op("next_item" if i > 1 else "open_item",
+                                "take a document", ordinal=i)
+            except Exception:
+                pass
             try:
                 self.process_one(page, purchase, dry_run=dry_run)
             except KeyboardInterrupt:
@@ -962,6 +969,14 @@ class App:
         if self.stats.get("failure_files"):
             return
         extra = {"postmortem": postmortem} if postmortem else None
+        # A checkpoint at the moment it gave up. It is also what makes the
+        # journal when nothing had written to it yet, and every tester file
+        # sent in on 2026-09-25 came back without one for that reason.
+        try:
+            if getattr(self, "_work_page", None) is not None:
+                self.journal.checkpoint("when the run gave up")
+        except Exception:
+            pass
         path = failure.write_failure(
             self.paths.diagnostics,
             command=self.stats.get("mode") or "run",

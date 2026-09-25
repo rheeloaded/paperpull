@@ -166,3 +166,26 @@ def test_the_failure_file_carries_the_calls(entry):
     m = re.search(r"def write_failure\(self.*?(?=\n    def )",
                   source(entry), re.S)
     assert "requests=self._requests" in m.group(0)
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_the_failure_file_has_a_journal_even_when_nothing_was_saved(entry):
+    """The journal was made the first time something wrote to it, and in
+    most apps the only thing that wrote was a document being saved. Every
+    failure file testers sent in on 2026-09-25, from five providers, came
+    back with no journal at all, which is the run that needed one. A
+    checkpoint as the run gives up makes it, and records the page's state
+    at that moment."""
+    m = re.search(r"def write_failure\(self.*?(?=\n    def )", source(entry), re.S)
+    assert m and 'self.journal.checkpoint("when the run gave up")' in m.group(0)
+    assert m.group(0).index("when the run gave up") < m.group(0).index(
+        "failure.write_failure(")
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
+def test_the_journal_says_which_document_the_run_was_on(entry):
+    """So a failure file says how far a run got and whether it ever
+    reached a second document, which is where the bugs that work once and
+    fail twice live."""
+    text = source(entry)
+    assert '"next_item" if i > 1 else "open_item"' in text
