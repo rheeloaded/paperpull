@@ -492,7 +492,7 @@ class App:
             return
 
         if dry_run:
-            filename = build_pdf_filename(purchase.purchase_date, purchase.summary)
+            filename = build_pdf_filename(purchase.purchase_date, purchase.summary, record=purchase)
             print(f"  DRY RUN - would save: {filename}")
             return
 
@@ -541,7 +541,7 @@ class App:
         # the row itself is asked first when there is nothing to fetch (#42).
         if not url or not site.is_safe_url(url):
             folder = self.paths.folder_for(purchase.purchase_type, "Receipt")
-            filename = build_pdf_filename(purchase.purchase_date, purchase.summary, "Receipt")
+            filename = build_pdf_filename(purchase.purchase_date, purchase.summary, "Receipt", record=purchase)
             out_path = unique_path(folder, filename, self.config["max_path_length"],
                                    distinguisher=purchase.order_number)
             trace: list = []
@@ -573,7 +573,7 @@ class App:
 
         purchase.document_type = "Receipt"
         folder = self.paths.folder_for(purchase.purchase_type, purchase.document_type)
-        filename = build_pdf_filename(purchase.purchase_date, purchase.summary, purchase.document_type)
+        filename = build_pdf_filename(purchase.purchase_date, purchase.summary, purchase.document_type, record=purchase)
         out_path = unique_path(folder, filename, self.config["max_path_length"],
                                distinguisher=purchase.order_number)
         if out_path.name != filename:
@@ -908,7 +908,7 @@ class App:
             old_path = Path(r.get("PDF Full Path") or "")
             date = r.get("Purchase Date") or (old_path.name[:10] if old_path.name else "")
             doc_type = r.get("Document Type") or "Receipt"
-            new_name = build_pdf_filename(date, new_summary, doc_type)
+            new_name = build_pdf_filename(date, new_summary, doc_type, record=prog)
             if old_path.exists():
                 new_path = unique_path(old_path.parent, new_name,
                                        self.config["max_path_length"])

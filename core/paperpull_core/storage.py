@@ -20,6 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+from .spec import RECEIPT
+
 # ---------------------------------------------------------------------------
 # Paths / configuration
 # ---------------------------------------------------------------------------
@@ -84,10 +86,49 @@ def load_config(path: Optional[Path] = None) -> dict:
     cfg.setdefault("browser", "auto")
     for key, value in sp.config_defaults.items():
         cfg.setdefault(key, value)
+    # How files are named (#50). Read here because every app loads its
+    # config before it names anything, so no app has to remember to.
+    set_filename_patterns(cfg)
     return cfg
 
 
 _FILENAME_OWNER = ""
+
+# The file naming pattern this run uses, or "" for the default of its kind.
+_FILENAME_PATTERN = ""
+_PATTERN_WARNED = set()
+
+
+def set_filename_patterns(config: dict) -> str:
+    """Choose the pattern this app names files with, from its config.
+
+    An app's own filename_pattern wins, then the one for its kind,
+    filename_pattern_receipts or filename_pattern_statements, then the
+    default, which is exactly how names were built before patterns
+    existed. A pattern that cannot be used is reported once and the
+    default is used instead, because a typo in a setting must never be
+    the reason a download run stops. Returns the pattern chosen."""
+    from . import naming
+    global _FILENAME_PATTERN
+    receipts = spec().kind == RECEIPT if _SPEC is not None else False
+    chosen = ""
+    for key in ("filename_pattern",
+                "filename_pattern_receipts" if receipts
+                else "filename_pattern_statements"):
+        value = (config or {}).get(key)
+        if isinstance(value, str) and value.strip():
+            chosen = value.strip()
+            break
+    if chosen:
+        problem = naming.check(chosen)
+        if problem:
+            if chosen not in _PATTERN_WARNED:
+                _PATTERN_WARNED.add(chosen)
+                print("The file naming pattern in config.json cannot be used, "
+                      "so files keep their usual names. %s" % problem)
+            chosen = ""
+    _FILENAME_PATTERN = chosen
+    return chosen
 
 
 def set_filename_owner(name: str) -> None:
@@ -229,15 +270,37 @@ def sanitize_component(name: str, max_len: int = 120) -> str:
 
 def build_pdf_filename(purchase_date: str, summary: str,
                        document_type: str = "Receipt",
-                       part: Optional[tuple] = None, owner=None) -> str:
-    """YYYY-MM-DD [Owner ]<Provider> <Summary> <Receipt|Invoice>[ (i of n)].pdf"""
+                       part: Optional[tuple] = None, owner=None,
+                       record=None, pattern: Optional[str] = None) -> str:
+    """A document's file name, from the naming pattern (#50).
+
+    With no pattern set, the default for the app's kind, which is exactly
+    YYYY-MM-DD [Owner ]<Provider> <Summary> <Receipt|Invoice>[ (i of n)].pdf
+    as it always was. `record` is the app's own record, which is where a
+    pattern finds fields beyond the date, the summary and the kind, such as
+    an order number or an account. `pattern` is for a preview, and a run
+    leaves it out and uses the one its config chose."""
+    from . import naming
     date = (purchase_date or "0000-00-00").strip()
     summary = title_case(summary or "Purchase")
     who_name = _FILENAME_OWNER if owner is None else owner
-    who = f"{who_name.strip()} " if who_name and who_name.strip() else ""
-    base = f"{date} {who}{spec().provider} {summary} {document_type}"
-    if part and part[1] > 1:
-        base += f" ({part[0]} of {part[1]})"
+    receipts = spec().kind == RECEIPT
+    chosen = pattern or _FILENAME_PATTERN or (
+        naming.DEFAULT_RECEIPTS if receipts else naming.DEFAULT_STATEMENTS)
+    fields = naming.fields_of(record, date=date, summary=summary,
+                              kind=document_type, provider=spec().provider,
+                              owner=(who_name or "").strip(), part=part,
+                              receipts=receipts)
+    if chosen in (naming.DEFAULT_RECEIPTS, naming.DEFAULT_STATEMENTS):
+        # The default says exactly what the call said, and nothing the
+        # record adds. A statements app passes no kind, and filling it
+        # from the record's category would rename every statement.
+        fields["kind"] = document_type or ""
+    try:
+        base = naming.render(chosen, fields)
+    except naming.PatternError:
+        base = naming.render(naming.DEFAULT_RECEIPTS if receipts
+                             else naming.DEFAULT_STATEMENTS, fields)
     return sanitize_component(base) + ".pdf"
 
 

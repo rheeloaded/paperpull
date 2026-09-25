@@ -535,7 +535,7 @@ class App:
                 print("  Already downloaded and verified - skipping.")
                 self.stats["skipped_completed"] += 1
                 continue
-            filename = build_pdf_filename(doc.date, doc.summary, "")
+            filename = build_pdf_filename(doc.date, doc.summary, "", record=doc)
             if dry_run:
                 print(f"  DRY RUN - would save: {filename}")
                 continue
@@ -599,7 +599,7 @@ class App:
 
         doc.account = facts.addressee or doc.account
         doc.summary = summary
-        filename = build_pdf_filename(doc.date, summary, "")
+        filename = build_pdf_filename(doc.date, summary, "", record=doc)
         if filename == out_path.name:
             return out_path
         target = unique_path(out_path.parent, filename,
