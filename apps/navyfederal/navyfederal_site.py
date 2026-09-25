@@ -608,6 +608,18 @@ def nfcu_collect(page):
     return docs
 
 
+def identity_for(doc) -> Identity:
+    """A date, and the account the row belonged to.
+
+    The account is the fact that matters here. Every account is billed
+    on the same day, so eight dates in this archive carry more than one
+    statement and the date alone places none of them. The account name
+    is useless on its own, since every statement in a group carries it,
+    and decisive against the statement beside it."""
+    return Identity(date=str(getattr(doc, "date", "") or "")[:10],
+                    label=str(getattr(doc, "account", "") or ""))
+
+
 def statement_request(page, account: str, date: str):
     """Everything up to the View click, for the statement dated `date`.
 

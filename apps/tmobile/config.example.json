@@ -15,5 +15,8 @@
   "delay_min_seconds": 2.5,
   "delay_max_seconds": 5.0,
   "pilot_count": 5,
+  "//refuse": "On. Each bill verifies against its own date and refuses the",
+  "//refuse2": "months either side. Only one bill was on disk to measure, so",
+  "//refuse3": "run tools/identity_fit.py once the archive has a few.",
   "refuse_wrong_documents": true
 }

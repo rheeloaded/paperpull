@@ -22,6 +22,7 @@ service.
 from __future__ import annotations
 
 from paperpull_core import delivery
+from paperpull_core import identity
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -476,6 +477,10 @@ class App:
 
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
+        # Every row, so a capture can be checked against the ones it
+        # could have come back with instead. Built once rather than per
+        # document, because it is the same list every time.
+        all_rows = [site.identity_for(d) for d in docs]
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
@@ -488,7 +493,9 @@ class App:
                 print(f"  DRY RUN - would save: {filename}")
                 continue
             try:
-                self.download_one(page, doc, filename)
+                self.download_one(
+                    page, doc, filename,
+                    rivals=identity.rivals_for(all_rows, i - 1))
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
@@ -498,7 +505,7 @@ class App:
                 self.stats["failed"] += 1
             self._delay()
 
-    def _deliver_statement(self, page, doc, out_path):
+    def _deliver_statement(self, page, doc, out_path, rivals=()):
         """One statement, with the one retry this provider needs.
 
         Retried only when nothing came back at all, which is what a dead
@@ -513,7 +520,8 @@ class App:
                 continue
             got = delivery.deliver(
                 page, request, out_path,
-                is_safe_url=site.is_safe_url, journal=self.journal,
+                is_safe_url=site.is_safe_url, rivals=rivals,
+                journal=self.journal,
                 strict=bool(self.config.get("refuse_wrong_documents", False)))
             print("  %s" % got.say())
             if got.outcome != delivery.NOTHING or attempt == 2:
@@ -522,7 +530,8 @@ class App:
                 return got
         return None
 
-    def download_one(self, page, doc: Document, filename: str):
+    def download_one(self, page, doc: Document, filename: str,
+                     rivals=()):
         """Download one document PDF: navigate (by SPA clicks, never page.goto)
         to the Statements & Year End Summaries page, click the row's Download,
         pick 'Billing Statement (PDF)' in the file-type dialog, and capture."""
@@ -547,7 +556,7 @@ class App:
         # produces, and checking it is this statement, is the
         # interceptor's. The retry is ours, because TD's session dies
         # quietly and the first click often does nothing at all.
-        got = self._deliver_statement(page, doc, out_path)
+        got = self._deliver_statement(page, doc, out_path, rivals=rivals)
         if got is not None and got.outcome == delivery.WRONG:
             why = "the statement that downloaded is not the one it was listed as"
             self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)

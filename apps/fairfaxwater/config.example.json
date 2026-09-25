@@ -14,14 +14,11 @@
   "delay_max_seconds": 5.0,
   "pilot_count": 5,
   "browser": "auto",
-  "//refuse": "Off here, and the reason is worth knowing. Every Fairfax",
-  "//refuse2": "bill prints the PREVIOUS bill's date next to its own, so the",
-  "//refuse3": "July bill mentions 04/16/26 and passes a check for the April",
-  "//refuse4": "bill. The date is the only fact a row here carries, so the",
-  "//refuse5": "check cannot tell adjacent quarters apart, which is exactly",
-  "//refuse6": "the wrong-document case. A second fact does not repair it,"
-  ,
-  "//refuse7": "because a check passes when ANY fact matches and the date",
-  "//refuse8": "matches wrongly. That needs an all-must-match mode to fix.",
-  "refuse_wrong_documents": false
+  "//refuse": "On. It was off, because every bill prints the PREVIOUS",
+  "//refuse2": "bill's date beside its own, so July passed a check for April.",
+  "//refuse3": "The check compares rows now, and July also carries its own",
+  "//refuse4": "amount while April does not, so July wins and April is",
+  "//refuse5": "refused. Measured over 4 bills: none refused, 10 of 12",
+  "//refuse6": "neighbour swaps caught.",
+  "refuse_wrong_documents": true
 }

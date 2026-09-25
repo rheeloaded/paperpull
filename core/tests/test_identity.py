@@ -421,3 +421,51 @@ def test_the_comparative_verdict_leaks_no_value_either():
     for leak in ("CANARYACCOUNT", "CANARYOTHER", "08/24/2026", "2026-08-24"):
         assert leak not in body, leak
     assert "label" in body
+
+
+# -- which rows count as competing --------------------------------------------
+
+def rows(*specs):
+    return [I.Identity(date=d, label=lab) for d, lab in specs]
+
+
+def test_the_rows_either_side_are_rivals():
+    """An index off by one is the commonest way a capture comes back
+    with the wrong document."""
+    r = rows(("2026-01-01", ""), ("2026-02-01", ""), ("2026-03-01", ""),
+             ("2026-04-01", ""), ("2026-05-01", ""))
+    got = I.rivals_for(r, 2, span=1)
+    assert [x.date for x in got] == ["2026-02-01", "2026-04-01"]
+
+
+def test_every_row_sharing_the_date_is_a_rival_however_far_away():
+    """Navy Federal bills every account on one day, and those rows can
+    be anywhere in the list."""
+    r = rows(("2026-08-24", "Checking"), ("2026-07-24", "Checking"),
+             ("2026-06-24", "Checking"), ("2026-05-24", "Checking"),
+             ("2026-08-24", "Vehicle Loan"))
+    got = I.rivals_for(r, 0, span=1)
+    assert any(x.label == "Vehicle Loan" for x in got), \
+        "the statement on the same date was not treated as a rival"
+
+
+def test_the_row_itself_is_never_its_own_rival():
+    r = rows(("2026-08-24", "a"), ("2026-08-24", "b"))
+    assert all(x.label != "a" for x in I.rivals_for(r, 0))
+
+
+def test_a_short_list_is_handled_without_running_off_either_end():
+    r = rows(("2026-01-01", ""), ("2026-02-01", ""))
+    assert len(I.rivals_for(r, 0)) == 1
+    assert len(I.rivals_for(r, 1)) == 1
+    assert I.rivals_for(r, 5) == ()
+    assert I.rivals_for([], 0) == ()
+    assert I.rivals_for(None, 0) == ()
+
+
+def test_a_neighbourhood_beats_the_whole_list():
+    """Measured. Against sixty four Navy Federal statements at once,
+    sixteen were placeable by nothing, because a fact a rival shares
+    stops counting and enough rivals share everything."""
+    r = rows(*[("2026-%02d-01" % ((n % 12) + 1), "acct") for n in range(40)])
+    assert len(I.rivals_for(r, 20, span=3)) < 12

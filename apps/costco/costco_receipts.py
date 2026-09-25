@@ -22,6 +22,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import delivery
+from paperpull_core import identity
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -438,7 +439,14 @@ class App:
 
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
         page = self.page()
+        # Every row, so a capture can be checked against the ones it
+        # could have come back with instead. Two warehouse visits to the
+        # same store on one day for the same amount are one row to this
+        # app, which warehouse_key says out loud, and the rows either
+        # side are what an index off by one lands on.
+        self._rows = [site.identity_for(p) for p in purchases]
         for i, purchase in enumerate(purchases, 1):
+            self._row_index = i - 1
             print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
@@ -647,6 +655,8 @@ class App:
             lambda staged: self._render(target_page, staged),
             out_path,
             expect=site.identity_for(purchase),
+            rivals=identity.rivals_for(getattr(self, '_rows', ()),
+                                       getattr(self, '_row_index', -1)),
             journal=self.journal,
             strict=bool(self.config.get("refuse_wrong_documents", False)))
 

@@ -16,5 +16,8 @@
   "delay_min_seconds": 2.5,
   "delay_max_seconds": 5.0,
   "pilot_count": 5,
+  "//refuse": "On. Both statements on disk verify against their own date and",
+  "//refuse2": "refuse each other. Thin evidence, so run",
+  "//refuse3": "tools/identity_fit.py once the archive has a few more.",
   "refuse_wrong_documents": true
 }

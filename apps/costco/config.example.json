@@ -12,5 +12,9 @@
   "delay_max_seconds": 4.5,
   "pilot_online": 5,
   "pilot_instore": 3,
+  "//refuse": "On, and the only one that was safe before the check learned",
+  "//refuse2": "to compare rows. 7 of 7 verify, 42 of 42 wrong ones refused,",
+  "//refuse3": "because a Costco row carries a number and a total as well as",
+  "//refuse4": "a date.",
   "refuse_wrong_documents": true
 }
