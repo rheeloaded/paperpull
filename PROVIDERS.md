@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (34, plus fourteen built and waiting for a tester)
+## Supported (35, plus fourteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -36,6 +36,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms; Document Access Hub API, nothing clicked | Brokerage |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
 | [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery. UNTESTED, built against an account with no purchases. Have one? Run Diagnose and attach the file to issue #41. Being tested by @jpfieber | Retail |
+| [`lowes`](apps/lowes) | Lowe's Home Improvement | Receipts for store purchases and online orders, and returns, from the purchase history back to 2023, each purchase's details page saved as the receipt. Built on the maintainer's own account, 41 purchases found and 6 saved in the first pilot | Retail |
 | [`github`](apps/github) | GitHub | Payment receipts for Pro, Copilot, Actions, Sponsors and anything else GitHub charged. Confirmed by @jpfieber on issue #43, whose Pilot saved five of the twenty-three receipts his account holds | Software services |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #35. Being tested by @watling777 | Credit union |
 | [`meijer`](apps/meijer) | Meijer | Order receipts, and in-store digital receipts where mPerks lists them. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #42. Being tested by @jpfieber | Retail |

@@ -62,6 +62,7 @@ unclassified rather than guessed at.
 | github |  |  |  | x |  | x | x |
 | golden1 | x | x | x |  |  | x |  |
 | kroger |  |  |  |  |  |  | x |
+| lowes |  |  |  |  |  |  | x |
 | meijer |  |  |  | x | x | x | x |
 | mtb |  |  |  |  |  | x |  |
 | mypay |  |  |  |  |  | x |  |
