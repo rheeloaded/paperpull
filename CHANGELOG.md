@@ -7,6 +7,53 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.35.0] - 2026-09-25
+
+Name your files your way, a forty-ninth provider, and three tester
+repairs.
+
+### Added
+- **Custom file names (#50).** The panel's new File names tab builds a
+  pattern from parts, the date in any shape, the provider, the order or
+  document number, the account, the total, the store and more, each
+  shown with how many of your own files carry it. A part can be skipped
+  when a document lacks it, so no name ends in a stray separator, and the
+  three newest files are previewed under the pattern as you type. One
+  pattern covers every receipts app or every statements app, and any app
+  can have its own. Every config it changes is backed up first. The
+  default names files exactly as before, checked against 18,908 real
+  names with none different.
+- **Rename to match.** After a save the tab offers to rename the files you
+  already have, a preview of every file first, then the rename, one app
+  and account at a time, stopping at the first that does not finish.
+  Nothing is downloaded again.
+- **Apple Card and Apple Savings (#52).** Card and Savings statements and
+  the 1099-INT. Built without an account and waiting for a tester.
+- **A wrong document is reported on its own.** When the identity check
+  refuses a document, the output says so in a sentence and the panel
+  names it first, instead of counting it as "needs review".
+- **Every failure file carries a journal**, even when the run failed
+  before saving anything, which is the run that needs one most.
+
+### Fixed
+- **Meijer looks for an in-store receipt on the In-Store tab (#42).** It
+  reloaded the orders page, which opens on Online Orders, and looked for
+  every in-store receipt there. It opens the right tab now and matches a
+  row on its date too. The dateless copies an earlier version recorded
+  are dropped, and purchases marked as having no receipt are tried again.
+- **E*TRADE finds its period picker (#36).** The dropdown's real name
+  carries its label, "Timeframe, Last 90 Days", so it was never found and
+  every round read only the default ninety days. It now walks Year To
+  Date and every year back.
+- **A recording names a control inside a web component (#45).** A click
+  inside one reached the recorder as the component around it and was
+  thrown away. A click that still cannot be named now says what kind of
+  element it landed on and where.
+- **Rename builds names from the app's own record.** It used the index row
+  alone, which would have left an order number or account out of every
+  renamed file under a custom pattern. Apps known by a document id find
+  their records now, and a split order keeps its "(1 of 3)".
+
 ## [0.34.2] - 2026-09-25
 
 Five tester repairs from one night of reports, and the safeguard that
