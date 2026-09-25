@@ -533,6 +533,9 @@ class App:
                 page, request, out_path,
                 is_safe_url=site.is_safe_url, dl_dir=self._dl_dir,
                 rivals=rivals,
+                # What expect_download waited before the handover. A
+                # bill that starts at thirty seconds is not nothing.
+                settle_ms=60000,
                 journal=self.journal,
                 strict=bool(self.config.get("refuse_wrong_documents", False)))
             print("  %s" % got.say())

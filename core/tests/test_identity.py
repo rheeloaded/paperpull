@@ -11,6 +11,8 @@ returns us to no check at all, and refusing one it should have passed,
 which would break forty eight working apps at once.
 """
 import json
+
+import pytest
 import sys
 from pathlib import Path
 
@@ -469,3 +471,34 @@ def test_a_neighbourhood_beats_the_whole_list():
     stops counting and enough rivals share everything."""
     r = rows(*[("2026-%02d-01" % ((n % 12) + 1), "acct") for n in range(40)])
     assert len(I.rivals_for(r, 20, span=3)) < 12
+
+
+# -- a check that cannot be made never takes a download down -------------------
+
+@pytest.mark.parametrize("total", ["nan", "inf", "-Infinity", float("nan")])
+def test_a_total_that_is_not_a_number_supplies_no_fact_and_raises_nothing(total):
+    """nan parses as a float and prints as a word, and splitting "nan" on
+    its point raised out of every check that asked."""
+    assert I.amount_variants(total) == []
+    assert not I.Identity(total=total).is_checkable()
+
+
+def test_no_rivals_given_as_none_is_the_same_as_none_given(tmp_path):
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    got = I.distinguish(pdf, I.Identity(date="2026-01-15"), None, text="x")
+    assert got.outcome in (I.UNCHECKED, I.UNREADABLE, I.VERIFIED, I.REFUSED)
+
+
+def test_a_check_that_raises_keeps_the_document_and_leaves_nothing_staged(
+        tmp_path, monkeypatch):
+    from paperpull_core import delivery
+
+    def boom(*a, **kw):
+        raise RuntimeError("the checker is unwell")
+    monkeypatch.setattr(delivery, "distinguish", boom)
+    got = delivery.place(b"%PDF-1.4\n" + b"x" * 2000, tmp_path / "s.pdf",
+                         expect=I.Identity(date="2026-01-15"))
+    assert got.outcome == delivery.SAVED
+    assert got.verdict.outcome == I.UNCHECKED
+    assert not list(tmp_path.glob("*.delivering"))

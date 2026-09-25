@@ -103,12 +103,46 @@ def test_the_hint_says_this_provider_answers_in_a_tab(monkeypatch):
         delivery.DOWNLOAD, delivery.RESPONSE, delivery.TAB, delivery.FOLDER}
 
 
-def test_the_statement_is_checked_against_its_date(monkeypatch):
-    """A row carries an account and a date. The account is the same on
-    every statement in the group, so only the date tells two apart."""
+def test_the_statement_is_checked_against_the_same_facts_as_its_rivals(
+        monkeypatch):
+    """The rivals carry the account, from identity_for. The statement
+    being asked for carried only its date, which it shares with every
+    account billed that day, so a neighbor's account name outweighed it
+    and a correct statement was refused and deleted with refusal on."""
     req = site.statement_request(ready(monkeypatch), "Checking", "2026-07-24")
-    assert req.expect.date == "2026-07-24"
-    assert sorted(req.expect.strong()) == ["date"]
+
+    class Doc:
+        account, date = "Checking", "2026-07-24"
+    assert req.expect == site.identity_for(Doc())
+    assert req.expect.label == "Checking"
+
+
+def test_a_checking_statement_that_mentions_a_card_is_not_refused(
+        monkeypatch, tmp_path):
+    """The case both reviews reproduced. Checking and a Visa both billed
+    on the 24th, and the Checking statement names the Visa it paid."""
+    from paperpull_core import identity
+
+    req = site.statement_request(ready(monkeypatch), "Checking", "2026-07-24")
+
+    class Row:
+        def __init__(self, account, date):
+            self.account, self.date = account, date
+    rows = [site.identity_for(Row(a, d)) for a, d in (
+        ("Checking", "2026-07-24"), ("Visa Signature", "2026-06-24"),
+        ("Visa Signature", "2026-07-24"), ("Checking", "2026-06-24"))]
+    text = ("EveryDay Checking statement 07/24/2026. Payment to Visa "
+            "Signature 120.00")
+    pdf = tmp_path / "s.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    rivals = identity.rivals_for(rows, 0)
+    verdict = identity.distinguish(pdf, req.expect, rivals, text=text)
+    assert verdict.outcome != identity.REFUSED
+    # and it is the account that decided it, since a date-only check of
+    # the same text against the same rows refuses
+    dated = identity.Identity(date="2026-07-24")
+    assert identity.distinguish(pdf, dated, rivals,
+                                text=text).outcome == identity.REFUSED
 
 
 def test_a_row_that_is_not_there_hands_over_nothing(monkeypatch):
