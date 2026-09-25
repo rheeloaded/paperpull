@@ -117,3 +117,54 @@ def test_the_old_entry_point_is_gone():
     of that."""
     assert not hasattr(site, "download_document")
     assert hasattr(site, "bill_request")
+
+
+# -- why the refusal is off here ----------------------------------------------
+
+def test_the_refusal_is_off_and_the_config_says_why():
+    """Not an oversight. Recorded here so nobody turns it on without
+    reading the reason, and so the reason survives this conversation."""
+    import json
+
+    cfg = json.load(open(Path(__file__).resolve().parents[1]
+                         / "config.example.json", encoding="utf-8-sig"))
+    assert cfg["refuse_wrong_documents"] is False
+    why = " ".join(v for k, v in cfg.items() if k.startswith("//refuse"))
+    assert "PREVIOUS bill" in why
+    assert "adjacent quarters" in why
+
+
+def test_a_bill_that_prints_the_previous_bills_date_defeats_a_date_check():
+    """Measured on four real bills. The July bill prints 04/16/26 beside
+    its own 07/17/26, so it passes a check for the April bill. Ten of
+    twelve cross-checks refused correctly and the two that did not were
+    both adjacent quarters, which is the wrong-document case this guard
+    exists for.
+
+    Adding a second fact does NOT repair it, which is worth stating
+    because it was the obvious thing to reach for. verify is satisfied
+    when ANY strong fact matches, deliberately, so a provider rendering
+    its amount as an image stays checkable by its number. Here the date
+    matches wrongly, so it verifies whatever else is supplied.
+    Repairing this needs a mode where every supplied fact has to match,
+    and that mode does not exist."""
+    from paperpull_core import identity as I
+
+    july = ("Fairfax Water  Account 0718\n"
+            "Bill date 07/17/26   Due 08/17/26\n"
+            "Previous bill 04/16/26   Service 04/16/26 to 07/16/26\n"
+            "Amount due 118.43\n" + "Please retain this notice. " * 12)
+    assert I.verify(None, I.Identity(date="2026-07-17"),
+                    text=july).outcome == I.VERIFIED
+    # The failure being written down rather than assumed away.
+    assert I.verify(None, I.Identity(date="2026-04-16"),
+                    text=july).outcome == I.VERIFIED
+    # Two quarters away is still caught, so the guard is partial, not absent.
+    assert I.verify(None, I.Identity(date="2026-01-16"),
+                    text=july).outcome == I.REFUSED
+    # And here is why an amount does not save it. April's amount is
+    # nowhere on July's bill, and it verifies anyway on the date alone.
+    wrong = I.verify(None, I.Identity(date="2026-04-16", total="99.99"),
+                     text=july)
+    assert wrong.outcome == I.VERIFIED
+    assert wrong.matched == ("date",)
