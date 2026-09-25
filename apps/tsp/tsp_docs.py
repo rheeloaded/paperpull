@@ -23,6 +23,7 @@ auth, and the one side effect (a downloaded message is marked read).
 """
 from __future__ import annotations
 
+from paperpull_core import delivery
 from paperpull_core import failure
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
@@ -494,10 +495,31 @@ class App:
             self.check_session(page)
             site.ensure_statements(page)
         try:
-            saved = site.download_document(page, doc.title, doc.date, out_path,
-                                           item_hint=doc.item_id,
-                                           client_hint=doc.client_id,
-                                           occurrence=doc.occurrence)
+            # The site layer resolves the item and asks the Secure
+            # Mailbox for it with this app's own headers. Staging the
+            # answer, checking it is this document, and putting it in
+            # place is the same for every provider.
+            data = site.document_bytes(page, doc.title, doc.date,
+                                       item_hint=doc.item_id,
+                                       client_hint=doc.client_id,
+                                       occurrence=doc.occurrence)
+            got = delivery.place(
+                data, out_path,
+                expect=site.identity_for(doc), journal=self.journal,
+                strict=bool(self.config.get("refuse_wrong_documents", False)))
+            print("  %s" % got.say())
+            saved = got.ok
+            if got.outcome == delivery.WRONG:
+                why = "the document that came back is not the one it was listed as"
+                self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+                self._write_row(doc, "Wrong document", "Needs Manual Review")
+                self.write_failure("save the document", why)
+                self.stats["manual_review"] += 1
+                self.stats["wrong_document"] = self.stats.get(
+                    "wrong_document", 0) + 1
+                print("  Nothing was saved for it. The file was destroyed")
+                print("  rather than filed under this document's name.")
+                return
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as "manual review" and finish looking successful while

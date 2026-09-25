@@ -429,6 +429,49 @@ def _finish(staged: Path, out_path: Path, expect, strict: bool,
     return Delivery(SAVED, mechanism, verdict, tuple(armed), size)
 
 
+def place(data: bytes, out_path, *, expect: Optional[Identity] = None,
+          journal=None, strict: bool = True) -> Delivery:
+    """For the apps that already have the bytes.
+
+    Thirty three of the forty eight ask the provider for a document
+    themselves and trigger nothing, and most do it from inside the page
+    with headers only that app knows, or decode something only that app
+    understands. TSP's 1099-R arrives with a print-stream line in front
+    of the PDF and has to be trimmed before it is one.
+
+    None of that can move into a shared fetch, and none of it should.
+    What those apps were missing is the other half, the part that has
+    nothing to do with how the bytes were obtained. Staged, checked
+    against what was asked for, and moved into place only if it is that
+    document.
+
+    So this is `deliver` with the racing removed, over the same
+    `_finish`, which is all those apps ever needed from it."""
+    out_path = Path(out_path)
+    staged = _stage(out_path)
+    _clear(staged)
+
+    def note(phase, **facts):
+        if journal is not None:
+            try:
+                journal.op(phase, "place", **facts)
+            except Exception:
+                pass
+
+    if not data:
+        note("verify", outcome=NOTHING, mechanism=ASK)
+        return Delivery(NOTHING, ASK, armed=(ASK,))
+    try:
+        staged.write_bytes(data)
+    except OSError as e:
+        log.info("could not stage the answer the app already had: %s", e)
+        return Delivery(NOTHING, ASK, armed=(ASK,))
+
+    note("download", mechanism=ASK, got=True,
+         checkable=bool(expect and expect.is_checkable()))
+    return _finish(staged, out_path, expect, strict, ASK, (ASK,), note)
+
+
 def render(page, draw, out_path, *, expect: Optional[Identity] = None,
            journal=None, strict: bool = True) -> Delivery:
     """For the twelve providers where there is no file to catch.

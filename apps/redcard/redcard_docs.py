@@ -514,7 +514,7 @@ class App:
             got = delivery.deliver(
                 page, request, out_path,
                 is_safe_url=site.is_safe_url, journal=self.journal,
-                strict=bool(self.config.get("refuse_wrong_documents", True)))
+                strict=bool(self.config.get("refuse_wrong_documents", False)))
             print("  %s" % got.say())
             if got.outcome != delivery.NOTHING or attempt == 2:
                 return got
