@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from paperpull_core import doc_types, receipt_pdf
+from paperpull_core import identity
 from paperpull_core import browser as browser_launcher
 import golden1_site as site
 from paperpull_core.models import State
@@ -400,6 +401,7 @@ class App:
             return 0
         doc = Document(title=title, category=category, summary=summary,
                        date=date, confidence=confidence, source_url=source_url)
+        self._listed_keys.add(doc.key)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -408,6 +410,39 @@ class App:
         # refresh which page the doc's download link lives on
         self.discovery.update(doc.key, {"source_url": source_url}, save=False)
         return 0
+
+    _listed_keys: set = set()
+
+    def _retire_unlisted(self, docs) -> int:
+        """Forget discovered documents the vendor's own list no longer names.
+
+        A pilot on 0.34.1 asked for a statement dated 2026-09-21 that was
+        not on the vendor's list, which ran by month ends. It was a record
+        left by an earlier build's discovery, which dated a control by the
+        text around it, and since it sorted newest it was the first thing
+        every pilot tried and failed (#35).
+
+        Only when this read found statements named by their own dates,
+        which is the vendor's list itself, and only records never saved.
+        A record forgotten here comes back the next time the vendor lists
+        it, so nothing is lost by it."""
+        if not any(getattr(r, "dated_by", "") == "label" for r in docs):
+            return 0
+        gone = []
+        for key, rec in list(self.discovery.data.items()):
+            if key in self._listed_keys or rec.get("downloaded_ok"):
+                continue
+            if rec.get("state") in DONE_STATES or rec.get("state") == State.PDF_VERIFIED.value:
+                continue
+            gone.append(key)
+        for key in gone:
+            del self.discovery.data[key]
+        if gone:
+            log.info("%d discovered documents are not on the vendor's list and were set aside",
+                     len(gone))
+            print(f"  {len(gone)} document(s) found by an earlier discovery are not on the "
+                  "vendor's list, so they will not be tried.")
+        return len(gone)
 
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
@@ -419,8 +454,10 @@ class App:
             site.goto_documents(page)
         self.check_session(page)
         docs = site.collect_download_docs(page)
+        self._listed_keys = set()
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
+        self._retire_unlisted(docs)
         self.discovery.save()
         log.info("documents page: %d documents, %d new", len(docs), n_new)
 
@@ -585,6 +622,39 @@ class App:
             self.write_failure('validate the saved pdf', 'the saved pdf did not validate')
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
+            return
+
+        # The statement has to print the date it is filed under. The date
+        # comes from the vendor's link, and a date read from anywhere else
+        # once named a statement the vendor never listed (#35). A file
+        # that does not print it is not filed under that name. It goes to
+        # Manual Review rather than being destroyed, because the check
+        # knows the usual ways a date is printed and not every way, and a
+        # correct statement in a format it missed would otherwise be
+        # deleted on every run. A scan with no text is kept.
+        verdict = identity.verify(out_path, identity.Identity(date=doc.date))
+        if verdict.outcome == identity.REFUSED:
+            import json as _json
+            quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                     self.config["max_path_length"])
+            try:
+                out_path.replace(quarantine)
+            except OSError:
+                quarantine = out_path
+            attempt = self.paths.diagnostics / "download-attempt.json"
+            atomic_write_text(attempt, _json.dumps(
+                {"timestamp": now_iso(), "date": doc.date,
+                 "landed_on": site.redact(page.url or ""),
+                 "responses": (trace + [{"note": "the saved statement does not print "
+                                                  "the date it was listed under",
+                                         "check": verdict.report()}])[:80]}, indent=2))
+            why = "the statement does not print the date it was listed under"
+            doc.pdf_path, doc.pdf_filename = str(quarantine), quarantine.name
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+            self._write_row(doc, "Wrong date", "Needs Manual Review")
+            self.write_failure("check the saved statement", why)
+            self.stats["manual_review"] += 1
+            print(f"  !! {verdict.say()}. Moved to Manual Review, not filed.")
             return
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count

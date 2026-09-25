@@ -385,6 +385,55 @@ def _bill_controls_by_name_only(page):
     return _controls_named(page, BILL_CONTROL_RE)
 
 
+def _dated_count(page) -> int:
+    """How many controls on the page are named by nothing but a date."""
+    try:
+        return _controls_named(page, DATE_ONLY_CONTROL_RE).count()
+    except Exception:
+        return 0
+
+
+def _all_dates(text: str) -> set:
+    """Every distinct day the text names, in any form parse_date reads."""
+    out = set()
+    for pattern, kind in DATE_PATTERNS:
+        for m in pattern.finditer(text or ""):
+            got = parse_date(m.group(0))
+            if got:
+                out.add(got)
+    return out
+
+
+def _date_of_control(el, name: str, list_shown: bool) -> Tuple[Optional[str], str]:
+    """The one date a document control belongs to, and where it came from.
+
+    The label comes first, and on the vendor's list the label is the
+    statement date itself. A control with no date of its own, such as
+    View PDF, is not read at all while the page lists dated statements,
+    since that list already names every statement once. Only on a page
+    with no such list is the date taken from the row, and then only when
+    the row names exactly one day.
+
+    A pilot on 0.34.1 wanted a statement dated 2026-09-21 while the
+    vendor's list ran from 08/31/26 back by month ends. That date came
+    from the text around a dateless control, where the first date found
+    is whatever the page prints near it, and it named no statement the
+    vendor offers (#35)."""
+    iso = parse_date(name)
+    if iso:
+        return iso, "label"
+    if list_shown:
+        return None, "no date of its own beside a dated list"
+    try:
+        row_text = el.evaluate(_ROW_OF_JS) or ""
+    except Exception:
+        row_text = ""
+    days = _all_dates(row_text)
+    if len(days) == 1:
+        return next(iter(days)), "row"
+    return None, ("no date near it" if not days else "more than one date near it")
+
+
 def _looks_like_billing(page) -> bool:
     try:
         if _bill_controls(page).count() > 0:
@@ -467,6 +516,10 @@ class RawDoc:
     text: str = ""
     row_index: int = -1
     kind: str = "doc"
+    # "label" when the control's own name is the date, "row" when it was
+    # read from the one date around it. The orchestrator trusts a list
+    # read from labels enough to retire what is no longer on it (#35).
+    dated_by: str = ""
 
 
 # The date a bill control belongs to. The control's own name first, then
@@ -605,10 +658,14 @@ def collect_download_docs(page) -> List[RawDoc]:
     # The vendor opens on the current statement, and the rest are behind
     # its own Statement History, which the recording shows the member
     # pressing before any dated link existed to press (#35).
-    open_statement_history(page)
+    opened = open_statement_history(page)
     expand_all(page)
     scroll_full_page(page)
+    list_shown = _dated_count(page) > 0
+    log.info("statement history %s, %d dated statements listed",
+             "opened" if opened else "control not found", _dated_count(page))
     ctrls = _bill_controls(page)
+    skipped = 0
     for i in range(ctrls.count()):
         el = ctrls.nth(i)
         try:
@@ -621,30 +678,37 @@ def collect_download_docs(page) -> List[RawDoc]:
             href = el.get_attribute("href") or ""
         except Exception:
             href = ""
-        row_text = ""
-        iso = parse_date(name)
+        iso, how = _date_of_control(el, name, list_shown)
         if not iso:
+            skipped += 1
+            continue
+        if iso in seen:
+            continue
+        seen.add(iso)
+        disp = _human_date(iso)
+        row_text = ""
+        if how == "row":
             try:
                 row_text = el.evaluate(_ROW_OF_JS) or ""
             except Exception:
                 row_text = ""
-            iso = parse_date(row_text)
-        if not iso or iso in seen:
-            continue
-        seen.add(iso)
-        disp = _human_date(iso)
         tax = bool(re.search(r"1099|1098|5498|tax", name + " " + row_text, re.I))
         kind_title = "Tax Document" if tax else "Account Statement"
         docs.append(RawDoc(title=f"{kind_title} - {disp}", date_text=iso,
                            href=href if PDF_HREF_RE.search(href or "") else "",
                            text=f"Golden 1 {kind_title} {disp}", row_index=i,
-                           kind="tax" if tax else "statement"))
+                           kind="tax" if tax else "statement", dated_by=how))
+    if skipped:
+        log.info("%d document controls left out, none named one date of its own", skipped)
     return docs
 
 
 def _control_for(page, iso: str):
     """The control for the document dated `iso`, matched the same way
-    discovery found it, or None."""
+    discovery found it, or None. Both read a control's date through
+    _date_of_control, so the two cannot disagree about which day a
+    statement is (#35)."""
+    list_shown = _dated_count(page) > 0
     ctrls = _bill_controls(page)
     for i in range(ctrls.count()):
         el = ctrls.nth(i)
@@ -652,12 +716,7 @@ def _control_for(page, iso: str):
             name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
         except Exception:
             name = ""
-        found = parse_date(name)
-        if not found:
-            try:
-                found = parse_date(el.evaluate(_ROW_OF_JS) or "")
-            except Exception:
-                found = None
+        found, _ = _date_of_control(el, name, list_shown)
         if found == iso:
             return el, name
     return None, ""
@@ -839,6 +898,7 @@ def _control_dates(page, limit: int = 30) -> list:
     when the one that was wanted is not among them. Dates only (#35)."""
     out = []
     try:
+        list_shown = _dated_count(page) > 0
         ctrls = _bill_controls(page)
         for i in range(min(ctrls.count(), limit)):
             el = ctrls.nth(i)
@@ -846,13 +906,10 @@ def _control_dates(page, limit: int = 30) -> list:
                 name = (el.get_attribute("aria-label") or el.inner_text(timeout=500) or "").strip()
             except Exception:
                 name = ""
-            found = parse_date(name)
-            if not found:
-                try:
-                    found = parse_date(el.evaluate(_ROW_OF_JS) or "")
-                except Exception:
-                    found = None
-            out.append(found or "no date")
+            found, how = _date_of_control(el, name, list_shown)
+            # Why a control has no date is fixed wording from this file,
+            # never the page's own text.
+            out.append(found or "no date, " + how)
     except Exception as e:
         log.info("control dates: %s", e)
     return out[:limit]
@@ -891,10 +948,20 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     # capture that skipped it would find nothing for any date but the
     # newest (#35).
     opened_history = open_statement_history(page)
-    if trace is not None:
-        trace.append({"note": ("the vendor's statement history opened" if opened_history
-                               else "no statement history control on the vendor's page")})
     expand_all(page)
+    # The 0.34.1 pilot found no Statement History control and yet twelve
+    # dated statements on the page, so the vendor can open straight on
+    # its list. A missing control is only a problem when no dated
+    # statement is listed either, and the trace now says which (#35).
+    listed = _dated_count(page)
+    if trace is not None:
+        if opened_history:
+            note = "the vendor's statement history opened"
+        elif listed:
+            note = "no statement history control, the vendor's page already lists dated statements"
+        else:
+            note = "no statement history control and no dated statement on the vendor's page"
+        trace.append({"note": note, "dated_statements": listed})
 
     el, label = _control_for(page, iso_date)
     if el is None:
