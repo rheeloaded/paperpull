@@ -333,10 +333,12 @@ class App:
         if not cards and site.history_state(page) != "empty":
             log.warning("No order rows found. If you are signed in and do have "
                         "orders, run --diagnose and share the file.")
+        seen_keys = set()
         for card in cards:
             purchase = site.card_to_purchase(card)
             if not purchase:
                 continue
+            seen_keys.add(purchase.key)
             if floor and purchase.purchase_date and purchase.purchase_date < floor:
                 continue  # before the cutoff: never record or download
             key = purchase.key
@@ -354,6 +356,10 @@ class App:
                     "store_info": purchase.store_info
                     or self.discovery.get(key).get("store_info", ""),
                 }, save=False)
+        dropped = self._drop_undated_leftovers(seen_keys)
+        if dropped:
+            log.info("Dropped %d undated purchase(s) an earlier version recorded "
+                     "and this page no longer shows", dropped)
         self.discovery.save()
 
         all_recs = list(self.discovery.data.values())
@@ -371,6 +377,37 @@ class App:
             if dates:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
         return {"new": n_new}
+
+    def _drop_undated_leftovers(self, seen_keys) -> int:
+        """Forget purchases an earlier version recorded with no date that
+        this page no longer shows.
+
+        0.33.0 read every in-store row without its date, and filed each as
+        an online order under a key built from that dateless text. The rows
+        now read properly and are recorded again under their real keys, so
+        the old ninety-six sat beside the new ninety-six, and Pilot spent
+        half its tries on purchases that do not exist (#42).
+
+        Only a discovery that found rows does this, so a page that failed
+        to load forgets nothing. A purchase with a date, one seen in this
+        run, and anything ever downloaded are always kept, and the file is
+        backed up before anything is dropped."""
+        if not seen_keys:
+            return 0
+        stale = []
+        for key, rec in self.discovery.data.items():
+            if not isinstance(rec, dict) or rec.get("purchase_date") or key in seen_keys:
+                continue
+            done = self.progress.get(key) or {}
+            if (done.get("downloaded_ok") or done.get("pdf_path") or done.get("pdf_filename")
+                    or rec.get("pdf_path") or rec.get("pdf_filename")):
+                continue
+            stale.append(key)
+        if stale:
+            self.discovery.save(backup=True)
+            for key in stale:
+                del self.discovery.data[key]
+        return len(stale)
 
     # -- selection ----------------------------------------------------------
 
@@ -418,8 +455,14 @@ class App:
         state = rec.get("state")
         # terminal / already-completed (incl. records made before the
         # downloaded_ok marker existed): done, do not re-download.
+        #
+        # Not "no receipt available". Every Meijer receipt row has one, so
+        # that state only ever meant this app failed to press it, and 0.34.2
+        # wrote it for ten purchases it had looked for on the wrong tab.
+        # Treated as final it would have hidden those receipts for good.
+        # Nothing was saved for them, so trying again fetches nothing twice.
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
-                     State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
+                     State.CANCELED.value):
             return True
         # a review copy counts only if its PDF is still present and valid;
         # a quarantined / failed one should be retried.
@@ -546,6 +589,8 @@ class App:
                                    distinguisher=purchase.order_number)
             trace: list = []
             site.goto_orders(page)
+            trace.append({"note": "the purchase's tab",
+                          "opened": site.show_tab_for(page, purchase.purchase_type)})
             body = site.press_row_receipt(page, purchase, trace)
             if body:
                 purchase.document_type = "Receipt"
