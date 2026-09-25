@@ -764,3 +764,47 @@ def test_the_identity_tells_two_receipts_on_the_same_list_apart():
                     text=printed).outcome == I.VERIFIED
     assert I.verify(None, site.identity_for(february),
                     text=printed).outcome == I.REFUSED
+
+
+# -- what a tester found on #47, 2026-09-23 -----------------------------------
+
+def test_a_return_receipt_is_collected_like_any_other():
+    """watling777's return never downloaded. Its control reads "View
+    Return Receipt" and the row reader looked for "view receipt", so the
+    row was never collected and nothing said why."""
+    import re
+
+    for label in ("View Receipt", "View Return Receipt", "View Gas Receipt"):
+        assert re.search(site.RECEIPT_CONTROL_TEXT, label, re.I), label
+
+
+def test_the_controls_that_start_a_return_are_still_refused():
+    """Widening the row matcher must not widen what may be pressed. A
+    row is collected by text and then the guard decides."""
+    for label in ("Return Item", "Start a Return", "Return"):
+        assert not site.is_safe_control(label), label
+    assert site.is_safe_control("View Return Receipt")
+
+
+def test_the_matcher_still_needs_the_word_receipt():
+    """One optional word, not any control beginning with View."""
+    import re
+
+    for label in ("View", "View Order", "View Details", "View my last receipt"):
+        assert not re.search(r"^%s$" % site.RECEIPT_CONTROL_TEXT, label, re.I), label
+
+
+def test_a_fuel_stop_is_named_by_what_costco_calls_it():
+    """A gas receipt was filed as Mixed Purchases while its own PDF says
+    Gas Station Receipt across the top, because a pump line is not an
+    item this app can classify and the summary was guessed from items."""
+    assert site.summary_from_kind("Gas Station") == "Gas Station"
+    assert site.summary_from_kind("Car Wash") == "Car Wash"
+    assert site.summary_from_kind("Pharmacy") == "Pharmacy"
+
+
+def test_a_place_is_not_a_summary():
+    """Almost every purchase is in a warehouse or online, so those say
+    nothing a filename wants and are left to the classifier."""
+    for kind in ("In-Warehouse", "Online", "Delivery", "Grocery", "", None):
+        assert site.summary_from_kind(kind) == ""
