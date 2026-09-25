@@ -106,3 +106,30 @@ def test_a_migrated_app_waits_as_long_as_it_did_before(name):
             found.append(settle[0].value.value if settle and isinstance(
                 settle[0].value, ast.Constant) else delivery.SETTLE_MS)
     assert found and min(found) >= WAITED_BEFORE[name], found
+
+
+def _app_uses_delivery(app):
+    for path in sorted(app.glob("*.py")):
+        text = io.open(path, encoding="utf-8", errors="ignore").read()
+        if any(True for _ in calls(ast.parse(text))):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_an_app_that_captures_through_delivery_runs_that_path_in_a_test(app):
+    """The signature check above reads the call. This makes sure the call
+    is also made, by a test that drives the app's real download path with
+    paperpull_core.testkit standing in for the capture. An app moved onto
+    delivery without one is an app back where the four were in 0.34.0,
+    with every handover test passing and nothing ever run."""
+    if not _app_uses_delivery(app):
+        pytest.skip("this app does not capture through delivery")
+    found = False
+    for path in sorted((app / "tests").glob("test_*.py")):
+        text = io.open(path, encoding="utf-8", errors="ignore").read()
+        if "StrictDelivery" in text and ".install(monkeypatch)" in text:
+            found = True
+            break
+    assert found, ("%s captures through delivery and no test runs its real "
+                   "download path with testkit.StrictDelivery" % app.name)

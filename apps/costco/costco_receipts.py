@@ -701,9 +701,12 @@ class App:
         print("     Nothing was saved for it. The file was destroyed rather")
         print("     than filed under this purchase's name.")
         self.write_failure("save the receipt", why)
+        # Named as the delivery's outcome. Passed as outcome= it collided
+        # with the journal's own first argument, raised, and the refusal
+        # was counted as an ordinary failure in _save_receipt's except.
         self.journal.result("refused the document",
-                            **{k: v for k, v in got.report().items()
-                               if k in ("outcome", "mechanism")})
+                            delivery_outcome=got.outcome,
+                            mechanism=got.mechanism)
         return False
 
     def _render(self, target_page, out_path: Path) -> None:
