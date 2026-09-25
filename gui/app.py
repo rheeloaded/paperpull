@@ -2313,6 +2313,7 @@ function run(action) {
       setStatus('err', code === '130' ? 'interrupted, progress saved' : `exited (code ${code}), check output`);
     } else if (result && result.attention) {
       const details = [];
+      if (result.wrong_document) details.push(`${result.wrong_document} refused as the wrong document`);
       if (result.manual_review) details.push(`${result.manual_review} need review`);
       if (result.failed) details.push(`${result.failed} failed`);
       if (result.validation_failures) details.push(`${result.validation_failures} PDF validation failures`);

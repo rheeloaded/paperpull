@@ -107,3 +107,23 @@ def test_the_message_names_the_folder_to_open(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "_is_packaged", lambda: False)
     said = app.setup_needed({"dir": str(tmp_path)})
     assert str(tmp_path) in said
+
+
+def test_a_wrong_document_needs_attention_on_its_own():
+    """Counted inside manual_review too, but the panel names it, because a
+    wrong statement arriving is not the same finding as nothing arriving."""
+    assert run_result.parse(line(wrong_document=1))["attention"]
+    assert run_result.parse(line())["wrong_document"] == 0
+
+
+def test_an_app_from_before_the_count_existed_still_reports():
+    """Absent is zero, so an install the panel has not refreshed yet still
+    shows its run rather than "no run summary"."""
+    assert run_result.parse(line()) is not None
+    assert run_result.parse(line(wrong_document=-1)) is None
+    assert run_result.parse(line(wrong_document="1")) is None
+
+
+def test_the_panel_names_a_wrong_document():
+    src = (Path(app.__file__)).read_text(encoding="utf-8")
+    assert "refused as the wrong document" in src

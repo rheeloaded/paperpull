@@ -34,7 +34,8 @@ def test_each_provider_reports_current_run_counts(entry, tmp_path, capsys):
     reports = [json.loads(line[len(PREFIX):]) for line in capsys.readouterr().out.splitlines()
                if line.startswith(PREFIX)]
     assert reports[0]["manual_review"] == 2
-    assert reports[1] == {"manual_review": 0, "failed": 0, "validation_failures": 0, "new_files": 0}
+    assert reports[1] == {"manual_review": 0, "failed": 0, "validation_failures": 0,
+                          "new_files": 0, "wrong_document": 0}
 
 
 @pytest.mark.parametrize("entry", ENTRIES, ids=lambda p: p.parent.name)
@@ -57,3 +58,21 @@ def test_interrupt_saves_progress_and_returns_nonzero(entry):
     exec(compile(ast.Module(body=[main], type_ignores=[]), str(entry), "exec"), scope)
     assert scope["main"]([]) == 130
     assert saved == ["progress", "discovery", "summary", "closed"]
+
+
+def test_a_wrong_document_is_reported_on_its_own_and_said_in_words(capsys):
+    """A refused wrong document was counted inside manual_review only, so
+    the panel said "needs review" whether nothing had arrived or the wrong
+    statement had, and the second puts the run's other files in doubt."""
+    report_run_result({"manual_review": 1, "wrong_document": 1, "new_files": []})
+    out = capsys.readouterr().out
+    result = json.loads(out.split(PREFIX, 1)[1])
+    assert result["wrong_document"] == 1
+    assert "refused because they were not the one asked for" in out
+
+
+def test_a_run_with_no_wrong_document_says_nothing_about_it(capsys):
+    report_run_result({"new_files": []})
+    out = capsys.readouterr().out
+    assert "refused" not in out
+    assert json.loads(out.split(PREFIX, 1)[1])["wrong_document"] == 0
