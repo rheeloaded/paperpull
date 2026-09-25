@@ -834,24 +834,226 @@ def _period_buttons(page):
     return page.get_by_role("button").filter(has_text=_PERIOD_RE)
 
 
-def _bill_button_for(page, iso_date: str):
+def _bill_button_for(page, iso_date: str, anchor_year: Optional[int] = None,
+                     today=None):
     """The history page's button for the bill whose period ends on
-    `iso_date`, matched on "Mon d" since the buttons carry no year, or
-    None. Two bills a year apart share the text, so the first match
-    walking newest to oldest is taken for the newer date."""
+    `iso_date`, or None.
+
+    The buttons carry no year, so each one's year is worked out from its
+    place in the list, the way discovery reads them. The newest takes
+    this year, or last year when its month has not come yet, or
+    `anchor_year` when a date range naming a year is showing, and each
+    older one steps back a year across January. Only the exact date
+    matches.
+
+    It used to match "Aug 22" alone and take the first, so a bill from
+    August 2025 asked for while only 2026's were showing would have
+    pressed 2026's and saved it under the 2025 date (#26)."""
+    from datetime import date as _date
+    today = today or _date.today()
+    dated = []
     try:
-        y, m, d = iso_date.split("-")
-        want = f"{_MONTH_NAMES[int(m) - 1][:3]} {int(d)}"
         loc = _period_buttons(page)
+        year, prev = None, None
         for i in range(min(loc.count(), 60)):
             el = loc.nth(i)
             text = (el.inner_text(timeout=800) or "").strip()
             pm = _PERIOD_RE.search(text)
-            if pm and f"{pm.group(3)[:3].title()} {int(pm.group(4))}" == want:
-                return el, text
+            if not pm:
+                continue
+            if year is None:
+                month = _MONTHS[pm.group(3)[:3].lower()]
+                if anchor_year is not None:
+                    year = anchor_year
+                else:
+                    year = today.year - (1 if month > today.month else 0)
+            iso, prev = _period_end(text, year, prev)
+            if not iso:
+                continue
+            year = int(iso[:4])
+            dated.append((el, text, iso))
     except Exception as e:
         log.info("bill button lookup failed: %s", e)
+        return None, ""
+    # Under a named year every button has to work out to that year. One
+    # that does not means the list crossed January and the years above
+    # are off by one, so nothing is matched rather than the wrong bill.
+    if anchor_year is not None and any(iso[:4] != str(anchor_year)
+                                       for _, _, iso in dated):
+        log.info("the %s list crosses a year, so no bill is matched on it",
+                 anchor_year)
+        return None, ""
+    for el, text, iso in dated:
+        if iso == iso_date:
+            return el, text
     return None, ""
+
+
+# The history's own date filter. It shows the most recent bills until
+# someone chooses a wider range, and an older bill has no button until
+# then (#26). None of its words are document words, so the guard refuses
+# them all, and each gets an allowlist of its own instead of the guard
+# being loosened. The opener, an option that names nothing but a span of
+# time, and the button that applies it. The forbidden words are still
+# checked first.
+RANGE_OPENER_RE = re.compile(
+    r"^\s*((select|choose|filter\s+by)\s+)?(a\s+)?date(\s+range)?\s*$", re.I)
+RANGE_OPTION_RE = re.compile(
+    r"^\s*((last|past|previous)\s+(\d{1,2})\s+months?|((?:19|20)\d\d)|"
+    r"all(\s+(bills|dates|time|history))?|(this|current|last|previous|past)\s+year)"
+    r"\s*$", re.I)
+RANGE_APPLY_RE = re.compile(
+    r"^\s*(apply|apply\s+filters?|done|show\s+results|view\s+results)\s*$", re.I)
+
+
+def is_range_control(label: str, pat) -> bool:
+    text = re.sub(r"\s+", " ", label or "").strip()
+    return bool(text) and not FORBIDDEN_CONTROL_RE.search(text) \
+        and bool(pat.match(text))
+
+
+def _range_choice(labels, iso_date: str, today=None):
+    """The option that reaches `iso_date`, and the year it names if any.
+
+    A span counted back from today first, the shortest "last N months"
+    that reaches the bill, then "all", because the history's newest bill
+    is then this year's and every button's year can be worked out from
+    today. A named year only when nothing else reaches, since a year's
+    list can hold a bill that ends in January of the next. "Last year" is
+    never chosen, because it can mean the calendar year or the last
+    twelve months and a wrong guess would shift every date by a year.
+    None when nothing on offer covers it, which the trace says."""
+    from datetime import date as _date
+    today = today or _date.today()
+    y, m = int(iso_date[:4]), int(iso_date[5:7])
+    back = (today.year - y) * 12 + (today.month - m)
+    best = None
+    for label in labels:
+        mm = RANGE_OPTION_RE.match(label or "")
+        if not mm:
+            continue
+        if mm.group(3):
+            months = int(mm.group(3))
+            key, year = ((0, months), None) if back < months else (None, None)
+        elif mm.group(1).lower().startswith("all"):
+            key, year = (1, 0), None
+        elif mm.group(4) and int(mm.group(4)) == y:
+            key, year = (2, 0), y
+        else:
+            key, year = None, None
+        if key is not None and (best is None or key < best[0]):
+            best = (key, label, year)
+    return (best[1], best[2]) if best else (None, None)
+
+
+def _range_options(page) -> list:
+    """Every visible element that reads as a range option, with its text."""
+    found, seen = [], set()
+    for role in ("option", "menuitemradio", "radio", "menuitem", "tab",
+                 "button", "link"):
+        try:
+            loc = page.get_by_role(role, name=RANGE_OPTION_RE)
+            for i in range(min(loc.count(), 20)):
+                el = loc.nth(i)
+                text = re.sub(r"\s+", " ", el.inner_text(timeout=500) or
+                              el.get_attribute("aria-label") or "").strip()
+                if text and text not in seen and el.is_visible():
+                    seen.add(text)
+                    found.append((el, text))
+        except Exception:
+            continue
+    return found
+
+
+def widen_range(page, iso_date: str, trace: Optional[list] = None,
+                today=None):
+    """Open the history's date filter and choose a span that reaches
+    `iso_date`. Returns (chose, anchor_year). chose is False when there
+    was no filter or no option covering it, and the trace says which,
+    with the options it saw, so a wrong guess costs one report and not
+    a round of guessing."""
+    note = {"note": "date range", "wanted": iso_date}
+    # A plain select first, since choosing in one clicks nothing.
+    try:
+        sels = page.locator("select")
+        for i in range(min(sels.count(), 6)):
+            sel = sels.nth(i)
+            labels = [re.sub(r"\s+", " ", t).strip() for t in
+                      (sel.evaluate("s => Array.from(s.options).map(o => o.text)")
+                       or [])]
+            if not any(RANGE_OPTION_RE.match(t) for t in labels):
+                continue
+            label, year = _range_choice(labels, iso_date, today)
+            note.update(kind="select", options=[redact(t)[:40] for t in labels][:12],
+                        chose=redact(label or "")[:40])
+            if label and is_range_control(label, RANGE_OPTION_RE):
+                sel.select_option(label=label)
+                page.wait_for_timeout(2500)
+                if trace is not None:
+                    trace.append(note)
+                return True, year
+    except Exception as e:
+        log.info("date range select: %s", e)
+
+    opener = None
+    for getter in (lambda: page.get_by_role("button", name=RANGE_OPENER_RE),
+                   lambda: page.get_by_role("combobox", name=RANGE_OPENER_RE),
+                   lambda: page.get_by_text(RANGE_OPENER_RE)):
+        try:
+            loc = getter()
+            for i in range(min(loc.count(), 4)):
+                el = loc.nth(i)
+                text = (el.inner_text(timeout=500) or
+                        el.get_attribute("aria-label") or "").strip()
+                if is_range_control(text, RANGE_OPENER_RE) and el.is_visible():
+                    opener = el
+                    break
+        except Exception:
+            continue
+        if opener is not None:
+            break
+    if opener is None:
+        note["kind"] = "none found"
+        if trace is not None:
+            trace.append(note)
+        return False, None
+    try:
+        opener.click(timeout=4000)
+        page.wait_for_timeout(1200)
+    except Exception as e:
+        log.info("date range opener: %s", e)
+    options = _range_options(page)
+    labels = [t for _, t in options]
+    label, year = _range_choice(labels, iso_date, today)
+    note.update(kind="menu", options=[redact(t)[:40] for t in labels][:12],
+                chose=redact(label or "")[:40])
+    if not label:
+        if trace is not None:
+            note["buttons"] = _buttons_seen(page)
+            trace.append(note)
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+        return False, None
+    el = next(e for e, t in options if t == label)
+    try:
+        el.click(timeout=4000)
+        page.wait_for_timeout(1200)
+        for role in ("button", "link"):
+            loc = page.get_by_role(role, name=RANGE_APPLY_RE)
+            if loc.count() and loc.first.is_visible():
+                text = (loc.first.inner_text(timeout=500) or "").strip()
+                if is_range_control(text, RANGE_APPLY_RE):
+                    loc.first.click(timeout=4000)
+                    note["applied"] = True
+                    break
+        page.wait_for_timeout(2500)
+    except Exception as e:
+        log.info("date range option: %s", e)
+    if trace is not None:
+        trace.append(note)
+    return True, year
 
 
 def _buttons_seen(page, limit: int = 12) -> list:
@@ -1165,6 +1367,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
 
     if goto_history(page):
         el, label = _bill_button_for(page, iso_date)
+        if el is None:
+            # Older than the history shows by default. The tester's four
+            # failures on each account were all of these (#26).
+            chose, anchor = widen_range(page, iso_date, trace)
+            if chose:
+                el, label = _bill_button_for(page, iso_date, anchor)
         if el is not None and is_safe_control(label):
             try:
                 el.scroll_into_view_if_needed(timeout=4000)
