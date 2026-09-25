@@ -195,8 +195,10 @@ _CAPTURE_JS = r"""
     if (label && label.trim()) return label.trim();
     const by = el.getAttribute("aria-labelledby");
     if (by) {
+      // Inside a shadow root the label is in that root, not the document.
+      const root = (el.getRootNode && el.getRootNode().getElementById) ? el.getRootNode() : el.ownerDocument;
       const parts = by.split(/\s+/)
-        .map((id) => (el.ownerDocument.getElementById(id) || {}).textContent || "")
+        .map((id) => (root.getElementById(id) || {}).textContent || "")
         .join(" ").trim();
       if (parts) return parts;
     }
@@ -240,16 +242,35 @@ _CAPTURE_JS = r"""
     return { how: "unresolved", tag: el.tagName.toLowerCase() };
   };
 
-  // Up from the event target to the thing a person would say they clicked.
+  // One step up, out of a shadow root when there is no parent inside it.
+  const up = (el) => el.parentElement ||
+    (el.getRootNode && el.getRootNode() !== document ? el.getRootNode().host : null) || null;
+
+  // Up from what was really clicked to the thing a person would say they
+  // clicked, across shadow roots.
   const control = (start) => {
     let el = start;
     for (let i = 0; el && i < 6; i++) {
       if (el.nodeType === 1 && (roleOf(el) || el.getAttribute("data-testid")))
         return el;
-      el = el.parentElement;
+      el = up(el);
     }
     return start && start.nodeType === 1 ? start : null;
   };
+
+  // What was really clicked. The event's target is retargeted to the
+  // outermost component when the click lands inside a shadow root, and
+  // that component has no role and no text of its own, so every click on
+  // a page built from components was thrown away as unnameable. His
+  // recording of American Family's billing tab is six clicks long and
+  // kept none of them (#45).
+  const clicked = (ev) => {
+    const path = ev.composedPath ? ev.composedPath() : [];
+    let el = path.length ? path[0] : ev.target;
+    if (el && el.nodeType !== 1) el = el.parentElement || (el.parentNode && el.parentNode.host) || ev.target;
+    return el;
+  };
+  const inFrame = () => { try { return window !== window.top; } catch (e) { return true; } };
 
   // The shape of the page from the body down to the control, the
   // control's neighbors at every level, and a little of what is inside
@@ -378,12 +399,14 @@ _CAPTURE_JS = r"""
   } catch (e) {}
 
   document.addEventListener("click", (ev) => {
-    const el = control(ev.target);
+    const el = control(clicked(ev));
     if (!el) return;
     const tag = el.tagName.toLowerCase();
     if (tag === "html" || tag === "body") return;   // a click on nothing
     send({ action: "click", locator: locate(el), tag: tag,
            label: nameOf(el).slice(0, 120), at: Date.now(),
+           in_shadow: !!(el.getRootNode && el.getRootNode() !== document),
+           in_frame: inFrame(),
            structure: shapeOf(ev, el) });
   }, true);
 
@@ -681,15 +704,18 @@ class Recorder:
             # the provider's own site. The binding hands this over, which
             # is surer than anything the payload could claim.
             where = ""
+            opened = False
             try:
-                where = (source.get("page").url or "") if isinstance(source, dict) else ""
+                src_page = source.get("page") if isinstance(source, dict) else None
+                where = (src_page.url or "") if src_page is not None else ""
+                opened = src_page is not None and src_page is not self.page
             except Exception:
                 where = ""
-            self._record_event(record, where)
+            self._record_event(record, where, opened)
         except Exception:
             self.dropped["malformed"] = self.dropped.get("malformed", 0) + 1
 
-    def _record_event(self, record, page_url: str = "") -> None:
+    def _record_event(self, record, page_url: str = "", opened: bool = False) -> None:
         if not isinstance(record, dict) or len(self.steps) >= _MAX_STEPS:
             return
         action = str(record.get("action") or "")
@@ -716,6 +742,7 @@ class Recorder:
             tag = tag if isinstance(tag, str) else ""
             if not label.strip() or tag in _NOT_A_CONTROL:
                 self.dropped["unresolved"] += 1
+                self._count_unresolved(record, tag, opened)
                 return
 
         step = {
@@ -748,6 +775,13 @@ class Recorder:
                 step["on_the_providers_own_site"] = False
         except Exception:
             pass
+        # Where on the page it was, when that is anywhere unusual. Counts
+        # and yes or no only.
+        where = {k: True for k, v in (("in_shadow", record.get("in_shadow")),
+                                      ("in_frame", record.get("in_frame")),
+                                      ("in_opened_tab", opened)) if v is True}
+        if where:
+            step["where"] = where
         if self._is_repeat(step):
             self.dropped["repeat"] += 1
             return
@@ -806,6 +840,23 @@ class Recorder:
             return abs(int(step.get("at") or 0) - int(last.get("at") or 0)) < _REPEAT_MS
         except (TypeError, ValueError):
             return False
+
+    def _count_unresolved(self, record, tag: str, opened: bool) -> None:
+        """What a click that could not be named landed on, as counts.
+
+        Six of one tester's clicks were thrown away and the file said only
+        that there were six (#45). The kind of element comes off the same
+        list a page's shape does, anything else is "custom" or "other", and
+        the rest are yes or no, so nothing here is text from the page."""
+        kind = tag if tag in STRUCTURE_TAGS else ("custom" if "-" in tag else "other")
+        by = self.dropped.setdefault("unresolved_on", {})
+        by[kind] = by.get(kind, 0) + 1
+        where = self.dropped.setdefault("unresolved_where", {})
+        for key, hit in (("in_shadow", record.get("in_shadow") is True),
+                         ("in_frame", record.get("in_frame") is True),
+                         ("in_opened_tab", opened)):
+            if hit:
+                where[key] = where.get(key, 0) + 1
 
     # -- what the page did in response ------------------------------------
 
