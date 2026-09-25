@@ -1046,6 +1046,28 @@ def _page_shape(page) -> dict:
         return {"items": [], "counts": {}}
 
 
+# The words a date filter is made of, which are the only words about a
+# new element that may reach the file. Anything else is reported by its
+# length. The file is attached to a public issue, and masking let a name,
+# a street and a phone number through when a review tried it before
+# 0.34.2, because masking removes what it recognizes and this keeps only
+# what it recognizes.
+RANGE_WORDS_RE = re.compile(
+    r"^\s*(from|to|start(\s+date)?|end(\s+date)?|date(\s+range)?|cancel|close|"
+    r"reset|clear|custom(\s+range)?|select(\s+a)?\s+(date|range|period)|"
+    r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)\s*$", re.I)
+
+
+def _range_words(text: str) -> dict:
+    """An element's text for the trace, only when it is a date filter's
+    own word, and its length otherwise."""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if text and any(p.match(text) for p in (RANGE_OPTION_RE, RANGE_APPLY_RE,
+                                            RANGE_OPENER_RE, RANGE_WORDS_RE)):
+        return {"text": text[:40]}
+    return {"text_len": min(len(text), 999)}
+
+
 def _appeared(before: dict, after: dict) -> list:
     """The elements in `after` that `before` did not have."""
     def key(x):
@@ -1176,7 +1198,7 @@ def widen_range(page, iso_date: str, trace: Optional[list] = None,
     if not label:
         note["appeared"] = [
             {"tag": x.get("tag", ""), "role": x.get("role", ""),
-             "type": x.get("type", ""), "text": redact(x.get("text", ""))[:40]}
+             "type": x.get("type", ""), **_range_words(x.get("text", ""))}
             for x in appeared[:20]]
         note["counts_before"] = before.get("counts", {})
         note["counts_after"] = after.get("counts", {})

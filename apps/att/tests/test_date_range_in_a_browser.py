@@ -140,13 +140,19 @@ def test_a_menu_that_never_opens_says_so(page):
     assert page.evaluate("window.opens") == 1
 
 
-def test_what_appeared_is_masked_before_it_is_recorded(page):
+def test_what_appeared_is_kept_only_when_it_is_a_filter_word(page):
+    """Masking was not enough, a review before 0.34.2 got a name, a street
+    and a phone number through it. What appeared is kept as text only when
+    it is a date filter's own word, and by its length otherwise."""
     page.set_content(f"""<body>
       <button onclick="document.getElementById('m').style.display='block'">Date range</button>
       <div id="m" style="display:none"><div>Account 123456789</div>
-        <div>Balance $84.20</div></div>{BILLS}</body>""")
+        <div>Jane Q Doe</div><div>From</div></div>{BILLS}</body>""")
     trace = []
     site.widen_range(page, "2025-10-05", trace, today=TODAY)
-    texts = [x["text"] for x in trace[0]["appeared"]]
-    assert "Account #########" in texts and "Balance $x.xx" in texts
-    assert not any("123456789" in t or "84.20" in t for t in texts)
+    appeared = trace[0]["appeared"]
+    texts = [x["text"] for x in appeared if "text" in x]
+    assert texts == ["From"]
+    assert all("text_len" in x for x in appeared if "text" not in x)
+    body = str(trace)
+    assert "123456789" not in body and "Jane" not in body

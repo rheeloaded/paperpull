@@ -697,3 +697,17 @@ def test_a_bare_span_of_months_or_years_is_a_range_option_too():
     assert site._range_choice(["0 months"], "2025-10-05", _TODAY) == (None, None)
     for text in ("12 months of payments", "Pay in 6 months", "2 years"):
         assert not site.is_range_control(text, site.RANGE_OPTION_RE), text
+
+
+def test_a_new_elements_text_reaches_the_trace_only_when_it_is_a_filter_word():
+    """Masking let a name, a street and a phone number through when the
+    review before 0.34.2 tried it, and this file is attached to a public
+    issue. A date filter's own words are kept, and everything else is
+    reported by its length."""
+    for text in ("Jane Q Doe", "1234 Oak Lane, Apt 5", "Wireless 214-555-0199",
+                 "Balance $1,204.18"):
+        got = site._range_words(text)
+        assert "text" not in got and got["text_len"] == len(text), text
+    for text in ("Last 12 months", "2025", "Apply", "Date range", "From",
+                 "End date", "September"):
+        assert site._range_words(text) == {"text": text}, text
