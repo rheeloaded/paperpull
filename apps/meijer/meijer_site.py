@@ -418,12 +418,20 @@ def collect_cards(page, purchase_type: str = "") -> List[RawCard]:
 
 # A row's own controls, including an icon with no text, so the PDF icon
 # at the end of an in-store row can be pressed (#42).
-_ROW_CONTROLS_JS = r"""([text, money]) => {
+_ROW_CONTROLS_JS = r"""([text, money, dates]) => {
   const rows = [];
+  // A row is also held to its own date when the purchase has one, so two
+  // receipts from the same store for the same amount are never mistaken
+  // for each other.
+  const dated = (t) => !dates || !dates.length || dates.some(d => t.includes(d));
   const walk = (el) => {
     for (const c of el.children) {
       const t = (c.innerText || '').trim();
-      if (t.includes(money) && t.includes(text.slice(0, 12))) rows.push(c);
+      // Only a row that is showing. A tab that is hidden rather than
+      // removed still hands back its text, and a row on it cannot be
+      // pressed.
+      if (t.includes(money) && t.includes(text.slice(0, 12)) && dated(t) &&
+          c.getClientRects().length) rows.push(c);
       walk(c);
     }
   };
@@ -460,13 +468,30 @@ _ROW_CONTROLS_JS = r"""([text, money]) => {
 }"""
 
 
+def row_dates(iso: str) -> List[str]:
+    """The ways a row can print this date. His rows read "In-Store:
+    09/19/2026", and a date written without leading zeros is allowed for."""
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", iso or "")
+    if not m:
+        return []
+    y, mo, d = m.groups()
+    return sorted({f"{mo}/{d}/{y}", f"{int(mo)}/{int(d)}/{y}", iso})
+
+
+def show_tab_for(page, purchase_type: str) -> bool:
+    """The tab a purchase's row lives on. The page opens on Online Orders,
+    so an in-store receipt was looked for on a tab that only ever said
+    there were no orders, and Pilot pressed nothing ten times (#42)."""
+    return open_tab(page, TAB_IN_STORE_RE if purchase_type == IN_STORE else TAB_ONLINE_RE)
+
+
 def row_controls(page, purchase):
     """(candidates, handles) for the row this purchase came from, the PDF
     icon first. None when the row is not on the page."""
     money = purchase.total or ""
     text = (purchase.items[0].name if purchase.items else "") or purchase.purchase_date or ""
     try:
-        h = page.evaluate_handle(_ROW_CONTROLS_JS, [text, money])
+        h = page.evaluate_handle(_ROW_CONTROLS_JS, [text, money, row_dates(purchase.purchase_date)])
         props = h.get_properties()
         if "els" not in props:
             return None
@@ -580,7 +605,14 @@ def press_row_receipt(page, purchase, trace=None):
     take whatever the page produces: a download, a PDF answer, or the
     window it opens (the page warns a pop-up blocker will stop it, so it
     opens one). Bytes, or None."""
-    found = row_controls(page, purchase)
+    # The tab's rows arrive after the tab is shown, so the row is given a
+    # few seconds to appear before it is called missing.
+    found = None
+    for _ in range(10):
+        found = row_controls(page, purchase)
+        if found:
+            break
+        page.wait_for_timeout(1000)
     if not found:
         if trace is not None:
             trace.append({"note": "the row for this purchase is not on the page"})
