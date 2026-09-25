@@ -44,7 +44,8 @@ from pathlib import Path
 
 DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 KIND_RE = re.compile(r"kind\s*=\s*([A-Z_]+)")
-PROVIDER_RE = re.compile(r"provider\s*=\s*[\"']([^\"']+)[\"']")
+# Either quote, and a double-quoted name may hold an apostrophe ("Lowe's").
+PROVIDER_RE = re.compile(r"""provider\s*=\s*["']((?<=")[^"]+(?=")|(?<=')[^']+(?='))""")
 
 CURRENT, DUE, OVERDUE, UNKNOWN, ONGOING = "current", "due", "overdue", "unknown", "ongoing"
 NEVER = "never"

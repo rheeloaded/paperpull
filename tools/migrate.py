@@ -67,7 +67,8 @@ SKIP_FIELDS = ("state", "downloaded_ok", "pdf_path", "discovered_at", "updated_a
 # Read out of an install's own storage.py, the same way the status report does,
 # so an install is identified by what it IS rather than what its folder is
 # called. Folders get renamed; a provider does not.
-PROVIDER_RE = re.compile(r"provider\s*=\s*[\"']([^\"']+)[\"']")
+# Either quote, and a double-quoted name may hold an apostrophe ("Lowe's").
+PROVIDER_RE = re.compile(r"""provider\s*=\s*["']((?<=")[^"]+(?=")|(?<=')[^']+(?='))""")
 KIND_RE = re.compile(r"kind\s*=\s*(DOCUMENT|RECEIPT)")
 
 # A terminal state means done even without the downloaded_ok marker. Kept in
