@@ -7,6 +7,133 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.34.0] - 2026-09-24
+
+A document is checked against the row it was listed under before it is
+filed, and one place catches it however a provider hands it over. Plus a
+long sweep of faults found by asking the same question of all forty
+eight apps at once rather than waiting for anybody to report them.
+
+### Added
+- **Whether the document is the one that was asked for.** The realistic
+  failure here is not saving nothing. It is saving the wrong thing under
+  the right name, from a row index off by one, a selector that matched a
+  neighbour, or a dialog that did not close so the next capture re-read
+  the last document. Each writes a valid PDF to a correct-looking path
+  and reports success, and nobody finds out until a tax year is being
+  reconciled. `validate_pdf` looked like it checked for this, since it
+  takes expected tokens, but it is satisfied when ANY appears and the
+  first it is usually given is the provider's own name, which every page
+  of every statement carries. Of its 148 call sites, 129 passed no
+  tokens at all.
+- **The check compares rows rather than checking one.** Asking whether a
+  document mentions its row's date gets a yes from the wrong document,
+  and four real archives said so. Navy Federal bills every account on
+  the same day, so eight dates there carry more than one statement.
+  Every Fairfax Water bill prints the previous bill's date beside its
+  own. Requiring every fact to match instead is worse, because eight of
+  twenty five TSP documents do not mention their own date at all, a
+  mailbox row being dated when the document was delivered rather than by
+  anything printed on it. So a fact counts only when no competing row
+  shares it, and then it is a matter of how many. The July Fairfax bill
+  carries April's date, so April scores one, and it carries July's
+  amount too, so July scores two and April is refused. A document that
+  prints none of this is left unchecked, which is not the same as
+  belonging elsewhere. Measured over 174 documents in four archives,
+  none refused.
+- **One place that catches a document, however it arrives.** Seven ways
+  a provider hands one over, counted across the apps, and twenty of the
+  forty eight already tried three or more because which one a provider
+  uses is not knowable before a live run. There were eleven near
+  identical copies of the catching code, between 139 and 155 lines each,
+  and 109 places in the app layer that wrote bytes to disk. A trigger
+  cannot be retried, since it is a click on somebody's bank, so every
+  way of catching a document is armed before it fires once and the race
+  is read afterwards. Everything lands on a staging file beside the
+  destination and moves into place only after it is checked, so a wrong
+  document is destroyed rather than filed.
+- **Six providers moved onto it and were run against real accounts.**
+  Costco, T-Mobile, Navy Federal, Target RedCard, Fairfax Water and TSP,
+  covering every way a document arrives. A printed page, a download
+  event, a blob tab, an answer read in flight, and an app that fetches
+  its own bytes with headers only it knows.
+- **Waiting several ways, and saying which one the page needed.**
+  `paperpull_core.ready` tries the guesses in order against one budget
+  and records which worked. It only ever waits, never clicks or reloads,
+  and a page counts as ready only when a required check says so. The
+  answer goes into the journal, the failure file, and one "Waited for"
+  line in the run's output, which the tester guide now asks people to
+  paste. No app uses it yet. It is adopted per provider in its next
+  round.
+- **A recording carries the shape of the page.** Element kinds,
+  attribute names and counts around each step, never text or values,
+  built from fixed lists in the page and again in Python. The privacy
+  canary gained fourteen more planted secrets, in attribute values and
+  names, a custom tag, a shadow root and deeply nested text, and none
+  reaches a recording or a failure file. `tools/read_recording.py`
+  prints the shape as an outline.
+- **Counting the rounds from the record.** `tools/rounds.py` reads how
+  many trips around the repair loop each tester-built provider has
+  taken, from git and from the issues, three ways, and says where the
+  counts disagree. `--as-of` reads the record as it stood on an earlier
+  day. Three providers have reached a working Pilot through a tester, at
+  a median of six rounds, and all twelve still in progress are waiting
+  on the maintainer. The baseline is in docs/failure-diagnostics.md.
+- **Two tools for deciding rather than guessing.**
+  `tools/delivery_census.py` says how each provider hands a document
+  over, and `tools/identity_fit.py` says whether the wrong-document
+  check can be trusted for a provider before it is switched on there.
+
+### Fixed
+- **A setting a provider gained never reached an install that already
+  existed.** config.example.json becomes config.json once, when an
+  install is made, and was never looked at again, so a setting added
+  afterwards reached new installs only. The wrong-document check was
+  switched on in six templates and off in all six installs on the
+  machine running them. Missing keys are added on refresh now, a value
+  somebody changed is never touched, and the config is backed up first.
+- **Thirty-four apps could not read a date with a time after it.** The
+  ISO pattern ended in a word boundary and there is none between the 4
+  and the T in 2026-03-04T12:00:00Z, so the date came back empty. Plenty
+  of these apps take their dates straight from a JSON API, where that is
+  the ordinary way to write one.
+- **Eleven apps read 12/31/99 as the year 2099.** All eleven came from
+  one scaffold and none of the other thirty seven read a short year at
+  all, so the two were never compared. The check that refuses impossible
+  dates had nothing to say, because 2099 is a perfectly possible year.
+- **Eight apps could not page forward, because Next is a forbidden
+  word.** Every blocklist here refuses "next", rightly, since that is
+  what a wizard's commit button says. Eight apps handed their pagination
+  control to that same blocklist, so the run finished and reported
+  success having seen the first page.
+- **Two cards of the same product were one document, in thirty two
+  apps.** A document is remembered by category, date, title and account,
+  and the account was cut to forty characters, which is before the
+  masked last four that tells two cards apart. The second card's entire
+  history read as already downloaded and was dropped on every run, and
+  nothing said so.
+- **Forty-seven apps stopped with the wrong advice when the panel
+  pressed a button.** The panel runs an app with stdin closed, on
+  purpose, so a stray prompt cannot hang a run. An app calling input()
+  there was told to run it from a real console window instead.
+- **Two settings nearly every app reads and almost no template showed.**
+  `browser` decides whether this drives a Chromium you already have,
+  uses its own, or downloads four hundred megabytes, and forty two apps
+  read it while five templates mentioned it. `default_start_date` is how
+  you say you already have everything before a date.
+- **Five apps said they were signed in on a page that had closed.**
+- **Four apps had a URL guard that nothing ever called**, three set a
+  dropdown without deciding it was safe to touch, and two refused to
+  click the documents they collect.
+- **The panel told people to attach the wrong file**, twice, and a
+  provider's own page named a file that is not the one a failed run
+  writes.
+- Walmart's pagination under another name, UKG's Diagnose never writing
+  more than five fields, Target launching its own browser, eBay trusting
+  a filter it should not, Rename reading the name a file was given
+  rather than the one it should have, and thirty lines in two apps that
+  have never run.
+
 ## [0.33.0] - 2026-09-23
 
 Two testers' reports, the tests running in CI at last, and four things
