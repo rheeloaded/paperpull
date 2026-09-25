@@ -62,7 +62,6 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urlsplit
 
@@ -71,6 +70,7 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
 # they drifted into three different versions.
+from paperpull_core.identity import Identity
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
@@ -385,21 +385,41 @@ def strip_print_stream_prefix(data: bytes) -> bytes:
     return data[i:]
 
 
-def download_document(page, title: str, date: str, out_path: Path,
-                      item_hint: str = "", client_hint: str = "",
-                      occurrence: int = 0) -> bool:
+def identity_for(doc) -> Identity:
+    """What would prove a saved file is this document and not another.
+
+    A mailbox row carries a title, a date and two internal ids. The ids
+    are the API's own handles and appear nowhere on the document, so
+    offering one as a fact would look for something that cannot be
+    there. The title is the same words on every statement of a kind.
+    That leaves the date."""
+    return Identity(date=str(getattr(doc, "date", "") or "")[:10])
+
+
+def document_bytes(page, title: str, date: str, item_hint: str = "",
+                   client_hint: str = "", occurrence: int = 0) -> bytes:
+    """The document itself, asked for through the signed-in page.
+
+    Nothing is clicked here and nothing opens. The Secure Mailbox is a
+    JSON API called from inside the page with headers this app reads out
+    of sessionStorage, and a 1099-R comes back with a print-stream line
+    in front of the PDF that has to be trimmed before it is one.
+
+    None of that can move into a shared fetch and none of it should.
+    What the caller does with these bytes, staging them, checking they
+    are the document that was asked for, and only then putting them in
+    place, is delivery.place and is the same for every provider.
+
+    Empty when the item cannot be resolved or the API does not answer
+    with a document."""
     row = resolve_item(page, title, date, occurrence)
     if row is None and item_hint and client_hint:
         log.info("%r (%s) not in the fresh list, trying the stored id", title, date)
         row = {"item_id": item_hint, "client_id": client_hint}
     if row is None:
         log.info("%r (%s) could not be resolved", title, date)
-        return False
-    data = fetch_pdf(page, row["item_id"], row["client_id"])
-    if not data:
-        return False
-    Path(out_path).write_bytes(data)
-    return True
+        return b""
+    return fetch_pdf(page, row["item_id"], row["client_id"])
 
 
 def _page_summary(page) -> dict:

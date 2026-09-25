@@ -869,3 +869,72 @@ def test_the_response_listener_is_removed_afterwards(monkeypatch, tmp_path):
             page, _Response("https://bank.example/doc.pdf"))),
             tmp_path / "d.pdf", is_safe_url=safe)
     assert page.context.handlers.get("response", []) == []
+
+
+# -- for the thirty three apps that already have the bytes --------------------
+
+def test_bytes_an_app_already_has_are_staged_checked_and_moved(monkeypatch,
+                                                                tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    out = tmp_path / "statement.pdf"
+    got = D.place(PDF, out, expect=EXPECT)
+    assert got.ok and got.mechanism == D.ASK
+    assert out.read_bytes() == PDF
+    assert [p.name for p in tmp_path.iterdir()] == ["statement.pdf"]
+
+
+def test_the_wrong_document_is_refused_even_when_the_app_fetched_it(
+        monkeypatch, tmp_path):
+    """Fetching the bytes yourself is not evidence they are the right
+    bytes. An id resolved from a stale list points at another document
+    just as easily as a mis-clicked row does."""
+    patch_text(monkeypatch, WRONG_ONE)
+    out = tmp_path / "January statement.pdf"
+    got = D.place(PDF, out, expect=EXPECT)
+    assert got.outcome == D.WRONG
+    assert not out.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_empty_answer_is_reported_rather_than_written(tmp_path):
+    out = tmp_path / "statement.pdf"
+    got = D.place(b"", out, expect=EXPECT)
+    assert got.outcome == D.NOTHING
+    assert not out.exists()
+
+
+def test_something_that_is_not_a_pdf_is_refused(monkeypatch, tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    out = tmp_path / "statement.pdf"
+    got = D.place(NOT_PDF, out, expect=EXPECT)
+    assert got.outcome == D.NOT_A_PDF
+    assert not out.exists()
+
+
+def test_an_app_with_nothing_to_check_against_still_saves(monkeypatch,
+                                                           tmp_path):
+    patch_text(monkeypatch, RIGHT)
+    out = tmp_path / "statement.pdf"
+    got = D.place(PDF, out)
+    assert got.ok and got.verdict.outcome == I.UNCHECKED
+
+
+def test_placing_never_learns_how_to_fetch():
+    """The bytes arrive as bytes. If this ever grows a page argument,
+    an app's own headers and decoding have started leaking into the
+    core, which is the thing that cannot be shared."""
+    import inspect
+
+    params = list(inspect.signature(D.place).parameters)
+    assert params[0] == "data"
+    assert "page" not in params
+
+
+def test_a_decoded_document_is_checked_like_any_other(monkeypatch, tmp_path):
+    """TSP's 1099-R arrives with a print-stream line in front of the PDF
+    and is trimmed by the app before this sees it. What arrives here is
+    already a document, whatever it took to become one."""
+    patch_text(monkeypatch, RIGHT)
+    trimmed = PDF
+    assert trimmed.startswith(b"%PDF-")
+    assert D.place(trimmed, tmp_path / "f.pdf", expect=EXPECT).ok

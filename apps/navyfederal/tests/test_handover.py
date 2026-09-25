@@ -132,3 +132,18 @@ def test_the_hand_rolled_blob_reader_is_gone(monkeypatch):
     """Reading a blob now happens in capture.fetch_as_b64, which is the
     same trick in one place rather than eleven."""
     assert not hasattr(site, "_NFCU_BLOB_FETCH")
+
+
+def test_the_refusal_is_off_and_the_config_says_why():
+    """It was on, on the strength of three statements. Sixty four said
+    otherwise. Eight dates carry more than one statement here, because
+    every account is billed on the same day, and the date is the only
+    fact a row carries."""
+    import json
+
+    cfg = json.load(open(Path(__file__).resolve().parents[1]
+                         / "config.example.json", encoding="utf-8-sig"))
+    assert cfg["refuse_wrong_documents"] is False
+    why = " ".join(v for k, v in cfg.items() if k.startswith("//refuse"))
+    assert "Sixty four" in why
+    assert "22 pairs" in why

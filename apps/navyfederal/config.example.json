@@ -15,5 +15,12 @@
   "delay_min_seconds": 2.5,
   "delay_max_seconds": 5.0,
   "pilot_count": 5,
-  "refuse_wrong_documents": true
+  "//refuse": "Off, and it was on until the whole archive was measured.",
+  "//refuse2": "Three statements said it worked. Sixty four said otherwise.",
+  "//refuse3": "Eight dates carry more than one statement, because every",
+  "//refuse4": "account is billed on the same day, and the date is the only",
+  "//refuse5": "fact a row here carries. A vehicle loan statement does not",
+  "//refuse6": "print the words on its own row, so no other fact separates",
+  "//refuse7": "them either, and 22 pairs cannot be told apart.",
+  "refuse_wrong_documents": false
 }

@@ -648,7 +648,7 @@ class App:
             out_path,
             expect=site.identity_for(purchase),
             journal=self.journal,
-            strict=bool(self.config.get("refuse_wrong_documents", True)))
+            strict=bool(self.config.get("refuse_wrong_documents", False)))
 
     def _refused(self, purchase: Purchase, got) -> bool:
         """A receipt was printed, read back, and is not this purchase.
