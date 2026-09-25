@@ -553,3 +553,135 @@ def test_a_bill_discovered_before_the_label_existed_takes_the_new_name():
     block = src.split("# refresh which page the doc's download link lives on")[1][:1200]
     assert 'patch["summary"] = summary' in block
     assert "downloaded_ok" in block, "a bill that already has a file keeps its name"
+
+
+# -- round ten, from the Run All that failed four on each account (#26) --------
+
+from datetime import date as _date  # noqa: E402
+
+_TODAY = _date(2026, 9, 25)
+
+
+class _Clickable(_Btn):
+    def __init__(self, text, on_click=None):
+        super().__init__(text)
+        self._on_click = on_click
+        self.clicks = 0
+
+    def click(self, timeout=0):
+        self.clicks += 1
+        if self._on_click:
+            self._on_click()
+
+
+class _RangeLoc(_TextLoc):
+    @property
+    def first(self):
+        return self._items[0]
+
+
+class _RangePage:
+    """A history that shows the newest bills until Date range is widened,
+    the way the tester's two failure files show it."""
+    url = "https://www.att.com/acctmgmt/billing/billandpaymenthistory?filter=bill"
+
+    def __init__(self, options=("Last 6 months", "Last 12 months",
+                                "Last 18 months", "All")):
+        self.recent = [_Btn("Bill\nJul 23 - Aug 22\n$1"),
+                       _Btn("Bill\nJun 23 - Jul 22\n$1")]
+        self.older = [_Btn("Bill\nAug 23 - Sep 22\n$1"),
+                      _Btn("Bill\nJul 23 - Aug 22\n$1")]
+        self.widened = None
+        self.menu = False
+        self.opener = _Clickable("Date range", lambda: setattr(self, "menu", True))
+        self.options = [_Clickable(t, lambda t=t: setattr(self, "widened", t))
+                        for t in options]
+        self.keyboard = type("K", (), {"press": lambda s, k: None})()
+
+    def _bills(self):
+        return self.recent + (self.older if self.widened else [])
+
+    def get_by_role(self, role, name=None):
+        if role == "button" and name is None:
+            return _RangeLoc([self.opener] + self._bills())
+        if role == "button" and name is site.RANGE_OPENER_RE:
+            return _RangeLoc([self.opener])
+        if role == "option" and name is site.RANGE_OPTION_RE and self.menu:
+            return _RangeLoc(self.options)
+        return _RangeLoc([])
+
+    def get_by_text(self, pat):
+        return _RangeLoc([])
+
+    def locator(self, sel):
+        return _RangeLoc([])
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+def test_a_bill_a_year_older_than_one_showing_is_not_matched_to_it():
+    """Matched on "Aug 22" alone, a 2025 bill asked for while only 2026's
+    showed would have pressed 2026's and saved it under the 2025 date."""
+    page = _RangePage()
+    assert site._bill_button_for(page, "2025-08-22", today=_TODAY) == (None, "")
+    el, _ = site._bill_button_for(page, "2026-08-22", today=_TODAY)
+    assert el is page.recent[0]
+
+
+def test_an_older_bill_is_reached_through_the_date_range():
+    page = _RangePage()
+    trace = []
+    chose, anchor = site.widen_range(page, "2025-09-22", trace, today=_TODAY)
+    assert chose and anchor is None
+    assert page.widened == "Last 18 months", "the shortest span that reaches it"
+    el, _ = site._bill_button_for(page, "2025-09-22", anchor, today=_TODAY)
+    assert el is page.older[0]
+    # and the 2025 August bill is the older button, not 2026's
+    el, _ = site._bill_button_for(page, "2025-08-22", anchor, today=_TODAY)
+    assert el is page.older[1]
+    assert trace[0]["chose"] == "Last 18 months"
+    assert "Last 6 months" in trace[0]["options"]
+
+
+def test_a_date_range_that_cannot_reach_the_bill_says_what_it_offered():
+    page = _RangePage(options=("Last 3 months", "Last 6 months"))
+    trace = []
+    chose, _ = site.widen_range(page, "2024-01-22", trace, today=_TODAY)
+    assert not chose and page.widened is None
+    assert trace[0]["options"] == ["Last 3 months", "Last 6 months"]
+    assert trace[0]["chose"] == ""
+
+
+def test_a_named_year_is_the_last_choice_and_last_year_is_never_one():
+    labels = ["Last year", "2025", "Last 6 months"]
+    assert site._range_choice(labels, "2025-09-22", _TODAY) == ("2025", 2025)
+    assert site._range_choice(labels + ["All"], "2025-09-22", _TODAY) == (
+        "All", None)
+    assert site._range_choice(["Last year"], "2025-09-22", _TODAY) == (
+        None, None)
+
+
+def test_a_year_list_that_crosses_january_matches_nothing():
+    """Under "2025", a bill ending in January 2026 at the top would make
+    every year below it wrong by one."""
+    page = _HistoryPage()
+    page.buttons = [_Btn("Bill\nDec 23 - Jan 22\n$1"),
+                    _Btn("Bill\nNov 23 - Dec 22\n$1")]
+    assert site._bill_button_for(page, "2025-01-22", 2025,
+                                 today=_TODAY) == (None, "")
+
+
+def test_the_range_controls_have_their_own_narrow_allowlist():
+    for text in ("Date range", "Select date range", "Last 12 months",
+                 "2025", "All bills", "Apply"):
+        pat = (site.RANGE_OPENER_RE if "ate" in text and "Last" not in text
+               else site.RANGE_APPLY_RE if text == "Apply"
+               else site.RANGE_OPTION_RE)
+        assert site.is_range_control(text, pat), text
+    for text in ("Pay by date", "Autopay 2025", "Last 12 months of payments",
+                 "Apply for credit"):
+        assert not any(site.is_range_control(text, p) for p in (
+            site.RANGE_OPENER_RE, site.RANGE_OPTION_RE, site.RANGE_APPLY_RE)), text
+    # and the document guard still refuses them, it was not loosened
+    assert not site.is_safe_control("Date range")
