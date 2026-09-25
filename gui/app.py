@@ -1005,7 +1005,52 @@ def refresh_install_code(dst: Path, src: Path) -> list:
         shutil.copy2(item, target)
         replaced.append(str(rel))
     replaced.extend(ensure_core(dst, stamp))
+    replaced.extend("config.json: " + k for k in ensure_settings(dst, stamp))
     return replaced
+
+
+def ensure_settings(dst: Path, stamp: str = "") -> list:
+    """Settings the template has gained since this install was made.
+
+    config.example.json becomes config.json once, when an install is
+    created, and is never looked at again. So a setting added to a
+    provider afterwards reaches new installs only, and everybody who set
+    that provider up earlier carries on as though it did not exist. That
+    is how the wrong-document check came to be switched on in six
+    templates and off in all six installs.
+
+    Only keys the install does not have are added. A value somebody
+    changed is theirs and is never touched, and neither is a key the
+    template has dropped, because an old setting still doing a job is
+    not this function's business.
+
+    The file is backed up before it is written, like the code is."""
+    example, live = dst / "config.example.json", dst / "config.json"
+    if not (example.is_file() and live.is_file()):
+        return []
+    try:
+        template = json.loads(example.read_text(encoding="utf-8-sig"))
+        current = json.loads(live.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(template, dict) or not isinstance(current, dict):
+        return []
+
+    added = [k for k in template
+             if k not in current and not str(k).startswith("//")]
+    if not added:
+        return []
+    merged = dict(current)
+    for key in added:
+        merged[key] = template[key]
+    try:
+        bak = dst / "Backups" / ("code-" + (stamp or "settings")) / "config.json"
+        bak.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(live, bak)
+        live.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return []
+    return added
 
 
 def _site_packages(venv: Path):

@@ -304,7 +304,12 @@ def test_an_upgrade_refreshes_the_code_in_an_existing_install(templates, setting
 
     app_module._REFRESHED_ROOTS.clear()
     got = app_module.refresh_installs()
-    assert got == {"Bank Statements": ["bank_site.py", "document_rules.json"]}
+    # The config entry is the settings top-up. This install's config was
+    # written by hand above and never had output_dir, which the template
+    # ships, so the refresh adds it rather than leaving the install a
+    # setting behind.
+    assert got == {"Bank Statements": ["bank_site.py", "document_rules.json",
+                                       "config.json: output_dir"]}
     assert (d / "bank_site.py").read_text(encoding="utf-8") == "# site, repaired\n"
     assert (d / "document_rules.json").is_file(), "a file the template gained is added"
     assert "id:1" in marker.read_text(encoding="utf-8"), "history is not code"
@@ -382,3 +387,85 @@ def test_a_bad_label_or_a_repeat_is_refused_and_nothing_is_overwritten(templates
         _account({"app": "Nope", "label": "spouse"})
     assert e.value.status_code == 404
     assert (home / "Shop Receipts" / "config.spouse.json").read_text(encoding="utf-8") == before
+
+
+# -- settings a provider gained after the install was made --------------------
+
+def _install(tmp_path, template, current):
+    import json as _json
+    d = tmp_path / "Provider"
+    d.mkdir()
+    (d / "config.example.json").write_text(_json.dumps(template), encoding="utf-8")
+    (d / "config.json").write_text(_json.dumps(current), encoding="utf-8")
+    return d
+
+
+def test_a_setting_the_template_gained_reaches_an_existing_install(tmp_path):
+    """config.example.json becomes config.json once, when an install is
+    made, and was never looked at again. That is how the wrong-document
+    check came to be on in six templates and off in all six installs."""
+    import json as _json
+
+    d = _install(tmp_path, {"a": 1, "refuse_wrong_documents": True}, {"a": 1})
+    added = app_module.ensure_settings(d, "t")
+    assert added == ["refuse_wrong_documents"]
+    assert _json.loads((d / "config.json").read_text(encoding="utf-8"))[
+        "refuse_wrong_documents"] is True
+
+
+def test_a_value_somebody_changed_is_never_overwritten(tmp_path):
+    """The whole reason this adds rather than merges. An install's port,
+    its output folder and its owner are theirs."""
+    import json as _json
+
+    d = _install(tmp_path, {"cdp_url": "http://127.0.0.1:9250", "new": 2},
+                 {"cdp_url": "http://127.0.0.1:9999"})
+    app_module.ensure_settings(d, "t")
+    cfg = _json.loads((d / "config.json").read_text(encoding="utf-8"))
+    assert cfg["cdp_url"] == "http://127.0.0.1:9999"
+    assert cfg["new"] == 2
+
+
+def test_a_setting_the_template_dropped_is_left_alone(tmp_path):
+    """An old setting still doing a job is not this function's business."""
+    import json as _json
+
+    d = _install(tmp_path, {"a": 1}, {"a": 1, "retired": "keep me"})
+    app_module.ensure_settings(d, "t")
+    assert _json.loads((d / "config.json").read_text(encoding="utf-8"))[
+        "retired"] == "keep me"
+
+
+def test_the_comment_keys_are_not_copied_in(tmp_path):
+    """A template explains itself with // keys. A live config does not
+    need the essay."""
+    d = _install(tmp_path, {"//why": "because", "real": 1}, {})
+    assert app_module.ensure_settings(d, "t") == ["real"]
+
+
+def test_nothing_to_add_writes_nothing(tmp_path):
+    d = _install(tmp_path, {"a": 1}, {"a": 2})
+    before = (d / "config.json").read_bytes()
+    assert app_module.ensure_settings(d, "t") == []
+    assert (d / "config.json").read_bytes() == before
+
+
+def test_the_config_is_backed_up_before_it_is_written(tmp_path):
+    d = _install(tmp_path, {"a": 1, "b": 2}, {"a": 1})
+    app_module.ensure_settings(d, "stamp")
+    assert (d / "Backups" / "code-stamp" / "config.json").is_file()
+
+
+def test_an_install_with_no_config_is_left_alone(tmp_path):
+    d = tmp_path / "Provider"
+    d.mkdir()
+    assert app_module.ensure_settings(d, "t") == []
+
+
+def test_a_config_that_will_not_parse_is_never_rewritten(tmp_path):
+    d = tmp_path / "Provider"
+    d.mkdir()
+    (d / "config.example.json").write_text('{"a": 1}', encoding="utf-8")
+    (d / "config.json").write_text("{ this is not json", encoding="utf-8")
+    assert app_module.ensure_settings(d, "t") == []
+    assert (d / "config.json").read_text(encoding="utf-8") == "{ this is not json"
