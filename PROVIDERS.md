@@ -56,7 +56,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098. UNTESTED, built without an account. Have an SBA loan? Run Diagnose and attach the file to issue #28 | Government loan servicing |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Brokerage |
 | [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills. Confirmed by @watling777 on issue #34, whose Pilot took the newest five and whose full run took the rest of the history | Utility |
-| [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | Fee invoices and tax forms such as the 1099-K. UNTESTED, built on an account with no documents yet. Have some? Run Diagnose and open an issue with the file | Payments |
+| [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | Fee invoices and tax forms such as the 1099-K. UNTESTED, built on an account with no documents yet. Have some? Run Diagnose and attach the file to issue #53 | Payments |
 | [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents. UNTESTED, built without an account. Have a policy? Run Diagnose and attach the file to issue #37. Being tested by @watling777 | Insurance |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
 | [`tsp`](apps/tsp) | Thrift Savings Plan (tsp.gov) | Participant statements, 1099-R | Federal retirement (government system) |
