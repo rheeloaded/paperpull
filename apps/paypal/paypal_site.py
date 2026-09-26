@@ -296,11 +296,14 @@ def _get(page, url: str) -> dict:
     return r
 
 
-def goto_documents(page) -> bool:
+def goto_documents(page, fresh: bool = False) -> bool:
     """Be on the statements page. The requests are same-origin, so any
-    signed-in page would serve them, and this is the one they come from."""
+    signed-in page would serve them, and this is the one they come from.
+    `fresh` loads it again even when the tab already shows it, because a
+    tab left there still looks signed in after the session has timed out.
+    A reload lands on the sign-in page, which the run can name."""
     try:
-        if on_myaccount(page) and "/myaccount/statements" in (page.url or ""):
+        if not fresh and on_myaccount(page) and "/myaccount/statements" in (page.url or ""):
             return True
         page.goto(STATEMENTS_PAGE, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)
@@ -352,6 +355,8 @@ class RawDoc:
 def collect_download_docs(page) -> List[RawDoc]:
     """Every monthly statement the site lists. `href` is the download
     address, built back from the month so nothing else rides along."""
+    if not goto_documents(page, fresh=True):
+        raise SessionExpired("PayPal showed a sign-in page")
     return [RawDoc(title=s["title"], date_text=s["date"], href=s["href"],
                    text=f"PayPal {s['title']}")
             for s in list_statements(page)]

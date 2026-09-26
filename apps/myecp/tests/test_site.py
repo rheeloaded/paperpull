@@ -87,6 +87,12 @@ class _Page:
     def content(self):
         return self.summary
 
+    def goto(self, url, **_):
+        self.url = getattr(self, "lands_on", url)
+
+    def wait_for_timeout(self, _ms):
+        pass
+
     def locator(self, *_):
         class _L:
             def count(self): return 0
@@ -184,3 +190,14 @@ def test_only_myecp_com_and_its_subdomains_are_allowed():
     assert not site.is_safe_url("https://notmyecp.com/")
     assert not site.is_safe_url("https://www.mcafeesecure.com/RatingVerify")
     assert not site.is_safe_url("https://user:pw@www.myecp.com/")
+
+
+def test_an_idle_session_is_seen_even_on_a_tab_that_still_shows_the_summary():
+    """MyECP idles out quickly. The tab kept showing the summary, the run
+    took that as signed in, retried and crashed. Loading the summary again
+    lands on the sign-in page, which the run can name."""
+    page = _Page({})
+    page.lands_on = "https://www.myecp.com/Account/Login?ReturnUrl=%2FAccountSummary"
+    with pytest.raises(site.SessionExpired):
+        site.collect_download_docs(page)
+    assert site.looks_signed_out(page)

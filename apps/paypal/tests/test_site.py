@@ -79,6 +79,12 @@ class _Page:
         self.answers = answers
         self.calls = []
 
+    def goto(self, url, **_):
+        self.url = getattr(self, "lands_on", url)
+
+    def wait_for_timeout(self, _ms):
+        pass
+
     def locator(self, *_):
         class _L:
             def count(self): return 0
@@ -164,3 +170,15 @@ def test_only_paypal_com_and_its_subdomains_are_allowed():
     assert not site.is_safe_url("https://notpaypal.com/")
     assert not site.is_safe_url("https://www.paypalobjects.com/x.js")
     assert not site.is_safe_url("https://user:pw@www.paypal.com/")
+
+
+def test_an_idle_session_is_seen_even_on_a_tab_that_still_looks_signed_in():
+    """A tab left on the site still looks signed in after the session has
+    timed out, and the run used to take it at its word, retry and crash.
+    Loading the page again lands on the sign-in page, which it can name."""
+    page = _Page({})
+    page.lands_on = "https://www.paypal.com/signin?returnUri=%2Fmyaccount%2Fstatements"
+    with pytest.raises(site.SessionExpired):
+        site.collect_download_docs(page)
+    assert site.looks_signed_out(page)
+    assert page.calls == []

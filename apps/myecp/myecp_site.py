@@ -252,11 +252,14 @@ def _get(page, url: str, fragment: bool = False) -> dict:
     return r
 
 
-def goto_documents(page) -> bool:
+def goto_documents(page, fresh: bool = False) -> bool:
     """Be on the Account Summary, where sign-in lands and every card
-    account is linked."""
+    account is linked. `fresh` loads it again even when the tab already
+    shows it, because MyECP idles a session out quickly and a tab left
+    on the summary still looks signed in after the session has gone. A
+    reload lands on the sign-in page instead, which the run can name."""
     try:
-        if on_site(page) and "/accountsummary" in (page.url or "").lower():
+        if not fresh and on_site(page) and "/accountsummary" in (page.url or "").lower():
             return True
         page.goto(SUMMARY_URL, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)
@@ -341,7 +344,8 @@ def collect_download_docs(page) -> List[RawDoc]:
     """Every statement on every card account. `href` carries the account
     index (MILSTAR1), which the download needs. The account label is left
     empty when there is only one account, so filenames stay short."""
-    goto_documents(page)
+    if not goto_documents(page, fresh=True):
+        raise SessionExpired("MyECP showed a sign-in page")
     accts = accounts(page)
     docs = []
     for acct in accts:
