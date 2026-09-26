@@ -79,6 +79,7 @@ unclassified rather than guessed at.
 | sba | x | x | x |  |  | x |  |
 | schwab |  |  |  |  |  | x |  |
 | smud | x | x | x |  |  | x |  |
+| stripe |  |  |  |  |  | x |  |
 | statefarm | x | x | x |  |  | x |  |
 | target | x |  |  |  |  |  | x |
 | tmobile | x |  |  |  |  |  |  |

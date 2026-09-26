@@ -1,0 +1,46 @@
+{
+  "_comment": "Editable rules mapping Stripe document titles to filename summaries. Fee invoices file as statements, tax forms under Tax Documents.",
+  "tax_rules": [
+    {
+      "pattern": "1099-?K\\b",
+      "summary": "1099-K Tax Form"
+    },
+    {
+      "pattern": "1099-?MISC\\b",
+      "summary": "1099-MISC Tax Form"
+    },
+    {
+      "pattern": "1099-?NEC\\b",
+      "summary": "1099-NEC Tax Form"
+    },
+    {
+      "pattern": "1042-?S\\b",
+      "summary": "1042-S Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+form",
+      "summary": "Tax Form"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "fee\\s+invoice",
+      "summary": "Fee Invoice"
+    },
+    {
+      "pattern": "\\binvoice\\b",
+      "summary": "Invoice"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+of\\s+service",
+    "services\\s+agreement",
+    "marketing"
+  ]
+}
