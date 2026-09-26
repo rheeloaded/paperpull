@@ -86,6 +86,7 @@ unclassified rather than guessed at.
 | tmobile | x |  |  |  |  |  |  |
 | tsp |  |  |  |  |  | x |  |
 | ukg |  |  |  |  |  | x |  |
+| ups |  |  |  |  |  | x |  |
 | usaa |  |  |  |  | x | x |  |
 | usbank | x |  |  |  | x | x |  |
 | verizon |  | x |  |  |  |  |  |

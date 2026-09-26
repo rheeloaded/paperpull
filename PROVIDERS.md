@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (39, plus fifteen built and waiting for a tester)
+## Supported (40, plus fifteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -62,6 +62,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`tsp`](apps/tsp) | Thrift Savings Plan (tsp.gov) | Participant statements, 1099-R | Federal retirement (government system) |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements | Payroll |
+| [`ups`](apps/ups) | UPS (Billing Center) | Shipping invoices from billing.ups.com, every invoice My Invoices lists. Built on the maintainer's own account | Shipping |
 | [`usaa`](apps/usaa) | USAA | Statements | Bank / insurance |
 | [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Card |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Telecom |

@@ -1,0 +1,20 @@
+{
+  "_comment": "Editable rules mapping UPS Billing Center titles to filename summaries. The app saves shipping invoices only.",
+  "tax_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "shipping\\s+invoice",
+      "summary": "Shipping Invoice"
+    },
+    {
+      "pattern": "\\binvoice\\b",
+      "summary": "Invoice"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+and\\s+conditions",
+    "marketing"
+  ]
+}
