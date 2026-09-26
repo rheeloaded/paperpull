@@ -47,8 +47,8 @@ signed installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Forty providers are supported today, all built on the same pattern.
-Eleven more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
-Newrez, Kroger, Meijer, American Family and Apple Card, are built and waiting for someone with an account to
+Twelve more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
+Newrez, Kroger, Meijer, American Family, Apple Card and Stripe, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#31](https://github.com/rheeloaded/paperpull/issues/31),
@@ -104,6 +104,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
 | [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/smud/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | Fee invoices, tax forms such as the 1099-K | **Untested, built on an account with no documents yet. Have Stripe invoices or tax forms? [Help test it](apps/stripe/README.md#help-test-it-no-programming-needed)** |
 | [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents | **Untested, built without an account. Have a policy? [Help test it](apps/statefarm/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
@@ -505,8 +506,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **fifty-three** apps pass their tests, the forty that are
-  supported and the eleven still waiting for a tester, 8,101 of them across
+- ✅ All **fifty-four** apps pass their tests, the forty that are
+  supported and the twelve still waiting for a tester, 8,101 of them across
   the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
