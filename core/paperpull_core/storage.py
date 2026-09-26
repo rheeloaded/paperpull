@@ -333,7 +333,7 @@ def title_case(text: str) -> str:
 
 
 def unique_path(directory: Path, filename: str, max_path_length: int = 240,
-                distinguisher: str = "") -> Path:
+                distinguisher: str = "", ignoring: str = "") -> Path:
     """Return a path in *directory* that does not collide with any existing
     file, case-insensitively. Never returns a path to an existing file.
 
@@ -349,6 +349,10 @@ def unique_path(directory: Path, filename: str, max_path_length: int = 240,
     (#49, and the same complaint on #43)."""
     directory = Path(directory)
     existing = {p.name.lower() for p in directory.iterdir()} if directory.exists() else set()
+    # A file being renamed does not stand in its own way. Rename asks where a
+    # file belongs while it is still there, and without this a file already
+    # told apart by its order number was pushed on to " (2)".
+    existing.discard((ignoring or "").lower())
     stem, ext = os.path.splitext(filename)
 
     # An empty stem used to return the DIRECTORY itself, because "dir / ''" is

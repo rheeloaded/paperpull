@@ -300,3 +300,21 @@ def test_the_first_of_a_split_order_keeps_its_part(tmp_path):
     said = []
     renaming.run_for(_App(tmp_path, rows), apply_changes=False, say=said.append)
     assert "already named" in " ".join(said), said
+
+
+def test_a_file_already_told_apart_by_its_number_stays_put(tmp_path):
+    """Two returns on one day with one summary. The second was saved with its
+    number in the name, and Rename used to push it on to " (2)" because its
+    own name counted as taken."""
+    first = row(tmp_path, "2022-08-10 Testco Return.pdf", order="A1")
+    second = row(tmp_path, "2022-08-10 Testco Return A2.pdf", order="A2")
+    changes = renaming.plan([first, second], lambda r: "2022-08-10 Testco Return.pdf",
+                            distinguisher=lambda r: r["order"])
+    assert [c.renaming for c in changes] == [False, False], [(c.old_name, c.new_name, c.reason) for c in changes]
+
+
+def test_unique_path_can_leave_a_files_own_name_free(tmp_path):
+    from paperpull_core.storage import unique_path
+    (tmp_path / "a.pdf").write_bytes(b"x")
+    assert unique_path(tmp_path, "a.pdf").name == "a (2).pdf"
+    assert unique_path(tmp_path, "a.pdf", ignoring="a.pdf").name == "a.pdf"
