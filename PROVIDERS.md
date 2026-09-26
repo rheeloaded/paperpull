@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (41, plus fifteen built and waiting for a tester)
+## Supported (41, plus sixteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -35,6 +35,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #36. Being tested by @watling777 | Brokerage |
 | [`ezpassva`](apps/ezpassva) | E-ZPass Virginia | Monthly and quarterly statements, the roughly one year of each the portal keeps online, so run it at least once a year. Built on the maintainer's own account | Tolls |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills, the last year's, from the FW Customer portal | Utility |
+| [`fedex`](apps/fedex) | FedEx (Billing Online) | Shipping invoices. UNTESTED, built from a login not connected to Billing Online, no invoice seen. Use it? Run Diagnose and attach the file to the FedEx issue | Shipping |
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms; Document Access Hub API, nothing clicked | Brokerage |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
 | [`homedepot`](apps/homedepot) | The Home Depot | Receipts for online orders, and store purchases where the history lists them, Home Depot's own print receipt with model and store SKU numbers. Home Depot keeps two years online, so run it every few months. Built on the maintainer's own account, 8 orders found and 6 receipts saved | Retail |
