@@ -59,6 +59,7 @@ unclassified rather than guessed at.
 | etrade | x | x | x |  |  | x |  |
 | ezpassva |  |  |  |  |  | x |  |
 | fairfaxwater |  |  |  |  |  |  |  |
+| fedex |  |  |  |  |  | x |  |
 | fidelity |  |  |  |  |  | x |  |
 | gap |  |  |  |  |  |  | x |
 | github |  |  |  | x |  | x | x |
