@@ -46,7 +46,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Thirty-eight providers are supported today, all built on the same pattern.
+Thirty-nine providers are supported today, all built on the same pattern.
 Eleven more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
 Newrez, Kroger, Meijer, American Family and Apple Card, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -73,6 +73,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Pilot confirmed by [@watling777](https://github.com/watling777) in round eight.** The full run and a second account are the rounds still open ([#26](https://github.com/rheeloaded/paperpull/issues/26)) |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
 | [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms | **Untested, built without an account. Have one? [Help test it](apps/applecard/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). Requested in [#52](https://github.com/rheeloaded/paperpull/issues/52) |
+| [`bestbuy`](apps/bestbuy) | Best Buy | Online, store-order and in-store receipts, and returns | **Built on the maintainer's own account, 35 purchases back to 2015.** The history through the page's own query a year at a time, each details page saved as the receipt, nothing clicked, real Edge/Chrome, paced for Best Buy's bot protection |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
@@ -503,7 +504,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **fifty-one** apps pass their tests, the thirty-eight that are
+- ✅ All **fifty-two** apps pass their tests, the thirty-nine that are
   supported and the eleven still waiting for a tester, 7,856 of them across
   the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above

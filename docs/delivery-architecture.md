@@ -48,6 +48,7 @@ unclassified rather than guessed at.
 | applecard | x | x | x |  |  | x |  |
 | anthem |  |  |  |  |  | x | x |
 | att | x | x | x |  | x | x |  |
+| bestbuy |  |  |  |  |  |  | x |
 | capitalone |  |  |  |  |  | x |  |
 | chase | x |  |  |  | x | x |  |
 | citi |  |  |  |  |  | x |  |

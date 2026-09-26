@@ -1,0 +1,15 @@
+{
+  "owner": "",
+  "owner_in_filename": false,
+  "output_dir": ".",
+  "profile_dir": "./browser-profile",
+  "browser": "auto",
+  "default_start_date": "",
+  "cdp_url": "http://127.0.0.1:9273",
+  "min_pdf_bytes": 3000,
+  "max_path_length": 240,
+  "delay_min_seconds": 2.0,
+  "delay_max_seconds": 4.5,
+  "pilot_online": 3,
+  "pilot_instore": 3
+}
