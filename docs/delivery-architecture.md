@@ -73,6 +73,7 @@ unclassified rather than guessed at.
 | netbenefits |  |  |  |  |  |  | x |
 | newrez | x | x | x |  |  | x |  |
 | paylocity |  |  |  |  |  | x |  |
+| paypal |  |  |  |  |  | x |  |
 | pge | x |  | x |  | x | x |  |
 | redcard | x |  |  |  |  |  |  |
 | robinhood | x |  |  | x | x | x |  |

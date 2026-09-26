@@ -1,0 +1,38 @@
+{
+  "_comment": "Editable rules mapping PayPal statement titles to filename summaries. The app lists monthly statements only, the tax rules are kept so a title that ever looked like a tax form would file under Tax Documents.",
+  "tax_rules": [
+    {
+      "pattern": "1099-?INT\\b",
+      "summary": "1099-INT Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "\\b1098\\b",
+      "summary": "1098 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement)",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "monthly\\s+(account\\s+)?statement",
+      "summary": "Monthly Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "\\boffers?\\b"
+  ]
+}

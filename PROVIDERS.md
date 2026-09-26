@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (38, plus fifteen built and waiting for a tester)
+## Supported (39, plus fifteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -48,6 +48,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits | Quarterly or monthly 401(k) statements, made to order and rendered; nothing clicked | Workplace retirement plan |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098. UNTESTED, built without an account. Have a Newrez mortgage? Run Diagnose and attach the file to issue #38. Being tested by @watling777 | Mortgage servicer |
+| [`paypal`](apps/paypal) | PayPal | Monthly statements, the three years the site keeps online. Tax forms not yet covered. Built on the maintainer's own account, 25 statements | Payments |
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements. Contributed by @appchamp, a pagination repair being tested by @watling777 | Utility |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |

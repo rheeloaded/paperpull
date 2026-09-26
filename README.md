@@ -46,7 +46,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Forty providers are supported today, all built on the same pattern.
+Forty-one providers are supported today, all built on the same pattern.
 Twelve more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
 Newrez, Kroger, Meijer, American Family, Apple Card and Stripe, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -97,6 +97,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Untested, built without an account. Have a Newrez mortgage? [Help test it](apps/newrez/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked; three years are online |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp), a pagination repair being tested by [@watling777](https://github.com/watling777) |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
@@ -506,8 +507,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **fifty-four** apps pass their tests, the forty that are
-  supported and the twelve still waiting for a tester, 8,101 of them across
+- ✅ All **fifty-five** apps pass their tests, the forty-one that are
+  supported and the twelve still waiting for a tester, 8,339 of them across
   the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
