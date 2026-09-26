@@ -5,7 +5,7 @@ FIELDS = ("manual_review", "failed", "validation_failures", "new_files")
 # Counts an app from before they existed does not send. Absent is zero,
 # present has to be a count like the rest, so an install the panel has
 # not refreshed yet still reports its run.
-OPTIONAL = ("wrong_document",)
+OPTIONAL = ("wrong_document", "stopped")
 
 
 def _count(value):

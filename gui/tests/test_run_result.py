@@ -127,3 +127,13 @@ def test_an_app_from_before_the_count_existed_still_reports():
 def test_the_panel_names_a_wrong_document():
     src = (Path(app.__file__)).read_text(encoding="utf-8")
     assert "refused as the wrong document" in src
+
+
+def test_a_run_that_stopped_needs_attention_and_is_named():
+    """A mid-run sign-out under the panel ends with exit code 0 and all
+    zero counts, which used to read as a clean finish."""
+    assert run_result.parse(line(stopped=1))["attention"]
+    assert run_result.parse(line())["stopped"] == 0
+    assert run_result.parse(line(stopped=-1)) is None
+    src = (Path(app.__file__)).read_text(encoding="utf-8")
+    assert "stopped before finishing" in src
