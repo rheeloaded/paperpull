@@ -46,7 +46,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Forty-one providers are supported today, all built on the same pattern.
+Forty-two providers are supported today, all built on the same pattern.
 Twelve more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
 Newrez, Kroger, Meijer, American Family, Apple Card and Stripe, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -111,6 +111,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements** | Per-employer tenant; JSON-API, nothing clicked |
+| [`ups`](apps/ups) | UPS Billing Center | Shipping invoices | **Built on the maintainer's own account.** The Billing Center's own invoice list and download from inside the page, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
 | [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
@@ -507,8 +508,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **fifty-five** apps pass their tests, the forty-one that are
-  supported and the twelve still waiting for a tester, 8,339 of them across
+- ✅ All **fifty-six** apps pass their tests, the forty-two that are
+  supported and the twelve still waiting for a tester, 8,467 of them across
   the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
