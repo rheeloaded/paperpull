@@ -7,6 +7,51 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.37.0] - 2026-09-26
+
+Five new providers built and run in full on real accounts, two more built
+and waiting for someone who uses them, and a run that stops now says so.
+
+### Added
+- **Best Buy.** Online orders, orders placed in a store, store purchases
+  and returns, back to 2015, each details page saved as the receipt. Best
+  Buy's own purchase list shows only what is on screen, so the app reads
+  the history through the page's own query a year at a time. It is paced,
+  because Best Buy stops answering a session that asks too quickly. 35
+  purchases found and all 35 saved on the account it was built on.
+- **E-ZPass Virginia.** Monthly and quarterly toll statements from the
+  customer portal's own list. About a year of each is online, so the
+  README says to run it at least once a year. 16 statements saved.
+- **PayPal.** Monthly statements for the three years PayPal keeps online,
+  from the site's own list and download. 25 statements saved.
+- **UPS.** Shipping invoices from the UPS Billing Center. Each is asked
+  for exactly the way the page's own code asks, including the invoice type
+  it translates from a code to a word. Both invoices on the account saved.
+- **MILITARY STAR card.** Monthly statements from MyECP, the Exchange
+  Credit Program's site. The site numbers a statement by its place in a
+  list that moves every month, so the app knows each one by its date. 25
+  statements saved, back to April 2023.
+- **Stripe, waiting for a tester (#53).** Fee invoices and tax forms from
+  the merchant Dashboard. Built on a real account that has no documents
+  yet, so no document has been seen.
+- **FedEx, waiting for a tester (#54).** Shipping invoices from FedEx
+  Billing Online. Built from a login not connected to Billing Online, so
+  no invoice has been seen. It never fills in FedEx's connect form.
+
+### Fixed
+- **A run that stops says it stopped.** A sign-out in the middle of a run
+  under the panel, where nobody can answer the prompt, used to end with
+  all zero counts and "finished, no issues reported". It now shows
+  "stopped before finishing" and says to press Resume. All 57 apps could
+  stop that way, and it is fixed once for all of them.
+- **Renaming leaves a file alone that is already told apart by its
+  number.** A file named with its order number was moved to a " (2)" it
+  did not need.
+- **MILITARY STAR, E-ZPass Virginia and PayPal notice an idle session.** A
+  tab left on the site still looked signed in after the session had timed
+  out, so the run crashed instead of saying to sign in again. Each now
+  loads its page fresh before reading the list.
+
 ## [0.36.0] - 2026-09-25
 
 Two home improvement stores, each built on a real account and run in full
