@@ -54,8 +54,8 @@ review and says to download it yourself in the Dashboard.
    is [Testing a provider](../../docs/testing-a-provider.md).
 6. Open the files you will send in Notepad and look through them. If
    anything in one looks personal, delete that line.
-7. [Open an issue](https://github.com/rheeloaded/paperpull/issues/new/choose)
-   titled Stripe and attach the survey file and the recording, with a
+7. Attach the survey file and the recording to
+   [issue #53](https://github.com/rheeloaded/paperpull/issues/53), with a
    sentence about which documents your Dashboard lists. If you are asked
    for the detailed file, read it through first and delete any line that
    names your business.
