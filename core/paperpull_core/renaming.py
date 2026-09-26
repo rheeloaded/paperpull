@@ -141,7 +141,14 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
                 except Exception:
                     token = ""
             target = unique_path(old_path.parent, new_name, max_path_length,
-                                 distinguisher=token)
+                                 distinguisher=token, ignoring=old_path.name)
+            # Told apart already, by the same order number it would be told
+            # apart by now. It used to be pushed on to " (2)" because its own
+            # name counted as taken, and five real files were asked to move.
+            if target.name.lower() == old_path.name.lower() and str(target).lower() not in claimed:
+                claimed.add(str(target).lower())
+                changes[slot] = Change(row, old_path, target.name, reason="already named that")
+                continue
             n = 1
             stem, ext = os.path.splitext(target.name)
             while str(target).lower() in claimed:
