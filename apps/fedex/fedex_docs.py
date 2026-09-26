@@ -519,7 +519,7 @@ class App:
             # FedEx wants something only the account holder may give,
             # Never done here.
             print(f"\n  !! {e}. Download it yourself in FedEx Billing Online,")
-            print("     then run Diagnose and attach the file to the FedEx issue.")
+            print("     then run Diagnose and attach the file to issue #54.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=str(e)[:200])
             self._write_row(doc, "Needs the account holder", "Needs Manual Review")
             self.stats["manual_review"] += 1

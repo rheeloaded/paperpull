@@ -48,8 +48,8 @@ stops and says so, and connecting is yours to do in FedEx.
    [Testing a provider](../../docs/testing-a-provider.md).
 6. Open the files you will send in Notepad and look through them. If
    anything in one looks personal, delete that line.
-7. Attach the survey file and the recording to the FedEx issue on
-   GitHub, with a sentence about how many invoices Billing Online shows
+7. Attach the survey file and the recording to
+   [issue #54](https://github.com/rheeloaded/paperpull/issues/54), with a sentence about how many invoices Billing Online shows
    you. If you are asked for the detailed file, read it through first
    and delete any line that names you or your business.
 
