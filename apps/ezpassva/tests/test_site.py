@@ -93,6 +93,12 @@ class _Page:
         self.answers = answers
         self.calls = []
 
+    def goto(self, url, **_):
+        self.url = getattr(self, "lands_on", url)
+
+    def wait_for_timeout(self, _ms):
+        pass
+
     def locator(self, *_):
         class _L:
             def count(self): return 0
@@ -207,3 +213,15 @@ def test_only_ezpassva_com_and_its_subdomains_are_allowed():
 def test_redaction_masks_long_digit_runs_and_query_strings():
     assert site.redact("account 12345678 at https://myaccount.ezpassva.com/x?tok=abc") == \
         "account ######## at https://myaccount.ezpassva.com/x?..."
+
+
+def test_an_idle_session_is_seen_even_on_a_tab_that_still_looks_signed_in():
+    """A tab left on the site still looks signed in after the session has
+    timed out, and the run used to take it at its word, retry and crash.
+    Loading the page again lands on the sign-in page, which it can name."""
+    page = _Page({})
+    page.lands_on = "https://myaccount.ezpassva.com/Account/Login?ReturnUrl=%2F"
+    with pytest.raises(site.SessionExpired):
+        site.collect_download_docs(page)
+    assert site.looks_signed_out(page)
+    assert page.calls == []

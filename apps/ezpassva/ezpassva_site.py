@@ -276,11 +276,14 @@ def _get(page, url: str, fragment: bool = False) -> dict:
     return r
 
 
-def goto_documents(page) -> bool:
+def goto_documents(page, fresh: bool = False) -> bool:
     """Be on a signed-in portal page. The fragment is same-origin, so any
-    portal page serves it, and the home page is where sign-in lands."""
+    portal page serves it, and the home page is where sign-in lands.
+    `fresh` loads it again even when the tab already shows the portal,
+    because a tab left there still looks signed in after the session has
+    timed out. A reload lands on the sign-in page, which the run can name."""
     try:
-        if on_portal(page):
+        if not fresh and on_portal(page):
             return True
         page.goto(HOME_URL, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)
@@ -370,6 +373,8 @@ class RawDoc:
 def collect_download_docs(page) -> List[RawDoc]:
     """Every statement the site lists. `href` is the download link, built
     back from its three numbers so nothing else the page wrote rides along."""
+    if not goto_documents(page, fresh=True):
+        raise SessionExpired("E-ZPass showed a sign-in page")
     return [RawDoc(title=s["title"], date_text=s["date"], href=s["href"],
                    text=f"E-ZPass Virginia {s['title']}")
             for s in list_statements(page)]
