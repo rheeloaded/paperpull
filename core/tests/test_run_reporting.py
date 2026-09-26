@@ -35,7 +35,7 @@ def test_each_provider_reports_current_run_counts(entry, tmp_path, capsys):
                if line.startswith(PREFIX)]
     assert reports[0]["manual_review"] == 2
     assert reports[1] == {"manual_review": 0, "failed": 0, "validation_failures": 0,
-                          "new_files": 0, "wrong_document": 0}
+                          "new_files": 0, "wrong_document": 0, "stopped": 0}
 
 
 @pytest.mark.parametrize("entry", ENTRIES, ids=lambda p: p.parent.name)
@@ -76,3 +76,52 @@ def test_a_run_with_no_wrong_document_says_nothing_about_it(capsys):
     out = capsys.readouterr().out
     assert "refused" not in out
     assert json.loads(out.split(PREFIX, 1)[1])["wrong_document"] == 0
+
+
+def _result(out):
+    return json.loads(out.split(PREFIX, 1)[1].splitlines()[0])
+
+
+def test_a_run_that_finishes_is_not_stopped(capsys):
+    report_run_result({"new_files": []})
+    assert _result(capsys.readouterr().out)["stopped"] == 0
+
+
+def test_a_run_leaving_on_an_exception_says_it_stopped(capsys):
+    """The quiet stop, SystemExit(0) after a prompt nobody could answer,
+    used to report all zeros and read as a clean finish."""
+    with pytest.raises(SystemExit):
+        try:
+            raise SystemExit(0)
+        finally:
+            report_run_result({"new_files": []})
+    out = capsys.readouterr().out
+    assert _result(out)["stopped"] == 1
+    assert "stopped before it finished" in out
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=lambda p: p.parent.name)
+def test_each_provider_reports_a_quiet_stop_as_stopped(entry, capsys):
+    """Every app's own main, with a run that stops the way a mid-run
+    sign-out stops under the panel. The result it writes on the way out
+    has to say so, whatever the exit code is."""
+    tree = ast.parse(entry.read_text(encoding="utf-8-sig"))
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+
+    class FakeApp:
+        def __init__(self, args):
+            self.stats = {"mode": "all", "new_files": []}
+            self.progress = SimpleNamespace(save=lambda: None)
+            self.discovery = SimpleNamespace(save=lambda: None)
+        def cmd_run(self, *args, **kwargs): raise SystemExit(0)
+        def write_run_summary(self): report_run_result(self.stats)
+        def close(self): pass
+    args = SimpleNamespace(start_date=None, end_date=None, open_browser=False,
+                           login=False, discover=False, pilot=False, all=True,
+                           pilot_online=False, pilot_instore=False, online=False, instore=False)
+    scope = {"ONLINE": "Online", "IN_STORE": "In-Store", "App": FakeApp,
+             "build_parser": lambda: SimpleNamespace(parse_args=lambda argv: args)}
+    exec(compile(ast.Module(body=[main], type_ignores=[]), str(entry), "exec"), scope)
+    with pytest.raises(SystemExit):
+        scope["main"]([])
+    assert _result(capsys.readouterr().out)["stopped"] == 1

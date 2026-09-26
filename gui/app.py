@@ -2804,6 +2804,8 @@ function run(action, opts) {
     const code = e.data;
     if (code !== '0') {
       setStatus('err', code === '130' ? 'interrupted, progress saved' : `exited (code ${code}), check output`);
+    } else if (result && result.stopped) {
+      setStatus('warn', 'stopped before finishing, see the output, then press Resume');
     } else if (result && result.attention) {
       const details = [];
       if (result.wrong_document) details.push(`${result.wrong_document} refused as the wrong document`);
