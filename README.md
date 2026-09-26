@@ -46,7 +46,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Thirty-nine providers are supported today, all built on the same pattern.
+Forty providers are supported today, all built on the same pattern.
 Eleven more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
 Newrez, Kroger, Meijer, American Family and Apple Card, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -84,6 +84,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`lowes`](apps/lowes) | Lowe's Home Improvement | Store and online receipts, and returns | **Built on the maintainer's own account.** The purchase history read by address, each purchase's details page saved as the receipt, nothing clicked, real Edge/Chrome |
 | [`homedepot`](apps/homedepot) | The Home Depot | Order receipts, with model and store SKU numbers | **Built on the maintainer's own account.** The history through the page's own request, Home Depot's own print receipt taken without opening the print dialog, nothing clicked, real Edge/Chrome. Home Depot keeps two years online |
 | [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms | **Untested, built without an account. Have one? [Help test it](apps/etrade/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`ezpassva`](apps/ezpassva) | E-ZPass Virginia | Monthly and quarterly toll statements | **Built on the maintainer's own account.** The portal's own statements list read from inside the page, nothing clicked; about a year is online, so run it at least once a year |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills | Mendix portal, driven like a person; PDFs for the last year only, so run it quarterly |
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms | Document Access Hub API from inside the page, nothing clicked; real Edge/Chrome |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Lazy-loading history; ~13-month limit |
@@ -504,8 +505,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **fifty-two** apps pass their tests, the thirty-nine that are
-  supported and the eleven still waiting for a tester, 7,856 of them across
+- ✅ All **fifty-three** apps pass their tests, the forty that are
+  supported and the eleven still waiting for a tester, 8,101 of them across
   the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).

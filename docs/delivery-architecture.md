@@ -57,6 +57,7 @@ unclassified rather than guessed at.
 | dominion | x |  |  |  | x | x |  |
 | ebay |  |  |  |  |  |  | x |
 | etrade | x | x | x |  |  | x |  |
+| ezpassva |  |  |  |  |  | x |  |
 | fairfaxwater |  |  |  |  |  |  |  |
 | fidelity |  |  |  |  |  | x |  |
 | gap |  |  |  |  |  |  | x |

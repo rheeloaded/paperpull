@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (37, plus fourteen built and waiting for a tester)
+## Supported (38, plus fourteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -33,6 +33,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`ebay`](apps/ebay) | eBay | Order receipts, the order-details page rendered to PDF, ten years of purchase history, nothing clicked. Confirmed by @jpfieber on issue #44, every order back to 2017 | Retail |
 | [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #36. Being tested by @watling777 | Brokerage |
+| [`ezpassva`](apps/ezpassva) | E-ZPass Virginia | Monthly and quarterly statements, the roughly one year of each the portal keeps online, so run it at least once a year. Built on the maintainer's own account | Tolls |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills, the last year's, from the FW Customer portal | Utility |
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms; Document Access Hub API, nothing clicked | Brokerage |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Retail |
