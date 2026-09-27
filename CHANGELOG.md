@@ -7,7 +7,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.38.0] - 2026-09-27
+
+The double-click file for fixing receipt names is back and reaches the
+installed app's folders, Windows installs get their terminal command, Mac
+double-click files open, and two more repairs from the tester's runs of
+0.37.1.
 
 ### Added
 - **review_names is a double-click file again** in the twelve receipt
@@ -35,6 +40,29 @@ All notable changes to PaperPull are recorded here. Versioning follows
   apps generated on a Windows machine reached every Mac without the
   executable bit, so a double-click refused them. All of them carry it
   now, and a test refuses one that does not.
+- **Newrez reads every year of statements (#38).** The statements page
+  shows one year at a time, with a year picker above the list, and the app
+  only read the year it opens on. Discovery now chooses each year the
+  picker offers and reads its list once the list on screen is that year's,
+  and an older statement is pressed only on its own year's list. Choosing
+  a year is the only new thing the app does on the page. A December
+  statement and that year's 1098 share a date, so documents are now told
+  apart by kind as well as by date.
+- **State Farm finds a redrawn row again, and asks for earlier years
+  (#37).** Pressing a row's View Documents draws that row anew, and the
+  app, still holding the old button, could not tie the revealed document
+  to its row and saved nothing. It now finds the row again by the
+  document's date and presses the document only when that one row holds
+  it. The page's own list request carries a year setting that is not a
+  four-digit year, so the year walk never asked for an earlier year. It
+  now replaces that setting whatever it holds, and an older document is
+  looked for on its own year's list.
+
+### Documentation
+- AT&T is confirmed on two accounts, wireless and internet, with a full
+  run on each (#26).
+- Newrez is partly tested, this year's statements and the 1098s download
+  on a real account (#38).
 
 ## [0.37.2] - 2026-09-27
 
