@@ -38,6 +38,17 @@ def test_title_case():
     assert title_case("school and office supplies") == "School and Office Supplies"
 
 
+def test_title_case_keeps_a_name_with_a_small_first_letter():
+    """iCloud+ came out ICloud+ in the Apple app's first file names. A word
+    whose first letter is small and second is a capital is a name spelled
+    that way on purpose, and every other word is capitalized as before."""
+    assert title_case("iCloud+") == "iCloud+"
+    assert title_case("iPhone case") == "iPhone Case"
+    assert title_case("eBay purchase") == "eBay Purchase"
+    assert title_case("ipad stand") == "Ipad Stand"
+    assert title_case("macOS update") == "MacOS Update"
+
+
 def test_sanitize_removes_forbidden_chars():
     assert sanitize_component('a<b>c:d"e/f\\g|h?i*j') == "abcdefghij"
 

@@ -327,6 +327,11 @@ def title_case(text: str) -> str:
         elif "'" in w:
             # Children's -> Children's (capitalize first letter only)
             out.append(w[0].upper() + w[1:])
+        elif len(w) > 1 and w[0].islower() and w[1].isupper():
+            # A name spelled with a small first letter and a capital second,
+            # iCloud, iPhone, iPad, eBay. Capitalizing it made "ICloud+" and
+            # "IPhone" in the Apple app's file names.
+            out.append(w)
         else:
             out.append(w[:1].upper() + w[1:])
     return " ".join(out)
