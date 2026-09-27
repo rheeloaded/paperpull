@@ -121,6 +121,22 @@ class Document:
         return cls(**d)
 
 
+def work_tab(tabs):
+    """The tab a run works in, among the open ones, or None when none is
+    open. The bank's own tab comes first. The vendor's tab is on an
+    allowed host too, and one an earlier run left open still shows a
+    list its ended session can no longer fetch, so it is never taken
+    over a tab of the bank's (#35). Matched on the parsed host, not a
+    substring, since "provider.com" in a URL also matches
+    "provider.com.phish.example"."""
+    tabs = list(tabs)
+    for wanted in (site.on_bank_host, site.is_safe_url):
+        for p in tabs:
+            if wanted(p.url or ""):
+                return p
+    return tabs[0] if tabs else None
+
+
 def migrate_legacy_keys(records: dict) -> int:
     """Move records written while the account was cut to forty characters.
 
@@ -225,12 +241,10 @@ class App:
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
         if self._cdp_mode:
-            # Reuse the user's already-signed-in Golden 1 tab.
-            # Matched on parsed host, not substring: "provider.com" in the
-            # URL also matches "provider.com.phish.example".
+            # Reuse the user's already-signed-in Golden 1 tab, the bank's
+            # own before the vendor's (see work_tab).
             live = [p for p in ctx.pages if not p.is_closed()]
-            dom = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = dom[0] if dom else (live[0] if live else ctx.new_page())
+            self._work_page = work_tab(live) or ctx.new_page()
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # A real Edge or Chrome attached over CDP saves a download itself,
@@ -416,7 +430,7 @@ class App:
     def _retire_unlisted(self, docs) -> int:
         """Forget discovered documents the vendor's own list no longer names.
 
-        A pilot on 0.34.1 asked for a statement dated 2026-09-21 that was
+        A pilot on 0.34.1 asked for a statement dated by a day that was
         not on the vendor's list, which ran by month ends. It was a record
         left by an earlier build's discovery, which dated a control by the
         text around it, and since it sorted newest it was the first thing
@@ -444,6 +458,16 @@ class App:
                   "vendor's list, so they will not be tried.")
         return len(gone)
 
+    # Where discovery read and how many dates it found, counts and fixed
+    # wording from the site layer, carried into download-attempt.json so a
+    # failed capture also says what discovery saw (#35). Its few lines go
+    # ahead of the capture's own and do not count against the capture's
+    # eighty.
+    _discovery_trace: tuple = ()
+
+    def _attempt_responses(self, trace: list) -> list:
+        return list(self._discovery_trace)[:4] + list(trace)[:80]
+
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
         n_new = 0
@@ -453,7 +477,8 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        self._discovery_trace = []
+        docs = site.collect_download_docs(page, trace=self._discovery_trace)
         self._listed_keys = set()
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
@@ -579,9 +604,14 @@ class App:
         if not saved:
             import json as _json
             attempt = self.paths.diagnostics / "download-attempt.json"
+            # Where the bank's tab stood is one of the trace's fixed words
+            # (site.where), never the address. redact leaves those words as
+            # they are, and it is what the repo-wide check on this line
+            # looks for (#35).
             atomic_write_text(attempt, _json.dumps(
-                {"timestamp": now_iso(), "date": doc.date, "landed_on": site.redact(page.url or ""),
-                 "responses": trace[:80]}, indent=2))
+                {"timestamp": now_iso(), "date": doc.date,
+                 "landed_on": site.redact(site.where(page.url or "")),
+                 "responses": self._attempt_responses(trace)}, indent=2))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -651,10 +681,11 @@ class App:
             attempt = self.paths.diagnostics / "download-attempt.json"
             atomic_write_text(attempt, _json.dumps(
                 {"timestamp": now_iso(), "date": doc.date,
-                 "landed_on": site.redact(page.url or ""),
-                 "responses": (trace + [{"note": "the saved statement does not print "
-                                                  "the date it was listed under",
-                                         "check": verdict.report()}])[:80]}, indent=2))
+                 "landed_on": site.redact(site.where(page.url or "")),
+                 "responses": self._attempt_responses(
+                     trace + [{"note": "the saved statement does not print "
+                                       "the date it was listed under",
+                               "check": verdict.report()}])}, indent=2))
             why = "the statement does not print the date it was listed under"
             doc.pdf_path, doc.pdf_filename = str(quarantine), quarantine.name
             self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)

@@ -2,7 +2,7 @@
 
 When Golden 1 changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round four, repaired from three surveys (#35). Written
+STATUS: UNVERIFIED, round five, repaired from three surveys (#35). Written
 without a Golden 1 account, so that someone who holds one can
 test it without writing code. Nothing below has run against the live
 signed-in site. On a first run it is deliberately cautious:
@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -80,6 +81,9 @@ BILLING_CANDIDATES = [
     f"{BASE}/accounts/overview",
 ]
 VENDOR_HOSTS = ("hepsiian.com",)
+# The bank's own site. It lists no statements, only the button that
+# signs on to the vendor, which every survey and the recording agree on.
+BANK_DOMAIN = "golden1.com"
 # Round four (#35). The third survey pressed "View documents", the
 # sidebar LINK, because the button and the link share a name and the
 # link came first, so it landed on the documents page again and the
@@ -129,10 +133,10 @@ SAFE_DOC_CONTROL_RE = re.compile(
 # A control whose whole label is a date. On the vendor's Statement
 # History that is what a statement is called, and nothing else.
 #
-# A recording caught this. The member pressed a link reading "07/31/26"
-# to open a statement, and the step came back guard_allows false, so the
+# A recording caught this. The member pressed a link whose whole label was
+# the statement's date, and the step came back guard_allows false, so the
 # app would have refused to press the one control that fetches the
-# document. Nothing destructive can be labelled with only a date, and
+# document. Nothing destructive can be labeled with only a date, and
 # the forbidden words are still checked first (#35).
 DATE_ONLY_CONTROL_RE = re.compile(
     r"^\s*(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|"
@@ -414,11 +418,15 @@ def _date_of_control(el, name: str, list_shown: bool) -> Tuple[Optional[str], st
     with no such list is the date taken from the row, and then only when
     the row names exactly one day.
 
-    A pilot on 0.34.1 wanted a statement dated 2026-09-21 while the
-    vendor's list ran from 08/31/26 back by month ends. That date came
-    from the text around a dateless control, where the first date found
-    is whatever the page prints near it, and it named no statement the
-    vendor offers (#35)."""
+    A pilot on 0.34.1 wanted a statement dated by a day that was not a
+    month end while the vendor's list ran back by month ends. That date
+    came from the text around a dateless control, where the first date
+    found is whatever the page prints near it, and it named no statement
+    the vendor offers (#35). The request census of the next pilot showed
+    discovery never reached the vendor, so that control was almost
+    certainly on the bank's own documents page. Only a tab this run
+    opened through the bank's button is read for statements now (see
+    collect_download_docs)."""
     iso = parse_date(name)
     if iso:
         return iso, "label"
@@ -448,18 +456,32 @@ def _looks_like_billing(page) -> bool:
                           body, re.I))
 
 
+# How long a page loaded by address is given before it is looked at.
+GOTO_WAIT_MS = 5000
+
+
 def goto_documents(page) -> bool:
     """Open Statements & Documents. The first candidate that is not a
     sign-in page and shows something statement-shaped wins, and the URL it
-    lands on is remembered so a later call does not walk the list again."""
+    lands on is remembered so a later call does not walk the list again.
+
+    Only a page on the bank's own site is taken as it is. The vendor's
+    tab is on an allowed host too and lists statements, but the bank's
+    documents page is where the run starts from, and a vendor tab an
+    earlier run left open would otherwise pass for it (#35).
+
+    A page loaded here is noted as just arrived, so its View Documents
+    button waits for the member's accounts to answer (see
+    _press_when_ready)."""
     global BILLING_URL
     dismiss_overlay(page)
-    if is_safe_url(page.url or "") and not looks_signed_out(page) and _looks_like_billing(page):
+    if on_bank_host(page.url or "") and not looks_signed_out(page) and _looks_like_billing(page):
         return True
     for url in [BILLING_URL] + [u for u in BILLING_CANDIDATES if u != BILLING_URL]:
         try:
+            _arriving(page)
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(GOTO_WAIT_MS)
         except Exception as e:
             log.info("goto %s failed: %s", url, e)
             continue
@@ -538,20 +560,81 @@ _ROW_OF_JS = r"""el => {
 }"""
 
 
+def _on_vendor_host(url: str) -> bool:
+    """True for an address on a known vendor host or on the host the
+    bank's button opened this run."""
+    hosts = set(VENDOR_HOSTS) | _VENDOR_HOSTS_SEEN
+    try:
+        host = (urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return False
+    return bool(host) and any(host == h or host.endswith("." + h) for h in hosts)
+
+
 def _vendor_tab(page):
     """The document vendor's tab, if one is open, on a known vendor host
     or on the host the bank's button opened this run."""
-    hosts = set(VENDOR_HOSTS) | _VENDOR_HOSTS_SEEN
     for p in page.context.pages:
         try:
             if p is page or p.is_closed():
                 continue
-            host = (urlsplit(p.url or "").hostname or "").lower()
-            if host and any(host == h or host.endswith("." + h) for h in hosts):
+            if _on_vendor_host(p.url or ""):
                 return p
         except Exception:
             continue
     return None
+
+
+# The vendor tabs this run opened itself, newest last. A vendor tab an
+# earlier run left open still shows the list it was given, long after
+# the vendor's session behind it has ended, so reading it would queue
+# statements that every capture then fails to fetch. Only a tab opened
+# by this run's own press of the bank's button is read (#35).
+_ADOPTED_TABS: list = []
+
+
+def _vendor_tab_this_run(page):
+    """The newest vendor tab this run opened that is still open and still
+    on the vendor, or None."""
+    for p in reversed(_ADOPTED_TABS):
+        try:
+            if p is page or p.is_closed():
+                continue
+            if _on_vendor_host(p.url or ""):
+                return p
+        except Exception:
+            continue
+    return None
+
+
+def on_bank_host(url: str) -> bool:
+    """True only for an https address on the bank's own site. is_safe_url
+    admits the vendor's host as well, and the vendor is not the bank."""
+    try:
+        parts = urlsplit(url or "")
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return False
+    return parts.scheme == "https" and (host == BANK_DOMAIN or host.endswith("." + BANK_DOMAIN))
+
+
+def _still_at_the_bank(page) -> bool:
+    """The tab is on an https page of the bank's own site and not signed
+    out. Checked right before the documents page's button is pressed,
+    since the sidebar link, or the page itself while it loads, may have
+    taken the tab anywhere.
+
+    Those two are what this relies on. detect_security_challenge is asked
+    as well, but it answers None on any page still showing a document
+    control, and the sidebar link is one, so it catches only a challenge
+    that replaces the whole page. One drawn over the page is left to the
+    click, which is never forced and so does not go through a dialog
+    covering the button."""
+    try:
+        return (on_bank_host(page.url or "") and not looks_signed_out(page)
+                and detect_security_challenge(page) is None)
+    except Exception:
+        return False
 
 
 def _vendor_button(page):
@@ -566,24 +649,41 @@ def _vendor_button(page):
 def _adopt_new_tab(page, tabs_before: set):
     """A tab the bank's own button opened, adopted as the vendor's tab.
     Its host is remembered for this run so the app can read and fetch
-    there. Anything that is not https is closed unread."""
+    there. Anything that is not https is closed unread.
+
+    A tab that never leaves the bank's own site is not the vendor's. Once
+    taken for it, a bank host joined the vendor's hosts for the run, so
+    the bank's own tab could pass for the vendor's, and a trace said the
+    vendor's tab had not opened when one had. It is closed, and the trace
+    says it stayed at the bank (#35).
+
+    A tab that closes before it is looked at leaves nothing to adopt, and
+    the trace says so rather than keeping the reason an earlier try gave."""
+    _said(TAB_GONE)
     for extra in [p for p in page.context.pages if p not in tabs_before]:
         try:
             extra.wait_for_load_state("domcontentloaded", timeout=20000)
         except Exception:
             pass
-        for _ in range(20):
-            extra.wait_for_timeout(500)
+        for _ in range(ADOPT_WAIT_POLLS):
             u = extra.url or ""
-            if u and u != "about:blank" and not u.startswith("https://digitalbanking.golden1.com"):
+            if u and u != "about:blank" and not on_bank_host(u):
                 break
+            extra.wait_for_timeout(500)
         u = extra.url or ""
         host = (urlsplit(u).hostname or "").lower()
-        if u.startswith("https://") and host:
+        if on_bank_host(u):
+            log.info("a tab opened and stayed on the bank's own site, so it is not the vendor's")
+            _said(STAYED_AT_THE_BANK)
+        elif u.startswith("https://") and host:
             _VENDOR_HOSTS_SEEN.add(host)
             ALLOWED_HOSTS.add(host)
+            _ADOPTED_TABS.append(extra)
             log.info("the vendor's tab is on %s", redact(host))
+            _said(OPENED)
             return extra
+        else:
+            _said(NOT_HTTPS)
         try:
             extra.close()
         except Exception:
@@ -591,36 +691,294 @@ def _adopt_new_tab(page, tabs_before: set):
     return None
 
 
+def _close_old_vendor_tabs(page) -> int:
+    """Close the statements tabs still open that this run will not read,
+    just before the button is pressed for a fresh one, and say how many.
+
+    A tab an earlier run left open still shows its list after the session
+    behind it has ended, so it is never read (see _vendor_tab_this_run).
+    Leaving it open is not harmless either. A bank that opens its vendor
+    into a NAMED window sends the new sign-on into an open tab of that
+    name instead of a new one, so the press opens no tab and discovery
+    finds nothing. With the old tab closed first, the press has to open a
+    new one, and only a new one is ever adopted (#35).
+
+    Only a tab on the vendor's site, or one this run opened, is closed.
+    Never the tab the run works in and never a page of the bank's."""
+    closed = 0
+    for p in list(page.context.pages):
+        if p is page:
+            continue
+        try:
+            if p.is_closed() or on_bank_host(p.url or ""):
+                continue
+            if _on_vendor_host(p.url or "") or any(p is a for a in _ADOPTED_TABS):
+                p.close()
+                closed += 1
+        except Exception:
+            continue
+    if closed:
+        log.info("closed %d statements tab(s) this run will not read", closed)
+    return closed
+
+
+# How long a press waits for the tab it opens, in half seconds.
+TAB_WAIT_POLLS = 30
+# How long a tab the button opened gets to leave the bank's own site for
+# the vendor's, in half seconds. The member's recording has him pressing
+# on the vendor's list about thirteen seconds after the button.
+ADOPT_WAIT_POLLS = 30
+# How long the documents page gets, once this run has brought the tab
+# there, to show its button and hear back about the member's accounts,
+# in half seconds. If the accounts never answer, the button is pressed
+# when this is over, as a person would press it.
+LINK_WAIT_POLLS = 30
+# And how long it is left to settle after the accounts answer, before the
+# button is pressed. The member pressed it almost three seconds after the
+# link.
+VENDOR_SETTLE_MS = 2000
+# The documents page asks for the member's accounts when it arrives, and
+# the button signs on to the vendor with one of them. The recording shows
+# this call answering at the link step and the button's sign-on sending
+# an account id, and both pilots' request lists show it too (#35).
+_ACCOUNTS_PATH_RE = re.compile(r"/edocs-sso/members/?$", re.I)
+
+# When this run last brought each bank tab to a page, by an address or by
+# the sidebar link, and when that tab last heard back about the member's
+# accounts, both on the monotonic clock. A tab the run found already on
+# the documents page has no arrival, since its page loaded long before,
+# and its button is pressed at once, as it always was (#35).
+_ARRIVALS: dict = {}
+
+
+def _watch(page) -> dict:
+    """This tab's arrival record. The first call starts listening for the
+    accounts call, so it hears one that answers after any later goto or
+    link press."""
+    rec = _ARRIVALS.get(page)
+    if rec is not None:
+        return rec
+    rec = {"arrived": None, "accounts": None}
+
+    def on_response(res):
+        try:
+            url = res.url or ""
+            if (on_bank_host(url) and res.status < 400
+                    and _ACCOUNTS_PATH_RE.search(urlsplit(url).path or "")):
+                rec["accounts"] = time.monotonic()
+        except Exception:
+            pass
+
+    try:
+        page.on("response", on_response)
+    except Exception:
+        pass
+    _ARRIVALS[page] = rec
+    return rec
+
+
+def _arriving(page) -> None:
+    """Note that this run is about to bring the tab to a new page, so the
+    button there waits for the accounts to answer again."""
+    _watch(page)["arrived"] = time.monotonic()
+
+
+def _ready_to_press(rec) -> bool:
+    """Whether the documents page has had what it needs from the bank
+    before its button is pressed. A page reached before the run looked
+    has. One this run brought the tab to has once the accounts answered
+    after it arrived and the page then settled, or once the whole wait is
+    over with no answer at all."""
+    arrived = rec.get("arrived")
+    if arrived is None:
+        return True
+    now = time.monotonic()
+    heard = rec.get("accounts")
+    if heard is not None and heard >= arrived:
+        return now - heard >= VENDOR_SETTLE_MS / 1000.0
+    return now - arrived >= LINK_WAIT_POLLS * 0.5
+
+
+def _waited(rec) -> str:
+    """How long the button was held back, in fixed words for a trace."""
+    arrived = rec.get("arrived")
+    if arrived is None:
+        return "not at all, the page was already open"
+    heard = rec.get("accounts")
+    if heard is not None and heard >= arrived:
+        return "until the accounts answered"
+    return "the whole wait, the accounts never answered"
+
+
+# Why open_vendor came back with what it did, in fixed words for a trace
+# a tester attaches, so a failed pilot says which step failed (#35).
+OPENED = "the button opened a new tab"
+REUSED = "the tab this run opened was still open"
+NO_DOCUMENTS_PAGE = "the documents page did not open"
+OFF_THE_BANK = "the tab was not on the bank's own site, so nothing was pressed"
+NO_CONTROL = "no View Documents button or link on the page"
+REFUSED = "the View Documents control did not pass the guard"
+LEFT_THE_BANK = ("the tab was not on the bank's signed-in pages when the button was due, "
+                 "so it was not pressed")
+NO_BUTTON = "no View Documents button on the documents page when it was due"
+NO_TAB = "the button was pressed and no tab opened"
+STAYED_AT_THE_BANK = "a tab opened but stayed on the bank's own site"
+NOT_HTTPS = "a tab opened on an address that is not https, so it was closed"
+TAB_GONE = "a tab opened and closed before it could be read"
+FAILED = "pressing it raised an error"
+_LAST_OPEN: dict = {}
+
+
+def _said(why: str, **more) -> None:
+    """Record why the vendor's tab did or did not open, one of the words
+    above, for the trace."""
+    _LAST_OPEN.clear()
+    _LAST_OPEN["why"] = why
+    _LAST_OPEN.update(more)
+
+
+def _open_said() -> dict:
+    """What the last try at the vendor's tab came to, fixed words and a
+    count only."""
+    return {k: _LAST_OPEN[k] for k in ("why", "waited", "error", "old_tabs_closed")
+            if _LAST_OPEN.get(k)}
+
+
+def _press_for_vendor_tab(page, loc):
+    """Press `loc`, once it has passed the guard, and adopt the tab it
+    opens, or None.
+
+    Statements tabs this run will not read are closed first (see
+    _close_old_vendor_tabs), and only a tab that did not exist before the
+    press is ever taken for the one it opened. An old tab that reloads
+    itself during the wait is not mistaken for it (#35)."""
+    label = (loc.first.inner_text(timeout=1000) or "").strip()
+    if not is_safe_control(label):
+        _said(REFUSED)
+        return None
+    closed = _close_old_vendor_tabs(page)
+    ctx = page.context
+    before = set(ctx.pages)
+    loc.first.click(timeout=5000)
+    for _ in range(TAB_WAIT_POLLS):
+        page.wait_for_timeout(500)
+        if [p for p in ctx.pages if p not in before]:
+            break
+    tab = None
+    if [p for p in ctx.pages if p not in before]:
+        tab = _adopt_new_tab(page, before)
+    else:
+        _said(NO_TAB)
+    if closed:
+        _LAST_OPEN["old_tabs_closed"] = closed
+    if tab is not None:
+        tab.wait_for_timeout(3000)
+    return tab
+
+
+def _press_when_ready(page, button, tabs_before=None):
+    """Press the documents page's button once the page is ready for it,
+    and adopt the tab it opens, or None.
+
+    When this run has just brought the tab to the page, by an address or
+    by the sidebar link, the button waits until the page has heard back
+    about the member's accounts and settled, since the button signs on
+    with one of them. Pressed sooner it may open nothing, and discovery
+    then has no list. A goto_documents that loaded the page by address
+    before open_vendor was called counts as bringing it there, which is
+    what discovery does when a run starts away from the documents page.
+
+    The wait ends early if the tab leaves the bank's site or is signed
+    out, and the button is pressed only while the tab is still at the
+    bank. `tabs_before`, given after the link, also takes a tab the link
+    itself opened."""
+    rec = _watch(page)
+    for _ in range(LINK_WAIT_POLLS + VENDOR_SETTLE_MS // 500 + 2):
+        if tabs_before is not None and [p for p in page.context.pages if p not in tabs_before]:
+            tab = _adopt_new_tab(page, tabs_before)
+            if tab is not None:
+                tab.wait_for_timeout(3000)
+            return tab
+        if not on_bank_host(page.url or "") or looks_signed_out(page):
+            break
+        if button.count() and _ready_to_press(rec):
+            break
+        page.wait_for_timeout(500)
+    if not _still_at_the_bank(page):
+        log.info("the tab is not on the bank's own signed-in page, so the button is not pressed")
+        _said(LEFT_THE_BANK)
+        return None
+    if not button.count():
+        _said(NO_BUTTON)
+        return None
+    waited = _waited(rec)
+    log.info("pressing View Documents, having waited %s", waited)
+    tab = _press_for_vendor_tab(page, button)
+    _LAST_OPEN["waited"] = waited
+    return tab
+
+
+def _follow_link_to_button(page, link, button):
+    """Press the sidebar link, which only brings this tab to the documents
+    page, then the button there that opens the vendor, once the page is
+    ready for it, or None."""
+    label = (link.first.inner_text(timeout=1000) or "").strip()
+    if not is_safe_control(label):
+        _said(REFUSED)
+        return None
+    before = set(page.context.pages)
+    _arriving(page)
+    link.first.click(timeout=5000)
+    return _press_when_ready(page, button, tabs_before=before)
+
+
 def open_vendor(page):
     """The vendor tab, opened through the documents page's "View
-    Documents" button when it is not open yet, or None. The button has
-    passed the guard, and the tab it opens has to be on the vendor's
-    host, anything else is closed unread."""
-    tab = _vendor_tab(page)
+    Documents" button when this run has not opened it yet, or None. The
+    button has passed the guard, and the tab it opens has to be on an
+    https host, anything else is closed unread.
+
+    The LINK of the same name sits in online banking's sidebar and only
+    brings this tab to the documents page. goto_documents takes
+    any page carrying that link for the documents page, so a run started
+    on the overview pressed the link, saw no tab open and gave up, and
+    discovery read the bank's own page. Two pilots did exactly that, each
+    request census showing the documents page loading and then a single
+    press of the button, which came from the capture after it (#35). So
+    a link that opens no tab is followed by the button it leads to.
+
+    Why it came back as it did is left in fixed words for the trace (see
+    _open_said)."""
+    tab = _vendor_tab_this_run(page)
     if tab is not None:
+        _said(REUSED)
         return tab
+    _watch(page)
     if not goto_documents(page):
+        _said(NO_DOCUMENTS_PAGE)
+        return None
+    # The button that opens the vendor is the bank's own, so nothing is
+    # pressed for it on any other site.
+    if not on_bank_host(page.url or ""):
+        log.info("not on the bank's own site, so the vendor's button is not looked for")
+        _said(OFF_THE_BANK)
         return None
     try:
+        button = page.get_by_role("button", name=VENDOR_BUTTON_RE)
         loc = _vendor_button(page)
         if loc.count() == 0:
+            _said(NO_CONTROL)
             return None
-        label = (loc.first.inner_text(timeout=1000) or "").strip()
-        if not is_safe_control(label):
-            return None
-        before = set(page.context.pages)
-        loc.first.click(timeout=5000)
-        for _ in range(30):
-            page.wait_for_timeout(500)
-            if [p for p in page.context.pages if p not in before]:
-                break
-        tab = _adopt_new_tab(page, before)
-        if tab is not None:
-            tab.wait_for_timeout(3000)
-            return tab
-        log.info("View Documents opened no tab")
+        if button.count():
+            tab = _press_when_ready(page, button)
+        else:
+            tab = _follow_link_to_button(page, loc, button)
+        if tab is None:
+            log.info("View Documents opened no tab")
+        return tab
     except Exception as e:
         log.info("could not open the document vendor: %s", e)
+        _said(FAILED, error=_error_word(e))
     return None
 
 
@@ -649,10 +1007,33 @@ def open_statement_history(page) -> bool:
     return False
 
 
-def collect_download_docs(page) -> List[RawDoc]:
+def collect_download_docs(page, trace: Optional[list] = None) -> List[RawDoc]:
     """Read every statement and tax document the vendor's page offers.
-    Each control's own name, or the row it sits in, carries the date."""
-    page = open_vendor(page) or page
+    Each control's own name, or the row it sits in, carries the date.
+
+    `trace` collects where discovery read and how many dates it found
+    there, counts and fixed wording only. What discovery saw had to be
+    worked out from the order of a request census, because no file a
+    tester sends said it (#35).
+
+    Only a vendor tab this run opened through the bank's button is read.
+    The bank's own pages list no statements, and a control there with no
+    date of its own took whatever date was printed near it, which is how
+    a statement dated by a day the vendor never offered came to be tried
+    first on every pilot. Any other tab, such as a vendor tab an earlier
+    run left open, may show a list from a session that has ended. When
+    the vendor's tab does not open, discovery finds nothing and says why."""
+    vendor = open_vendor(page)
+    if vendor is None:
+        log.info("the vendor's tab did not open, so there is no list to read")
+        if trace is not None:
+            trace.append({"note": "discovery, the vendor's tab did not open, so no list was read",
+                          "on": _where(page.url), **_open_said()})
+        return []
+    page = vendor
+    if trace is not None:
+        trace.append({"note": "discovery, the vendor's tab opened",
+                      "on": _where(page.url), **_open_said()})
     docs: List[RawDoc] = []
     seen = set()
     # The vendor opens on the current statement, and the rest are behind
@@ -700,6 +1081,13 @@ def collect_download_docs(page) -> List[RawDoc]:
                            kind="tax" if tax else "statement", dated_by=how))
     if skipped:
         log.info("%d document controls left out, none named one date of its own", skipped)
+    if trace is not None:
+        trace.append({"note": "discovery read the page",
+                      "statement_history": "opened" if opened else "not found",
+                      "dated_statements": _dated_count(page),
+                      "by_label": sum(1 for d in docs if d.dated_by == "label"),
+                      "by_row": sum(1 for d in docs if d.dated_by == "row"),
+                      "left_out": skipped})
     return docs
 
 
@@ -730,8 +1118,50 @@ def _fetch_pdf(page, href: str) -> Optional[bytes]:
 
 def _take_same_tab(page, start_url: str, out_path: Path, trace) -> bool:
     """A PDF the click opened in this very tab. The core does the reading,
-    this app's guard decides which addresses it may read."""
-    return _core_take_same_tab(page, start_url, out_path, trace, is_safe_url)
+    this app's guard decides which addresses it may read.
+
+    The core notes the address the tab moved to. What reaches this app's
+    trace is only which site that was and what kind of answer it gave."""
+    moved_to = page.url or ""
+    noted: list = []
+    ok = _core_take_same_tab(page, start_url, out_path, noted, is_safe_url)
+    if trace is not None:
+        for entry in noted:
+            trace.append({"note": "the tab moved", "on": _where(moved_to),
+                          "type": _type_word(str(entry.get("content_type") or ""))})
+    return ok
+
+
+# How long a click is given to produce the document, in seconds, before
+# the next way of catching it is tried, after a second step, and at last.
+CLICK_WAIT_S = 10
+SECOND_STEP_WAIT_S = 20
+LAST_WAIT_S = 15
+
+
+def _type_word(content_type: str) -> str:
+    """A content type as one of a few fixed words, for a trace."""
+    ct = (content_type or "").lower()
+    for word in ("pdf", "json", "octet", "html", "javascript", "text"):
+        if word in ct:
+            return word
+    return "other" if ct else "none"
+
+
+def _control_kind(label: str) -> str:
+    """What sort of control was pressed, in fixed words, for a trace. Its
+    own words stay out of the file."""
+    if DATE_ONLY_CONTROL_RE.match(label or ""):
+        return "a link named by its date"
+    if _SECOND_STEP_RE.match(label or ""):
+        return "a download step"
+    return "another document control"
+
+
+def _error_word(e: BaseException) -> str:
+    """An error by its kind alone. Playwright's message can quote the
+    element it was waiting for, address and all."""
+    return type(e).__name__[:40]
 
 
 _SECOND_STEP_RE = re.compile(
@@ -751,7 +1181,12 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     """Click `el` and save whatever PDF the site produces, a file landing
     in `dl_dir`, a download event, a PDF response, a new tab, this tab
     moving to the document, or a second control the click revealed.
-    `trace` collects what happened, the click's own outcome included."""
+    `trace` collects what happened, the click's own outcome included.
+
+    Everything the trace says is built from fixed words, counts and
+    statuses. It goes into download-attempt.json, which a tester is asked
+    to attach to a public issue, and until this pilot no Golden 1 run had
+    got this far, so it had never held an address or a label (#35)."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
@@ -767,7 +1202,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 return
             ct = (res.headers.get("content-type") or "").lower()
             if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
-                trace.append({"status": res.status, "type": ct[:40], "url": redact(url)[:160]})
+                trace.append({"status": res.status, "type": _type_word(ct), "on": _where(url)})
             if got:
                 return
             if "pdf" in ct or "octet" in ct:
@@ -825,18 +1260,20 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         try:
             el.click(timeout=8000)
             if trace is not None:
-                trace.append({"note": "clicked", "control": redact(label)[:60]})
+                trace.append({"note": "clicked", "control_kind": _control_kind(label)})
         except Exception as e:
             if trace is not None:
-                trace.append({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
+                trace.append({"note": "click failed", "control_kind": _control_kind(label),
+                              "error": _error_word(e)})
             try:
                 el.evaluate("el => el.click()")
                 if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
+                    trace.append({"note": "clicked through the DOM instead",
+                                  "control_kind": _control_kind(label)})
             except Exception as e2:
                 if trace is not None:
-                    trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
-        if wait_for_pdf(10):
+                    trace.append({"note": "DOM click failed too", "error": _error_word(e2)})
+        if wait_for_pdf(CLICK_WAIT_S):
             return True
         if _take_same_tab(page, start_url, out_path, trace):
             return True
@@ -844,25 +1281,27 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         appeared = _control_texts(page) - controls_before
         if trace is not None:
-            trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
-                          "appeared": [redact(t) for t in sorted(appeared)[:15]],
+            trace.append({"note": "after the click", "on": _where(page.url or ""),
+                          "appeared": len(appeared),
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
         step, step_label = _second_step(page, appeared)
         if step is not None:
             try:
                 step.click(timeout=8000)
                 if trace is not None:
-                    trace.append({"note": "second step clicked", "control": redact(step_label)[:60]})
+                    trace.append({"note": "second step clicked",
+                                  "control_kind": _control_kind(step_label)})
             except Exception as e:
                 if trace is not None:
-                    trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
-                                  "error": str(e)[:160]})
-            if wait_for_pdf(20):
+                    trace.append({"note": "second step click failed",
+                                  "control_kind": _control_kind(step_label),
+                                  "error": _error_word(e)})
+            if wait_for_pdf(SECOND_STEP_WAIT_S):
                 return True
             if _take_same_tab(page, start_url, out_path, trace) or \
                     _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
                 return True
-        if wait_for_pdf(15):
+        if wait_for_pdf(LAST_WAIT_S):
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
@@ -884,13 +1323,33 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 pass
 
 
-def _host_of(url: str) -> str:
-    """Which site a page is on, and nothing else about it."""
-    from urllib.parse import urlsplit
+# The hosts a trace may name. Anything else is "another site", so what
+# goes into a file a tester attaches is always one of these words.
+_KNOWN_HOSTS = ("digitalbanking.golden1.com", "login.golden1.com", "ebank.hepsiian.com")
+_KNOWN_DOMAINS = (BANK_DOMAIN,) + VENDOR_HOSTS
+
+
+def _where(url: str) -> str:
+    """Which site a page is on, for a file a tester attaches. Always a word
+    from the lists above, a known host of the bank's or the vendor's, the
+    domain for any other page of theirs, "another site", or "nowhere".
+    Never the address itself, its port or anything before its host."""
     try:
-        return urlsplit(url or "").netloc or "nowhere"
+        host = (urlsplit(url or "").hostname or "").lower()
     except ValueError:
         return "nowhere"
+    if not host:
+        return "nowhere"
+    if host in _KNOWN_HOSTS:
+        return host
+    for domain in _KNOWN_DOMAINS:
+        if host == domain or host.endswith("." + domain):
+            return domain
+    return "another site"
+
+
+# The orchestrator says where the bank's tab stood in the same words.
+where = _where
 
 
 def _control_dates(page, limit: int = 30) -> list:
@@ -937,12 +1396,19 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     # sent, and an empty trace cannot be told from a run that never
     # started (#35).
     vendor = open_vendor(page)
+    if vendor is None:
+        # Only a vendor tab this run opened lists statements it can fetch.
+        # The bank's own pages list none, their only document controls are
+        # the two that lead to the vendor, and any other tab may be an old
+        # one whose session has ended. So nothing is pressed anywhere else.
+        log.info("the vendor's tab did not open, so nothing is pressed for %s", iso_date)
+        if trace is not None:
+            trace.append({"note": "the vendor's tab did not open, so no statement was pressed",
+                          "on": _where(page.url), **_open_said()})
+        return False
+    page = vendor
     if trace is not None:
-        trace.append({"note": ("the vendor's tab opened" if vendor
-                               else "the vendor's tab did not open, so the bank's own "
-                                    "page is all there is to look at"),
-                      "on": _host_of(vendor.url if vendor else page.url)})
-    page = vendor or page
+        trace.append({"note": "the vendor's tab opened", "on": _where(page.url), **_open_said()})
     # The same step discovery takes. The vendor opens on the current
     # statement and the rest are behind its own Statement History, so a
     # capture that skipped it would find nothing for any date but the
@@ -975,7 +1441,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         log.info("refusing unsafe control %r for %s", label, iso_date)
         if trace is not None:
             trace.append({"note": "the control for that date is one the guard refuses",
-                          "control": redact(label)[:60]})
+                          "control_kind": _control_kind(label)})
         return False
 
     try:
@@ -995,7 +1461,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                 return True
             if trace is not None:
                 trace.append({"note": "the control's own link did not answer with a PDF",
-                              "url": redact(target)[:160]})
+                              "on": _where(target)})
     return _catch_pdf(page, el, label, out_path, trace, dl_dir)
 
 

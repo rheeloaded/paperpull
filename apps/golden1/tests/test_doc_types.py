@@ -177,6 +177,8 @@ def test_a_tab_the_bank_opened_is_adopted_and_its_host_allowed_for_the_run():
     assert tab is not None and "edocs.example.test" in site._VENDOR_HOSTS_SEEN
     assert site.is_safe_url("https://edocs.example.test/statements/1.pdf")
     assert not site.is_safe_url("http://edocs.example.test/x")
+    assert site._ADOPTED_TABS[-1] is tab
+    site._ADOPTED_TABS.remove(tab)
     site.ALLOWED_HOSTS.discard("edocs.example.test")
     site._VENDOR_HOSTS_SEEN.clear()
 
@@ -191,12 +193,21 @@ def test_the_trace_says_whether_the_vendors_tab_opened():
     assert "_control_dates(page)" in src
 
 
-def test_the_host_is_all_that_is_said_about_where_it_was():
-    assert site._host_of("https://ebank.example.com/docs/12345?token=abc") == "ebank.example.com"
-    assert site._host_of("https://digitalbanking.golden1.com/accounts/documents") == \
+def test_where_it_was_is_said_in_fixed_words_only():
+    """A trace names a known host of the bank's or the vendor's and
+    nothing else. An unknown host, a port, anything before the host and
+    the path never reach a file a tester attaches."""
+    assert site._where("https://digitalbanking.golden1.com/accounts/documents") == \
         "digitalbanking.golden1.com"
-    assert site._host_of("") == "nowhere"
-    assert site._host_of("not a url") == "nowhere"
+    assert site._where("https://ebank.hepsiian.com/cv/searchResults.jsf?t=abc") == "ebank.hepsiian.com"
+    assert site._where("https://someone:secret@ebank.hepsiian.com:8443/x") == "ebank.hepsiian.com"
+    assert site._where("https://m.golden1.com/member/12345") == "golden1.com"
+    assert site._where("https://ebank.example.com/docs/12345?token=abc") == "another site"
+    assert site._where("https://golden1.com.phish.example/") == "another site"
+    assert site._where("") == "nowhere"
+    assert site._where("not a url") == "nowhere"
+    src = inspect.getsource(site.collect_download_docs) + inspect.getsource(site.download_bill)
+    assert '"on": _where(page.url)' in src and "_host_of" not in src
 
 
 def test_the_dates_a_page_carries_come_back_as_dates_and_nothing_else():

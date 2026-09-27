@@ -1,7 +1,7 @@
 """One date per statement, the one the vendor's list shows.
 
-A pilot on 0.34.1 asked the vendor for a statement dated 2026-09-21. The
-vendor's own list ran by month ends, 08/31/26 back to 09/30/25, so no
+A pilot on 0.34.1 asked the vendor for a statement dated by a day that was
+not a month end, while the vendor's own list ran by month ends, so no
 control on the page carried that date and nothing was saved. The date
 came from the text around a control with no date of its own, where the
 first date found is whatever the page prints near it, and a record made
@@ -10,6 +10,8 @@ every pilot after it (#35).
 
 The same trace showed no Statement History control and yet twelve dated
 statements, so the vendor can open straight on its list.
+
+Every date and page here is invented. The shape is the vendor's.
 """
 import json
 import sys
@@ -27,10 +29,10 @@ import golden1_site as site
 # no statement at all, the day the page was read.
 VENDOR = """<body>
   <main>
-    <section><h2>Current Statement</h2><p>As of 09/21/2026</p>
+    <section><h2>Current Statement</h2><p>As of 12/14/2023</p>
       <p><a href="#">View PDF</a></p></section>
     <section><h2>History</h2>
-      <a href="#">08/31/26</a><a href="#">07/31/26</a><a href="#">06/30/26</a>
+      <a href="#">11/30/23</a><a href="#">10/31/23</a><a href="#">09/30/23</a>
       <a href="#">Pay my loan</a>
     </section>
   </main>
@@ -53,19 +55,21 @@ def page():
 
 @pytest.fixture()
 def on_the_vendor(monkeypatch):
-    """The page under test is the vendor's tab already, and nothing
-    navigates away from it."""
-    monkeypatch.setattr(site, "open_vendor", lambda p: None)
+    """The page under test is the vendor's tab already, so opening the
+    vendor hands back that very page, and nothing navigates away from
+    it."""
+    monkeypatch.setattr(site, "open_vendor", lambda p: p)
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
     monkeypatch.setattr(site, "scroll_full_page", lambda p, *a, **k: None)
+    monkeypatch.setattr(site, "_LAST_OPEN", {})
 
 
 def test_discovery_reads_only_the_dates_the_vendor_lists(page, on_the_vendor):
     page.set_content(VENDOR)
     docs = site.collect_download_docs(page)
-    assert [d.date_text for d in docs] == ["2026-08-31", "2026-07-31", "2026-06-30"]
+    assert [d.date_text for d in docs] == ["2023-11-30", "2023-10-31", "2023-09-30"]
     assert all(d.dated_by == "label" for d in docs)
-    assert "2026-09-21" not in [d.date_text for d in docs]
+    assert "2023-12-14" not in [d.date_text for d in docs]
 
 
 def test_capture_finds_each_discovered_date_and_nothing_for_a_date_not_listed(page, on_the_vendor):
@@ -73,37 +77,37 @@ def test_capture_finds_each_discovered_date_and_nothing_for_a_date_not_listed(pa
     for d in site.collect_download_docs(page):
         el, label = site._control_for(page, d.date_text)
         assert el is not None and site.parse_date(label) == d.date_text
-    el, _ = site._control_for(page, "2026-09-21")
+    el, _ = site._control_for(page, "2023-12-14")
     assert el is None
-    assert "2026-09-21" not in site._control_dates(page)
+    assert "2023-12-14" not in site._control_dates(page)
 
 
 def test_a_row_date_is_taken_only_when_the_row_names_one_day(page):
     page.set_content("""<body>
-      <div><p>Statement 08/31/2026</p><p><a id="one" href="#">View PDF</a></p></div>
-      <div><p>08/01/2026 to 08/31/2026</p><p><a id="two" href="#">View PDF</a></p></div>
+      <div><p>Statement 11/30/2023</p><p><a id="one" href="#">View PDF</a></p></div>
+      <div><p>11/01/2023 to 11/30/2023</p><p><a id="two" href="#">View PDF</a></p></div>
     </body>""")
     one = page.locator("#one")
     two = page.locator("#two")
-    assert site._date_of_control(one, "View PDF", False) == ("2026-08-31", "row")
+    assert site._date_of_control(one, "View PDF", False) == ("2023-11-30", "row")
     assert site._date_of_control(two, "View PDF", False)[0] is None
     # Beside a dated list a dateless control is not read at all.
     assert site._date_of_control(one, "View PDF", True)[0] is None
-    assert site._date_of_control(one, "08/31/26", True) == ("2026-08-31", "label")
+    assert site._date_of_control(one, "11/30/23", True) == ("2023-11-30", "label")
 
 
 def test_the_trace_says_the_list_was_already_there_without_statement_history(page, on_the_vendor, tmp_path):
     page.set_content(VENDOR.replace("<h2>History</h2>", ""))
     trace = []
-    ok = site.download_bill(page, tmp_path, "2026-09-21", tmp_path / "x.pdf", trace=trace)
+    ok = site.download_bill(page, tmp_path, "2023-12-14", tmp_path / "x.pdf", trace=trace)
     assert ok is False
     notes = [t.get("note") for t in trace]
     assert "no statement history control, the vendor's page already lists dated statements" in notes
     listed = next(t for t in trace if "dated_statements" in t)
     assert listed["dated_statements"] == 3
     missing = next(t for t in trace if t.get("note") == "no control on this page carries that date")
-    assert "2026-09-21" not in missing["dates_here"]
-    assert "2026-08-31" in missing["dates_here"]
+    assert "2023-12-14" not in missing["dates_here"]
+    assert "2023-11-30" in missing["dates_here"]
 
 
 # -- the orchestrator ---------------------------------------------------------
@@ -124,14 +128,14 @@ def _app_with(records):
 
 
 def test_a_date_an_earlier_discovery_made_up_is_retired_once_the_vendor_lists_its_own():
-    stale = "Statement:2026-09-21:Account Statement - Sep 21, 2026:"
-    kept_done = "Statement:2026-05-31:Account Statement - May 31, 2026:"
-    listed = "Statement:2026-08-31:Account Statement - Aug 31, 2026:"
+    stale = "Statement:2023-12-14:Account Statement - Dec 14, 2023:"
+    kept_done = "Statement:2023-06-30:Account Statement - Jun 30, 2023:"
+    listed = "Statement:2023-11-30:Account Statement - Nov 30, 2023:"
     app = _app_with({stale: {"state": State.NEEDS_MANUAL_REVIEW.value},
                      kept_done: {"state": State.COMPLETED.value, "downloaded_ok": True},
                      listed: {"state": State.DISCOVERED.value}})
     app._listed_keys = {listed}
-    docs = [site.RawDoc(title="Account Statement - Aug 31, 2026", date_text="2026-08-31",
+    docs = [site.RawDoc(title="Account Statement - Nov 30, 2023", date_text="2023-11-30",
                         dated_by="label")]
     assert app._retire_unlisted(docs) == 1
     assert set(app.discovery.data) == {kept_done, listed}
@@ -141,7 +145,7 @@ def test_nothing_is_retired_when_the_list_was_not_read_from_the_vendors_own_date
     app = _app_with({"a": {"state": State.DISCOVERED.value}})
     app._listed_keys = set()
     assert app._retire_unlisted([]) == 0
-    assert app._retire_unlisted([site.RawDoc(title="t", date_text="2026-08-31", dated_by="row")]) == 0
+    assert app._retire_unlisted([site.RawDoc(title="t", date_text="2023-11-30", dated_by="row")]) == 0
     assert set(app.discovery.data) == {"a"}
 
 
@@ -194,33 +198,35 @@ def _capturing_app(tmp_path, monkeypatch, printed: str):
 
 
 class _Page:
-    url = "https://ebank.hepsiian.com/statements"
+    url = "https://ebank.hepsiian.com/statements?token=abc123"
 
 
 def _doc():
-    return golden1_docs.Document(title="Account Statement - Aug 31, 2026",
+    return golden1_docs.Document(title="Account Statement - Nov 30, 2023",
                                  category="Statement", summary="Account Statement",
-                                 date="2026-08-31")
+                                 date="2023-11-30")
 
 
 def test_a_statement_that_does_not_print_its_date_is_not_filed_under_it(tmp_path, monkeypatch):
     app = _capturing_app(tmp_path, monkeypatch,
-                         "Golden 1 Credit Union Statement Period Ending 09/30/26 Page 1 of 3")
+                         "Golden 1 Credit Union Statement Period Ending 12/31/23 Page 1 of 3")
     doc = _doc()
-    app.download_one(_Page(), doc, "2026-08-31 Golden 1 Account Statement.pdf")
+    app.download_one(_Page(), doc, "2023-11-30 Golden 1 Account Statement.pdf")
     assert not list(app.paths.folder_for(doc.category).glob("*.pdf"))
     assert app.progress.get(doc.key)["state"] == State.NEEDS_MANUAL_REVIEW.value
     attempt = json.loads((app.paths.diagnostics / "download-attempt.json").read_text())
     note = attempt["responses"][-1]
     assert note["check"]["outcome"] == "refused"
-    assert "09/30/26" not in json.dumps(attempt)
+    assert "12/31/23" not in json.dumps(attempt)
+    # Where the tab stood is said in fixed words, never as its address.
+    assert attempt["landed_on"] == "ebank.hepsiian.com"
 
 
 def test_a_statement_that_prints_its_date_is_filed(tmp_path, monkeypatch):
     app = _capturing_app(tmp_path, monkeypatch,
-                         "Golden 1 Credit Union Statement Period Ending 08/31/26 Page 1 of 3")
+                         "Golden 1 Credit Union Statement Period Ending 11/30/23 Page 1 of 3")
     app.journal.checkpoint = lambda *a, **k: None
     doc = _doc()
-    app.download_one(_Page(), doc, "2026-08-31 Golden 1 Account Statement.pdf")
+    app.download_one(_Page(), doc, "2023-11-30 Golden 1 Account Statement.pdf")
     assert app.progress.get(doc.key)["state"] == State.COMPLETED.value
     assert list(app.paths.folder_for(doc.category).glob("*.pdf"))
