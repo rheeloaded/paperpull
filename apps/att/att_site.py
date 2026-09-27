@@ -2,7 +2,9 @@
 
 When AT&T changes its site, repair this file only.
 
-STATUS: round nine, the first round with bills on disk. Written without an AT&T account and
+STATUS: CONFIRMED on the tester's two accounts, wireless and internet, with a full run
+on each since 0.37.1 read the bill history past its first eight bills (#26). Round
+nine was the first round with bills on disk. Written without an AT&T account and
 repaired from two surveys a tester sent (#26). What the surveys showed:
 
   * Sign-in lands on /acctmgmt/overview, a shop page. The nav's Billing

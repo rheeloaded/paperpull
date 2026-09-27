@@ -47,15 +47,14 @@ signed installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Forty-four providers are supported today, all built on the same pattern.
-Twelve more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
-Newrez, Kroger, Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
+Eleven more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
+Kroger, Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#31](https://github.com/rheeloaded/paperpull/issues/31),
 [#35](https://github.com/rheeloaded/paperpull/issues/35),
 [#36](https://github.com/rheeloaded/paperpull/issues/36),
 [#37](https://github.com/rheeloaded/paperpull/issues/37),
-[#38](https://github.com/rheeloaded/paperpull/issues/38),
 [#41](https://github.com/rheeloaded/paperpull/issues/41),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
 [#45](https://github.com/rheeloaded/paperpull/issues/45)):
@@ -69,7 +68,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards | **Untested, built without an account. Have one? [Help test it](apps/amfam/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
-| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Pilot confirmed by [@watling777](https://github.com/watling777) in round eight.** The full run and a second account are the rounds still open ([#26](https://github.com/rheeloaded/paperpull/issues/26)) |
+| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Confirmed by [@watling777](https://github.com/watling777)** on two accounts, wireless and internet, with a full run on each ([#26](https://github.com/rheeloaded/paperpull/issues/26)) |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
 | [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms | **Partly tested.** A first Pilot on [@watling777](https://github.com/watling777)'s account saved three of five statements, and a repair for the other two is being tested. Requested in [#52](https://github.com/rheeloaded/paperpull/issues/52) |
 | [`bestbuy`](apps/bestbuy) | Best Buy | Online, store-order and in-store receipts, and returns | **Built on the maintainer's own account, 35 purchases back to 2015.** The history through the page's own query a year at a time, each details page saved as the receipt, nothing clicked, real Edge/Chrome, paced for Best Buy's bot protection |
@@ -97,7 +96,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
-| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Untested, built without an account. Have a Newrez mortgage? [Help test it](apps/newrez/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Partly tested.** On [@watling777](https://github.com/watling777)'s account this year's statements and the 1098s download, and a repair for earlier years is being tested ([#38](https://github.com/rheeloaded/paperpull/issues/38)) |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked; three years are online |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |

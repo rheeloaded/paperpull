@@ -19,7 +19,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
-| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. Pilot confirmed by @watling777 in round eight, the full run and a second account still being tested on issue #26 | Telecom |
+| [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. Confirmed by @watling777 on two accounts, wireless and internet, with a full run on each (#26) | Telecom |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #45. Being tested by @jpfieber | Insurance |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
@@ -49,7 +49,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Mortgage servicing |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits | Quarterly or monthly 401(k) statements, made to order and rendered; nothing clicked | Workplace retirement plan |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
-| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098. UNTESTED, built without an account. Have a Newrez mortgage? Run Diagnose and attach the file to issue #38. Being tested by @watling777 | Mortgage servicer |
+| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098. Built without an account and run against @watling777's (#38). This year's statements and the 1098s download, with a repair being tested for earlier years | Mortgage servicer |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements, the three years the site keeps online. Tax forms not yet covered. Built on the maintainer's own account, 25 statements | Payments |
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements. Contributed by @appchamp. Repaired in 0.37.1 and confirmed on a real account by @watling777 (#33) | Utility |

@@ -1,13 +1,12 @@
 # AT&T bill downloader
 
-**Working on the tester's account, still being finished.** This app was
-built without an AT&T account and repaired across eight rounds from the
-surveys and traces one tester sent. Round eight's pilot saved his bills.
-What is still open is the full history run and a household with more than
-one account (he holds wireless and fiber, and only the account in focus is
-read so far). The conversation is
-[issue #26](https://github.com/rheeloaded/paperpull/issues/26), and the
-steps below are still how a round works.
+**Working on the tester's account.** This app was built without an AT&T
+account and repaired across many rounds from the surveys, traces and
+recordings one tester sent. Since 0.37.1 it reads the bill history past its
+first eight bills with the list's own Next, and a full run on each of his
+two accounts, wireless and internet, saved every bill. The conversation is
+[issue #26](https://github.com/rheeloaded/paperpull/issues/26). If AT&T
+changes its site, the steps below are how a repair round works.
 
 Downloads your AT&T monthly **bills** as PDFs from myAT&T. Read-only,
 delete-safe, part of [PaperPull](../../README.md).

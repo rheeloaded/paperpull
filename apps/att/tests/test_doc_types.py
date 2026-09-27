@@ -126,9 +126,10 @@ def test_only_att_hosts():
 
 def test_the_status_is_stated_where_a_tester_will_read_it():
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "STATUS: round nine" in src.split('"""')[1]
+    assert "STATUS: CONFIRMED on the tester's two accounts" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "still being finished" in readme and "Not yet tested" not in readme
+    assert "**Working on the tester's account.**" in readme
+    assert "still being finished" not in readme and "Not yet tested" not in readme
 
 
 # -- round two, from the first tester's survey (#26) --------------------------
