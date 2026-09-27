@@ -7,6 +7,35 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **review_names is a double-click file again** in the twelve receipt
+  apps, Amazon, Best Buy, Costco, eBay, Gap, GitHub, Home Depot, Kroger,
+  Lowe's, Meijer, Target and Walmart. It went away with the other per-app
+  launchers on 2026-09-15 (#23), but it asks for one name at a time and so
+  cannot run in the panel, and the terminal command in its place was not
+  on anyone's PATH in the installed apps (#47). In a checkout it runs on
+  the folder's own Python. In a folder the installed app made, which has
+  no setup file, it runs on the app's own Python, so those folders get it
+  too, new ones at once and existing ones the next time the panel opens.
+
+### Fixed
+- **Windows installs have their terminal command again.** The panel's
+  launcher was a batch file named PaperPull.bat, and Windows does not tell
+  that name from paperpull.bat, the terminal command, so every Windows
+  package since 0.19.0 had the panel launcher under both names and no
+  terminal command at all. The Start menu and desktop shortcuts now open
+  PaperPull.exe, which the installer already carried, and paperpull.bat is
+  the terminal command the docs describe. Double-clicked with nothing after
+  it, paperpull.bat still opens the panel, so an older shortcut keeps
+  working. Its exit code is now the command's, where it used to report
+  success every time.
+- **Mac double-click files open.** The setup and login files of the 36
+  apps generated on a Windows machine reached every Mac without the
+  executable bit, so a double-click refused them. All of them carry it
+  now, and a test refuses one that does not.
+
 ## [0.37.2] - 2026-09-27
 
 The first signed Windows release, and one repair from the tester's runs

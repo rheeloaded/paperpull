@@ -57,7 +57,7 @@ signed-in browsers can be open at once.
 | 5 | `paperpull gap all` | Your entire purchase history (asks for `yes`) |
 | any time | `paperpull gap resume` | Continue after an interruption; never redoes finished work |
 | any time | `paperpull gap verify` | Re-validate every indexed PDF |
-| any time | `paperpull gap review-names` | Fix low-confidence filenames interactively |
+| any time | `review_names.bat`, `./review_names.command` on a Mac, or `paperpull gap review-names` | Fix low-confidence filenames interactively |
 
 Useful for splitting a run:
 

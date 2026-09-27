@@ -266,8 +266,10 @@ paperpull list                  REM every app it can see
 
 `paperpull` is `paperpull.bat` on Windows and `./paperpull` on macOS and
 Linux, or `python paperpull.py` anywhere. In the installed Mac app it is
-`/Applications/PaperPull.app/Contents/Resources/paperpull`, which works on
-the same installs the panel does. It finds the app by folder name,
+`/Applications/PaperPull.app/Contents/Resources/paperpull`, and in the
+installed Windows app it is `paperpull.bat` in the folder PaperPull was
+installed to, `%LOCALAPPDATA%\PaperPull` unless you chose another. Both work
+on the same installs the panel does. It finds the app by folder name,
 slug or provider, runs it under its own environment, and passes anything else
 straight through, so `paperpull chase all --year 2025 --account spouse` works.
 The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
@@ -441,7 +443,7 @@ prompt while the certificate is new, since it learns to trust a publisher
 from downloads over time. See [Code signing policy](#code-signing-policy)
 below.
 
-For a checkout of this repository, one download covers both. The two
+For a checkout of this repository, one download covers both. The
 double-click files each app keeps, and the one-shot setup, come in both
 flavors, and everything else is the same `paperpull` command on either:
 
@@ -450,11 +452,18 @@ flavors, and everything else is the same `paperpull` command on either:
 | One-shot setup | `setup-all.bat` | `./setup-all.command` |
 | Set up one app | `setup.bat` | `./setup.command` |
 | Sign in | `login.bat` | `./login.command` |
+| Fix unsure receipt names | `review_names.bat` | `./review_names.command` |
 | Test run | `paperpull amex pilot` | `./paperpull amex pilot` |
 | Full run | `paperpull amex all` | `./paperpull amex all` |
 | Control panel | `gui\run_gui.bat` | `gui/run_gui.command` |
 
 A second account is the same on both: `paperpull amex all --account spouse`.
+
+`review_names` is in each receipt app, the ones that name a purchase from its
+items, because it asks you for one name at a time and so cannot run in the
+panel. It is also the one double-click file in a folder the installed app
+made, since the panel does the rest there, and in such a folder it runs on
+the app's own Python.
 
 Only one thing genuinely differs. macOS keeps Playwright's browser inside an
 app bundle and in a different cache directory, and a couple of providers need

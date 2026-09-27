@@ -46,7 +46,7 @@ stealth or evasion is used.
 | 5 | `paperpull lowes all` | Your entire purchase history (asks for `yes`) |
 | any time | `paperpull lowes resume` | Continue after an interruption. Never redoes finished work |
 | any time | `paperpull lowes verify` | Re-validate every indexed PDF |
-| any time | `paperpull lowes review-names` | Fix low-confidence filenames interactively |
+| any time | `review_names.bat`, `./review_names.command` on a Mac, or `paperpull lowes review-names` | Fix low-confidence filenames interactively |
 
 ## How receipts are captured
 

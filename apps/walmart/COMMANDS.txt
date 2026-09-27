@@ -1,7 +1,7 @@
 WALMART RECEIPTS  -  commands
 ============================================================
 Run these from the PaperPull folder (paperpull.bat on Windows,
-./paperpull on macOS). login.bat is the one double-click that stays.
+./paperpull on macOS). login.bat and review_names.bat are the double-clicks that stay.
 
   Task            You                                 Spouse
   --------------  ----------------------------------  ----------------------------------
@@ -12,7 +12,7 @@ Run these from the PaperPull folder (paperpull.bat on Windows,
   In-store only   paperpull walmart instore           paperpull walmart instore --account spouse
   Continue        paperpull walmart resume            paperpull walmart resume --account spouse
   Re-check PDFs   paperpull walmart verify            paperpull walmart verify --account spouse
-  Fix a name      paperpull walmart review-names      paperpull walmart review-names --account spouse
+  Fix a name      review_names.bat                    review_names.bat spouse
 
 FLOW:  login.bat  ->  paperpull walmart pilot  ->  paperpull walmart all
 Keep the sign-in browser OPEN during the run (Walmart signs you

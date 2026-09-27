@@ -49,7 +49,7 @@ signed-in browsers can be open at once.
 | 5 | `paperpull ebay all` | Your entire purchase history (asks for `yes`) |
 | any time | `paperpull ebay resume` | Continue after an interruption. Never redoes finished work |
 | any time | `paperpull ebay verify` | Re-validate every indexed PDF |
-| any time | `paperpull ebay review-names` | Fix low-confidence filenames interactively |
+| any time | `review_names.bat`, `./review_names.command` on a Mac, or `paperpull ebay review-names` | Fix low-confidence filenames interactively |
 
 Useful for splitting a run
 

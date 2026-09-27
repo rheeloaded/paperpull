@@ -1,7 +1,7 @@
 TARGET RECEIPTS  -  commands
 ============================================================
 Run these from the PaperPull folder (paperpull.bat on Windows,
-./paperpull on macOS). login.bat is the one double-click that stays.
+./paperpull on macOS). login.bat and review_names.bat are the double-clicks that stay.
 
   Task            You                                 Spouse
   --------------  ----------------------------------  ----------------------------------
@@ -12,7 +12,7 @@ Run these from the PaperPull folder (paperpull.bat on Windows,
   In-store only   paperpull target instore            paperpull target instore --account spouse
   Continue        paperpull target resume             paperpull target resume --account spouse
   Re-check PDFs   paperpull target verify             paperpull target verify --account spouse
-  Fix a name      paperpull target review-names       paperpull target review-names --account spouse
+  Fix a name      review_names.bat                    review_names.bat spouse
 
 FLOW:  login.bat  ->  paperpull target pilot  ->  paperpull target all
 Keep the sign-in browser OPEN during the run.

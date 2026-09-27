@@ -6,6 +6,8 @@ the way. These pin each of those, and that the panel and the terminal offer
 the same commands, since the point of #23 was to stop having two answers.
 """
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -189,17 +191,55 @@ def test_every_real_app_resolves_and_builds_a_command():
 
 # -- the launchers that are gone stay gone -------------------------------------
 
-def test_an_app_ships_only_setup_and_login_as_double_click_files():
+def test_an_app_ships_only_setup_login_and_review_names_as_double_click_files():
     """Two hundred and forty-four files that each called one script with one
     flag were deleted for #23. The dispatcher does that job. A new provider
-    cloned from an old checkout would bring them back."""
-    allowed = {"setup.bat", "setup.command", "login.bat", "login.command"}
-    stray = []
+    cloned from an old checkout would bring them back.
+
+    review_names came back on its own terms, in every receipt app that has
+    the mode and nowhere else, because it asks for one name at a time and
+    so cannot run in the panel, and a tester told to type its terminal
+    command on a Mac got "command not found" (#47)."""
+    everywhere = {"setup.bat", "setup.command", "login.bat", "login.command"}
+    review = {"review_names.bat", "review_names.command"}
+    stray, missing, with_mode = [], [], 0
     for app in sorted(d for d in (REPO / "apps").iterdir() if d.is_dir()):
+        entry = paperpull.entry_script(app)
+        has_mode = bool(entry) and "--review-names" in entry.read_text(encoding="utf-8", errors="ignore")
+        with_mode += has_mode
+        allowed = everywhere | (review if has_mode else set())
         for f in app.iterdir():
             if f.suffix in (".bat", ".command") and f.name not in allowed:
                 stray.append(str(f.relative_to(REPO)))
+        if has_mode:
+            missing += [str((app / n).relative_to(REPO)) for n in sorted(review)
+                        if not (app / n).is_file()]
+    assert with_mode >= 12, with_mode
     assert not stray, "launchers that paperpull.py replaced: " + ", ".join(stray)
+    assert not missing, "a receipt app without its review_names file: " + ", ".join(missing)
+
+
+def test_every_command_file_opens_on_a_mac_double_click():
+    """A .command opens on a double-click only when it is executable and
+    has Unix line endings. git on Windows cannot record the first, and the
+    setup and login files of the 36 apps generated on a Windows machine
+    reached every Mac without it, 72 files that would not open."""
+    git = shutil.which("git")
+    if not git:
+        pytest.skip("git is not installed")
+    listed = subprocess.run([git, "ls-files", "-s", "--", "*.command"], cwd=REPO,
+                            capture_output=True, text=True)
+    if listed.returncode:
+        pytest.skip("not a git checkout")
+    rows = [line.split(None, 3) for line in listed.stdout.splitlines() if line.strip()]
+    assert len(rows) > 100, len(rows)
+    not_executable = [row[3] for row in rows if row[0] != "100755"]
+    assert not not_executable, ("run git update-index --chmod=+x on " + ", ".join(not_executable))
+    eol = subprocess.run([git, "ls-files", "--eol", "--", "*.command"], cwd=REPO,
+                         capture_output=True, text=True)
+    crlf = [line.split()[-1] for line in eol.stdout.splitlines()
+            if line.strip() and not line.startswith("i/lf")]
+    assert not crlf, "a .command stored without Unix line endings: " + ", ".join(crlf)
 
 
 def test_no_app_doc_still_points_at_a_deleted_launcher():

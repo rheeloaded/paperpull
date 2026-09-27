@@ -1,7 +1,7 @@
 GAP RECEIPTS  -  commands
 ============================================================
 Run these from the PaperPull folder (paperpull.bat on Windows,
-./paperpull on macOS). login.bat is the one double-click that stays.
+./paperpull on macOS). login.bat and review_names.bat are the double-clicks that stay.
 
   Task            You                                 Spouse
   --------------  ----------------------------------  ----------------------------------
@@ -10,7 +10,7 @@ Run these from the PaperPull folder (paperpull.bat on Windows,
   Full run        paperpull gap all                   paperpull gap all --account spouse
   Continue        paperpull gap resume                paperpull gap resume --account spouse
   Re-check PDFs   paperpull gap verify                paperpull gap verify --account spouse
-  Fix a name      paperpull gap review-names          paperpull gap review-names --account spouse
+  Fix a name      review_names.bat                    review_names.bat spouse
 
 FLOW:  login.bat  ->  paperpull gap pilot  ->  paperpull gap all
 Online orders land in Online\, in-store purchases in In-Store\.

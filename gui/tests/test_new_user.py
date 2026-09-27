@@ -54,6 +54,9 @@ def templates(tmp_path, monkeypatch):
         # the double-click launchers a checkout ships
         (d / "setup.bat").write_text("@echo off", encoding="utf-8")
         (d / "login.command").write_text("#!/bin/bash", encoding="utf-8")
+        # and the one that also runs on the packaged app's own Python
+        (d / "review_names.bat").write_text("@echo off", encoding="utf-8")
+        (d / "review_names.command").write_text("#!/bin/bash", encoding="utf-8")
     monkeypatch.setattr(app_module, "_templates_root", lambda: root)
     monkeypatch.setattr(app_module, "_provider_notes",
                         lambda: {"bank": {"documents": "Statements", "category": "Bank"}})
@@ -156,6 +159,28 @@ def test_the_packaged_app_leaves_the_launchers_out(templates, settings, tmp_path
     assert not (d / "login.command").exists()
     assert (d / "bank_docs.py").exists(), "the code itself must still be copied"
     assert (d / "config.json").exists()
+
+
+def test_the_packaged_app_ships_review_names_which_finds_its_python(templates, settings, tmp_path,
+                                                                    monkeypatch):
+    """review_names asks for one name at a time, so it cannot run in the
+    panel, and it looks for the app's own Python when the folder has no
+    setup file. So it is the one double-click file a packaged install gets,
+    in a new install and, on the next refresh, in one made before it
+    shipped."""
+    monkeypatch.setattr(app_module, "_is_packaged", lambda: True)
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    d = home / "Bank Statements"
+    assert (d / "review_names.bat").is_file()
+    assert (d / "review_names.command").is_file()
+
+    (d / "review_names.bat").unlink()
+    (d / "review_names.command").unlink()
+    changed = app_module.refresh_install_code(d, templates / "bank")
+    assert "review_names.bat" in changed and "review_names.command" in changed
+    assert (d / "review_names.command").is_file()
+    assert not (d / "setup.bat").exists() and not (d / "login.command").exists()
 
 
 def test_an_existing_install_is_never_overwritten(templates, settings, tmp_path):

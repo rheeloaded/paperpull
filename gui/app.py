@@ -842,6 +842,21 @@ def _is_packaged() -> bool:
 
 LAUNCHER_SUFFIXES = (".bat", ".command")
 
+# The double-click files that also run in a folder the packaged app made,
+# which has no venv, because they look for the app's own Python when the
+# folder has no setup file (see tools/make_unix_launchers.py). review_names
+# asks for one name at a time, so it cannot run in the panel. The rest call
+# a venv the package never makes, or a system Python it cannot assume.
+PACKAGED_LAUNCHERS = {"review_names.bat", "review_names.command"}
+
+
+def _launcher_left_out(item: Path) -> bool:
+    """Whether a template file is a double-click file this install could
+    not run. A checkout install gets every one, a packaged install only
+    those that find the app's own Python."""
+    return (item.suffix.lower() in LAUNCHER_SUFFIXES and _is_packaged()
+            and item.name.lower() not in PACKAGED_LAUNCHERS)
+
 
 def _provider_notes() -> dict:
     """What each app downloads, from the table in PROVIDERS.md, keyed by slug.
@@ -905,11 +920,12 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
     dst = root / info["folder"]
     if dst.exists():
         return "exists"
-    # The double-click launchers call .venv\Scripts\python.exe, which the
+    # Most double-click launchers call .venv\Scripts\python.exe, which the
     # packaged app never has, and setup.bat wants a system Python it cannot
     # assume. Copied into a packaged install they are a folder of files that
-    # all fail, right where a new user goes looking. The panel does their job.
-    skip_launchers = _is_packaged()
+    # all fail, right where a new user goes looking. The panel does their
+    # job. review_names finds the app's own Python, so it goes in
+    # (_launcher_left_out).
     for item in src.rglob("*"):
         rel = item.relative_to(src)
         # Exact names, plus anything profile-shaped. A profile folder is
@@ -921,7 +937,7 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
                or part.lower().endswith(".pdf")
                for part in rel.parts):
             continue
-        if skip_launchers and item.suffix.lower() in LAUNCHER_SUFFIXES:
+        if _launcher_left_out(item):
             continue
         if item.is_dir():
             (dst / rel).mkdir(parents=True, exist_ok=True)
@@ -960,7 +976,6 @@ def _set_owner(config: Path, owner: str) -> None:
 def _template_files(src: Path):
     """The files a template ships to an install, the same filter the first
     copy uses."""
-    skip_launchers = _is_packaged()
     for item in src.rglob("*"):
         if item.is_dir():
             continue
@@ -969,7 +984,7 @@ def _template_files(src: Path):
                or "browser-profile" in part.lower()
                or part.lower().endswith(".pdf") for part in rel.parts):
             continue
-        if skip_launchers and item.suffix.lower() in LAUNCHER_SUFFIXES:
+        if _launcher_left_out(item):
             continue
         yield rel, item
 

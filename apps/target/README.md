@@ -30,7 +30,7 @@ CAPTCHAs or security checks.
 | 5 | `paperpull target all` | Full history (asks for `YES` confirmation) |
 | any time | `paperpull target resume` | Continue after an interruption, never restarts finished work |
 | any time | `paperpull target verify` | Re-validate every indexed PDF |
-| any time | `paperpull target review-names` | Fix low-confidence filenames interactively |
+| any time | `review_names.bat`, `./review_names.command` on a Mac, or `paperpull target review-names` | Fix low-confidence filenames interactively |
 
 ## All command-line options
 

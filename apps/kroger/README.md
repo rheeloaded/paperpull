@@ -108,7 +108,7 @@ already on your machine is used and not the bundled one.
 | 6 | `paperpull kroger all` | Your entire purchase history (asks for `yes`) |
 | any time | `paperpull kroger resume` | Continue after an interruption. Never redoes finished work |
 | any time | `paperpull kroger verify` | Re-validate every indexed PDF |
-| any time | `paperpull kroger review-names` | Fix low-confidence filenames interactively |
+| any time | `review_names.bat`, `./review_names.command` on a Mac, or `paperpull kroger review-names` | Fix low-confidence filenames interactively |
 
 ## How it is meant to work
 

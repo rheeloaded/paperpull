@@ -53,7 +53,7 @@ invoice for online orders).
 | 5 | `paperpull walmart all` | Full history (asks for `YES` confirmation) |
 | any time | `paperpull walmart resume` | Continue after an interruption, never restarts finished work |
 | any time | `paperpull walmart verify` | Re-validate every indexed PDF |
-| any time | `paperpull walmart review-names` | Fix low-confidence filenames interactively |
+| any time | `review_names.bat`, `./review_names.command` on a Mac, or `paperpull walmart review-names` | Fix low-confidence filenames interactively |
 
 ## All command-line options
 

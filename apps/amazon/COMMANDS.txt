@@ -1,7 +1,7 @@
 AMAZON RECEIPTS  -  commands
 ============================================================
 Run these from the PaperPull folder (paperpull.bat on Windows,
-./paperpull on macOS). login.bat is the one double-click that stays.
+./paperpull on macOS). login.bat and review_names.bat are the double-clicks that stay.
 
   Task            You                                 Spouse
   --------------  ----------------------------------  ----------------------------------
@@ -10,7 +10,7 @@ Run these from the PaperPull folder (paperpull.bat on Windows,
   Full run        paperpull amazon all                paperpull amazon all --account spouse
   Continue        paperpull amazon resume             paperpull amazon resume --account spouse
   Re-check PDFs   paperpull amazon verify             paperpull amazon verify --account spouse
-  Fix a name      paperpull amazon review-names       paperpull amazon review-names --account spouse
+  Fix a name      review_names.bat                    review_names.bat spouse
 
 FLOW:  login.bat  ->  paperpull amazon pilot  ->  paperpull amazon all
 Keep the sign-in browser OPEN during the run.
