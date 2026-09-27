@@ -53,7 +53,8 @@ Pump 4 Gallons Price
 Regular
 Total Sale"""
 
-# The same kind of receipt read the way the member's paste came out.
+# The same kind of receipt in the order the member's second paste kept,
+# the order the page gives (#47, 2026-09-27), with invented values.
 READABLE_GAS = """Gas Station Receipt
 SPRINGFIELD #1234
 Pump

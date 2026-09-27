@@ -1237,13 +1237,16 @@ _NOT_AN_ITEM_RE = re.compile(
 #     Regular           $36.96
 #     Total Sale        $36.96
 #
-# His paste came out with every cell on a line of its own, and he put the
-# lines back in rows by hand, so the order a live page gives these cells
-# in has not been seen. No line carries an item number and the grade can
-# sit a line away from its amount, so neither reader above found anything
-# and the receipt was filed as Mixed Purchases. The sale below is read a
-# row at a time or a column at a time, and the pump by arithmetic rather
-# than by where its figures sit.
+# His first paste came out with every cell on a line of its own, and he
+# put the lines back in rows by hand. RECORDED, his second paste (#47,
+# 2026-09-27) kept the order the page gives, one cell per line, each
+# table's headings first and then its values, Pump, Gallons, Price, the
+# three figures, then Product, Amount, the grade, its amount, Total Sale
+# and the total. No line carries an item number and the grade sits a line
+# away from its amount, so neither reader above found anything and the
+# receipt was filed as Mixed Purchases. The sale below is read a row at a
+# time or a column at a time, and the pump by arithmetic rather than by
+# where its figures sit, which that order passes either way.
 _SALE_HEADER_RE = re.compile(r"^product\s+amount$", re.I)
 _TOTAL_SALE_RE = re.compile(r"^total\s+sale\b", re.I)
 _SALE_MONEY_RE = re.compile(
