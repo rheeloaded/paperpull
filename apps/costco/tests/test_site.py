@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
@@ -808,3 +810,331 @@ def test_a_place_is_not_a_summary():
     nothing a filename wants and are left to the classifier."""
     for kind in ("In-Warehouse", "Online", "Delivery", "Grocery", "", None):
         assert site.summary_from_kind(kind) == ""
+
+
+# -- the gas station receipt, #47 ----------------------------------------------
+
+# The shape watling777 pasted from a fuel receipt, with every value made
+# up. The pump and the sale are two small tables, and read as text each
+# cell lands on a line of its own, which is how his paste came out.
+FUEL_RECEIPT = """Gas Station Receipt
+SPRINGFIELD #1234
+Pump
+Gallons
+Price
+4
+11.204
+$3.299
+Product
+Amount
+Regular
+$36.96
+Total Sale
+$36.96"""
+
+# The same receipt with each row on one line, which is what a table
+# gives when its cells are read as tabs.
+FUEL_RECEIPT_ROWS = """Gas Station Receipt
+SPRINGFIELD #1234
+Pump\tGallons\tPrice
+4\t11.204\t$3.299
+Product\tAmount
+Regular\t$36.96
+Total Sale\t$36.96"""
+
+
+def test_a_fuel_receipt_reads_its_grade_as_an_item():
+    """It read no items at all, because no line carries an item number
+    and the grade and its amount sit on separate lines."""
+    items = site.items_from_text(FUEL_RECEIPT)
+    assert len(items) == 1
+    assert items[0].name == "Regular Fuel"
+    assert items[0].line_total == "$36.96"
+
+
+def test_the_pump_gives_the_gallons_and_the_price_per_gallon():
+    item = site.items_from_text(FUEL_RECEIPT)[0]
+    assert item.quantity == "11.204"
+    assert item.unit_price == "$3.299"
+
+
+def test_a_fuel_receipt_read_a_row_to_a_line_gives_the_same_item():
+    """Not also a bare "Regular", which the one line reader would have
+    made of the sale row and the classifier cannot place."""
+    items = site.items_from_text(FUEL_RECEIPT_ROWS)
+    assert [(i.name, i.quantity, i.unit_price, i.line_total) for i in items] == [
+        ("Regular Fuel", "11.204", "$3.299", "$36.96")]
+
+
+def test_the_total_sale_and_the_pump_number_are_not_items():
+    names = " ".join(i.name for i in site.items_from_text(FUEL_RECEIPT))
+    assert "Total" not in names
+    assert "Pump" not in names
+
+
+def test_a_fuel_receipt_is_filed_as_a_gas_station():
+    """The row comes off the Warehouse tab typed as a warehouse purchase,
+    so the row cannot name it. The heading does, see the tests below, and
+    the items now say Gas Station on their own as well. Mixed Purchases
+    was the classifier's answer to an empty list."""
+    from paperpull_core import classification
+
+    c = classification.classify_items(site.items_from_text(FUEL_RECEIPT),
+                                      classification.load_rules())
+    assert c.summary == "Gas Station"
+    assert c.confidence == classification.HIGH
+
+
+def test_a_grade_that_already_says_fuel_is_left_as_printed():
+    text = FUEL_RECEIPT.replace("Regular", "Diesel")
+    assert site.items_from_text(text)[0].name == "Diesel"
+
+
+def test_a_sale_with_no_pump_line_is_still_read():
+    """Without a pump there is nothing to say the line is fuel, so the
+    product keeps the name the receipt gives it."""
+    text = "Product\nAmount\nUltimate Wash\n$12.00\nTotal Sale\n$12.00"
+    items = site.items_from_text(text)
+    assert [(i.name, i.quantity, i.line_total) for i in items] == [
+        ("Ultimate Wash", "1", "$12.00")]
+
+
+def test_warehouse_and_online_receipts_do_not_look_like_a_fuel_sale():
+    assert site._fuel_items(RECEIPT_TEXT.splitlines()) == []
+    assert site._fuel_items(ONLINE_INVOICE.splitlines()) == []
+
+
+# -- a fuel receipt read whichever way the page gives its cells ---------------
+#
+# The member put his paste back in rows by hand, so the order a live page
+# gives these cells in has not been seen. Every layout below is invented,
+# and each is one the first fix read wrong or not at all.
+
+ROW_SALE = "Product\nAmount\nRegular\n$36.96\nTotal Sale\n$36.96"
+FUEL = ("Regular Fuel", "11.204", "$3.299", "$36.96")
+
+
+def _fuel(pump, sale, head="Gas Station Receipt\nSPRINGFIELD #1234\n"):
+    return head + pump + "\n" + sale
+
+
+def _read(text):
+    return [(i.name, i.quantity, i.unit_price, i.line_total)
+            for i in site.items_from_text(text)]
+
+
+def test_a_pump_table_read_a_column_at_a_time_gives_the_same_item():
+    """The first fix read the pump only when its three headings came
+    before its three values. Read a column at a time, the gallons and
+    the price were lost and the grade stayed a bare Regular."""
+    assert _read(_fuel("Pump\n4\nGallons\n11.204\nPrice\n$3.299", ROW_SALE)) == [FUEL]
+
+
+def test_a_sale_table_read_a_column_at_a_time_gives_the_same_item():
+    text = _fuel("Pump\nGallons\nPrice\n4\n11.204\n$3.299",
+                 "Product\nRegular\nTotal Sale\nAmount\n$36.96\n$36.96")
+    assert _read(text) == [FUEL]
+
+
+def test_a_column_that_does_not_pair_up_is_not_guessed_at():
+    """Three names and two amounts could be paired more than one way."""
+    text = "Product\nRegular\nUltimate Wash\nTotal Sale\nAmount\n$36.96\n$48.96"
+    assert site._fuel_items(text.splitlines()) == []
+
+
+@pytest.mark.parametrize("pump", [
+    "Pump #\tGallons\tPrice\n4\t11.204\t$3.299",
+    "Pump\tGrade\tGallons\tPrice\n4\tRegular\t11.204\t$3.299",
+    "Pump\tGallons\tPrice\n4\t11.204G\t$3.299",
+    "Pump\tGallons\tPrice\n4\t11.204\t$3.299/gal",
+    "Pump\tGallons\tPrice\n4\t11.204\t3.299",
+    "Pump\tPrice\tGallons\n4\t3.299\t11.204",
+    "Pump\tPrice\tGallons\n4\t$3.299\t11.204",
+], ids=["numbered heading", "a column more", "gallons with a unit",
+        "price with a unit", "no dollar sign", "headings reversed",
+        "headings reversed with a dollar sign"])
+def test_the_pump_is_read_by_arithmetic_not_by_position(pump):
+    assert _read(_fuel(pump, ROW_SALE)) == [FUEL]
+
+
+def test_the_pump_table_may_come_after_the_sale():
+    text = _fuel(ROW_SALE, "Pump\tGallons\tPrice\n4\t11.204\t$3.299")
+    assert _read(text) == [FUEL]
+
+
+def test_the_pump_reading_goes_to_the_product_it_pays_for():
+    """Not to whichever product comes first. A car wash listed above the
+    fuel took the gallons and was called Car Wash Fuel."""
+    text = _fuel("Pump\tGallons\tPrice\n4\t11.204\t$3.299",
+                 "Product\tAmount\nUltimate Wash\t$12.00\nRegular\t$36.96\n"
+                 "Total Sale\t$48.96")
+    assert _read(text) == [("Ultimate Wash", "1", "", "$12.00"), FUEL]
+
+
+def test_figures_that_do_not_multiply_out_are_left_alone():
+    """Gallons and a price that do not make the amount belong to nothing
+    this app can name, so the quantity stays one rather than being
+    wrong."""
+    text = _fuel("Pump\tGallons\tPrice\n4\t11.204\t$3.299",
+                 "Product\tAmount\nRegular\t$50.00\nTotal Sale\t$50.00")
+    assert _read(text) == [("Regular Fuel", "1", "", "$50.00")]
+
+
+def test_a_pump_nobody_can_read_still_leaves_the_grade_called_fuel():
+    """The pump table came out in some way nobody predicted. The Gallons
+    heading and the receipt's own heading still say fuel was pumped."""
+    assert _read(_fuel("Pump\nGallons\nPrice", ROW_SALE)) == [
+        ("Regular Fuel", "1", "", "$36.96")]
+
+
+def test_the_gas_station_heading_alone_is_enough_to_call_a_grade_fuel():
+    assert _read("Gas Station Receipt\n" + ROW_SALE) == [
+        ("Regular Fuel", "1", "", "$36.96")]
+
+
+def test_a_gallons_heading_alone_is_enough_to_call_a_grade_fuel():
+    assert _read(_fuel("Pump\nGallons\nPrice", ROW_SALE, head="")) == [
+        ("Regular Fuel", "1", "", "$36.96")]
+
+
+def test_a_grade_on_a_receipt_that_says_nothing_about_fuel_is_left_as_printed():
+    assert _read(ROW_SALE) == [("Regular", "1", "", "$36.96")]
+
+
+def test_only_a_bare_grade_is_given_the_word_fuel():
+    """A car wash sold on a gas station receipt is still a car wash."""
+    text = "Gas Station Receipt\nProduct\nAmount\nUltimate Wash\n$12.00\nTotal Sale\n$12.00"
+    assert _read(text) == [("Ultimate Wash", "1", "", "$12.00")]
+
+
+def test_a_grade_with_its_octane_or_in_capitals_is_still_a_grade():
+    assert _read(FUEL_RECEIPT.replace("Regular", "Regular 87"))[0][0] == "Regular 87 Fuel"
+    assert _read(FUEL_RECEIPT.replace("Regular", "PREMIUM"))[0][0] == "PREMIUM FUEL"
+
+
+def test_amounts_printed_without_a_dollar_sign_are_read():
+    text = _fuel("Pump\tGallons\tPrice\n4\t11.204\t3.299",
+                 "Product\tAmount\nRegular\t36.96\nTotal Sale\t36.96")
+    assert _read(text) == [FUEL]
+
+
+def test_a_credit_keeps_its_sign_whichever_side_of_the_dollar_it_is_on():
+    for credit in ("-$3.00", "$-3.00"):
+        text = ("Product\nAmount\nUltimate Wash\n$12.00\nWash Coupon\n%s\n"
+                "Total Sale\n$9.00" % credit)
+        assert _read(text)[-1] == ("Wash Coupon", "1", "", "-$3.00"), credit
+
+
+def test_a_tax_code_after_an_amount_is_not_part_of_the_next_name():
+    text = ("Product\tAmount\nRegular\t$36.96 N\nUltimate Wash\t$12.00 N\n"
+            "Total Sale\t$48.96")
+    assert [i.name for i in site.items_from_text(text)] == ["Regular", "Ultimate Wash"]
+
+
+def test_a_member_line_inside_the_sale_does_not_take_the_grade_with_it():
+    text = "Product\nAmount\nMember 111111111111\nRegular\n$36.96\nTotal Sale\n$36.96"
+    assert _read(text) == [("Regular", "1", "", "$36.96")]
+
+
+def test_a_till_line_that_says_product_amount_is_not_a_fuel_sale():
+    """The sale is anchored on a Product heading on a line of its own, so
+    reading amounts without a dollar sign cannot reach into a till line."""
+    text = "E 123456 PRODUCT AMOUNT SIGN 5.99 Y\nSUBTOTAL 5.99\nTOTAL SALE 5.99"
+    assert site._fuel_items(text.splitlines()) == []
+
+
+# -- the heading names the purchase -------------------------------------------
+
+def test_the_heading_names_a_gas_receipt_whatever_its_tables_did():
+    """The one thing the member reported directly, and it does not depend
+    on how the tables come out as text."""
+    assert site.kind_from_receipt(FUEL_RECEIPT) == "Gas Station"
+    assert site.kind_from_receipt("Gas Station Receipt\nPump 4 11 204") == "Gas Station"
+
+
+def test_a_warehouse_or_online_receipt_is_left_to_its_items():
+    assert site.kind_from_receipt(RECEIPT_TEXT) == ""
+    assert site.kind_from_receipt(ONLINE_INVOICE) == ""
+    assert site.kind_from_receipt("") == ""
+
+
+def test_the_heading_may_follow_a_control_or_break_across_lines():
+    assert site.kind_from_receipt("Close\nGAS STATION\nRECEIPT") == "Gas Station"
+    assert site.kind_from_receipt("Gas & Car Wash Receipt") == "Gas and Car Wash"
+    assert site.kind_from_receipt("Car Wash Receipt") == "Car Wash"
+
+
+def test_a_line_far_below_the_heading_does_not_name_the_purchase():
+    text = RECEIPT_TEXT.replace("Thank You!", "GAS STATION RECEIPT")
+    assert site.kind_from_receipt(text) == ""
+
+
+def test_what_the_heading_names_is_a_kind_costco_names_itself():
+    """So the orchestrator files it at high confidence, as it does for a
+    purchase type the API gives."""
+    for text in ("Gas Station Receipt", "Car Wash Receipt", "Gas and Car Wash Receipt"):
+        kind = site.kind_from_receipt(text)
+        assert kind and site.summary_from_kind(kind) == kind
+
+
+# -- what Diagnose may send about the receipt it opened -----------------------
+
+# Invented. Every private-looking word here is one the layout must drop.
+DIAGNOSED = """Close
+Gas Station Receipt
+SPRINGFIELD #1234
+4321 Dansk Ct
+SPRINGFIELD, VA 22150
+Pump
+4
+Gallons
+11.204
+Price
+$3.299
+Product
+Amount
+Regular
+$36.96
+Total Sale
+$36.96
+VISA XXXXXXXXXXXX1111
+09/01/2026 10:15
+Member 111111111111
+Pat Morgan"""
+
+
+def test_the_layout_keeps_the_order_of_the_cells_and_nothing_else():
+    layout = site.receipt_layout(DIAGNOSED)
+    assert layout[layout.index("pump"):layout.index("pump") + 6] == [
+        "pump", "int", "gallons", "decthree", "price", "cashthree"]
+    assert layout[layout.index("product"):layout.index("product") + 6] == [
+        "product", "amount", "regular", "cashtwo", "total sale", "cashtwo"]
+
+
+def test_the_layout_carries_no_word_from_the_receipt_that_is_not_on_its_list():
+    text = " ".join(site.receipt_layout(DIAGNOSED)).lower()
+    for private in ("springfield", "dansk", "pat", "morgan", "visa", "xxxx",
+                    "1234", "1111", "36", "3.299", "11.204", "2026"):
+        assert private not in text, private
+    assert not re.search(r"\d", text)
+
+
+def test_the_shape_survives_the_survey_files_own_filter_whole():
+    """The survey keeps only lower case words, counts and yes or no, and
+    drops a field that is anything else. Nothing here may be dropped."""
+    from paperpull_core import failure
+
+    shape = site.receipt_shape(DIAGNOSED, site.items_from_text(DIAGNOSED))
+    assert shape["heading"] == "gas station"
+    assert shape["pump_read"] is True
+    assert failure._only_safe(shape) == shape
+
+
+def test_a_long_receipt_is_cut_to_what_the_survey_keeps():
+    from paperpull_core import failure
+
+    long_line = " ".join(["Word"] * 30) + " 12.34 Y"
+    shape = site.receipt_shape("\n".join([long_line] * 40), [])
+    assert len(shape["layout"]) == 20
+    assert all(row.endswith(" more") for row in shape["layout"])
+    assert failure._only_safe(shape) == shape

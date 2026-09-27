@@ -137,8 +137,12 @@ changes.
   how you ask for the eleventh. Nothing on that account went over ten,
   so there was nothing to find out from.
 - **The gas station and the car wash.** The API answers with counts for
-  both, so Costco tracks them apart, and no row for either turned up to
-  look at.
+  both, so Costco tracks them apart. A tester's gas receipts come up on
+  the Warehouse tab behind an ordinary View Receipt, and the dialog is
+  headed "Gas Station Receipt", which is what names the file now (#47).
+  How the pump and sale tables in it come out as text has not been seen
+  on a live page, so the fuel line is read several ways. No car wash
+  receipt has turned up to look at.
 - **What a returned or cancelled purchase looks like**, on either tab.
 - **The GraphQL queries.** Everything the page does goes through one
   endpoint, and a recording keeps the shape of an answer and never a

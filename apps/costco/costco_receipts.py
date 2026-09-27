@@ -515,7 +515,11 @@ class App:
         # Unless Costco has already said what this purchase is. A fuel
         # stop has no item to classify, so it was being filed as Mixed
         # Purchases while its own PDF says Gas Station Receipt (#47).
-        told = site.summary_from_kind(purchase.store_info)
+        # Every row on the Warehouse tab is typed as a warehouse visit,
+        # gas included, so the row cannot say it and the receipt's own
+        # heading is what does.
+        told = (site.summary_from_kind(purchase.store_info)
+                or site.receipt_kind(page))
         purchase.summary = told or cls.summary
         purchase.confidence = classification.HIGH if told else cls.confidence
         review_needed = (not told) and cls.confidence == classification.LOW
@@ -1134,13 +1138,18 @@ class App:
         So this is written beside it, on the same list of what may leave
         that the failure file uses, and it is the one to send.
         """
+        # The receipt Diagnose opened, as its layout in words from a fixed
+        # list, so a receipt this app cannot read yet can be repaired
+        # from a file that is safe to post (#47).
+        shape = getattr(self, "_receipt_shape", None)
         failure.write_survey(
             self.paths.diagnostics,
             page=getattr(self, "_work_page", None),
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
             requests=self._requests,
-            provider='Costco')
+            provider='Costco',
+            extra={"receipt": shape} if shape else None)
 
     def cmd_diagnose(self):
         """The purchase history and one receipt page, as this browser sees
@@ -1166,10 +1175,13 @@ class App:
                 print("\nOpening the newest receipt page ...")
                 site.goto_receipt(page, pp)
                 sv = site.survey_receipt_page(page)
+                items = site.extract_items(page)
+                self._receipt_shape = site.receipt_shape(site.receipt_text(page), items)
                 info["receipt"] = {"url": sv.url, "title": sv.title, "rendered": sv.rendered,
                                    "failed": sv.failed, "lines": sv.lines, "outline": sv.outline,
                                    "controls": sv.controls,
-                                   "items_read": [site.mask_text(i.name)[:60] for i in site.extract_items(page)][:20]}
+                                   "items_read": [site.mask_text(i.name)[:60] for i in items][:20],
+                                   "shape": self._receipt_shape}
             else:
                 info["receipt"] = {"note": "no finished purchase to open"}
         except Exception as e:
@@ -1184,7 +1196,10 @@ class App:
         print(f"  History: state={h.get('state') or 'has purchases'} api={h.get('api')}")
         r = info.get("receipt") or {}
         print(f"  Receipt page: rendered={r.get('rendered')} failed={r.get('failed')} lines={len(r.get('lines') or [])}")
-        print("  Nothing in the file identifies you. Attach it to the GitHub issue.")
+        # It used to end by saying to attach this file, which carries the
+        # page's own words, straight after saying it stays here. The
+        # survey written next is the one to send.
+        print("  Do not attach this one. The survey written next is the file to send.")
 
 
     # -- run summary --------------------------------------------------------

@@ -1226,6 +1226,67 @@ _NOT_AN_ITEM_RE = re.compile(
     r"debit|credit|cash|ebt|snap|gift\s+card|refund|member|whse|trm|trn|opt|"
     r"items?\s+sold|total\s+number\s+of\s+items?|approved)\b", re.I)
 
+# A gas station receipt is not a till's item list. It is two small
+# tables, the pump and the sale. A member pasted the shape of one (#47),
+# which with made-up values reads
+#
+#     Pump     Gallons     Price
+#     4        11.204      $3.299
+#
+#     Product           Amount
+#     Regular           $36.96
+#     Total Sale        $36.96
+#
+# His paste came out with every cell on a line of its own, and he put the
+# lines back in rows by hand, so the order a live page gives these cells
+# in has not been seen. No line carries an item number and the grade can
+# sit a line away from its amount, so neither reader above found anything
+# and the receipt was filed as Mixed Purchases. The sale below is read a
+# row at a time or a column at a time, and the pump by arithmetic rather
+# than by where its figures sit.
+_SALE_HEADER_RE = re.compile(r"^product\s+amount$", re.I)
+_TOTAL_SALE_RE = re.compile(r"^total\s+sale\b", re.I)
+_SALE_MONEY_RE = re.compile(
+    r"^(?P<neg>-)?\$?(?P<neg2>-)?(?P<amount>\d[\d,]*\.\d{2})$")
+_SALE_ROW_RE = re.compile(
+    r"^(?P<name>.*?[A-Za-z].*?)\s+(?P<money>-?\s*\$?\s*-?\d[\d,]*\.\d{2})"
+    r"(?:\s+[A-Z])?$")
+# A decimal figure outside the sale, which is where the gallons and the
+# price per gallon are printed. The pump number has no decimal point, so
+# it is never one of them.
+_PUMP_FIGURE_RE = re.compile(
+    r"(?<![\w.$])(?P<dollar>\$\s*)?(?P<n>\d{1,3}\.\d{1,4})(?:gal|g)?(?![\w.])",
+    re.I)
+_GALLONS_WORD_RE = re.compile(r"\bgallons?\b", re.I)
+_PRICE_WORD_RE = re.compile(r"\bprice\b", re.I)
+# How far gallons times price may sit from the amount. A pump rounds the
+# sale to the cent and works from more of the gallon than it prints.
+_PUMP_CENTS = 0.02
+# A grade printed bare, with or without its octane. "Regular" alone
+# matches nothing in the category rules and "Regular Fuel" does. Only
+# these words, so a car wash or anything else sold at the pump keeps the
+# name it was printed with.
+_GRADE_RE = re.compile(
+    r"^(?:regular|premium|plus|super|mid\s*-?\s*grade)(?:\s+\d{2,3})?$", re.I)
+# Anything on the receipt that says fuel was pumped.
+_FUEL_SIGNAL_RE = re.compile(r"\bgallons?\b|\bgas\s+station\b", re.I)
+
+# The dialog's heading names the kind of receipt. A warehouse receipt's
+# reads "In-Warehouse Receipt", SEEN, and a member reported "Gas Station
+# Receipt" across the top of a fuel receipt's PDF, which is rendered from
+# this same dialog (#47). Costco's own counts name two more kinds on the
+# Warehouse tab, a car wash and gas with a car wash, whose headings
+# nobody has seen, and they are read the same way. A heading this does
+# not know leaves the name to the items.
+_KIND_HEADING_RE = re.compile(
+    r"\b(?P<kind>gas\s+(?:and|&)\s+car\s+wash|gas\s+station|car\s+wash)"
+    r"\s+receipt\b", re.I)
+_KIND_BY_HEADING = {"gas and car wash": "Gas and Car Wash",
+                    "gas station": "Gas Station", "car wash": "Car Wash"}
+# Where the heading sits, counted in lines that have something on them.
+# A few, because a Close control can come before it in the dialog's text.
+_HEADING_LINES = 6
+
 
 def _clean_item_name(name: str) -> str:
     """A name as a person would write it down. Costco wraps some in
@@ -1273,6 +1334,188 @@ def _online_table_items(lines: List[str]) -> List[Item]:
     return items
 
 
+def _sale_money(s: str) -> str:
+    """An amount in the sale as the spreadsheet writes it, "$36.96" or
+    "-$3.00", whichever side of the sign the dollar was on. Empty when
+    the cell is not an amount."""
+    m = _SALE_MONEY_RE.match(re.sub(r"\s+", "", s or ""))
+    if not m:
+        return ""
+    return ("-$" if (m.group("neg") or m.group("neg2")) else "$") + m.group("amount")
+
+
+def _is_total_sale(cells: List[str], n: int) -> bool:
+    """Total Sale on one line, or Total and Sale on a line each."""
+    return bool(_TOTAL_SALE_RE.match(cells[n])) or (
+        cells[n].lower() == "total" and n + 1 < len(cells)
+        and cells[n + 1].lower() == "sale")
+
+
+def _sale_by_rows(cells: List[str], start: int):
+    """The sale read a row at a time, as (name, amount) pairs, and the
+    index of its Total Sale. None when there is no Total Sale.
+
+    A name is every line since the last amount, so a grade and its amount
+    on one line or on two come out the same. A line of one letter is a
+    tax code, and a line that is plainly not an item, a member number
+    for instance, is not part of the next name either, or it would take
+    the grade down with it when the name is checked."""
+    pairs, name = [], []
+    for n in range(start, len(cells)):
+        cell = cells[n]
+        if _is_total_sale(cells, n):
+            return pairs, n
+        money = _sale_money(cell)
+        row = None if money else _SALE_ROW_RE.match(cell)
+        if row:
+            money = _sale_money(row.group("money"))
+        if money:
+            pairs.append((" ".join(name + ([row.group("name")] if row else [])), money))
+            name = []
+        elif len(cell) > 1 and not _NOT_AN_ITEM_RE.match(cell):
+            name.append(cell)
+    return None
+
+
+def _sale_by_columns(cells: List[str], first: int, amount_at: int):
+    """The sale read a column at a time. The names run from `first` to
+    the Amount heading and must include Total Sale, then come the
+    amounts. Only paired when there are exactly as many amounts as
+    names, because pairing them any other way is a guess."""
+    names: List[str] = []
+    for cell in cells[first:amount_at]:
+        if names and names[-1].lower() == "total" and cell.lower() == "sale":
+            names[-1] = "Total Sale"
+        elif len(cell) > 1:
+            names.append(cell)
+    if not any(_TOTAL_SALE_RE.match(n) for n in names):
+        return None
+    amounts: List[str] = []
+    for cell in cells[amount_at + 1:]:
+        money = _sale_money(cell)
+        if not money:
+            break
+        amounts.append(money)
+    if len(amounts) != len(names):
+        return None
+    return list(zip(names, amounts)), amount_at + len(amounts)
+
+
+def _find_sale(cells: List[str]):
+    """The sale's (name, amount) pairs and the first and last cell it
+    took, or None. Anchored on a Product heading that is a line of its
+    own, so a till line that happens to say PRODUCT is never one."""
+    for i, cell in enumerate(cells):
+        low = cell.lower()
+        if _SALE_HEADER_RE.match(cell):
+            got = _sale_by_rows(cells, i + 1)
+        elif low == "product" and i + 1 < len(cells) and cells[i + 1].lower() == "amount":
+            got = _sale_by_rows(cells, i + 2)
+        elif low == "product":
+            amount_at = next((k for k in range(i + 2, min(len(cells), i + 14))
+                              if cells[k].lower() == "amount"), None)
+            got = _sale_by_columns(cells, i + 1, amount_at) if amount_at else None
+        else:
+            continue
+        if got:
+            pairs, last = got
+            return pairs, i, last
+    return None
+
+
+def _pump_reading(text: str, amounts: List[str]):
+    """Which product the pump filled, as (its position, gallons, price
+    per gallon), or None.
+
+    Found by arithmetic and not by position, since the order a live page
+    gives these figures in has not been seen. Two decimals printed
+    outside the sale that multiply out to a product's amount are the
+    pump's. The one with a dollar sign is the price, and when neither or
+    both has one, the order of the Gallons and Price headings says which
+    is which, because the values follow their headings whether the table
+    is read by rows or by columns. More than one answer is no answer."""
+    figures = []
+    for m in _PUMP_FIGURE_RE.finditer(text):
+        value = float(m.group("n"))
+        if value > 0:
+            figures.append((value, m.group("n"), bool(m.group("dollar")), m.start()))
+    gallons_word = _GALLONS_WORD_RE.search(text)
+    price_word = _PRICE_WORD_RE.search(text)
+    found = set()
+    for n, money in enumerate(amounts):
+        if money.startswith("-"):
+            continue
+        want = float(money.lstrip("$").replace(",", ""))
+        if want < 1:
+            continue
+        for a in figures:
+            for b in figures:
+                if a[3] >= b[3] or abs(a[0] * b[0] - want) > _PUMP_CENTS:
+                    continue
+                if a[2] != b[2]:
+                    gallons, per = (b, a) if a[2] else (a, b)
+                elif gallons_word and price_word:
+                    gallons, per = ((a, b) if gallons_word.start() < price_word.start()
+                                    else (b, a))
+                else:
+                    continue
+                found.add((n, gallons[1], "$" + per[1]))
+    return found.pop() if len(found) == 1 else None
+
+
+def _fuel_items(lines: List[str]) -> List[Item]:
+    """The sale on a gas station receipt, if that is what this is.
+
+    The product the pump filled takes the gallons as its quantity and the
+    price per gallon as its unit price. A bare grade gets " Fuel" after it
+    when anything on the receipt says fuel was pumped, a Gallons heading,
+    the gas station heading or a pump reading, so the category rules can
+    place it. The receipt's heading names the purchase on its own as well,
+    see kind_from_receipt, so the name does not rest on this alone."""
+    cells = [c for c in (ln.strip() for ln in lines) if c]
+    found = _find_sale(cells)
+    if not found:
+        return []
+    pairs, first, last = found
+    kept = [(name, money) for name, money in
+            ((_clean_item_name(raw), money) for raw, money in pairs) if name]
+    outside = " ".join(cells[:first] + cells[last + 1:])
+    pump = _pump_reading(outside, [money for _, money in kept])
+    pumped = bool(pump) or bool(_FUEL_SIGNAL_RE.search(" ".join(cells)))
+    items: List[Item] = []
+    for n, (name, money) in enumerate(kept):
+        item = Item(name=name, quantity="1", line_total=money)
+        if pump and pump[0] == n:
+            item.quantity, item.unit_price = pump[1], pump[2]
+        if pumped and _GRADE_RE.match(name):
+            item.name = name + (" FUEL" if name.isupper() else " Fuel")
+        item.name = item.name[:300]
+        items.append(item)
+    return items
+
+
+def kind_from_receipt(text: str) -> str:
+    """What the receipt says it is, when that is a kind with a name of
+    its own, or empty.
+
+    Read from the top few lines only, where the heading sits, so a line
+    further down cannot name the purchase. This does not depend on how
+    the pump and sale tables come out as text, which nobody has seen."""
+    top = [ln.strip() for ln in (text or "").splitlines() if ln.strip()][:_HEADING_LINES]
+    m = _KIND_HEADING_RE.search(re.sub(r"\s+", " ", " ".join(top)))
+    if not m:
+        return ""
+    words = re.sub(r"\s+", " ", m.group("kind").lower().replace("&", "and"))
+    return summary_from_kind(_KIND_BY_HEADING.get(words, ""))
+
+
+def receipt_kind(page) -> str:
+    """kind_from_receipt for the receipt dialog on screen. Only the
+    dialog, never the page around it, and empty on an online invoice,
+    which is not a dialog."""
+    return kind_from_receipt(receipt_text(page))
+
+
 def extract_items(page) -> List[Item]:
     """Line items from the receipt on screen, warehouse or online."""
     return items_from_text(receipt_text(page) or _page_text(page))
@@ -1288,7 +1531,7 @@ def _page_text(page) -> str:
 def items_from_text(text: str) -> List[Item]:
     """Kept apart from the page so a real receipt can be tested."""
     lines = [ln.strip() for ln in (text or "").splitlines()]
-    items = _online_table_items(lines)
+    items = _online_table_items(lines) or _fuel_items(lines)
     if items:
         return items
     for raw in lines:
@@ -1502,6 +1745,82 @@ def mask_json(obj, key: str = "", depth: int = 0):
     if key in _KEEP_VALUES and len(s) < 40:
         return s
     return mask_text(s)[:80]
+
+
+# The receipt's layout, for the survey a member may post. Built from a
+# list of what may leave, never by scrubbing. Each line of the dialog
+# becomes a row of tokens, the words below kept and everything else
+# replaced by what kind of thing it was, so the order the page gives its
+# cells in survives and nothing about what was bought, where, or with
+# which card does. Lower case letters and spaces only, which is all the
+# survey file lets a string carry (paperpull_core.failure._only_safe).
+_LAYOUT_WORDS = frozenset((
+    "receipt", "warehouse", "gas", "station", "car", "wash", "and", "pump",
+    "gallons", "gallon", "gal", "price", "product", "amount", "total",
+    "sale", "subtotal", "tax", "regular", "premium", "plus", "diesel",
+    "unleaded", "fuel", "member", "approved", "purchase", "change", "items",
+    "sold", "close", "print", "return",
+))
+_PLACES = {0: "", 1: "one", 2: "two", 3: "three", 4: "four"}
+_LAYOUT_NUMBER_RE = re.compile(
+    r"^(?P<neg>-)?(?P<dollar>\$)?(?P<neg2>-)?#?\d[\d,]*(?:\.(?P<places>\d+))?"
+    r"(?P<unit>/gal|gal|g)?$")
+_LAYOUT_DATE_RE = re.compile(r"^\d{1,4}([/-])\d{1,2}\1\d{2,4}$")
+_LAYOUT_TIME_RE = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?$")
+# The survey file keeps twenty entries of a list and sixty characters of
+# a string, and drops anything longer rather than cutting it.
+_LAYOUT_LINES = 20
+_LAYOUT_WIDTH = 55
+
+
+def _layout_token(token: str) -> str:
+    t = token.lower().strip(".,:;!*()[]")
+    if t in _LAYOUT_WORDS:
+        return t
+    m = _LAYOUT_NUMBER_RE.match(t)
+    if m:
+        kind = "cash" if m.group("dollar") else ("dec" if m.group("places") else "int")
+        kind += _PLACES.get(len(m.group("places") or ""), "many")
+        if m.group("neg") or m.group("neg2"):
+            kind = "minus " + kind
+        return kind + (" gal" if m.group("unit") else "")
+    if _LAYOUT_DATE_RE.match(t):
+        return "date"
+    if _LAYOUT_TIME_RE.match(t):
+        return "time"
+    return "word" if re.search(r"[a-z]", t) else "mark"
+
+
+def receipt_layout(text: str) -> List[str]:
+    """The receipt's lines as tokens from a fixed list, starting a couple
+    of lines above the first pump or sale heading when there is one, so
+    the twenty the survey keeps are the ones that matter."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    start = next((i for i, ln in enumerate(lines)
+                  if re.match(r"^(?:pump|gallons|product)\b", ln, re.I)), None)
+    if start is not None:
+        lines = lines[max(0, start - 2):]
+    out: List[str] = []
+    for line in lines[:_LAYOUT_LINES]:
+        row = ""
+        for token in line.split():
+            word = _layout_token(token)
+            if len(row) + len(word) + 1 > _LAYOUT_WIDTH:
+                row += " more"
+                break
+            row = (row + " " + word).strip()
+        out.append(row or "mark")
+    return out
+
+
+def receipt_shape(text: str, items: List[Item]) -> dict:
+    """What Diagnose may send about the receipt it opened. A heading from
+    a fixed list, counts, one yes or no and the layout above."""
+    return {"heading": (kind_from_receipt(text) or "none").lower(),
+            "lines": len([ln for ln in (text or "").splitlines() if ln.strip()]),
+            "items": len(items),
+            "pump_read": any(i.unit_price for i in items),
+            "layout": receipt_layout(text)}
 
 
 @dataclass
