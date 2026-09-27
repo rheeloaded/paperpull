@@ -7,6 +7,62 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.37.1] - 2026-09-26
+
+Eight repairs from one overnight round of tester reports, every one of
+them run on 0.37.0. Each fix was reviewed independently for whether it
+answers the evidence and whether it could press anything unsafe or save a
+document under another's name, and repaired until it passed.
+
+### Fixed
+- **AT&T reads past the first eight bills (#26).** The bill history shows
+  bills eight at a time with Prev and Next, and the app only ever read the
+  first page, so every older bill went to Manual Review. It now presses
+  the list's own Next, works out each batch's years from the bills before
+  it, and presses a bill only while the list still reads as it did when
+  the bill was found. Earlier rounds aimed at the Date range, which the
+  tester's recording showed changes nothing.
+- **Apple Card follows the site as it is built (#52).** The first real
+  recording showed card.apple.com draws each section when its link is
+  pressed and answers every guessed address with a 404. The app now loads
+  only the front page, waits for the menu, and follows the recorded links
+  to card statements, Savings statements and tax forms. It reads only
+  buttons named the way the site names them, refuses a list left over from
+  before a press, and checks Apple's own file name against the document
+  asked for.
+- **Costco names a gas receipt (#47).** A fuel receipt has no item
+  numbers, so it read no items and was named Mixed Purchases. The app now
+  reads the Gas Station Receipt heading and the fuel line.
+- **E*TRADE saves each document from its own row (#36).** Discovery walks
+  every period, and the download then looked for documents on the empty
+  oldest year it left on screen. It now shows each document's own period,
+  and where several documents share a date it presses only the one its row
+  names, never a notice or insert beside it.
+- **Golden 1 reaches the statements tab from any page (#35).** Starting
+  anywhere but the documents page, the app pressed the sidebar link, which
+  opens no tab, and gave up, so a stale entry was tried first every time.
+  It now waits on the documents page for the accounts to load, presses the
+  button once, reads only the tab its own press opens, and no longer takes
+  dates from the bank's own pages.
+- **Newrez waits for a slow statement and names files by the printed date
+  (#38).** A statement slower than 25 seconds failed. The app now waits
+  longer while a download is visibly on its way, takes more care that a
+  late download is not taken as the next statement, and names each file
+  for the date printed after Statement Date. Records keep their identity,
+  so nothing downloads again, and Rename can bring older names in line.
+- **PG&E presses View Bill PDF (#33).** Since 0.19.0 every control's label
+  read as blank, because of a Playwright call given an argument it does not
+  take, so the safety check refused every View Bill PDF. Labels now read
+  correctly, the check judges every label a control carries and everything
+  around it, a bill is taken only from its own row, and a download counts
+  only when it is the one that bill's save started.
+- **State Farm waits for the Document Center to draw (#37).** The app
+  looked for a document's row about a second after reloading, before the
+  rows existed. It now waits for them, keeps each document's file address
+  from discovery instead of discarding it, and presses a document revealed
+  by a row only while it sits inside that row, and takes a PDF only from
+  its own tab or one its press opened.
+
 ## [0.37.0] - 2026-09-26
 
 Five new providers built and run in full on real accounts, two more built
