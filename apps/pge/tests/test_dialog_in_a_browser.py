@@ -249,6 +249,20 @@ def test_nothing_but_a_pdf_in_a_successful_answer_on_pge_counts():
     assert site._pdf_in_aura(_Res(AURA, "not json at all")) is None
 
 
+def test_a_bill_inside_json_written_out_as_a_string_is_read():
+    """An Apex method answers with a string, and the string can be JSON
+    written out with the base64 inside it. It does not start the way a
+    PDF does, so it was passed over (review of round eight)."""
+    encoded = _b64.b64encode(_PDF).decode()
+    wrapped = _json.dumps({"fileName": "invented.pdf", "body": encoded})
+    assert site._pdf_in_aura(_Res(AURA, _aura(wrapped))) == _PDF
+    assert site._pdf_in_aura(_Res(AURA, _aura(_json.dumps([wrapped])))) == _PDF
+    # JSON with no bill in it, and a string that only looks like JSON
+    assert site._pdf_in_aura(_Res(AURA, _aura(_json.dumps(
+        {"bills": [{"due": "2031-01-05", "note": "x" * 300}]})))) is None
+    assert site._pdf_in_aura(_Res(AURA, _aura("{" + "not json " * 40))) is None
+
+
 def test_the_capture_listens_for_a_bill_inside_salesforces_answer():
     import inspect
     src = inspect.getsource(site.download_bill)

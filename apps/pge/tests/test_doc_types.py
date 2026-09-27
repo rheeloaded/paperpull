@@ -114,8 +114,24 @@ def test_a_verb_stem_inside_another_word_is_not_a_refusal():
         assert not site.is_safe_control(label), label
 
 
+class _NoProps:
+    def get_properties(self):
+        return {}
+
+
+class _Alone:
+    """A fake element that sits inside nothing and holds nothing. The guard
+    asks the page what is around a control and inside it before approving
+    it, and these answer the way a free-standing element would."""
+    def evaluate(self, js, arg=None):
+        return []
+
+    def evaluate_handle(self, js, arg=None):
+        return _NoProps()
+
+
 def test_a_bill_row_hands_over_the_pdf_control_and_never_pay():
-    class El:
+    class El(_Alone):
         def __init__(self, text="", aria=None):
             self.text, self.aria = text, aria
         def inner_text(self, timeout=None):
@@ -129,6 +145,24 @@ def test_a_bill_row_hands_over_the_pdf_control_and_never_pay():
     assert site.pick_document_control([El(""), El("", aria="View Bill PDF")]).aria == "View Bill PDF"
     assert site.pick_document_control([]) is None
     assert site.pick_document_control(None) is None
+
+
+def test_a_control_that_cannot_say_what_is_around_it_is_refused():
+    """A guard that cannot look has not approved anything. A control whose
+    page cannot be asked what sits around it and inside it is refused, and
+    counted as refused for what was around it (second review of round
+    eight)."""
+    class Mute:
+        def inner_text(self, timeout=None):
+            return "View Bill PDF"
+        def get_attribute(self, name):
+            return None
+        def evaluate(self, js, arg=None):
+            raise RuntimeError("Execution context was destroyed")
+
+    tally = {}
+    assert site.pick_document_control([Mute()], tally) is None
+    assert tally == {"seen": 1, "refused": 1, "nearby": 1}
 
 
 def test_the_page_picker_is_the_only_control_outside_a_row():
@@ -170,24 +204,34 @@ class _Ctl:
 
 class _Picker:
     """The Jump to combobox. `sticky` is the site as the tester saw it: the
-    picker takes the value, the table never follows."""
+    picker takes the value, the table never follows.
+
+    Shaped like the real handle. click and evaluate take what Playwright's
+    take, and the options are found inside the picker. Its parent does not
+    hear the by-value change event, so these tests walk the option path,
+    the fallback. The by-value path is driven in a real browser in
+    test_page_picker_in_a_browser.py."""
     def __init__(self, history, pages, sticky):
         self.history, self.pages, self.sticky, self.value, self.shown = history, pages, sticky, 1, 1
-    def evaluate(self, js):
+    def evaluate(self, js, arg=None):
         return self.pages if "options" in js else self.value
-    def click(self): pass
-    def inner_text(self, timeout=None): return str(self.value)
+    def click(self, timeout=None): pass
+    def inner_text(self): return str(self.value)
     def get_attribute(self, name): return "Jump to" if name == "aria-label" else None
+    def query_selector_all(self, sel):
+        return [_Opt(self, n) for n in self.pages]
 
 
 class _Opt:
     def __init__(self, picker, n): self.picker, self.n = picker, n
-    def inner_text(self, timeout=None): return str(self.n)
+    def inner_text(self): return str(self.n)
     def get_attribute(self, name): return None
-    def click(self):
+    def click(self, timeout=None):
         self.picker.value = self.n
         if not self.picker.sticky:
             self.picker.shown = self.n
+    def evaluate(self, js):
+        self.click()
 
 
 class _History:
@@ -203,9 +247,11 @@ class _History:
     def wait_for_timeout(self, ms): pass
 
 
-PAGES = [["08/20/2026", "07/21/2026", "06/21/2026", "05/21/2026"],
-         ["04/21/2026", "03/21/2026", "02/20/2026", "01/21/2026"],
-         ["12/20/2025", "11/20/2025", "10/21/2025", "09/20/2025"]]
+# Invented dates in the shape of his history, four bills a page, newest
+# first, about a month apart.
+PAGES = [["08/14/2032", "07/15/2032", "06/15/2032", "05/14/2032"],
+         ["04/14/2032", "03/15/2032", "02/13/2032", "01/14/2032"],
+         ["12/13/2031", "11/13/2031", "10/14/2031", "09/13/2031"]]
 
 
 def test_a_jump_that_does_not_take_is_reported_not_read_again(monkeypatch):
@@ -214,7 +260,7 @@ def test_a_jump_that_does_not_take_is_reported_not_read_again(monkeypatch):
     7, and nothing found there at download time."""
     monkeypatch.setattr(site, "get_pagination_pages", lambda page: page.picker.pages)
     got = site.collect_download_docs(_History(PAGES, sticky=True))
-    assert [d["date_text"] for d in got] == ["2026-08-20", "2026-07-21", "2026-06-21", "2026-05-21"]
+    assert [d["date_text"] for d in got] == ["2032-08-14", "2032-07-15", "2032-06-15", "2032-05-14"]
     assert {d["page_number"] for d in got} == {1}, "a bill is filed where it was seen, never where a jump claimed to be"
 
 
@@ -223,7 +269,7 @@ def test_a_jump_that_takes_reads_every_page_once(monkeypatch):
     got = site.collect_download_docs(_History(PAGES))
     assert len(got) == 12
     assert [d["page_number"] for d in got] == [1] * 4 + [2] * 4 + [3] * 4
-    assert got[4] == {"date_text": "2026-04-21", "title": "Energy Statement - 2026-04-21",
+    assert got[4] == {"date_text": "2032-04-14", "title": "Energy Statement - 2032-04-14",
                       "page_number": 2, "row_index": 0, "summary": "Energy Statement"}
 
 
@@ -231,17 +277,17 @@ def test_a_bill_filed_under_the_wrong_page_is_still_found():
     hist = _History(PAGES)
     site.goto_page_number(hist, 3)
     assert hist.picker.shown == 3
-    assert site._row_for_date(hist, "2025-11-20", 9) is not None
-    assert site._row_for_date(hist, "2026-08-20", 0) is None
+    assert site._row_for_date(hist, "2031-11-13", 9) is not None
+    assert site._row_for_date(hist, "2032-08-14", 0) is None
     site.goto_page_number(hist, 1)
-    assert site._row_for_date(hist, "2026-08-20", 0) is not None
+    assert site._row_for_date(hist, "2032-08-14", 0) is not None
 
 
 def test_a_jump_that_moves_the_rows_counts_even_if_the_picker_never_says_so(monkeypatch):
     """Round one of #33 waited for the picker's value to read the target.
     The tester's picker never did, and the walk stopped at page 1 again."""
     class _MutePicker(_Picker):
-        def evaluate(self, js):
+        def evaluate(self, js, arg=None):
             return self.pages if "options" in js else 1     # the value never updates
     hist = _History(PAGES)
     hist.picker = _MutePicker(hist, [1, 2, 3], sticky=False)
@@ -256,7 +302,7 @@ def test_the_next_control_is_only_ever_next():
 
 
 def test_a_row_whose_pdf_control_is_not_an_anchor_still_hands_it_over():
-    class _El:
+    class _El(_Alone):
         def __init__(self, text): self._text = text
         def inner_text(self, timeout=None): return self._text
         def get_attribute(self, name): return None
@@ -274,7 +320,7 @@ def test_a_row_whose_pdf_control_is_not_an_anchor_still_hands_it_over():
         def evaluate_handle(self, js):
             assert "view" in js and "children" in js and "querySelectorAll" not in js, "the walk uses children, never the patched querySelectorAll"
             return _Handle([_El("View Bill PDF"), _El("View Bill PDF")])
-        def inner_text(self): return "09/20/2026 View Bill PDF Pay"
+        def inner_text(self): return "09/13/2031 View Bill PDF Pay"
     ctrls = site.row_controls(_Row())
     assert [c._text for c in ctrls] == ["View Bill PDF", "View Bill PDF", "Pay"], "the walk answers first, the queries after"
     # and the guard hands over the PDF control, never Pay
