@@ -206,3 +206,30 @@ def test_the_detailed_file_is_not_the_one_it_says_to_attach(tmp_path, monkeypatc
     assert "Do not attach this one" in said
     detailed = json.loads((tmp_path / "diagnose-costco.json").read_text(encoding="utf-8"))
     assert detailed["receipt"]["shape"]["heading"] == "gas station"
+
+
+# -- a receipt page that will not open ----------------------------------------
+
+def test_a_receipt_page_that_fails_twice_writes_its_failure_and_moves_on(monkeypatch):
+    """The second failure called write_failure with a keyword it does not
+    take, so the run raised a TypeError there instead of writing the file
+    and going to Manual Review. The stand-in below has the real method's
+    signature, so a call it would refuse fails here too."""
+    app = _app(monkeypatch, WAREHOUSE)
+
+    def never_opens(page, purchase):
+        raise RuntimeError("the receipt page did not load")
+
+    monkeypatch.setattr(site, "goto_receipt", never_opens)
+    monkeypatch.setattr(site, "goto_orders", lambda page: None)
+    monkeypatch.setattr(app_mod.time, "sleep", lambda s: None)
+    written = []
+
+    def write_failure(step, reason, text="", postmortem=None):
+        written.append((step, reason))
+
+    app.write_failure = write_failure
+    purchase = _warehouse_visit()
+    _run(app, purchase)
+    assert written == [("open the receipt", "it would not open twice")]
+    assert app.stats["manual_review"] == 1

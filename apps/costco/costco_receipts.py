@@ -498,8 +498,9 @@ class App:
                     self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
                                        notes="Receipt page failed to load twice")
                     self.stats["manual_review"] += 1
-                    self.write_failure("open the receipt", "it would not open twice",
-                                       error=e)
+                    # The failure file reads the page as it stands, and the
+                    # error's own words stay in the log, which is never posted.
+                    self.write_failure("open the receipt", "it would not open twice")
                     return
                 time.sleep(5)
                 site.goto_orders(page)
