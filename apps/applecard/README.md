@@ -1,12 +1,15 @@
 # Apple Card and Savings document downloader
 
-**Not yet tested against a real account.** This app was built without an
+**Partly tested against a real account.** This app was built without an
 Apple Card or a Savings account, so that someone who holds them can test
 it without writing code. The first recording from a real account has
 since shown how each list is reached and what its buttons are called,
 marked RECORDED in `applecard_site.py`, and what is still a guess is
-marked GUESS. It runs, its guard is tested, and it is waiting on a Pilot
-from a real account. The conversation is
+marked GUESS. The first Pilot on a real account, in 0.37.1, saved three of
+the five newest statements. The two it missed were each the first press
+on a list the app had just opened, which is now made once more when it
+produces nothing, and no tax form has been saved by a run yet. The
+conversation is
 [issue #52](https://github.com/rheeloaded/paperpull/issues/52).
 
 Downloads your **Apple Card monthly statements, Savings monthly
@@ -76,8 +79,7 @@ contributed to anything, is
    landed in `Statements\`, and whether the card and Savings statements
    came out with the right names and months. A Pilot saves the five
    newest documents, which are usually all statements, since a tax form
-   is filed at the end of its tax year. Tax forms come with a full run,
-   once the tax year has been checked (see the guesses below).
+   is filed at the end of its tax year. Tax forms come with a full run.
 
 One recording is usually enough to write the first working build. Expect
 a few Pilot runs after it, each with a word about what came out wrong,
@@ -170,17 +172,28 @@ marked RECORDED in the code.
   those names and it names another document than the one the app asked
   for, another kind, another month or another tax year, the file is not
   saved.
+- **The tax year of a tax form** is the year its button names. The
+  recording's 1099-INT button saved a file Apple named with the same
+  year, and the tax year printed on that form matched it. So each form is
+  filed at the end of the year its button names, and a form whose file
+  Apple names with another year is not saved.
+
+Known from the first Pilot on a real account (#52, 0.37.1).
+
+- **A download reaches the app.** Three statements were saved, card and
+  Savings both.
+- **The first press on a list the app has just opened can come to
+  nothing.** On the card's statements and on the Savings statements
+  alike, that press produced no download, no file, no tab and nothing new
+  on the page, and every later press on the same list downloaded at
+  once. It was not a slow download, since no file for it ever reached a
+  later press. Why the page ignores it is not known, so a press that
+  produces nothing at all is made once more on the same button, found
+  again by its name. A press that puts anything new on the page is never
+  repeated.
 
 A guess, marked GUESS in the code.
 
-- **The tax year of a tax form.** Its button names a month and a year.
-  In the recording that button saved a file Apple named "1099-INT" with
-  the same year, so the year is read as the form's tax year and the form
-  is filed at the end of it. A form whose file Apple names with another
-  year is not saved. But Apple may take both years from one date, the
-  day the form was issued, so before a full run saves every 1099-INT
-  under that reading, check the tax year printed on the one Apple saved
-  for you against the year in the name Apple gave the file.
 - **Whether a tax form's row says 1099-INT.** If it does, the file is
   named 1099-INT Tax Form, and if not, Tax Document.
 - **Whether the menu's Statements, pressed on a Savings page, keeps the
@@ -195,11 +208,6 @@ A guess, marked GUESS in the code.
   app catches the download itself, so this does not stop a save, and
   card.apple.com stays the only host it reads from. If a PDF turns out to
   come from another Apple host, that one host is added and nothing wider.
-- **Whether a download reaches the app's own folder** when your Edge or
-  Chrome saves it. The recording saw the browser save it, and no run of
-  this app has caught one yet. If the name check above never sees Apple's
-  name, because the file arrives some other way, the file is saved on
-  the strength of the list checks alone.
 
 ## Files
 

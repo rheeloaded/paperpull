@@ -2,14 +2,16 @@
 
 When Apple changes card.apple.com, repair this file only.
 
-STATUS: UNVERIFIED as a run. This app was written without an Apple Card
+STATUS: PARTLY VERIFIED. This app was written without an Apple Card
 or a Savings account, from the sign-in address the requester named (#52)
 and what Apple says in public about card.apple.com. The first Record and
 Diagnose from a real account (#52, round one) then showed how the three
 lists are reached and what their buttons are called, and the navigation
 and the labels below are rebuilt from that. Those facts are marked
-RECORDED. No run of this app has saved a document yet, and what nobody
-has seen is still marked GUESS. On a run it is deliberately cautious:
+RECORDED. The first Pilot from a real account (0.37.1) saved three of the
+five newest statements, and what it showed about the other two is
+recorded at _catch_pdf. What nobody has seen is still marked GUESS. On a
+run it is deliberately cautious:
 
   * --login opens a real Edge or Chrome at card.apple.com, whose sign-in
     (an Apple Account with a code sent to a trusted device) is the user's
@@ -26,9 +28,9 @@ has seen is still marked GUESS. On a run it is deliberately cautious:
     carries from inside the page, or by pressing the row's own control
     once and catching a download event, a PDF response or a new tab.
 
-The guesses that most need confirming are marked GUESS. The biggest one
-left is the year a tax form's button names, read as the form's own tax
-year, which the next Pilot's saved 1099-INT will confirm or correct.
+The guesses still open are marked GUESS. The biggest one was the year a
+tax form's button names, read as the form's own tax year, and the tester
+has since confirmed it against the year printed on the form itself.
 
 What is public and believed true, still to be confirmed by a Record.
 Apple Card statements run for a calendar month, so a statement named by
@@ -76,6 +78,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -171,6 +174,14 @@ STEP_SETTLE_MS = 3000
 # before the press would be read as the new one. What the list must show
 # before it is taken is in _list_checks.
 ARRIVE_SECONDS = 10
+
+# How long a press on a document's button is given to produce the PDF
+# before anything else is tried, how long a second press is given when the
+# first produced nothing at all (_catch_pdf), and how long the last wait
+# lasts. RECORDED, a press that works downloads at once (#52).
+PRESS_WAIT_SECONDS = 10
+AGAIN_WAIT_SECONDS = 15
+LAST_WAIT_SECONDS = 15
 
 # RECORDED. The link at the top of the Savings statements list, marked
 # aria-current, that leads back to Savings' Documents. The card's
@@ -412,11 +423,11 @@ def tax_list_date(label: str) -> Optional[str]:
     it names a statement's, so the words never say tax. In the first
     recording (#52) that button on the Tax Documents list saved a file
     Apple itself called "1099-INT <year> - Tax Form.pdf", with the same
-    year the button gave, so that year is read as the form's own. That is
-    still a GUESS, since one example backs it, and the tax year printed on
-    the next Pilot's saved form confirms it or corrects it. Only this exact
-    shape is read, and only on that list, so a statement's month can never
-    be taken for a tax year."""
+    year the button gave, so that year is read as the form's own. RECORDED,
+    the tester then checked the tax year printed on that form, and it is
+    the year in the file's name. Only this exact shape is read, and only
+    on that list, so a statement's month can never be taken for a tax
+    year."""
     m = DOC_BUTTON_RE.match(label or "")
     return f"{m.group(2)}-12-31" if m else None
 
@@ -916,11 +927,11 @@ def _walk(page, kind: str, trace: Optional[list] = None) -> Optional[str]:
     return None
 
 
-# Which list this app last opened, at what address, and the count its
-# link carried. Nothing but this app moves the page during a run, so the
-# list on screen is kept only when it was opened here for the same kind
-# and the address has not moved since. Anything else is opened again
-# through the menu.
+# Which list this app last opened, at what address, the count its link
+# carried, and when it was taken. Nothing but this app moves the page
+# during a run, so the list on screen is kept only when it was opened here
+# for the same kind and the address has not moved since. Anything else is
+# opened again through the menu.
 _ARRIVED: dict = {}
 
 
@@ -980,7 +991,7 @@ def goto_section(page, kind: str, trace: Optional[list] = None) -> bool:
                     trace.append({"note": "the list's link counted none", "kind": kind})
                 return False
             if label is not None and _arrived(page, kind, None, old, count, trace):
-                _ARRIVED.update(kind=kind, url=page.url or "", count=count)
+                _ARRIVED.update(kind=kind, url=page.url or "", count=count, at=time.monotonic())
                 return True
     finally:
         _let_go(old)
@@ -1315,6 +1326,8 @@ _TRACE_WORDS = frozenset(KINDS) | frozenset({
     "no control carried this document's date", "more than one control carried this document's date",
     "clicked", "click failed", "clicked through the DOM instead", "DOM click failed too",
     "after the click", "second step clicked", "second step click failed",
+    "pressed again", "the second press failed",
+    "the list was opened for this document", "the list was already open",
     "the control's own link did not answer with a PDF",
     "apple named the file for another document",
     # notes the core's capture writes into the same trace
@@ -1363,6 +1376,29 @@ def attempt_record(trace) -> list:
     return out
 
 
+def _press_again(el, label: str, trace: Optional[list] = None) -> bool:
+    """Press a document's button a second time, found again by its whole
+    name, once the guard has passed that name again. False when it could
+    not be pressed, and when two controls now carry the name, since
+    pressing one of two would be a guess."""
+    if not is_safe_control(label):
+        return False
+    try:
+        el.scroll_into_view_if_needed(timeout=4000)
+    except Exception:
+        pass
+    try:
+        el.click(timeout=8000)
+    except Exception as e:
+        if trace is not None:
+            trace.append({"note": "the second press failed", "control": _label_mask(label),
+                          "error": _click_failure(e)})
+        return False
+    if trace is not None:
+        trace.append({"note": "pressed again", "control": _label_mask(label)})
+    return True
+
+
 def _new_names(dl_dir, before: set) -> List[str]:
     """The finished files that appeared in the download folder since
     `before`, by name."""
@@ -1386,7 +1422,21 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     `expect` is the (kind, date) of the document asked for. When the file
     arrives with a name Apple wrote for another document, a download
     event's name or the name it was saved under in `dl_dir`, nothing is
-    saved and nothing else is tried (apple_file_verdict)."""
+    saved and nothing else is tried (apple_file_verdict).
+
+    RECORDED in the first Pilot (#52, 0.37.1). The first press on a list
+    the app had just opened produced nothing at all, no download, no file,
+    no tab and no new control, on the card's statements and on the Savings
+    statements alike, and every later press on the same list downloaded at
+    once. Not a slow download either, or its file would have landed during
+    a later press and been refused there for its name, and no later press
+    in that run saw one. Why the page let that first press go is not
+    known. So a press that produced nothing at all, on a page that
+    has not moved, is made once more on the same button, found again by
+    its whole name (_press_again). A file that arrives is checked against
+    the document asked for the same way whichever press sent it, and a
+    second copy, which the browser names with " (1)", is left in the
+    download folder."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
@@ -1504,7 +1554,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             except Exception as e2:
                 if trace is not None:
                     trace.append({"note": "DOM click failed too", "error": _click_failure(e2)})
-        if wait_for_pdf(10):
+        if wait_for_pdf(PRESS_WAIT_SECONDS):
             return True
         if refused:
             return False
@@ -1534,7 +1584,14 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             if _take_same_tab(page, start_url, out_path, trace) or \
                     _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
                 return True
-        if wait_for_pdf(15):
+        elif not appeared and (page.url or "") == start_url and _press_again(el, label, trace):
+            if wait_for_pdf(AGAIN_WAIT_SECONDS):
+                return True
+            if refused:
+                return False
+            if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
+                return True
+        if wait_for_pdf(LAST_WAIT_SECONDS):
             return True
         if refused:
             return False
@@ -1562,8 +1619,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None) -> bool:
     """Save the document dated `iso_date` of the kind its title names. The
     section is opened, and a PDF link on the row is fetched from inside
-    the page. Otherwise the row's own control is pressed once, after the
-    guard has passed it, and whichever the site produces is caught, a
+    the page. Otherwise the row's own control is pressed, after the guard
+    has passed it, once more only when the first press produced nothing at
+    all (_catch_pdf), and whichever the site produces is caught, a
     download event or a PDF response, in this tab or one it opens.
 
     `dl_dir` is where the attached browser saves a download, watched
@@ -1571,9 +1629,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     kind = kind_of_title(title)
+    was_taken = _ARRIVED.get("at")
     if not goto_section(page, kind, trace):
         log.info("could not open the %s section for %s", kind, iso_date)
         return False
+    taken = _ARRIVED.get("at")
     expand_all(page)
 
     el, label = _control_for(page, kind, iso_date)
@@ -1608,6 +1668,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             if trace is not None:
                 trace.append({"note": "the control's own link did not answer with a PDF",
                               "url": mask_href(target)})
+    # Whether this press is the first on a list just opened, and how long
+    # the list has been on screen, the two things that set apart the
+    # presses that failed in the first Pilot (#52).
+    if trace is not None and taken is not None:
+        trace.append({"note": ("the list was already open" if taken == was_taken
+                               else "the list was opened for this document"),
+                      "kind": kind, "seconds_open": int(time.monotonic() - taken)})
     return _catch_pdf(page, el, label, out_path, trace, dl_dir, expect=(kind, iso_date))
 
 

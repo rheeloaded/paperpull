@@ -34,7 +34,11 @@ a link on the first and the last and a button on the card's. list_late
 draws a Savings list that long after its link is pressed. narrow draws the
 menu inside the page's content. overlay lays a promo over the front page.
 folder hands each download to the test to save into a folder, the way a
-real Edge or Chrome saves it, instead of raising a download event.
+real Edge or Chrome saves it, instead of raising a download event. deaf
+lets the first press on each list it draws do nothing, the way the first
+Pilot saw it (#52, 0.37.1), reacts has that press put up a control of its
+own instead, and dead lets no press do anything. The page counts every
+press on a document's button and every download it starts.
 """
 import ast
 import json
@@ -64,6 +68,10 @@ let view = location.pathname.indexOf("/savings") === 0 ? "savings" : "home";
 const app = document.querySelector("ui-app");
 const legal = document.getElementById("legal");
 window.pressed = [];
+window.presses = 0;
+window.downloads = 0;
+// Whether the list on screen was drawn since the last press on a document.
+let fresh = false;
 
 function menu() {
   const link = (href, words) => '<li class="item"><a class="m" tabindex="0" href="' + href +
@@ -147,6 +155,7 @@ function syncLegal() {
 
 function show(v, url) {
   view = v;
+  fresh = true;
   if (url) history.replaceState(null, "", url);
   app.innerHTML = VIEWS[v]();
   syncLegal();
@@ -175,6 +184,7 @@ function fileName(from, m, y) {
 }
 
 function download(b) {
+  window.downloads += 1;
   const from = { statements: "card", sav_statements: "savings", tax: "tax" }[view] || "other";
   const body = "%PDF-1.4\n% " + from + " " + b.dataset.m + " " + b.dataset.y + "\n" + "x".repeat(2500) + "\n%%EOF\n";
   const name = fileName(from, b.dataset.m, b.dataset.y);
@@ -191,7 +201,17 @@ document.addEventListener("click", (e) => {
   const x = e.target.closest(".promo button");
   if (x) { window.pressed.push(x.getAttribute("aria-label") || x.textContent); return; }
   const b = e.target.closest("ui-button");
-  if (b) { download(b); return; }
+  if (b) {
+    window.presses += 1;
+    const first = fresh;
+    fresh = false;
+    if (K.dead || ((K.deaf || K.reacts) && first)) {
+      if (K.reacts) b.closest(".act").insertAdjacentHTML("beforeend", '<button type="button" class="note">Try again later</button>');
+      return;
+    }
+    download(b);
+    return;
+  }
   const a = e.target.closest("a[href]");
   if (!a || !a.closest("ui-app")) return;
   const href = a.getAttribute("href");
@@ -234,9 +254,14 @@ def quick(monkeypatch):
     """A made-up page redraws at once, so the waits after a press are cut
     short, and nothing here needs scrolling. The page is given 6 seconds
     to be the list a walk asked for, where the slowest redraw below takes
-    1.5. Whichever list the last test opened is forgotten."""
+    1.5, and a download, which starts as soon as its button is pressed, a
+    few seconds to land. Whichever list the last test opened is
+    forgotten."""
     monkeypatch.setattr(site, "STEP_SETTLE_MS", 300, raising=False)
     monkeypatch.setattr(site, "ARRIVE_SECONDS", 6, raising=False)
+    monkeypatch.setattr(site, "PRESS_WAIT_SECONDS", 3, raising=False)
+    monkeypatch.setattr(site, "AGAIN_WAIT_SECONDS", 3, raising=False)
+    monkeypatch.setattr(site, "LAST_WAIT_SECONDS", 1, raising=False)
     monkeypatch.setattr(site, "scroll_full_page", lambda *a, **k: None)
     monkeypatch.setattr(site, "BILLING_URL", site.BILLING_URL)
     getattr(site, "_ARRIVED", {}).clear()
@@ -711,6 +736,93 @@ def test_the_name_a_browser_saved_the_file_under_is_checked_too(browser, tmp_pat
     assert not bad.exists()
     assert [p.name for p in dl.iterdir()] == ["1099-INT 2029 - Tax Form.pdf"]
     assert any(t.get("note") == "apple named the file for another document" for t in trace), trace
+
+
+def test_a_first_press_that_does_nothing_is_made_once_more(browser, tmp_path):
+    """RECORDED in the first Pilot (#52, 0.37.1). The first press on a list
+    the app had just opened produced nothing at all, on the card's
+    statements and on the Savings statements, and every later press on the
+    same list downloaded at once. That press is made once more. The next
+    document on the same list needs only its own press, and no document
+    is downloaded twice."""
+    page, served = _open(browser, deaf=True)
+    page.goto("https://card.apple.com/")
+    traces = []
+    for n, (title, iso, want) in enumerate([
+            ("Apple Card Statement - March 2031", "2031-03-31", b"card March 2031"),
+            ("Apple Card Statement - February 2031", "2031-02-28", b"card February 2031"),
+            ("Savings Statement - March 2031", "2031-03-31", b"savings March 2031"),
+            ("Savings Statement - February 2031", "2031-02-28", b"savings February 2031")]):
+        out = tmp_path / ("%d.pdf" % n)
+        trace = []
+        assert site.download_bill(page, None, iso, out, title=title, trace=trace), (title, trace)
+        assert want in out.read_bytes(), title
+        traces.append(trace)
+    assert [sum(t.get("note") == "pressed again" for t in tr) for tr in traces] == [1, 0, 1, 0], traces
+    lists = [[t["note"] for t in tr if t.get("note", "").startswith("the list was")] for tr in traces]
+    assert lists == [["the list was opened for this document"], ["the list was already open"],
+                     ["the list was opened for this document"], ["the list was already open"]]
+    assert page.evaluate("window.presses") == 6
+    assert page.evaluate("window.downloads") == 4
+
+
+def test_a_press_that_works_is_never_made_again(browser, tmp_path):
+    page, served = _open(browser)
+    page.goto("https://card.apple.com/")
+    trace = []
+    assert site.download_bill(page, None, "2031-02-28", tmp_path / "card.pdf",
+                              title="Apple Card Statement - February 2031", trace=trace)
+    assert not any(t.get("note") == "pressed again" for t in trace), trace
+    assert page.evaluate("window.presses") == 1
+    assert page.evaluate("window.downloads") == 1
+
+
+def test_a_button_that_never_answers_is_pressed_twice_and_no_more(browser, tmp_path):
+    """Nothing is saved, the button is pressed twice in all, and what the
+    trace says leaves as fixed words with no month and no year."""
+    page, served = _open(browser, dead=True)
+    page.goto("https://card.apple.com/")
+    out = tmp_path / "card.pdf"
+    trace = []
+    assert not site.download_bill(page, None, "2031-02-28", out,
+                                  title="Apple Card Statement - February 2031", trace=trace)
+    assert not out.exists()
+    assert page.evaluate("window.presses") == 2
+    notes = [t.get("note") for t in trace]
+    assert notes.count("clicked") == 1 and notes.count("pressed again") == 1, notes
+    record = site.attempt_record(trace)
+    assert {"note": "pressed again", "control": "a document button"} in record
+    written = json.dumps(record)
+    assert "February" not in written and "2031" not in written
+
+
+def test_a_press_the_page_answered_is_not_made_again(browser, tmp_path):
+    """A press that put anything new on the page was not ignored, and
+    pressing again could undo what it opened. Only a press that produced
+    nothing at all is made twice."""
+    page, served = _open(browser, reacts=True)
+    page.goto("https://card.apple.com/")
+    trace = []
+    assert not site.download_bill(page, None, "2031-02-28", tmp_path / "card.pdf",
+                                  title="Apple Card Statement - February 2031", trace=trace)
+    assert page.evaluate("window.presses") == 1
+    assert not any(t.get("note") == "pressed again" for t in trace), trace
+
+
+def test_the_second_press_is_caught_in_the_folder_too(browser, tmp_path):
+    """A real Edge or Chrome saves the file itself into the folder the app
+    watches. The file the second press sent is taken from there and the
+    folder is left empty."""
+    page, served = _open(browser, deaf=True, folder=True)
+    dl = tmp_path / "downloads"
+    dl.mkdir()
+    page.expose_function("landInFolder", lambda name, body: (dl / name).write_bytes(body.encode("latin-1")))
+    page.goto("https://card.apple.com/")
+    out = tmp_path / "savings.pdf"
+    assert site.download_bill(page, dl, "2031-02-28", out, title="Savings Statement - February 2031")
+    assert b"savings February 2031" in out.read_bytes()
+    assert list(dl.iterdir()) == []
+    assert page.evaluate("window.presses") == 2
 
 
 def test_only_a_button_whose_whole_name_dismisses_is_pressed_to_clear_an_overlay(browser):
