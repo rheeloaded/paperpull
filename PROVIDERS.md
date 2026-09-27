@@ -24,7 +24,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #45. Being tested by @jpfieber | Insurance |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, member/plan documents (all coverage years), digital ID cards, secure-message letters; tRPC API, nothing clicked. Contributed by @riordan | Health insurance (PHI) |
-| [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #52. Being tested by @watling777 | Card / savings |
+| [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms. Built without an account and run against @watling777's (#52). A first Pilot saved three of five statements, with a repair being tested for the other two | Card / savings |
 | [`bestbuy`](apps/bestbuy) | Best Buy | Receipts for online orders, orders placed in a store and store purchases, and returns, each purchase's details page saved as the receipt, back to 2015. Built on the maintainer's own account, 35 purchases found and all 35 saved. Best Buy's bot protection stops answering if asked too quickly, so it is paced, and a blocked run says to wait an hour | Retail |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Card |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements, the roughly two years the site lists online; statements API, nothing clicked | Card |
@@ -52,7 +52,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098. UNTESTED, built without an account. Have a Newrez mortgage? Run Diagnose and attach the file to issue #38. Being tested by @watling777 | Mortgage servicer |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements, the three years the site keeps online. Tax forms not yet covered. Built on the maintainer's own account, 25 statements | Payments |
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
-| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements. Contributed by @appchamp, a pagination repair being tested by @watling777 | Utility |
+| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements. Contributed by @appchamp. Repaired in 0.37.1 and confirmed on a real account by @watling777 (#33) | Utility |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098. UNTESTED, built without an account. Have an SBA loan? Run Diagnose and attach the file to issue #28 | Government loan servicing |

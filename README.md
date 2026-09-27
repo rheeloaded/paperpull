@@ -46,9 +46,9 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Forty-three providers are supported today, all built on the same pattern.
-Thirteen more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
-Newrez, Kroger, Meijer, American Family, Apple Card, Stripe and FedEx, are built and waiting for someone with an account to
+Forty-four providers are supported today, all built on the same pattern.
+Twelve more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
+Newrez, Kroger, Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#31](https://github.com/rheeloaded/paperpull/issues/31),
@@ -58,8 +58,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#38](https://github.com/rheeloaded/paperpull/issues/38),
 [#41](https://github.com/rheeloaded/paperpull/issues/41),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
-[#45](https://github.com/rheeloaded/paperpull/issues/45),
-[#52](https://github.com/rheeloaded/paperpull/issues/52)):
+[#45](https://github.com/rheeloaded/paperpull/issues/45)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -72,7 +71,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Pilot confirmed by [@watling777](https://github.com/watling777) in round eight.** The full run and a second account are the rounds still open ([#26](https://github.com/rheeloaded/paperpull/issues/26)) |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
-| [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms | **Untested, built without an account. Have one? [Help test it](apps/applecard/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). Requested in [#52](https://github.com/rheeloaded/paperpull/issues/52) |
+| [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms | **Partly tested.** A first Pilot on [@watling777](https://github.com/watling777)'s account saved three of five statements, and a repair for the other two is being tested. Requested in [#52](https://github.com/rheeloaded/paperpull/issues/52) |
 | [`bestbuy`](apps/bestbuy) | Best Buy | Online, store-order and in-store receipts, and returns | **Built on the maintainer's own account, 35 purchases back to 2015.** The history through the page's own query a year at a time, each details page saved as the receipt, nothing clicked, real Edge/Chrome, paced for Best Buy's bot protection |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
@@ -101,7 +100,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Untested, built without an account. Have a Newrez mortgage? [Help test it](apps/newrez/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked; three years are online |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
-| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp), a pagination repair being tested by [@watling777](https://github.com/watling777) |
+| [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
@@ -266,7 +265,9 @@ paperpull list                  REM every app it can see
 ```
 
 `paperpull` is `paperpull.bat` on Windows and `./paperpull` on macOS and
-Linux, or `python paperpull.py` anywhere. It finds the app by folder name,
+Linux, or `python paperpull.py` anywhere. In the installed Mac app it is
+`/Applications/PaperPull.app/Contents/Resources/paperpull`, which works on
+the same installs the panel does. It finds the app by folder name,
 slug or provider, runs it under its own environment, and passes anything else
 straight through, so `paperpull chase all --year 2025 --account spouse` works.
 The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
