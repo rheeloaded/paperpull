@@ -17,6 +17,7 @@ import json
 import re
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -1303,7 +1304,9 @@ def test_a_row_drawn_above_after_the_press_does_not_have_its_document_saved_here
     added at the top a moment after the press. The rows are drawn again with
     new nodes, and the row open at that place is the one above, whose
     receipt was pressed and saved as this one. The node that was pressed is
-    gone, so nothing that appeared can be tied to it."""
+    gone, so the row is found again by its date, and the receipt showing is
+    not inside it. Nothing is pressed, as when a row that left the page was
+    refused outright (round nine)."""
     driver, browser, pg = _drive(lambda: PAGE % _BY_PLACE)
     try:
         out = tmp_path / "doc.pdf"
@@ -1313,9 +1316,10 @@ def test_a_row_drawn_above_after_the_press_does_not_have_its_document_saved_here
         _only_the_row_was_pressed(pg, out, trace)
         [row] = [t for t in trace if t.get("note") == "the row's documents"]
         assert row["control_after_the_press"] == "left the page" and row["of_the_wanted_type"] == 1, row
-        assert {"note": "no revealed document was pressed",
-                "why": "the row's control left the page after its press, "
-                       "so nothing ties what appeared to its row"} in trace, trace
+        assert {"note": "the row's control left the page after its press, so its row was looked for "
+                        "again by this date", "rows_with_this_date": 1} in trace, trace
+        assert {"note": "the control changed before it was pressed, so nothing was pressed",
+                "why": "the document is not inside the row found again by this date"} in trace, trace
     finally:
         browser.close()
         driver.stop()
@@ -1359,7 +1363,7 @@ def test_a_list_that_keeps_its_rows_but_opens_by_place_has_the_document_refused(
         [where] = [t for t in trace if t.get("note") == "where the document sat against the row that was pressed"]
         assert where == {"note": "where the document sat against the row that was pressed",
                          "in_the_row": False, "in_the_element_after_the_row": False,
-                         "in_the_rows_parent": True}, where
+                         "in_the_rows_parent": True, "in_a_dialog": False}, where
     finally:
         browser.close()
         driver.stop()
@@ -1801,3 +1805,454 @@ def test_the_documents_own_viewer_tab_is_still_saved(tmp_path):
     finally:
         browser.close()
         driver.stop()
+
+
+# -- round nine, his 0.37.1 Pilot (#37) ------------------------------------------
+#
+# His file said View Documents1 was pressed, a Renewal Notice appeared, and
+# the button pressed had left the page, while a View Documents of the same
+# number appeared as well. The Document Center draws the pressed row anew,
+# with the documents inside the new row, and nothing was pressed after that
+# because the node held was the old one. His census also showed the page
+# asking for its list with a year in the query that is not four digits, so
+# discovery never asked for an earlier year.
+
+# Rows drawn from ROWS, closed. Pressing a row's button draws that row anew,
+# open, with its document inside it and a button that names itself by
+# OPENED, where N is the row's place. Neither button says aria-expanded, as in
+# his file. With TWIN the press also draws another row with the same date
+# right after it. With IN_DIALOG the document goes in a dialog that was on
+# the page, hidden and empty, before the press. FILL is what fills ROWS and
+# draws them.
+_ANEW = """<div id='rows'></div><div role='dialog' id='dialog' hidden></div><script>
+%s
+const OPENED = OPENED_JSON;
+const TWIN = TWIN_JSON;
+const IN_DIALOG = IN_DIALOG_JSON;
+let ROWS = [];
+let openAt = -1;
+function docLink(r) {
+  const a = document.createElement('a');
+  a.href = '#';
+  a.textContent = r.doc;
+  a.onclick = () => { pressDoc('the document of ' + r.when); return false; };
+  return a;
+}
+function rowNode(r, i, open) {
+  const row = document.createElement('div');
+  row.setAttribute('role', 'row');
+  row.innerHTML = "<span class='when'></span> <span>Sent by mail.</span> <button class='view'></button>";
+  row.querySelector('.when').textContent = r.when;
+  const b = row.querySelector('button');
+  b.textContent = open ? OPENED.replace('N', String(i)) : 'View Documents' + i;
+  b.onclick = () => press(i);
+  if (open && !IN_DIALOG) {
+    const docs = document.createElement('div');
+    docs.className = 'docs';
+    docs.appendChild(docLink(r));
+    row.appendChild(docs);
+  }
+  return row;
+}
+function draw() {
+  ROWS.forEach((r, i) => document.getElementById('rows').appendChild(rowNode(r, i, false)));
+}
+function press(i) {
+  const list = document.getElementById('rows');
+  const was = openAt;
+  openAt = openAt === i ? -1 : i;
+  [was, i].forEach(k => {
+    if (k >= 0) list.children[k].replaceWith(rowNode(ROWS[k], k, k === openAt));
+  });
+  if (TWIN && openAt === i) {
+    list.children[i].insertAdjacentElement('afterend', rowNode(
+      {when: ROWS[i].when, doc: 'Payment Receipt - Another Receipt'}, ROWS.length, false));
+  }
+  if (IN_DIALOG) {
+    const dialog = document.getElementById('dialog');
+    dialog.replaceChildren(...(openAt === i ? [docLink(ROWS[i])] : []));
+    dialog.hidden = openAt !== i;
+  }
+}
+FILL
+</script>""" % _COUNTS_PRESSES
+
+
+def _anew(rows, opened="View Documents N", twin=False, fill=None, in_dialog=False):
+    return PAGE % (_ANEW.replace("OPENED_JSON", json.dumps(opened))
+                   .replace("TWIN_JSON", json.dumps(twin))
+                   .replace("IN_DIALOG_JSON", json.dumps(in_dialog))
+                   .replace("FILL", fill or "ROWS = %s;\ndraw();" % json.dumps(rows)))
+
+
+_ANEW_ROWS = [{"when": "09/12/2026", "doc": "Payment Receipt - Payment Receipt"},
+              {"when": "07/22/2026", "doc": "Payment Receipt - Payment Receipt"},
+              {"when": "04/16/2026", "doc": "Renewal Notice - 2017 Invented Roadster"}]
+
+
+@pytest.mark.parametrize("opened,when,title,button", [
+    ("View DocumentsN", "2026-04-16", "Renewal Notice - Auto", "View Documents2"),
+    ("View Documents N", "2026-04-16", "Renewal Notice - Auto", "View Documents2"),
+    ("View Documents N", "2026-07-22", "Payment Receipt - Billing/Payments", "View Documents1"),
+])
+def test_a_row_drawn_anew_by_its_press_has_its_document_saved_from_that_row(tmp_path, opened, when,
+                                                                            title, button):
+    """His file. The row's View Documents was pressed, its Renewal Notice
+    appeared, and the button pressed had left the page, so nothing more was
+    pressed. The row is found again by its date now and its document is
+    pressed from inside it. The receipt asked for is the one in the row with
+    its date and not the other row's. A new button that names itself with a
+    space appears in the trace the way his did."""
+    driver, browser, pg = _drive(lambda: _anew(_ANEW_ROWS, opened))
+    try:
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert site.download_bill(pg, None, when, out, title=title, trace=trace), trace
+        row_date = "%s/%s/%s" % (when[5:7], when[8:10], when[:4])
+        assert out.read_bytes() == ("%%PDF-1.4 the document of %s" % row_date).encode()
+        assert pg.evaluate("window.docsPressed") == 1
+        masked = "%s - ..." % site._type_word(title)
+        assert [t["control"] for t in trace if t.get("note") == "clicked"] == [button, masked], trace
+        [row] = [t for t in trace if t.get("note") == "the row's documents"]
+        assert row["control_after_the_press"] == "left the page", row
+        assert row["expanded_before"] == row["expanded_after"] == "absent", row
+        assert row["appeared"] == ([masked, button] if " N" in opened else [masked]), row
+        assert {"note": "the row's control left the page after its press, so its row was looked for "
+                        "again by this date", "rows_with_this_date": 1} in trace, trace
+        assert "Invented" not in json.dumps(trace)
+    finally:
+        browser.close()
+        driver.stop()
+
+
+@pytest.mark.parametrize("drawn", ["before the press", "after the press"])
+def test_two_rows_that_carry_the_date_have_no_document_pressed(tmp_path, drawn):
+    """Two rows with one date cannot be told apart by it. Before the press
+    nothing is pressed at all. After it the row cannot be found again as the
+    only one with its date, so the document it revealed is not pressed, and
+    the trace says how many rows carried the date."""
+    rows = [{"when": "07/22/2026", "doc": "Payment Receipt - Payment Receipt"},
+            {"when": "04/16/2026", "doc": "Renewal Notice - 2017 Invented Roadster"}]
+    if drawn == "before the press":
+        rows.insert(1, {"when": "07/22/2026", "doc": "Payment Receipt - Another Receipt"})
+    driver, browser, pg = _drive(lambda: _anew(rows, twin=drawn == "after the press"))
+    try:
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert not site.download_bill(pg, None, "2026-07-22", out,
+                                      title="Payment Receipt - Billing/Payments", trace=trace), trace
+        assert not out.exists() and len(pg.context.pages) == 1
+        assert pg.evaluate("window.docsPressed") == 0, "no document was pressed"
+        clicked = [t["control"] for t in trace if t.get("note") == "clicked"]
+        if drawn == "before the press":
+            assert clicked == [], trace
+            assert {"note": "more than one control on the page carries this date", "controls": 2,
+                    "so": "which row is this document's is not known, so none was pressed"} in trace
+        else:
+            assert clicked == ["View Documents0"], trace
+            assert {"note": "the row's control left the page after its press, so its row was looked "
+                            "for again by this date", "rows_with_this_date": 2} in trace, trace
+            assert {"note": "no revealed document was pressed",
+                    "why": "2 rows carry this date after the press, so which one is this "
+                           "document's is not known"} in trace, trace
+    finally:
+        browser.close()
+        driver.stop()
+
+
+# The renewal notice's row first, so the notice in the dialog reads that
+# row's date from the page around it, and a Renewal Notice is a document
+# control where a Payment Receipt is not.
+_RENEWAL_FIRST = [_ANEW_ROWS[2], _ANEW_ROWS[0], _ANEW_ROWS[1]]
+
+
+@pytest.mark.parametrize("rows,button", [(_ANEW_ROWS, "View Documents2"),
+                                         (_RENEWAL_FIRST, "View Documents0")],
+                         ids=["the third row", "the first row"])
+def test_a_document_that_opens_in_a_dialog_is_not_pressed_and_the_trace_says_where_it_sat(
+        tmp_path, rows, button):
+    """Every failure file counted four dialogs, hidden ones included, so a
+    dialog the press filled in would not change the count. His file points
+    to the row, and a document outside its row is not pressed wherever it
+    sits. The trace says it sat in a dialog, so the next file settles it.
+
+    With the first row asked for, the notice in the dialog reads that row's
+    date from the page around it. It was counted as another control outside
+    the row then, and the trace never said where it sat."""
+    driver, browser, pg = _drive(lambda: _anew(rows, in_dialog=True))
+    try:
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert not site.download_bill(pg, None, "2026-04-16", out, title="Renewal Notice - Auto",
+                                      trace=trace), trace
+        assert not out.exists() and len(pg.context.pages) == 1
+        assert pg.evaluate("window.docsPressed") == 0, "no document was pressed"
+        assert [t["control"] for t in trace if t.get("note") == "clicked"] == [button], trace
+        assert {"note": "the control changed before it was pressed, so nothing was pressed",
+                "why": "the document is not inside the row found again by this date"} in trace, trace
+        [where] = [t for t in trace if str(t.get("note", "")).startswith("where the document sat")]
+        assert where == {"note": "where the document sat against the row found again by this date",
+                         "in_the_row": False, "in_the_element_after_the_row": False,
+                         "in_the_rows_parent": False, "in_a_dialog": True}, where
+    finally:
+        browser.close()
+        driver.stop()
+
+
+# The same rows, filled from the page's own list call the way the Document
+# Center fills itself, one row for each date. The call leaves the year empty,
+# one of the values his file allows, since it held something other than four
+# digits.
+_FILLED_BY_THE_LIST = (
+    "fetch('/DocumentCenterProxyV1/customerMetadata?year=').then(r => r.json()).then(body => {\n"
+    "  const seen = {};\n"
+    "  (body.data.attributes || []).forEach(e => {\n"
+    "    if (seen[e.creationDate]) return;\n"
+    "    seen[e.creationDate] = true;\n"
+    "    ROWS.push({when: e.creationDate, doc: e.type + ' - ' + e.description});\n"
+    "  });\n"
+    "  draw();\n"
+    "});")
+
+THIS_YEAR = date.today().year
+
+
+def _fills_itself():
+    return _anew([], fill=_FILLED_BY_THE_LIST)
+
+
+def _listed(when, kind, category, description, doc_id):
+    """One document as the list answers for it, with every field his file
+    showed and no file address, as for the document he tried."""
+    return {"availableDate": when[:6] + str(int(when[6:]) + 2), "category": category,
+            "clientId": "invented", "communicationId": "invented", "creationDate": when,
+            "custIndexId": 1, "custViewCd": "invented", "deliveryType": "Mail",
+            "description": description, "docSeqNum": 1, "docSetId": 1, "documentId": doc_id,
+            "expirationDate": "", "filePathUrl": "", "partitionId": "invented",
+            "policyId": "invented", "roleAccessSum": 1, "size": 1, "type": kind}
+
+
+def _by_year():
+    """What the list answers for each value of its year. Left empty, the
+    page's own period, it answers with this year's."""
+    y = THIS_YEAR
+    this = [_listed("01/02/%d" % y, "Renewal Notice", "Auto", "2017 Invented Roadster", "invented-1"),
+            _listed("01/01/%d" % y, "Payment Receipt", "Billing/Payments", "Payment Receipt", "invented-2")]
+    last = [_listed("10/16/%d" % (y - 1), "Renewal Notice", "Auto", "2017 Invented Roadster", "invented-3"),
+            _listed("07/22/%d" % (y - 1), "Payment Receipt", "Billing/Payments", "Payment Receipt",
+                    "invented-4")]
+    return {"": this, str(y): this, str(y - 1): last}
+
+
+def _list_by_year(asked, answers):
+    """The list call answered from `answers` by the year in its query, and
+    each year it was asked for kept in `asked`, the page's own and the
+    walk's alike. A year the app changed on the page's own call is read
+    here as changed."""
+    def answer(route):
+        from urllib.parse import parse_qs, urlsplit
+        year = parse_qs(urlsplit(route.request.url).query, keep_blank_values=True).get("year", [None])[0]
+        asked.append(year)
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"data": {"attributes": answers.get(year, [])}}))
+    return ("**/DocumentCenterProxyV1/customerMetadata**", answer)
+
+
+def _drive_by_year(asked, answers=None):
+    driver, browser, pg = _drive(_fills_itself, [_list_by_year(asked, answers or _by_year())])
+    pg.wait_for_selector("button.view")
+    del asked[:]
+    return driver, browser, pg
+
+
+def test_discovery_asks_the_list_for_each_earlier_year_by_the_year_in_its_own_address():
+    """His Discover found this year only and said the list's address carries
+    no year to change, while his census showed the page's own call carrying
+    year in its query. Its value is not four digits, and here it is left
+    empty. The walk sets it to this year and to each earlier one, and stops
+    after two years running with nothing in them."""
+    asked = []
+    driver, browser, pg = _drive_by_year(asked)
+    try:
+        y = THIS_YEAR
+        facts = {}
+        docs = site.collect_download_docs(pg, facts)
+        assert sorted(d.date_text for d in docs) == [
+            "%d-07-22" % (y - 1), "%d-10-16" % (y - 1), "%d-01-01" % y, "%d-01-02" % y], docs
+        assert facts["year_in_address"] is False and facts["year_value"] == "left empty", facts
+        assert [e["year"] for e in facts["years"]] == [y, y - 1, y - 2, y - 3], facts
+        assert facts["years"][1] == {"year": y - 1, "status": 200, "type": "json", "listed": 2,
+                                     "kept": 2}, facts
+        assert facts["stopped"] == "two years running with nothing in them", facts
+        # The page's own call, then the walk's, each with only the year changed.
+        assert asked == ["", str(y), str(y - 1), str(y - 2), str(y - 3)], asked
+        assert (facts["with_a_file_address"], facts["with_no_file_address"]) == (0, 4), facts
+    finally:
+        browser.close()
+        driver.stop()
+
+
+def test_an_older_document_is_saved_from_the_list_of_its_own_year(tmp_path):
+    """The page draws the rows of its own period, so last year's documents
+    have no row on it, and a download of one looked for its date on a page
+    that could not carry it. The reload now asks the page's own list call for
+    the document's year, changing nothing else, and the page draws that
+    year's rows itself. Nothing but the row's View Documents and its
+    document is pressed, and the change ends with the load."""
+    asked = []
+    driver, browser, pg = _drive_by_year(asked)
+    try:
+        y = THIS_YEAR
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert site.download_bill(pg, None, "%d-10-16" % (y - 1), out, title="Renewal Notice - Auto",
+                                  trace=trace), trace
+        assert out.read_bytes() == ("%%PDF-1.4 the document of 10/16/%d" % (y - 1)).encode()
+        [loaded] = [t for t in trace if str(t.get("note", "")).startswith("loaded the documents page")]
+        assert loaded["note"] == ("loaded the documents page again with its list asked for this "
+                                  "document's year, and waited for its rows"), loaded
+        assert loaded["year_asked"] == y - 1 and loaded["wanted_date_seen"], loaded
+        assert (loaded["list_calls_changed"], loaded["list_calls_unchanged"]) == (1, 0), loaded
+        assert [t["control"] for t in trace if t.get("note") == "clicked"] == [
+            "View Documents0", "Renewal Notice - ..."], trace
+        assert asked == [str(y - 1)], "the page asked for that year itself, %s" % asked
+        # A page loaded afterwards asks for its own period again.
+        del asked[:]
+        pg.goto(CENTER)
+        pg.wait_for_selector("button.view")
+        assert asked == [""], asked
+    finally:
+        browser.close()
+        driver.stop()
+
+
+def test_a_document_from_this_year_is_looked_for_in_the_pages_own_period_first(tmp_path):
+    """Every document found so far was in the page's own period, and that
+    load is left as the page makes it."""
+    asked = []
+    driver, browser, pg = _drive_by_year(asked)
+    try:
+        y = THIS_YEAR
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert site.download_bill(pg, None, "%d-01-02" % y, out, title="Renewal Notice - Auto",
+                                  trace=trace), trace
+        assert out.read_bytes() == ("%%PDF-1.4 the document of 01/02/%d" % y).encode()
+        [loaded] = [t for t in trace if str(t.get("note", "")).startswith("loaded the documents page")]
+        assert "year_asked" not in loaded and loaded["wanted_date_seen"], loaded
+        assert asked == [""], asked
+    finally:
+        browser.close()
+        driver.stop()
+
+
+def test_a_document_from_this_year_outside_the_pages_own_period_is_looked_for_in_its_year(tmp_path):
+    """The page's own period need not be the whole year. A document the walk
+    found in this year's list, with no row in the page's own period, is
+    looked for in the list of its year next."""
+    answers = _by_year()
+    answers[""] = answers[""][:1]
+    asked = []
+    driver, browser, pg = _drive_by_year(asked, answers)
+    try:
+        y = THIS_YEAR
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert site.download_bill(pg, None, "%d-01-01" % y, out,
+                                  title="Payment Receipt - Billing/Payments", trace=trace), trace
+        assert out.read_bytes() == ("%%PDF-1.4 the document of 01/01/%d" % y).encode()
+        loads = [t for t in trace if str(t.get("note", "")).startswith("loaded the documents page")]
+        assert [t.get("year_asked") for t in loads] == [None, y], loads
+        assert not loads[0]["wanted_date_seen"] and loads[1]["wanted_date_seen"], loads
+        assert asked == ["", str(y)], asked
+    finally:
+        browser.close()
+        driver.stop()
+
+
+def test_a_row_past_the_thirtieth_control_is_found_without_asking_the_list_for_its_year(tmp_path):
+    """The wait reads the dates of the first thirty controls only. A row
+    past them was not seen there, and a document from this year then had
+    the list asked for its year, which rests on a guess, where one load used
+    to find it. The row is looked for among every control once the page is
+    expanded, and the list is asked for nothing the page did not ask for."""
+    y = THIS_YEAR
+    many = [_listed("01/%02d/%d" % (d, y), "Renewal Notice", "Auto", "2017 Invented Roadster",
+                    "invented-%d" % d) for d in range(1, 32)]
+    asked = []
+    driver, browser, pg = _drive_by_year(asked, {"": many, str(y): many})
+    try:
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert site.download_bill(pg, None, "%d-01-31" % y, out, title="Renewal Notice - Auto",
+                                  trace=trace), trace
+        assert out.read_bytes() == ("%%PDF-1.4 the document of 01/31/%d" % y).encode()
+        [loaded] = [t for t in trace if str(t.get("note", "")).startswith("loaded the documents page")]
+        assert "year_asked" not in loaded, loaded
+        assert asked == [""], asked
+    finally:
+        browser.close()
+        driver.stop()
+
+
+def test_an_older_document_whose_own_year_ends_on_a_sign_in_page_is_looked_for_in_the_pages_own_period(
+        tmp_path, monkeypatch):
+    """A load for an older document's own year that ended early ended the
+    search, before the page's own period was tried. Only a load of the
+    page's own period ends it that way now."""
+    y = THIS_YEAR
+    rows = [{"when": "10/16/%d" % (y - 1), "doc": "Renewal Notice - 2017 Invented Roadster"}]
+    driver, browser, pg = _drive(lambda: _anew(rows))
+    try:
+        real = site._fresh_list
+        loads = []
+
+        def ends_early_for_its_year(page, want="", year=None):
+            loads.append(year)
+            if year is None:
+                return real(page, want)
+            page.evaluate("document.getElementById('rows').replaceChildren()")
+            return {"waited_ms": 0, "list_answered": False, "dated_controls": 0,
+                    "wanted_date_seen": False, "rows_redrawn": 0, "year_asked": year,
+                    "stopped_early": "a sign-in page or a page off statefarm.com"}
+        monkeypatch.setattr(site, "_fresh_list", ends_early_for_its_year)
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert site.download_bill(pg, None, "%d-10-16" % (y - 1), out, title="Renewal Notice - Auto",
+                                  trace=trace), trace
+        assert loads == [y - 1, None], loads
+        assert out.read_bytes() == ("%%PDF-1.4 the document of 10/16/%d" % (y - 1)).encode()
+    finally:
+        browser.close()
+        driver.stop()
+
+
+def test_a_change_to_the_list_call_is_taken_off_even_when_adding_it_raised():
+    """page.route can add its handler and still raise. The change was taken
+    off only when adding it had not raised, so it could stay on the page and
+    change the next document's list call as well."""
+    class _RouteRaises:
+        url = CENTER
+
+        def __init__(self):
+            self.added, self.taken_off = [], []
+
+        def on(self, *a):
+            pass
+
+        def remove_listener(self, *a):
+            pass
+
+        def route(self, url, handler):
+            self.added.append((url, handler))
+            raise Exception("added and then failed")
+
+        def unroute(self, url, handler=None):
+            self.taken_off.append((url, handler))
+
+        def goto(self, *a, **k):
+            raise Exception("no page here")
+    pg = _RouteRaises()
+    facts = site._fresh_list(pg, "2025-10-16", year=2025)
+    assert facts.get("reloaded") is False, facts
+    assert len(pg.added) == 1 and pg.taken_off == pg.added, (pg.added, pg.taken_off)

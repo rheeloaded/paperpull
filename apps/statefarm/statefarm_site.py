@@ -90,12 +90,23 @@ BILLING_CANDIDATES = [
 # lands on a DocumentCenterUI app that lists documents by category (Auto,
 # Billing/Payments, Homeowners) with a Time Period filter, and a "View
 # Documents" control per row that opens the PDFs in a new tab. The app
-# fills itself from DocumentCenterProxyV1/customerMetadata?year=NNNN,
-# whose answer is data.attributes[] of {availableDate, category, type,
-# description, documentId, filePathUrl, policyId, ...}. Discovery reads
-# that answer as the page loads it, then asks the same address for each
-# earlier year. A document's PDF is its filePathUrl, fetched from inside
-# the page, with the row's own control as the fallback.
+# fills itself from DocumentCenterProxyV1/customerMetadata, whose answer
+# is data.attributes[] of {availableDate, category, type, description,
+# documentId, filePathUrl, policyId, ...}. Discovery reads that answer as
+# the page loads it, then asks the same address for each earlier year. A
+# document's PDF is its filePathUrl, fetched from inside the page, with the
+# row's own control as the fallback.
+#
+# RECORDED. The page's own list call carries a query parameter named year,
+# and in his 0.37.1 file its value was not four digits. The census keeps
+# only the parameter's name and the recording masked its value as not a
+# plain word, so all that is known is that it is not a four digit year,
+# most likely empty or a short number. The walk looked for four digits
+# only, and never asked for an earlier year (#37).
+# GUESS. The Time Period menu offers years back to 2023, so the same call
+# with the year set to four digits answers for that year. The year walk and
+# the download of an older document both rest on this, and Discover prints
+# what each year answered, so a wrong guess shows there.
 DOCS_API_RE = re.compile(r"/DocumentCenterProxyV1/customerMetadata", re.I)
 YEARS_BACK = 7
 BILLING_URL = BILLING_CANDIDATES[0]
@@ -758,15 +769,18 @@ def _revealed_document(page, appeared: set, title: str):
     return el, name, ""
 
 
-def _still_the_document(page, el, name: str, row, iso: str, facts: Optional[dict] = None) -> str:
+def _still_the_document(page, el, name: str, row, iso: str, facts: Optional[dict] = None,
+                        row_is: str = "the row that was pressed") -> str:
     """Why the revealed document about to be pressed is no longer the one
-    that was checked, or can no longer be tied to the row that was pressed,
-    as a fixed phrase, or "" when it is still both.
+    that was checked, or can no longer be tied to its row, as a fixed
+    phrase, or "" when it is still both.
 
     Its own name and count are read again first, the same check the row's
     own control gets before its press (#37). Then _still_in_its_row ties it
-    to `row`, the control that was pressed, and `facts` gets what that says
-    about where the document sat when it was not inside the row."""
+    to `row`, the control that was pressed, or the one found again in its
+    place when the press drew the row anew, which `row_is` names. `facts`
+    gets what that says about where the document sat when it was not inside
+    the row."""
     read = _doc_name(el)
     if read is None:
         return "it could not be read again"
@@ -777,12 +791,18 @@ def _still_the_document(page, el, name: str, row, iso: str, facts: Optional[dict
     n = len(_visible_named(page, name, whole=True))
     if n != 1:
         return "%d visible controls carry its name now" % n
-    return _still_in_its_row(page, row, el, name, iso, facts)
+    return _still_in_its_row(page, row, el, name, iso, facts, row_is)
 
 
-def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict] = None) -> str:
+def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict] = None,
+                      row_is: str = "the row that was pressed") -> str:
     """Why the revealed document `doc` cannot be tied to the row whose
     control `row` was pressed, as a fixed phrase, or "" when it can.
+
+    `row` is the control found again by the date when the press drew the
+    row anew and the one pressed left the page (_row_found_again), and
+    everything below is asked of that one instead. `row_is` names which of
+    the two it is, one of those two fixed phrases.
 
     After the press nothing tied the document to the row. Any new document
     of the wanted type anywhere on the page was taken, so a list drawn again
@@ -797,7 +817,9 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
       * It is still the only row that does. No other control outside its
         row carries the date, and no other View Documents inside it does.
         The documents the row revealed carry its date too and are not
-        counted. Another row's View Documents is, since a date printed as
+        counted, and neither is the document about to be pressed wherever
+        it sits, since the last check below refuses it outside the row and
+        says where it sat. Another row's View Documents is, since a date printed as
         a heading over several rows makes that whole block the row, and a
         row added to it after the press was opened in the pressed row's
         place and had its notice taken as this one.
@@ -811,7 +833,8 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
 
     `facts` gets where the document sat instead, as yes or no, when it was
     not inside the row. A page whose documents open in the element after the
-    dated row, rather than inside it, is refused here, and those say so."""
+    dated row, or in a dialog, rather than inside it, is refused here, and
+    those say so."""
     if not iso:
         return "there is no date to tie the document to its row"
     dated = _controls_for(page, iso)
@@ -827,10 +850,10 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
                 h.dispose()
             except Exception:
                 pass
-    if not isinstance(got, list) or len(got) != 10:
+    if not isinstance(got, list) or len(got) != 11:
         return "the row's control could not be read again"
     (row_on, row_name, row_text, doc_on, doc_text, inside, outside, openers_inside,
-     in_parent, in_next) = got
+     in_parent, in_next, in_dialog) = got
     if not row_on:
         return "the row's control left the page"
     if _date_of({"name": str(row_name or "").strip(), "row": str(row_text or "")}) != iso:
@@ -855,9 +878,36 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
     if not inside:
         if facts is not None:
             facts.update({"in_the_row": False, "in_the_element_after_the_row": bool(in_next),
-                          "in_the_rows_parent": bool(in_parent)})
-        return "the document is not inside the row that was pressed"
+                          "in_the_rows_parent": bool(in_parent), "in_a_dialog": bool(in_dialog)})
+        return "the document is not inside %s" % row_is
     return ""
+
+
+def _row_found_again(page, iso: str):
+    """The one row on the page that carries `iso`, found again by its View
+    Documents after a press drew the row anew, as (node, rows). `node` is
+    None unless exactly one View Documents carries the date, and `rows` is
+    how many do.
+
+    A row is known by its View Documents and the date it reads, the same
+    way download_bill found it before its press. The documents a row
+    revealed carry its date too, and are not rows. Two rows carrying one
+    date cannot be told apart, and no row with it means the press took the
+    page somewhere else, so neither gives a row to tie a document to (#37).
+    """
+    if not iso:
+        return None, 0
+    openers, others = [], []
+    for h, name in _controls_for(page, iso):
+        (openers if VIEW_DOCUMENTS_RE.match(" ".join((name or "").split())) else others).append(h)
+    for h in others + (openers if len(openers) != 1 else []):
+        try:
+            h.dispose()
+        except Exception:
+            pass
+    if len(openers) != 1:
+        return None, len(openers)
+    return openers[0], 1
 
 
 def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
@@ -874,10 +924,13 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
     `check` says, right before the press, why the control is no longer the
     one that was checked, or nothing when it still is. The revealed
     document gets the same check before its own press, and is also tied to
-    this row then, by `iso`, the document's date (_still_in_its_row). Once
-    the pressed control has left the page nothing that appeared can be tied
-    to it, so nothing more is pressed. `census` is the run's request census,
-    which is not listening while the document is pressed and caught."""
+    this row then, by `iso`, the document's date (_still_in_its_row). When
+    the press draws the row anew, the control pressed leaves the page and
+    the row is found again by `iso` (_row_found_again). Only the one row on
+    the page that carries the date can hold the document then, and two rows
+    with it, or none, press nothing more. `census` is the run's request
+    census, which is not listening while the document is pressed and
+    caught."""
     def note(entry):
         if trace is not None:
             trace.append(entry)
@@ -933,16 +986,39 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
           "refused_by_the_guard": sum(1 for t in appeared if _refused_document(t)),
           "expanded_before": _attr_word(expanded), "expanded_after": _attr_word(expanded_after),
           "control_after_the_press": after})
-    # What appeared is this row's only while the node that was pressed is
-    # still there to hold it. A list drawn again after the press, keeping its
-    # open row by its place, put new nodes everywhere and opened the row
-    # above, and that row's receipt was pressed and saved as this one (#37).
+    # What appeared is this row's only while it can be tied to the row. A
+    # list drawn again after the press, keeping its open row by its place,
+    # put new nodes everywhere and opened the row above, and that row's
+    # receipt was pressed and saved as this one (#37).
+    #
+    # RECORDED. His 0.37.1 file showed the Document Center drawing the
+    # pressed row anew. The node pressed left the page, and a Renewal Notice
+    # and a View Documents of the same number appeared among the page's own
+    # controls, so the document is in the page and not in a frame. The page
+    # held the same four dialogs and two frames every earlier file counted
+    # before anything was pressed, and the press added elements to the page
+    # rather than showing ones already there, so nothing says it opened a
+    # dialog. What kept the document from its row was that the node held
+    # here was the old one. A row whose control left the page is found again
+    # by this date, and it has to be the one row on the page carrying it.
+    # Every check the pressed row gets before the document is pressed is then
+    # made against that row, so the list drawn again by place above is still
+    # refused, since its document is not inside the row with this date, and a
+    # document outside its row, in a dialog or anywhere else, is refused and
+    # the trace says where it sat.
+    row, row_is = el, "the row that was pressed"
     if after == "left the page":
-        note({"note": "no revealed document was pressed",
-              "why": "the row's control left the page after its press, "
-                     "so nothing ties what appeared to its row"})
-        return False
-    if after != "still on the page":
+        row, rows = _row_found_again(page, iso)
+        note({"note": "the row's control left the page after its press, so its row was "
+                      "looked for again by this date", "rows_with_this_date": rows})
+        if row is None:
+            note({"note": "no revealed document was pressed",
+                  "why": ("no row carries this date after the press" if rows == 0 else
+                          "%d rows carry this date after the press, so which one is this "
+                          "document's is not known" % rows)})
+            return False
+        row_is = "the row found again by this date"
+    elif after != "still on the page":
         note({"note": "no revealed document was pressed",
               "why": "the row's control could not be read after its press, "
                      "so nothing ties what appeared to its row"})
@@ -954,9 +1030,9 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
 
     def check_document() -> str:
         where: dict = {}
-        why_now = _still_the_document(page, doc_el, doc_name, el, iso, where)
+        why_now = _still_the_document(page, doc_el, doc_name, row, iso, where, row_is)
         if where:
-            note(dict({"note": "where the document sat against the row that was pressed"}, **where))
+            note(dict({"note": "where the document sat against " + row_is}, **where))
         return why_now
 
     # Whatever the page asks for once the document is pressed is the
@@ -985,7 +1061,7 @@ def _all_on_page(handles) -> bool:
     return True
 
 
-def _fresh_list(page, want: str = "") -> dict:
+def _fresh_list(page, want: str = "", year: Optional[int] = None) -> dict:
     """Load the documents page again so every row starts folded, then wait
     for the rows.
 
@@ -1016,8 +1092,21 @@ def _fresh_list(page, want: str = "") -> dict:
     the two second grace starts over, so the passes counted before the date
     first showed cannot end the wait while the page draws its rows again.
 
+    `year`, when given, is the year the page's own list call asks for while
+    the page loads. The page draws the rows of one period, and a document
+    from an earlier year has no row until the list is asked for its year.
+    So the year in the call's query is set to `year` and nothing else in it
+    changes, the same change the year walk makes, and the page draws that
+    year's rows itself. Nothing on the page is pressed for it, since the
+    page's own Time Period menu is a control this app does not press. Only
+    a GET on statefarm.com whose address carries one year is changed, the
+    change ends with the wait, and the facts count the page's list calls
+    that were changed and those that were not (#37).
+
     Returns what the wait saw, as counts and yes or no, for the trace."""
     answered: list = []
+    changed: list = []
+    unchanged: list = []
 
     def on_response(res):
         try:
@@ -1027,10 +1116,37 @@ def _fresh_list(page, want: str = "") -> dict:
         except Exception:
             pass
 
+    def ask_for_year(route):
+        # A route left unanswered holds the page's request until the page
+        # closes, so a call that cannot be changed goes on as it was.
+        try:
+            target = _list_call_for_year(route.request.method, route.request.url, year)
+        except Exception:
+            target = None
+        if target is not None:
+            try:
+                route.fallback(url=target)
+                changed.append(1)
+                return
+            except Exception as e:
+                log.info("the list call could not be asked for another year: %s", e)
+        unchanged.append(1)
+        try:
+            route.fallback()
+        except Exception:
+            pass
+
     facts = {"waited_ms": 0, "list_answered": False, "dated_controls": 0,
              "wanted_date_seen": False, "rows_redrawn": 0}
+    if year is not None:
+        facts["year_asked"] = int(year)
     page.on("response", on_response)
     try:
+        if year is not None:
+            try:
+                page.route(DOCS_API_RE, ask_for_year)
+            except Exception as e:
+                log.info("the list call could not be asked for %s: %s", year, e)
         try:
             page.goto(BILLING_URL, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
@@ -1084,9 +1200,50 @@ def _fresh_list(page, want: str = "") -> dict:
             page.remove_listener("response", on_response)
         except Exception:
             pass
+        # The page's later calls are its own again, so a page loaded after
+        # this one, the next document's included, shows its own period. It is
+        # taken off whenever it was asked for, since page.route can add it
+        # and still raise.
+        if year is not None:
+            try:
+                page.unroute(DOCS_API_RE, ask_for_year)
+            except Exception as e:
+                log.info("the change to the list call could not be removed: %s", e)
         facts["list_answered"] = bool(answered)
+        if year is not None:
+            facts["list_calls_changed"] = len(changed)
+            facts["list_calls_unchanged"] = len(unchanged)
     dismiss_overlay(page)
     return facts
+
+
+def _list_call_for_year(method: str, url: str, year: int) -> Optional[str]:
+    """Where the page's own list call is sent instead, asking for `year`, or
+    None when it is left as it is. Only a GET is changed, since the list is
+    only ever read, and only an address that carries one year parameter and
+    is still on statefarm.com once the year is set (#37)."""
+    if (method or "").upper() != "GET":
+        return None
+    target = _with_year(url or "", year)
+    return target if target is not None and is_safe_url(target) else None
+
+
+def _years_to_show(iso: str) -> list:
+    """The years to ask the list for, in turn, while looking for the row of
+    the document dated `iso`. None is the page's own period.
+
+    Every document found so far has been in the page's own period, so a
+    document from this year looks there first and asks for its year only
+    when its row is not there. One from an earlier year is where the year
+    walk finds it, in the list of its own year, so that is asked first, and
+    the page's own period after it in case that period reaches back past
+    New Year (#37)."""
+    from datetime import date as _date
+    m = re.match(r"(\d{4})-\d{2}-\d{2}$", iso or "")
+    if not m:
+        return [None]
+    year = int(m.group(1))
+    return [year, None] if year < _date.today().year else [None, year]
 
 
 @dataclass
@@ -1244,7 +1401,64 @@ FACT_WORDS = frozenset({
     # why the year walk stopped
     "asked every year back to the limit", "the list's address carries no year to change",
     "the changed address is not on statefarm.com", "two years running with nothing in them",
+    # what the year in the page's own list address held, from _year_word
+    "not there", "there more than once", "left empty", "a four digit year",
+    "a number that is not a four digit year", "some other value",
 })
+
+
+# The year in the list's address, as the page's own call carries it, a query
+# parameter named year. Its value is whatever the page put there, so the
+# whole value is matched and nothing after it.
+_YEAR_PARAM_RE = re.compile(r"([?&]year=)([^&#]*)")
+
+
+def _year_values(url: str) -> list:
+    """The values of every year parameter in `url`'s query, as they stand."""
+    query = (url or "").split("#", 1)[0]
+    return [m.group(2) for m in _YEAR_PARAM_RE.finditer(query)]
+
+
+def _with_year(url: str, year: int) -> Optional[str]:
+    """`url` with its year parameter set to `year` and nothing else in it
+    changed, or None when it carries no year parameter or more than one.
+
+    The walk used to change four digits after "year=" and nothing else. The
+    page's own call carries something other than four digits there (his
+    0.37.1 file), so the walk changed nothing and stopped before its first
+    year. Whatever the value is, it is replaced whole now (#37)."""
+    head, mark, fragment = (url or "").partition("#")
+    if len(_year_values(head)) != 1:
+        return None
+    return (_YEAR_PARAM_RE.sub(lambda m: m.group(1) + "%04d" % int(year), head, count=1)
+            + mark + fragment)
+
+
+def _four_digit_year(url: str) -> int:
+    """The year the list's address asks for, when its one year parameter
+    holds four digits, else -1."""
+    values = _year_values(url)
+    return int(values[0]) if len(values) == 1 and re.fullmatch(r"\d{4}", values[0]) else -1
+
+
+def _year_word(url: str) -> str:
+    """What the year in the list's address held, as a fixed phrase from
+    FACT_WORDS and none of the value. The census kept only the parameter's
+    name and the recording masked its value, so this is the one way a
+    tester's file can say which kind of value the page sends (#37)."""
+    values = _year_values(url)
+    if not values:
+        return "not there"
+    if len(values) > 1:
+        return "there more than once"
+    value = values[0]
+    if not value:
+        return "left empty"
+    if re.fullmatch(r"\d{4}", value):
+        return "a four digit year"
+    if re.fullmatch(r"-?\d{1,12}", value):
+        return "a number that is not a four digit year"
+    return "some other value"
 
 
 def _years_from(page, url: str, first_year: int, facts: Optional[dict] = None) -> List[dict]:
@@ -1256,7 +1470,12 @@ def _years_from(page, url: str, first_year: int, facts: Optional[dict] = None) -
     year, while this walk wrote its failures to the log and nowhere else
     (#37). `facts` gets each year's status, a word for its content type
     and how many documents it listed and kept, or a fixed phrase for why
-    it failed, and why the walk stopped."""
+    it failed, and why the walk stopped.
+
+    `first_year` is the year the page's own call asked for, or -1 when its
+    address did not hold one. Then this year is asked for too, since the
+    page's own period may not be the whole of it, and a document read
+    twice is read once by collect_download_docs."""
     from datetime import date as _date
     out = []
     asked: list = []
@@ -1266,8 +1485,8 @@ def _years_from(page, url: str, first_year: int, facts: Optional[dict] = None) -
     for year in range(this_year, this_year - YEARS_BACK - 1, -1):
         if year == first_year:
             continue
-        target = re.sub(r"([?&]year=)\d{4}", lambda m: m.group(1) + str(year), url)
-        if target == url:
+        target = _with_year(url, year)
+        if target is None:
             stopped = "the list's address carries no year to change"
             break
         if not is_safe_url(target):
@@ -1305,6 +1524,14 @@ def _years_from(page, url: str, first_year: int, facts: Optional[dict] = None) -
     return out
 
 
+def _address_kind(url: str) -> str:
+    """Which count a document's file address from the list goes under. A
+    path is the one kind download_bill asks for."""
+    if not url:
+        return "with_no_file_address"
+    return "with_a_file_address" if "/" in url else "with_a_file_address_that_is_not_a_path"
+
+
 def collect_download_docs(page, facts: Optional[dict] = None) -> List[RawDoc]:
     """Every document the Document Center's API lists, this year as the
     page loads it and each earlier year by the same call, else the rows.
@@ -1322,10 +1549,23 @@ def collect_download_docs(page, facts: Optional[dict] = None) -> List[RawDoc]:
         facts["page_list_listed"] = sum(_listed(b) for b in bodies)
         facts["page_list_kept"] = len(found)
     if urls:
-        m = re.search(r"[?&]year=(\d{4})", urls[0])
+        # RECORDED. The address checked is the page's own first list call,
+        # which carries a year parameter whose value was not four digits in
+        # his 0.37.1 file. Only four digits used to count as a year there,
+        # so the walk stopped before its first year and said the address
+        # carried none. What the value held is in the facts as a fixed
+        # phrase, since the census kept only the parameter's name (#37).
+        first = _four_digit_year(urls[0])
         if facts is not None:
-            facts["year_in_address"] = bool(m)
-        found.extend(_years_from(page, urls[0], int(m.group(1)) if m else -1, facts))
+            facts["year_in_address"] = first != -1
+            facts["year_value"] = _year_word(urls[0])
+        found.extend(_years_from(page, urls[0], first, facts))
+    # What the list gave as each document's file address, counted. The one
+    # document tried in his 0.37.1 file had "an id and no address", which
+    # an empty filePathUrl and one with no slash in it both give, so these
+    # say which it was without saying what it held (#37).
+    addresses = {"with_a_file_address": 0, "with_a_file_address_that_is_not_a_path": 0,
+                 "with_no_file_address": 0}
     for d in found:
         # One entry is one document, told from another by its document id,
         # else by its file address when the list gave no id. Two entries
@@ -1339,11 +1579,14 @@ def collect_download_docs(page, facts: Optional[dict] = None) -> List[RawDoc]:
         if key in seen:
             continue
         seen.add(key)
+        addresses[_address_kind(d["url"])] += 1
         insurance = bool(re.search(r"id\s*card|declaration|policy", d["kind"] + " " + d["title"], re.I))
         docs.append(RawDoc(title=d["title"], account=d["category"], date_text=d["date"],
                            href=d["url"] or d["hint"], text=f"State Farm {d['title']} {d['desc']}",
                            kind="insurance" if insurance else "statement", ident=ident))
     if docs:
+        if facts is not None:
+            facts.update(addresses)
         return docs
     reveal_documents(page)
     expand_all(page)
@@ -1396,20 +1639,27 @@ _NAME_AND_ROW_JS = ("el => [(el.getAttribute('aria-label') || el.innerText || ''
 # finds. Returns whether the control is on the page, its name, its row's
 # text, whether the document is on the page, the document's own words,
 # whether the row holds the document, how many dated controls sit outside
-# the row besides the control itself, how many other View Documents carrying
-# the date sit inside it, and whether the document sits in the row's parent
-# or in the element right after the row, for the trace when the row does
-# not hold it (#37).
+# the row besides the control itself and the document, how many other View
+# Documents carrying the date sit inside it, and whether the document sits
+# in the row's parent, in the element right after the row or in a dialog,
+# for the trace when the row does not hold it (#37). A dialog is asked about
+# because every failure file counts four on the page, hidden ones included,
+# so a dialog filled in by the press would not change the count. The
+# document is left out of the controls outside the row because, outside it,
+# it reads its date from the page around it like any control, and was then
+# refused as another control before the trace could say where it sat. It is
+# still refused, by the check that the row holds it.
 _TIE_JS = ("(row, [doc, dated, openers]) => { const box = (" + _ROW_BOX_JS + ")(row); "
            "const inside = h => !!box && box.contains(h); return ["
            "row.isConnected, (row.getAttribute('aria-label') || row.innerText || '').trim(), "
            "box ? (box.innerText || '').trim().slice(0, 300) : '', "
            "doc.isConnected, doc.innerText || '', "
            "!!box && box !== doc && box.contains(doc), "
-           "dated.filter(h => h !== row && !inside(h)).length, "
+           "dated.filter(h => h !== row && h !== doc && !inside(h)).length, "
            "dated.filter((h, i) => h !== row && inside(h) && openers[i]).length, "
            "!!box && !!box.parentElement && box.parentElement.contains(doc), "
-           "!!box && !!box.nextElementSibling && box.nextElementSibling.contains(doc)]; }")
+           "!!box && !!box.nextElementSibling && box.nextElementSibling.contains(doc), "
+           "!!doc.closest('dialog, [role=dialog], [aria-modal=true]')]; }")
 
 
 def _read_control(el) -> Optional[dict]:
@@ -2083,11 +2333,35 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     # twice, which folds the row away when it was the one left open. The
     # rows' own buttons carry the dates, so the wanted row is found folded
     # and opened once (#37).
-    loaded = _fresh_list(page, iso_date)
-    if trace is not None:
-        trace.append(dict({"note": "loaded the documents page again and waited for its rows"},
-                          **loaded))
-    expand_all(page)
+    #
+    # The page draws the rows of one period, so a document from an earlier
+    # year has a row only once the list is asked for its year. It is asked
+    # for that first, and a document from this year asks for its year only
+    # when the page's own period does not hold its row (_years_to_show).
+    #
+    # Whether a load holds the row is read from every control once the page
+    # is expanded, the way the row is found below. The wait's own look at the
+    # dates reads the first thirty controls only, so a row past them would
+    # send a this-year document to a second load that rests on a guess. A
+    # load that does not load ends the search. One that ends on a sign-in
+    # page ends it only for the page's own period, so an older document whose
+    # own year ended early is still looked for in the page's own period.
+    for year in _years_to_show(iso_date):
+        loaded = _fresh_list(page, iso_date, year=year)
+        if trace is not None:
+            said = ("loaded the documents page again and waited for its rows" if year is None else
+                    "loaded the documents page again with its list asked for this document's "
+                    "year, and waited for its rows")
+            trace.append(dict({"note": said}, **loaded))
+        expand_all(page)
+        here = _controls_for(page, iso_date)
+        for h, _ in here:
+            try:
+                h.dispose()
+            except Exception:
+                pass
+        if here or loaded.get("reloaded") is False or (year is None and loaded.get("stopped_early")):
+            break
 
     found = _controls_for(page, iso_date)
     if not found:

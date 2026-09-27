@@ -1,11 +1,12 @@
 # State Farm document downloader
 
-**Not yet tested against a real account.** This app was built without
-a State Farm auto, home or life policy, so that someone who holds one can test it without
-writing code. It runs, its guards are tested, and every guess about
-statefarm.com is marked in `statefarm_site.py`. What it needs is a survey from a
-signed-in account, which the Diagnose button produces and which contains
-no personal data. The conversation is
+**Not yet tested against a real account as far as a saved PDF.** This app
+was built without a State Farm auto, home or life policy, so that someone
+who holds one can test it without writing code. A tester's surveys, a
+recording and several Pilots on a real account have since shown where the
+documents are and how a row opens, marked RECORDED in `statefarm_site.py`,
+and what is still a guess is marked GUESS. Discovery reads State Farm's own
+list of documents, and no run has saved a PDF yet. The conversation is
 [issue #37](https://github.com/rheeloaded/paperpull/issues/37).
 
 Downloads your State Farm **bills, renewal notices, ID cards and payment receipts** as PDFs. Read-only,
@@ -43,7 +44,10 @@ delete-safe, part of [PaperPull](../../README.md).
    in `Statements\` or `Insurance Documents\`, then attach a fresh Diagnose file.
    If the run printed any lines that begin with `Waited for`, copy
    those into your comment as well. They say which way of waiting
-   each page needed, which is the thing the next build keeps.
+   each page needed, which is the thing the next build keeps. Copy the
+   lines Discover prints under its counts too, which say how State Farm's
+   list answered for each year. They hold counts, years and fixed words
+   only.
 
 A Diagnose file and one recording together are usually enough to get a
 provider working in a single round. Diagnose on its own takes two or three.
@@ -56,6 +60,58 @@ way. It is what keeps the rounds after the first one short, and it is
 described in full on the
 [Testing a provider](../../docs/testing-a-provider.md#if-a-run-fails-send-the-file-it-wrote)
 page.
+
+## What is known, and what is a guess
+
+Known from the tester's surveys, recording and Pilots (#37), marked
+RECORDED in the code.
+
+- **Sign-in lands on My Accounts** at my.statefarm.com. The documents are
+  in the Document Center on edocuments.statefarm.com, behind "View
+  documents & PDFs" and "Documents (excludes claims)".
+- **The Document Center fills itself from one list call**, whose answer
+  names each document with the day it was made, its type, its category, a
+  document id and a field for a file address. A document is dated by the
+  day it was made. The "Available online until" date under its title is two
+  years later and is never used.
+- **The list call carries a year in its query**, and the value the page
+  itself sends there is not a four digit year. Discovery used to change
+  four digits only, so it never asked for an earlier year. It now sets the
+  year to each one in turn, whatever the page put there, and Discover says
+  which kind of value the page sent.
+- **Each row keeps its documents folded behind its own button**, named
+  View Documents with the row's number after it. A document the row
+  reveals is named after what it is, "Renewal Notice" and then the vehicle
+  for one, and pressing it opens the document in a new tab.
+- **Pressing View Documents draws the row anew.** The button pressed leaves
+  the page, and a button with the same name is drawn in its place with the
+  documents inside the new row. The app finds that row again by its date
+  and presses a document only when it sits inside the one row on the page
+  that carries the date. Two rows with the date, or none, press nothing.
+- **The documents appear in the page itself.** The revealed document was
+  among the page's own controls, so it is not in a frame. The four dialogs
+  and two frames every failure file counted were on the page before
+  anything was pressed, and pressing View Documents added one link and a
+  few elements to the page and no dialog, so nothing says it opened one.
+  A document found outside its row, in a dialog or anywhere else, is not
+  pressed, and the trace says where it sat.
+- **The list gave no file address for the document tried in 0.37.1**, only
+  an id, so its row is the way to it. Discover now counts how many
+  documents came with a file address, with one that is not a path, or with
+  none.
+
+A guess, marked GUESS in the code.
+
+- **The Time Period menu asks for a year by its four digits.** The menu
+  offers years back to 2023. Discovery sets the list's year to four digits
+  for each earlier year, and Discover prints the status and count each year
+  answered, so a wrong guess shows there first.
+- **An older document's row appears once the page's own list call asks for
+  its year.** A download of one reloads the Document Center with the year
+  in that one call set to the document's, changing nothing else in it and
+  pressing nothing to get there.
+- **State Farm keeps about two years.** The walk stops after two years
+  running with nothing in them.
 
 ## Setup, for a checkout
 
@@ -70,12 +126,18 @@ paperpull statefarm pilot            REM once the site layer is confirmed
 
 - **Real Edge or Chrome.** Statefarm.com's sign-in is happiest in a real browser, so `login.bat` launches the browser already on the machine with a separate profile.
 - **You sign in** in that window. The tool reuses the signed-in tab.
-- **Documents and billing.** Discovery tries the documents and billing routes under statefarm.com's customer care in turn and takes the first that is not a sign-in page and looks like a documents list. Every control whose name says it fetches a bill, a renewal notice, an ID card, a receipt or a policy document ("View", "Download", "ID card", "Bill PDF") is read, and the date comes from the control's name or the row it sits in.
-- **Downloads.** A row that links straight to a PDF is fetched from inside
-  the page with the session's own cookies. Otherwise the row's control is
-  clicked, once it has passed the guard, and whatever the site does, a
-  download event, a PDF response or a new tab, is caught and saved to
-  `Statements\` or `Insurance Documents\`.
+- **Documents.** Discovery opens the Document Center on
+  edocuments.statefarm.com and reads the list the page loads for itself,
+  then asks the same list for each earlier year until two years running
+  have nothing in them. Each document is dated by the day it was made.
+- **Downloads.** A document the list gave a file address for is fetched
+  from inside the page with the session's own cookies. Otherwise its row
+  is found by its date, the row's View Documents is pressed once, and the
+  document the row reveals is pressed only once it has passed the guard
+  and sits inside the one row on the page that carries that date. The PDF
+  it opens is caught and saved to `Statements\` or `Insurance Documents\`.
+  A document from an earlier year is looked for in the list of its own
+  year.
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays, sets up autopay, files or reports a claim, changes coverage, adds or removes a vehicle, driver or policy, starts a quote, cancels or renews anything, or edits the account. A control must also look like a document action before it can be clicked.
 
 ## Scope

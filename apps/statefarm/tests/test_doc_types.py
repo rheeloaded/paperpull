@@ -779,3 +779,119 @@ def test_one_document_is_one_and_two_documents_are_two(monkeypatch):
     assert len(one_address) == 2
     rec = _recorded(one_address)
     assert rec["shared_key"] is True and rec["href"] == ""
+
+
+# -- round nine, his 0.37.1 Pilot (#37) ------------------------------------------
+
+_LIST = "https://edocuments.statefarm.com/DocumentCenterProxyV1/customerMetadata"
+
+
+def test_the_year_in_the_list_address_is_set_whatever_it_held():
+    """His Discover said the list's address carries no year to change, while
+    his census showed the page's own call carrying year in its query. It
+    held something other than four digits, and only four digits used to be
+    changed. Whatever it holds is set now, and nothing else in the address
+    changes."""
+    for held in ("", "0", "12", "-1", "2026", "recent"):
+        assert site._with_year(_LIST + "?year=" + held, 2025) == _LIST + "?year=2025", held
+    assert site._with_year(_LIST + "?commId=null&year=&v=2", 2024) == _LIST + "?commId=null&year=2024&v=2"
+    assert site._with_year(_LIST + "?year=#rows", 2023) == _LIST + "?year=2023#rows"
+    assert site._with_year(_LIST + "?commId=null", 2025) is None
+    assert site._with_year(_LIST + "?year=1&year=2", 2025) is None, "two years cannot say which is meant"
+    assert site._with_year(_LIST + "?fiscalyear=2026", 2025) is None
+    assert site._four_digit_year(_LIST + "?year=2026") == 2026
+    assert site._four_digit_year(_LIST + "?year=") == site._four_digit_year(_LIST) == -1
+
+
+def test_what_the_year_held_is_said_in_a_fixed_phrase_and_never_as_itself():
+    """The census keeps only the parameter's name and the recording masked
+    its value, so no file has said what the page sends. A phrase from the
+    list says which kind of value it was."""
+    for query, word in (("?year=", "left empty"), ("?year=0", "a number that is not a four digit year"),
+                        ("?year=2026", "a four digit year"), ("?year=Jane%20Q", "some other value"),
+                        ("?commId=null", "not there"), ("?year=1&year=2", "there more than once")):
+        assert site._year_word(_LIST + query) == word, query
+        assert word in site.FACT_WORDS, word
+
+
+def test_only_the_pages_own_get_of_its_list_on_statefarm_is_asked_for_another_year():
+    """The reload for an older document changes the year of the page's own
+    list call and nothing else. The list is only ever read, so nothing but
+    a GET is changed, and never to an address off statefarm.com."""
+    assert site._list_call_for_year("GET", _LIST + "?year=", 2025) == _LIST + "?year=2025"
+    assert site._list_call_for_year("get", _LIST + "?year=0", 2024) == _LIST + "?year=2024"
+    assert site._list_call_for_year("POST", _LIST + "?year=", 2025) is None
+    assert site._list_call_for_year("GET", _LIST + "?commId=null", 2025) is None
+    assert site._list_call_for_year("GET", _LIST + "?year=1&year=2", 2025) is None
+    assert site._list_call_for_year(
+        "GET", "https://statefarm.com.evil.test/DocumentCenterProxyV1/customerMetadata?year=", 2025) is None
+    assert site._list_call_for_year("GET", _LIST.replace("https:", "http:") + "?year=", 2025) is None
+
+
+def test_a_download_asks_the_list_for_an_older_documents_year_first():
+    """Every document found so far has been in the page's own period, which
+    a document from this year keeps first. One from an earlier year is in
+    the list of its own year, where the walk finds it."""
+    from datetime import date
+    this_year = date.today().year
+    assert site._years_to_show("%d-03-14" % this_year) == [None, this_year]
+    assert site._years_to_show("%d-10-16" % (this_year - 1)) == [this_year - 1, None]
+    assert site._years_to_show("") == [None] and site._years_to_show("not a date") == [None]
+
+
+def test_a_year_that_is_not_four_digits_is_walked_from_this_year_back():
+    """The walk stopped before its first year, since there were no four
+    digits to change. It asks for this year as well now, since the page's
+    own period may not be the whole of it."""
+    from datetime import date
+    this_year = date.today().year
+    one = {"data": {"attributes": [{"creationDate": "01/01/%d" % (this_year - 1), "type": "Renewal Notice",
+                                    "category": "Auto", "documentId": "invented"}]}}
+    page = _YearPage({this_year: one, this_year - 1: one})
+    facts = {}
+    got = site._years_from(page, _LIST + "?year=", -1, facts)
+    assert page.asked == [this_year, this_year - 1, this_year - 2, this_year - 3], page.asked
+    assert len(got) == 2 and facts["stopped"] == "two years running with nothing in them", facts
+
+
+def test_discovery_says_what_the_year_held_and_what_the_list_gave_as_addresses(monkeypatch):
+    """The one document tried in his 0.37.1 file had "an id and no address",
+    which an empty filePathUrl and one with no slash in it both give. The
+    facts count each kind, and say what the year in the page's own address
+    held, with none of their values."""
+    import json
+    from datetime import date
+    this_year = date.today().year
+    entries = [{"creationDate": "01/01/%d" % this_year, "type": kind, "category": "Auto",
+                "documentId": doc_id, "filePathUrl": address}
+               for kind, doc_id, address in (
+                   ("Renewal Notice", "invented-1", "/DocumentCenterProxyV1/document/Jane_Q_Invented"),
+                   ("ID Card", "invented-2", "Jane_Q_Invented"),
+                   ("Declarations Page", "invented-3", ""))]
+    monkeypatch.setattr(site, "_capture_docs",
+                        lambda page: ([{"data": {"attributes": entries}}], [_LIST + "?year="]))
+    facts = {}
+    docs = site.collect_download_docs(_YearPage(), facts)
+    assert len(docs) == 3
+    assert facts["year_in_address"] is False and facts["year_value"] == "left empty", facts
+    assert (facts["with_a_file_address"], facts["with_a_file_address_that_is_not_a_path"],
+            facts["with_no_file_address"]) == (1, 1, 1), facts
+    assert [y["year"] for y in facts["years"]][:1] == [this_year], facts
+    assert "Jane" not in json.dumps(facts)
+
+
+def test_discover_says_what_the_year_held_and_how_many_came_with_an_address():
+    import statefarm_docs
+    facts = {"page_list_answers": 1, "page_list_listed": 4, "page_list_kept": 4,
+             "year_in_address": False, "year_value": "left empty",
+             "years": [{"year": 2026, "status": 200, "type": "json", "listed": 4, "kept": 4}],
+             "stopped": "two years running with nothing in them",
+             "with_a_file_address": 0, "with_a_file_address_that_is_not_a_path": 1,
+             "with_no_file_address": 3}
+    lines = statefarm_docs.discovery_lines(facts)
+    assert lines[1] == "The year in the page's own list address was left empty.", lines
+    assert ("Of the documents the list gave, 0 came with a file address, 1 with one that is not a "
+            "path, and 3 with none.") in lines, lines
+    odd = dict(facts, year_value="Jane_Q_Invented", with_no_file_address="Jane")
+    written = " ".join(statefarm_docs.discovery_lines(odd))
+    assert "Jane" not in written and "was another word." in written, written

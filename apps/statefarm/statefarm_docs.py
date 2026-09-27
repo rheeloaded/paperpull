@@ -179,6 +179,11 @@ def discovery_lines(facts) -> List[str]:
     out = ["The page's own read of State Farm's list listed %d and kept %d, in %d answer(s)."
            % (_count(facts.get("page_list_listed")), _count(facts.get("page_list_kept")),
               _count(facts.get("page_list_answers")))]
+    # The census keeps only the name of the list's year parameter, and a
+    # walk that stopped because its value was not four digits said nothing
+    # about what it was (#37).
+    if facts.get("year_value"):
+        out.append("The year in the page's own list address was %s." % _word(facts["year_value"]))
     years = [y for y in (facts.get("years") or []) if isinstance(y, dict)]
     for y in years[:10]:
         head = "Year %d" % _count(y.get("year"))
@@ -195,6 +200,13 @@ def discovery_lines(facts) -> List[str]:
         out.append("No earlier year was asked for.")
     if facts.get("stopped"):
         out.append("The year walk ended because %s." % _word(facts["stopped"]))
+    # Whether any document came with an address a download can fetch. The
+    # one tried in 0.37.1 had an id and no address, which an empty
+    # filePathUrl and one with no slash in it both give (#37).
+    kinds = ("with_a_file_address", "with_a_file_address_that_is_not_a_path", "with_no_file_address")
+    if any(k in facts for k in kinds):
+        out.append("Of the documents the list gave, %d came with a file address, %d with one that "
+                   "is not a path, and %d with none." % tuple(_count(facts.get(k)) for k in kinds))
     if _count(facts.get("sharing_a_key")):
         out.append("%d record(s) stand for two documents in the list, so neither is saved."
                    % _count(facts.get("sharing_a_key")))
