@@ -35,7 +35,10 @@ SAFETY (this is a mortgage account with a bank account on file):
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -53,7 +56,7 @@ from paperpull_core.dates import human_date as _human_date
 # re-exported: this app's docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
-from paperpull_core.capture import take_new_pdf as _take_new_pdf
+from paperpull_core.capture import UNFINISHED as _UNFINISHED
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import take_same_tab as _core_take_same_tab
@@ -231,6 +234,137 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
         year = int(m.group(1) + m.group(2))
         return f"{year:04d}-12-31", str(year)
     return None, ""
+
+
+# The statements list dates a row by its month and year and nothing finer,
+# so a statement is first filed under the last day of that month. The
+# statement itself prints its own date beside this label, as the model form
+# for a mortgage statement does. The day differs from account to account,
+# so it is read off each statement rather than assumed (#38).
+STATEMENT_DATE_RE = re.compile(r"statement\s*date\s*:?", re.I)
+# How far past the label the date may sit. A header printed as a row of
+# labels over a row of values puts the first value more than forty
+# characters past the label. A date that far away names a file only when
+# it falls in the row's own month, and statement_verdict says when one
+# may refuse a file.
+STATEMENT_DATE_REACH = 80
+
+
+def statement_dates(text: str) -> List[str]:
+    """The first date after each "Statement Date" label, in the order the
+    labels appear, as YYYY-MM-DD."""
+    out: List[str] = []
+    text = text or ""
+    for m in STATEMENT_DATE_RE.finditer(text):
+        window = text[m.end():m.end() + STATEMENT_DATE_REACH]
+        # The earliest date in any of the forms the reader knows, rather
+        # than the first form found, which could skip past the real one.
+        hits = [h for h in (p.search(window) for p, _kind in DATE_PATTERNS) if h]
+        if not hits:
+            continue
+        first = min(hits, key=lambda h: h.start())
+        found = parse_date(first.group(0))
+        if found:
+            out.append(found)
+    return out
+
+
+def _dates_in(window: str) -> List[str]:
+    """Every date in `window` the reader knows, as YYYY-MM-DD."""
+    out = []
+    for pattern, _kind in DATE_PATTERNS:
+        for m in pattern.finditer(window):
+            found = parse_date(m.group(0))
+            if found:
+                out.append(found)
+    return out
+
+
+def _dates_near_statement_label(text: str) -> set:
+    """Every date within reach after any "Statement Date" label."""
+    text = text or ""
+    near = set()
+    for m in STATEMENT_DATE_RE.finditer(text):
+        near.update(_dates_in(text[m.end():m.end() + STATEMENT_DATE_REACH]))
+    return near
+
+
+# Spaces and tabs only, so the label never reaches onto the next line.
+DUE_DATE_RE = re.compile(r"due[ \t]*date[ \t]*:?", re.I)
+
+
+def _due_dates(text: str) -> set:
+    """The dates a "Due Date" label names on its own line, the label then
+    only spaces or a colon and then the date. A date on the line below
+    could belong to any label in a row of them, so it is not one."""
+    text = text or ""
+    out = set()
+    for m in DUE_DATE_RE.finditer(text):
+        window = text[m.end():m.end() + 40]
+        hits = [h for h in (p.search(window) for p, _kind in DATE_PATTERNS) if h]
+        if not hits:
+            continue
+        first = min(hits, key=lambda h: h.start())
+        if window[:first.start()].strip(" \t:"):
+            continue
+        found = parse_date(first.group(0))
+        if found:
+            out.add(found)
+    return out
+
+
+def printed_statement_date(text: str, row_iso: str) -> str:
+    """The date a statement prints beside "Statement Date", as YYYY-MM-DD,
+    or "".
+
+    Only the first date after the first label that has one is read, and
+    it is believed only when it falls in the month the statement's row
+    names. A due date on the first of the next month, or a label with no
+    date after it, leaves the file under the month's own date, as it was."""
+    month = (row_iso or "")[:7]
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        return ""
+    dates = statement_dates(text)
+    return dates[0] if dates and dates[0][:7] == month else ""
+
+
+# What the date inside a saved statement says about which row it belongs
+# to. Fixed words, because the verdict goes into the failure file.
+STATEMENT_VERDICTS = ("this month", "no date", "unclear", "another row", "another month")
+
+
+def statement_verdict(text: str, row_iso: str, other_months) -> str:
+    """Whether a saved statement is the one its row asked for, read from
+    the dates after "Statement Date" inside it.
+
+    "another row" is the only verdict that refuses a file. The first date
+    after the label is in the month of another statement on the same list,
+    no date within reach after any such label is in the row's own month,
+    and the date is not one a "Due Date" label names on its own line. That
+    is what a statement taken by the wrong capture looks like, a download
+    the capture before gave up on arriving during this one (#38).
+
+    Captures run newest first, so a late download is always a newer
+    statement landing in an older row's capture, and none of its dates is
+    in the older row's month. A date in the row's own month anywhere near
+    the label therefore means the reading is out of order, the due date
+    read first say, and the verdict is "unclear" rather than a refusal,
+    since a refused statement is fetched again on every run. The row's own
+    due date read first is "another month" for the same reason, and so is
+    a date in a month the list does not show. `other_months` holds YYYY-MM
+    for every other statement on the list."""
+    month = (row_iso or "")[:7]
+    dates = statement_dates(text)
+    if not dates or not re.fullmatch(r"\d{4}-\d{2}", month):
+        return "no date"
+    first = dates[0]
+    if first[:7] == month:
+        return "this month"
+    if any(d[:7] == month for d in _dates_near_statement_label(text)):
+        return "unclear"
+    if first[:7] in set(other_months or ()) - {month} and first not in _due_dates(text):
+        return "another row"
+    return "another month"
 
 
 _WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
@@ -646,6 +780,439 @@ def _note(trace: Optional[list], note: str, **fields) -> None:
         trace.append(dict({"note": note}, **fields))
 
 
+# What a capture may say in the failure file, the one file a tester
+# reliably attaches, and in the journal line for a saved document. His
+# 0.37.0 file showed the second statement failing on the list after a 33
+# second capture and could not say what the click did, because that is
+# only in download-attempt.json (#38). Each step the trace names maps to
+# fixed words written here, and only the counts, yes-or-no fields and
+# words listed below are copied, so no label, address or date off the
+# page can reach the file.
+_CAPTURE_STEPS = {
+    "already on the statements page": "stayed on the list",
+    "opened the statements page": "opened the list",
+    "could not open the statements page": "could not open the list",
+    "no loan number in the address, so the yearly page cannot be opened": "no loan number in the address",
+    "could not open the yearly page": "could not open the yearly page",
+    "found the row": "found the row",
+    "no row on the page has this date": "no row has this date",
+    "refused the control, the guard said no": "guard refused the control",
+    "the control's own link did not answer with a PDF": "own link was not a pdf",
+    "clicked": "clicked",
+    "click failed": "click failed",
+    "clicked through the DOM instead": "clicked through the page",
+    "DOM click failed too": "page click failed too",
+    "the tab moved": "the tab moved",
+    "after the click": "looked after the click",
+    "second step clicked": "second step clicked",
+    "second step click failed": "second step click failed",
+    "no PDF arrived": "no pdf arrived",
+    "the control's own link answered with a PDF": "own link was a pdf",
+    "waited for an earlier download to finish": "waited for an earlier download",
+    "an earlier download was still being written, so nothing was clicked":
+        "earlier download still being written",
+    "the row left the page before it could be pressed": "row left the page",
+    "the row changed before it was pressed, so nothing was pressed": "row changed before the press",
+    "the row changed, so it was not pressed through the DOM": "row changed before the page click",
+    "the download folder could not say which download is this one":
+        "folder could not tell which download",
+    "waited on a document still on its way": "waited on a document on its way",
+    "the PDF landed": "the pdf landed",
+}
+# Which counts, yes-or-no fields and words may be copied, and the part of
+# the capture each one describes. Grouped so the failure file stays under
+# the twenty fields a section may hold, and so a count keeps its meaning,
+# the list's wait and the wait for an earlier download being two numbers.
+_CAPTURE_COUNTS = {
+    "waited_s": "list", "controls": "list", "visible": "list", "same_date": "list",
+    "after_click_s": "click", "in_flight_s": "click", "new_tabs": "click",
+    # Playwright's own download event. It does not fire for an attached
+    # Edge or Chrome, so a zero here says nothing about whether a download
+    # began. The download folder and the network counts do.
+    "download_events": "click",
+    "arrived_unfinished": "download_folder", "arrived_not_pdf": "download_folder",
+    "left_unfinished": "download_folder", "earlier_download_s": "download_folder",
+    # A download that was still being written when the click was made and
+    # was gone when a PDF landed, and how many new PDFs there were then.
+    "earlier_finished": "download_folder", "new_pdfs": "download_folder",
+}
+_CAPTURE_FLAGS = {"scrolled": "list", "chosen_visible": "list", "signed_out": "list"}
+# The wait a PDF landed in, and the way it arrived.
+_CAPTURE_WINDOWS = ("first wait", "second step wait", "last wait", "in flight wait", "no click")
+_CAPTURE_HOWS = ("download folder", "download event", "pdf response", "refetched response",
+                 "same tab", "new tab", "own link")
+# Why the control about to be pressed was no longer the one the guard
+# approved.
+_CHECK_WHYS = ("it left the page", "its name changed", "it no longer carries this date",
+               "it could not be read again")
+_CAPTURE_WORDS = {"window": _CAPTURE_WINDOWS, "how": _CAPTURE_HOWS, "why": _CHECK_WHYS}
+
+
+def capture_facts(trace: Optional[list]) -> dict:
+    """A capture's trace as steps, counts and fixed words, for the failure
+    file and the journal. Nothing is copied that is not named above, and
+    the network counts are integers under fixed names."""
+    out: dict = {"steps": []}
+    for entry in trace or []:
+        if not isinstance(entry, dict):
+            continue
+        note = entry.get("note")
+        step = _CAPTURE_STEPS.get(note) if isinstance(note, str) else None
+        if not step:
+            continue
+        out["steps"].append(step)
+        for name, part in _CAPTURE_COUNTS.items():
+            value = entry.get(name)
+            if isinstance(value, int) and not isinstance(value, bool):
+                out.setdefault(part, {})[name] = value
+        for name, part in _CAPTURE_FLAGS.items():
+            if isinstance(entry.get(name), bool):
+                out.setdefault(part, {})[name] = entry[name]
+        for name, allowed in _CAPTURE_WORDS.items():
+            if entry.get(name) in allowed:
+                out.setdefault("click", {})[name] = entry[name]
+        if isinstance(entry.get("appeared"), list):
+            out.setdefault("click", {})["controls_appeared"] = len(entry["appeared"])
+        if isinstance(entry.get("network"), dict):
+            out["network"] = _network_facts(entry["network"])
+    return out
+
+
+def landing_facts(trace: Optional[list]) -> dict:
+    """How a saved document arrived, for the journal line written when it
+    is saved. How long after the click, in which wait, which way, how long
+    the list took, and the network counts, so a run that saves some and
+    not others shows how close the good ones came to giving up (#38)."""
+    facts = capture_facts(trace)
+    if "the pdf landed" not in facts.get("steps", []):
+        return {}
+    out = dict(facts.get("click") or {})
+    out.pop("controls_appeared", None)
+    if "waited_s" in (facts.get("list") or {}):
+        out["list_waited_s"] = facts["list"]["waited_s"]
+    if facts.get("network"):
+        out["network"] = facts["network"]
+    return out
+
+
+# ---------------------------------------------------------------------------
+# What the browser sent and got back while one capture waited, as counts.
+# ---------------------------------------------------------------------------
+# His 0.37.0 failure file listed no newrez.com answer to the statements tab
+# after the page loaded, for the statement that saved as much as for the
+# one that did not (#38). Only the provider's own answers are ever listed,
+# so the document comes some other way, from another address, from data
+# the page already held, or in a tab the list never watched. These counts
+# cover the statements tab and any tab the click opens, at every address,
+# and say whether a request that could be the document was still waiting,
+# was answered with an error, came back as an attachment, or never went
+# out, without writing down an address, a header or a byte of what came
+# back. "aborted" is a request the browser cut off, which is what a request
+# turned into a download ends as, and also what a page cancelling its own
+# call ends as, so "attachments" is the firmer sign of a download. The
+# other tabs of his browser are not counted, since a call one of them keeps
+# open would keep every capture waiting for nothing.
+_TRAFFIC_WHERE = ("provider", "elsewhere")
+_TRAFFIC_COUNTS = (
+    "requests", "document_requests", "fetch_requests",
+    "responses_pdf", "responses_octet", "responses_json", "responses_html", "responses_other",
+    "attachments", "status_2xx", "status_3xx", "status_4xx", "status_5xx",
+    "finished", "failed", "aborted", "pending", "pending_answered",
+)
+
+
+def _network_facts(raw) -> dict:
+    """Only the fixed names above, and only whole numbers."""
+    out = {}
+    for where in _TRAFFIC_WHERE:
+        part = raw.get(where) if isinstance(raw, dict) else None
+        if not isinstance(part, dict):
+            continue
+        out[where] = {k: part[k] for k in _TRAFFIC_COUNTS
+                      if isinstance(part.get(k), int) and not isinstance(part.get(k), bool)}
+    return out
+
+
+class _Traffic:
+    """Every request the browser made while one capture waited, counted
+    by whether it went to Newrez or elsewhere, and never described.
+
+    Listened for on the whole browser context, so a tab the click opens is
+    counted too. A request from a tab in `ignore`, the tabs that were open
+    before the click other than the statements tab, is not counted, and
+    neither is one no tab can be named for, a service worker's say. Only
+    the requests counted here are answered, finished or failed here.
+    Nothing here may raise, it runs inside Playwright's events."""
+
+    def __init__(self, ignore=()):
+        self.counts = {w: dict.fromkeys(_TRAFFIC_COUNTS, 0) for w in _TRAFFIC_WHERE}
+        self._open: dict = {}
+        self._tracked: set = set()
+        self._ignore = set(ignore or ())
+
+    @staticmethod
+    def _where(url) -> str:
+        try:
+            return "provider" if is_safe_url(url or "") else "elsewhere"
+        except Exception:
+            return "elsewhere"
+
+    def _counted(self, req) -> bool:
+        """Whether a new request comes from a tab this capture watches."""
+        try:
+            return req.frame.page not in self._ignore
+        except Exception:
+            return False
+
+    def tracks(self, req) -> bool:
+        """Whether `req` was made while this capture watched, from a tab
+        it watches."""
+        try:
+            return req in self._tracked
+        except Exception:
+            return False
+
+    def on_request(self, req) -> None:
+        try:
+            if not self._counted(req):
+                return
+            where = self._where(req.url)
+            kind = str(req.resource_type or "")
+            part = self.counts[where]
+            part["requests"] += 1
+            if kind == "document":
+                part["document_requests"] += 1
+            elif kind in ("fetch", "xhr"):
+                part["fetch_requests"] += 1
+            self._open[req] = {"where": where, "kind": kind, "answered": False, "file": False}
+            self._tracked.add(req)
+        except Exception:
+            pass
+
+    def on_response(self, res) -> None:
+        try:
+            if not self.tracks(res.request):
+                return
+            where = self._where(res.url)
+            part = self.counts[where]
+            headers = res.headers or {}
+            ct = str(headers.get("content-type") or "").lower()
+            kind = ("pdf" if "pdf" in ct else "octet" if "octet-stream" in ct
+                    else "json" if "json" in ct else "html" if "html" in ct else "other")
+            part["responses_" + kind] += 1
+            attached = str(headers.get("content-disposition") or "").lower().startswith("attachment")
+            if attached:
+                part["attachments"] += 1
+            status = int(res.status or 0)
+            if 200 <= status < 600:
+                part["status_%dxx" % (status // 100)] += 1
+            entry = self._open.get(res.request)
+            if entry is not None:
+                entry["answered"] = True
+                entry["file"] = kind in ("pdf", "octet") or attached
+        except Exception:
+            pass
+
+    def _closed(self, req, how: str) -> None:
+        try:
+            entry = self._open.pop(req, None)
+            if entry is None:
+                return
+            where = entry["where"]
+            self.counts[where][how] += 1
+            if how == "failed" and "ERR_ABORTED" in str(req.failure or ""):
+                # Cut off by the browser, which a request turned into a
+                # download is, and a call the page cancelled is too.
+                self.counts[where]["aborted"] += 1
+        except Exception:
+            pass
+
+    def on_finished(self, req) -> None:
+        self._closed(req, "finished")
+
+    def on_failed(self, req) -> None:
+        self._closed(req, "failed")
+
+    def in_flight(self) -> bool:
+        """A request made since the click, from the statements tab or a
+        tab the click opened, that could still be the document. A page
+        load or a download started by the browser, a call from the page, or
+        anything already answered with a file whose body is still coming.
+        Calls to other sites count too, since the failure file shows the
+        document does not come from a newrez.com address, and the wait they
+        can cause is capped (#38)."""
+        for entry in list(self._open.values()):
+            if entry["file"] or entry["kind"] in ("document", "fetch", "xhr"):
+                return True
+        return False
+
+    def facts(self) -> dict:
+        out = {w: dict(c) for w, c in self.counts.items()}
+        for entry in list(self._open.values()):
+            out[entry["where"]]["pending"] += 1
+            if entry["answered"]:
+                out[entry["where"]]["pending_answered"] += 1
+        return out
+
+
+# How long a capture waits for the PDF after the click, in seconds. The
+# first wait, the wait after a second control the click revealed, and the
+# last. A statement he saved on 0.37.0 took about eleven seconds from the
+# click, past the first wait, which leaves the budget little room (#38).
+FIRST_WAIT_S = 10
+SECOND_STEP_WAIT_S = 20
+LAST_WAIT_S = 15
+# How much longer the last wait may run while a document is visibly on
+# its way, a file still being written to the download folder or a request
+# that could be it still waiting. Nothing is clicked while it waits.
+IN_FLIGHT_WAIT_S = 45
+# A download an earlier capture gave up on and that is still being written
+# is let finish before the row is looked for, for at most this long, and
+# taken as abandoned once it has not grown for EARLIER_STILL_S. One still
+# growing when the wait ends means nothing is clicked.
+EARLIER_WAIT_S = 30
+EARLIER_STILL_S = 5
+# How long Playwright may take to press the control.
+CLICK_TIMEOUT_MS = 8000
+# The clock a capture measures itself by, so a test can move it.
+_clock = time.monotonic
+# Files still being written that a capture in this run has already taken
+# as abandoned, by path and size. A browser keeps an interrupted download's
+# file so it can resume it, and such a leftover is waited on once, not
+# before every capture. One whose size has changed is waited on again.
+_ABANDONED: dict = {}
+
+
+def _unfinished(dl_dir) -> dict:
+    """The download folder's files still being written, with their sizes."""
+    out = {}
+    if not dl_dir:
+        return out
+    try:
+        names = os.listdir(dl_dir)
+    except OSError:
+        return out
+    for name in names:
+        if name.lower().endswith(_UNFINISHED):
+            try:
+                out[name] = os.path.getsize(os.path.join(dl_dir, name))
+            except OSError:
+                out[name] = -1
+    return out
+
+
+def _earlier_downloads_settled(page, dl_dir, trace: Optional[list]) -> bool:
+    """Let a download still being written from an earlier capture finish
+    before this capture looks for its row, or say it has not.
+
+    The folder is compared before and after the click. A file an earlier
+    capture gave up on that finishes after the click has a new name, the
+    finished one, and could be saved under this document's name. One that
+    finishes here is part of the picture taken before the click and is
+    left alone. One that has not grown for EARLIER_STILL_S is taken as
+    abandoned. The capture then watches it, and a PDF that lands after it
+    has gone is not taken (#38).
+
+    False when one is still growing after EARLIER_WAIT_S. Nothing is
+    clicked then, and the document is left for the next run. This runs
+    before the row is looked for, so no wait sits between the guard
+    approving a control and the click."""
+    if not dl_dir:
+        return True
+
+    def live() -> dict:
+        return {name: size for name, size in _unfinished(dl_dir).items()
+                if _ABANDONED.get(str(Path(dl_dir) / name)) != size}
+
+    waited = still = 0
+    last = None
+    settled = True
+    while True:
+        now = live()
+        if not now:
+            break
+        if waited >= EARLIER_WAIT_S:
+            settled = False
+            break
+        still = still + 1 if now == last else 0
+        if still >= EARLIER_STILL_S:
+            for name, size in now.items():
+                _ABANDONED[str(Path(dl_dir) / name)] = size
+            break
+        last = now
+        page.wait_for_timeout(1000)
+        waited += 1
+    left = len(_unfinished(dl_dir))
+    if not settled:
+        _note(trace, "an earlier download was still being written, so nothing was clicked",
+              earlier_download_s=waited, left_unfinished=left)
+        log.info("an earlier download is still being written, so this one is left for the next run")
+        return False
+    if waited:
+        _note(trace, "waited for an earlier download to finish",
+              earlier_download_s=waited, left_unfinished=left)
+    return True
+
+
+def _new_pdfs(dl_dir, before: set) -> list:
+    """Finished files in the download folder that were not there before
+    and start like a PDF, by name."""
+    if not dl_dir:
+        return []
+    try:
+        names = sorted(f for f in os.listdir(dl_dir)
+                       if f not in before and not f.lower().endswith(_UNFINISHED))
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        try:
+            with open(os.path.join(dl_dir, name), "rb") as fh:
+                if fh.read(5) == b"%PDF-":
+                    out.append(name)
+        except OSError:
+            continue
+    return out
+
+
+# A control's name, the text around it that carries a date, and whether it
+# is still on the page, read in one call so they describe one moment.
+_NAME_AND_ROW_JS = ("el => [(el.getAttribute('aria-label') || el.innerText || '').trim(), ("
+                    + _ROW_OF_JS + ")(el), el.isConnected]")
+# The press through the page, made only if the control still has the name
+# the guard approved, checked and pressed in one step so nothing can move
+# in between.
+_DOM_CLICK_IF_SAME_JS = ("(el, want) => { const n = (el.getAttribute('aria-label') || el.innerText"
+                         " || '').trim(); if (!el.isConnected || n !== want) return false;"
+                         " el.click(); return true; }")
+
+
+def _still_the_one(el, iso: str, label: str) -> str:
+    """Why the control about to be pressed is no longer the one the guard
+    approved, as fixed words, or "" when it still is.
+
+    The control is held as the element itself, so a list that redraws in
+    another order cannot move the press to another row. A page that reuses
+    the element for another row changes its name or its date, and that is
+    read again right before the press (#38)."""
+    try:
+        got = el.evaluate(_NAME_AND_ROW_JS)
+    except Exception:
+        return "it could not be read again"
+    if not isinstance(got, list) or len(got) != 3:
+        return "it could not be read again"
+    name, row, connected = got
+    if not connected:
+        return "it left the page"
+    name = str(name or "").strip()
+    if name != label or not is_safe_control(name):
+        return "its name changed"
+    found = parse_period_date(name)[0] or parse_period_date(str(row or ""))[0]
+    if found != iso:
+        return "it no longer carries this date"
+    return ""
+
+
 def _where(page) -> str:
     """The page's path and route with digits masked, never its query."""
     from urllib.parse import urlsplit
@@ -755,22 +1322,47 @@ def _second_step(page, appeared: set):
     return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control)
 
 
+# What landed() answers when a PDF arrived in the download folder but the
+# folder cannot say it is this document's.
+_AMBIGUOUS = "ambiguous"
+
+
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
-               dl_dir=None) -> bool:
+               dl_dir=None, check=None) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
     in `dl_dir`, a download event, a PDF response, a new tab, this tab
     moving to the document, or a second control the click revealed.
-    `trace` collects what happened, the click's own outcome included."""
+    `trace` collects what happened, the click's own outcome included, and
+    how long after the click the PDF landed, in which wait and which way.
+
+    `check` says why `el` is no longer the control the guard approved, or
+    "" when it still is. It is asked right before the press, and nothing
+    is pressed when it objects.
+
+    A PDF in the download folder is taken only when the folder can say it
+    is this one. It is not when a download that was still being written
+    before the click has gone by the time the PDF lands, since that
+    download may have finished as this very file, or when more than one
+    new PDF is there. The files are left where they are, nothing is saved,
+    and the document is asked for again on the next run (#38)."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
     start_url = page.url or ""
+    before = set(ctx.pages)
+    # The other tabs of the browser are not this capture's business.
+    traffic = _Traffic(ignore=before - {page})
 
     def on_download(dl):
         downloads.append(dl)
 
     def on_response(res):
+        traffic.on_response(res)
         try:
+            # Only an answer to a request made while this capture watched,
+            # from this tab or one the click opened, can be this document.
+            if not traffic.tracks(res.request):
+                return
             url = res.url or ""
             if not is_safe_url(url):
                 return
@@ -790,102 +1382,214 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         except Exception:
             pass
 
-    ctx.on("response", on_response)
+    listeners = [("request", traffic.on_request), ("response", on_response),
+                 ("requestfinished", traffic.on_finished), ("requestfailed", traffic.on_failed)]
+    for event, fn in listeners:
+        try:
+            ctx.on(event, fn)
+        except Exception:
+            pass
     page.on("download", on_download)
-    before = set(ctx.pages)
     seen = _snapshot(dl_dir)
+    # Downloads still being written when the picture was taken, from an
+    # earlier capture or left over from before. The browser renames one
+    # when it finishes, so a PDF that lands after one of these has gone
+    # may be it.
+    unfinished_before = {name for name in seen if name.lower().endswith(_UNFINISHED)}
     controls_before = _control_texts(page)
+    clicked_at = [_clock()]
+    doubt: dict = {}
 
-    def landed() -> bool:
+    def after_click_s() -> int:
+        return max(0, int(round(_clock() - clicked_at[0])))
+
+    def earlier_gone() -> int:
+        return len(unfinished_before - _snapshot(dl_dir))
+
+    def from_folder() -> str:
+        """The download folder's PDF moved to `out_path`, _AMBIGUOUS when
+        the folder cannot say which download it is, or "" when none has
+        landed."""
+        new = _new_pdfs(dl_dir, seen)
+        if not new:
+            return ""
+        # Looked at after the new PDFs were listed, so an earlier download
+        # that finishes in between is seen as gone.
+        gone = earlier_gone()
+        if gone or len(new) > 1:
+            doubt.update(earlier_finished=gone, new_pdfs=len(new))
+            return _AMBIGUOUS
+        try:
+            if out_path.exists():
+                out_path.unlink()
+            shutil.move(os.path.join(dl_dir, new[0]), str(out_path))
+        except OSError as e:
+            log.info("could not move the downloaded PDF: %s", e)
+            return ""
+        return "download folder"
+
+    def landed() -> str:
+        """The way a PDF arrived, or "" while none has."""
         if downloads:
             try:
                 from paperpull_core.receipt_pdf import save_download
                 save_download(downloads[0], out_path)
                 if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-                    return True
+                    return "download event"
             except Exception as e:
                 log.info("download event save failed: %s", e)
         if got.get("body"):
             out_path.write_bytes(got["body"])
-            return True
+            return "pdf response"
         if got.get("refetch"):
             try:
                 resp = page.context.request.get(got.pop("refetch"), timeout=60000)
                 body = resp.body() if resp.ok else b""
                 if body[:5] == b"%PDF-":
                     out_path.write_bytes(body)
-                    return True
+                    return "refetched response"
             except Exception:
                 pass
-        return _take_new_pdf(dl_dir, seen, out_path)
+        return from_folder()
 
-    def wait_for_pdf(seconds: int) -> bool:
+    def wait_for_pdf(seconds: int) -> str:
         for _ in range(seconds):
-            if landed():
-                return True
+            how = landed()
+            if how:
+                return how
             page.wait_for_timeout(1000)
         return landed()
+
+    def on_its_way() -> bool:
+        """A file this click started still being written, or a request
+        that could be the document still waiting."""
+        if traffic.in_flight():
+            return True
+        return any(name not in seen for name in _unfinished(dl_dir))
+
+    def wait_while_on_its_way():
+        waited = 0
+        while waited < IN_FLIGHT_WAIT_S and on_its_way():
+            page.wait_for_timeout(1000)
+            waited += 1
+            how = landed()
+            if how:
+                return how, waited
+        return (landed() if waited else ""), waited
+
+    def new_tabs() -> list:
+        return [p for p in ctx.pages if p not in before]
+
+    def ended(how: str, window: str) -> bool:
+        if how == _AMBIGUOUS:
+            _note(trace, "the download folder could not say which download is this one",
+                  after_click_s=after_click_s(), network=traffic.facts(), **doubt)
+            log.info("a PDF landed that may be an earlier download, so it was not taken")
+            return False
+        if trace is not None:
+            trace.append({"note": "the PDF landed", "how": how, "window": window,
+                          "after_click_s": after_click_s(), "network": traffic.facts()})
+        return True
 
     try:
         try:
             el.scroll_into_view_if_needed(timeout=4000)
         except Exception:
             pass
+        why = check() if check is not None else ""
+        if why:
+            _note(trace, "the row changed before it was pressed, so nothing was pressed", why=why)
+            log.info("the control for %r changed before it was pressed, so nothing was pressed", label)
+            return False
+        clicked_at[0] = _clock()
         try:
-            el.click(timeout=8000)
+            el.click(timeout=CLICK_TIMEOUT_MS)
             if trace is not None:
                 trace.append({"note": "clicked", "control": redact(label)[:60]})
         except Exception as e:
             if trace is not None:
                 trace.append({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
+            # The ordinary press can take seconds to give up, so the name and
+            # the date are read again before pressing through the page, and
+            # the name once more in the same step as the press.
+            why = check() if check is not None else ""
             try:
-                el.evaluate("el => el.click()")
-                if trace is not None:
+                if why:
+                    _note(trace, "the row changed, so it was not pressed through the DOM", why=why)
+                elif el.evaluate(_DOM_CLICK_IF_SAME_JS, label) is False:
+                    _note(trace, "the row changed, so it was not pressed through the DOM")
+                elif trace is not None:
                     trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
             except Exception as e2:
                 if trace is not None:
                     trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
-        if wait_for_pdf(10):
-            return True
+        how = wait_for_pdf(FIRST_WAIT_S)
+        if how:
+            return ended(how, "first wait")
         if _take_same_tab(page, start_url, out_path, trace):
-            return True
-        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-            return True
+            return ended("same tab", "first wait")
+        if _take_new_tab(page, new_tabs(), out_path):
+            return ended("new tab", "first wait")
         appeared = _control_texts(page) - controls_before
         if trace is not None:
             trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
                           "appeared": [redact(t) for t in sorted(appeared)[:15]],
-                          "new_tabs": len([p for p in ctx.pages if p not in before])})
+                          "new_tabs": len(new_tabs())})
         step, step_label = _second_step(page, appeared)
         if step is not None:
             try:
-                step.click(timeout=8000)
+                step.click(timeout=CLICK_TIMEOUT_MS)
                 if trace is not None:
                     trace.append({"note": "second step clicked", "control": redact(step_label)[:60]})
             except Exception as e:
                 if trace is not None:
                     trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
                                   "error": str(e)[:160]})
-            if wait_for_pdf(20):
-                return True
-            if _take_same_tab(page, start_url, out_path, trace) or \
-                    _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-                return True
-        if wait_for_pdf(15):
-            return True
-        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-            return True
+            how = wait_for_pdf(SECOND_STEP_WAIT_S)
+            if how:
+                return ended(how, "second step wait")
+            if _take_same_tab(page, start_url, out_path, trace):
+                return ended("same tab", "second step wait")
+            if _take_new_tab(page, new_tabs(), out_path):
+                return ended("new tab", "second step wait")
+        how = wait_for_pdf(LAST_WAIT_S)
+        if how:
+            return ended(how, "last wait")
+        if _take_new_tab(page, new_tabs(), out_path):
+            return ended("new tab", "last wait")
+        # A statement that took about eleven seconds on a good run leaves
+        # the budget little room, so one still visibly on its way is
+        # waited for rather than given up on (#38).
+        how, in_flight_s = wait_while_on_its_way()
+        if in_flight_s:
+            _note(trace, "waited on a document still on its way", in_flight_s=in_flight_s)
+        if how:
+            return ended(how, "in flight wait")
+        if in_flight_s and _take_new_tab(page, new_tabs(), out_path):
+            return ended("new tab", "in flight wait")
         if trace is not None:
+            # What reached the download folder and was not taken. A file
+            # still being written is a document on its way that the wait
+            # gave up on, and a finished one left behind is not a PDF.
+            arrived = _snapshot(dl_dir) - seen
+            unfinished = sum(1 for f in arrived if f.lower().endswith(_UNFINISHED))
             trace.append({"note": "no PDF arrived", "url": redact(_where(page)),
-                          "downloads": len(downloads),
-                          "new_tabs": len([p for p in ctx.pages if p not in before])})
+                          "download_events": len(downloads),
+                          "new_tabs": len(new_tabs()),
+                          "arrived_unfinished": unfinished,
+                          "arrived_not_pdf": len(arrived) - unfinished,
+                          "earlier_finished": earlier_gone(),
+                          "after_click_s": after_click_s(),
+                          "in_flight_s": in_flight_s,
+                          "network": traffic.facts()})
         log.info("click on %r produced no PDF", label)
         return False
     finally:
-        try:
-            ctx.remove_listener("response", on_response)
-        except Exception:
-            pass
+        for event, fn in listeners:
+            try:
+                ctx.remove_listener(event, fn)
+            except Exception:
+                pass
         try:
             page.remove_listener("download", on_download)
         except Exception:
@@ -914,6 +1618,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     if not _open_list(page, _list_path_for(title), trace):
         log.info("could not open the documents page for %s", iso_date)
         return False
+    # Before the row is looked for, so that no wait sits between the guard
+    # approving a control and the press.
+    if not _earlier_downloads_settled(page, dl_dir, trace):
+        return False
 
     el, label = _wait_for_control(page, iso_date, trace)
     if el is None:
@@ -922,6 +1630,19 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     if not is_safe_control(label):
         _note(trace, "refused the control, the guard said no", control=redact(label)[:60])
         log.info("refusing unsafe control %r for %s", label, iso_date)
+        return False
+    # The control as the element itself rather than as "the nth control",
+    # which is found again when it is pressed and lands on another row once
+    # the list redraws in another order. Its name and its date are read
+    # again through it now and once more right before the press.
+    try:
+        el = el.element_handle(timeout=2000)
+    except Exception:
+        _note(trace, "the row left the page before it could be pressed")
+        return False
+    why = _still_the_one(el, iso_date, label)
+    if why:
+        _note(trace, "the row changed before it was pressed, so nothing was pressed", why=why)
         return False
 
     try:
@@ -938,11 +1659,14 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             body = _fetch_pdf(page, target)
             if body:
                 out_path.write_bytes(body)
+                _note(trace, "the control's own link answered with a PDF")
+                _note(trace, "the PDF landed", how="own link", window="no click")
                 return True
             if trace is not None:
                 trace.append({"note": "the control's own link did not answer with a PDF",
                               "url": redact(target)[:160]})
-    return _catch_pdf(page, el, label, out_path, trace, dl_dir)
+    return _catch_pdf(page, el, label, out_path, trace, dl_dir,
+                      check=lambda: _still_the_one(el, iso_date, label))
 
 
 # ---------------------------------------------------------------------------

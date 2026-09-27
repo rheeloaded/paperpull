@@ -82,6 +82,10 @@ class Document:
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
         self.document_id = document_id  # unused, the date is the identity
+        # The day the statement prints as its date, read from the saved
+        # PDF. The file is named for it. The key keeps `date`, the last day
+        # of the row's month, so nothing downloaded is fetched again (#38).
+        self.statement_date = kw.get("statement_date", "")
         self.source_url = kw.get("source_url", "")  # page where the doc's download link lives
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
@@ -128,6 +132,111 @@ def migrate_legacy_keys(records: dict) -> int:
     short enough to fit has no such records and nothing happens.
     """
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
+
+
+class _Ledger:
+    """The index as a rename reads it, written through to the real one."""
+
+    def __init__(self, csv, rows):
+        self._csv, self._rows = csv, rows
+        self.columns = csv.columns
+
+    def read_all(self):
+        return self._rows
+
+    def rewrite(self, rows):
+        self._csv.rewrite(rows)
+
+
+class _Records:
+    """Records as a rename reads them, which is only ever `.data`."""
+
+    def __init__(self, data):
+        self.data = data
+
+
+# What a saved statement's own date says, in the words the run and Rename
+# print. Only the first refuses a file.
+_ANOTHER_ROW = ("The statement inside is dated in the month of another statement on "
+                "the list, so it may be that one. Moved to Manual Review, and the next "
+                "run asks for this one again.")
+_NOT_CONFIRMED = ("The date beside Statement Date inside it is not in the month its row "
+                  "names, so it keeps the month's name. Open it to check it is that "
+                  "month's statement.")
+_UNCLEAR = ("The dates beside Statement Date inside it disagree about the month, so "
+            "it keeps the month's name. Open it to check it is that month's statement.")
+# Why Rename lists a file, by verdict.
+_DOUBTS = {
+    "another row": "it is dated in the month of another statement on the list, so it may be that one",
+    "another month": "the date beside Statement Date is not in this month",
+    "unclear": "the dates beside Statement Date disagree about the month",
+}
+
+
+def _statement_months(*stores) -> set:
+    """YYYY-MM of every statement the stores know of."""
+    months = set()
+    for store in stores:
+        for rec in (getattr(store, "data", None) or {}).values():
+            if isinstance(rec, dict) and rec.get("category") == doc_types.STATEMENT:
+                date = str(rec.get("date") or "")
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+                    months.add(date[:7])
+    return months
+
+
+class _DatedByStatement:
+    """This app as a rename sees it, with each statement dated by the day
+    printed on it (#38).
+
+    A statement saved before that day was read has a row dated the last
+    day of its month. Its file is read and the row is dated by the day it
+    prints, in this view only, so a preview changes nothing and an applied
+    rename writes the row along with the file. The records keep the month's
+    date, which is their key. The rename finds a row's record by its date
+    and title, so it is shown a copy of each record dated as its row is,
+    and a naming pattern that uses the record still has it.
+
+    A saved statement whose own date is in some other month is not renamed
+    and is listed in `doubts`, with the verdict, so Rename can say which
+    files to open. One dated in the month of another statement on the list
+    may be that statement, taken by the wrong capture."""
+
+    def __init__(self, app, read_text=None):
+        read_text = read_text or receipt_pdf.pdf_text
+        self.config = app.config
+        self.progress = app.progress
+        self.doubts: list = []
+        months = _statement_months(app.progress, app.discovery)
+        by_title: dict = {}
+        for store in (app.progress, app.discovery):
+            for rec in (getattr(store, "data", None) or {}).values():
+                if isinstance(rec, dict) and rec.get("title") and rec.get("date"):
+                    by_title.setdefault(rec["title"], {}).update(
+                        {k: v for k, v in rec.items() if v not in (None, "")})
+        rows = app.index_csv.read_all()
+        copies = {}
+        for row in rows:
+            rec = by_title.get((row.get("Document Title") or "").strip())
+            if not rec or (row.get("Category") or "").strip() != doc_types.STATEMENT:
+                continue
+            date = (row.get("Document Date") or "").strip()
+            path = (row.get("PDF Full Path") or "").strip()
+            if date == rec["date"] and path and Path(path).exists():
+                text = read_text(Path(path))
+                printed = site.printed_statement_date(text, date)
+                if printed:
+                    row["Document Date"] = date = printed
+                elif (row.get("Processing Status") or "").strip() != "Needs Manual Review":
+                    verdict = site.statement_verdict(text, date, months)
+                    if verdict in _DOUBTS:
+                        self.doubts.append((Path(path).name, verdict))
+            if date and date != rec["date"]:
+                copies["dated by statement:%s:%s" % (date, rec["title"])] = dict(rec, date=date)
+        self.index_csv = _Ledger(app.index_csv, rows)
+        data = dict(getattr(app.discovery, "data", None) or {})
+        data.update(copies)
+        self.discovery = _Records(data)
 
 
 class App:
@@ -549,7 +658,8 @@ class App:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
             self._write_row(doc, "Capture failed", "Needs Manual Review")
-            self.write_failure('capture the document', 'the document would not render')
+            self.write_failure('capture the document', 'the document would not render',
+                               capture=site.capture_facts(trace))
             self.stats["manual_review"] += 1
             print("  Could not capture this document - marked for manual review.")
             return
@@ -594,10 +704,27 @@ class App:
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
 
+        if doc.category == doc_types.STATEMENT:
+            text = receipt_pdf.pdf_text(out_path)
+            verdict = site.statement_verdict(text, doc.date, self._statement_months())
+            if verdict == "another row":
+                self._refuse_another_rows_statement(doc, out_path, trace)
+                return
+            if verdict in ("another month", "unclear"):
+                said = _UNCLEAR if verdict == "unclear" else _NOT_CONFIRMED
+                doc.notes = (doc.notes + "; " if doc.notes else "") + said
+                print("  !! " + said)
+            out_path = self._dated_by_statement(doc, out_path, text)
+        doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
         self._record(doc, State.COMPLETED)
         self.journal.checkpoint('a document is saved')
+        # How long after the click it landed and in which wait, so a run
+        # that saves some and not others shows how close the good ones
+        # came to giving up (#38). The core's checkpoint takes no facts,
+        # so they go on the line after it.
+        self.journal.result('saved the document', **site.landing_facts(trace))
         self._write_row(doc, "Downloaded", "Completed")
         self.stats["new_files"].append(str(out_path))
         if doc.date:
@@ -612,6 +739,70 @@ class App:
             self.stats["other"] += 1
         print(f"  Saved: {out_path.name}")
 
+    def _statement_months(self) -> set:
+        """YYYY-MM of every statement on the list, from what discovery and
+        earlier runs recorded."""
+        return _statement_months(self.progress, self.discovery)
+
+    def _refuse_another_rows_statement(self, doc: Document, out_path: Path, trace) -> None:
+        """A statement dated in the month of another statement on the list
+        is not saved under this one's name.
+
+        That is what a download the capture before gave up on looks like
+        when it arrives during this capture (#38). The file goes to Manual
+        Review, where it can be opened, and this statement stays undone, so
+        the next Pilot or Resume asks for it again."""
+        quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                 self.config["max_path_length"])
+        try:
+            out_path.replace(quarantine)
+        except OSError as e:
+            log.info("could not move %s to manual review: %s", out_path.name, e)
+            try:
+                out_path.unlink()
+            except OSError:
+                pass
+            quarantine = None
+        doc.pdf_path = str(quarantine) if quarantine else ""
+        doc.pdf_filename = quarantine.name if quarantine else ""
+        doc.notes = (doc.notes + "; " if doc.notes else "") + _ANOTHER_ROW
+        self._write_row(doc, "Dated in another month", "Needs Manual Review")
+        # The record keeps no path, so the file in Manual Review does not
+        # count as this statement and the next run asks for it again.
+        doc.pdf_path = doc.pdf_filename = ""
+        self._record(doc, State.NEEDS_MANUAL_REVIEW)
+        capture = site.capture_facts(trace)
+        capture["statement_check"] = "another row"
+        self.write_failure('check the saved statement', 'the statement is dated in another month',
+                           capture=capture)
+        self.stats["manual_review"] += 1
+        print("  !! " + _ANOTHER_ROW)
+
+    def _dated_by_statement(self, doc: Document, out_path: Path, text: str = None) -> Path:
+        """Name a saved statement for the date printed on it.
+
+        The list dates each row by a month and a year, so the file is saved
+        under the last day of that month first. The statement prints its
+        own date, and once that is read the file takes it. A statement that
+        prints no date inside its row's month keeps the month's name (#38)."""
+        if doc.category != doc_types.STATEMENT:
+            return out_path
+        if text is None:
+            text = receipt_pdf.pdf_text(out_path)
+        printed = site.printed_statement_date(text, doc.date)
+        if not printed or printed == doc.date:
+            return out_path
+        name = build_pdf_filename(printed, doc.summary, "", record=doc)
+        target = unique_path(out_path.parent, name, self.config["max_path_length"],
+                             ignoring=out_path.name)
+        try:
+            out_path.replace(target)
+        except OSError as e:
+            log.info("kept the month's name for %s: %s", doc.key, e)
+            return out_path
+        doc.statement_date = printed
+        return target
+
     # -- records -----------------------------------------------------------
 
     def _record(self, doc: Document, state: State, notes: str = ""):
@@ -625,7 +816,8 @@ class App:
         notes = "; ".join(x for x in (doc.notes, status) if x)
         self.index_csv.append_rows([{
             "Account Holder": self.config.get("owner", ""),
-            "Document Date": doc.date,
+            # The date the file is named for, which is what Rename reads.
+            "Document Date": doc.statement_date or doc.date,
             "Category": doc.category,
             "Document Summary": doc.summary,
             "Document Title": doc.title,
@@ -711,9 +903,20 @@ class App:
         A naming scheme improves and the files on disk keep the old one.
         Nothing about them needs fetching, only their names are wrong, so
         nothing is asked of the provider here (#43, #49). A preview
-        unless --apply is given."""
+        unless --apply is given.
+
+        A statement saved before its printed date was read is read now,
+        from the file already on disk, so it takes that date too (#38).
+        One whose own date is in some other month keeps its name and is
+        named here, so it can be opened and checked."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        view = _DatedByStatement(self)
+        renaming.run_for(view, apply_changes=bool(getattr(self.args, "apply", False)))
+        if view.doubts:
+            print("")
+            print("Open these and check that the month inside matches the month in the name.")
+            for name, verdict in view.doubts:
+                print("  !! %s, %s. It keeps its name." % (name, _DOUBTS[verdict]))
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
@@ -764,7 +967,7 @@ class App:
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None) -> None:
+                      postmortem: dict = None, capture: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
         Written without anybody having to know to ask for it, because a
@@ -776,7 +979,15 @@ class App:
         is still sitting on the thing that broke."""
         if self.stats.get("failure_files"):
             return
-        extra = {"postmortem": postmortem} if postmortem else None
+        extra = {}
+        if postmortem:
+            extra["postmortem"] = postmortem
+        # What the capture did, as steps and counts from
+        # site.capture_facts, so this file answers what the click did
+        # without download-attempt.json beside it (#38).
+        if capture:
+            extra["capture"] = capture
+        extra = extra or None
         # A checkpoint at the moment it gave up. It is also what makes the
         # journal when nothing had written to it yet, and every tester file
         # sent in on 2026-09-25 came back without one for that reason.

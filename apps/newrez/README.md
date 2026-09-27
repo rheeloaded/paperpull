@@ -75,7 +75,43 @@ paperpull newrez pilot            REM once the site layer is confirmed
   the page with the session's own cookies. Otherwise the row's control is
   clicked, once it has passed the guard, and whatever the site does, a
   download event, a PDF response or a new tab, is caught and saved to
-  `Statements\` or `Tax Documents\`.
+  `Statements\` or `Tax Documents\`. A document still visibly on its way
+  when the usual wait ends, a file still being written or a request that
+  could be it still waiting, is waited for up to 45 seconds more.
+- **The control that is pressed.** The control is held as the element the
+  guard approved, and its name and date are read again right before it is
+  pressed, so a list that redraws cannot move the press to another row. If
+  the control has changed, nothing is pressed and the document is left for
+  the next run.
+- **A late download.** Every statement downloads under the same name, so
+  the download folder is watched for what an earlier statement left
+  behind. Before a row is looked for, a download still being written is
+  given up to 30 seconds to finish, and one that has not grown for 5
+  seconds is taken as abandoned. If one is still growing after 30 seconds,
+  nothing is clicked and the document is left for the next run. A PDF that
+  lands after such a download has gone, or next to a second new PDF, is not
+  taken, since the folder cannot say which one it is. It stays in the
+  folder and the document is asked for again on the next run. This cannot
+  see a download whose server has not answered yet, which has no file, so
+  such a download landing during the next statement's capture is not
+  caught here. For a statement the date check below is the backstop, and
+  for a 1098 there is none.
+- **Dates.** The statements list gives a month and a year and no day, so a
+  statement is saved under the last day of its month and then named for the
+  date printed beside "Statement Date" inside it, when that date falls in
+  the same month. The app remembers each statement by its month, so nothing
+  already downloaded is fetched again, and **Rename preview** then
+  **Apply renames** bring files saved by an earlier build into line.
+- **The right statement.** A statement whose first date after "Statement
+  Date" falls in the month of another statement on the list, with no date
+  of its own month near that label, is not saved under this one's name
+  unless that date is the one a "Due Date" label names on its own line. It
+  goes to `Manual Review\` and the statement is asked for again on the next
+  run. One whose dates are in some other month, or disagree, keeps its
+  month's name with a note, and **Rename preview** lists any file already
+  saved that looks that way, so it can be opened and checked. This reads
+  the words a statement is assumed to print and has not been tried on a
+  real Newrez statement.
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays, schedules a payment, sets up autopay, requests a payoff, an escrow change or hardship help, uploads anything, or edits the account. A control must also look like a document action before it can be clicked.
 
 ## Scope
