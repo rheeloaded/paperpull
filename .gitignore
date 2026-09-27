@@ -57,6 +57,8 @@ config.json.*
 **/Orders/
 **/In-Store/
 **/Online/
+**/App Store/
+**/Apple Store/
 **/Logs/
 **/Diagnostics/
 **/Backups/

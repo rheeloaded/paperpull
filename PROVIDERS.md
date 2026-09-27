@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (41, plus sixteen built and waiting for a tester)
+## Supported (42, plus sixteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -24,6 +24,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #45. Being tested by @jpfieber | Insurance |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, member/plan documents (all coverage years), digital ID cards, secure-message letters; tRPC API, nothing clicked. Contributed by @riordan | Health insurance (PHI) |
+| [`apple`](apps/apple) | Apple (App Store and Apple Store) | Receipts for everything paid for, App Store subscriptions such as Apple One and iCloud+, in-app purchases anywhere in Family Sharing and paid apps, each saved from Apple's own emailed receipt with free downloads skipped, and Apple Store orders, each order's invoice saved and a canceled one recorded without a receipt. Built and run on the maintainer's own account | Retail |
 | [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms. Built without an account and run against @watling777's (#52). A first Pilot saved three of five statements, with a repair being tested for the other two | Card / savings |
 | [`bestbuy`](apps/bestbuy) | Best Buy | Receipts for online orders, orders placed in a store and store purchases, and returns, each purchase's details page saved as the receipt, back to 2015. Built on the maintainer's own account, 35 purchases found and all 35 saved. Best Buy's bot protection stops answering if asked too quickly, so it is paced, and a blocked run says to wait an hour | Retail |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Card |

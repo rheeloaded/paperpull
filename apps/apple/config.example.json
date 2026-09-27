@@ -1,0 +1,20 @@
+{
+  "owner": "",
+  "owner_in_filename": false,
+  "output_dir": ".",
+  "profile_dir": "./browser-profile",
+  "browser": "auto",
+  "default_start_date": "",
+  "cdp_url": "http://127.0.0.1:9280",
+  "min_pdf_bytes": 3000,
+  "max_path_length": 240,
+  "delay_min_seconds": 2.0,
+  "delay_max_seconds": 4.5,
+  "pilot_app_store": 3,
+  "pilot_apple_store": 2,
+  "//refuse": "A receipt that does not carry its own order number is destroyed",
+  "//refuse2": "rather than filed under the purchase's name. Both of Apple's",
+  "//refuse3": "receipts print it, the App Store's as Order ID and the Apple",
+  "//refuse4": "Store's as Order Number.",
+  "refuse_wrong_documents": true
+}

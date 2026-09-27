@@ -7,6 +7,29 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Apple, the 59th app.** Receipts for everything paid for through Apple,
+  in one app with two folders. App Store holds a receipt for every paid
+  purchase in the family, subscriptions such as Apple One and iCloud+,
+  in-app purchases on a child's account in Family Sharing, and paid apps,
+  songs and movies back to the iTunes years, each saved from Apple's own
+  receipt. Free downloads are skipped. Apple Store holds the invoice of
+  every hardware order, and a canceled order is recorded with no receipt.
+  It reads Report a Problem's purchase list and each receipt from inside
+  the signed-in page, and the store's order pages, and presses nothing.
+  Built and run on the maintainer's own account.
+
+### Fixed
+- **Names like iCloud, iPhone and eBay keep their spelling in file
+  names.** A word with a small first letter and a capital second one was
+  capitalized into ICloud+ and IPhone. Rename brings older files in line.
+- **Costco writes its failure file when a receipt page will not open.**
+  The second failed attempt passed the failure writer an argument it does
+  not take, so the run raised an error there instead of writing the file
+  and moving the purchase to Manual Review.
+
 ## [0.38.0] - 2026-09-27
 
 The double-click file for fixing receipt names is back and reaches the
