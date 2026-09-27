@@ -2,10 +2,11 @@
 
 **Not yet tested against a real account.** This app was built without an
 Apple Card or a Savings account, so that someone who holds them can test
-it without writing code. Everything it believes about a signed-in
-card.apple.com page is a guess, marked GUESS in `applecard_site.py`. It
-runs, its guard is tested, and it is waiting on one recording from a
-real account. The conversation is
+it without writing code. The first recording from a real account has
+since shown how each list is reached and what its buttons are called,
+marked RECORDED in `applecard_site.py`, and what is still a guess is
+marked GUESS. It runs, its guard is tested, and it is waiting on a Pilot
+from a real account. The conversation is
 [issue #52](https://github.com/rheeloaded/paperpull/issues/52).
 
 Downloads your **Apple Card monthly statements, Savings monthly
@@ -47,30 +48,36 @@ contributed to anything, is
    `Diagnostics\recording.json`, the path you actually took. One
    recording can hold all three trips. If you do not have Savings, or no
    tax form is listed, just record what you have.
-5. Click **Diagnose** as well, in the same **more** menu. That writes
-   `Diagnostics\diagnose-documents.json`, what the app itself sees on each
-   of the three pages, which says what it got wrong. It downloads
-   nothing, presses nothing but a Statements, Savings or Documents link,
-   takes no screenshot, and masks any run of six or more digits.
-6. Open each file in Notepad and read it through. It should hold page
-   headings, the names of buttons and links, and the shape of the data
-   the page loads, no values. The recording ends by printing anything
-   worth a second look. If anything in either file looks personal,
-   delete that line.
+5. Click **Diagnose** as well, in the same **more** menu. It downloads
+   nothing, presses nothing but a Statements, Savings, Documents or Tax
+   Documents link, and takes no screenshot. It writes two files. The one
+   whose name starts with `survey-diagnose-` holds counts and states and
+   no text from your account, and that is the one to send.
+   `diagnose-documents.json` beside it is the detailed one. It carries
+   the page's own words, the headings and the names of buttons and
+   links, the months of your statements among them, so it stays on your
+   machine.
+6. Open each file you will send in Notepad and read it through. The
+   recording holds the names of the buttons and links you pressed and
+   the shape of the data the page loads, no values. It ends by printing
+   anything worth a second look. If anything in either file looks
+   personal, delete that line.
    A recording also has a long `structure` block on each step. It holds
    only element kinds, attribute names and counts, so there is nothing
    in it to edit.
-7. Attach both files to
+7. Attach `recording.json` and the `survey-diagnose-` file to
    [issue #52](https://github.com/rheeloaded/paperpull/issues/52) with a
    sentence about where you found each kind, and how far back the lists
-   go. Do not attach a screenshot of a statement. Those carry your card
-   and account numbers, and the recording deliberately does not.
+   go. Do not attach `diagnose-documents.json`, which carries the page's
+   own words. Do not attach a screenshot of a statement either. A
+   statement carries your card and account numbers, and the recording
+   deliberately does not.
 8. When a new build is posted, click **Pilot** and say whether PDFs
-   landed in `Statements\` and `Tax Documents\`, and whether the card and
-   Savings statements came out with the right names.
-   If the run printed any lines that begin with `Waited for`, copy
-   those into your comment as well. They say which way of waiting
-   each page needed, which is the thing the next build keeps.
+   landed in `Statements\`, and whether the card and Savings statements
+   came out with the right names and months. A Pilot saves the five
+   newest documents, which are usually all statements, since a tax form
+   is filed at the end of its tax year. Tax forms come with a full run,
+   once the tax year has been checked (see the guesses below).
 
 One recording is usually enough to write the first working build. Expect
 a few Pilot runs after it, each with a word about what came out wrong,
@@ -79,9 +86,14 @@ which is the normal shape of it and not a sign anything went wrong.
 **If a run stops early, send the file it wrote.** Every failed run leaves a
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It
 says which step broke and what the page looked like at the time, as counts and
-states, with no text from your account in it. Attach it to the issue the same
-way. It is what keeps the rounds after the first one short, and it is
-described in full on the
+states, with no text from your account in it. When the app reaches a list and
+will not read it, because the list failed one of the checks below, the file
+names that list and each check as true or false. A document that would not
+save also leaves `download-attempt.json`, which says what the site answered in
+fixed words, counts and flags, with an address cut down to whether it is
+card.apple.com's and the plain words of its path. Attach both to the issue the
+same way. They are what keep the rounds after the first one short, and the
+failure file is described in full on the
 [Testing a provider](../../docs/testing-a-provider.md#if-a-run-fails-send-the-file-it-wrote)
 page.
 
@@ -117,22 +129,77 @@ Known, from the requester and from what Apple says in public.
   monthly statements, and a Savings account that earned interest gets a
   1099-INT each year.
 
+Known from the first recording and Diagnose from a real account (#52),
+marked RECORDED in the code.
+
+- **The lists are reached through the menu, never by address.**
+  card.apple.com draws each section itself. Typed in, only the front page
+  and `/savings` answer, and every section address the first build
+  guessed came back 404. So the app loads the front page only, waits for
+  its menu, which took several seconds after a fresh load, and presses
+  links the way the tester did.
+- **The card's statements** are the menu's Statements.
+- **Savings statements and tax forms** are under the menu's Savings, then
+  Documents, then Statements or Tax Documents, each shown with its count.
+  The menu's own Statements link is still on that page and is the card's,
+  so those two presses look only in the page's content, and only at a
+  link that carries a count, which the menu's never does. A link whose
+  count is 0 opens a list with nothing to save, which is not a failure.
+- **Every document is one button** named "Download statement of
+  <month> <year> (PDF)", on all three lists, a 1099-INT's included, and
+  pressing it downloads the PDF, with no new tab and no choice of format.
+  Only a button named exactly that way is read as a document, and it is
+  dated by its own name. The first Diagnose found another control on the
+  Savings page, one that holds no document, whose name the app's wider
+  pattern took for a document's. So anything else on a list, a link to
+  terms or a policy for one, is counted and never read or pressed. Two
+  buttons that name the same month on one list are both left alone,
+  since pressing one would be a guess.
+- **The lists are checked before they are read.** Since the buttons on all
+  three lists look alike, a list is not read until none of the buttons
+  that were on screen before the press is still there. The card's list
+  must also have no link back to Savings' Documents, which the Savings
+  statements list carries, and a list opened from a link with a count
+  must not hold more documents than that count. A list that fails any of
+  these is not read, and the app opens it again from a freshly loaded
+  front page. If it fails again, nothing is saved from it and the
+  failure file says which check refused it.
+- **Apple names each file for its document**, "Apple Card Statement -
+  <month> <year>.pdf", "Savings Statement - <month> <year>.pdf" and
+  "1099-INT <year> - Tax Form.pdf". When the download arrives with one of
+  those names and it names another document than the one the app asked
+  for, another kind, another month or another tax year, the file is not
+  saved.
+
 A guess, marked GUESS in the code.
 
-- The addresses of the card's statements, the Savings statements and the
-  tax forms. If none of them is right the app starts at the overview and
-  presses Statements, or Savings and then Statements, the way a person
-  would.
-- How a month is written next to its download button. A button whose row
-  does not name exactly one month is left alone and counted, never filed
-  under a neighbor's month.
-- Where the 1099-INT lives, whether beside the Savings statements or on a
-  page of its own.
-- Whether a download is a file, a PDF in a new tab, or a choice of format
-  first. If a format is asked for, PDF is picked and nothing else.
-- Whether a statement PDF is served from card.apple.com itself. That is
-  the only host this app will read from. If the recording shows another
-  Apple host, that one host is added and nothing wider.
+- **The tax year of a tax form.** Its button names a month and a year.
+  In the recording that button saved a file Apple named "1099-INT" with
+  the same year, so the year is read as the form's tax year and the form
+  is filed at the end of it. A form whose file Apple names with another
+  year is not saved. But Apple may take both years from one date, the
+  day the form was issued, so before a full run saves every 1099-INT
+  under that reading, check the tax year printed on the one Apple saved
+  for you against the year in the name Apple gave the file.
+- **Whether a tax form's row says 1099-INT.** If it does, the file is
+  named 1099-INT Tax Form, and if not, Tax Document.
+- **Whether the menu's Statements, pressed on a Savings page, keeps the
+  Savings address.** If it does, the app loads the front page and presses
+  Statements from there, and a card statement is never read as Savings
+  either way.
+- **Whether the tax list shows the same link back to Documents** as the
+  Savings statements list. Nothing depends on it. The card's list is told
+  from both by having none.
+- **Which host serves the PDF.** The recording saw each download arrive
+  with its file name and saw no request for it on card.apple.com. The
+  app catches the download itself, so this does not stop a save, and
+  card.apple.com stays the only host it reads from. If a PDF turns out to
+  come from another Apple host, that one host is added and nothing wider.
+- **Whether a download reaches the app's own folder** when your Edge or
+  Chrome saves it. The recording saw the browser save it, and no run of
+  this app has caught one yet. If the name check above never sees Apple's
+  name, because the file arrives some other way, the file is saved on
+  the strength of the list checks alone.
 
 ## Files
 
@@ -158,13 +225,15 @@ paperpull applecard pilot         REM once the site layer is confirmed
   browser already on the machine, so `login.bat` launches it with a
   separate profile on port **9270** and leaves the sign-in to you.
 - **Three sections.** Discovery opens the card's statements, then the
-  Savings statements, then the tax forms, and reads every control whose
-  name says it fetches one document. An account without Savings simply
-  has no second section.
-- **Downloads.** A row that links straight to a PDF is fetched from inside
-  the page with the session's own cookies. Otherwise the row's control is
-  pressed once, after the guard has passed it, and whatever the site does,
-  a download, a PDF response or a new tab, is caught and saved.
+  Savings statements, then the tax forms, each through the menu, and
+  reads every button whose name says it fetches one document. An account
+  without Savings simply has no second section.
+- **Downloads.** The row's own button is pressed once, after the guard
+  has passed it, and the PDF it downloads is caught and saved. A PDF
+  response or a new tab would be caught too. A run takes one list at a
+  time, the card's statements, then Savings, then the tax forms, newest
+  first within each, so it walks the menu once per list and not once per
+  document.
 - **Nothing is downloaded twice.** A document already in `progress.json`
   is skipped forever, even if you delete the PDF afterwards.
 
@@ -177,10 +246,17 @@ paperpull applecard pilot         REM once the site layer is confirmed
   shares the card, links a bank account, opens or closes anything, or
   edits a setting. A control must also look like a document action, or
   be exactly Statements, Savings or Documents, before it can be pressed.
+  An overlay is cleared only with Escape or a button whose whole name is
+  Close, Dismiss, No thanks or Not now, so "Close Apple Card Account"
+  is never pressed.
 - Only `https` addresses on `card.apple.com` are ever read. Not
   `apple.com` as a whole, which would take in the Apple Store.
-- Diagnostics mask every run of six or more digits, every amount, every
-  email address and the account holder's name.
+- The files you are asked to send, the `survey-diagnose-` file,
+  `failure-*.json` and `download-attempt.json`, are built from a list of
+  what may leave, counts, states, flags and fixed words. The detailed
+  `diagnose-documents.json` masks every run of six or more digits, every
+  amount, every email address and the account holder's name, and stays
+  on your machine.
 
 ## Tests
 

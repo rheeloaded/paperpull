@@ -2,12 +2,14 @@
 
 When Apple changes card.apple.com, repair this file only.
 
-STATUS: UNVERIFIED. This app was written without an Apple Card or a
-Savings account, from the sign-in address the requester named (#52) and
-what Apple says in public about card.apple.com, so that someone who holds
-one can test it without writing code. Nothing below has run against the
-live signed-in site, and nobody here has seen a signed-in page. On a first
-run it is deliberately cautious:
+STATUS: UNVERIFIED as a run. This app was written without an Apple Card
+or a Savings account, from the sign-in address the requester named (#52)
+and what Apple says in public about card.apple.com. The first Record and
+Diagnose from a real account (#52, round one) then showed how the three
+lists are reached and what their buttons are called, and the navigation
+and the labels below are rebuilt from that. Those facts are marked
+RECORDED. No run of this app has saved a document yet, and what nobody
+has seen is still marked GUESS. On a run it is deliberately cautious:
 
   * --login opens a real Edge or Chrome at card.apple.com, whose sign-in
     (an Apple Account with a code sent to a trusted device) is the user's
@@ -24,9 +26,9 @@ run it is deliberately cautious:
     carries from inside the page, or by pressing the row's own control
     once and catching a download event, a PDF response or a new tab.
 
-The guesses that most need confirming are marked GUESS. The biggest are
-the addresses of the three sections, how a month is labelled, and where
-the 1099-INT lives.
+The guesses that most need confirming are marked GUESS. The biggest one
+left is the year a tax form's button names, read as the form's own tax
+year, which the next Pilot's saved 1099-INT will confirm or correct.
 
 What is public and believed true, still to be confirmed by a Record.
 Apple Card statements run for a calendar month, so a statement named by
@@ -36,6 +38,23 @@ transactions can also be exported as CSV or OFX, which this app never
 wants. Savings is managed from the same Apple Card account and has its
 own monthly statements, and a Savings account that earned interest gets a
 1099-INT.
+
+RECORDED in round one. card.apple.com is one page that draws each
+section itself when its menu link is pressed, and an address typed in
+for a section answers 404. The card's statements are the menu's
+Statements. Savings statements and tax forms are under the menu's
+Savings, then Documents, then "Statements" or "Tax Documents", each with
+its count. On all three lists every document is one button labeled
+"Download statement of <month> <year> (PDF)", and pressing it downloads
+the PDF straight away, with no new tab and no second step, under a name
+Apple gives it, "Apple Card Statement - <month> <year>.pdf", "Savings
+Statement - <month> <year>.pdf" or "1099-INT <year> - Tax Form.pdf".
+Only a button named that exact way is ever read as a document, since the
+Savings page also carries a control that a wider pattern took for a
+document's and that is not one. Because the three lists look alike, a
+list is read only once the one it replaced is gone and its own content
+agrees (goto_section, _list_checks), and a file whose name Apple wrote
+for another document is never saved (_catch_pdf).
 
 SAFETY (this is a credit card and a bank account, both able to move money):
   This module is strictly READ-ONLY. It opens the statement and document
@@ -55,6 +74,7 @@ SAFETY (this is a credit card and a bank account, both able to move money):
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,6 +97,7 @@ from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import take_same_tab as _core_take_same_tab
+from paperpull_core.capture import UNFINISHED as _UNFINISHED
 from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
@@ -95,36 +116,66 @@ KINDS = (CARD, SAVINGS, TAX)
 KIND_TITLE = {CARD: "Apple Card Statement", SAVINGS: "Savings Statement",
               TAX: "Tax Document"}
 
-# GUESS, all of them. card.apple.com is a single-page app and nobody here
-# has seen its routes signed in. These are the addresses such an app would
-# plausibly use. A route that does not exist lands on the overview, which
-# is harmless, and then the section is reached through its own menu
-# (SECTION_PATH below), which is how a person would get there anyway.
-SECTION_URLS = {
-    CARD: [f"{BASE}/statements"],
-    SAVINGS: [f"{BASE}/savings/statements", f"{BASE}/savings"],
-    TAX: [f"{BASE}/savings/documents", f"{BASE}/savings/statements", f"{BASE}/documents"],
-}
-
-# GUESS. The menu words a person would press to reach each section from
-# the overview, one press per step, each checked against the guard. Apple
-# says Savings is reached from the Apple Card account, so the Savings
-# steps start there.
-SECTION_PATH = {
-    CARD: [r"^\s*statements?\s*$"],
-    SAVINGS: [r"^\s*savings(\s+account)?\s*$", r"^\s*statements?\s*$"],
-    TAX: [r"^\s*savings(\s+account)?\s*$", r"^\s*(tax\s+(documents?|forms?)|documents?|statements?)\s*$"],
-}
-
-BILLING_CANDIDATES = [SECTION_URLS[CARD][0], SECTION_URLS[SAVINGS][0], f"{BASE}/"]
-BILLING_URL = BILLING_CANDIDATES[0]
+# RECORDED. The front page is the only address this app loads. Loaded
+# directly, card.apple.com answered only its front page and /savings.
+# /statements, /documents, /savings/statements and /savings/documents
+# each came back 404 in the tester's Diagnose, although the menu's own
+# links point at two of them, because the page draws each section itself
+# when its link is pressed. So every list is reached through the menu,
+# the way the tester reached it, and never by its address.
 URLS = {
     "home": f"{BASE}/",
     # The sign-in is on the front page itself (#52).
     "login": f"{BASE}/",
-    "documents": BILLING_URL,
-    "statements": BILLING_URL,
+    "documents": f"{BASE}/",
+    "statements": f"{BASE}/",
 }
+BILLING_URL = URLS["home"]
+
+# RECORDED. The links the tester pressed to reach each list, as (where,
+# words), and every one of them was a link. "nav" is the menu along the
+# top of every signed-in page and "main" is the page's own content. The
+# card's statements are the menu's Statements. Savings statements and tax
+# forms are both under the menu's Savings, then Documents, then a link
+# that carries its count, like "Statements 12" or "Tax Documents 3". The
+# menu's own Statements link is still on screen there and it is the
+# card's, which is why the last two presses look only inside main, and
+# why they need the count. Both links the tester pressed carried one, and
+# the menu's Statements never does, so the card's link cannot be taken
+# for the Savings statements even if a narrow window ever draws the menu
+# inside the page's content.
+SECTION_PATH = {
+    CARD: [("nav", r"^\s*statements?\s*$")],
+    SAVINGS: [("nav", r"^\s*savings\s*$"), ("main", r"^\s*documents?\s*$"),
+              ("main", r"^\s*statements?\s*\d+\s*$")],
+    TAX: [("nav", r"^\s*savings\s*$"), ("main", r"^\s*documents?\s*$"),
+          ("main", r"^\s*tax\s+documents?\s*\d+\s*$")],
+}
+
+# RECORDED. The page has been drawn once one of the menu's section links
+# is on screen. After a direct load of the front page the tester's
+# Diagnose found no text, no link and no button about five seconds in,
+# where the old fixed wait gave up, and the whole menu a few seconds
+# later. So the wait is for the menu, with this long to draw it.
+MENU_DRAWN_RE = re.compile(r"^\s*(statements?|savings)\s*$", re.I)
+APP_DRAW_SECONDS = 30
+
+# How long a press is given to redraw the page before it is read. The
+# tester's next click came two to six seconds after each press, and a
+# link or a list that is slower than this is waited for on its own.
+STEP_SETTLE_MS = 3000
+
+# How long a list is given, after the last press, to be the list that
+# press asked for. Every document button on all three lists has the same
+# kind of name and their months overlap, so a list left on screen from
+# before the press would be read as the new one. What the list must show
+# before it is taken is in _list_checks.
+ARRIVE_SECONDS = 10
+
+# RECORDED. The link at the top of the Savings statements list, marked
+# aria-current, that leads back to Savings' Documents. The card's
+# statements have no link of that name anywhere on the page.
+SAVINGS_BACK_RE = re.compile(r"^\s*documents?\s*$", re.I)
 
 LOGIN_URL_MARKERS = ["/login", "/signin", "/sign-in", "/auth/", "/mfa",
                      "/verification", "/challenge", "/authenticate"]
@@ -145,7 +196,10 @@ SIGN_IN_HOSTS = ("idmsa.apple.com", "appleid.apple.com", "account.apple.com")
 FORBIDDEN_CONTROL_RE = re.compile(
     r"(transfer|zelle|\bwire\b|\bpay\b|payments?|pay\s*later|bill\s*pay|autopay|auto\s*pay|"
     r"schedul|recurring|deposit|withdraw|send\s+money|request\s+money|move\s+money|add\s+money|"
-    r"\bapply\b|open\s+(an?\s+)?(account|savings)|close\s+(the\s+|my\s+)?(account|savings|card)|"
+    # "Close Apple Card" and "Close Apple Card Account" too, with up to
+    # three words between the verb and what it closes. Everything the
+    # narrower form refused is still refused.
+    r"\bapply\b|open\s+(an?\s+)?(account|savings)|close\s+(\w+\s+){0,3}(account|savings|card)|"
     r"\bloan\b|\bborrow|"
     r"daily\s+cash|apple\s+cash|\bcash\b|"
     r"card\s+(number|details?|info(rmation)?)|security\s+code|\bcvv\b|virtual\s+card|"
@@ -177,8 +231,13 @@ SAFE_DOC_CONTROL_RE = re.compile(
 SECTION_NAV_RE = re.compile(
     r"^\s*(savings(\s+account)?|statements?|documents?|tax\s+(documents?|forms?))\s*$", re.I)
 
-# A control that fetches one document. GUESS at the wording, wide on
-# purpose. "Download PDF", "Download Statement", "View", "1099-INT".
+# A control whose name says it fetches a document, wide on purpose. It is
+# what the survey counts, and what tells a list the app reads from a
+# challenge page. It is never what a document is read from. That is
+# DOC_BUTTON_RE, the one shape recorded on all three lists, because the
+# tester's own Diagnose (#52) found a control this matches on the Savings
+# page that holds no document at all, and on the Tax Documents list any
+# year printed near such a control would have been read as a tax form's.
 BILL_CONTROL_RE = re.compile(
     r"((download|view|print|open|get)\s*(my\s+|the\s+|this\s+|your\s+)?(statement|document|pdf|tax|letter|notice|1099)|"
     r"(statement|document|tax\s+form|1099(-?int)?)\s*\(?\s*pdf\s*\)?|\bpdf\b|\b1099-?int\b|"
@@ -208,7 +267,12 @@ FALLBACK = {
     "doc_row": ("table tbody tr, [role='row'], [role='listitem'], [class*='statement' i], "
                 "li[class*='document' i], [class*='document' i]"),
     "doc_link": "a[href*='.pdf'], a[download], button[class*='download' i]",
-    "download_control": "a[download], a[href$='.pdf'], button:has-text('Download')",
+    # RECORDED. Each document's control is an element of Apple's own with
+    # role=button and the name in aria-label, holding only an icon, so it
+    # is counted by those two attributes. Plain CSS, so the failure file's
+    # census can count it inside the page.
+    "download_control": ("a[download], a[href$='.pdf'], [role='button'][aria-label*='download' i], "
+                         "button[aria-label*='download' i]"),
     "page_ready": "table, [role='row'], [role='list'], main, [role='main']",
     "sign_in_frame": "iframe[src*='idmsa.apple.com'], iframe[src*='appleid.apple.com']",
 }
@@ -332,6 +396,63 @@ def document_date(kind: str, text: str) -> Optional[str]:
         if 0 < (b - a).days <= 45:
             return days[1]
     return None
+
+
+# RECORDED. The name Apple gives every document's button, on the card's
+# statements, the Savings statements and the tax forms alike.
+DOC_BUTTON_RE = re.compile(r"^\s*download\s+statement\s+of\s+" + _MONTH +
+                           r"\s+((?:19|20)\d{2})\s*\(\s*pdf\s*\)\s*$", re.I)
+
+
+def tax_list_date(label: str) -> Optional[str]:
+    """A form on the Tax Documents list, filed at the end of the year its
+    button names, or None for a button named any other way.
+
+    Apple names a tax form's button with a month and a year, the same way
+    it names a statement's, so the words never say tax. In the first
+    recording (#52) that button on the Tax Documents list saved a file
+    Apple itself called "1099-INT <year> - Tax Form.pdf", with the same
+    year the button gave, so that year is read as the form's own. That is
+    still a GUESS, since one example backs it, and the tax year printed on
+    the next Pilot's saved form confirms it or corrects it. Only this exact
+    shape is read, and only on that list, so a statement's month can never
+    be taken for a tax year."""
+    m = DOC_BUTTON_RE.match(label or "")
+    return f"{m.group(2)}-12-31" if m else None
+
+
+# RECORDED. The name Apple gave each file the tester's three presses
+# downloaded, "Apple Card Statement - <month> <year>.pdf", "Savings
+# Statement - <month> <year>.pdf" and "1099-INT <year> - Tax Form.pdf". A
+# browser that already holds one may add " (1)" at the end.
+APPLE_STATEMENT_FILE_RE = re.compile(r"^\s*(apple\s+card|savings)\s+statement\s*-\s*" + _MONTH +
+                                     r"\s+((?:19|20)\d{2})\b", re.I)
+APPLE_TAX_FILE_RE = re.compile(r"^\s*1099(?:-?[a-z]{1,4})?\s+((?:19|20)\d{2})\s*-\s*tax\s+form\b", re.I)
+
+
+def apple_file_verdict(kind: str, iso: str, filename: str) -> Optional[dict]:
+    """What the name Apple gave a downloaded file says about it, against
+    the `kind` document dated `iso` that was asked for. None when the name
+    is not one of the shapes Apple was recorded using, since a name that
+    says nothing is no evidence either way. Otherwise which kind it names
+    and whether its kind and its month, or a tax form's year, agree.
+
+    A tax form's year here is the one Apple wrote into the file name, and
+    the app files a form at the year its button names. The two agreed in
+    the recording. If they ever disagree the form is not saved, and a
+    repair is told which reading was wrong."""
+    name = re.split(r"[\\/]", filename or "")[-1]
+    m = APPLE_TAX_FILE_RE.match(name)
+    if m:
+        named, period, want = TAX, m.group(1), (iso or "")[:4]
+    else:
+        m = APPLE_STATEMENT_FILE_RE.match(name)
+        if not m:
+            return None
+        named = SAVINGS if m.group(1).lower().startswith("savings") else CARD
+        period = "%s-%02d" % (m.group(3), _MONTHS[m.group(2)[:3].lower()])
+        want = (iso or "")[:7]
+    return {"named_kind": named, "same_kind": named == kind, "same_period": period == want}
 
 
 def parse_period_date(text: str) -> Tuple[Optional[str], str]:
@@ -491,26 +612,35 @@ def _take_new_tab(page, new_pages, out_path: Path) -> bool:
 # Sections
 # ---------------------------------------------------------------------------
 
+# The whole name of a button that dismisses something and does nothing
+# else. Only the whole name, because "Close Apple Card Account" also
+# starts with close, and an icon button carries its name in aria-label
+# with no text of its own to check.
+DISMISS_RE = re.compile(r"^\s*(close|dismiss|no,?\s*thanks|not\s+now)\s*$", re.I)
+
+
 def dismiss_overlay(page) -> None:
     """Close a cookie banner, a survey prompt or a promo overlay, the things
     that sit over signed-in pages and intercept clicks. Escape first, then
-    only a control that says close or dismiss, never accept."""
+    only a button whose whole name is close, dismiss, no thanks or not now,
+    never accept. Its aria-label and its text are both put to the guard."""
     try:
         page.keyboard.press("Escape")
         page.wait_for_timeout(250)
     except Exception:
         pass
     try:
-        cl = page.get_by_role("button", name=re.compile(r"^(close|dismiss|no thanks|not now)\b", re.I))
+        cl = page.get_by_role("button", name=DISMISS_RE)
         for i in range(min(cl.count(), 6)):
             el = cl.nth(i)
             try:
-                if el.is_visible():
-                    label = el.inner_text(timeout=500) or ""
-                    if FORBIDDEN_CONTROL_RE.search(label):
-                        continue
-                    el.click(timeout=1000)
-                    page.wait_for_timeout(250)
+                if not el.is_visible():
+                    continue
+                words = [el.get_attribute("aria-label") or "", el.inner_text(timeout=500) or ""]
+                if any(FORBIDDEN_CONTROL_RE.search(w) for w in words):
+                    continue
+                el.click(timeout=1000)
+                page.wait_for_timeout(250)
             except Exception:
                 continue
     except Exception:
@@ -519,8 +649,16 @@ def dismiss_overlay(page) -> None:
 
 def _bill_controls(page):
     """Every control on the page whose name says it fetches a document.
-    The words are this provider's, the rest is the core's."""
+    The words are this provider's, the rest is the core's. Wide, for the
+    survey and the counts. Documents are read from _doc_buttons."""
     return _controls_named(page, BILL_CONTROL_RE)
+
+
+def _doc_buttons(page):
+    """Every document button on the page, named the one way Apple names
+    them on all three lists (DOC_BUTTON_RE). Nothing else on a list is
+    ever read, dated, waited for or pressed as a document."""
+    return _controls_named(page, DOC_BUTTON_RE)
 
 
 def _headings(page) -> str:
@@ -530,22 +668,33 @@ def _headings(page) -> str:
         return ""
 
 
+def _savingsy(page) -> bool:
+    """Whether the page on screen is one of Savings'. RECORDED. Savings
+    kept the address /savings on every page the tester opened under it,
+    its Documents list and both lists below that included, and the card's
+    statements were at the front page's address."""
+    try:
+        path = (urlsplit(page.url or "").path or "").lower()
+    except ValueError:
+        path = ""
+    return "savings" in path or bool(re.search(r"\bsavings\b", _headings(page), re.I))
+
+
 def _looks_like(page, kind: str) -> bool:
-    """GUESS. Whether the page on screen is this section. A document
-    control must be there. Savings is told from the card by the word
-    Savings in the address or the top headings, and the card page must
-    not say it, because a Savings statement filed as a card statement is
-    the mistake this app is most likely to make."""
+    """GUESS. Whether the page on screen is this section, from its words.
+    Only the survey asks this now, to say what it thinks each page is.
+    Opening a section goes by which link was pressed (goto_section),
+    because the Savings statements and the tax forms share one address
+    and one shape. A document control must be there. Savings is told from
+    the card by the word Savings in the address or the top headings, and
+    the card page must not say it, because a Savings statement filed as a
+    card statement is the mistake this app is most likely to make."""
     try:
         if _bill_controls(page).count() == 0:
             return False
     except Exception:
         return False
-    try:
-        path = (urlsplit(page.url or "").path or "").lower()
-    except ValueError:
-        path = ""
-    savingsy = "savings" in path or bool(re.search(r"\bsavings\b", _headings(page), re.I))
+    savingsy = _savingsy(page)
     try:
         body = page.locator("body").inner_text(timeout=5000)
     except Exception:
@@ -559,81 +708,285 @@ def _looks_like(page, kind: str) -> bool:
     return savingsy if kind == SAVINGS else not savingsy
 
 
-def _press_step(page, pattern: str, trace: Optional[list] = None) -> bool:
-    """Press the one visible menu entry whose whole label matches, once,
-    after the guard has passed it. False when there is none."""
-    rx = re.compile(pattern, re.I)
-    for role in ("link", "tab", "button", "menuitem"):
+def _pause(page, ms: int) -> bool:
+    """Wait on the page. False when the page can no longer be waited on."""
+    try:
+        page.wait_for_timeout(ms)
+        return True
+    except Exception:
+        return False
+
+
+def _app_drawn(page, seconds: int) -> bool:
+    """Whether the menu has been drawn, asked once a second for up to
+    `seconds`. A signed-out page stops the wait, since it never will be."""
+    for waited in range(seconds + 1):
         try:
-            loc = page.get_by_role(role, name=rx)
-            for i in range(min(loc.count(), 6)):
-                el = loc.nth(i)
-                if not el.is_visible():
-                    continue
-                label = (el.inner_text(timeout=800) or el.get_attribute("aria-label") or "").strip()
-                if not is_safe_control(label):
-                    continue
-                el.click(timeout=5000)
-                page.wait_for_timeout(3000)
-                if trace is not None:
-                    trace.append({"note": "pressed a section menu entry", "role": role,
-                                  "control": redact(label)[:60]})
-                return True
+            links = page.locator("nav").get_by_role("link", name=MENU_DRAWN_RE)
+            for i in range(min(links.count(), 4)):
+                if links.nth(i).is_visible():
+                    return True
         except Exception:
-            continue
+            pass
+        if waited == seconds or looks_signed_out(page) or not _pause(page, 1000):
+            return False
     return False
 
 
-_SECTION_URL: dict = {}
+def _drawn_controls(page):
+    """Handles to the document buttons on screen now, or None when they
+    cannot be read. Taken before a walk, so that the list the walk opens
+    can be told from one that was already there. Only the document buttons,
+    so a control of another kind that stays on every Savings page, if
+    there is one, does not make each new Savings list look like the one
+    before it."""
+    try:
+        return _doc_buttons(page).element_handles()
+    except Exception:
+        return None
+
+
+def _let_go(handles) -> None:
+    for h in handles or []:
+        try:
+            h.dispose()
+        except Exception:
+            pass
+
+
+_STILL_DRAWN_JS = "els => els.filter(e => e && e.isConnected && e.getClientRects().length > 0).length"
+
+
+def _left_over(page, old) -> int:
+    """How many of the controls in `old` are still drawn. When that cannot
+    be asked, all of them are taken to be, since a list that cannot be
+    shown to be new is not read as new."""
+    if not old:
+        return 0
+    try:
+        return int(page.evaluate(_STILL_DRAWN_JS, old))
+    except Exception:
+        return len(old)
+
+
+def _savings_back_link(page) -> bool:
+    """Whether the page's content holds the Savings lists' link back to
+    Documents. When that cannot be asked, it is taken to be there, so
+    the card's list is never taken on a page that could not be read."""
+    try:
+        links = page.locator("main").get_by_role("link", name=SAVINGS_BACK_RE)
+        for i in range(min(links.count(), 4)):
+            if links.nth(i).is_visible():
+                return True
+    except Exception:
+        return True
+    return False
+
+
+def _count_in(label: Optional[str]) -> Optional[int]:
+    """The count a link carries after its words, "Statements 12" or
+    "Tax Documents 3", or None for a link without one."""
+    m = re.search(r"(\d+)\s*$", label or "")
+    return int(m.group(1)) if m else None
+
+
+def _list_checks(page, kind: str, old, count: Optional[int]) -> dict:
+    """What the list on screen must show before it is read as `kind`'s,
+    each as True or False.
+
+    Its document buttons, of the recorded shape, are drawn. None of the
+    buttons that were on screen before the walk is still drawn, since a
+    list left over from before the press looks exactly like the new one.
+    The address agrees, a Savings address for the Savings statements and
+    the tax forms and any other for the card's. The card's list has no
+    link back to Savings' Documents, which the Savings statements list
+    carries (RECORDED). A list reached through a link that carries a count
+    holds no more documents than that count, which is what tells the tax
+    forms from the Savings statements by what is on screen and not only
+    by the link that was pressed (RECORDED, the tax link's count was the
+    number of rows on the list it opened). Buttons that cannot be counted
+    pass neither check."""
+    shown = _count(_doc_buttons(page))
+    within = shown >= 0 and (count is None or shown <= count)
+    return {
+        "documents_drawn": shown > 0,
+        "earlier_list_gone": _left_over(page, old) == 0,
+        "address_agrees": _savingsy(page) == (kind in (SAVINGS, TAX)),
+        "no_savings_back_link": kind != CARD or not _savings_back_link(page),
+        "within_its_count": within,
+    }
+
+
+def _arrived(page, kind: str, seconds: Optional[int] = None, old=None,
+             count: Optional[int] = None, trace: Optional[list] = None) -> bool:
+    """Whether the list on screen is `kind`'s, asked once a second for up
+    to `seconds` until every one of _list_checks holds. Which of the two
+    Savings lists it is comes first from the link that was pressed, since
+    they share one address and one shape. A list that never passes is not
+    read, and the trace says which check it failed, as True or False."""
+    seconds = ARRIVE_SECONDS if seconds is None else seconds
+    checks: dict = {}
+    for waited in range(seconds + 1):
+        checks = _list_checks(page, kind, old, count)
+        if all(checks.values()):
+            return True
+        if waited == seconds or not _pause(page, 1000):
+            break
+    if trace is not None:
+        entry = {"note": "the list on screen was not taken", "kind": kind}
+        entry.update(checks)
+        trace.append(entry)
+    return False
+
+
+def _step_control(page, step) -> Tuple[object, str]:
+    """The visible link a path step names, inside its part of the page,
+    once the guard has passed it, as (locator, label), or (None, "")."""
+    where, pattern = step
+    rx = re.compile(pattern, re.I)
+    try:
+        loc = page.locator(where).get_by_role("link", name=rx)
+        for i in range(min(loc.count(), 6)):
+            el = loc.nth(i)
+            if not el.is_visible():
+                continue
+            label = (el.inner_text(timeout=800) or el.get_attribute("aria-label") or "").strip()
+            if is_safe_control(label):
+                return el, label
+    except Exception:
+        pass
+    return None, ""
+
+
+def _press_step(page, step, trace: Optional[list] = None, kind: str = "",
+                index: int = 0, of: int = 0) -> Optional[str]:
+    """Press the link a path step names, once, after the guard has passed
+    it, and give back its label. None when there is none or the press
+    failed. The trace says which step of which path it was and the count
+    the link carried, never the link's own words."""
+    el, label = _step_control(page, step)
+    if el is None:
+        return None
+    try:
+        el.click(timeout=5000)
+    except Exception as e:
+        log.info("pressing %r failed: %s", redact(label)[:60], e)
+        return None
+    _pause(page, STEP_SETTLE_MS)
+    if trace is not None:
+        trace.append({"note": "pressed a section menu entry", "kind": kind,
+                      "step": index + 1, "of": of, "where": step[0],
+                      "count": _count_in(label)})
+    return label
+
+
+def _furthest_step(page, path, start: int, seconds: int = 8) -> Optional[int]:
+    """The furthest step along `path`, from `start` on, whose link is on
+    screen, asked once a second for up to `seconds`. None when none of
+    them appears."""
+    for waited in range(seconds + 1):
+        for j in range(len(path) - 1, start - 1, -1):
+            if _step_control(page, path[j])[0] is not None:
+                return j
+        if waited == seconds or not _pause(page, 1000):
+            return None
+    return None
+
+
+def _walk(page, kind: str, trace: Optional[list] = None) -> Optional[str]:
+    """Press along `kind`'s path until its last link has been pressed, and
+    give back that link's label, or None when the walk stopped short. The
+    furthest link on screen is pressed each time, so a walk that starts
+    partway along, on the Savings Documents list or on one of the two
+    lists under it, carries on from there. That is also how the tester
+    went from the Savings statements to the tax forms, back through
+    Documents (#52)."""
+    path = SECTION_PATH[kind]
+    start = 0
+    while start < len(path):
+        j = _furthest_step(page, path, start)
+        if j is None:
+            return None
+        label = _press_step(page, path[j], trace, kind, j, len(path))
+        if label is None:
+            return None
+        if j == len(path) - 1:
+            return label
+        start = j + 1
+    return None
+
+
+# Which list this app last opened, at what address, and the count its
+# link carried. Nothing but this app moves the page during a run, so the
+# list on screen is kept only when it was opened here for the same kind
+# and the address has not moved since. Anything else is opened again
+# through the menu.
+_ARRIVED: dict = {}
 
 
 def goto_section(page, kind: str, trace: Optional[list] = None) -> bool:
-    """Open the card's statements, the Savings statements, or wherever the
-    tax forms are. The page already on screen first, then the address
-    that worked last time, then the guessed addresses, then the overview
-    and its menu one step at a time. The address that works is kept, so
-    the list is walked once per run."""
+    """Open the card's statements, the Savings statements or the Savings
+    tax forms, by pressing through the menu the way the tester did (#52).
+
+    The list already on screen is kept when this app opened it for the
+    same kind. Otherwise the walk starts from the page on screen when the
+    menu is drawn there, or from the front page loaded fresh, and a walk
+    that does not arrive is tried once more from the front page. That
+    covers a Savings page that keeps its address when the menu's
+    Statements is pressed, which nobody has seen either way yet.
+
+    The document buttons on screen before the walk are held on to, and
+    the list the walk opens is not read while any of them is still drawn
+    (_list_checks). Going from a Savings list to the card's is one press
+    of the menu's Statements, and a page that moved its address before it
+    redrew would otherwise hand over a Savings statement for the card's
+    of the same month. A page that keeps those very buttons and relabels
+    them is never shown to be new, so it is left for the fresh front page,
+    which holds nothing from before."""
     dismiss_overlay(page)
-    if is_safe_url(page.url or "") and not looks_signed_out(page) and _looks_like(page, kind):
+    here = page.url or ""
+    if (_ARRIVED.get("kind") == kind and _ARRIVED.get("url") == here and is_safe_url(here)
+            and not looks_signed_out(page)
+            and _arrived(page, kind, 0, count=_ARRIVED.get("count"))):
         return True
-    tried = []
-    for url in ([_SECTION_URL[kind]] if kind in _SECTION_URL else []) + SECTION_URLS[kind]:
-        if url in tried:
-            continue
-        tried.append(url)
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(4000)
-        except Exception as e:
-            log.info("goto %s failed: %s", url, e)
-            continue
-        dismiss_overlay(page)
-        if looks_signed_out(page):
-            return False
-        if _looks_like(page, kind):
-            _SECTION_URL[kind] = page.url or url
-            return True
+    _ARRIVED.clear()
+    old = _drawn_controls(page)
     try:
-        page.goto(URLS["home"], wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(4000)
-    except Exception as e:
-        log.info("goto the overview failed: %s", e)
-        return False
-    if looks_signed_out(page):
-        return False
-    dismiss_overlay(page)
-    for step in SECTION_PATH[kind]:
-        if _looks_like(page, kind):
-            break
-        if not _press_step(page, step, trace):
-            break
-    if _looks_like(page, kind):
-        if is_safe_url(page.url or ""):
-            _SECTION_URL[kind] = page.url
-        return True
+        for attempt in range(2):
+            if attempt or old is None or not (is_safe_url(page.url or "") and _app_drawn(page, 2)):
+                try:
+                    page.goto(URLS["home"], wait_until="domcontentloaded", timeout=60000)
+                except Exception as e:
+                    log.info("goto the front page failed: %s", e)
+                    return False
+                # A page loaded fresh holds nothing from before.
+                _let_go(old)
+                old = []
+                if not _app_drawn(page, APP_DRAW_SECONDS):
+                    if trace is not None and not looks_signed_out(page):
+                        trace.append({"note": "the menu was never drawn", "kind": kind,
+                                      "seconds": APP_DRAW_SECONDS})
+                    return False
+            if looks_signed_out(page):
+                return False
+            dismiss_overlay(page)
+            label = _walk(page, kind, trace)
+            count = _count_in(label)
+            if label is not None and count == 0:
+                # The link says the list is empty, so there is nothing to
+                # wait for and nothing to refuse. A Savings account with no
+                # tax forms yet is not a failure.
+                if trace is not None:
+                    trace.append({"note": "the list's link counted none", "kind": kind})
+                return False
+            if label is not None and _arrived(page, kind, None, old, count, trace):
+                _ARRIVED.update(kind=kind, url=page.url or "", count=count)
+                return True
+    finally:
+        _let_go(old)
     if trace is not None:
         trace.append({"note": "the section was not found", "kind": kind,
-                      "document_controls": _count(_bill_controls(page))})
+                      "document_controls": _count(_doc_buttons(page))})
     return False
 
 
@@ -703,10 +1056,11 @@ class RawDoc:
     kind: str = "doc"
 
 
-# The row a document control sits in. The control's own name first, then
-# the nearest enclosing element whose text carries a date or a month,
-# up to six levels up. The text is handed back so document_date can refuse
-# a container that names more than one.
+# The row a document control sits in, the nearest enclosing element whose
+# text carries a date, a month or a year, up to six levels up. A document
+# is dated by its button's own name and never by this. The row only says
+# whether a tax form is a 1099-INT, and whether a statement row speaks of
+# tax, which leaves that button unread.
 _ROW_OF_JS = r"""el => {
   const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2},?\s+)?\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|\b(19|20)\d{2}\b/i;
   let node = el, depth = 0;
@@ -728,38 +1082,47 @@ def _label_of(el) -> str:
 
 def _read_control(el, kind: str) -> Tuple[str, str, Optional[str], str]:
     """A control's label, the kind it belongs to, its date, and its row's
-    text. A control on a statements page whose words say tax is a tax
-    form, since Savings may list its 1099-INT beside its statements."""
+    text. Only a button of the recorded shape (DOC_BUTTON_RE) is given a
+    date, and only from its own name, so nothing else on a list, a PDF
+    link beside it or a year printed near it, can ever be read as a
+    document (#52).
+
+    Every such button on the Tax Documents list is a tax form, since Apple
+    names its button the way it names a statement's, filed at the year the
+    button names (tax_list_date). On a statements list it is that list's
+    statement, filed at the end of the month it names. A statement row
+    whose own text says tax is left undated, since it is neither."""
     name = _label_of(el)
     row_text = ""
     try:
         row_text = el.evaluate(_ROW_OF_JS) or ""
     except Exception:
         row_text = ""
-    own = TAX if TAX_WORDS_RE.search(name + " " + row_text) else (SAVINGS if kind == SAVINGS else CARD)
-    if kind == TAX and own != TAX:
-        return name, own, None, row_text
-    iso = document_date(own, name) or document_date(own, row_text)
-    return name, own, iso, row_text
+    if not DOC_BUTTON_RE.match(name):
+        return name, kind, None, row_text
+    if kind == TAX:
+        return name, TAX, tax_list_date(name), row_text
+    if TAX_WORDS_RE.search(row_text):
+        return name, kind, None, row_text
+    return name, kind, document_date(kind, name), row_text
 
 
 def collect_download_docs(page, kind: str = CARD, trace: Optional[list] = None) -> List[RawDoc]:
-    """Read every document the section on screen offers. Each control's
-    own name, or the row it sits in, carries the date. One document per
-    kind and date, since a row often has a View and a Download for the
-    same statement."""
+    """Read every document the list on screen offers, one per recorded
+    button, dated by the button's own name. One document per kind and
+    date. Controls that only look like a document's are counted for the
+    trace and never read."""
     docs: List[RawDoc] = []
     seen = set()
     undated = 0
     expand_all(page)
     scroll_full_page(page)
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
+    ctrls = _doc_buttons(page)
+    total = _count(ctrls)
+    for i in range(max(total, 0)):
         el = ctrls.nth(i)
         name, own, iso, _row = _read_control(el, kind)
         if not is_safe_control(name):
-            continue
-        if kind == TAX and own != TAX:
             continue
         if not iso:
             undated += 1
@@ -775,30 +1138,51 @@ def collect_download_docs(page, kind: str = CARD, trace: Optional[list] = None) 
         docs.append(RawDoc(title=title, date_text=iso,
                            href=href if PDF_HREF_RE.search(href or "") else "",
                            text=f"Apple Card {title}", row_index=i, kind=own))
+    other = max(_count(_bill_controls(page)) - max(total, 0), 0)
     if trace is not None:
         trace.append({"note": "read a section", "kind": kind, "documents": len(docs),
-                      "controls_without_one_date": undated})
+                      "controls_without_one_date": undated,
+                      "controls_of_another_shape": other})
     if undated:
-        log.info("%d document control(s) in the %s section carried no single date, left alone",
+        log.info("%d document button(s) in the %s section carried no single date, left alone",
                  undated, kind)
+    if other:
+        log.info("%d control(s) in the %s section only looked like a document's, left alone",
+                 other, kind)
     return docs
 
 
-def _control_for(page, kind: str, iso: str):
-    """The control for the `kind` document dated `iso`, matched the same
-    way discovery found it, or None. A Download is preferred to a View
-    when a row has both."""
-    ctrls = _bill_controls(page)
-    found = []
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        name, own, got, _row = _read_control(el, kind)
+def _dated(page, kind: str, iso: str) -> List[str]:
+    """The name of every document button on the list on screen that reads
+    as the `kind` document dated `iso`, the same way discovery read it."""
+    ctrls = _doc_buttons(page)
+    names = []
+    for i in range(max(_count(ctrls), 0)):
+        name, own, got, _row = _read_control(ctrls.nth(i), kind)
         if own == kind and got == iso and is_safe_control(name):
-            found.append((el, name))
-    if not found:
+            names.append(name)
+    return names
+
+
+def _exactly_named(page, name: str):
+    """The control whose whole name is `name`, found by that name every
+    time it is used. A click therefore lands on the button that names this
+    document, even when the list gains or loses a row between reading it
+    and pressing it, and fails when two controls carry that name."""
+    words = (name or "").split()
+    rx = re.compile(r"^\s*" + r"\s+".join(re.escape(w) for w in words) + r"\s*$", re.I)
+    return _controls_named(page, rx)
+
+
+def _control_for(page, kind: str, iso: str):
+    """The button for the `kind` document dated `iso`, matched the same way
+    discovery found it, as (control, name), or (None, "") when no button or
+    more than one reads as that document, since pressing one of two would
+    be a guess."""
+    names = _dated(page, kind, iso)
+    if len(names) != 1:
         return None, ""
-    found.sort(key=lambda p: 0 if re.search(r"download|pdf", p[1], re.I) else 1)
-    return found[0]
+    return _exactly_named(page, names[0]), names[0]
 
 
 def _fetch_pdf(page, href: str) -> Optional[bytes]:
@@ -827,16 +1211,204 @@ def _second_step(page, appeared: set):
     return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control)
 
 
+# ---------------------------------------------------------------------------
+# What a download may write down. download-attempt.json is a file a tester
+# is asked to attach to a public issue, so what goes in it comes from a
+# list of what may leave, fixed words, counts, states, the kind of an
+# address and the plain words of its path, and never from the page's text
+# or an address with parts scrubbed out. A clicked button's name carries a
+# statement's month, and a revealed control could carry anything.
+# ---------------------------------------------------------------------------
+_PATH_PART_RE = re.compile(r"[a-z][a-z0-9._-]{0,40}")
+_PARAM_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9._-]{0,40}")
+
+
+def _plain(part: str, rx) -> str:
+    """One piece of an address or one parameter name when it is a plain
+    word with at most three digits, else #."""
+    ok = rx.fullmatch(part or "") and sum(ch.isdigit() for ch in part) <= 3
+    return part if ok else "#"
+
+
+def mask_href(url: str) -> str:
+    """An address as it may leave. Whether it is card.apple.com's, the
+    plain lowercase words of its path and the names of its parameters,
+    never their values. Anything else in it is #, and an address on any
+    other host is only "elsewhere"."""
+    from urllib.parse import parse_qsl
+    u = (url or "").strip()
+    if not u:
+        return ""
+    low = u.lower()
+    for scheme in ("javascript:", "blob:", "data:", "about:"):
+        if low.startswith(scheme):
+            return scheme[:-1]
+    try:
+        parts = urlsplit(u)
+        keys = sorted({_plain(k, _PARAM_NAME_RE) for k, _v in parse_qsl(parts.query, keep_blank_values=True)})
+    except ValueError:
+        return "unreadable"
+    if parts.scheme or parts.netloc:
+        if not is_safe_url(u):
+            return "elsewhere"
+        where = "card"
+    else:
+        where = "relative"
+    out = where + ":/" + "/".join(_plain(p, _PATH_PART_RE) for p in parts.path.split("/") if p)[:160]
+    if keys:
+        out += "?" + "&".join(keys[:12])
+    return out
+
+
+_MASKED_HREF_RE = re.compile(r"(card|relative|elsewhere|unreadable|javascript|blob|data|about)"
+                             r"(:/[a-z0-9._#/-]*)?(\?[A-Za-z0-9._#&-]*)?")
+
+
+def _type_word(content_type: str) -> str:
+    """A response's content type as one word."""
+    ct = (content_type or "").lower()
+    for word in ("pdf", "json", "octet", "html"):
+        if word in ct:
+            return word
+    return "other" if ct.strip() else ""
+
+
+def _label_mask(label: str) -> str:
+    """A control's name as a trace may carry it, a fixed phrase and never
+    the page's own words. A document button's name is a statement's
+    month, so it is only called a document button."""
+    text = " ".join((label or "").split())
+    if not text:
+        return "nothing"
+    if DOC_BUTTON_RE.match(text):
+        return "a document button"
+    if _SECOND_STEP_RE.match(text):
+        return "a download or save control"
+    return "another control"
+
+
+def _click_failure(e: Exception) -> str:
+    """Why a press failed, as a fixed phrase. Playwright's own message
+    quotes the locator, and the locator quotes the control's name."""
+    msg = str(e).lower()
+    if "intercepts pointer events" in msg:
+        return "something else on the page was in the way"
+    if "strict mode violation" in msg:
+        return "more than one control matched"
+    if "not visible" in msg:
+        return "it was not visible"
+    if "detached" in msg or "not attached" in msg:
+        return "it was no longer on the page"
+    if "timeout" in msg:
+        return "it timed out"
+    return "another error"
+
+
+# Every fixed word a trace entry here may carry as it stands. A string
+# that is not one of these leaves as null, so a new note that was not
+# added here loses its words rather than widening the file.
+_TRACE_WORDS = frozenset(KINDS) | frozenset({
+    "nav", "main",
+    # notes written in this module
+    "pressed a section menu entry", "the menu was never drawn", "the section was not found",
+    "the list on screen was not taken", "the list's link counted none", "read a section",
+    "no control carried this document's date", "more than one control carried this document's date",
+    "clicked", "click failed", "clicked through the DOM instead", "DOM click failed too",
+    "after the click", "second step clicked", "second step click failed",
+    "the control's own link did not answer with a PDF",
+    "apple named the file for another document",
+    # notes the core's capture writes into the same trace
+    "the tab moved",
+    # _label_mask
+    "nothing", "a document button", "a download or save control", "another control",
+    # _click_failure
+    "something else on the page was in the way", "more than one control matched",
+    "it was not visible", "it was no longer on the page", "it timed out", "another error",
+})
+
+
+def _trace_value(key: str, value, depth: int = 0):
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, int):
+        return max(min(value, 10 ** 6), -1)
+    if isinstance(value, float):
+        return round(value, 3)
+    if isinstance(value, str):
+        if key == "url":
+            return value if _MASKED_HREF_RE.fullmatch(value) else mask_href(value)
+        if key in ("type", "content_type"):
+            return _type_word(value)
+        return value if value in _TRACE_WORDS else None
+    if isinstance(value, (list, tuple)) and depth == 0:
+        return [_trace_value(key, v, 1) for v in list(value)[:20]]
+    return None
+
+
+def attempt_record(trace) -> list:
+    """A download's trace as download-attempt.json may carry it. Field
+    names, numbers and flags as they are, an address through mask_href, a
+    content type as one word, and a string only when it is one of this
+    module's fixed words. The core's own entries in the same trace go
+    through the same list."""
+    out = []
+    for entry in list(trace or [])[:80]:
+        if not isinstance(entry, dict):
+            continue
+        rec = {}
+        for key, value in list(entry.items())[:20]:
+            k = re.sub(r"[^a-z0-9_]+", "_", str(key).lower())[:40]
+            rec[k] = _trace_value(k, value)
+        out.append(rec)
+    return out
+
+
+def _new_names(dl_dir, before: set) -> List[str]:
+    """The finished files that appeared in the download folder since
+    `before`, by name."""
+    if not dl_dir:
+        return []
+    try:
+        return sorted(f for f in os.listdir(dl_dir)
+                      if f not in before and not f.lower().endswith(_UNFINISHED))
+    except OSError:
+        return []
+
+
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
-               dl_dir=None) -> bool:
+               dl_dir=None, expect: Optional[Tuple[str, str]] = None) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
     in `dl_dir`, a download event, a PDF response, a new tab, this tab
     moving to the document, or a second control the click revealed.
-    `trace` collects what happened, the click's own outcome included."""
+    `trace` collects what happened, the click's own outcome included, in
+    fixed words and counts.
+
+    `expect` is the (kind, date) of the document asked for. When the file
+    arrives with a name Apple wrote for another document, a download
+    event's name or the name it was saved under in `dl_dir`, nothing is
+    saved and nothing else is tried (apple_file_verdict)."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
+    refused: list = []
     start_url = page.url or ""
+
+    def named_right(name: str) -> bool:
+        """False once Apple's own name for the file names another document."""
+        if refused:
+            return False
+        if expect is None:
+            return True
+        verdict = apple_file_verdict(expect[0], expect[1], name)
+        if verdict is None or (verdict["same_kind"] and verdict["same_period"]):
+            return True
+        refused.append(verdict)
+        if trace is not None:
+            trace.append({"note": "apple named the file for another document", "kind": expect[0],
+                          "named_kind": verdict["named_kind"], "same_kind": verdict["same_kind"],
+                          "same_period": verdict["same_period"]})
+        log.info("the file for a %s document arrived named for another document, not saved", expect[0])
+        return False
 
     def on_download(dl):
         downloads.append(dl)
@@ -848,7 +1420,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 return
             ct = (res.headers.get("content-type") or "").lower()
             if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
-                trace.append({"status": res.status, "type": ct[:40], "url": redact(url)[:160]})
+                trace.append({"status": res.status, "type": _type_word(ct), "url": mask_href(url)})
             if got:
                 return
             if "pdf" in ct or "octet" in ct:
@@ -869,7 +1441,15 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     controls_before = _control_texts(page)
 
     def landed() -> bool:
+        if refused:
+            return False
         if downloads:
+            try:
+                suggested = downloads[0].suggested_filename or ""
+            except Exception:
+                suggested = ""
+            if not named_right(suggested):
+                return False
             try:
                 from paperpull_core.receipt_pdf import save_download
                 save_download(downloads[0], out_path)
@@ -889,12 +1469,18 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                     return True
             except Exception:
                 pass
+        # A real Edge or Chrome saves the file itself, under Apple's name.
+        for name in _new_names(dl_dir, seen):
+            if not named_right(name):
+                return False
         return _take_new_pdf(dl_dir, seen, out_path)
 
     def wait_for_pdf(seconds: int) -> bool:
         for _ in range(seconds):
             if landed():
                 return True
+            if refused:
+                return False
             page.wait_for_timeout(1000)
         return landed()
 
@@ -906,45 +1492,52 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         try:
             el.click(timeout=8000)
             if trace is not None:
-                trace.append({"note": "clicked", "control": redact(label)[:60]})
+                trace.append({"note": "clicked", "control": _label_mask(label)})
         except Exception as e:
             if trace is not None:
-                trace.append({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
+                trace.append({"note": "click failed", "control": _label_mask(label),
+                              "error": _click_failure(e)})
             try:
                 el.evaluate("el => el.click()")
                 if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
+                    trace.append({"note": "clicked through the DOM instead", "control": _label_mask(label)})
             except Exception as e2:
                 if trace is not None:
-                    trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
+                    trace.append({"note": "DOM click failed too", "error": _click_failure(e2)})
         if wait_for_pdf(10):
             return True
+        if refused:
+            return False
         if _take_same_tab(page, start_url, out_path, trace):
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
         appeared = _control_texts(page) - controls_before
         if trace is not None:
-            trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
-                          "appeared": [redact(t) for t in sorted(appeared)[:15]],
+            trace.append({"note": "after the click", "url": mask_href(page.url or ""),
+                          "appeared": [_label_mask(t) for t in sorted(appeared)[:15]],
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
         step, step_label = _second_step(page, appeared)
         if step is not None:
             try:
                 step.click(timeout=8000)
                 if trace is not None:
-                    trace.append({"note": "second step clicked", "control": redact(step_label)[:60]})
+                    trace.append({"note": "second step clicked", "control": _label_mask(step_label)})
             except Exception as e:
                 if trace is not None:
-                    trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
-                                  "error": str(e)[:160]})
+                    trace.append({"note": "second step click failed", "control": _label_mask(step_label),
+                                  "error": _click_failure(e)})
             if wait_for_pdf(20):
                 return True
+            if refused:
+                return False
             if _take_same_tab(page, start_url, out_path, trace) or \
                     _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
                 return True
         if wait_for_pdf(15):
             return True
+        if refused:
+            return False
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
         log.info("click on %r produced no PDF", label)
@@ -985,10 +1578,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
 
     el, label = _control_for(page, kind, iso_date)
     if el is None:
-        log.info("no %s document control found for %s", kind, iso_date)
+        same = len(_dated(page, kind, iso_date))
+        log.info("%d %s document buttons read as %s, none pressed", same, kind, iso_date)
         if trace is not None:
-            trace.append({"note": "no control carried this document's date", "kind": kind,
-                          "document_controls": _count(_bill_controls(page))})
+            trace.append({"note": ("more than one control carried this document's date" if same
+                                   else "no control carried this document's date"),
+                          "kind": kind, "document_controls": _count(_doc_buttons(page)),
+                          "with_this_date": same})
         return False
     if not is_safe_control(label):
         log.info("refusing unsafe control %r for %s", label, iso_date)
@@ -1011,8 +1607,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                 return True
             if trace is not None:
                 trace.append({"note": "the control's own link did not answer with a PDF",
-                              "url": redact(target)[:160]})
-    return _catch_pdf(page, el, label, out_path, trace, dl_dir)
+                              "url": mask_href(target)})
+    return _catch_pdf(page, el, label, out_path, trace, dl_dir, expect=(kind, iso_date))
 
 
 # ---------------------------------------------------------------------------
@@ -1115,13 +1711,30 @@ def _page_summary(page) -> dict:
     return out
 
 
+def _front_page_again(page) -> bool:
+    """The front page, loaded fresh, with its menu waited for. This is the
+    survey's way back after following a link. Going back in the tab's
+    history does not work here, because the page replaces its own history
+    entry when a section is opened, so going back leaves card.apple.com
+    for whatever the tab held before it. In the first Diagnose (#52) that
+    was a section address that answers 404, and the rows read after the
+    survey were read off that 404 page."""
+    try:
+        page.goto(URLS["home"], wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        log.info("goto the front page failed: %s", e)
+        return False
+    return _app_drawn(page, APP_DRAW_SECONDS)
+
+
 def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
     """What the signed-in card, Savings and tax pages look like, without
     downloading anything. Records each page, its headings and controls with
     the guard's verdict on each, which section each page was taken for, and
     every JSON or PDF response card.apple.com sends while the page settles.
-    Then follows, one at a time and back again, the few links whose text is
-    a section name. No screenshot."""
+    Then follows, one at a time, the few links whose text is a section
+    name, and after one that moved the page loads the front page again
+    rather than going back (_front_page_again). No screenshot."""
     seen: list = []
 
     def on_response(res):
@@ -1155,6 +1768,9 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
         except Exception:
             pass
 
+    # The survey presses menu links of its own, so whichever list this app
+    # last opened is no longer known to be the one on screen.
+    _ARRIVED.clear()
     page.on("response", on_response)
     report = {"pages": [], "responses": seen}
     try:
@@ -1194,15 +1810,14 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
                     except Exception:
                         pass
                 if not is_safe_url(page.url or ""):
-                    page.go_back()
+                    _front_page_again(page)
                     continue
                 summary = _page_summary(page)
                 summary["followed_from"] = c["text"]
                 report["pages"].append(summary)
                 followed += 1
                 if page.url != before:
-                    page.go_back(wait_until="domcontentloaded", timeout=15000)
-                    page.wait_for_timeout(1500)
+                    _front_page_again(page)
             except Exception as e:
                 report.setdefault("notes", []).append(
                     "could not follow %r: %s" % (c["text"], str(e)[:120]))

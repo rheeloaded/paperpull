@@ -83,6 +83,22 @@ def test_every_control_that_moves_money_or_changes_anything_is_refused():
         assert not site.is_safe_control(label), label
 
 
+def test_closing_the_card_or_savings_is_refused_however_it_is_worded():
+    """The guard refused "Close Account" and "Close the card" but not
+    "Close Apple Card Account", and the overlay helper used the guard
+    alone to decide whether a button that starts with close may be
+    pressed. Everything the narrower wording refused is still refused."""
+    for label in ["Close Apple Card", "Close Apple Card Account", "Close your Savings account",
+                  "Close Apple Savings", "Close Account", "Close the card", "Close my Savings",
+                  "Close Cardholder Account"]:
+        assert site.FORBIDDEN_CONTROL_RE.search(label), label
+    for label in ["Close", "Dismiss", "No thanks", "No, thanks", "Not now"]:
+        assert not site.FORBIDDEN_CONTROL_RE.search(label), label
+        assert site.DISMISS_RE.match(label), label
+    for label in ["Close Apple Card Account", "Close dialog and pay", "Not now, pay later", "Closed"]:
+        assert not site.DISMISS_RE.match(label), label
+
+
 def test_an_export_is_never_mistaken_for_a_statement():
     """Apple offers transactions as CSV or OFX beside the statement PDFs.
     Neither is a statement, so neither may be pressed."""
@@ -174,16 +190,87 @@ def test_the_survey_follows_only_section_links():
 
 def test_every_section_menu_step_is_a_word_the_guard_allows():
     """A step the guard would refuse can never be pressed, so a path made
-    of one would be dead code pretending to be a route."""
+    of one would be dead code pretending to be a route. The words are the
+    ones the recording pressed, with made-up counts."""
+    import re
+    words = ["Statements", "Savings", "Documents", "Statements 12", "Statements\n12",
+             "Tax Documents 3", "Tax Documents\n3"]
     for kind, steps in site.SECTION_PATH.items():
-        for step in steps:
-            import re
+        for where, step in steps:
+            assert where in ("nav", "main"), (kind, where)
             rx = re.compile(step, re.I)
-            examples = [w for w in ["Statements", "Savings", "Tax Documents", "Documents"]
-                        if rx.match(w)]
+            examples = [w for w in words if rx.match(w)]
             assert examples, (kind, step)
             for w in examples:
                 assert site.is_safe_control(w), (kind, w)
+
+
+def test_the_savings_lists_are_never_reached_through_the_cards_statements_link():
+    """The menu's Statements link is on the Savings Documents page too, and
+    it is the card's. The Savings statements step is looked for inside the
+    page's content only, and the tax forms step never matches it."""
+    import re
+    assert site.SECTION_PATH[site.SAVINGS][-1][0] == "main"
+    assert site.SECTION_PATH[site.TAX][-1][0] == "main"
+    tax_last = re.compile(site.SECTION_PATH[site.TAX][-1][1], re.I)
+    assert not tax_last.match("Statements") and not tax_last.match("Statements 12")
+    assert tax_last.match("Tax Documents 3")
+    # The menu's Statements carries no count, and both recorded links did,
+    # so it cannot be taken for the Savings statements wherever it is drawn.
+    savings_last = re.compile(site.SECTION_PATH[site.SAVINGS][-1][1], re.I)
+    assert not savings_last.match("Statements") and not tax_last.match("Tax Documents")
+    assert savings_last.match("Statements 12") and savings_last.match("Statements\n12")
+
+
+def test_the_name_apple_gives_a_file_is_read_against_the_document_asked_for():
+    """The recorded shapes only, with a browser's " (1)" allowed. A name in
+    any other shape says nothing either way."""
+    v = site.apple_file_verdict
+    agree = {"same_kind": True, "same_period": True}
+    assert v(site.CARD, "2031-02-28", "Apple Card Statement - February 2031.pdf") == dict(named_kind="card", **agree)
+    assert v(site.SAVINGS, "2031-02-28", "Savings Statement - February 2031 (1).pdf") == dict(
+        named_kind="savings", **agree)
+    assert v(site.TAX, "2030-12-31", "1099-INT 2030 - Tax Form.pdf") == dict(named_kind="tax", **agree)
+    assert v(site.TAX, "2030-12-31", "C:\\dl\\1099-INT 2030 - Tax Form.pdf")["same_period"]
+    # the Savings statement handed over for the card's, and the other way
+    assert v(site.CARD, "2031-02-28", "Savings Statement - February 2031.pdf")["same_kind"] is False
+    assert v(site.SAVINGS, "2031-02-28", "Apple Card Statement - February 2031.pdf")["same_kind"] is False
+    # another month, another tax year
+    assert v(site.CARD, "2031-02-28", "Apple Card Statement - January 2031.pdf")["same_period"] is False
+    assert v(site.TAX, "2030-12-31", "1099-INT 2029 - Tax Form.pdf")["same_period"] is False
+    assert v(site.CARD, "2031-02-28", "1099-INT 2031 - Tax Form.pdf")["same_kind"] is False
+    for name in ["", "download.pdf", "statement.pdf", "8b1f0c2e.pdf", "Statement February 2031.pdf"]:
+        assert v(site.CARD, "2031-02-28", name) is None, name
+
+
+def test_an_address_leaves_as_its_kind_and_its_plain_words():
+    """What download-attempt.json may say about an address. Never a value,
+    never a word with a capital or more than three digits, never another
+    host's name."""
+    m = site.mask_href
+    assert m("https://card.apple.com/savings") == "card:/savings"
+    assert m("https://card.apple.com/api/v1/statements/8b1f0c2e9a/pdf?id=123456789&format=pdf") == \
+        "card:/api/v1/statements/#/pdf?format&id"
+    assert m("https://card.apple.com/u/DanaQuill/doc") == "card:/u/#/doc"
+    assert m("https://www.example.com/terms.pdf") == "elsewhere"
+    assert m("http://card.apple.com/savings") == "elsewhere"
+    assert m("blob:https://card.apple.com/8b1f0c2e") == "blob"
+    assert m("/savings/documents") == "relative:/savings/documents"
+    assert m("") == ""
+
+
+def test_a_tax_form_is_filed_at_the_year_its_button_names():
+    """Apple names a tax form's button the way it names a statement's. Only
+    that exact shape is read, and a statement's own date rules are
+    untouched by it."""
+    assert site.tax_list_date("Download statement of January 2031 (PDF)") == "2031-12-31"
+    assert site.tax_list_date(" download statement of Jan 2029 ( pdf ) ") == "2029-12-31"
+    for label in ["Download statement of January 31, 2031 (PDF)", "January 2031",
+                  "Download statement (PDF)", "Download 1099-INT", ""]:
+        assert site.tax_list_date(label) is None, label
+    # the same words on a statements list are still that month's statement
+    assert site.document_date(site.SAVINGS, "Download statement of March 2031 (PDF)") == "2031-03-31"
+    assert site.document_date(site.TAX, "Download statement of March 2031 (PDF)") is None
 
 
 def test_only_card_apple_com():
@@ -195,10 +282,57 @@ def test_only_card_apple_com():
               "http://card.apple.com/s.pdf", "https://user@card.apple.com/s.pdf",
               "https://card.apple.com:8443/s.pdf"]:
         assert not site.is_safe_url(u), u
-    for urls in site.SECTION_URLS.values():
-        assert all(site.is_safe_url(u) for u in urls)
-    assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
     assert all(site.is_safe_url(u) for u in site.URLS.values())
+
+
+def test_the_front_page_is_the_only_address_loaded():
+    """Every section address the first build guessed answered 404 when
+    loaded, so each list is reached through the menu instead. Going back
+    in the tab's history is not a way back either, since the page replaces
+    its own entries and going back leaves card.apple.com."""
+    import re
+    assert set(site.URLS.values()) == {"https://card.apple.com/"}
+    assert site.BILLING_URL == "https://card.apple.com/"
+    src = Path(site.__file__).read_text(encoding="utf-8")
+    loads = re.findall(r"\.goto\(([^,)]*)", src)
+    assert loads and set(loads) == {'URLS["home"]'}, loads
+    assert ".go_back(" not in src
+    assert inspect.getsource(site.goto_section).count(".goto(") == 1
+
+
+def test_a_run_takes_one_list_at_a_time_newest_first_within_each():
+    """Newest first across all of them alternates the card's statements
+    with the Savings statements month by month, and every switch is a
+    walk through the menu. The same documents are taken, grouped by list.
+    Which documents a Pilot takes does not change, only their order."""
+    from types import SimpleNamespace
+    import applecard_docs
+    docs = [("Apple Card Statement - March 2031", "2031-03-31"),
+            ("Savings Statement - March 2031", "2031-03-31"),
+            ("Apple Card Statement - February 2031", "2031-02-28"),
+            ("Savings Statement - February 2031", "2031-02-28"),
+            ("Tax Document - 2030", "2030-12-31"),
+            ("Apple Card Statement - January 2031", "2031-01-31"),
+            ("Savings Statement - January 2031", "2031-01-31")]
+    app = applecard_docs.App.__new__(applecard_docs.App)
+    app.args = SimpleNamespace(type=None, year=None, start_date=None, end_date=None, max_docs=None)
+    app.config = {"document_types": ["Statement", "Tax Document"]}
+    data = {}
+    for title, date in docs:
+        cat, summary, _ = doc_types.classify_document(title, RULES)
+        d = applecard_docs.Document(title=title, category=cat, summary=summary, date=date)
+        data[d.key] = d.to_dict()
+    app.discovery = SimpleNamespace(data=data)
+
+    five = [d.title for d in app._select(limit=5)]
+    assert five == ["Apple Card Statement - March 2031", "Apple Card Statement - February 2031",
+                    "Apple Card Statement - January 2031",
+                    "Savings Statement - March 2031", "Savings Statement - February 2031"]
+    every = [d.title for d in app._select()]
+    assert every == ["Apple Card Statement - March 2031", "Apple Card Statement - February 2031",
+                     "Apple Card Statement - January 2031", "Savings Statement - March 2031",
+                     "Savings Statement - February 2031", "Savings Statement - January 2031",
+                     "Tax Document - 2030"]
 
 
 class _Frame:

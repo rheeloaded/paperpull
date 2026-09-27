@@ -134,6 +134,62 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+# What Diagnose says about the rows and documents it read, built from a
+# list of what may leave (flags, counts and this app's own words) rather
+# than from the page's text with digits masked. Before #52's first round
+# the run never reached a list, so these were empty. Now it does, and a
+# row's text is a statement's month, a link's words or a name on the
+# page, and the first tester attached this file to a public issue.
+_SAMPLE_FIELDS = ("has_date", "has_link", "says_download", "lines", "category")
+
+
+def _sample(doc, rules) -> dict:
+    """One row the loose scrape found, as flags and a category only."""
+    text = doc.text or doc.title or ""
+    category, _summary, _conf = doc_types.classify_document(doc.title, rules)
+    return {
+        "has_date": bool(doc.date_text),
+        "has_link": bool(doc.href),
+        "says_download": "download" in text.lower(),
+        "lines": min(len(text.splitlines()), 99),
+        "category": category,
+    }
+
+
+# The checks goto_section puts to a list before it is read, each a flag.
+_LIST_CHECKS = ("documents_drawn", "earlier_list_gone", "address_agrees",
+                "no_savings_back_link", "within_its_count")
+
+
+def _refusal(trace, kind: str) -> dict:
+    """The checks a list failed, from the last time goto_section reached
+    one and would not take it, as the kind and one flag per check. Empty
+    when the walk never reached a list, which an account without Savings
+    or without tax forms does on an ordinary day."""
+    last = None
+    for entry in trace or []:
+        if isinstance(entry, dict) and entry.get("note") == "the list on screen was not taken":
+            last = entry
+    if last is None:
+        return {}
+    out = {"kind": kind}
+    for name in _LIST_CHECKS:
+        out[name] = bool(last.get(name))
+    return out
+
+
+def _recognized(found_docs) -> dict:
+    """How many documents each list gave, and how many carried a PDF link,
+    as counts. Not their dates."""
+    by_kind = {k: 0 for k in site.KINDS}
+    with_link = 0
+    for d in found_docs:
+        key = d.kind if d.kind in by_kind else "other"
+        by_kind[key] = by_kind.get(key, 0) + 1
+        with_link += 1 if d.href else 0
+    return {"by_kind": by_kind, "with_pdf_link": with_link}
+
+
 class App:
     _journal = None
     _requests = None
@@ -426,9 +482,17 @@ class App:
             site.goto_documents(page)
         self.check_session(page)
         found_any = False
+        refused = []
         for kind in site.KINDS:
-            if not site.goto_section(page, kind):
-                log.info("The %s section was not found", kind)
+            trace: list = []
+            if not site.goto_section(page, kind, trace):
+                checks = _refusal(trace, kind)
+                if checks:
+                    refused.append(checks)
+                    log.info("The %s list was reached and not taken, %s", kind,
+                             ", ".join("%s %s" % (k, v) for k, v in checks.items() if k != "kind"))
+                else:
+                    log.info("The %s section was not found", kind)
                 if site.looks_signed_out(page):
                     self.check_session(page)
                 continue
@@ -440,7 +504,16 @@ class App:
             n_new += n_kind
             self.discovery.save()
             log.info("%s section: %d documents, %d new", kind, len(docs), n_kind)
-        if not found_any:
+        if refused:
+            # A list the walk reached and the checks refused. Those checks
+            # have not yet run on a real account, and this is where one
+            # would first refuse. Its documents are simply missing from
+            # discovery otherwise, and in a Pilot of statements a refused
+            # tax list would not show at all. Each check is a flag, so the
+            # file carries no page text.
+            self.write_failure("open a statements section", "a list did not pass its checks",
+                               postmortem={"refused": refused})
+        elif not found_any:
             self.write_failure("open a statements section",
                                "no section with a document control was found")
 
@@ -471,7 +544,16 @@ class App:
         docs = [d for d in docs if self._in_scope(d)]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
-        return docs[:limit] if limit else docs
+        docs = docs[:limit] if limit else docs
+        # The same documents, taken one list at a time, newest first within
+        # each. Newest first across all of them alternates the card's
+        # statements with the Savings statements month by month, and every
+        # switch is a walk through the menu, with a fresh front page when
+        # the list cannot be shown to be new. One list at a time is one
+        # walk per list for a whole run (#52).
+        rank = {k: i for i, k in enumerate(site.KINDS)}
+        docs.sort(key=lambda d: rank.get(site.kind_of_title(d.title), len(rank)))
+        return docs
 
     def _already_done(self, doc: Document) -> bool:
         """Skip documents already handled. A document that was successfully
@@ -560,10 +642,18 @@ class App:
         if not saved:
             import json as _json
             attempt = self.paths.diagnostics / "download-attempt.json"
+            # A file testers are asked to attach, so it is built from what
+            # may leave. The address is its kind and the plain words of its
+            # path, and the trace is fixed words, counts and flags
+            # (site.attempt_record), never the page's text scrubbed.
             atomic_write_text(attempt, _json.dumps(
-                {"timestamp": now_iso(), "date": doc.date, "landed_on": site.redact(page.url or ""),
-                 "responses": trace[:80]}, indent=2))
-            print(f"  What the site answered is in {attempt}, attach it to the issue.")
+                {"timestamp": now_iso(),
+                 "date": doc.date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", doc.date or "") else "",
+                 "kind": site.kind_of_title(doc.title),
+                 "landed_on": site.mask_href(page.url or ""),
+                 "responses": site.attempt_record(trace)}, indent=2))
+            print(f"  What the site answered is in {attempt}. It holds fixed words, counts")
+            print("  and flags, no text from your account. Read it through, then attach it to the issue.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
             self._write_row(doc, "Capture failed", "Needs Manual Review")
@@ -847,10 +937,12 @@ class App:
             provider='Apple Card')
 
     def cmd_diagnose(self):
-        """Survey each statements section and write a file a tester can attach to
-        the GitHub issue. No screenshot, digit runs masked, JSON bodies as
-        shape only. Nothing is downloaded and nothing but a documents link is
-        followed."""
+        """Survey each statements section and write the detailed file a
+        repair is read from, which stays on this machine. The one to attach
+        to an issue is the survey written beside it (write_survey). No
+        screenshot, digit runs masked, JSON bodies as shape only, and the
+        rows and documents it read as flags and counts. Nothing is
+        downloaded and nothing but a section link is followed."""
         self.stats["mode"] = "diagnose"
         import json as _json
         page = self.page()
@@ -890,30 +982,24 @@ class App:
                 found_docs.extend(got)
                 info["sections"][kind] = {"found": ok, "landed_on": site.redact(page.url or ""),
                                           "documents": len(got), "steps": steps[:10]}
-            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_pdf_link": bool(b.href)}
-                                            for b in found_docs[:40]]
+            info["documents_recognized"] = _recognized(found_docs)
             info["rows_collected"] = len(docs)
-            info["samples"] = []
-            for d in docs[:12]:
-                cat, summ, conf = doc_types.classify_document(d.title, self.rules)
-                date, period = site.parse_period_date(d.text or d.title)
-                info["samples"].append({
-                    "title": d.title[:90], "href": (d.href or "")[:100],
-                    "text": (d.text or "").replace("\n", " | ")[:160],
-                    "category": cat, "summary": summ, "date": date, "period": period})
+            info["samples"] = [_sample(d, self.rules) for d in docs[:12]]
         except Exception as e:
             info["error"] = str(e)[:300]
         out = self.paths.diagnostics / "diagnose-documents.json"
         atomic_write_text(out, _json.dumps(info, indent=2))
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. It")
-        print("  carries the page's own words, so it stays on this machine")
-        print("  unless you decide to send it.")
+        print("  carries the page's own words, headings and the names of")
+        print("  buttons and links, so it stays on this machine. Please do")
+        print("  not attach it to an issue. The survey file beside it, whose")
+        print("  name starts with survey-, is the one that is safe to send.")
+        recognized = info.get("documents_recognized") or {}
         print(f"Documents page found: {info.get('documents_page_found', '?')}, "
-              f"documents recognized: {len(info.get('documents_recognized', []))}, "
+              f"documents recognized: {sum(recognized.get('by_kind', {}).values())}, "
               f"rows: {info.get('rows_collected', '?')}")
-        print("Look through that file for anything you would not want public,")
-        print("then attach it to the Apple Card issue on GitHub. No screenshot was taken.")
+        print("No screenshot was taken.")
 
     # -- summary -----------------------------------------------------------
 
