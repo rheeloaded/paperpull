@@ -83,7 +83,15 @@ paperpull att pilot               REM once the site layer is confirmed
   the page with the session's own cookies. Otherwise the row's control is
   clicked, once it has passed the guard, and whatever att.com does, a
   download event, a PDF response or a new tab, is caught and saved to
-  `Statements\`.
+  `Statements\`. The history shows eight bills a page, so an older bill
+  is reached by pressing the list's own **Next**. That is the first
+  button after the last bill, with nothing but Prev, a page number or a
+  button with no name in between, and it is pressed only when every name
+  it has is Next, Next page or Go to next page. A bill's own button is
+  pressed only while the list still reads as it did when the bill was
+  found. If that press fails, nothing else is pressed and the bill goes
+  to Manual Review, since the Download PDF then showing would be another
+  bill's.
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays, enrolls
   in autopay or paperless, changes a plan, adds a line, upgrades or trades
   in a device, suspends service, moves a number, or edits the account. A

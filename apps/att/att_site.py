@@ -48,6 +48,13 @@ repaired from two surveys a tester sent (#26). What the surveys showed:
     puts it in the summary, drops discovery records the history API no
     longer lists when nothing was downloaded for them, and never takes a
     date that follows the word "due" as a bill date.
+  * From 0.34.0 to 0.37.0 every bill older than the newest eight went to
+    Manual Review on both accounts. The history shows eight bills a page,
+    with "Prev" and "Next" after them, while its API hands the page all
+    sixteen, with or without a date range. 0.37.1 turns the list's pages
+    with its own Next (find_bill_button), and presses a bill's button only
+    while the list still reads as it did when the bill was dated
+    (_press_bill).
 
   So discovery now reads the history API as the page loads it, passively,
   and falls back to the bill buttons. A download opens the history page,
@@ -80,7 +87,15 @@ SAFETY (this is a phone account with a card on file):
   suspends or restores service, moves a number, or edits any setting.
   FORBIDDEN_CONTROL_RE is the guard. A control must ALSO look like a
   document action (SAFE_DOC_CONTROL_RE) before it may be clicked. There is
-  no code here that submits a form or confirms a dialog.
+  no code here that submits a form or confirms a dialog. The few controls
+  pressed that are not document controls each have an exact allowlist of
+  their own instead, the history's Date range filter (is_range_control),
+  a close or dismiss button over the page (dismiss_overlay), and the bill
+  list's own "Next", which only shows the next eight bills
+  (_next_beside_list, pressed by _press_next on the element it read). A
+  bill's own button is pressed on the element that was dated, and a
+  failed press presses nothing else, since the Download PDF then showing
+  would be another bill's (_press_bill).
 """
 from __future__ import annotations
 
@@ -89,7 +104,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.controls import safe_selects as _safe_selects
@@ -849,33 +864,66 @@ def _bill_button_for(page, iso_date: str, anchor_year: Optional[int] = None,
 
     It used to match "Aug 22" alone and take the first, so a bill from
     August 2025 asked for while only 2026's were showing would have
-    pressed 2026's and saved it under the 2025 date (#26)."""
+    pressed 2026's and saved it under the 2025 date (#26).
+
+    This reads the page showing and nothing else, and hands back a
+    locator. find_bill_button turns the list's pages and hands back the
+    element itself, which is what download_bill presses."""
     from datetime import date as _date
     today = today or _date.today()
-    dated = []
     try:
-        loc = _period_buttons(page)
-        year, prev = None, None
-        for i in range(min(loc.count(), 60)):
-            el = loc.nth(i)
-            text = (el.inner_text(timeout=800) or "").strip()
-            pm = _PERIOD_RE.search(text)
-            if not pm:
-                continue
-            if year is None:
-                month = _MONTHS[pm.group(3)[:3].lower()]
-                if anchor_year is not None:
-                    year = anchor_year
-                else:
-                    year = today.year - (1 if month > today.month else 0)
-            iso, prev = _period_end(text, year, prev)
-            if not iso:
-                continue
-            year = int(iso[:4])
-            dated.append((el, text, iso))
+        dated = _dated_buttons(page, today, anchor_year)
     except Exception as e:
         log.info("bill button lookup failed: %s", e)
         return None, ""
+    return _match_bill(dated, iso_date, anchor_year)
+
+
+def _date_texts(texts: list, today, anchor_year: Optional[int] = None,
+                carry: Optional[Tuple[int, int]] = None, start: int = 0) -> list:
+    """Each bill button's words in `texts`, from `start` on, with the date
+    its period ends, as [(i, text, iso)] in page order, i its place in
+    `texts`. The years are worked out as _bill_button_for says. On a later
+    page of the list, `carry` is the year and month of the last bill on
+    the page before, and the first bill here goes on from it exactly as
+    the next button on the same page would have. Starting each page from
+    today instead would date a third page a year late (#26)."""
+    dated = []
+    year, prev = carry if carry else (None, None)
+    for i in range(start, len(texts)):
+        text = texts[i] or ""
+        pm = _PERIOD_RE.search(text)
+        if not pm:
+            continue
+        if year is None:
+            month = _MONTHS[pm.group(3)[:3].lower()]
+            if anchor_year is not None:
+                year = anchor_year
+            else:
+                year = today.year - (1 if month > today.month else 0)
+        iso, prev = _period_end(text, year, prev)
+        if not iso:
+            continue
+        year = int(iso[:4])
+        dated.append((i, text, iso))
+    return dated
+
+
+def _dated_buttons(page, today, anchor_year: Optional[int] = None) -> list:
+    """The bill buttons showing now, each with the date its period ends,
+    as [(el, text, iso)] in page order, el a locator."""
+    loc = _period_buttons(page)
+    els, texts = [], []
+    for i in range(min(loc.count(), 60)):
+        el = loc.nth(i)
+        els.append(el)
+        texts.append((el.inner_text(timeout=800) or "").strip())
+    return [(els[i], text, iso) for i, text, iso in _date_texts(texts, today, anchor_year)]
+
+
+def _match_bill(dated: list, iso_date: str, anchor_year: Optional[int] = None):
+    """The (el, text) in `dated` whose period ends on `iso_date`, or
+    (None, ""). el is whatever `dated` holds first in each entry."""
     # Under a named year every button has to work out to that year. One
     # that does not means the list crossed January and the years above
     # are off by one, so nothing is matched rather than the wrong bill.
@@ -890,13 +938,338 @@ def _bill_button_for(page, iso_date: str, anchor_year: Optional[int] = None,
     return None, ""
 
 
-# The history's own date filter. It shows the most recent bills until
-# someone chooses a wider range, and an older bill has no button until
-# then (#26). None of its words are document words, so the guard refuses
-# them all, and each gets an allowlist of its own instead of the guard
-# being loosened. The opener, an option that names nothing but a span of
-# time, and the button that applies it. The forbidden words are still
-# checked first.
+# The history shows its bills eight at a time. The tester's survey (#26)
+# lists the eight bill buttons and then "Prev" and "Next" right after the
+# last of them. The history API hands the page all sixteen bills whether
+# or not a date range is chosen, as the tester's recording showed, so the
+# Date range was never what hid the older ones. They are on the next page.
+# The list's own Next is the only button of the pager ever pressed. It is
+# found as the first button after the last bill button, with nothing but
+# Prev, a page number or an unnamed button between, so a carousel's Next
+# elsewhere on the page is never taken for it. Every name it has must be
+# Next and pass the guard.
+PAGER_NEXT_RE = re.compile(r"^\s*(go\s+to\s+)?next(\s+page)?\s*$", re.I)
+_PAGER_PREV_RE = re.compile(r"^\s*(go\s+to\s+)?(prev|previous)(\s+page)?\s*$", re.I)
+_PAGER_NUMBER_RE = re.compile(r"^\s*((page\s+)?\d{1,3}|\.\.\.|\N{HORIZONTAL ELLIPSIS})\s*$", re.I)
+# Pages turned at most for one bill. Sixteen bills are two pages.
+PAGER_MAX_TURNS = 4
+# How long a turned page may take to draw, in looks 250 ms apart.
+_PAGER_POLLS = 40
+# The newest bill on a page just turned to has to end within this many
+# days before the oldest bill on the page before begins. Bills follow one
+# another, so a page that did not turn, or slid by a few bills, or skipped
+# a page, fails this and is not read, since its years would be a year out.
+_PAGER_JOIN_DAYS = 45
+
+_BUTTON_STATES_JS = r"""els => els.map(e => ({
+  text: (e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+  label: (e.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+  off: !!e.disabled || /^true$/i.test(e.getAttribute('aria-disabled') || '')
+}))"""
+
+
+def _guard_refuses(text: str) -> bool:
+    """True when the words name anything the guard refuses, a payment, a
+    setting or a sign-in word."""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    return bool(FORBIDDEN_CONTROL_RE.search(text) or SETTINGS_CONTROL_RE.search(text)
+                or AUTH_CONTROL_RE.search(text))
+
+
+def _pager_word(state: dict) -> str:
+    """What a button is, as one fixed word, for finding the list's Next
+    and for the trace. "next" only when every name the button has, its
+    words and its aria-label, is Next, and none is a word the guard
+    refuses. Nothing else about a button ever reaches the trace."""
+    state = state or {}
+    names = [n for n in (state.get("text") or "", state.get("label") or "") if n]
+    if not names:
+        return "unnamed"
+    if any(_guard_refuses(n) for n in names):
+        return "other"
+    for word, pat in (("next", PAGER_NEXT_RE), ("prev", _PAGER_PREV_RE),
+                      ("number", _PAGER_NUMBER_RE)):
+        if all(pat.match(n) for n in names):
+            return word
+    return "other"
+
+
+def _next_beside_list(page):
+    """The bill list's own Next, as (handle, word, after). It looks and
+    clicks nothing. handle is the button to press, or None. word says what
+    was found, in fixed words. after is what the few buttons right after
+    the last bill button are, in fixed words, so a trace shows the pager
+    even when this is wrong. A button with no name at all is never taken
+    for Next, only stepped over."""
+    try:
+        handles = page.get_by_role("button").element_handles()[:200]
+        states = page.evaluate(_BUTTON_STATES_JS, handles) or []
+    except Exception as e:
+        log.info("pager lookup failed: %s", e)
+        return None, "unreadable", []
+    last = None
+    for i, s in enumerate(states):
+        if _PERIOD_RE.search((s or {}).get("text") or ""):
+            last = i
+    if last is None:
+        return None, "no bill list", []
+    after = [_pager_word(s) for s in states[last + 1:last + 7]]
+    for k, word in enumerate(after):
+        if word == "next":
+            if states[last + 1 + k].get("off"):
+                return None, "next disabled", after
+            return handles[last + 1 + k], "found", after
+        if word not in ("prev", "number", "unnamed"):
+            break
+    return None, "no next beside the list", after
+
+
+def _press_next(page, handle) -> str:
+    """Press the list's Next, read once more just before, on the very
+    element that was read. A fixed word for the trace."""
+    try:
+        state = (page.evaluate(_BUTTON_STATES_JS, [handle]) or [{}])[0]
+        if _pager_word(state) != "next" or state.get("off") or not handle.is_visible():
+            return "next changed"
+        handle.click(timeout=4000)
+        return "pressed"
+    except Exception as e:
+        log.info("pager next: %s", e)
+        return "click failed"
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _period_texts(page) -> list:
+    """The bill buttons' words, in page order."""
+    try:
+        return [_norm(t) for t in _period_buttons(page).all_inner_texts()]
+    except Exception:
+        return []
+
+
+_LIST_TEXTS_JS = r"""els => els.map(e => e.isConnected ? (e.innerText || '') : null)"""
+
+
+def _read_list(page):
+    """The bill buttons showing now, as (handles, words), the words read
+    in one go from the very elements held. ([], []) when there are none,
+    or when the list keeps changing under the read."""
+    for _ in range(3):
+        handles = _period_buttons(page).element_handles()[:60]
+        if not handles:
+            return [], []
+        raw = page.evaluate(_LIST_TEXTS_JS, handles) or []
+        if len(raw) == len(handles) and all(t is not None for t in raw):
+            return handles, [_norm(t) for t in raw]
+        page.wait_for_timeout(250)
+    return [], []
+
+
+_SAME_ELEMENT_JS = r"""([a, b]) => a === b"""
+
+
+class BillButton(NamedTuple):
+    """A bill's button as find_bill_button read it. `handle` is the element
+    itself and `text` its words. `texts` is the words of every bill button
+    on the list as it was read, which no other page read on the way
+    matched, and `index` this one's place among them. _press_bill checks
+    the list against these before it presses anything."""
+    handle: object
+    text: str
+    index: int
+    texts: tuple
+
+
+def _wait_for_turn(page, before: list) -> bool:
+    """True once the bill buttons read differently from `before` and have
+    read the same for three looks in a row. A list that empties while the
+    next page loads is waited out, and one that never changes is not
+    taken for a new page."""
+    last, same = None, 0
+    for _ in range(_PAGER_POLLS):
+        page.wait_for_timeout(250)
+        now = _period_texts(page)
+        if not now or now == before:
+            last, same = None, 0
+            continue
+        if now == last:
+            same += 1
+            if same >= 2:
+                return True
+        else:
+            last, same = now, 0
+    return False
+
+
+def _period_start(text: str, end_iso: str):
+    """The day a period like "Jul 23 - Aug 22" begins, as a date, worked
+    out from the date it ends. None when it cannot be read."""
+    from datetime import date as _date
+    m = _PERIOD_RE.search(text or "")
+    if not m:
+        return None
+    month, day = _MONTHS[m.group(1)[:3].lower()], int(m.group(2))
+    try:
+        end_year, end_month = int(end_iso[:4]), int(end_iso[5:7])
+        return _date(end_year if month <= end_month else end_year - 1, month, day)
+    except ValueError:
+        return None
+
+
+def _pages_join(newer: tuple, older: tuple) -> bool:
+    """True when `older`, the first bill of the page just turned to, ends
+    shortly before `newer`, the last bill of the page before, begins."""
+    from datetime import date as _date
+    start = _period_start(newer[1], newer[2])
+    try:
+        end = _date.fromisoformat(older[2])
+    except ValueError:
+        return False
+    return start is not None and 0 <= (start - end).days <= _PAGER_JOIN_DAYS
+
+
+def find_bill_button(page, iso_date: str, trace: Optional[list] = None,
+                     today=None, anchor_year: Optional[int] = None):
+    """The history's button for the bill whose period ends on `iso_date`,
+    turning the list's pages to reach an older one. Returns (button,
+    turned). button is a BillButton, or None when nothing matched, and
+    turned is how many pages were turned, so the caller knows the list is
+    no longer on its first page.
+
+    The history shows eight bills a page (#26). When the bill is older
+    than every bill showing, the list's own Next is pressed and the next
+    page read, its years carried on from the page before, up to
+    PAGER_MAX_TURNS pages. Next may show the older bills in place of the
+    ones showing or add them below, and either is read. A page that does
+    not change, or does not join the page before, ends the search with
+    nothing matched rather than a bill dated a year out. `trace` gets what
+    happened, in fixed words and counts only, since the file may be posted
+    publicly."""
+    from datetime import date as _date
+    today = today or _date.today()
+    try:
+        handles, texts = _read_list(page)
+    except Exception as e:
+        log.info("bill button lookup failed: %s", e)
+        return None, 0
+    dated = _date_texts(texts, today, anchor_year)
+    others: list = []
+    i, text = _match_bill(dated, iso_date, anchor_year)
+    if i is not None:
+        return BillButton(handles[i], text, i, tuple(texts)), 0
+    if not dated:
+        return None, 0
+    note = {"note": "bill list pages", "pager": "", "turned": 0,
+            "period_buttons": [len(texts)], "turns": []}
+    try:
+        for _ in range(PAGER_MAX_TURNS):
+            if iso_date >= dated[-1][2]:
+                # Not older than the oldest bill showing, so no later page
+                # holds it, and nothing is pressed.
+                note["pager"] = "not older than this page"
+                return None, note["turned"]
+            nxt, word, after = _next_beside_list(page)
+            note.setdefault("after_list", after)
+            note["pager"] = word
+            if nxt is None:
+                return None, note["turned"]
+            pressed = _press_next(page, nxt)
+            if pressed != "pressed":
+                note["pager"] = pressed
+                return None, note["turned"]
+            note["turned"] += 1
+            if not _wait_for_turn(page, texts):
+                note["pager"] = "no change"
+                return None, note["turned"]
+            new_handles, new_texts = _read_list(page)
+            # Next either shows the older bills in place of these or adds
+            # them below these. Added below, only the new ones are dated,
+            # going on from the last of these, as a new page would be.
+            grew = len(new_texts) > len(texts) and new_texts[:len(texts)] == texts
+            newer = dated[-1]
+            new_dated = _date_texts(new_texts, today, anchor_year,
+                                    carry=(int(newer[2][:4]), int(newer[2][5:7])),
+                                    start=len(texts) if grew else 0)
+            note["turns"].append("grew" if grew else "replaced")
+            note["period_buttons"].append(len(new_texts))
+            if not new_dated:
+                note["pager"] = "empty page"
+                return None, note["turned"]
+            if not _pages_join(newer, new_dated[0]):
+                note["pager"] = "pages do not join"
+                return None, note["turned"]
+            others.append(tuple(texts))
+            handles, texts, dated = new_handles, new_texts, new_dated
+            i, text = _match_bill(dated, iso_date, anchor_year)
+            if i is not None:
+                if tuple(texts) in others:
+                    # This page reads word for word like one before it, as
+                    # a page two years on can. Its words alone could not
+                    # tell the press which of the two is showing.
+                    note["pager"] = "pages read alike"
+                    return None, note["turned"]
+                note["pager"] = "found"
+                return BillButton(handles[i], text, i, tuple(texts)), note["turned"]
+        note["pager"] = "page limit"
+        return None, note["turned"]
+    except Exception as e:
+        log.info("bill list pages: %s", e)
+        note["pager"] = "failed"
+        return None, note["turned"]
+    finally:
+        if trace is not None:
+            trace.append(note)
+
+
+# What _press_bill reports, in fixed words. Only the first two pressed
+# the bill's button.
+BILL_PRESSED = ("pressed", "pressed after the list redrew")
+
+
+def _press_bill(page, button: BillButton) -> str:
+    """Press a bill's button, and only while the bill list reads word for
+    word as it did when the bill was dated, so the press lands on the bill
+    that was dated and not on whatever sits in its place on another page
+    (#26). Its page reads like no other page read on the way, which
+    find_bill_button made sure of, so the same words mean the same page.
+
+    The list is read again, and the element in the bill's place in that
+    same read is the one pressed. It is the very element that was dated,
+    unless the page drew the list again in between, which the trace says.
+    Nothing is forced, and a failed click is not tried again another way,
+    since the Download PDF then showing would belong to another bill. A
+    fixed word for the trace, one of BILL_PRESSED when it pressed."""
+    try:
+        handles, now = _read_list(page)
+        if tuple(now) != button.texts or button.index >= len(handles):
+            return "bill list moved"
+        target = handles[button.index]
+        same = page.evaluate(_SAME_ELEMENT_JS, [target, button.handle])
+    except Exception as e:
+        log.info("bill list read again: %s", e)
+        return "bill list moved"
+    try:
+        target.click(timeout=5000)
+    except Exception as e:
+        log.info("bill button click failed: %s", e)
+        return "click failed"
+    return BILL_PRESSED[0] if same else BILL_PRESSED[1]
+
+
+# The history's own date filter. 0.34.1 took it for what hid the older
+# bills, and it was not, the list is paged (PAGER_NEXT_RE above). On
+# att.com it is a Start date and End date picker, which this never fills
+# in, so it is only opened, written down and closed, and only when
+# find_bill_button found no button for the bill, whatever stopped it,
+# pages turned or not. It stays for a filter made of spans of time (#26).
+# None of its words are document words, so the guard refuses them all,
+# and each gets an allowlist of its own instead of the guard being
+# loosened. The opener, an option that names nothing but a span of time,
+# and the button that applies it. The forbidden words are still checked
+# first.
 RANGE_OPENER_RE = re.compile(
     r"^\s*((select|choose|filter\s+by)\s+)?(a\s+)?date(\s+range)?\s*$", re.I)
 # "6 months" and "Past 2 years" are guesses from the round that found the
@@ -1528,7 +1901,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
     "Download PDF" it reveals, and whatever arrives is caught. When the
     history has no button for it (the current bill lives on the billing
     center), the billing center's own "Download PDF" is used, provided the
-    bill shown there carries this date. Nothing else is ever clicked.
+    bill shown there carries this date. When the bill's button is found
+    but cannot be pressed as it was read, nothing more is pressed and the
+    bill is left for review. Nothing else is ever clicked.
 
     `dl_dir` is where the attached browser saves a download, watched
     after every click."""
@@ -1536,21 +1911,32 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if goto_history(page):
-        el, label = _bill_button_for(page, iso_date)
-        if el is None:
-            # Older than the history shows by default. The tester's four
-            # failures on each account were all of these (#26).
-            chose, anchor = widen_range(page, iso_date, trace)
-            if chose:
-                el, label = _bill_button_for(page, iso_date, anchor)
-        if el is not None and is_safe_control(label):
-            try:
-                el.scroll_into_view_if_needed(timeout=4000)
-                el.click(timeout=5000)
-                page.wait_for_timeout(2000)
-                dismiss_overlay(page)
-            except Exception as e:
-                log.info("bill button click failed for %s: %s", iso_date, e)
+        # An older bill is on a later page of the history, which shows
+        # eight at a time. Every bill that failed on both accounts in
+        # 0.34.1 to 0.37.0 was one of these (#26).
+        found, turned = find_bill_button(page, iso_date, trace)
+        if found is None:
+            # The Date range works on the list as the page first shows it.
+            # After pages were turned the page is opened again first, so a
+            # span chosen there is read from its first page, and not dated
+            # as a first page from whatever page the search stopped on.
+            if not turned or goto_history(page):
+                chose, anchor = widen_range(page, iso_date, trace)
+                if chose:
+                    found, _ = find_bill_button(page, iso_date, trace, anchor_year=anchor)
+        if found is not None and is_safe_control(found.text):
+            pressed = _press_bill(page, found)
+            if trace is not None:
+                trace.append({"note": "bill button", "press": pressed})
+            if pressed not in BILL_PRESSED:
+                # The Download PDF showing now, if any, belongs to the bill
+                # selected before, not this one, so nothing more is pressed.
+                # The billing center shows the current bill only and is not
+                # tried either.
+                log.info("the bill button for %s was not pressed: %s", iso_date, pressed)
+                return False
+            page.wait_for_timeout(2000)
+            dismiss_overlay(page)
             # The bill opens in place or on its own page, and its Download
             # PDF may take a moment to appear.
             btn, blabel = None, ""
