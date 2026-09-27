@@ -7,7 +7,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.39.0] - 2026-09-27
+
+Apple, the 59th app, saves a receipt for everything paid for through
+Apple, and two more repairs from the tester's runs of 0.38.0.
 
 ### Added
 - **Apple, the 59th app.** Receipts for everything paid for through Apple,
