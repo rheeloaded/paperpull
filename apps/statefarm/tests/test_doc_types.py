@@ -124,33 +124,37 @@ def test_the_documents_link_that_mentions_claims_is_followed_and_a_claim_is_not(
 
 def test_the_document_center_answer_gives_each_document_a_date_a_title_and_its_file():
     body = {"data": {"attributes": [
-        {"creationDate": "07/22/2026", "category": "Auto", "type": "Renewal Notice",
+        {"creationDate": "03/14/2026", "category": "Auto", "type": "Renewal Notice",
          "description": "Renewal Notice - 2019 SEDAN 1HGCM82633A123456", "documentId": "d1",
          "filePathUrl": "/DocumentCenterProxyV1/document/d1", "policyId": "p1"},
-        {"creationDate": "09/12/2026", "category": "Billing/Payments", "type": "Payment Receipt",
+        {"creationDate": "05/08/2026", "category": "Billing/Payments", "type": "Payment Receipt",
          "description": "Payment Receipt - Payment Receipt", "documentId": "d2", "filePathUrl": ""},
-        {"creationDate": "07/22/2026", "category": "Auto", "type": "ID Card", "description": "ID Card - 2019 SEDAN",
+        {"creationDate": "03/14/2026", "category": "Auto", "type": "ID Card", "description": "ID Card - 2019 SEDAN",
          "documentId": "d3", "filePathUrl": "/x/d3"},
         {"type": "no date"},
     ]}}
     got = site._docs_from_api(body)
     assert [(d["date"], d["title"], d["hint"], d["url"]) for d in got] == [
-        ("2026-07-22", "Renewal Notice - Auto", "d1", "/DocumentCenterProxyV1/document/d1"),
-        ("2026-09-12", "Payment Receipt - Billing/Payments", "d2", ""),
-        ("2026-07-22", "ID Card - Auto", "d3", "/x/d3")]
+        ("2026-03-14", "Renewal Notice - Auto", "d1", "/DocumentCenterProxyV1/document/d1"),
+        ("2026-05-08", "Payment Receipt - Billing/Payments", "d2", ""),
+        ("2026-03-14", "ID Card - Auto", "d3", "/x/d3")]
     assert "1HGCM82633A123456" not in got[0]["desc"], "a VIN in the description is masked"
     assert site._docs_from_api({}) == []
 
 
 def test_the_year_is_the_only_thing_changed_in_the_metadata_address():
+    from datetime import date
+    this_year = date.today().year
     calls = []
     class _P:
         def evaluate(self, js, url):
             calls.append(url)
-            return {"data": {"attributes": [{"creationDate": "01/05/" + url[-4:], "type": "Bill", "category": "Auto"}]}}
-    got = site._years_from(_P(), "https://documentcenterproxyv1-prod.statefarm.com/DocumentCenterProxyV1/customerMetadata?commId=null&year=2026", 2026)
-    assert calls[0].endswith("year=2025") and all("year=" in c for c in calls)
-    assert len(calls) == site.YEARS_BACK and got[0]["date"] == "2025-01-05"
+            return {"status": 200, "type": "application/json", "body": {"data": {"attributes": [
+                {"creationDate": "01/05/" + url[-4:], "type": "Bill", "category": "Auto"}]}}}
+    got = site._years_from(_P(), "https://documentcenterproxyv1-prod.statefarm.com/DocumentCenterProxyV1/"
+                                 "customerMetadata?commId=null&year=%d" % this_year, this_year)
+    assert calls[0].endswith("year=%d" % (this_year - 1)) and all("year=" in c for c in calls)
+    assert len(calls) == site.YEARS_BACK and got[0]["date"] == "%d-01-05" % (this_year - 1)
     assert site._years_from(_P(), "https://x.statefarm.com/customerMetadata?commId=null", -1) == []
 
 
@@ -176,7 +180,7 @@ class _YearPage:
         m = _re.search(r"year=(\d{4})", target or "")
         year = int(m.group(1)) if m else 0
         self.asked.append(year)
-        return self._per_year.get(year, {})
+        return {"status": 200, "type": "application/json", "body": self._per_year.get(year, {})}
 
 
 def test_the_year_walk_stops_when_the_history_runs_out():
@@ -194,7 +198,7 @@ def test_the_year_walk_stops_when_the_history_runs_out():
 def test_a_year_with_documents_in_it_does_not_end_the_walk():
     from datetime import date
     this_year = date.today().year
-    one = {"data": {"attributes": [{"creationDate": "2026-06-12", "type": "Renewal Notice",
+    one = {"data": {"attributes": [{"creationDate": "2026-02-03", "type": "Renewal Notice",
                                     "category": "Auto", "documentId": "abc123",
                                     "filePathUrl": "/docs/abc123.pdf"}]}}
     page = _YearPage({this_year - 1: one, this_year - 2: one})
@@ -265,14 +269,14 @@ def test_the_reveal_presses_nothing_the_guard_refuses():
 
 
 def test_a_document_is_dated_when_it_was_made_not_how_long_it_stays_up():
-    """A tester found one filed under 2028, from "Sent by mail. Available
-    online until 07/21/2028" under its title, while the page's own
-    controls carried 2026 dates for the same documents (#37)."""
+    """A tester found one filed under 2028, from the "Available online
+    until" line under its title, while the page's own controls carried
+    2026 dates for the same documents (#37)."""
     made = {"data": {"attributes": [{
-        "creationDate": "2026-07-22", "availableDate": "2028-07-21",
+        "creationDate": "2026-03-14", "availableDate": "2028-03-13",
         "type": "Renewal Notice", "category": "Auto"}]}}
     [doc] = site._docs_from_api(made)
-    assert doc["date"] == "2026-07-22"
+    assert doc["date"] == "2026-03-14"
 
 
 def test_a_document_with_only_an_availability_date_is_left_out_rather_than_misdated():
@@ -280,7 +284,7 @@ def test_a_document_with_only_an_availability_date_is_left_out_rather_than_misda
     missing, which is the 2028 date his next Pilot went looking for (#37).
     A document must never be filed under the wrong date."""
     only = {"data": {"attributes": [{
-        "availableDate": "2028-07-21", "type": "Declarations", "category": "Auto"}]}}
+        "availableDate": "2028-03-13", "type": "Declarations", "category": "Auto"}]}}
     assert site._docs_from_api(only) == []
 
 
@@ -291,8 +295,8 @@ def test_a_document_dated_in_the_future_is_never_listed():
     ahead = (date.today() + timedelta(days=400)).isoformat()
     body = {"data": {"attributes": [
         {"creationDate": ahead, "type": "Renewal Notice", "category": "Auto"},
-        {"creationDate": "2026-09-12", "type": "Payment Receipt", "category": "Billing/Payments"}]}}
-    assert [d["date"] for d in site._docs_from_api(body)] == ["2026-09-12"]
+        {"creationDate": "2026-05-08", "type": "Payment Receipt", "category": "Billing/Payments"}]}}
+    assert [d["date"] for d in site._docs_from_api(body)] == ["2026-05-08"]
     assert site.is_future(ahead)
     assert not site.is_future(date.today().isoformat())
     assert not site.is_future((date.today() + timedelta(days=1)).isoformat()), "a clock a day apart"
@@ -307,12 +311,12 @@ def test_records_an_older_version_dated_2028_are_forgotten_on_discovery():
     looking for 2028 on a page that only carries 2026 (#37)."""
     import statefarm_docs
     records = {
-        "Statement:2028-06-12:Payment Receipt - Billing/Payments:": {"date": "2028-06-12", "state": "needs_manual_review"},
-        "Statement:2026-09-12:Payment Receipt - Billing/Payments:": {"date": "2026-09-12", "state": "discovered"},
-        "Insurance:2028-07-21:kept:": {"date": "2028-07-21", "downloaded_ok": True},
+        "Statement:2028-02-19:Payment Receipt - Billing/Payments:": {"date": "2028-02-19", "state": "needs_manual_review"},
+        "Statement:2026-05-08:Payment Receipt - Billing/Payments:": {"date": "2026-05-08", "state": "discovered"},
+        "Insurance:2028-03-13:kept:": {"date": "2028-03-13", "downloaded_ok": True},
     }
     assert statefarm_docs.drop_future_records(records) == 1
-    assert sorted(r["date"] for r in records.values()) == ["2026-09-12", "2028-07-21"], \
+    assert sorted(r["date"] for r in records.values()) == ["2026-05-08", "2028-03-13"], \
         "a record that was ever downloaded is kept, so a deleted file never comes back"
 
 
@@ -325,9 +329,9 @@ def test_a_future_date_is_never_selected_for_download():
     app.args = types.SimpleNamespace(type=None, year=None, start_date=None, end_date=None)
     app.config = {}
     future = statefarm_docs.Document(title="Payment Receipt - Billing/Payments",
-                                     category=doc_types.STATEMENT, date="2028-06-12")
+                                     category=doc_types.STATEMENT, date="2028-02-19")
     real = statefarm_docs.Document(title="Payment Receipt - Billing/Payments",
-                                   category=doc_types.STATEMENT, date="2026-09-12")
+                                   category=doc_types.STATEMENT, date="2026-05-08")
     assert app._in_scope(real)
     assert not app._in_scope(future)
 
@@ -373,6 +377,63 @@ def test_the_document_pressed_is_the_one_of_the_wanted_type():
     assert el is None and "nothing" in why
 
 
+class _Store:
+    def __init__(self):
+        self.data = {}
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def update(self, key, value, save=True):
+        self.data.setdefault(key, {}).update(value)
+
+    def save(self, backup=False):
+        pass
+
+
+def _bare_app():
+    """An App with no browser, no files and no config behind it."""
+    import types
+    import statefarm_docs
+    app = statefarm_docs.App.__new__(statefarm_docs.App)
+    app.args = types.SimpleNamespace(start_date=None)
+    app.config = {}
+    app.rules = RULES
+    app.stats = {"skipped_out_of_scope": 0}
+    app.discovery = _Store()
+    return app
+
+
+def test_discovery_keeps_the_file_address_the_list_gave():
+    """Every download-attempt.json he sent said "neither an id nor an
+    address" while the list's own shape carried documentId and filePathUrl
+    on every entry. Discovery read them and then dropped them, so the
+    download never had either (#37)."""
+    import statefarm_docs
+    app = _bare_app()
+    raw = site.RawDoc(title="Renewal Notice - Auto", account="Auto", date_text="2026-03-14",
+                      href="/DocumentCenterProxyV1/document/invented-one", kind="statement")
+    assert app._record_rawdoc(raw, site.BILLING_URL) == 1
+    [rec] = app.discovery.data.values()
+    assert rec["href"] == "/DocumentCenterProxyV1/document/invented-one"
+    assert statefarm_docs.Document.from_dict(rec).href == rec["href"]
+    # A record an earlier version discovered without it gets it on the next Discover.
+    rec["href"] = ""
+    assert app._record_rawdoc(raw, site.BILLING_URL) == 0
+    assert rec["href"] == "/DocumentCenterProxyV1/document/invented-one"
+
+
+def test_a_fetch_failure_is_traced_as_a_fixed_phrase():
+    """The error text can carry the address, which is not for a trace."""
+    assert site._fetch_failure(Exception("TypeError: Failed to fetch https://x.statefarm.com/d/abc")) \
+        == "the browser could not fetch it"
+    assert site._fetch_failure(Exception("Refusing an off-host document request")) \
+        == "the address is off statefarm.com"
+    assert "statefarm.com/d" not in site._fetch_failure(Exception("boom https://x.statefarm.com/d/abc"))
+    assert [site._answer_kind(b) for b in (b"", b"  <html>", b'{"a": 1}', b"%PDF")] == \
+        ["nothing", "html", "json", "other"]
+
+
 def test_the_download_opens_the_wanted_row_once_and_never_every_row():
     """Opening every row and then pressing the wanted row again pressed the
     same button twice, which folds the row away (#37)."""
@@ -382,3 +443,339 @@ def test_the_download_opens_the_wanted_row_once_and_never_every_row():
     assert "_open_row_then_document(" in src
     opener = inspect.getsource(site._open_row_then_document)
     assert opener.count(".click(") == 1, "the row's button is pressed once"
+
+
+# -- round eight, repair after review (#37) ------------------------------------
+
+def test_the_year_walk_says_what_each_year_answered():
+    """Discovery has found the current year only in every round since
+    0.33.0, and the walk wrote why to the log alone. A refusal, a year
+    with nothing in it and a fetch the browser would not make now read
+    differently, in facts."""
+    import json
+    from datetime import date
+    this_year = date.today().year
+    url = f"https://edocuments.statefarm.com/DocumentCenterProxyV1/customerMetadata?year={this_year}"
+
+    class _Refused(_YearPage):
+        def evaluate(self, js, target=None):
+            super().evaluate(js, target)
+            return {"status": 403, "type": "text/html; charset=utf-8"}
+    facts = {}
+    assert site._years_from(_Refused(), url, this_year, facts) == []
+    assert facts["years"] == [
+        {"year": this_year - 1, "status": 403, "type": "html", "listed": 0, "kept": 0},
+        {"year": this_year - 2, "status": 403, "type": "html", "listed": 0, "kept": 0}]
+    assert facts["stopped"] == "two years running with nothing in them"
+
+    class _Blocked(_YearPage):
+        def evaluate(self, js, target=None):
+            super().evaluate(js, target)
+            raise Exception("TypeError: Failed to fetch " + (target or ""))
+    facts = {}
+    site._years_from(_Blocked(), url, this_year, facts)
+    assert [y.get("failed") for y in facts["years"]] == \
+        ["the browser could not fetch it"] * site.YEARS_BACK
+    assert facts["stopped"] == "asked every year back to the limit"
+    assert "customerMetadata" not in json.dumps(facts)
+
+    one_dated = {"data": {"attributes": [
+        {"creationDate": "2026-02-03", "type": "Bill", "category": "Auto"}, {"type": "undated"}]}}
+    facts = {}
+    site._years_from(_YearPage({this_year - 1: one_dated}), url, this_year, facts)
+    assert facts["years"][0] == {"year": this_year - 1, "status": 200, "type": "json",
+                                 "listed": 2, "kept": 1}
+
+    facts = {}
+    site._years_from(_YearPage(), "https://x.statefarm.com/customerMetadata?commId=null", -1, facts)
+    assert facts == {"years": [], "stopped": "the list's address carries no year to change"}
+
+
+def _two_that_share_a_key():
+    first = site.RawDoc(title="Renewal Notice - Auto", account="Auto", date_text="2026-03-14",
+                        href="/DocumentCenterProxyV1/document/invented-first")
+    second = site.RawDoc(title="Renewal Notice - Auto", account="Auto", date_text="2026-03-14",
+                         href="/DocumentCenterProxyV1/document/invented-second")
+    return first, second
+
+
+def test_two_documents_that_share_a_key_keep_neither_address():
+    """Two renewal notices issued the same day have one key, and the key
+    cannot change because it is what remembers a download. Keeping the
+    address that came last would fetch one of the two under a record that
+    stands for both, so neither is kept and the download says why."""
+    import statefarm_docs
+    app = _bare_app()
+    first, second = _two_that_share_a_key()
+    app._begin_discovery_pass()
+    assert app._record_rawdoc(first, site.BILLING_URL) == 1
+    [key] = list(app.discovery.data)
+    assert app._record_rawdoc(second, site.BILLING_URL) == 0
+    assert list(app.discovery.data) == [key], "the key does not change"
+    rec = app.discovery.data[key]
+    assert rec["href"] == "" and rec["shared_key"] is True
+    assert statefarm_docs.Document.from_dict(rec).shared_key
+    # A third read of the same entry in the same pass does not bring one back.
+    app._record_rawdoc(first, site.BILLING_URL)
+    assert rec["href"] == ""
+    # The next read of the list holds only one of them, which gets its address.
+    app._begin_discovery_pass()
+    app._record_rawdoc(first, site.BILLING_URL)
+    assert rec["href"] == first.href and rec["shared_key"] is False
+
+
+def test_discover_starts_a_fresh_pass_and_keeps_what_the_list_read_said(monkeypatch):
+    app = _bare_app()
+    app.page = lambda: object()
+    app.check_session = lambda page: None
+    first, second = _two_that_share_a_key()
+    monkeypatch.setattr(site, "goto_documents", lambda page: True)
+
+    def collect(page, facts=None):
+        facts["page_list_answers"] = 1
+        return [first, second]
+    monkeypatch.setattr(site, "collect_download_docs", collect)
+    app._shared_this_pass = {"a key an earlier read shared"}
+    app.cmd_discover(quiet=True)
+    assert app._discovery_facts == {"page_list_answers": 1, "found": 2, "sharing_a_key": 1}
+
+
+def test_the_attempt_file_is_built_from_facts():
+    """download-attempt.json is posted on a public issue. Where the page
+    ended up is facts about its address, and how the list was read goes
+    with it."""
+    import json
+    import statefarm_docs
+    app = _bare_app()
+    app._discovery_facts = {"page_list_answers": 1, "stopped": "asked every year back to the limit",
+                            "years": [{"year": 2025, "failed": "the browser could not fetch it"}]}
+
+    class _Page:
+        url = "https://edocuments.statefarm.com/DocumentInformationUI/view/Jane_Q_Invented?t=abc"
+    doc = statefarm_docs.Document(title="Renewal Notice - Auto", date="2026-03-14")
+    got = app._attempt_report(doc, _Page(), [{"note": "an entry"}])
+    written = json.dumps(got)
+    assert "Jane_Q_Invented" not in written and "t=abc" not in written
+    assert got["landed_on"]["starts_with"] == "DocumentInformationUI" and got["landed_on"]["has_query"]
+    assert got["discovery"]["years"][0]["failed"] == "the browser could not fetch it"
+    assert got["date"] == "2026-03-14" and got["responses"] == [{"note": "an entry"}]
+    del app._discovery_facts
+    assert app._attempt_report(doc, _Page(), [])["discovery"] == {"note": "no Discover ran in this command"}
+
+
+class _CenterPage:
+    url = "https://edocuments.statefarm.com/DocumentCenterUI/"
+
+
+def _downloading_app(tmp_path, monkeypatch):
+    """An App whose download_one runs for real against a download_bill that
+    only says what it was handed, and records what it would write."""
+    import types
+    app = _bare_app()
+    app.config = {"max_path_length": 240}
+    app.paths = types.SimpleNamespace(folder_for=lambda cat: tmp_path, diagnostics=tmp_path)
+    app._dl_dir = tmp_path
+    app._requests = object()
+    app.stats.update({"duplicate_filenames": 0, "manual_review": 0})
+    app.check_session = lambda page: None
+    app.progress = _Store()
+    app.rows, app.failures, app.asked = [], [], []
+    app._write_row = lambda doc, status, processing: app.rows.append((status, processing))
+    app.write_failure = lambda *a, **k: app.failures.append(a)
+
+    def download_bill(page, dl_dir, iso, out, **kw):
+        app.asked.append(kw)
+        kw["trace"].append({"note": "an entry"})
+        return False
+    monkeypatch.setattr(site, "goto_documents", lambda page: True)
+    monkeypatch.setattr(site, "download_bill", download_bill)
+    return app
+
+
+def test_the_download_is_handed_the_census_and_the_file_address(monkeypatch, tmp_path):
+    """The file address and every press of a document happen while the
+    run's census is not listening, so the download has to be handed the
+    census, and the address discovery kept."""
+    import json
+    import statefarm_docs
+    app = _downloading_app(tmp_path, monkeypatch)
+    doc = statefarm_docs.Document(title="Renewal Notice - Auto", category="Statement", date="2026-03-14",
+                                  href="/DocumentCenterProxyV1/document/invented-one")
+    app.download_one(_CenterPage(), doc, "invented.pdf")
+    [kw] = app.asked
+    assert kw["census"] is app._requests and kw["hint"] == doc.href and kw["shared"] is False
+    assert kw["twins"] == 0
+    attempt = json.loads((tmp_path / "download-attempt.json").read_text(encoding="utf-8"))
+    assert attempt["landed_on"]["host"] == "edocuments.statefarm.com"
+    assert attempt["responses"] == [{"note": "an entry"}]
+    assert app.rows == [("Capture failed", "Needs Manual Review")] and len(app.failures) == 1
+
+
+def test_a_record_that_stands_for_two_documents_goes_to_manual_review_untouched(monkeypatch, tmp_path):
+    """Saving either document under it would mark it done for good and the
+    other would never be fetched. Nothing is asked of the page, and since
+    nothing on the page went wrong it takes neither download-attempt.json
+    nor the run's one failure file from a document that did fail. Run
+    twice, the way two Pilots would, its note is written once, because each
+    run starts from the discovery record and not from the last note."""
+    import statefarm_docs
+    from paperpull_core.models import State
+    app = _downloading_app(tmp_path, monkeypatch)
+    rec = statefarm_docs.Document(title="Renewal Notice - Auto", category="Statement",
+                                  date="2026-03-14", shared_key=True).to_dict()
+    key = statefarm_docs.Document.from_dict(rec).key
+    app.discovery.data[key] = rec
+    for _ in range(2):
+        app.download_one(_CenterPage(), statefarm_docs.Document.from_dict(app.discovery.data[key]),
+                         "invented.pdf")
+    assert not app.asked, "download_bill was never called"
+    assert not (tmp_path / "download-attempt.json").exists() and not app.failures
+    done = app.progress.data[key]
+    assert done["state"] == State.NEEDS_MANUAL_REVIEW.value
+    assert done["notes"] == statefarm_docs.SHARED_NOTE
+    assert app.rows == [("Two documents share this record", "Needs Manual Review")] * 2
+    assert app.stats["manual_review"] == 2
+
+
+def test_the_download_is_told_how_many_documents_share_its_date_and_type(monkeypatch, tmp_path):
+    """A Renewal Notice for a car and one for a house on one day have
+    different records, and the page's rows cannot say which is which. The
+    download is told there is another, from the last Discover when one ran,
+    so a record the list no longer holds does not count."""
+    import statefarm_docs
+    app = _downloading_app(tmp_path, monkeypatch)
+    records = [statefarm_docs.Document(title=t, category="Statement", date=d)
+               for t, d in (("Renewal Notice - Auto", "2026-03-14"),
+                            ("Renewal Notice - Homeowners", "2026-03-14"),
+                            ("Payment Receipt - Billing/Payments", "2026-03-14"),
+                            ("Renewal Notice - Auto", "2026-03-15"))]
+    for r in records:
+        app.discovery.data[r.key] = r.to_dict()
+    car = records[0]
+    app.download_one(_CenterPage(), car, "invented.pdf")
+    assert app.asked[-1]["twins"] == 1
+    # The last Discover saw only the car's notice, so the house's is gone.
+    app._idents_this_pass = {car.key: "invented-id-1", records[2].key: "invented-id-2"}
+    app.download_one(_CenterPage(), car, "invented.pdf")
+    assert app.asked[-1]["twins"] == 0
+
+
+def test_what_the_list_gave_in_place_of_an_address_is_named_by_its_kind():
+    """Anything without a slash in it used to read as "an id". A path with
+    backslashes or a bare file name is not one, and the next repair needs
+    to know which it was, without the value."""
+    assert site._hint_word("") == "neither an id nor an address"
+    assert site._hint_word("0f8e7d6c-1a2b-4c3d") == "an id and no address"
+    assert site._hint_word("\\\\invented-share\\Jane_Q_Invented\\a.pdf") == \
+        "a path written with backslashes, which this app does not ask for"
+    assert site._hint_word("Jane_Q_Invented.pdf") == \
+        "a file name with no path, which this app does not ask for"
+    assert site._hint_word("Jane Q Invented") == "a value that is neither an id nor an address"
+
+
+def test_discovery_says_how_the_list_answered_in_counts_and_listed_words():
+    """Only the current year has been found in every round. Discover now
+    says what each earlier year answered, in lines that can be pasted
+    into an issue, so every word in them comes from the site's list."""
+    import statefarm_docs
+    facts = {"page_list_answers": 1, "page_list_listed": 4, "page_list_kept": 3,
+             "years": [{"year": 2025, "status": 403, "type": "html", "listed": 0, "kept": 0},
+                       {"year": 2024, "failed": "the browser could not fetch it"},
+                       {"year": 2023, "status": 200, "type": "json", "listed": 2, "kept": 0,
+                        "answer": "not readable as json"}],
+             "stopped": "two years running with nothing in them", "sharing_a_key": 1}
+    assert statefarm_docs.discovery_lines(facts) == [
+        "The page's own read of State Farm's list listed 4 and kept 3, in 1 answer(s).",
+        "Year 2025 answered with status 403 and html, listed 0, kept 0.",
+        "Year 2024 failed, the browser could not fetch it.",
+        "Year 2023 answered with status 200 and json, listed 2, kept 0, not readable as json.",
+        "The year walk ended because two years running with nothing in them.",
+        "1 record(s) stand for two documents in the list, so neither is saved."]
+    assert "No earlier year was asked for." in statefarm_docs.discovery_lines({"page_list_answers": 1})
+    odd = {"page_list_listed": "Jane", "stopped": "jane q invented moved away",
+           "years": [{"year": "Jane", "status": "403", "type": "application/json; name=jane",
+                      "failed": "", "answer": "jane"},
+                     {"year": 2025, "failed": "https://edocuments.statefarm.com/Jane_Q_Invented"}]}
+    written = " ".join(statefarm_docs.discovery_lines(odd)).lower()
+    assert "jane" not in written and "http" not in written and "name=" not in written, written
+    assert statefarm_docs.discovery_lines({}) == [] and statefarm_docs.discovery_lines(None) == []
+
+
+def test_every_word_the_year_walk_writes_is_on_the_list():
+    """A phrase added to the walk and not to the list would print as
+    "another word" and say nothing."""
+    import re as _re
+    src = __import__("inspect").getsource(site._years_from)
+    for phrase in _re.findall(r'stopped = "([^"]+)"', src) + _re.findall(r'"answer"\] = "([^"]+)"', src):
+        assert phrase in site.FACT_WORDS, phrase
+    for e in (Exception("Refusing an off-host request"), Exception("Failed to fetch"), Exception("x")):
+        assert site._fetch_failure(e) in site.FACT_WORDS
+    for ct in ("application/json", "application/pdf", "text/html", "text/xml", "text/plain",
+               "image/png", "application/octet-stream", "application/x-invented", ""):
+        assert site._kind_of(ct) in site.FACT_WORDS, ct
+
+
+def test_discover_prints_how_the_list_answered(monkeypatch, capsys):
+    app = _bare_app()
+    app.page = lambda: object()
+    app.check_session = lambda page: None
+    monkeypatch.setattr(site, "goto_documents", lambda page: True)
+
+    def collect(page, facts=None):
+        facts.update({"page_list_answers": 1, "page_list_listed": 1, "page_list_kept": 1,
+                      "years": [{"year": 2025, "status": 403, "type": "html", "listed": 0, "kept": 0}],
+                      "stopped": "two years running with nothing in them"})
+        return [site.RawDoc(title="Renewal Notice - Auto", account="Auto", date_text="2026-03-14",
+                            href="/DocumentCenterProxyV1/document/invented-one")]
+    monkeypatch.setattr(site, "collect_download_docs", collect)
+    app.cmd_discover()
+    out = capsys.readouterr().out
+    assert "Year 2025 answered with status 403 and html, listed 0, kept 0." in out, out
+    assert "The year walk ended because two years running with nothing in them." in out, out
+
+
+def _entry(doc_id, address):
+    return {"creationDate": "03/14/2026", "category": "Auto", "type": "Renewal Notice",
+            "documentId": doc_id, "filePathUrl": address}
+
+
+def _read_list(monkeypatch, *entries):
+    monkeypatch.setattr(site, "_capture_docs",
+                        lambda page: ([{"data": {"attributes": list(entries)}}], []))
+    return site.collect_download_docs(object())
+
+
+def _recorded(docs):
+    app = _bare_app()
+    app._begin_discovery_pass()
+    for r in docs:
+        app._record_rawdoc(r, site.BILLING_URL)
+    [rec] = app.discovery.data.values()
+    return rec
+
+
+def test_one_document_is_one_and_two_documents_are_two(monkeypatch):
+    """A document is told from another by its document id, else by its
+    address. Folding on the date and title alone hid two documents that
+    share them. Folding on the address as well split one document whose
+    address differed between two reads, and a record split that way is
+    refused for good."""
+    one = _read_list(monkeypatch, _entry("invented-id-1", "/DocumentCenterProxyV1/document/a"),
+                     _entry("invented-id-1", "/DocumentCenterProxyV1/document/b"))
+    assert len(one) == 1
+    rec = _recorded(one + one)
+    assert rec["shared_key"] is False and rec["href"] == "/DocumentCenterProxyV1/document/a"
+
+    no_ids = _read_list(monkeypatch, _entry("", "/DocumentCenterProxyV1/document/a"),
+                        _entry("", "/DocumentCenterProxyV1/document/b"))
+    assert len(no_ids) == 2
+    rec = _recorded(no_ids)
+    assert rec["shared_key"] is True and rec["href"] == ""
+
+    # Two ids and one address is still two documents, and the one address
+    # would be fetched for a record that stands for both.
+    one_address = _read_list(monkeypatch, _entry("invented-id-1", "/DocumentCenterProxyV1/document/a"),
+                             _entry("invented-id-2", "/DocumentCenterProxyV1/document/a"))
+    assert len(one_address) == 2
+    rec = _recorded(one_address)
+    assert rec["shared_key"] is True and rec["href"] == ""

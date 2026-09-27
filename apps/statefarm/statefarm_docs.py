@@ -88,6 +88,11 @@ class Document:
         # after importing it into paperless-ngx).
         self.downloaded_ok = kw.get("downloaded_ok", False)
         self.href = href
+        # Two entries in the Document Center's list with this record's date,
+        # type and category share its key, so which one's file address it
+        # held depended on the order of the list. When that happens no
+        # address is kept and this says why (#37). Not part of the key.
+        self.shared_key = bool(kw.get("shared_key", False))
         self.row_index = row_index
         self.confidence = confidence
         self.state = kw.get("state", State.DISCOVERED.value)
@@ -145,6 +150,55 @@ def drop_future_records(records: dict) -> int:
     for k in stale:
         del records[k]
     return len(stale)
+
+
+SHARED_NOTE = ("Two documents in the list share this date, type and category, "
+               "so neither was saved under this one record")
+
+
+def _count(value) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _word(value) -> str:
+    """One of the site module's own fixed words or phrases, from its list,
+    or a fixed phrase in its place."""
+    return value if isinstance(value, str) and value in site.FACT_WORDS else "another word"
+
+
+def discovery_lines(facts) -> List[str]:
+    """How State Farm's document list answered a Discover, as lines to print.
+
+    Only the current year has been found in every round, and the per-year
+    answers used to reach nobody unless a download failed and wrote
+    download-attempt.json (#37). Each line is counts, years, statuses and
+    the fixed words the site module gives, so it is safe to paste into an
+    issue. Nothing a page printed is in it."""
+    if not isinstance(facts, dict) or not facts:
+        return []
+    out = ["The page's own read of State Farm's list listed %d and kept %d, in %d answer(s)."
+           % (_count(facts.get("page_list_listed")), _count(facts.get("page_list_kept")),
+              _count(facts.get("page_list_answers")))]
+    years = [y for y in (facts.get("years") or []) if isinstance(y, dict)]
+    for y in years[:10]:
+        head = "Year %d" % _count(y.get("year"))
+        if y.get("failed"):
+            out.append("%s failed, %s." % (head, _word(y["failed"])))
+            continue
+        line = "%s answered with status %d and %s, listed %d, kept %d" % (
+            head, _count(y.get("status")), _word(y.get("type") or "nothing"),
+            _count(y.get("listed")), _count(y.get("kept")))
+        if y.get("answer"):
+            line += ", %s" % _word(y["answer"])
+        out.append(line + ".")
+    if not years:
+        out.append("No earlier year was asked for.")
+    if facts.get("stopped"):
+        out.append("The year walk ended because %s." % _word(facts["stopped"]))
+    if _count(facts.get("sharing_a_key")):
+        out.append("%d record(s) stand for two documents in the list, so neither is saved."
+                   % _count(facts.get("sharing_a_key")))
+    return out
 
 
 class App:
@@ -422,16 +476,45 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        # The href is the file address the Document Center's list gave, or
+        # its document id when it gave no address. It was dropped here, so
+        # the download never had it and every download-attempt.json said
+        # "neither an id nor an address" whatever the list held (#37).
         doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+                       date=date, confidence=confidence, source_url=source_url,
+                       href=r.href or "")
+        # Two entries with the same date, type and category share a key,
+        # and the key cannot change, since it is what remembers a download.
+        # Keeping whichever address came last would fetch one of them under
+        # a record that stands for both, so neither address is kept (#37).
+        # Two entries are two documents when their document ids differ, or
+        # their addresses when the list gave no id. One document whose
+        # address differs between two reads is still one.
+        ident = getattr(r, "ident", "") or doc.href
+        idents = self.__dict__.setdefault("_idents_this_pass", {})
+        shared = self.__dict__.setdefault("_shared_this_pass", set())
+        if doc.key in idents and idents[doc.key] != ident:
+            shared.add(doc.key)
+        idents.setdefault(doc.key, ident)
+        if doc.key in shared:
+            doc.href, doc.shared_key = "", True
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
-        # refresh which page the doc's download link lives on
-        self.discovery.update(doc.key, {"source_url": source_url}, save=False)
+        # refresh which page the doc's download link lives on, and the
+        # address, so a record discovered before this change picks it up
+        self.discovery.update(doc.key, {"source_url": source_url, "href": doc.href,
+                                        "shared_key": doc.shared_key}, save=False)
         return 0
+
+    def _begin_discovery_pass(self) -> None:
+        """Forget which keys the last read of the list gave, so a document
+        that shared its key then and does not now gets its address back."""
+        self._idents_this_pass = {}
+        self._shared_this_pass = set()
+        self._discovery_facts = {}
 
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
@@ -442,9 +525,12 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        self._begin_discovery_pass()
+        docs = site.collect_download_docs(page, self._discovery_facts)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
+        self._discovery_facts["found"] = len(docs)
+        self._discovery_facts["sharing_a_key"] = len(self._shared_this_pass)
         dropped = drop_future_records(self.discovery.data)
         if dropped:
             log.info("forgot %d document(s) an older version dated in the future", dropped)
@@ -471,6 +557,11 @@ class App:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
+            # How the list answered, for every Discover and not only one that
+            # ends in a failed download, since only the current year has ever
+            # been found and nothing said why (#37).
+            for line in discovery_lines(self._discovery_facts):
+                print(f"  {line}")
         return n_new
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
@@ -544,6 +635,18 @@ class App:
         inside the page when there is one, and otherwise clicks the row's
         own control and catches what arrives."""
         self.check_session(page)
+        # One record that stands for two documents cannot be saved as
+        # either, since it would be marked done and the other never fetched.
+        # Nothing on the page went wrong, so it takes neither the run's one
+        # failure file nor download-attempt.json from a document that did
+        # fail (#37).
+        if doc.shared_key:
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=SHARED_NOTE)
+            self._write_row(doc, "Two documents share this record", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print("  Two documents in State Farm's list share this date, type and category,")
+            print("  so this one record cannot stand for either. Nothing was pressed.")
+            return
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
         # Two documents on one day used to differ by " (2)", which says
@@ -560,7 +663,9 @@ class App:
             site.goto_documents(page)
         trace: list = []
         saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                   title=doc.title, trace=trace, hint=doc.href)
+                                   title=doc.title, trace=trace, hint=doc.href,
+                                   census=self._requests, shared=doc.shared_key,
+                                   twins=self._twins(doc))
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):
@@ -570,8 +675,7 @@ class App:
             import json as _json
             attempt = self.paths.diagnostics / "download-attempt.json"
             atomic_write_text(attempt, _json.dumps(
-                {"timestamp": now_iso(), "date": doc.date, "landed_on": site.redact(page.url or ""),
-                 "responses": trace[:80]}, indent=2))
+                self._attempt_report(doc, page, trace), indent=2))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -638,6 +742,47 @@ class App:
         else:
             self.stats["other"] += 1
         print(f"  Saved: {out_path.name}")
+
+    def _twins(self, doc: Document) -> int:
+        """How many other documents in the list have this one's date and
+        type, in another category.
+
+        The page finds a row by its date and the document in it by its
+        type, and neither says the category. With two such documents, a row
+        holding one of them could be pressed for the other and its PDF saved
+        under the other's name, so the site module presses no row for them
+        (#37). The last Discover's documents are counted when one ran in
+        this command, so a record the list no longer holds does not count,
+        and every record otherwise."""
+        want = site._type_key(doc.title)
+        if not want or not doc.date:
+            return 0
+        keys = getattr(self, "_idents_this_pass", None) or {}
+        pool = ([self.discovery.get(k) for k in keys] if keys
+                else list(self.discovery.data.values()))
+        n = 0
+        for rec in pool:
+            if not isinstance(rec, dict):
+                continue
+            other = Document.from_dict(rec)
+            if other.key != doc.key and other.date == doc.date \
+                    and site._type_key(other.title) == want:
+                n += 1
+        return n
+
+    def _attempt_report(self, doc: Document, page, trace: list) -> dict:
+        """download-attempt.json, the file a tester is asked to attach.
+
+        Every part of it is a count, a date, a status or a fixed word. Where
+        the page ended up is facts about its address rather than the
+        address, since after a press it can be a document's own. How the
+        list was read goes with it, because discovery has found the current
+        year only in every round and nothing said why (#37)."""
+        return {"timestamp": now_iso(), "date": doc.date,
+                "landed_on": site.url_mask(getattr(page, "url", "") or ""),
+                "discovery": dict(getattr(self, "_discovery_facts", None)
+                                  or {"note": "no Discover ran in this command"}),
+                "responses": trace[:80]}
 
     # -- records -----------------------------------------------------------
 
