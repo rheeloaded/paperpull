@@ -22,6 +22,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Built and run on the maintainer's own account.
 
 ### Fixed
+- **Apple Card takes a statement where the page builds it (#52).** On the
+  tester's Chrome both August statements downloaded, twice, with Chrome's
+  own download menu open, and the app saw neither copy, so the newest
+  statement of each list went unsaved. The app now keeps the PDF the page
+  makes for the download and saves that, whatever the browser does with the
+  download itself, and checks Apple's name for it as before. A PDF another
+  Apple host hands the page is caught the same way.
 - **Names like iCloud, iPhone and eBay keep their spelling in file
   names.** A word with a small first letter and a capital second one was
   capitalized into ICloud+ and IPhone. Rename brings older files in line.

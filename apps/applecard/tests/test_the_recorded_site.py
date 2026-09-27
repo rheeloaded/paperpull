@@ -931,3 +931,70 @@ def test_every_word_a_trace_here_writes_is_one_the_attempt_file_keeps():
     for message in ("Timeout 8000ms exceeded", "strict mode violation", "element is not visible",
                     "<div> intercepts pointer events", "Element is not attached to the DOM", "boom"):
         assert site._click_failure(RuntimeError(message)) in site._TRACE_WORDS, message
+
+
+# -- the file the page made, when the browser's own download never arrives ------
+#
+# RECORDED (#52, 0.38.0). The tester's Chrome downloaded both August
+# statements twice, with its own download menu open in the address bar, and
+# nothing reached the folder the app watches or its download event. Here the
+# browser's download is made to fail the same way, so the only way left to
+# save the file is where the page built it.
+
+def _downloads_never_arrive(monkeypatch):
+    from paperpull_core import receipt_pdf
+
+    def lost(download, out_path):
+        raise RuntimeError("the browser kept this download to itself")
+
+    monkeypatch.setattr(receipt_pdf, "save_download", lost)
+
+
+def test_the_file_the_page_made_is_taken_when_the_download_never_arrives(browser, tmp_path, monkeypatch):
+    _downloads_never_arrive(monkeypatch)
+    page, served = _open(browser)
+    page.goto("https://card.apple.com/")
+    out = tmp_path / "card.pdf"
+    trace = []
+    assert site.download_bill(page, None, "2031-02-28", out,
+                              title="Apple Card Statement - February 2031", trace=trace), trace
+    assert b"card February 2031" in out.read_bytes()
+    made = [t for t in trace if t.get("note") == "the page made the document itself"]
+    assert made == [{"note": "the page made the document itself", "named": True}], trace
+    assert page.evaluate("window.presses") == 1
+
+
+def test_a_file_made_for_the_document_before_is_never_taken_for_the_next(browser, tmp_path, monkeypatch):
+    """Arming the watch again for each document forgets what it kept, so
+    the second document can only be taken from its own press."""
+    _downloads_never_arrive(monkeypatch)
+    page, served = _open(browser)
+    page.goto("https://card.apple.com/")
+    for n, (title, iso, want) in enumerate([
+            ("Apple Card Statement - February 2031", "2031-02-28", b"card February 2031"),
+            ("Apple Card Statement - January 2031", "2031-01-31", b"card January 2031")]):
+        out = tmp_path / ("%d.pdf" % n)
+        assert site.download_bill(page, None, iso, out, title=title), title
+        assert want in out.read_bytes(), title
+
+
+def test_a_made_file_apple_named_for_another_document_is_refused(browser, tmp_path, monkeypatch):
+    _downloads_never_arrive(monkeypatch)
+    page, served = _open(browser, mode="misname")
+    page.goto("https://card.apple.com/")
+    out = tmp_path / "tax.pdf"
+    trace = []
+    assert not site.download_bill(page, None, "2030-12-31", out, title="Tax Document - 2030", trace=trace)
+    assert not out.exists()
+    assert any(t.get("note") == "apple named the file for another document" for t in trace), trace
+    assert not any(t.get("note") == "the page made the document itself" for t in trace), trace
+
+
+def test_only_apples_own_hosts_may_hand_over_a_pdf_in_passing():
+    assert site._is_apple_file_host("https://card.apple.com/x.pdf")
+    assert site._is_apple_file_host("https://statements.apple.com/doc?id=1")
+    assert site._is_apple_file_host("https://apple.com/a.pdf")
+    for url in ("http://statements.apple.com/a.pdf", "https://apple.com.example.net/a.pdf",
+                "https://evilapple.com/a.pdf", "https://user@statements.apple.com/a.pdf",
+                "https://statements.apple.com:8443/a.pdf", "not a url", ""):
+        assert not site._is_apple_file_host(url), url

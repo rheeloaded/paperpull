@@ -1327,6 +1327,7 @@ _TRACE_WORDS = frozenset(KINDS) | frozenset({
     "clicked", "click failed", "clicked through the DOM instead", "DOM click failed too",
     "after the click", "second step clicked", "second step click failed",
     "pressed again", "the second press failed",
+    "the page made the document itself", "another apple host",
     "the list was opened for this document", "the list was already open",
     "the control's own link did not answer with a PDF",
     "apple named the file for another document",
@@ -1399,6 +1400,108 @@ def _press_again(el, label: str, trace: Optional[list] = None) -> bool:
     return True
 
 
+# RECORDED (#52). The recording saw each download arrive under Apple's file
+# name with no request for it on card.apple.com, so the page builds the PDF
+# itself. On 0.38.0 the tester's Chrome downloaded both August statements
+# twice, its own download menu open in the address bar, while nothing
+# reached the folder this app watches or its download event. So the file is
+# also taken where the page hands it to the browser. URL.createObjectURL is
+# wrapped to keep every PDF blob the page makes, and an anchor's click to
+# keep the name Apple gives the file, and both are passed on unchanged, so
+# the page and the browser do exactly what they did before. Nothing is
+# pressed, blocked or suppressed. Arming it again clears what it kept, so a
+# document is only ever taken from a blob made after its own press began.
+_BLOB_HOOK_JS = r"""() => {
+  window.__paperpullBlobs = [];
+  window.__paperpullNames = [];
+  if (window.__paperpullBlobHook) return true;
+  window.__paperpullBlobHook = true;
+  const made = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = function (obj) {
+    const url = made(obj);
+    try {
+      if (obj instanceof Blob && ['application/pdf', 'application/octet-stream', ''].includes(obj.type)) {
+        window.__paperpullBlobs.push({url, blob: obj});
+      }
+    } catch (e) {}
+    return url;
+  };
+  const clicked = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    try {
+      if (this.download) window.__paperpullNames.push({href: this.href, name: String(this.download)});
+    } catch (e) {}
+    return clicked.apply(this, arguments);
+  };
+  return true;
+}"""
+
+# The newest PDF blob the page made since the hook was armed, as base64, with
+# the name its anchor gave it, or empty. Anything that does not begin with
+# the PDF marker, or is implausibly small or large, is passed over.
+_TAKE_BLOB_JS = r"""async () => {
+  const blobs = window.__paperpullBlobs || [];
+  const names = window.__paperpullNames || [];
+  for (let i = blobs.length - 1; i >= 0; i--) {
+    const {url, blob} = blobs[i];
+    if (!blob || blob.size < 100 || blob.size > 30000000) continue;
+    const head = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
+    if (String.fromCharCode(...head) !== '%PDF-') continue;
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let s = '';
+    for (let j = 0; j < buf.length; j += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(j, j + 0x8000));
+    const named = names.filter(n => n.href === url).map(n => n.name);
+    return {b64: btoa(s), name: named.length ? named[named.length - 1] : '', count: blobs.length};
+  }
+  return {b64: '', name: '', count: blobs.length};
+}"""
+
+
+def _arm_blob_hook(page) -> bool:
+    """Start keeping the PDF blobs the page makes, and forget any kept for
+    an earlier document. False when the page could not be asked."""
+    try:
+        return bool(page.evaluate(_BLOB_HOOK_JS))
+    except Exception:
+        return False
+
+
+def _take_blob(page) -> Optional[Tuple[bytes, str]]:
+    """The newest PDF the page made since the hook was armed, and the name
+    Apple gave it, or None."""
+    try:
+        got = page.evaluate(_TAKE_BLOB_JS)
+    except Exception:
+        return None
+    if not isinstance(got, dict) or not got.get("b64"):
+        return None
+    import base64
+    try:
+        data = base64.b64decode(got["b64"])
+    except Exception:
+        return None
+    if data[:5] != b"%PDF-":
+        return None
+    return data, str(got.get("name") or "")
+
+
+def _is_apple_file_host(url: str) -> bool:
+    """An https address on apple.com or one of its own subdomains, the only
+    other place a statement's PDF may be read from as it goes past. Only
+    read, never opened or asked for by this app except to fetch the very
+    answer the page received."""
+    try:
+        parts = urlsplit(url or "")
+    except ValueError:
+        return False
+    host = (parts.hostname or "").lower().rstrip(".")
+    if parts.scheme != "https" or parts.username or parts.password:
+        return False
+    if parts.port not in (None, 443):
+        return False
+    return host == "apple.com" or host.endswith(".apple.com")
+
+
 def _new_names(dl_dir, before: set) -> List[str]:
     """The finished files that appeared in the download folder since
     `before`, by name."""
@@ -1466,11 +1569,17 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     def on_response(res):
         try:
             url = res.url or ""
-            if not is_safe_url(url):
+            ours = is_safe_url(url)
+            if not ours and not _is_apple_file_host(url):
                 return
             ct = (res.headers.get("content-type") or "").lower()
             if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
-                trace.append({"status": res.status, "type": _type_word(ct), "url": mask_href(url)})
+                entry = {"status": res.status, "type": _type_word(ct), "url": mask_href(url)}
+                if not ours:
+                    entry["from"] = "another apple host"
+                trace.append(entry)
+            if not ours and "pdf" not in ct and "octet" not in ct:
+                return
             if got:
                 return
             if "pdf" in ct or "octet" in ct:
@@ -1489,6 +1598,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     before = set(ctx.pages)
     seen = _snapshot(dl_dir)
     controls_before = _control_texts(page)
+    hooked = _arm_blob_hook(page)
 
     def landed() -> bool:
         if refused:
@@ -1519,6 +1629,18 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                     return True
             except Exception:
                 pass
+        # The PDF the page built itself, whatever the browser then did with
+        # its download (_BLOB_HOOK_JS). Checked against Apple's name for it
+        # the same way as every other arrival.
+        made = _take_blob(page) if hooked else None
+        if made:
+            data, name = made
+            if name and not named_right(name):
+                return False
+            out_path.write_bytes(data)
+            if trace is not None:
+                trace.append({"note": "the page made the document itself", "named": bool(name)})
+            return True
         # A real Edge or Chrome saves the file itself, under Apple's name.
         for name in _new_names(dl_dir, seen):
             if not named_right(name):

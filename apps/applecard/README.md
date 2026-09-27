@@ -182,15 +182,16 @@ Known from the first Pilot on a real account (#52, 0.37.1).
 
 - **A download reaches the app.** Three statements were saved, card and
   Savings both.
-- **The first press on a list the app has just opened can come to
-  nothing.** On the card's statements and on the Savings statements
-  alike, that press produced no download, no file, no tab and nothing new
-  on the page, and every later press on the same list downloaded at
-  once. It was not a slow download, since no file for it ever reached a
-  later press. Why the page ignores it is not known, so a press that
-  produces nothing at all is made once more on the same button, found
-  again by its name. A press that puts anything new on the page is never
-  repeated.
+- **A press can download without the app seeing it.** On the card's
+  statements and on the Savings statements alike, the first press on a
+  list the app had just opened seemed to produce nothing, and 0.38.0 pressed
+  once more. The tester then saw Chrome download that statement twice, its
+  own download menu open in the address bar, while nothing reached the
+  folder the app watches or its download event. So the app now also takes
+  the PDF where the page builds it, before the browser does anything with
+  the download, and checks Apple's name for it like any other arrival. A
+  press that produces nothing at all is still made once more, and one that
+  puts anything new on the page is never repeated.
 
 A guess, marked GUESS in the code.
 
