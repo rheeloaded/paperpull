@@ -18,8 +18,8 @@ Two things had to be true of the folder first, and are. Nothing writes
 into it at run time (bytecode goes to the user's temp folder, settings to
 Roaming AppData), and the entry point is a real executable, because a
 manifest cannot name a .bat. PaperPull.exe is a few lines of C# compiled
-with the csc.exe that every Windows has, and it does what PaperPull.bat
-does. Start the panel, open the browser to it, wait.
+with the csc.exe that every Windows has, and the installer's shortcuts
+start it too. Start the panel, open the browser to it, wait.
 
 IDENTITY
 
@@ -125,10 +125,10 @@ def manifest(version: str, ident: dict, arch: str = "x64") -> str:
 """.format(version=version, arch=arch, **ident)
 
 
-LAUNCHER_CS = r'''// PaperPull.exe. What PaperPull.bat does, as an executable, because an
-// MSIX manifest cannot name a batch file. Start the panel under the
-// packaged Python, open the browser to it, wait. Closing this window or
-// pressing Ctrl+C stops the panel with it.
+LAUNCHER_CS = r'''// PaperPull.exe. Opens the control panel, for the installer's shortcuts
+// and for the MSIX, whose manifest cannot name a batch file. Start the
+// panel under the packaged Python, open the browser to it, wait. Closing
+// this window or pressing Ctrl+C stops the panel with it.
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -192,7 +192,7 @@ def find_csc() -> Path | None:
 def compile_launcher(stage: Path, icon: Path | None, say) -> bool:
     csc = find_csc()
     if csc is None:
-        say("  csc.exe not found, PaperPull.exe not built (the .bat still works)")
+        say("  csc.exe not found, PaperPull.exe not built")
         return False
     src = stage.parent / "cache" / "launcher.cs"
     src.parent.mkdir(parents=True, exist_ok=True)
@@ -276,6 +276,14 @@ def find_makeappx() -> Path | None:
     return sdk_tool("makeappx.exe")
 
 
+# The terminal command and the installer's readme have no place in a Store
+# package, whose folder Windows keeps locked. The exe and the code are what
+# ship. Named in the case they are staged in, since this list once named a
+# launcher that no longer exists and, with Windows ignoring case, would have
+# deleted the terminal command by its name.
+STORE_LEAVES_OUT = ("paperpull.bat", "README-FIRST.txt")
+
+
 def pack(stage: Path, dist: Path, version_str: str, png256: bytes, say, arch: str = "x64") -> Path | None:
     """Stage the folder again with a manifest and assets beside it, and pack.
     Returns the .msix path, or None when makeappx is not on this machine."""
@@ -290,9 +298,7 @@ def pack(stage: Path, dist: Path, version_str: str, png256: bytes, say, arch: st
     if root.exists():
         shutil.rmtree(root)
     shutil.copytree(stage, root)
-    # The installer's own launcher and readme have no place in a Store
-    # package. The exe and the code are what ship.
-    for extra in ("PaperPull.bat", "README-FIRST.txt"):
+    for extra in STORE_LEAVES_OUT:
         p = root / extra
         if p.exists():
             p.unlink()

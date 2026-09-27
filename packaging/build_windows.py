@@ -291,23 +291,22 @@ def write_launchers() -> None:
     if icon.is_file():
         shutil.copy2(icon, STAGE / "paperpull.ico")
         say("  icon")
-    # PaperPull.exe does what PaperPull.bat does. The MSIX needs it, since a
-    # manifest cannot name a batch file, and it is in the installer too so
-    # both packages start the same way.
-    msix.compile_launcher(STAGE, icon if icon.is_file() else None, say)
-    (STAGE / "PaperPull.bat").write_text(
-        "@echo off\r\n"
-        "setlocal\r\n"
-        "cd /d \"%~dp0\"\r\n"
-        "rem The panel binds 127.0.0.1 only. Nothing is reachable from the network.\r\n"
-        "start \"\" http://127.0.0.1:8765\r\n"
-        "python\\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8765 --app-dir gui\r\n",
-        encoding="utf-8")
+    # PaperPull.exe opens the control panel. The installer's shortcuts start
+    # it, and so does the MSIX, whose manifest cannot name a batch file.
+    #
+    # There used to be a PaperPull.bat for the panel as well. Windows does
+    # not tell PaperPull.bat from paperpull.bat, the terminal command staged
+    # from the repo, so writing the one replaced the other, and from 0.19.0
+    # on no Windows package had a terminal command at all. Nothing written
+    # here may share a name with anything staged, whatever the case.
+    if not msix.compile_launcher(STAGE, icon if icon.is_file() else None, say):
+        raise SystemExit("PaperPull.exe was not built, and it is what opens the panel")
 
     (STAGE / "README-FIRST.txt").write_text(
         "PaperPull %s\r\n"
         "\r\n"
-        "Double-click PaperPull.bat. A browser tab opens with the control panel.\r\n"
+        "Double-click PaperPull.exe. A window opens running the control panel and\r\n"
+        "a browser tab opens to it. Close the window to stop it.\r\n"
         "\r\n"
         "The first time, it asks where your downloaders are. If you already have\r\n"
         "them, paste that folder's full path and it uses them exactly as they\r\n"
@@ -322,7 +321,22 @@ def write_launchers() -> None:
         "\r\n"
         "Your existing setup keeps working alongside this one, so there is no\r\n"
         "need to remove anything until you are happy with it.\r\n"
+        "\r\n"
+        "From a terminal, the same panel's commands are\r\n"
+        "  paperpull.bat <app> <command>\r\n"
+        "run in this folder.\r\n"
         % version(), encoding="utf-8")
+    check_terminal_command()
+
+
+def check_terminal_command() -> None:
+    """The terminal command must reach the package as the repo has it. A
+    launcher written over it under another case of the same name is the
+    one way it has gone missing before."""
+    staged, source = STAGE / "paperpull.bat", REPO / "paperpull.bat"
+    if not staged.is_file() or staged.read_bytes() != source.read_bytes():
+        raise SystemExit("the staged paperpull.bat is not the terminal command from the repo")
+    say("  paperpull.bat is the terminal command")
 
 
 def write_inno_script() -> Path:
@@ -356,14 +370,14 @@ UninstallDisplayIcon={app}\paperpull.ico
 Source: "PaperPull\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\PaperPull"; Filename: "{app}\PaperPull.bat"; WorkingDir: "{app}"; IconFilename: "{app}\paperpull.ico"
-Name: "{autodesktop}\PaperPull"; Filename: "{app}\PaperPull.bat"; WorkingDir: "{app}"; IconFilename: "{app}\paperpull.ico"; Tasks: desktopicon
+Name: "{group}\PaperPull"; Filename: "{app}\PaperPull.exe"; WorkingDir: "{app}"; IconFilename: "{app}\paperpull.ico"
+Name: "{autodesktop}\PaperPull"; Filename: "{app}\PaperPull.exe"; WorkingDir: "{app}"; IconFilename: "{app}\paperpull.ico"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
 
 [Run]
-Filename: "{app}\PaperPull.bat"; Description: "Open PaperPull now"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\PaperPull.exe"; Description: "Open PaperPull now"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 ; The program only. The user's downloaders, history and browser profiles are
@@ -374,7 +388,7 @@ Type: filesandordirs; Name: "{app}\python"
        # emulation. The native arm64 build is for ARM64 machines only.
        "arch_allowed": "x64compatible" if ARCH == "x64" else "arm64"},
         encoding="utf-8")
-    say("  wrote %s" % iss.relative_to(REPO))
+    say("  wrote %s" % iss)
     return iss
 
 

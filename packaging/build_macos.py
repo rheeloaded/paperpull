@@ -21,7 +21,7 @@ the machine every Mac sold since 2020 is, and an Intel build would double the
 matrix for a shrinking audience.
 
 The bundle's main executable opens a Terminal window running the panel and
-then opens the browser to it, the same shape as PaperPull.bat on Windows.
+then opens the browser to it, the same shape as PaperPull.exe on Windows.
 Closing the Terminal window stops it. The executable itself is a dozen lines
 of C, compiled on the build machine, because notarization requires a Mach-O
 main executable with the hardened runtime. It finds its own bundle and hands
@@ -184,7 +184,7 @@ def write_bundle() -> None:
     MACOS.mkdir(parents=True, exist_ok=True)
     icon = write_icon()
 
-    # What the Terminal window runs. Same shape as PaperPull.bat.
+    # What the Terminal window runs. Same shape as PaperPull.exe on Windows.
     (RES / "paperpull-panel.sh").write_text(
         '#!/bin/bash\n'
         '# The PaperPull control panel. Close this window to stop it.\n'
