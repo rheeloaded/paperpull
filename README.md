@@ -47,13 +47,12 @@ signed installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Forty-five providers are supported today, all built on the same pattern.
-Eleven more, Wells Fargo, SBA, Verizon Mobile, Golden 1, E*TRADE, State Farm,
+Ten more, Wells Fargo, SBA, Verizon Mobile, Golden 1, State Farm,
 Kroger, Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#31](https://github.com/rheeloaded/paperpull/issues/31),
 [#35](https://github.com/rheeloaded/paperpull/issues/35),
-[#36](https://github.com/rheeloaded/paperpull/issues/36),
 [#37](https://github.com/rheeloaded/paperpull/issues/37),
 [#41](https://github.com/rheeloaded/paperpull/issues/41),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
@@ -82,7 +81,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`ebay`](apps/ebay) | eBay | Order receipts, ten years of purchase history | **Confirmed by [@jpfieber](https://github.com/jpfieber), every order back to 2017.** Order-details page rendered to PDF, nothing clicked, real Edge/Chrome. Requested in [#44](https://github.com/rheeloaded/paperpull/issues/44) |
 | [`lowes`](apps/lowes) | Lowe's Home Improvement | Store and online receipts, and returns | **Built on the maintainer's own account.** The purchase history read by address, each purchase's details page saved as the receipt, nothing clicked, real Edge/Chrome |
 | [`homedepot`](apps/homedepot) | The Home Depot | Order receipts, with model and store SKU numbers | **Built on the maintainer's own account.** The history through the page's own request, Home Depot's own print receipt taken without opening the print dialog, nothing clicked, real Edge/Chrome. Home Depot keeps two years online |
-| [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms | **Untested, built without an account. Have one? [Help test it](apps/etrade/README.md#help-test-it-no-programming-needed)** Being tested by [@watling777](https://github.com/watling777). |
+| [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms | **Partly tested.** A Pilot on [@watling777](https://github.com/watling777)'s account saved two of four statements, and a repair for the other two is being tested ([#36](https://github.com/rheeloaded/paperpull/issues/36)) |
 | [`ezpassva`](apps/ezpassva) | E-ZPass Virginia | Monthly and quarterly toll statements | **Built on the maintainer's own account.** The portal's own statements list read from inside the page, nothing clicked; about a year is online, so run it at least once a year |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills | Mendix portal, driven like a person; PDFs for the last year only, so run it quarterly |
 | [`fedex`](apps/fedex) | FedEx Billing Online | Shipping invoices | **Untested, built from a login not connected to Billing Online. Use it? [Help test it](apps/fedex/README.md#help-test-it-no-programming-needed)** Requested in [#54](https://github.com/rheeloaded/paperpull/issues/54) |
@@ -523,8 +522,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 ## Status & roadmap
 
 - ✅ All **fifty-nine** apps pass their tests, the forty-five that are
-  supported, the three with a known issue and the eleven still waiting for a
-  tester, 9,594 of them across the repo. Most are in regular use by the author. The rest were built or
+  supported, the four with a known issue and the ten still waiting for a
+  tester, 9,605 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,

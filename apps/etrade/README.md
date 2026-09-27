@@ -1,11 +1,11 @@
 # E*TRADE document downloader
 
-**Not yet tested against a real account.** This app was built without
+**Partly tested against a real account.** This app was built without
 an E*TRADE brokerage or retirement account, so that someone who holds one can test it without
 writing code. It runs, its guards are tested, and every guess about
-etrade.com is marked in `etrade_site.py`. What it needs is a survey from a
-signed-in account, which the Diagnose button produces and which contains
-no personal data. The conversation is
+etrade.com is marked in `etrade_site.py`. On a real account Discover
+found thirteen documents, and a Pilot saved two of four statements. The other two came back inside the site's answer to the
+press, as JSON, which the app now reads the PDF out of. The conversation is
 [issue #36](https://github.com/rheeloaded/paperpull/issues/36).
 
 Downloads your E*TRADE **statements, trade confirmations and tax forms** as PDFs. Read-only,
@@ -119,8 +119,16 @@ paperpull etrade pilot            REM once the site layer is confirmed
   again. A PDF the site sends back as an answer is taken only when the
   request for it, or the request a redirect came from, was made during
   this document's attempt, so a late answer to the one before is not
-  saved under this name. A download event, or a file that lands in the
-  download folder, is not yet tied to the click that way.
+  saved under this name. Pressing a document's link makes the page ask
+  E*TRADE for it, and the answer is JSON with the PDF inside it as
+  base64, which the page hands to the browser as a download. The app
+  reads the PDF straight out of that answer, which is tied to the press
+  the same way. A download event, or a file that lands in the download
+  folder, is not yet tied to the click that way, so an answer that is
+  wins over them. An answer that holds no PDF is written to
+  `download-attempt.json` by its shape alone, how many texts it held,
+  the length of the longest, and whether that one is base64 and encodes
+  the start of a PDF, a zip or a gzip.
   When the app cannot tell which row or control is the document's it
   presses nothing and says so in `Diagnostics\download-attempt.json`, in
   counts and fixed words.

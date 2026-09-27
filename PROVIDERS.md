@@ -33,7 +33,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card, **moving to Capital One** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`ebay`](apps/ebay) | eBay | Order receipts, the order-details page rendered to PDF, ten years of purchase history, nothing clicked. Confirmed by @jpfieber on issue #44, every order back to 2017 | Retail |
-| [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #36. Being tested by @watling777 | Brokerage |
+| [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms. Built without an account and run against @watling777's (#36). A Pilot saved two of four statements, with a repair being tested for the other two | Brokerage |
 | [`ezpassva`](apps/ezpassva) | E-ZPass Virginia | Monthly and quarterly statements, the roughly one year of each the portal keeps online, so run it at least once a year. Built on the maintainer's own account | Tolls |
 | [`fairfaxwater`](apps/fairfaxwater) | Fairfax Water (VA) | Water bills, the last year's, from the FW Customer portal | Utility |
 | [`fedex`](apps/fedex) | FedEx (Billing Online) | Shipping invoices. UNTESTED, built from a login not connected to Billing Online, no invoice seen. Use it? Run Diagnose and attach the file to issue #54 | Shipping |

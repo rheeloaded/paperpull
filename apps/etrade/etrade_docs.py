@@ -1,4 +1,4 @@
-"""E*TRADE statement and tax document downloader (local, supervised). UNVERIFIED, see etrade_site.py.
+"""E*TRADE statement and tax document downloader (local, supervised). PARTLY VERIFIED, see etrade_site.py.
 
 This app was written without a E*TRADE account so that someone who holds one
 can test it without writing code. The orchestrator below is the same one

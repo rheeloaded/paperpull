@@ -29,6 +29,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   makes for the download and saves that, whatever the browser does with the
   download itself, and checks Apple's name for it as before. A PDF another
   Apple host hands the page is caught the same way.
+- **E*TRADE reads a statement out of the site's own answer (#36).** A Pilot
+  on the tester's account saved two of four statements. Pressing a
+  document's link makes the page ask E*TRADE for it, and the answer is JSON
+  with the PDF inside it, which the page then hands to the browser as a
+  download. Two of those downloads never reached the app. It now takes the
+  PDF straight out of that answer, which belongs to its own press the way
+  a download does not, so the answer also wins over a download that starts
+  while the app waits. An answer with no PDF in it is described in the
+  attempt file by its shape alone.
 - **Names like iCloud, iPhone and eBay keep their spelling in file
   names.** A word with a small first letter and a capital second one was
   capitalized into ICloud+ and IPhone. Rename brings older files in line.

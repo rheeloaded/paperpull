@@ -2,10 +2,13 @@
 
 When E*TRADE changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round five, repaired from four surveys (#36). Written
-without an E*TRADE account, so that someone who holds one can
-test it without writing code. Nothing below has run against the live
-signed-in site. On a first run it is deliberately cautious:
+STATUS: PARTLY VERIFIED (#36). Written without an E*TRADE account, so that
+someone who holds one can test it without writing code, and repaired from
+the surveys, failure files and download attempts a tester sent. On his
+account Discover found thirteen documents and a Pilot saved two of four
+statements. Reading the PDF out of the site's JSON answer, which the other
+two came back in, is this round's repair and has not yet run against the
+live site. On a first run it is deliberately cautious.
 
   * --login opens a real Edge or Chrome, since etrade.com runs bot protection that is happiest in a real browser.
   * --diagnose surveys whatever the documents page turns out to be,
@@ -151,6 +154,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
@@ -1808,14 +1812,84 @@ def _second_step(page, appeared: set):
     return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control)
 
 
+# RECORDED (#36, 0.38.0). Pressing a document's link makes the page POST to
+# /etaz/api/adsal/accountdocs/<...>/<n>.pdf, and the answer is JSON, 200, with
+# the PDF inside it as base64 text, which the page then hands to the browser
+# as a download. Two of four statements reached the app that way and two did
+# not. So the PDF is also read straight out of that JSON answer, which ties
+# it to the very request this attempt's press made.
+_DOC_ANSWER_RE = re.compile(r"/accountdocs/.*\.pdf$", re.I)
+# How a file begins once written as base64, "%PDF-" for a PDF. Only a PDF is
+# ever saved. The other two just name what an answer held when it held none.
+_ENCODED_STARTS = (("JVBERi0", "pdf"), ("UEsDB", "zip"), ("H4sI", "gzip"))
+# A data address can wrap the base64, "data:application/pdf;base64,".
+_DATA_ADDRESS_RE = re.compile(r"^data:[a-z]+/[a-z0-9.+-]+;base64,", re.I)
+_BASE64_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}")
+
+
+def _json_texts(value, depth: int = 0):
+    """Every text in a JSON answer, six levels down and two hundred wide."""
+    if depth > 6:
+        return
+    if isinstance(value, str):
+        yield value
+        return
+    if isinstance(value, dict):
+        items = list(value.values())
+    elif isinstance(value, list):
+        items = value
+    else:
+        return
+    for item in items[:200]:
+        yield from _json_texts(item, depth + 1)
+
+
+def _bare(text: str) -> str:
+    """A text without its whitespace or a data address around it."""
+    return _DATA_ADDRESS_RE.sub("", re.sub(r"\s+", "", text))
+
+
+def _pdf_in_json(value) -> Optional[bytes]:
+    """The PDF carried inside a JSON answer as base64 text, found by what it
+    starts with rather than by the field's name, or None."""
+    import base64
+    for text in _json_texts(value):
+        text = _bare(text)
+        if not text.startswith("JVBERi0") or len(text) > 60_000_000:
+            continue
+        try:
+            # Strict, so text that only starts like a PDF is not decoded
+            # into something that also only starts like one.
+            data = base64.b64decode(text, validate=True)
+        except Exception:
+            continue
+        if data[:5] == b"%PDF-" and b"%%EOF" in data[-2048:]:
+            return data
+    return None
+
+
+def _json_answer_shape(value) -> dict:
+    """What a JSON answer that held no PDF did hold, for the attempt file,
+    in counts and fixed words. Its longest text is given by its length,
+    whether it is base64, and which kind of file its start would encode,
+    never by what it says."""
+    texts = [_bare(t) for t in _json_texts(value)]
+    longest = max(texts, key=len, default="")
+    begins = next((word for start, word in _ENCODED_STARTS if longest.startswith(start)),
+                  "other" if longest else "nothing")
+    return {"texts": len(texts), "longest": len(longest),
+            "base64": bool(_BASE64_RE.fullmatch(longest)), "begins": begins}
+
+
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
                dl_dir=None) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
     in `dl_dir`, a download event, a PDF response, a new tab, this tab
     moving to the document, or a second control the click revealed. A PDF
-    answer is taken only when its request was made during this attempt,
-    and for a redirect, the request it came from. A download event or a
-    file landing in `dl_dir` is not tied to the click that way yet.
+    answer, or a JSON answer carrying one, is taken only when its request
+    was made during this attempt, and for a redirect, the request it came
+    from. A download event or a file landing in `dl_dir` is not tied to the
+    click that way yet, so such an answer wins over them.
     `trace` collects what happened, the click's own outcome included."""
     ctx = page.context
     got: dict = {}
@@ -1839,7 +1913,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 trace.append({"status": int(res.status), "type": _kind_of(ct), "url": mask_href(url)})
             if got:
                 return
-            if "pdf" in ct or "octet" in ct:
+            carried = "json" in ct and bool(_DOC_ANSWER_RE.search(urlsplit(url).path or ""))
+            if "pdf" in ct or "octet" in ct or carried:
                 # Only an answer to a request made during this attempt is
                 # this document. Runs now take several documents in turn,
                 # and a late answer to the last document's click used to
@@ -1857,6 +1932,22 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                     if trace is not None:
                         trace.append({"note": "a PDF answering an earlier request was left alone",
                                       "type": _kind_of(ct)})
+                    return
+                if carried:
+                    try:
+                        answer = res.json()
+                    except Exception:
+                        if trace is not None:
+                            trace.append({"note": "its JSON answer could not be read"})
+                        return
+                    inside = _pdf_in_json(answer)
+                    if inside:
+                        got["body"] = inside
+                        if trace is not None:
+                            trace.append({"note": "the PDF came inside its JSON answer"})
+                    elif trace is not None:
+                        trace.append(dict({"note": "its JSON answer held no PDF"},
+                                          **_json_answer_shape(answer)))
                     return
                 try:
                     body = res.body()
@@ -1876,6 +1967,12 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     controls_before = _control_texts(page)
 
     def landed() -> bool:
+        # An answer to this attempt's own request comes first. A download
+        # event is not tied to the click, so an earlier press's late
+        # download must not win over it.
+        if got.get("body"):
+            out_path.write_bytes(got["body"])
+            return True
         if downloads:
             try:
                 from paperpull_core.receipt_pdf import save_download
@@ -1884,9 +1981,6 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                     return True
             except Exception as e:
                 log.info("download event save failed: %s", e)
-        if got.get("body"):
-            out_path.write_bytes(got["body"])
-            return True
         if got.get("refetch"):
             try:
                 resp = page.context.request.get(got.pop("refetch"), timeout=60000)
