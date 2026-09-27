@@ -71,12 +71,85 @@ paperpull etrade pilot            REM once the site layer is confirmed
 - **Real Edge or Chrome.** Etrade.com runs bot protection that is happiest in a real browser, so `login.bat` launches the browser already on the machine with a separate profile.
 - **You sign in** in that window. The tool reuses the signed-in tab.
 - **Documents.** Discovery tries the documents and statements routes on us.etrade.com in turn and takes the first that is not a sign-in page and looks like a documents list. Every control whose name says it fetches a statement, a confirmation or a tax form ("View", "Download", "Statement PDF", "1099") is read, and the date comes from the control's name or the row it sits in.
-- **Downloads.** A row that links straight to a PDF is fetched from inside
+- **Downloads.** The documents page lists one period at a time, so the
+  period that lists the document, its year or Year To Date, is chosen
+  first. Two documents can share a date, so the row taken is the one
+  whose link names the document, its whole words or label the title,
+  the title then PDF, or the title then PDF for the account. An element
+  whose own text is the title while a child adds more words, a link
+  reading the title with "Privacy Notice" in a span inside it, does not
+  name it. A row is taken by its date alone only when it is the only one
+  and the lists the page loaded held one document on that date, with
+  this document's title whenever the lists named it. Of what a row offers, its box aside,
+  nothing is pressed for a document when something else that could be
+  pressed sits inside it, so a cell holding this document's link beside
+  another document's or an insert, a clickable container holding an
+  insert's View, or a card wrapping a notice's link is never pressed
+  whole. Anything inside a link or a button is judged as that link or
+  button, since a press on it presses them too, so the title in a span
+  inside an insert's link is the insert. A link whose words mark it as
+  an insert is never taken. Inside the chosen row a View, a pointer or
+  the row's box is used only when the row holds this document and no
+  other. A row that names another document of the date, prints another
+  date, holds two boxes, repeats a control, or is one of fewer rows of
+  the date than the lists held documents gets only this document's own
+  name pressed. Only a row that looks like a document's own counts
+  toward that, one that prints the date and no other, prints a title the
+  lists gave that date, and holds a bare View or Download or a control
+  carrying such a title. A filter chip that prints the date does not
+  count, and neither does a notice with a View of its own. A control
+  that does not name the document is pressed for it only when it is a
+  bare View, Download, Open, Print or PDF, alone or followed by words
+  like statement, or when its row nowhere prints the document's title,
+  holds no bare action, and holds no other control that says something
+  else. Every control in the row counts for that, links, buttons, input
+  buttons, pointers and elements the page made clickable, not links
+  alone. An insert does not count as one, since it is never pressed.
+  Every step follows that rule, the steps that take a row's link and the
+  only control of a date included. A control found before the row walk
+  has to sit in one row, the nearest element around it that prints a
+  date holding a single element that prints one. Each element is held
+  from the check to the press, so a list that changes in between cannot
+  move the press. Every word an element carries, what it shows and its
+  label, goes through the guard, except the account a link names after
+  "PDF for". The page's Download button is pressed only through the
+  row's box, never as a document's own control, and only when the page
+  has one outside every document row, this row's own box reads ticked,
+  and it is the only box ticked, and a box the app ticked is cleared
+  again. A PDF the site sends back as an answer is taken only when the
+  request for it, or the request a redirect came from, was made during
+  this document's attempt, so a late answer to the one before is not
+  saved under this name. A download event, or a file that lands in the
+  download folder, is not yet tied to the click that way.
+  When the app cannot tell which row or control is the document's it
+  presses nothing and says so in `Diagnostics\download-attempt.json`, in
+  counts and fixed words.
+  A row that links straight to a PDF is fetched from inside
   the page with the session's own cookies. Otherwise the row's control is
   clicked, once it has passed the guard, and whatever the site does, a
   download event, a PDF response or a new tab, is caught and saved to
   `Statements\` or `Tax Documents\`.
-- **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that trades, buys, sells, places or cancels an order, transfers, wires, deposits, withdraws, takes a distribution, links a bank, or edits the account. A control must also look like a document action before it can be clicked.
+- **Resume reads the lists first.** The choice of row rests on what the
+  lists said, how many documents each date held and their titles, so
+  Resume runs discovery before it downloads, as Pilot and a full run do.
+  Without them a row that does not name its document would be refused.
+- **What the download writes down.** `download-attempt.json` and
+  `discovery-trace.json` are meant to be attached to a public issue, so
+  they are built from what may leave. Fixed words, counts and yes or no
+  answers, the document's date, the period words and the dates each
+  period listed, the kind of each candidate control, exception names,
+  HTTP methods, status codes and content kinds, and for the row's
+  outline the tags, classes and roles with the shape of each piece of
+  text. A period is a word from a fixed list, Year To Date, Last N Days
+  or Months, All, or a year 19xx or 20xx, so digits printed on the page
+  are never read as one. Each address is written as whether it is
+  E*TRADE's, the words of its path that are on the list of words
+  E*TRADE's pages were seen to use, a file's ending, and the names of
+  its parameters that are on the list of names E*TRADE was seen to use,
+  never their values. A request's body is written as the names of its
+  keys from that same list. Every other word or name is written as #.
+  Never the page's own words, the account column included.
+- **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that trades, buys, sells, places or cancels an order, transfers, wires, deposits, withdraws, takes a distribution, links a bank, or edits the account. A control that signs in, signs out, logs out or logs off, or that changes a setting, is refused too. Every control pressed for a document, the row's box aside, must also look like a document action, on every step, the row walk included.
 
 ## Scope
 

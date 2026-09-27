@@ -26,13 +26,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import storage  # noqa: F401  binds this provider's AppSpec
 import etrade_site as site
 
-# One statement per period, dated inside it. The default is the last
-# ninety days, which held one statement in his account too.
+# Invented statements, each dated inside its period. The default is the
+# last ninety days, which held one statement in his account too.
 DATES = {"Last 90 Days": ["2026-08-31"],
-         "Year To Date": ["2026-08-31", "2026-03-31"],
-         "2026": ["2026-08-31", "2026-03-31"],
-         "2025": ["2025-12-31", "2025-09-30", "2025-06-30"],
-         "2024": ["2024-12-31"]}
+         "Year To Date": ["2026-08-31", "2026-02-28"],
+         "2026": ["2026-08-31", "2026-02-28"],
+         "2025": ["2025-11-30", "2025-08-31", "2025-05-31"],
+         "2024": ["2024-10-31"]}
 
 PAGE = """<!doctype html><html><body>
 <form id="filters">
@@ -92,8 +92,8 @@ def _answer(route):
     tf = json.loads(req.post_data or "{}").get("TimeFrame", "")
     body = {"defaultDocumentList": [
         {"documentGuid": "g-%s" % d, "documentId": "i-%s" % d, "documentTypeName": "Statements",
-         "documentTitle": "Single Account Statement", "documentDate": d + "T00:00:00",
-         "displayMultipleAccounts": "Individual Brokerage"} for d in DATES.get(tf, [])],
+         "documentTitle": "Invented Account Statement", "documentDate": d + "T00:00:00",
+         "displayMultipleAccounts": "Invented Brokerage - 4242"} for d in DATES.get(tf, [])],
         "numFound": str(len(DATES.get(tf, [])))}
     route.fulfill(status=200, content_type="application/json",
                   headers={"access-control-allow-origin": "*"}, body=json.dumps(body))
@@ -144,4 +144,4 @@ def test_the_trace_says_what_the_picker_offered_and_what_each_period_brought(dis
     assert result["note"] == "discovery result" and result["documents"] == 6
     # Period words, counts, booleans and dates, and nothing from the page.
     text = json.dumps(trace)
-    assert "Individual" not in text and "Single Account" not in text
+    assert "Invented" not in text and "4242" not in text and "Account Statement" not in text

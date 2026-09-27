@@ -550,8 +550,11 @@ class App:
         if not saved:
             import json as _json
             attempt = self.paths.diagnostics / "download-attempt.json"
+            # Built from what may leave, since it goes on a public issue.
+            # The address is its kind and plain words, and the trace holds
+            # fixed words, counts and shapes (#36, review).
             atomic_write_text(attempt, _json.dumps(
-                {"timestamp": now_iso(), "date": doc.date, "landed_on": site.redact(page.url or ""),
+                {"timestamp": now_iso(), "date": doc.date, "landed_on": site.mask_href(page.url or ""),
                  "responses": trace[:80]}, indent=2))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
@@ -709,6 +712,14 @@ class App:
         if not docs:
             print("Nothing to resume - everything in scope is complete.")
             return
+        # The download chooses a row by what the lists said, how many
+        # documents each date held and their titles. Those are read by
+        # discovery, and without them a row that does not name its document
+        # is refused. The app says to press Resume after a stopped run, so
+        # Resume reads the lists first, the way Pilot and Run do (#36,
+        # review).
+        self.cmd_discover(quiet=True)
+        docs = [d for d in self._select() if not self._already_done(d)]
         print(f"Resuming: {len(docs)} document(s) remaining.")
         self.process(docs, dry_run=self.args.dry_run)
 

@@ -7,7 +7,8 @@ somewhere else entirely, so a walk over each element's own children
 reached the slot and stopped (#36).
 
 These run in a real browser, because a shadow root is the one thing a
-fake page cannot honestly stand in for.
+fake page cannot honestly stand in for. The date, the account and the
+link are invented, in the shape the trace showed.
 """
 import sys
 from pathlib import Path
@@ -22,8 +23,8 @@ import etrade_site as site
 ROW = """
 <table><tbody>
 <tr class="row_level-1">
-  <td><div>06/30/26</div></td>
-  <td><div>Individual Brokerage - 1551</div></td>
+  <td><div>07/31/26</div></td>
+  <td><div>Invented Brokerage - 4242</div></td>
   <td><div><my-cell><slot name="doc"></slot></my-cell></div></td>
 </tr>
 </tbody></table>
@@ -31,14 +32,15 @@ ROW = """
 class MyCell extends HTMLElement {
   connectedCallback() {
     const sr = this.attachShadow({mode: 'open'});
-    sr.innerHTML = '<a href="/doc/9.pdf">Account Statement</a><slot></slot>';
+    sr.innerHTML = '<a href="/doc/statement.pdf">Account Statement</a><slot></slot>';
   }
 }
 customElements.define('my-cell', MyCell);
 </script>
 """
 
-DATES = ["06/30/26", "06/30/2026"]
+ISO = "2026-07-31"
+DATES = ["07/31/26", "07/31/2026"]
 TITLE = "Account Statement"
 
 
@@ -58,28 +60,42 @@ def page():
 
 def _walk(page):
     page.set_content(ROW)
-    return page.evaluate(site._ROW_BY_DATE_JS, [DATES, TITLE]) or {}
+    return page.evaluate(site._ROW_BY_DATE_JS, [DATES, TITLE, False]) or {}
 
 
 def test_the_link_inside_a_shadow_root_is_found(page):
     got = _walk(page)
     assert [c["text"] for c in got["cands"]] == [TITLE], \
         "the document's own link is in the shadow root, not in the row's children"
+    assert got["cands"][0]["kind"] == "title"
 
 
-def test_the_outline_shows_where_it_was(page):
-    outline = "\n".join(_walk(page)["outline"])
+def test_the_outline_shows_where_it_was_and_nothing_it_said(page, monkeypatch):
+    """The outline goes into download-attempt.json, which is attached to a
+    public issue. It used to carry each element's own text, the account
+    column among it (#36, review). Now tags, roles and shapes."""
+    monkeypatch.setattr(site, "_LISTED", {})
+    page.set_content(ROW)
+    found = site._row_by_date(page, ISO, TITLE)
+    outline = "\n".join(site._outline_line(p, TITLE) for p in found["outline"])
     assert "my-cell" in outline
-    assert "a = Account Statement" in outline, outline
-    assert "href=/doc/9.pdf" in outline
+    assert "~a = <the title> href=relative pdf" in outline, outline
+    assert "row_level-1" in outline
+    for leaked in ("Invented", "Brokerage", "4242", TITLE, "statement.pdf", "07/31"):
+        assert leaked not in outline, leaked
 
 
-def test_a_row_with_nothing_in_its_shadow_still_answers(page):
-    page.set_content("<table><tbody><tr><td><div>06/30/26</div></td>"
-                     "<td><div>Individual Brokerage - 1551</div></td></tr></tbody></table>")
-    got = page.evaluate(site._ROW_BY_DATE_JS, [DATES, TITLE]) or {}
-    assert got.get("cands") == []
-    assert got.get("outline")
+def test_a_row_that_names_nothing_is_taken_only_when_the_lists_say_it_is_alone(page):
+    """A row with the date and no element naming the document is the
+    document's only when the lists the page loaded held one document on
+    that date. Otherwise it could be another document of the same day."""
+    page.set_content("<table><tbody><tr><td><div>07/31/26</div></td>"
+                     "<td><div>Invented Brokerage - 4242</div></td></tr></tbody></table>")
+    alone = page.evaluate(site._ROW_BY_DATE_JS, [DATES, TITLE, True]) or {}
+    assert alone.get("cands") == []
+    assert alone.get("outline")
+    unsure = page.evaluate(site._ROW_BY_DATE_JS, [DATES, TITLE, False]) or {}
+    assert unsure == {"refused": "no row of this date names this document", "rows": 1, "named": 0}
 
 
 def test_the_walk_is_in_the_source_for_both_the_outline_and_the_candidates():
