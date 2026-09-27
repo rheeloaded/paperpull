@@ -2,10 +2,13 @@
 
 When Newrez changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round three, repaired from two surveys (#38). Written
-without a Newrez account, so that someone who holds one can
-test it without writing code. Nothing below has run against the live
-signed-in site. On a first run it is deliberately cautious:
+STATUS: PARTLY VERIFIED (#38). Written without a Newrez account, so that
+someone who holds one can test it without writing code, and repaired from
+two surveys, failure files and a recording a tester sent. On his account
+0.37.1 saved this year's statements and both 1098s, named for the dates
+printed on them. Reading the earlier years through the statements page's
+year picker is this round's repair and has not yet run against the live
+site. On a first run it is deliberately cautious.
 
   * --login opens a real Edge or Chrome, since Newrez's portal is happiest in a real browser.
   * --diagnose surveys whatever the documents page turns out to be,
@@ -14,13 +17,15 @@ signed-in site. On a first run it is deliberately cautious:
     takes no screenshot. That file is what a tester attaches to the
     GitHub issue.
   * --discover reads dates from any control that looks like a
-    monthly statement, escrow analysis or 1098, wherever it sits on the page.
+    monthly statement, escrow analysis or 1098, wherever it sits on the page,
+    and then chooses each year the statements page's year picker offers
+    and reads that year's list once it is on screen (RECORDED, #38).
   * --pilot tries to save the newest few, by fetching a PDF link the row
     carries from inside the page, or by clicking the row's own control
     and catching a download event, a PDF response or a new tab.
 
-The guesses that most need confirming from a survey are marked GUESS.
-The routes are the biggest one.
+What a tester's files showed is marked RECORDED, and the guesses that are
+left are marked GUESS.
 
 SAFETY (this is a mortgage account with a bank account on file):
   This module is strictly READ-ONLY. It opens the documents area, reads
@@ -39,11 +44,13 @@ import os
 import re
 import shutil
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE, MONEY_CONTROL_RE
+from paperpull_core.controls import IDENTITY_JS as _CORE_IDENTITY_JS
+from paperpull_core.controls import is_forbidden_context
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -330,15 +337,20 @@ def printed_statement_date(text: str, row_iso: str) -> str:
 
 # What the date inside a saved statement says about which row it belongs
 # to. Fixed words, because the verdict goes into the failure file.
-STATEMENT_VERDICTS = ("this month", "no date", "unclear", "another row", "another month")
+STATEMENT_VERDICTS = ("this month", "no date", "unclear", "another row", "another month",
+                      "a tax form")
+# A 1098 prints no Statement Date, so one whose download arrived late,
+# during a statement's capture, read as "no date" and was kept as that
+# statement.
+FORM_1098_RE = re.compile(r"\bform\s*1098\b", re.I)
 
 
 def statement_verdict(text: str, row_iso: str, other_months) -> str:
     """Whether a saved statement is the one its row asked for, read from
     the dates after "Statement Date" inside it.
 
-    "another row" is the only verdict that refuses a file. The first date
-    after the label is in the month of another statement on the same list,
+    "another row" refuses a file, as "a tax form" below does. The first
+    date after the label is in the month of another statement on the list,
     no date within reach after any such label is in the row's own month,
     and the date is not one a "Due Date" label names on its own line. That
     is what a statement taken by the wrong capture looks like, a download
@@ -352,9 +364,15 @@ def statement_verdict(text: str, row_iso: str, other_months) -> str:
     since a refused statement is fetched again on every run. The row's own
     due date read first is "another month" for the same reason, and so is
     a date in a month the list does not show. `other_months` holds YYYY-MM
-    for every other statement on the list."""
+    for every other statement on the list.
+
+    "a tax form" refuses a file too. It says Form 1098 and prints no
+    Statement Date, which a statement always does, so it is a 1098 whose
+    download arrived during a statement's capture."""
     month = (row_iso or "")[:7]
     dates = statement_dates(text)
+    if not dates and FORM_1098_RE.search(text or ""):
+        return "a tax form"
     if not dates or not re.fullmatch(r"\d{4}-\d{2}", month):
         return "no date"
     first = dates[0]
@@ -645,10 +663,15 @@ _ROW_OF_JS = r"""el => {
 }"""
 
 
-def collect_download_docs(page) -> List[RawDoc]:
+def collect_download_docs(page, walk: Optional[dict] = None) -> List[RawDoc]:
     """Every statement on the monthly page, then every 1098 on the yearly
     page. Each control's own name, or the row it sits in, carries the
-    date. A page that shows an error instead of a list is said so."""
+    date. A page that shows an error instead of a list is said so.
+
+    What a page shows first is read as it always was, and then the list
+    for every year its year picker offers, since the monthly page shows
+    one year at a time (#38). `walk` collects what each page's picker
+    gave, in counts and fixed words, for the discovery line."""
     docs: List[RawDoc] = []
     seen: set = set()
     loan = loan_number(page)
@@ -668,43 +691,55 @@ def collect_download_docs(page) -> List[RawDoc]:
         except Exception:
             pass
         _read_rows(page, docs, seen)
+        facts = _walk_years(page, docs, seen)
+        if walk is not None:
+            walk[path.rsplit("/", 1)[-1]] = facts
         if not loan:
             break
     return docs
 
 
+# Every document control's name, its link and the row around it, read in
+# one call. Read one control at a time, a list drawn again with fewer rows
+# after the count was taken left each control that had gone to wait out
+# Playwright's thirty second default.
+_CONTROL_ROWS_JS = ("els => els.map(el => [(el.getAttribute('aria-label') || el.innerText || '')"
+                    ".trim(), el.getAttribute('href') || '', (" + _ROW_OF_JS + ")(el)])")
+
+
 def _read_rows(page, docs: List[RawDoc], seen: set) -> None:
     expand_all(page)
     scroll_full_page(page)
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
-        except Exception:
-            name = ""
+    try:
+        every = _bill_controls(page).evaluate_all(_CONTROL_ROWS_JS)
+    except Exception:
+        every = []
+    for i, got in enumerate(every if isinstance(every, list) else []):
+        if not isinstance(got, list) or len(got) != 3:
+            continue
+        name, href, row = (str(v or "") for v in got)
         if not is_safe_control(name):
             continue
-        try:
-            href = el.get_attribute("href") or ""
-        except Exception:
-            href = ""
         row_text = ""
         # A month and a year is a date for a monthly statement, and a year
         # alone is one for a 1098, so the period reader is used rather than
         # the one that insists on a day (#38).
         iso, _period = parse_period_date(name)
         if not iso:
-            try:
-                row_text = el.evaluate(_ROW_OF_JS) or ""
-            except Exception:
-                row_text = ""
+            row_text = row
             iso, _period = parse_period_date(row_text)
-        if not iso or iso in seen:
+        if not iso:
             continue
-        seen.add(iso)
-        disp = _human_date(iso)
         tax = bool(re.search(r"1099|1098|5498|tax|yearly", name + " " + row_text + " " + (page.url or ""), re.I))
+        # A December statement and that year's 1098 are both dated the
+        # last day of the year. Kept by the date alone, the 1098, read
+        # second, would be dropped as a copy of the statement now that
+        # every year's statements are read (#38). A row's View and
+        # Download, and a hidden copy of the list, are still one document.
+        if (tax, iso) in seen:
+            continue
+        seen.add((tax, iso))
+        disp = _human_date(iso)
         kind_title = "Tax Document" if tax else "Mortgage Statement"
         docs.append(RawDoc(title=f"{kind_title} - {disp}", date_text=iso,
                            href=href if PDF_HREF_RE.search(href or "") else "",
@@ -766,6 +801,528 @@ def _control_for(page, iso: str, info: Optional[dict] = None):
     return chosen if chosen else (None, "")
 
 
+# ---------------------------------------------------------------------------
+# The year picker on the statements page
+# ---------------------------------------------------------------------------
+# RECORDED (#38, 2026-09-27). The monthly page shows one year's statements
+# at a time, and a year picker above the list shows another. His 0.37.1
+# runs found only this year's statements, and his recording chose 2025,
+# then 2024, and pressed Download on December 2024. The picker is a select
+# with no id, no name and no label tied to it, inside a form that holds
+# nothing else, beside a label that is not linked to it. So it is known by
+# what it offers, every option a year.
+#
+# It has four options, and what the first says was not recorded. The
+# first has no id and the other three have one, and his 2024 list held
+# seven statements, which fits a loan whose first statement came in the
+# middle of 2024. So the years with statements are 2024, 2025 and 2026,
+# the three he named, and the first option is taken to be a placeholder
+# such as Select Year (GUESS). One leading option that is not a year is
+# allowed when every other option is one. It is never chosen and never
+# counted as a year. A first option that is a year works as well, and a
+# select with two options that are not years, or one anywhere but first,
+# is not a picker, which the discovery line says with its counts.
+#
+# His recording saw no call to newrez.com while he chose the years, and
+# seven calls to other hosts over the whole recording, so the list is
+# drawn again from an answer that comes back a moment after the choice.
+# Until it does, the list on screen is still the last year's, and every
+# row looks alike. A year's list is read only once every dated row on
+# screen is in that year and two readings a second apart agree.
+YEAR_OPTION_RE = re.compile(r"^(19|20)\d{2}$")
+# How long a year's list may take to replace the last one. The recording
+# pressed Download about two seconds after choosing 2024. A year with no
+# statement never shows one, so this is also what an empty year costs.
+YEAR_WAIT_S = 20
+# How long a page with a dropdown that offers something other than years
+# is given for its options to become years, in case they arrive after the
+# list (GUESS).
+PICKER_WAIT_S = 5
+# How long capture lets the picker sit with no list drawn before choosing
+# anyway, for a year with no statement yet, early in January say. Never
+# for the newest year offered, whose list is the one the page draws first.
+PICKER_IDLE_S = 8
+# How long Playwright may take to choose the year.
+YEAR_CHOICE_TIMEOUT_MS = 8000
+
+# What the look for a picker found and why one was not used, and what
+# became of each year of a walk. Fixed words, since they go into the
+# discovery line, the journal and the failure file.
+_PICKER_STATES = ("found", "none", "refused", "more than one", "hidden",
+                  "not on a statements page")
+_PICKER_REFUSALS = ("the shared filter refused it", "it could not be read",
+                    "it takes more than one choice", "it is disabled", "it is not in a form",
+                    "its form has more to fill in", "its words name an action")
+_WALK_OUTCOMES = ("shown", "never showed", "could not be chosen", "changed before the choice",
+                  "not offered", "no picker")
+
+# A select's options, the one chosen, whether it is in a form and whether
+# anything else in that form can be filled in or pressed, and its words,
+# read in one call. Its words are its own names, its form's, the label
+# nearest it and the nearest heading above it, and never a class name. A
+# class says how a thing looks. The core's identity check
+# reads class names, and this app's forbidden words refuse "card" and
+# "lock", so a picker inside a styling class of "card" or "d-block" would
+# be refused, and a refused picker looks like an account with one year.
+# It only reads.
+_SELECT_FACTS_JS = r"""el => {
+  const texts = Array.from(el.options || []).map(o => (o.text || '').replace(/\s+/g, ' ').trim());
+  const form = el.form || el.closest('form');
+  let others = 0;
+  if (form) {
+    for (const c of Array.from(form.elements || [])) {
+      const tag = (c.tagName || '').toLowerCase();
+      if (c === el || tag === 'fieldset' || tag === 'output' || tag === 'object') continue;
+      if (tag === 'input' && (c.type || '').toLowerCase() === 'hidden') continue;
+      others += 1;
+    }
+    others += form.querySelectorAll('[role=button], [role=textbox], [role=checkbox], '
+                                    + '[role=radio], [role=switch], [contenteditable]').length;
+  }
+  const words = ['id', 'name', 'aria-label', 'title', 'placeholder', 'data-testid']
+    .map(a => el.getAttribute(a) || '');
+  for (const id of (el.getAttribute('aria-labelledby') || '').split(/\s+/)) {
+    const t = id ? document.getElementById(id) : null;
+    if (t) words.push((t.innerText || t.textContent || '').trim().slice(0, 80));
+  }
+  for (const l of Array.from(el.labels || [])) words.push((l.innerText || '').trim().slice(0, 80));
+  if (form) for (const a of ['id', 'name', 'aria-label', 'action']) words.push(form.getAttribute(a) || '');
+  let node = el, near = '';
+  for (let i = 0; i < 5 && node && !near; i++) {
+    node = node.parentElement;
+    const l = node ? node.querySelector('label, legend') : null;
+    if (l) near = (l.innerText || l.textContent || '').trim().slice(0, 80);
+  }
+  words.push(near);
+  let heading = '';
+  node = el;
+  for (let i = 0; i < 12 && node && !heading; i++) {
+    node = node.parentElement;
+    if (!node) break;
+    const above = Array.from(node.querySelectorAll('h1, h2, h3, h4, h5, h6')).filter(h =>
+      (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
+      && (h.innerText || h.textContent || '').trim());
+    if (above.length) {
+      const h = above[above.length - 1];
+      heading = (h.innerText || h.textContent || '').trim().slice(0, 80);
+    }
+  }
+  words.push(heading);
+  const box = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  return {options: texts.slice(0, 40),
+          chosen: el.selectedIndex >= 0 ? (texts[el.selectedIndex] || '') : '',
+          others: others, in_form: !!form, words: words.filter(Boolean).join(' | ').slice(0, 400),
+          visible: box.width >= 1 && box.height >= 1 && style.display !== 'none'
+                   && style.visibility !== 'hidden',
+          enabled: !el.matches(':disabled'), multiple: !!el.multiple, connected: el.isConnected};
+}"""
+
+# A select's facts beside the core's reading of what it is, the identity
+# every app's dropdowns are filtered by, read together so they describe
+# one element at one moment. And the same for every select on the page.
+_ONE_SELECT_JS = "el => [(" + _SELECT_FACTS_JS + ")(el), (" + _CORE_IDENTITY_JS + ")(el)]"
+_ALL_SELECTS_JS = "els => els.slice(0, 12).map(" + _ONE_SELECT_JS + ")"
+# The core's filter is asked with its own rules, money and sign-in words
+# and a control that will not say what it is. This app's forbidden words
+# were written for the words on a button, "card" and "lock" among them,
+# and the core's identity carries class names, where "mat-card" or
+# "d-block" says how a thing looks. Asked with them, the filter would
+# refuse the picker inside most styled pages. _picker_refusal applies
+# those words to the words that name the control.
+_SHARED_FILTER = "the shared filter refused it"
+
+# Every document control's name, the text around it that carries a date,
+# and whether it is on screen, all read in one call. A list that is being
+# drawn again can lose rows between two calls, and asking Playwright for
+# the nth control once there are fewer than n waits out its whole timeout,
+# thirty seconds for each row that went, which is what a list whose old
+# rows animate out did to the first version of this.
+_DATED_CONTROLS_JS = ("els => els.slice(0, 80).map(el => { const b = el.getBoundingClientRect(),"
+                      " s = getComputedStyle(el); return [(el.getAttribute('aria-label')"
+                      " || el.innerText || '').trim(), (" + _ROW_OF_JS + ")(el), b.width >= 1"
+                      " && b.height >= 1 && s.display !== 'none' && s.visibility !== 'hidden']; })")
+
+
+@dataclass
+class _Picker:
+    """The year picker on a page, or why there is none, in counts and
+    fixed words, with the select itself when there is one."""
+    state: str = "none"
+    handle: object = None
+    years: List[str] = field(default_factory=list)
+    chosen: str = ""
+    refused: str = ""
+    reasons: set = field(default_factory=set)
+    selects: int = 0
+    year_selects: int = 0
+    most_years: int = 0
+    most_options: int = 0
+
+    def facts(self) -> dict:
+        """What the discovery line and the journal are told."""
+        out = {"picker": self.state, "selects": self.selects, "year_selects": self.year_selects}
+        if self.state == "found":
+            out["years"] = len(self.years)
+        else:
+            out.update(most_years=self.most_years, most_options=self.most_options)
+        if self.state == "refused":
+            out["why"] = self.refused
+        return out
+
+
+def _on_statements_page(page) -> bool:
+    """Whether this is one of the servicing app's statements pages, signed
+    in. Nothing on any other page is chosen in, whatever it offers."""
+    from urllib.parse import urlsplit
+    url = page.url or ""
+    try:
+        path = urlsplit(url).path.rstrip("/")
+    except ValueError:
+        return False
+    if not (is_safe_url(url) and loan_number(page) and path.endswith(STATEMENT_PAGES)):
+        return False
+    return not looks_signed_out(page)
+
+
+def _options(facts) -> List[str]:
+    return [str(o or "").strip() for o in (facts or {}).get("options") or []]
+
+
+def _placeholder(facts) -> str:
+    """The words of a select's first option when it is not a year, the
+    placeholder such as Select Year, or ""."""
+    opts = _options(facts)
+    return opts[0] if opts and not YEAR_OPTION_RE.match(opts[0]) else ""
+
+
+def _years_of(facts) -> List[str]:
+    """The years a select offers, when every option is a year but for at
+    most one leading placeholder. The placeholder is never a year here, so
+    it is never chosen and never counted. A second option that is not a
+    year, or one anywhere but first, means the select is not a picker."""
+    opts = _options(facts)
+    if opts and not YEAR_OPTION_RE.match(opts[0]):
+        opts = opts[1:]
+    return opts if opts and all(YEAR_OPTION_RE.match(o) for o in opts) else []
+
+
+def _picker_refusal(facts: dict) -> str:
+    """Why a select that offers only years may still not be chosen in, as
+    fixed words, or "" when it may.
+
+    Choosing a year is reading, but a select that offers years can also
+    be a card's expiry year in a payment form or a year in a request
+    form. The recorded picker is alone in its own form and named by
+    nothing, so a select outside a form, one whose form has anything else
+    to fill in or press, and one with a word near it, above it or in its
+    placeholder that names an action, is left alone. Outside a form there
+    is no telling which fields beside it belong with it."""
+    if not facts.get("connected"):
+        return "it could not be read"
+    if facts.get("multiple"):
+        return "it takes more than one choice"
+    if not facts.get("enabled"):
+        return "it is disabled"
+    if not facts.get("in_form"):
+        return "it is not in a form"
+    if facts.get("others"):
+        return "its form has more to fill in"
+    # A placeholder says what the select is for as plainly as a label does.
+    words = " | ".join(w for w in (str(facts.get("words") or ""), _placeholder(facts)) if w)
+    if words and (FORBIDDEN_CONTROL_RE.search(words) or MONEY_CONTROL_RE.search(words)
+                  or AUTH_CONTROL_RE.search(words)):
+        return "its words name an action"
+    return ""
+
+
+def _year_picker(page) -> _Picker:
+    """The statements page's year picker. A select that offers only years
+    after at most one leading placeholder, on a signed-in statements page,
+    that the core's filter lets through, on screen, alone in its form, with
+    no word near it that names an action, and the only one of its kind.
+    Anything else is left alone, and what was seen is kept in counts and
+    fixed words."""
+    out = _Picker()
+    if not _on_statements_page(page):
+        out.state = "not on a statements page"
+        return out
+    try:
+        loc = page.locator("select")
+        every = loc.evaluate_all(_ALL_SELECTS_JS)
+    except Exception:
+        return out
+    if not isinstance(every, list):
+        return out
+    out.selects = len(every)
+    usable, hidden, on_screen = [], 0, 0
+    for i, pair in enumerate(every):
+        if not (isinstance(pair, list) and len(pair) == 2 and isinstance(pair[0], dict)):
+            continue
+        facts, identity = pair
+        # The select closest to being a picker, for the discovery line. Two
+        # options that are not years, or one anywhere but first, show up
+        # here as a count of years short of the count of options.
+        opts = _options(facts)
+        n_years = sum(1 for o in opts if YEAR_OPTION_RE.match(o))
+        if n_years > out.most_years or not (out.most_years or out.most_options):
+            out.most_years, out.most_options = n_years, len(opts)
+        years = _years_of(facts)
+        if not years:
+            continue
+        out.year_selects += 1
+        # Every one on screen counts toward more than one, refused or not,
+        # so a real picker that is disabled for now beside a second select
+        # of years never hands the choice to the second.
+        on_screen += bool(facts.get("visible"))
+        # The core's filter first, the gate every app's sweep of a page's
+        # dropdowns goes through, and then this app's stricter checks.
+        why = _SHARED_FILTER if is_forbidden_context(str(identity or "")) else _picker_refusal(facts)
+        if why:
+            out.refused = out.refused or why
+            out.reasons.add(why)
+        elif not facts.get("visible"):
+            hidden += 1
+        else:
+            usable.append((i, facts, years))
+    if on_screen > 1:
+        out.state = "more than one"
+    elif usable:
+        i, facts, years = usable[0]
+        # Held as the element itself, and read again through it right
+        # before a year is chosen, so a select drawn in between cannot
+        # take the choice.
+        try:
+            out.handle = loc.nth(i).element_handle(timeout=2000)
+        except Exception:
+            out.state, out.refused = "refused", "it could not be read"
+            return out
+        out.state, out.years = "found", years
+        out.chosen = str(facts.get("chosen") or "").strip()
+    elif out.refused:
+        out.state = "refused"
+    elif hidden:
+        out.state = "hidden"
+    return out
+
+
+def _find_year_picker(page, wait_s: Optional[int] = None) -> _Picker:
+    """The year picker, given PICKER_WAIT_S when the page has a dropdown
+    that does not offer only years yet, or a picker whose only fault is
+    that it is disabled, as one can be while its page loads."""
+    budget = PICKER_WAIT_S if wait_s is None else wait_s
+    waited = 0
+    while True:
+        picker = _year_picker(page)
+        loading = ((picker.state == "none" and picker.selects)
+                   or (picker.state == "refused" and picker.reasons == {"it is disabled"}))
+        if not loading or waited >= budget:
+            return picker
+        page.wait_for_timeout(1000)
+        waited += 1
+
+
+def _choose_year(page, year: str, picker: Optional[_Picker] = None):
+    """Choose `year` in the year picker, and nothing else. Answers what
+    became of it in fixed words, with the picker as it was found.
+
+    The select is read again through the element itself right before the
+    choice, so one drawn again as something else in between is not chosen
+    in. The choice is Playwright's select_option, which sets the option and
+    tells the page it changed. Nothing is clicked or pressed, and the form
+    is never submitted."""
+    picker = picker if picker is not None else _year_picker(page)
+    if picker.state != "found":
+        return "no picker", picker
+    if year not in picker.years:
+        return "not offered", picker
+    if picker.chosen == year:
+        return "already chosen", picker
+    try:
+        facts, identity = picker.handle.evaluate(_ONE_SELECT_JS)
+    except Exception:
+        return "changed before the choice", picker
+    if (not isinstance(facts, dict) or _years_of(facts) != picker.years
+            or is_forbidden_context(str(identity or "")) or _picker_refusal(facts)
+            or not facts.get("visible")):
+        return "changed before the choice", picker
+    try:
+        picker.handle.select_option(label=year, timeout=YEAR_CHOICE_TIMEOUT_MS)
+        now = picker.handle.evaluate(_SELECT_FACTS_JS)
+    except Exception as e:
+        log.info("could not choose a year in the year picker: %s", str(e).split("\n")[0][:160])
+        return "could not be chosen", picker
+    if not isinstance(now, dict) or str(now.get("chosen") or "").strip() != year:
+        return "could not be chosen", picker
+    picker.chosen = year
+    return "chose", picker
+
+
+def _list_dates(page) -> List[str]:
+    """The date every document control on the list carries, read the way
+    discovery reads a row, its name first and then the row around it. The
+    controls on screen answer, and hidden ones only when none is on
+    screen."""
+    try:
+        every = _bill_controls(page).evaluate_all(_DATED_CONTROLS_JS)
+    except Exception:
+        return []
+    shown, hidden = [], []
+    for got in every if isinstance(every, list) else []:
+        if not isinstance(got, list) or len(got) != 3:
+            continue
+        name, row, on_screen = got
+        found = parse_period_date(str(name or ""))[0] or parse_period_date(str(row or ""))[0]
+        if found:
+            (shown if on_screen else hidden).append(found)
+    return shown or hidden
+
+
+def _wait_for_year(page, year: str, budget_s: Optional[int] = None) -> Tuple[bool, int, int]:
+    """Whether the list on screen became `year`'s, the seconds that took,
+    and how many statements it shows.
+
+    Every dated row on screen must be in that year, so a list left over
+    from the year before is never taken for the new one, not even while
+    its rows are still leaving. Two readings a second apart must also
+    agree, so a list drawn in pieces less than a second apart is not read
+    half done. A year with no statement never shows one."""
+    budget = YEAR_WAIT_S if budget_s is None else budget_s
+    waited = 0
+    last = None
+    while True:
+        dates = _list_dates(page)
+        now = None
+        if dates and all(d[:4] == year for d in dates):
+            now = tuple(sorted(set(dates)))
+        if now is not None and now == last:
+            return True, waited, len(now)
+        last = now
+        if waited >= budget:
+            return False, waited, 0
+        page.wait_for_timeout(1000)
+        waited += 1
+
+
+def _walk_years(page, docs: List[RawDoc], seen: set) -> dict:
+    """Read the list for every year the page's year picker offers, in the
+    order it offers them, each once its own list is on screen. What each
+    year gave comes back in counts and fixed words for the discovery line.
+    A page without a picker is left as it was."""
+    picker = _find_year_picker(page)
+    facts = picker.facts()
+    if picker.state != "found":
+        return facts
+    walked = []
+    for year in list(picker.years):
+        how, _found = _choose_year(page, year, picker)
+        rows = 0
+        if how in ("chose", "already chosen"):
+            shown, _waited, rows = _wait_for_year(page, year)
+            how = "shown" if shown else "never showed"
+            if shown:
+                _read_rows(page, docs, seen)
+        walked.append([int(year), rows, how])
+        # Looked for afresh before the next year, since the page may have
+        # drawn the picker again along with the list.
+        picker = None
+    facts["walked"] = walked
+    return facts
+
+
+def _plural(n: int, word: str) -> str:
+    return "%d %s%s" % (n, word, "" if n == 1 else "s")
+
+
+def _whole(facts: dict, key: str) -> int:
+    """A count from the walk's facts, or 0 for anything that is not one."""
+    value = facts.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def year_walk_facts(walk) -> dict:
+    """What each statements page's picker gave, for the journal and so for
+    the failure file, which a tester attaches in public.
+
+    No year is written. How many statements each year holds says when the
+    loan began, seven in the year it came to Newrez say, so each year is
+    its place in the picker instead, 1 for the first year it offers. The
+    console line may name the years, since a tester reads it before
+    pasting it. Only the counts and fixed words above are copied."""
+    out: dict = {}
+    if not isinstance(walk, dict):
+        return out
+    for name in (p.rsplit("/", 1)[-1] for p in STATEMENT_PAGES):
+        facts = walk.get(name)
+        if not isinstance(facts, dict):
+            continue
+        page = {k: _whole(facts, k) for k in ("selects", "year_selects", "years",
+                                              "most_years", "most_options") if k in facts}
+        if facts.get("picker") in _PICKER_STATES:
+            page["picker"] = facts["picker"]
+        if facts.get("why") in _PICKER_REFUSALS:
+            page["why"] = facts["why"]
+        walked = []
+        for place, entry in enumerate(facts.get("walked") or [], 1):
+            try:
+                rows, how = int(entry[1]), entry[2]
+            except (TypeError, ValueError, IndexError):
+                continue
+            if how in _WALK_OUTCOMES:
+                walked.append([place, rows, how])
+        if walked:
+            page["walked"] = walked
+        out[name] = page
+    return out
+
+
+def year_walk_lines(walk) -> List[str]:
+    """The discovery lines a tester copies into the issue, one for each
+    statements page, which years its picker offered and how many documents
+    each gave. Built from numbers and the fixed words above only, so
+    nothing off the page can reach them (#38). They name the years, so
+    they go to the console and never to the journal, which carries
+    year_walk_facts instead."""
+    lines: List[str] = []
+    if not isinstance(walk, dict):
+        return lines
+    for name in (p.rsplit("/", 1)[-1] for p in STATEMENT_PAGES):
+        facts = walk.get(name)
+        if not isinstance(facts, dict):
+            continue
+        state = facts.get("picker")
+        if state == "found":
+            parts = []
+            for entry in facts.get("walked") or []:
+                try:
+                    year, rows, how = int(entry[0]), int(entry[1]), entry[2]
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if not 1900 <= year <= 2099 or how not in _WALK_OUTCOMES:
+                    continue
+                parts.append("%d gave %d" % (year, rows) if how == "shown" else "%d %s" % (year, how))
+            lines.append("Year picker on the %s page walked %s, %s"
+                         % (name, _plural(len(parts), "year"), ", ".join(parts) or "none was read"))
+        elif state == "none" and not _whole(facts, "selects"):
+            lines.append("No year picker on the %s page, it has no dropdown" % name)
+        elif state == "none":
+            lines.append("No year picker on the %s page, it has %s and the one with the most years "
+                         "offers %d among %s" % (name, _plural(_whole(facts, "selects"), "dropdown"),
+                                                 _whole(facts, "most_years"),
+                                                 _plural(_whole(facts, "most_options"), "option")))
+        elif state == "refused" and facts.get("why") in _PICKER_REFUSALS:
+            lines.append("The year picker on the %s page was not used, %s" % (name, facts["why"]))
+        elif state == "more than one":
+            lines.append("The %s page has %d dropdowns that offer only years, so none was used"
+                         % (name, _whole(facts, "year_selects")))
+        elif state == "hidden":
+            lines.append("The year picker on the %s page is not on screen, so it was not used" % name)
+        elif state == "not on a statements page":
+            lines.append("The %s page was not a signed-in statements page, so no year picker "
+                         "was looked for" % name)
+    return lines
+
+
 # How long capture waits for the rows once a statements page is open.
 # Every page.goto reloads the servicing app, which signs in again through
 # Okta before it asks for the list. His failure file (#38) ends on exactly
@@ -818,6 +1375,15 @@ _CAPTURE_STEPS = {
         "folder could not tell which download",
     "waited on a document still on its way": "waited on a document on its way",
     "the PDF landed": "the pdf landed",
+    # The statement's year, for a row the list as drawn did not have (#38).
+    "chose the statement's year": "chose the year",
+    "the year picker already shows the statement's year": "year already chosen",
+    "the year picker does not offer the statement's year": "year not offered",
+    "the year picker changed before the choice, so nothing was chosen":
+        "picker changed before the choice",
+    "the statement's year could not be chosen, so nothing was pressed": "year could not be chosen",
+    "the list never showed the statement's year, so nothing was pressed":
+        "list never showed the year",
 }
 # Which counts, yes-or-no fields and words may be copied, and the part of
 # the capture each one describes. Grouped so the failure file stays under
@@ -835,6 +1401,10 @@ _CAPTURE_COUNTS = {
     # A download that was still being written when the click was made and
     # was gone when a PDF landed, and how many new PDFs there were then.
     "earlier_finished": "download_folder", "new_pdfs": "download_folder",
+    # How long the list took to show the statement's year once it was
+    # chosen, how many statements that year's list showed, and how many
+    # years the picker offered. Never the year itself.
+    "year_wait_s": "year", "year_rows": "year", "years_offered": "year",
 }
 _CAPTURE_FLAGS = {"scrolled": "list", "chosen_visible": "list", "signed_out": "list"}
 # The wait a PDF landed in, and the way it arrived.
@@ -845,7 +1415,10 @@ _CAPTURE_HOWS = ("download folder", "download event", "pdf response", "refetched
 # approved.
 _CHECK_WHYS = ("it left the page", "its name changed", "it no longer carries this date",
                "it could not be read again")
-_CAPTURE_WORDS = {"window": _CAPTURE_WINDOWS, "how": _CAPTURE_HOWS, "why": _CHECK_WHYS}
+_CAPTURE_WORDS = {"window": _CAPTURE_WINDOWS, "how": _CAPTURE_HOWS, "why": _CHECK_WHYS,
+                  "picker": _PICKER_STATES}
+# The part of the capture a word describes, the click unless named here.
+_CAPTURE_WORD_PARTS = {"picker": "year"}
 
 
 def capture_facts(trace: Optional[list]) -> dict:
@@ -870,7 +1443,7 @@ def capture_facts(trace: Optional[list]) -> dict:
                 out.setdefault(part, {})[name] = entry[name]
         for name, allowed in _CAPTURE_WORDS.items():
             if entry.get(name) in allowed:
-                out.setdefault("click", {})[name] = entry[name]
+                out.setdefault(_CAPTURE_WORD_PARTS.get(name, "click"), {})[name] = entry[name]
         if isinstance(entry.get("appeared"), list):
             out.setdefault("click", {})["controls_appeared"] = len(entry["appeared"])
         if isinstance(entry.get("network"), dict):
@@ -890,6 +1463,8 @@ def landing_facts(trace: Optional[list]) -> dict:
     out.pop("controls_appeared", None)
     if "waited_s" in (facts.get("list") or {}):
         out["list_waited_s"] = facts["list"]["waited_s"]
+    if facts.get("year"):
+        out["year"] = facts["year"]
     if facts.get("network"):
         out["network"] = facts["network"]
     return out
@@ -1265,15 +1840,72 @@ def _open_list(page, path: str, trace: Optional[list]) -> bool:
     return True
 
 
+def _year_for_row(page, iso: str, drawn: int, idle: int, trace: Optional[list]):
+    """Set the year picker to the statement's year, for a row the list as
+    drawn does not have, and wait until the list shows that year.
+
+    Answers what became of it, the seconds that took, and what the look
+    for the picker found. What became of it is "" while there is no picker
+    or the list has not drawn, since a year chosen while the page is still
+    loading its first list can have that list land after the chosen one,
+    and the picker's options may still be arriving. A picker that sits
+    with nothing drawn for PICKER_IDLE_S is used anyway, for a year with
+    no statement yet, but never for the newest year it offers. That year's
+    list is the one the page draws first, and choosing it while the page
+    still loads drew the list twice and took the row away before the
+    press, where 0.37.1 had saved it. "failed" means nothing may be
+    pressed."""
+    year = (iso or "")[:4]
+    found = _year_picker(page)
+    if found.state != "found":
+        return "", 0, found.state
+    if not drawn and (idle < PICKER_IDLE_S or year == max(found.years)):
+        return "", 0, found.state
+    offered = len(found.years)
+    if year not in found.years:
+        _note(trace, "the year picker does not offer the statement's year", years_offered=offered)
+        return "not offered", 0, found.state
+    if found.chosen == year:
+        _note(trace, "the year picker already shows the statement's year", years_offered=offered)
+        return "already chosen", 0, found.state
+    how, found = _choose_year(page, year, found)
+    if how == "changed before the choice":
+        _note(trace, "the year picker changed before the choice, so nothing was chosen",
+              years_offered=offered)
+        return "failed", 0, found.state
+    if how != "chose":
+        _note(trace, "the statement's year could not be chosen, so nothing was pressed",
+              years_offered=offered)
+        return "failed", 0, found.state
+    shown, spent, rows = _wait_for_year(page, year)
+    if not shown:
+        _note(trace, "the list never showed the statement's year, so nothing was pressed",
+              year_wait_s=spent, years_offered=offered)
+        return "failed", spent, found.state
+    _note(trace, "chose the statement's year", year_wait_s=spent, year_rows=rows,
+          years_offered=offered)
+    return "shown", spent, found.state
+
+
 def _wait_for_control(page, iso: str, trace: Optional[list]):
     """The control for `iso`, waiting for the list to render. Once rows
     are there and none is this date, the page is expanded and scrolled
-    once, as discovery does, and the wait ends when the count settles."""
+    once, as discovery does, and the wait ends when the count settles.
+
+    A statement is only on its own year's list. While the row is not on
+    the list the year picker is looked for, and once the list has drawn
+    the picker is set to the statement's year, once, and the list waited
+    on until it shows that year, before the row is looked for again. A
+    list that never shows it ends the wait with nothing pressed (#38)."""
     counts: list = []
     scrolled = False
     waited = 0
     info: dict = {}
     el, label = None, ""
+    # What became of the statement's year, "" while the picker is still
+    # looked for, what the look for it last found, and how many looks
+    # found it with no list drawn.
+    year_step, picker, idle = "", "", 0
     while True:
         info = {}
         el, label = _control_for(page, iso, info)
@@ -1283,6 +1915,15 @@ def _wait_for_control(page, iso: str, trace: Optional[list]):
         counts.append(n)
         if waited >= LIST_WAIT_S:
             break
+        if not year_step:
+            year_step, spent, picker = _year_for_row(page, iso, n, idle, trace)
+            waited += spent
+            idle += picker == "found"
+            if year_step == "failed":
+                break
+            if year_step == "shown":
+                counts, scrolled = [], False
+                continue
         if n and not scrolled:
             expand_all(page)
             scroll_full_page(page)
@@ -1293,8 +1934,9 @@ def _wait_for_control(page, iso: str, trace: Optional[list]):
             break
         page.wait_for_timeout(1000)
         waited += 1
+    looked = {"picker": picker} if picker else {}
     _note(trace, "found the row" if el is not None else "no row on the page has this date",
-          date=iso, waited_s=waited, scrolled=scrolled, url=_where(page), **info)
+          date=iso, waited_s=waited, scrolled=scrolled, url=_where(page), **looked, **info)
     return el, label
 
 

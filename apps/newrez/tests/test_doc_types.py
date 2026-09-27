@@ -94,11 +94,14 @@ def test_only_the_providers_own_hosts():
     assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
 
 
-def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
+def test_the_partly_verified_status_is_stated_where_a_tester_will_read_it():
+    """His 0.37.1 run saved this year's statements and both 1098s, and the
+    earlier years are this round's repair (#38)."""
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "UNVERIFIED" in src.split('"""')[1]
+    assert "STATUS: PARTLY VERIFIED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "Not yet tested against a real account" in readme
+    assert readme.split("\n\n")[1].startswith("**Partly tested against a real account.**")
+    assert "Not yet tested" not in readme
 
 
 # -- round two, from the first survey --------------------------------------

@@ -1,12 +1,12 @@
 # Newrez document downloader
 
-**Not yet tested against a real account.** This app was built without
-a Newrez mortgage, so that someone who holds one can test it without
-writing code. It runs, its guards are tested, and every guess about
-newrez.com is marked in `newrez_site.py`. What it needs is a survey from a
-signed-in account, which the Diagnose button produces and which contains
-no personal data. The conversation is
-[issue #38](https://github.com/rheeloaded/paperpull/issues/38).
+**Partly tested against a real account.** On a tester's account this
+year's statements and both 1098s download and are named for the dates
+printed on them, and reading the earlier years is this round's repair
+([issue #38](https://github.com/rheeloaded/paperpull/issues/38)). This app
+was built without a Newrez mortgage, so that someone who holds one can
+test it without writing code. Its guards are tested, and every guess
+about newrez.com that is left is marked in `newrez_site.py`.
 
 Downloads your Newrez **mortgage statements and 1098 forms** as PDFs. Read-only,
 delete-safe, part of [PaperPull](../../README.md).
@@ -21,7 +21,9 @@ delete-safe, part of [PaperPull](../../README.md).
 4. Click **more** under the buttons, then **Diagnose**. It reads the
    documents page and writes `Diagnostics\diagnose-documents.json` in the
    Newrez folder. It downloads nothing, clicks nothing but a documents
-   link, takes no screenshot, and masks any run of six or more digits.
+   link, takes no screenshot, and masks any run of six or more digits. On
+   the statements page it also chooses each year in the year picker, to
+   read that year's list, and does nothing else there.
 5. Click **Record**, in the same **more** menu. Go back to the browser window
    and click your way to one document the way you normally would, then come
    back here and click **Stop recording**. It writes
@@ -43,7 +45,9 @@ delete-safe, part of [PaperPull](../../README.md).
    in `Statements\` or `Tax Documents\`, then attach a fresh Diagnose file.
    If the run printed any lines that begin with `Waited for`, copy
    those into your comment as well. They say which way of waiting
-   each page needed, which is the thing the next build keeps.
+   each page needed, which is the thing the next build keeps. The same
+   goes for the lines that begin with `Year picker` or `No year picker`,
+   which say which years were read and how many statements each gave.
 
 A Diagnose file and one recording together are usually enough to get a
 provider working in a single round. Diagnose on its own takes two or three.
@@ -70,7 +74,32 @@ paperpull newrez pilot            REM once the site layer is confirmed
 
 - **Real Edge or Chrome.** Newrez's portal is happiest in a real browser, so `login.bat` launches the browser already on the machine with a separate profile.
 - **You sign in** in that window. The tool reuses the signed-in tab.
-- **Documents.** Discovery tries the documents and statements routes under myaccount.newrez.com in turn and takes the first that is not a sign-in page and looks like a documents list. Every control whose name says it fetches a statement, an escrow analysis or a 1098 is read, and the date comes from the control's name or the row it sits in.
+- **Documents.** From the dashboard, **Account Details** leads into the
+  servicing app at servicing.newrez.com, where the monthly statements and
+  the yearly 1098s each have their own page (from two surveys, #38). Every
+  control whose name says it fetches a statement, an escrow analysis or a
+  1098 is read, and the date comes from the control's name or the row it
+  sits in.
+- **Years.** Recorded, from a tester's **Record** file (#38). The monthly
+  page shows one year's statements at a time, with a year picker above
+  the list, and choosing a year draws that year's list a moment later.
+  Discovery reads the list the page shows first, then chooses each year
+  the picker offers and reads that year's list only once every statement
+  on screen is in that year, so a list left over from the year before is
+  never read as the new one. A download that does not find its row on the
+  list as drawn chooses the statement's own year first, and presses
+  nothing if that year's list never shows. The picker is a dropdown with
+  no name of its own, so it is known by offering nothing but years after
+  one placeholder at most. Choosing one of the years is all the app does
+  to it, and a dropdown that offers anything else, sits in a form with
+  more to fill in, or has words near it that name an action is left
+  alone. What the picker's first option says was not recorded. His three
+  years with statements account for the other three options, so the
+  first is taken to be a placeholder such as Select Year, and it is never
+  chosen. A dropdown with two options that are not years, or one anywhere
+  but first, is not used, and the `No year picker` line says so. The
+  yearly page is walked the same way only if it turns out to have a
+  picker too.
 - **Downloads.** A row that links straight to a PDF is fetched from inside
   the page with the session's own cookies. Otherwise the row's control is
   clicked, once it has passed the guard, and whatever the site does, a
@@ -99,8 +128,10 @@ paperpull newrez pilot            REM once the site layer is confirmed
 - **Dates.** The statements list gives a month and a year and no day, so a
   statement is saved under the last day of its month and then named for the
   date printed beside "Statement Date" inside it, when that date falls in
-  the same month. The app remembers each statement by its month, so nothing
-  already downloaded is fetched again, and **Rename preview** then
+  the same month. A tester confirmed that his statements print
+  `Statement Date: mm/dd/yyyy` and that files were renamed and saved under
+  the right date (#38). The app remembers each statement by its month, so
+  nothing already downloaded is fetched again, and **Rename preview** then
   **Apply renames** bring files saved by an earlier build into line.
 - **The right statement.** A statement whose first date after "Statement
   Date" falls in the month of another statement on the list, with no date
@@ -109,9 +140,9 @@ paperpull newrez pilot            REM once the site layer is confirmed
   goes to `Manual Review\` and the statement is asked for again on the next
   run. One whose dates are in some other month, or disagree, keeps its
   month's name with a note, and **Rename preview** lists any file already
-  saved that looks that way, so it can be opened and checked. This reads
-  the words a statement is assumed to print and has not been tried on a
-  real Newrez statement.
+  saved that looks that way, so it can be opened and checked. The label it
+  reads is the one a tester's statements print (#38), and a statement
+  refused this way has not been seen on a real run yet.
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays, schedules a payment, sets up autopay, requests a payoff, an escrow change or hardship help, uploads anything, or edits the account. A control must also look like a document action before it can be clicked.
 
 ## Scope

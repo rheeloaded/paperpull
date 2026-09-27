@@ -292,6 +292,32 @@ def test_this_statements_own_due_date_read_first_never_refuses_it(tmp_path, monk
     assert "Open it to check" in app.index_csv.read_all()[-1]["Notes"]
 
 
+def test_a_1098_that_lands_in_a_statements_capture_is_not_kept_as_that_statement(tmp_path,
+                                                                                 monkeypatch):
+    """A 1098 prints no Statement Date, so one whose download arrived late,
+    during a statement's capture, read as "no date" and was kept as that
+    statement. A statement always prints its date, a 1098 notice in it or
+    not."""
+    others = {"2025-12"}
+    assert site.statement_verdict("Form 1098 Mortgage Interest Statement", "2026-01-31", others) \
+        == "a tax form"
+    assert site.statement_verdict("Statement Date: 01/03/2026\nYour Form 1098 is on its way",
+                                  "2026-01-31", others) == "this month"
+    app = _app(tmp_path, monkeypatch, ["Form 1098 Mortgage Interest Statement", "Tax year 2025"])
+    failures = []
+    app.write_failure = lambda step, reason, **k: failures.append((step, reason, k))
+    doc = _statement("2026-01-31", "January 31, 2026")
+    app.download_one(_Page(), doc, "2026-01-31 Newrez Account Statement.pdf")
+    assert _names(app.paths.folder_for("Statement")) == []
+    assert _names(app.paths.manual_review) == ["2026-01-31 Newrez Account Statement.pdf"]
+    rec = app.progress.get(doc.key)
+    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value and not rec.get("downloaded_ok")
+    assert "Form 1098 and not a statement" in app.index_csv.read_all()[-1]["Notes"]
+    [(step, reason, kw)] = failures
+    assert reason == "the statement is a tax form"
+    assert kw["capture"]["statement_check"] == "a tax form"
+
+
 def test_a_1098_is_never_renamed(tmp_path, monkeypatch):
     app = _app(tmp_path, monkeypatch, ["Form 1098", "Statement Date: 12/06/2025"])
     doc = newrez_docs.Document(title="Tax Document - December 31, 2025",

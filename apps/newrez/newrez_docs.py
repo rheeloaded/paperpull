@@ -1,11 +1,11 @@
-"""Newrez statement and tax document downloader (local, supervised). UNVERIFIED, see newrez_site.py.
+"""Newrez statement and tax document downloader (local, supervised). PARTLY VERIFIED, see newrez_site.py.
 
 This app was written without a Newrez account so that someone who holds one
 can test it without writing code. The orchestrator below is the same one
-every other statement app runs on. What has not been proven is the site layer,
-newrez_site.py, which carries every guess about newrez.com and says which ones
-most need a survey. Run --diagnose first and attach the Diagnostics file
-to the GitHub issue. It takes no screenshot and masks digit runs.
+every other statement app runs on. The site layer, newrez_site.py, carries
+what a tester's files showed about newrez.com and marks every guess that is
+left. Run --diagnose first and attach the Diagnostics file to the GitHub
+issue. It takes no screenshot and masks digit runs.
 
 Usage:
     python newrez_docs.py --login       verify connection to your browser
@@ -165,11 +165,15 @@ _NOT_CONFIRMED = ("The date beside Statement Date inside it is not in the month 
                   "month's statement.")
 _UNCLEAR = ("The dates beside Statement Date inside it disagree about the month, so "
             "it keeps the month's name. Open it to check it is that month's statement.")
+_A_TAX_FORM = ("The file is a Form 1098 and not a statement, so it may be a 1098 whose "
+               "download arrived late. Moved to Manual Review, and the next run asks for "
+               "this statement again.")
 # Why Rename lists a file, by verdict.
 _DOUBTS = {
     "another row": "it is dated in the month of another statement on the list, so it may be that one",
     "another month": "the date beside Statement Date is not in this month",
     "unclear": "the dates beside Statement Date disagree about the month",
+    "a tax form": "it is a Form 1098 and not a statement",
 }
 
 
@@ -527,11 +531,24 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        walk: dict = {}
+        docs = site.collect_download_docs(page, walk)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
         log.info("documents page: %d documents, %d new", len(docs), n_new)
+        # Which years each statements page's year picker offered and how
+        # many documents each gave, in numbers and fixed words, for a
+        # tester to copy into the issue. The journal reaches the failure
+        # file, which is attached in public, so it keeps each year's place
+        # in the picker and never the year, since the count in each year
+        # says when the loan began (#38).
+        for line in site.year_walk_lines(walk):
+            log.info(line)
+        try:
+            self.journal.result("looked for the year pickers", **site.year_walk_facts(walk))
+        except Exception:
+            pass
 
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -707,8 +724,8 @@ class App:
         if doc.category == doc_types.STATEMENT:
             text = receipt_pdf.pdf_text(out_path)
             verdict = site.statement_verdict(text, doc.date, self._statement_months())
-            if verdict == "another row":
-                self._refuse_another_rows_statement(doc, out_path, trace)
+            if verdict in ("another row", "a tax form"):
+                self._refuse_another_rows_statement(doc, out_path, trace, verdict)
                 return
             if verdict in ("another month", "unclear"):
                 said = _UNCLEAR if verdict == "unclear" else _NOT_CONFIRMED
@@ -744,14 +761,17 @@ class App:
         earlier runs recorded."""
         return _statement_months(self.progress, self.discovery)
 
-    def _refuse_another_rows_statement(self, doc: Document, out_path: Path, trace) -> None:
+    def _refuse_another_rows_statement(self, doc: Document, out_path: Path, trace,
+                                       verdict: str = "another row") -> None:
         """A statement dated in the month of another statement on the list
-        is not saved under this one's name.
+        is not saved under this one's name, and nor is a Form 1098.
 
         That is what a download the capture before gave up on looks like
         when it arrives during this capture (#38). The file goes to Manual
         Review, where it can be opened, and this statement stays undone, so
         the next Pilot or Resume asks for it again."""
+        tax_form = verdict == "a tax form"
+        said = _A_TAX_FORM if tax_form else _ANOTHER_ROW
         quarantine = unique_path(self.paths.manual_review, out_path.name,
                                  self.config["max_path_length"])
         try:
@@ -765,18 +785,21 @@ class App:
             quarantine = None
         doc.pdf_path = str(quarantine) if quarantine else ""
         doc.pdf_filename = quarantine.name if quarantine else ""
-        doc.notes = (doc.notes + "; " if doc.notes else "") + _ANOTHER_ROW
-        self._write_row(doc, "Dated in another month", "Needs Manual Review")
+        doc.notes = (doc.notes + "; " if doc.notes else "") + said
+        self._write_row(doc, "A Form 1098, not a statement" if tax_form else "Dated in another month",
+                        "Needs Manual Review")
         # The record keeps no path, so the file in Manual Review does not
         # count as this statement and the next run asks for it again.
         doc.pdf_path = doc.pdf_filename = ""
         self._record(doc, State.NEEDS_MANUAL_REVIEW)
         capture = site.capture_facts(trace)
-        capture["statement_check"] = "another row"
-        self.write_failure('check the saved statement', 'the statement is dated in another month',
+        capture["statement_check"] = "a tax form" if tax_form else "another row"
+        self.write_failure('check the saved statement',
+                           'the statement is a tax form' if tax_form
+                           else 'the statement is dated in another month',
                            capture=capture)
         self.stats["manual_review"] += 1
-        print("  !! " + _ANOTHER_ROW)
+        print("  !! " + said)
 
     def _dated_by_statement(self, doc: Document, out_path: Path, text: str = None) -> Path:
         """Name a saved statement for the date printed on it.
@@ -1072,9 +1095,12 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            found_docs = site.collect_download_docs(page) if found else []
+            walk: dict = {}
+            found_docs = site.collect_download_docs(page, walk) if found else []
             info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_pdf_link": bool(b.href)}
                                             for b in found_docs[:40]]
+            info["year_pickers"] = walk
+            info["year_picker_lines"] = site.year_walk_lines(walk)
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)
             info["samples"] = []
@@ -1096,6 +1122,9 @@ class App:
         print(f"Documents page found: {info.get('documents_page_found', '?')}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
               f"rows: {info.get('rows_collected', '?')}")
+        # Numbers and fixed words only, safe to copy into the issue (#38).
+        for line in info.get("year_picker_lines") or []:
+            print(line)
         print("Look through that file for anything you would not want public,")
         print("then attach it to the Newrez issue on GitHub. No screenshot was taken.")
 

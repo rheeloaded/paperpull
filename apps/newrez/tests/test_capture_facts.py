@@ -726,17 +726,25 @@ def test_every_step_the_capture_writes_has_public_words():
     import inspect
     import re
     src = "".join(inspect.getsource(f) for f in (
-        site._open_list, site._wait_for_control, site.download_bill, site._catch_pdf,
-        site._earlier_downloads_settled))
+        site._open_list, site._wait_for_control, site._year_for_row, site.download_bill,
+        site._catch_pdf, site._earlier_downloads_settled))
     written = set(re.findall(r'"note": "([^"]+)"', src))
     written |= set(re.findall(r'_note\(trace, "([^"]+)"', src))
     written |= set(re.findall(r'else "([^"]+)"', src))
-    assert len(written) >= 24, written
+    assert len(written) >= 30, written
     assert not written - set(site._CAPTURE_STEPS), written - set(site._CAPTURE_STEPS)
     from paperpull_core.failure import _STEP_RE
     for words in list(site._CAPTURE_STEPS.values()) + list(site._CAPTURE_WINDOWS) \
-            + list(site._CAPTURE_HOWS) + list(site._CHECK_WHYS) + list(site.STATEMENT_VERDICTS):
+            + list(site._CAPTURE_HOWS) + list(site._CHECK_WHYS) + list(site.STATEMENT_VERDICTS) \
+            + list(site._PICKER_STATES) + list(site._PICKER_REFUSALS) + list(site._WALK_OUTCOMES):
         assert _STEP_RE.match(words), words
+    # every word a year step or a walk can end on is one of the fixed words
+    year_src = inspect.getsource(site._year_picker) + inspect.getsource(site._picker_refusal)
+    assert set(re.findall(r'return "([a-z ]+)"\n', year_src)) <= set(site._PICKER_REFUSALS)
+    states = set(re.findall(r'out\.state(?:, out\.\w+)? = "([a-z ]+)"', year_src))
+    assert states and states <= set(site._PICKER_STATES), states
+    assert set(re.findall(r'return "([a-z ]+)", picker\n', inspect.getsource(site._choose_year))) \
+        <= set(site._WALK_OUTCOMES) | {"chose", "already chosen"}
     # the words a capture names its wait and its way by are all allowed
     windows = set(re.findall(r'ended\([^,]+, "([^"]+)"\)', src))
     hows = set(re.findall(r'ended\("([^"]+)"', src)) | set(re.findall(r'return "([a-z ]+)"\n', src))
