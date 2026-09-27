@@ -113,8 +113,8 @@ unsigned otherwise, so a fork builds without any of this.
 3. On the Artifact Signing account, the role Artifact Signing Certificate
    Profile Signer for that app registration.
 4. In the GitHub repository, an environment named `release`, holding the
-   secrets `AZURE_CLIENT_ID` (the app registration's client id),
-   `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID`, and the repository
+   secrets `AZURE_CLIENT_ID` (the app registration's client id) and
+   `AZURE_TENANT_ID`, and the repository
    variables `ARTIFACT_SIGNING_ENDPOINT` (the account's URI from its
    Overview page, such as `https://eus.codesigning.azure.net/`),
    `ARTIFACT_SIGNING_ACCOUNT` and `ARTIFACT_SIGNING_PROFILE`.
