@@ -60,6 +60,9 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # The app holds a role on the signing account only, not on the
+          # subscription, so the Azure CLI finds no subscription to list.
+          allow-no-subscriptions: true
 
       # Only PaperPull.exe, the one program the build compiles. Everything
       # else under dist\PaperPull is Python's own and already signed by the
