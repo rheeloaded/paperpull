@@ -7,6 +7,40 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.37.2] - 2026-09-27
+
+The first signed Windows release, and one repair from the tester's runs
+of 0.37.1.
+
+### Changed
+- **Windows builds are signed.** The installer, and the PaperPull.exe
+  inside it, the portable zip and the MSIX, carry the maintainer's Azure
+  Artifact Signing certificate and a timestamp, so Windows names the
+  publisher instead of calling it unknown. SmartScreen can still show its
+  prompt while the certificate is new, since it learns to trust a
+  publisher from downloads over time. The release workflow signs through
+  the repository's own environment with no key stored anywhere, and a
+  build that should be signed and is not stops before anything is
+  uploaded. See [docs/code-signing.md](docs/code-signing.md).
+
+### Fixed
+- **Apple Card presses a button again when the press did nothing
+  (#52).** The first Pilot on a real account saved three of five
+  statements. The two it missed were each the first press on a list the
+  app had just opened, card and Savings alike, which produced no
+  download, no file and nothing new on the page, while every later press
+  on the same list downloaded at once. A press that produces nothing at
+  all is now made once more on the same button, found again by its name,
+  and a press that puts anything new on the page is never repeated. The
+  tax year a form's button names is now confirmed against the year
+  printed on the form.
+
+### Documentation
+- PG&E is confirmed working again on a real account (#33).
+- Costco's gas receipt reader was checked against the exact order a
+  member's second paste kept, and reads it (#47).
+- The README gives the terminal command inside the installed Mac app.
+
 ## [0.37.1] - 2026-09-26
 
 Eight repairs from one overnight round of tester reports, every one of
