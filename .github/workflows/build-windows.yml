@@ -1,12 +1,23 @@
 # Builds the Windows package on a clean runner, so a release never depends on
-# something that only exists on one machine, and hands the installer to
-# SignPath for signing once the project holds a SignPath Foundation
-# certificate. Until then the signing step is skipped and the unsigned
-# installer is the artifact, same as a local build.
+# something that only exists on one machine, and signs it with Azure Artifact
+# Signing when the repository is set up for it.
 #
-# Nothing here publishes. The artifacts sit on the workflow run and a person
-# attaches them to a release by hand, so a tag push cannot ship anything on
-# its own.
+# Signing happens in two places. PaperPull.exe is signed in the staged
+# folder, before it is zipped, packed into the MSIX and wrapped by the
+# installer, so every copy of it that ships carries the signature. Then the
+# installer itself is signed. The MSIX is left for the Store, which signs it
+# on submission.
+#
+# Signing runs only when the repository variable ARTIFACT_SIGNING_ENDPOINT is
+# set. Without it the job builds the same package unsigned, as a local build
+# does. When it is set, a file that comes out unsigned stops the job, so an
+# unsigned build can never pass for a signed one. The Azure sign-in is by
+# OpenID Connect through the "release" environment, with no password stored
+# anywhere. See docs/code-signing.md for the one-time setup.
+#
+# Nothing here publishes. The artifacts sit on the workflow run and
+# tools/release.sh attaches them to a release, so a tag push cannot ship
+# anything on its own.
 
 name: Windows package
 
@@ -21,6 +32,14 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    # The environment is what the Azure federated credential trusts. Its
+    # secrets and variables hold the signing details.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SIGNING: ${{ vars.ARTIFACT_SIGNING_ENDPOINT != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,13 +50,57 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
-      - name: Build the package, installer and MSIX
+      - name: Stage the package
+        run: python packaging/build_windows.py --stage-only
+
+      - name: Sign in to Azure
+        if: env.SIGNING == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Only PaperPull.exe, the one program the build compiles. Everything
+      # else under dist\PaperPull is Python's own and already signed by the
+      # Python Software Foundation, so it is moved aside for the signing and
+      # put back after, rather than signed again under this name.
+      - name: Set PaperPull.exe aside for signing
+        if: env.SIGNING == 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force to-sign\launcher | Out-Null
+          Move-Item dist\PaperPull\PaperPull.exe to-sign\launcher\PaperPull.exe
+
+      - name: Sign PaperPull.exe
+        if: env.SIGNING == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\to-sign\launcher
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Put the signed PaperPull.exe back
+        if: env.SIGNING == 'true'
+        shell: pwsh
+        run: |
+          Move-Item to-sign\launcher\PaperPull.exe dist\PaperPull\PaperPull.exe
+          $sig = Get-AuthenticodeSignature dist\PaperPull\PaperPull.exe
+          if ($sig.Status -ne 'Valid') { throw "PaperPull.exe is not validly signed: $($sig.Status)" }
+          Write-Output ("PaperPull.exe signed by " + $sig.SignerCertificate.Subject)
+
+      - name: Build the zip, installer and MSIX from the stage
         env:
           MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
           MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
           MSIX_PUBLISHER_DISPLAY: ${{ vars.MSIX_PUBLISHER_DISPLAY }}
           MSIX_DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME }}
-        run: python packaging/build_windows.py --installer --msix
+        run: python packaging/build_windows.py --package-only --installer --msix
 
       - name: Refuse to continue without an installer
         shell: pwsh
@@ -45,6 +108,38 @@ jobs:
           $exe = Get-ChildItem dist -Filter "PaperPull-*-setup.exe"
           if (-not $exe) { throw "Inno Setup produced no installer" }
           Write-Output $exe.Name
+          New-Item -ItemType Directory -Force to-sign\installer | Out-Null
+          Copy-Item $exe.FullName to-sign\installer\
+
+      - name: Sign the installer
+        if: env.SIGNING == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\to-sign\installer
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Check every shipped program is signed
+        if: env.SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem to-sign\installer -Filter "PaperPull-*-setup.exe" | Select-Object -First 1
+          Copy-Item $exe.FullName dist\ -Force
+          $zip = Get-ChildItem dist -Filter "PaperPull-*.zip" | Select-Object -First 1
+          $unzipped = Join-Path $env:RUNNER_TEMP "zipcheck"
+          Expand-Archive $zip.FullName -DestinationPath $unzipped -Force
+          $inZip = Get-ChildItem $unzipped -Recurse -Filter PaperPull.exe | Select-Object -First 1
+          foreach ($f in @((Join-Path dist $exe.Name), $inZip.FullName)) {
+            $sig = Get-AuthenticodeSignature $f
+            if ($sig.Status -ne 'Valid') { throw "$f is not validly signed: $($sig.Status)" }
+            Write-Output ("{0} signed by {1}" -f (Split-Path $f -Leaf), $sig.SignerCertificate.Subject)
+          }
 
       # The Store signs the real package. To prove this one installs, it is
       # signed here with a certificate made for the job and thrown away, then
@@ -94,6 +189,7 @@ jobs:
           Remove-Item $pfx, $signed -Force
           Write-Output "removed again"
 
+      # After signing, so the checksums are of the files that ship.
       - name: Checksums
         shell: pwsh
         run: |
@@ -103,14 +199,10 @@ jobs:
             Set-Content -Encoding ascii dist/SHA256SUMS.txt
           Get-Content dist/SHA256SUMS.txt
 
-      # SignPath signs what this step uploads, so it holds the installer and
-      # nothing else. upload-artifact wraps it in a zip, which is what the
-      # SignPath artifact configuration expects (a zip holding one PE file).
-      - name: Upload the unsigned installer
-        id: upload-unsigned
+      - name: Upload the installer
         uses: actions/upload-artifact@v4
         with:
-          name: PaperPull-installer-unsigned
+          name: PaperPull-installer
           path: dist/PaperPull-*-setup.exe
           if-no-files-found: error
 
@@ -123,32 +215,11 @@ jobs:
             dist/SHA256SUMS.txt
           if-no-files-found: error
 
-      # Unsigned, as the Store wants it. The Store signs on submission.
+      # Unsigned as a package, as the Store wants it. The Store signs on
+      # submission. The PaperPull.exe inside it is already signed.
       - name: Upload the MSIX for the Store
         uses: actions/upload-artifact@v4
         with:
           name: PaperPull-msix-unsigned
           path: dist/PaperPull-*.msix
-          if-no-files-found: error
-
-      # Runs only once the repository carries the SignPath organization id
-      # as a variable. Before that the job ends here with an unsigned build.
-      - name: Sign the installer (SignPath Foundation)
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: paperpull
-          signing-policy-slug: release-signing
-          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: dist/signed
-
-      - name: Upload the signed installer
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: PaperPull-installer-signed
-          path: dist/signed/**
           if-no-files-found: error

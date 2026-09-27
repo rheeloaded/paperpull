@@ -359,10 +359,13 @@ reasons unrelated to PaperPull.
 so on the issue. Short sessions are a real property of the site and the app
 will have to deal with it, so knowing is useful.
 
-**You would rather not run an unsigned installer.** Say so on the issue. A
+**Windows warns about the installer.** The installer is signed, and the
+publisher it names is the project's maintainer, but SmartScreen can still
+show its prompt while the certificate is new. If you would rather not run
+it, say so on the issue. A
 [Diagnose](../CONTRIBUTING.md#fixing-a-provider-that-broke) file from an
-existing install is less complete but still helps, and the signing situation
-is explained in [docs/code-signing.md](code-signing.md).
+existing install is less complete but still helps, and the signing is
+explained in [docs/code-signing.md](code-signing.md).
 
 **Anything else.**
 [Open an issue](https://github.com/rheeloaded/paperpull/issues/new/choose) and

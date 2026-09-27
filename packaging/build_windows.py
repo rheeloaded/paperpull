@@ -329,7 +329,8 @@ def write_inno_script() -> Path:
     """The installer definition. Compiled only when Inno Setup is present."""
     iss = DIST / "PaperPull.iss"
     iss.write_text(r"""; PaperPull installer. Compile with Inno Setup 6.
-; Not yet code-signed. Windows will show a SmartScreen warning on first run.
+; The release workflow signs this installer and PaperPull.exe inside it with
+; Azure Artifact Signing. A local build is unsigned.
 
 #define AppVersion "%(ver)s"
 
@@ -429,7 +430,18 @@ def main(argv=None) -> int:
                     help="also build the unsigned MSIX for the Microsoft Store")
     ap.add_argument("--arch", choices=sorted(ARCHES), default="x64",
                     help="x64 (default) or arm64, built on a machine of that architecture")
+    # Signing sits between the two halves. PaperPull.exe has to be signed
+    # before it is zipped, packed into the MSIX and wrapped by the
+    # installer, so a signed build stages first, signs the stage, then
+    # packages what was signed. With neither flag it does both, as before.
+    ap.add_argument("--stage-only", action="store_true",
+                    help="build and test dist\\PaperPull, then stop before any packaging")
+    ap.add_argument("--package-only", action="store_true",
+                    help="package the dist\\PaperPull already staged, without staging again")
     args = ap.parse_args(argv)
+    if args.stage_only and args.package_only:
+        say("--stage-only and --package-only are the two halves of one build, pick one.")
+        return 2
 
     if sys.platform != "win32":
         say("This builds the Windows package and runs on Windows.")
@@ -443,16 +455,25 @@ def main(argv=None) -> int:
         return 1
 
     say("PaperPull %s, %s" % (version(), ARCH))
-    if STAGE.exists():
-        shutil.rmtree(STAGE)
-    STAGE.mkdir(parents=True)
+    if args.package_only:
+        if not (STAGE / "PaperPull.exe").is_file():
+            say("Nothing is staged at %s, run with --stage-only first." % STAGE)
+            return 1
+    else:
+        if STAGE.exists():
+            shutil.rmtree(STAGE)
+        STAGE.mkdir(parents=True)
 
-    py = stage_python()
-    install_packages(py)
-    stage_code()
-    write_launchers()
-    audit()
-    smoke_test(py)
+        py = stage_python()
+        install_packages(py)
+        stage_code()
+        write_launchers()
+        audit()
+        smoke_test(py)
+        if args.stage_only:
+            say()
+            say("Staged at dist\\PaperPull. Sign it, then run again with --package-only.")
+            return 0
     zip_it()
     if args.msix:
         icon = REPO / "packaging" / "paperpull.ico"

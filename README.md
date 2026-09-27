@@ -434,9 +434,11 @@ uninstalls cleanly, plus the knowledge that it keeps the project going.
 Nothing is held back from either edition. The AGPL permits selling copies and the source stays public. For macOS
 there is `PaperPull-<version>-arm64.dmg`, Apple Silicon only, signed and
 notarized, so it opens with no warning. Drag PaperPull to Applications and
-double-click it. The Windows installer is not yet code-signed, so Windows
-shows its SmartScreen prompt the first time. See
-[Code signing policy](#code-signing-policy) below.
+double-click it. The Windows installer and the program inside it are
+code-signed with Azure Artifact Signing. SmartScreen can still show its
+prompt while the certificate is new, since it learns to trust a publisher
+from downloads over time. See [Code signing policy](#code-signing-policy)
+below.
 
 For a checkout of this repository, one download covers both. The two
 double-click files each app keeps, and the one-shot setup, come in both
