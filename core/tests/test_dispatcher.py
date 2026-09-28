@@ -119,6 +119,29 @@ def test_main_runs_in_the_apps_folder_and_returns_its_exit_code(root, monkeypatc
     assert seen["argv"][1:] == ["chase_docs.py", "--resume", "--max-docs", "3"]
 
 
+def test_an_app_writes_utf8_wherever_its_output_goes(root, tmp_path, monkeypatch):
+    """Output headed for a file was written in the Windows code page, and
+    printing a receipt named in Korean failed that purchase (Apple,
+    2026-09-27). The panel always set UTF-8, the terminal did not."""
+    calls = []
+    monkeypatch.setattr(paperpull.subprocess, "call", lambda argv, **kw: calls.append(kw) or 0)
+    monkeypatch.delenv("PYTHONIOENCODING", raising=False)
+    assert paperpull.run(root / "chase", ["python", "chase_docs.py"]) == 0
+    assert calls[0]["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert calls[0]["cwd"] == str(root / "chase")
+
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-16")
+    assert paperpull.app_env()["PYTHONIOENCODING"] == "utf-16", "a setting of the person's own is kept"
+
+    monkeypatch.delenv("PYTHONIOENCODING", raising=False)
+    out = tmp_path / "run.log"
+    with open(out, "wb") as sink:
+        rc = subprocess.run([sys.executable, "-c", "print('\\uce74\\uce74\\uc624\\ud1a1')"],
+                            stdout=sink, env=paperpull.app_env()).returncode
+    assert rc == 0
+    assert out.read_bytes().decode("utf-8").strip() == "카카오톡"
+
+
 def test_no_venv_and_no_core_stops_with_the_setup_command(root, monkeypatch):
     monkeypatch.setattr(paperpull, "has_core", lambda: False)
     with pytest.raises(SystemExit, match="paperpull.py chase setup"):

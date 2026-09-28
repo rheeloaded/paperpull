@@ -200,8 +200,19 @@ def build_argv(app_dir: Path, command: str, account: str | None,
             *account_flags(app_dir, account), *extra]
 
 
+def app_env() -> dict:
+    """The environment an app runs in, with its output in UTF-8 as the panel
+    sets it. A receipt's name can hold any letter, and Windows writes output
+    headed for a file or a pipe in its own code page, which holds few of
+    them, so printing an app named in Korean failed that purchase. A setting
+    of the person's own is kept."""
+    env = dict(os.environ)
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    return env
+
+
 def run(app_dir: Path, argv: list[str]) -> int:
-    return subprocess.call(argv, cwd=str(app_dir))
+    return subprocess.call(argv, cwd=str(app_dir), env=app_env())
 
 
 # -- setup ---------------------------------------------------------------------

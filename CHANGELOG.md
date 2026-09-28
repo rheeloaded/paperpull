@@ -16,6 +16,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   as a sign-in and stopped at that purchase on every run. A refused receipt
   now counts as a sign-in only when the family list is refused too, and
   otherwise that purchase is tried again next run while the rest are saved.
+- **The terminal command writes UTF-8.** Output headed for a file or a pipe
+  was written in the Windows code page, and printing a receipt named in
+  Korean failed that purchase. The panel always set UTF-8 for the apps it
+  runs, and the terminal command now does the same.
 
 ## [0.39.0] - 2026-09-27
 
