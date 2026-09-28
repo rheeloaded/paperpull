@@ -622,98 +622,156 @@ def press_row_receipt(page, purchase, trace=None):
         trace.append({"note": "the row's controls",
                       "candidates": [{**c, "text": mask_text(c["text"]), "label": mask_text(c["label"]),
                                       "href": mask_href(c["href"])} for c in cands[:12]]})
+    # Only the row's own receipt control is pressed, and only its address is
+    # fetched. Until 0.39.2 this function raised before its first press, so
+    # the loop that pressed up to six of the row's controls in turn had never
+    # run on a real account, and it would have pressed an Email Receipt, or
+    # a control with no words at all, before the receipt (#42, review).
+    picked = next(((c, el) for c, el in zip(cands, els)
+                   if el is not None and is_receipt_control(c)), None)
+    if picked is None:
+        if trace is not None:
+            trace.append({"note": "no control on the row reads as its receipt", "controls": len(cands)})
+        return None
+    c, el = picked
+    label = c["text"] or c["label"]
+    href = urljoin(BASE, c["href"] or "")
+    if c["href"] and is_safe_url(href):
+        body = fetch_receipt_bytes(page, href)
+        if body:
+            return body
     ctx = page.context
-    for c, el in list(zip(cands, els))[:6]:
-        if el is None:
-            continue
-        label = c["label"] or c["text"] or "receipt"
-        if FORBIDDEN_CONTROL_RE.search(label):
-            continue
-        href = urljoin(BASE, c["href"] or "")
-        if c["href"] and is_safe_url(href):
-            body = fetch_receipt_bytes(page, href)
-            if body:
-                return body
-        got = {}
+    got: dict = {}
+    downloads: list = []
+    popups: list = []
 
-        def on_response(res):
-            try:
-                if got or "pdf" not in (res.headers.get("content-type") or "").lower():
-                    return
-                if not is_safe_url(res.url or ""):
-                    return
-                body = res.body()
-                if body[:5] == b"%PDF-":
-                    got["body"] = body
-            except Exception:
-                pass
-        downloads = []
+    def on_response(res):
+        # An answer from this page or a window this press opened. Another
+        # tab of the same browser can be on meijer.com as well (review).
+        try:
+            if got or "pdf" not in (res.headers.get("content-type") or "").lower():
+                return
+            if not is_safe_url(res.url or "") or res.frame.page not in [page] + popups:
+                return
+            body = res.body()
+            if body[:5] == b"%PDF-":
+                got["body"] = body
+        except Exception:
+            pass
+
+    # A function of its own and not downloads.append. Playwright marks the
+    # handler it is given, a built-in method cannot be marked, and every
+    # receipt on 0.39.1 raised AttributeError right here (#42). It is also
+    # the one object the listener is taken off with below, where a second
+    # downloads.append would be a different one.
+    def on_download(dl):
+        downloads.append(dl)
+
+    def on_popup(p):
+        popups.append(p)
+        try:
+            p.on("download", on_download)
+        except Exception:
+            pass
+
+    looked: list = []
+    try:
         ctx.on("response", on_response)
-        page.on("download", downloads.append)
-        before = set(ctx.pages)
+        page.on("download", on_download)
+        page.on("popup", on_popup)
         try:
             el.click(timeout=5000)
         except Exception as e:
             if trace is not None:
                 trace.append({"note": "click failed", "control": mask_text(label)[:40], "error": str(e)[:100]})
-        try:
-            for _ in range(20):
-                page.wait_for_timeout(500)
-                if got or downloads:
-                    break
-                for extra in [x for x in ctx.pages if x not in before]:
-                    try:
-                        extra.wait_for_load_state("domcontentloaded", timeout=5000)
-                    except Exception:
-                        pass
-                    u = extra.url or ""
-                    if u.startswith("blob:") or is_safe_url(u):
-                        body = fetch_receipt_bytes(extra, u) if not u.startswith("blob:") else None
-                        if not body:
-                            try:
-                                got = _fetch_with_status(extra, u)
-                                body = base64.b64decode(got["b64"]) if got.get("b64") else None
-                            except Exception:
-                                body = None
-                        if body and body[:5] == b"%PDF-":
-                            got["body"] = body
-                    if u and not got:
-                        if trace is not None:
-                            trace.append({"note": "the control opened a window", "url": mask_href(u)})
-                    try:
-                        extra.close()
-                    except Exception:
-                        pass
-                if got:
-                    break
-        finally:
-            try:
-                ctx.remove_listener("response", on_response)
-            except Exception:
-                pass
-            try:
-                page.remove_listener("download", downloads.append)
-            except Exception:
-                pass
-        if downloads and not got:
-            # A download the browser saved for itself. Its own file is read
-            # rather than moved, so nothing is left in the browser's folder
-            # half-taken.
-            try:
-                import pathlib
-                saved = downloads[0].path()
-                if saved:
-                    body = pathlib.Path(saved).read_bytes()
-                    if body[:5] == b"%PDF-":
+        for _ in range(20):
+            page.wait_for_timeout(500)
+            if got or downloads:
+                break
+            for extra in [p for p in popups if p not in looked]:
+                u = extra.url or ""
+                # A window the page opens blank, to be filled once its own
+                # fetch answers, is looked at again on the next tick and never
+                # closed while it is still being filled (review).
+                if not u or u == "about:blank":
+                    continue
+                looked.append(extra)
+                try:
+                    extra.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass
+                if u.startswith("blob:") or is_safe_url(u):
+                    body = fetch_receipt_bytes(extra, u) if not u.startswith("blob:") else None
+                    if not body:
+                        # Its own name. Answered into `got`, a page that was
+                        # not the receipt read as a receipt found and ended
+                        # the wait before a download could land.
+                        try:
+                            fetched = _fetch_with_status(extra, u)
+                            body = base64.b64decode(fetched["b64"]) if fetched.get("b64") else None
+                        except Exception:
+                            body = None
+                    if body and body[:5] == b"%PDF-":
                         got["body"] = body
-            except Exception as e:
-                if trace is not None:
-                    trace.append({"note": "download save failed", "error": str(e)[:100]})
-        if got.get("body"):
+                if not got and trace is not None:
+                    trace.append({"note": "the control opened a window", "url": mask_href(u)})
+            if got:
+                break
+    finally:
+        for target, event, handler in ((ctx, "response", on_response), (page, "download", on_download),
+                                       (page, "popup", on_popup)):
+            try:
+                target.remove_listener(event, handler)
+            except Exception:
+                pass
+        for extra in popups:
+            try:
+                extra.remove_listener("download", on_download)
+            except Exception:
+                pass
+            try:
+                extra.close()
+            except Exception:
+                pass
+    if downloads and not got:
+        # A download the browser saved for itself. Its own file is read
+        # rather than moved, so nothing is left in the browser's folder
+        # half-taken.
+        try:
+            import pathlib
+            saved = downloads[0].path()
+            if saved:
+                body = pathlib.Path(saved).read_bytes()
+                if body[:5] == b"%PDF-":
+                    got["body"] = body
+        except Exception as e:
             if trace is not None:
-                trace.append({"note": "the receipt came from the row's control", "control": mask_text(label)[:40]})
-            return got["body"]
+                trace.append({"note": "download save failed", "error": str(e)[:100]})
+    if got.get("body"):
+        if trace is not None:
+            trace.append({"note": "the receipt came from the row's control", "control": mask_text(label)[:40]})
+        return got["body"]
     return None
+
+
+# What the row's own receipt control says. The member's recording showed a
+# link that reads "view receipt pdf" (#42). A control with no words of its
+# own is taken only when its name for a screen reader says the same.
+RECEIPT_PDF_LABEL_RE = re.compile(
+    r"^\s*(view|download|open)\s+(the\s+|my\s+|your\s+)?(receipt\s+)?pdf\s*$", re.I)
+
+
+def is_receipt_control(c: dict) -> bool:
+    """Whether a row control is the one that fetches its receipt. Never one
+    the guard refuses, and never one that only mentions a receipt, since
+    Email Receipt and Share Receipt send it somewhere."""
+    text = " ".join((c.get("text") or "").split())
+    label = " ".join((c.get("label") or "").split())
+    if FORBIDDEN_CONTROL_RE.search(text) or FORBIDDEN_CONTROL_RE.search(label):
+        return False
+    if text:
+        return bool(RECEIPT_LINK_RE.match(text))
+    return bool(RECEIPT_LINK_RE.match(label) or RECEIPT_PDF_LABEL_RE.match(label))
 
 
 def goto_receipt_page(page, url: str) -> bool:
