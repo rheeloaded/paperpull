@@ -1040,6 +1040,215 @@ PANEL_HEADING_FORBIDDEN_RE = re.compile(
 CARD_TITLE = "Credit Card Statement"
 ACCOUNT_TITLE = "Account Statement"
 
+# RECORDED, from the member's 0.39.1 Pilot of 2026-09-28. The card's twelve
+# statements came back with the checking account's twelve dates, while the
+# card's own list runs on the 20th of each month, so every card statement
+# was looked for on a day the card never had. The history is one dialog for
+# every account, and the list read for the card was the one the dialog
+# still showed from the account read before it. Each account also read one
+# page and no more, where the member counts seven years behind NEXT (#35).
+#
+# So right before Statement History or NEXT is pressed, every control on
+# the page is marked with its own label, and a list counts once its dated
+# controls are unmarked, drawn after the press, or carry a label other than
+# the one they were marked with, drawn again in place. The vendor answers
+# each press with a round trip of its own, so the wait is longer than the
+# six seconds it was, and why a history stopped paging goes in the trace.
+HISTORY_WAIT_MS = 20000
+_POLL_MS = 300
+_SEEN_ATTR = "data-paperpull-seen"
+# The list read last, kept on the page itself, so a page loaded again
+# forgets it along with the list it described.
+_LAST_LIST_ATTR = "data-paperpull-last-list"
+
+# How a press's list came, fixed phrases for the trace.
+DRAWN = "drawn after the press"
+DRAWN_SAME = "drawn again the same"
+SHOWN = "shown without being drawn again"
+BEFORE = "the list read before"
+NO_LIST = "no list"
+
+_MARK_JS = r"""(attr) => {
+  const label = el => (el.getAttribute('aria-label') || el.textContent || '').trim();
+  for (const el of document.querySelectorAll('a, button, [role=link], [role=button]')) {
+    el.setAttribute(attr, label(el));
+  }
+}"""
+
+# A marked control whose label is no longer the one it was marked with was
+# drawn again in place, so it counts as new.
+_UNMARK_CHANGED_JS = r"""(attr) => {
+  const label = el => (el.getAttribute('aria-label') || el.textContent || '').trim();
+  for (const el of document.querySelectorAll('[' + attr + ']')) {
+    if (el.getAttribute(attr) !== label(el)) el.removeAttribute(attr);
+  }
+}"""
+
+
+def _mark_seen(page) -> None:
+    """Mark every control on the page with its label, so the list the next
+    press brings can be told from the one the page holds now."""
+    try:
+        page.evaluate(_MARK_JS, _SEEN_ATTR)
+    except Exception as e:
+        log.info("could not mark the controls on the page: %s", e)
+
+
+def _fresh(page):
+    """The controls drawn since the page was last marked, as a locator to
+    narrow another one with."""
+    try:
+        page.evaluate(_UNMARK_CHANGED_JS, _SEEN_ATTR)
+    except Exception:
+        pass
+    return page.locator(":not([%s])" % _SEEN_ATTR)
+
+
+def _labels_of(loc) -> List[str]:
+    """Each control's label, its aria-label or else its words, in order."""
+    out = []
+    try:
+        for i in range(loc.count()):
+            el = loc.nth(i)
+            out.append((el.get_attribute("aria-label", timeout=500)
+                        or el.inner_text(timeout=500) or "").strip())
+    except Exception:
+        return []
+    return out
+
+
+def _listed_labels(page, fresh_only: bool = False) -> List[str]:
+    """The labels of the dated statements showing, only those drawn since
+    the last mark when `fresh_only`.
+
+    Only a control that shows is counted. controls_named falls back to
+    every control whose words match when none matches by its accessible
+    name, and that takes in the links of a history dialog that was closed.
+    Right after the card's Statement History was pressed and before its
+    dialog showed, those were the checking account's links, which is the
+    likeliest way the card got the checking account's dates (#35)."""
+    try:
+        loc = _controls_named(page, DATE_ONLY_CONTROL_RE).filter(visible=True)
+        if fresh_only:
+            loc = loc.and_(_fresh(page))
+    except Exception:
+        return []
+    return _labels_of(loc)
+
+
+def _remember_list(page, panel, labels: List[str]) -> None:
+    """Keep the list just read, and whose panel it was, on the page."""
+    try:
+        page.evaluate("([attr, value]) => document.documentElement.setAttribute(attr, "
+                      "JSON.stringify(value))",
+                      [_LAST_LIST_ATTR, {"panel": panel, "labels": list(labels)}])
+    except Exception:
+        pass
+
+
+def _last_read(page) -> Optional[dict]:
+    """The list this run read last on this page and whose panel it was, as
+    {"panel", "labels"}, or None when it has read none since the page
+    loaded."""
+    import json
+    try:
+        got = json.loads(page.evaluate(
+            "(attr) => document.documentElement.getAttribute(attr) || 'null'", _LAST_LIST_ATTR))
+    except Exception:
+        return None
+    if not isinstance(got, dict) or not isinstance(got.get("labels"), list):
+        return None
+    return {"panel": got.get("panel"), "labels": [x for x in got["labels"] if isinstance(x, str)]}
+
+
+def _wait_for_new_list(page, panel, not_like: List[str], stale: List[str],
+                       shown_at_once: bool = False) -> Tuple[str, List[str]]:
+    """Wait for the dated list a press brought. Returns how it came, one of
+    the fixed phrases above, and its labels.
+
+    A list drawn after the press is taken, unless its labels are
+    `not_like`, the page NEXT was pressed on or the last list read from
+    another account. That one is waited past, since the old list can be
+    drawn before the new one arrives, and taken only when nothing else
+    comes. A list showing that was not drawn after the press is taken at
+    once only when `shown_at_once`, which is when nothing has been read on
+    this page yet, so it cannot be left over from this run, and taken that
+    way as it always was. Otherwise it is taken at the end of the wait, and
+    only when it is not `stale`, the page NEXT was pressed on or the list
+    last read from another account, which is what a dialog opened again
+    shows before its new list arrives (#35). `panel` is kept with whatever
+    list is taken."""
+    not_like = list(not_like or [])
+    same: List[str] = []
+    for _ in range(max(1, HISTORY_WAIT_MS // _POLL_MS)):
+        page.wait_for_timeout(_POLL_MS)
+        fresh = _listed_labels(page, fresh_only=True)
+        if fresh:
+            if not_like and fresh == not_like:
+                same = fresh
+                continue
+            # One more look, so a list still being drawn is read whole.
+            page.wait_for_timeout(_POLL_MS)
+            fresh = _listed_labels(page, fresh_only=True) or fresh
+            _remember_list(page, panel, fresh)
+            return DRAWN, fresh
+        if shown_at_once:
+            shown = _listed_labels(page)
+            if shown:
+                page.wait_for_timeout(_POLL_MS)
+                shown = _listed_labels(page) or shown
+                _remember_list(page, panel, shown)
+                return SHOWN, shown
+    if same:
+        _remember_list(page, panel, same)
+        return DRAWN_SAME, same
+    shown = _listed_labels(page)
+    if not shown:
+        return NO_LIST, []
+    if stale and shown == list(stale):
+        return BEFORE, shown
+    _remember_list(page, panel, shown)
+    return SHOWN, shown
+
+
+# Words a trace may say a panel's heading carries, and nothing else from it.
+# A heading holds the account's own name and number, and these are enough to
+# learn how the vendor names a card. The member's card panel matched none of
+# card, Visa or Mastercard, so its statements were read as an account's (#35).
+_HEADING_WORDS = (
+    "account", "auto", "business", "card", "cash", "certificate", "checking", "classic",
+    "credit", "debit", "equity", "gold", "ira", "line", "loan", "mastercard",
+    "member", "membership", "money", "market", "mortgage", "platinum", "premier",
+    "premium", "rewards", "savings", "secured", "share", "signature", "statement",
+    "statements", "travel", "visa")
+_HEADING_WORD_RE = re.compile(r"\b(%s)\b" % "|".join(_HEADING_WORDS), re.I)
+
+# A masked account number in a heading, "****4321", "x4321", "...4321" or
+# "ending in 4321", with the suffix a credit union writes after a member
+# number when there is one, "XXXXXX1111-20". A balance or a date is not one.
+_MASKED_FOUR_RE = re.compile(
+    r"(?:(?<![A-Za-z0-9])[*x\u2022#]+|\.{2,}|\u2026|\bending\s+in|\bends\s+in)\s*(\d{4})"
+    r"(-\d{1,3})?(?!\d)",
+    re.I)
+# A month's whole name or its short form, and not a word that merely starts
+# like one, "Market" or "Decade".
+_MONTH_WORD_RE = re.compile(
+    r"^(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sept?(ember)?|"
+    r"oct(ober)?|nov(ember)?|dec(ember)?)$", re.I)
+
+
+def _heading_words(text: str) -> List[str]:
+    """The words from the list above that `text` carries, lowercase."""
+    return sorted({m.group(1).lower() for m in _HEADING_WORD_RE.finditer(text or "")})
+
+
+def _panel_facts(panel: dict) -> dict:
+    """What a trace may say about a panel's heading, words from the list
+    above and whether it shows a masked number, never the heading."""
+    return {"words": _heading_words(panel.get("heading") or ""),
+            "words_under_it": _heading_words(" ".join(panel.get("sub") or [])),
+            "masked_number": bool(_MASKED_FOUR_RE.search(panel.get("heading") or ""))}
+
 
 def panel_heading_is_safe(text: str) -> bool:
     """A panel's heading may be pressed to open the panel when it names no
@@ -1058,20 +1267,24 @@ _PANELS_JS = r"""(pattern) => {
   const links = [...document.querySelectorAll('a, button, [role=link], [role=button], [role=tab]')]
     .filter(el => re.test(named(el)));
   links.forEach((el, i) => {
-    let header = null;
+    let header = null, box = null;
     for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
       header = [...node.children].find(c => c.hasAttribute('aria-expanded') && !c.contains(el));
-      if (header) break;
+      if (header) { box = node; break; }
     }
     el.setAttribute('data-paperpull-history', String(i));
     if (header) header.setAttribute('data-paperpull-panel', String(i));
     const shown = !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
     const inner = header ? [...header.querySelectorAll('a, button, input, select, [role=button], [role=link]')] : [];
+    // The panel's own headings under its header, which may name the
+    // account's kind when the header does not.
+    const sub = box ? [...box.querySelectorAll('h3, h4')].filter(h => !header.contains(h))
+      .slice(0, 3).map(h => (h.innerText || h.textContent || '').trim()) : [];
     out.push({i, heading: header ? (header.innerText || header.textContent || '').trim() : '',
               expanded: header ? header.getAttribute('aria-expanded') : '',
               header: !!header,
               header_controls: inner.map(c => (c.getAttribute('aria-label') || c.textContent || '').trim()),
-              shown});
+              sub, shown});
   });
   return out;
 }"""
@@ -1094,10 +1307,41 @@ def _panel_account(panels: List[dict], panel: dict) -> str:
     """What tells this panel's statements from another panel's of the same
     kind. The first panel of a kind keeps an empty account, which is what
     every statement saved before round six was keyed by, so nothing is
-    fetched twice. A later one is told apart by its heading, whose last
-    four digits the key keeps."""
+    fetched twice. A later one is told apart by the masked number in its
+    heading, else by the heading's own words, and by its place among the
+    panels of its kind only when neither tells it from the rest.
+
+    0.39.1 kept the whole heading. A heading can hold more than the
+    account's name, a balance or a date beside it, and a key that changed
+    with either would list every statement of that account again as new on
+    the next run (#35). A key has to be the panel's own as well. Two
+    panels given one key share one record for each date, and a place moves
+    to the next panel when one before it closes, which would pass its
+    downloaded dates to another account's statements."""
     same = [p for p in panels if p["card"] == panel["card"]]
-    return "" if same and same[0]["i"] == panel["i"] else (panel.get("heading") or "")
+    if not same or same[0]["i"] == panel["i"]:
+        return ""
+    for key in (_masked_key, _words_key):
+        mine = key(panel)
+        if mine and sum(1 for p in same[1:] if key(p) == mine) == 1:
+            return mine
+    place = next((n for n, p in enumerate(same, 1) if p["i"] == panel["i"]), 0)
+    return "account %d" % place
+
+
+def _masked_key(panel: dict) -> str:
+    """The panel by the masked number in its heading, or ""."""
+    m = _MASKED_FOUR_RE.search(panel.get("heading") or "")
+    return "account ending %s%s" % (m.group(1), m.group(2) or "") if m else ""
+
+
+def _words_key(panel: dict) -> str:
+    """The panel by its heading's words alone, with every number, amount and
+    month name left out, so a balance or a date that changes does not
+    change it. Short enough that the key keeps it whole, or ""."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z]+", panel.get("heading") or "")
+             if not _MONTH_WORD_RE.match(w)]
+    return ("account " + " ".join(words))[:40].rstrip() if words else ""
 
 
 def _panel_opens_safely(panel: dict) -> bool:
@@ -1108,9 +1352,15 @@ def _panel_opens_safely(panel: dict) -> bool:
         not (x or "").strip() or panel_heading_is_safe(x) for x in inner)
 
 
-def open_panel_history(page, panel: dict, trace: Optional[list] = None) -> bool:
+def open_panel_history(page, panel: dict, trace: Optional[list] = None,
+                       facts: Optional[dict] = None) -> bool:
     """Open this panel if it is closed, through its own heading, then press
-    its Statement History. True when the history's dated list shows."""
+    its Statement History. True when a list shows that the press brought.
+
+    Every control is marked right before the press, and when the list read
+    last on this page was another account's, the new one must not be it, so
+    a list left over from the account before is never read as this one's
+    (#35). `facts` gets how the list came, as _wait_for_new_list says it."""
     i = panel["i"]
     try:
         if panel.get("expanded") == "false":
@@ -1133,6 +1383,8 @@ def open_panel_history(page, panel: dict, trace: Optional[list] = None) -> bool:
         label = (link.get_attribute("aria-label") or link.inner_text(timeout=1500) or "").strip()
         if not STATEMENT_HISTORY_RE.match(label) or not is_safe_control(label):
             return False
+        last = _last_read(page)
+        _mark_seen(page)
         link.click(timeout=5000)
     except Exception as e:
         log.info("could not open a panel's statement history: %s", e)
@@ -1140,20 +1392,14 @@ def open_panel_history(page, panel: dict, trace: Optional[list] = None) -> bool:
             trace.append({"note": "a panel's statement history would not open", "panel": i,
                           "error": _error_word(e)})
         return False
-    for _ in range(20):
-        if _dated_count(page) > 0:
-            return True
-        page.wait_for_timeout(300)
-    return False
-
-
-def _dated_labels(page) -> List[str]:
-    """The labels of the dated statements showing, in order."""
-    try:
-        loc = _controls_named(page, DATE_ONLY_CONTROL_RE)
-        return [(loc.nth(i).inner_text(timeout=500) or "").strip() for i in range(loc.count())]
-    except Exception:
-        return []
+    # Only another account's list is one this account's must not be. The
+    # same account's, opened again, is waited on to be drawn again, since it
+    # can be showing a later page, and taken as it is when it never is.
+    other = last["labels"] if last is not None and last["panel"] != i else []
+    how, _labels = _wait_for_new_list(page, i, other, other, shown_at_once=last is None)
+    if facts is not None:
+        facts["list"] = how
+    return how in (DRAWN, DRAWN_SAME, SHOWN)
 
 
 # The history dialog's own controls. The dialog is in the selector itself,
@@ -1162,47 +1408,91 @@ _DIALOG_CONTROLS = ("[role=dialog] button, [role=dialog] a, [role=dialog] [role=
                     "[aria-modal=true] button, [aria-modal=true] [role=button]")
 
 
-def _pager(page, name_re):
+def _pager(page, name_re, why: Optional[dict] = None):
     """The history dialog's own control whose whole label, its aria-label
     or else what it shows, matches `name_re`, showing and enabled, or None.
     A control whose label cannot be read is never taken, and neither is
-    one the guard refuses."""
+    one the guard refuses. `why` gets "hidden", "disabled" or "none" when
+    nothing is taken."""
+    hidden = disabled = 0
     try:
         loc = page.locator(_DIALOG_CONTROLS)
         count = int(loc.count())
     except Exception:
-        return None
+        count = 0
     for i in range(min(count, 40)):
         el = loc.nth(i)
         try:
             label = (el.get_attribute("aria-label") or el.inner_text(timeout=500) or "").strip()
             if not label or not name_re.match(label) or FORBIDDEN_CONTROL_RE.search(label):
                 continue
-            if el.is_visible() and el.is_enabled():
-                return el
+            if not el.is_visible():
+                hidden += 1
+                continue
+            if not el.is_enabled() or _looks_disabled(el):
+                disabled += 1
+                continue
+            return el
         except Exception:
             continue
+    if why is not None:
+        why["pager"] = "disabled" if disabled else "hidden" if hidden else "none"
     return None
 
 
-def next_history_page(page) -> bool:
-    """Press NEXT under the history, and wait for a different page of
-    dates. False on the last page, where NEXT is gone or disabled or the
-    list does not change."""
-    btn = _pager(page, NEXT_PAGE_RE)
-    if btn is None:
+def _looks_disabled(el) -> bool:
+    """A control that says it is disabled without the disabled property. A
+    WebForms link button that is off is drawn as a link with the class
+    aspNetDisabled, and a browser reports that link as enabled, so a last
+    page's NEXT would be pressed and waited on."""
+    try:
+        if (el.get_attribute("aria-disabled") or "").strip().lower() == "true":
+            return True
+        return "aspnetdisabled" in (el.get_attribute("class") or "").lower()
+    except Exception:
         return False
-    before = _dated_labels(page)
+
+
+# Why a history stopped paging, fixed phrases for the trace, each one a
+# clause that reads after "paging stopped because".
+_STOPPED = {
+    "none": "there is no NEXT in the history",
+    "hidden": "NEXT is hidden",
+    "disabled": "NEXT is disabled",
+    DRAWN_SAME: "NEXT drew the same page again",
+    BEFORE: "NEXT brought no new page",
+    NO_LIST: "the list went away after NEXT",
+}
+PAGE_LIMIT = "it reached the page limit"
+
+
+def next_history_page(page, facts: Optional[dict] = None) -> bool:
+    """Press NEXT under the history, and wait for the next page of dates,
+    drawn after the press. False on the last page, where NEXT is gone or
+    disabled or no new page comes, and `facts` gets why as a fixed phrase,
+    how long the wait was, and how the new page came when it did (#35)."""
+    facts = facts if facts is not None else {}
+    why: dict = {}
+    btn = _pager(page, NEXT_PAGE_RE, why)
+    if btn is None:
+        facts["stopped"] = _STOPPED.get(why.get("pager"), _STOPPED["none"])
+        return False
+    before = _listed_labels(page)
+    last = _last_read(page)
+    _mark_seen(page)
     try:
         btn.click(timeout=5000)
     except Exception as e:
         log.info("NEXT did not press: %s", e)
+        facts["stopped"] = "NEXT would not press (%s)" % _error_word(e)
         return False
-    for _ in range(20):
-        page.wait_for_timeout(300)
-        after = _dated_labels(page)
-        if after and after != before:
-            return True
+    started = time.monotonic()
+    how, _labels = _wait_for_new_list(page, last["panel"] if last else None, before, before)
+    facts["list"] = how
+    facts["waited_s"] = round(time.monotonic() - started, 1)
+    if how in (DRAWN, SHOWN):
+        return True
+    facts["stopped"] = _STOPPED.get(how, how)
     return False
 
 
@@ -1232,19 +1522,24 @@ def _panel_for(panels: List[dict], title: str, account: str) -> Optional[dict]:
     return same[0]
 
 
-def _read_dated_list(page, kind: str, account: str, seen: set) -> List[RawDoc]:
+def _read_dated_list(page, kind: str, account: str, seen: set,
+                     fresh_only: bool = False) -> List[RawDoc]:
     """The statements on the history page showing, each named by nothing
-    but its date, as this panel's kind of statement."""
+    but its date, as this panel's kind of statement. Only statements that
+    show are read, and only those drawn after the last press when
+    `fresh_only`, so a list left over from another account is not (#35)."""
     docs: List[RawDoc] = []
     try:
-        loc = _controls_named(page, DATE_ONLY_CONTROL_RE)
+        loc = _controls_named(page, DATE_ONLY_CONTROL_RE).filter(visible=True)
+        if fresh_only:
+            loc = loc.and_(_fresh(page))
         count = loc.count()
     except Exception:
         return docs
     for i in range(count):
         el = loc.nth(i)
         try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
+            name = (el.get_attribute("aria-label", timeout=800) or el.inner_text(timeout=800) or "").strip()
         except Exception:
             continue
         iso = parse_date(name) if is_safe_control(name) else None
@@ -1264,11 +1559,17 @@ def _read_dated_list(page, kind: str, account: str, seen: set) -> List[RawDoc]:
 
 
 def _read_every_panel(page, panels: List[dict], trace: Optional[list]) -> List[RawDoc]:
-    """Every panel's history, every page of it, closed again after."""
+    """Every panel's history, every page of it, closed again after.
+
+    The trace says, for each panel, how its first list came, how many pages
+    were read and why the paging stopped, and which words from a fixed list
+    its heading carries, so the next file says what NEXT did and what the
+    vendor calls a card (#35)."""
     if trace is not None:
         trace.append({"note": "discovery found the account panels", "panels": len(panels),
                       "cards": sum(1 for p in panels if p["card"]),
-                      "closed": sum(1 for p in panels if p.get("expanded") == "false")})
+                      "closed": sum(1 for p in panels if p.get("expanded") == "false"),
+                      "headings": [_panel_facts(p) for p in panels[:6]]})
     docs: List[RawDoc] = []
     seen: set = set()
     for first in panels:
@@ -1278,32 +1579,47 @@ def _read_every_panel(page, panels: List[dict], trace: Optional[list]) -> List[R
             continue
         if _pager(page, CLOSE_RE) is not None:
             close_history(page)
-        if not open_panel_history(page, panel, trace):
+        opened: dict = {}
+        if not open_panel_history(page, panel, trace, facts=opened):
             if trace is not None:
                 trace.append({"note": "a panel's statement history did not show",
-                              "panel": panel["i"], "card": panel["card"]})
+                              "panel": panel["i"], "card": panel["card"],
+                              "list": opened.get("list", "")})
             continue
         expand_all(page)
         kind = CARD_TITLE if panel["card"] else ACCOUNT_TITLE
         account = _panel_account(now, panel)
+        fresh_only = opened.get("list") != SHOWN
         pages = found = 0
+        stopped, waits = "", []
         while True:
             pages += 1
-            got = _read_dated_list(page, kind, account, seen)
+            got = _read_dated_list(page, kind, account, seen, fresh_only=fresh_only)
             docs += got
             found += len(got)
-            if pages >= MAX_HISTORY_PAGES or not next_history_page(page):
+            if pages >= MAX_HISTORY_PAGES:
+                stopped = PAGE_LIMIT
                 break
+            paged: dict = {}
+            if not next_history_page(page, paged):
+                stopped = paged.get("stopped", "")
+                break
+            waits.append(paged.get("waited_s", 0))
+            fresh_only = paged.get("list") != SHOWN
         close_history(page)
         if trace is not None:
             trace.append({"note": "a panel's statement history was read", "panel": panel["i"],
-                          "card": panel["card"], "pages": pages, "dated": found})
+                          "card": panel["card"], "pages": pages, "dated": found,
+                          "list": opened.get("list", ""), "paging_stopped": stopped,
+                          "longest_wait_s": max(waits) if waits else 0})
     return docs
 
 
 def _find_in_panels(page, panels: List[dict], iso_date: str, title: str, account: str,
                     trace: Optional[list]):
-    """This statement's control, in its own panel's history, paged to."""
+    """This statement's control, in its own panel's history, paged to. Only
+    a list the presses drew is searched, never one left from another
+    account (#35)."""
     panel = _panel_for(panels, title, account)
     if panel is None:
         if trace is not None:
@@ -1312,21 +1628,78 @@ def _find_in_panels(page, panels: List[dict], iso_date: str, title: str, account
         return None, ""
     if _pager(page, CLOSE_RE) is not None:
         close_history(page)
-    if not open_panel_history(page, panel, trace):
+    opened: dict = {}
+    if not open_panel_history(page, panel, trace, facts=opened):
         if trace is not None:
             trace.append({"note": "a panel's statement history did not show",
-                          "panel": panel["i"], "card": panel["card"]})
+                          "panel": panel["i"], "card": panel["card"],
+                          "list": opened.get("list", "")})
         return None, ""
     expand_all(page)
+    fresh_only = opened.get("list") != SHOWN
     pages = 1
-    el, label = _control_for(page, iso_date)
-    while el is None and pages < MAX_HISTORY_PAGES and next_history_page(page):
+    stopped = ""
+    el, label = _control_for(page, iso_date, fresh_only=fresh_only, visible_only=True)
+    while el is None:
+        if pages >= MAX_HISTORY_PAGES:
+            stopped = PAGE_LIMIT
+            break
+        paged: dict = {}
+        if not next_history_page(page, paged):
+            stopped = paged.get("stopped", "")
+            break
         pages += 1
-        el, label = _control_for(page, iso_date)
+        fresh_only = paged.get("list") != SHOWN
+        el, label = _control_for(page, iso_date, fresh_only=fresh_only, visible_only=True)
     if trace is not None:
         trace.append({"note": "the panel's statement history was searched", "panel": panel["i"],
-                      "card": panel["card"], "pages": pages, "found": el is not None})
+                      "card": panel["card"], "pages": pages, "found": el is not None,
+                      "list": opened.get("list", ""), "paging_stopped": stopped})
     return el, label
+
+
+_HOW_SAID = {
+    DRAWN: "Its list was drawn after the press.",
+    DRAWN_SAME: "Its list was drawn with the same dates as the account read before it.",
+    SHOWN: "Its list showed without being drawn again.",
+    BEFORE: "Only the list read before it showed.",
+    NO_LIST: "No list came.",
+}
+
+
+def discovery_lines(trace) -> List[str]:
+    """What discovery saw of each account's history, as sentences of fixed
+    words and counts, for Discover to print so a tester can paste them.
+    The member's paste of the summary alone could not say which account
+    was read how, or why each stopped at one page (#35)."""
+    entries = [t for t in (trace or []) if isinstance(t, dict)]
+    found = next((t for t in entries if t.get("note") == "discovery found the account panels"), None)
+    if found is None:
+        return []
+    out = ["The statements page shows %d account(s), %d taken for a card."
+           % (found.get("panels", 0), found.get("cards", 0))]
+    for k, h in enumerate(found.get("headings") or []):
+        words = h.get("words") or []
+        said = ("Account %d heading carries the words %s" % (k + 1, ", ".join(words)) if words
+                else "Account %d heading carries no word from the app's list" % (k + 1))
+        if h.get("masked_number"):
+            said += ", and a masked number"
+        under = h.get("words_under_it") or []
+        if under:
+            said += ". The headings under it carry %s" % ", ".join(under)
+        out.append(said + ".")
+    for t in entries:
+        if t.get("note") == "a panel's statement history was read":
+            said = "Account %d history, %d statements on %d page(s). %s" % (
+                t.get("panel", 0) + 1, t.get("dated", 0), t.get("pages", 0),
+                _HOW_SAID.get(t.get("list"), ""))
+            if t.get("paging_stopped"):
+                said += " Paging stopped because %s." % t["paging_stopped"]
+            out.append(said.strip())
+        elif t.get("note") == "a panel's statement history did not show":
+            out.append("Account %d history did not show. %s"
+                       % (t.get("panel", 0) + 1, _HOW_SAID.get(t.get("list"), "Its link would not open.")))
+    return out
 
 
 def collect_download_docs(page, trace: Optional[list] = None) -> List[RawDoc]:
@@ -1419,22 +1792,42 @@ def collect_download_docs(page, trace: Optional[list] = None) -> List[RawDoc]:
     return docs
 
 
-def _control_for(page, iso: str):
+_PICKED_ATTR = "data-paperpull-picked"
+
+
+def _control_for(page, iso: str, fresh_only: bool = False, visible_only: bool = False):
     """The control for the document dated `iso`, matched the same way
     discovery found it, or None. Both read a control's date through
     _date_of_control, so the two cannot disagree about which day a
-    statement is (#35)."""
+    statement is (#35). With `visible_only`, as in an account's history,
+    only a control that shows is taken, and with `fresh_only` only one
+    drawn after the last press.
+
+    The control found is marked and handed back by that mark, so the one
+    pressed is the one whose date was read, even when the list is drawn
+    again in between and the same place holds another."""
     list_shown = _dated_count(page) > 0
     ctrls = _bill_controls(page)
+    if visible_only or fresh_only:
+        ctrls = ctrls.filter(visible=True)
+    if fresh_only:
+        ctrls = ctrls.and_(_fresh(page))
     for i in range(ctrls.count()):
         el = ctrls.nth(i)
         try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
+            name = (el.get_attribute("aria-label", timeout=800)
+                    or el.inner_text(timeout=800) or "").strip()
         except Exception:
             name = ""
         found, _ = _date_of_control(el, name, list_shown)
         if found == iso:
-            return el, name
+            try:
+                el.evaluate("(e, a) => { document.querySelectorAll('[' + a + ']')"
+                            ".forEach(x => x.removeAttribute(a)); e.setAttribute(a, '1'); }",
+                            _PICKED_ATTR)
+                return page.locator("[%s]" % _PICKED_ATTR).first, name
+            except Exception:
+                return el, name
     return None, ""
 
 
