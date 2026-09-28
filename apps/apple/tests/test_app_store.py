@@ -358,9 +358,41 @@ def test_the_receipt_is_asked_for_with_the_purchasers_dsid():
 
 
 def test_a_receipt_answer_that_says_sign_in_is_not_a_receipt():
-    page = _Page([{"status": 401, "redirected": False, "failed": False, "data": None}])
+    """The family list is refused too, so the session is gone."""
+    signed_out = {"status": 401, "redirected": False, "failed": False, "data": None}
+    page = _Page([signed_out, signed_out])
     got = site.fetch_invoice(page, "MLF0TEST03", CHILD)
     assert got == {"kind": site.SIGNED_OUT, "status": 401, "html": ""}
+    assert [c["path"] for c in page.calls] == ["/api/order/MLF0TEST03/invoice.html", "/api/family"]
+
+
+# RECORDED 2026-09-27, Apple's answer to the one receipt it would not give.
+APPLE_ERROR = {"error": {"actionCode": "DISPLAY_ERROR", "location": None,
+                         "messageBodyLocKey": "RAP2.Error.INTERNAL_ERROR.Body",
+                         "messageTitleLocKey": None, "messageLinkURL": None}}
+
+
+def test_one_receipt_apple_refuses_is_not_a_sign_in():
+    """A 400 for one receipt while the family list still answers. Read as a
+    sign-in, it stopped every run at the same purchase."""
+    page = _Page([{"status": 400, "redirected": False, "failed": False, "data": APPLE_ERROR},
+                  ok(FAMILY)])
+    got = site.fetch_invoice(page, "MLF0TEST03", CHILD)
+    assert got == {"kind": site.REFUSED, "status": 400, "html": ""}
+    assert [c["path"] for c in page.calls] == ["/api/order/MLF0TEST03/invoice.html", "/api/family"]
+    assert page.calls[1]["dsid"] == "", "the family list is asked for as the page asks"
+
+
+def test_a_refused_receipt_with_the_family_refused_too_is_a_sign_in():
+    page = _Page([{"status": 400, "redirected": False, "failed": False, "data": APPLE_ERROR},
+                  {"status": 401, "redirected": False, "failed": False, "data": None}])
+    assert site.fetch_invoice(page, "MLF0TEST03", CHILD)["kind"] == site.SIGNED_OUT
+
+
+def test_a_redirect_to_sign_in_is_a_sign_in_without_asking_again():
+    page = _Page([{"status": 0, "redirected": True, "failed": False, "data": None}])
+    assert site.fetch_invoice(page, "MLF0TEST03", CHILD)["kind"] == site.SIGNED_OUT
+    assert len(page.calls) == 1
 
 
 def test_a_receipt_is_not_asked_for_without_a_proper_order_and_dsid():

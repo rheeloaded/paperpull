@@ -28,7 +28,9 @@ THE APP STORE AND OTHER MEDIA, reportaproblem.apple.com
   purchaser, answers JSON whose invoice is the whole emailed receipt as
   HTML. It is rendered to PDF in a blank tab of the same browser.
 * A 400, 401 or 403, or a redirect toward idmsa.apple.com, means the
-  session is gone.
+  session is gone. Except that Apple can refuse one receipt with a 400 and
+  its own error while the session lives, so a refused receipt counts as a
+  sign-in only when the family list is refused too.
 
 THE APPLE STORE, www.apple.com/shop and secureN.store.apple.com
 
@@ -738,8 +740,23 @@ def fetch_invoice(page, weborder: str, dsid: str) -> dict:
         return {"kind": REFUSED, "status": 0, "html": ""}
     got = api_call(page, invoice_path(weborder), dsid=dsid)
     kind = answer_kind(got)
+    if kind == SIGNED_OUT and not got.get("redirected") and session_alive(page):
+        # RECORDED 2026-09-27. One paid purchase's receipt answered 400 with
+        # Apple's own error, actionCode DISPLAY_ERROR and the message key
+        # RAP2.Error.INTERNAL_ERROR.Body, while the family list answered 200
+        # beside it. Read as a sign-in, that one receipt stopped every run at
+        # the same purchase. So a refused receipt is a sign-in only when the
+        # family list is refused too.
+        kind = REFUSED
     html = invoice_html_from(got.get("data")) if kind == ANSWERED else ""
     return {"kind": kind, "status": got.get("status") or 0, "html": html}
+
+
+def session_alive(page) -> bool:
+    """Whether Report a Problem still answers its family list, the cheapest
+    call the page makes, so that one receipt Apple refuses is told from a
+    session that is gone."""
+    return answer_kind(api_call(page, FAMILY_PATH)) == ANSWERED
 
 
 def identity_for(purchase) -> Identity:
