@@ -22,7 +22,11 @@ permissions:
 jobs:
   tests:
     runs-on: windows-latest
-    timeout-minutes: 40
+    # A guard against a run that hangs, not a budget. The suite grew to
+    # about 37 minutes, and on 2026-09-27 the same commit took 37 minutes
+    # on one runner and ran past 40 on another, where the limit cut it off
+    # with no test failing.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 

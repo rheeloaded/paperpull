@@ -24,46 +24,41 @@ import etrade_site as site
 import test_download_period as period  # noqa: E402  its made-up page and list answers
 
 _PRESS = 'fetch("/docs/" + d.documentDate.slice(0, 10) + ".pdf");'
-_ASK = ('fetch("/etaz/api/adsal/accountdocs/v1/" + d.documentDate.slice(0, 10) + ".pdf?RequestID=1",'
-        ' {method: "POST", body: JSON.stringify({documentId: d.documentId})})')
-JSON_PAGE = period.PAGE.replace(_PRESS, _ASK + ";")
+# The press asks E*TRADE for the document. When the answer says download,
+# the page then downloads this document itself, and when it says late, a
+# download of another document starts a moment after the answer, the way
+# an earlier press's late download would.
+_ASK = ('const day = d.documentDate.slice(0, 10);'
+        ' const save = (text, name) => { const a = document.createElement("a");'
+        ' a.href = URL.createObjectURL(new Blob([text], {type: "application/pdf"}));'
+        ' a.download = name; document.body.appendChild(a); a.click(); };'
+        ' fetch("/etaz/api/adsal/accountdocs/v1/" + day + ".pdf?RequestID=1",'
+        ' {method: "POST", body: JSON.stringify({documentId: d.documentId})})'
+        '.then(r => r.json()).then(b => {'
+        ' if (b.download) save("%PDF-1.4\\n% invented statement " + day + "\\n" + "x".repeat(400)'
+        ' + "\\n%%EOF\\n", "Statement.pdf");'
+        ' if (b.late) setTimeout(() => save("%PDF-1.4\\n% an earlier document\\n%%EOF\\n",'
+        ' "earlier.pdf"), 300); });')
+JSON_PAGE = period.PAGE.replace(_PRESS, _ASK)
 assert JSON_PAGE != period.PAGE, "the page's press did not change"
-# The same press, and a moment after its answer a download of another
-# document starts, the way an earlier press's late download would.
-LATE_PAGE = period.PAGE.replace(_PRESS, _ASK + """.then(() => setTimeout(() => {
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(new Blob(["%PDF-1.4\\n% an earlier document\\n%%EOF\\n"],
-                                                {type: "application/pdf"}));
-          a.download = "earlier.pdf";
-          document.body.appendChild(a);
-          a.click();
-        }, 300));""")
-assert LATE_PAGE != period.PAGE, "the page's press did not change"
+
+# What the site answers a press with, set by each test through `answer`.
+ANSWER = {"carries_pdf": True, "late": False, "download": False}
 
 
 def _pdf(day: str) -> bytes:
     return b"%PDF-1.4\n% invented statement " + day.encode() + b"\n" + b"x" * 400 + b"\n%%EOF\n"
 
 
-def _site(carries_pdf: bool, page_html: str):
-    def answer(route):
-        url = route.request.url
-        if "/etaz/api/adsal/accountdocs/v1/" in url:
-            day = url.split("/v1/", 1)[1][:10]
-            body = {"documentStream": base64.b64encode(_pdf(day)).decode() if carries_pdf else "",
-                    "fileName": "Statement.pdf", "status": "SUCCESS"}
-            return route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
-        route.fulfill(status=200, content_type="text/html", body=page_html)
-    return answer
-
-
-def _page(browser, carries_pdf=True, page_html=JSON_PAGE):
-    ctx = browser.new_context()
-    ctx.route("https://us.etrade.com/**", _site(carries_pdf, page_html))
-    ctx.route("https://ext-web.etrade.com/**", period._answer)
-    pg = ctx.new_page()
-    site.collect_download_docs(pg)
-    return ctx, pg
+def _site(route):
+    url = route.request.url
+    if "/etaz/api/adsal/accountdocs/v1/" in url:
+        day = url.split("/v1/", 1)[1][:10]
+        body = {"documentStream": base64.b64encode(_pdf(day)).decode() if ANSWER["carries_pdf"] else "",
+                "fileName": "Statement.pdf", "status": "SUCCESS", "late": ANSWER["late"],
+                "download": ANSWER["download"]}
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+    route.fulfill(status=200, content_type="text/html", body=JSON_PAGE)
 
 
 @pytest.fixture(scope="module")
@@ -79,62 +74,71 @@ def browser():
     driver.stop()
 
 
-def test_the_pdf_inside_the_json_answer_is_saved(browser, tmp_path):
-    ctx, pg = _page(browser)
-    try:
-        day = "2025-11-30"
-        out = tmp_path / "statement.pdf"
-        trace: list = []
-        assert site.download_bill(pg, tmp_path / "dl", day, out, title=period.TITLE, trace=trace), trace
-        assert out.read_bytes() == _pdf(day)
-        assert {"note": "the PDF came inside its JSON answer"} in trace, trace
-    finally:
-        ctx.close()
+@pytest.fixture(scope="module")
+def page(browser):
+    """One page for the module, its lists read once. Reading them walks
+    every period, which took most of each test's time when every test
+    read them again."""
+    ctx = browser.new_context()
+    ctx.route("https://us.etrade.com/**", _site)
+    ctx.route("https://ext-web.etrade.com/**", period._answer)
+    pg = ctx.new_page()
+    site.collect_download_docs(pg)
+    yield pg
+    ctx.close()
 
 
-def test_each_document_is_saved_from_its_own_answer(browser, tmp_path):
+@pytest.fixture
+def answer():
+    ANSWER.update(carries_pdf=True, late=False, download=False)
+    yield ANSWER
+    ANSWER.update(carries_pdf=True, late=False, download=False)
+
+
+def test_the_pdf_inside_the_json_answer_is_saved(page, answer, tmp_path):
+    day = "2025-11-30"
+    out = tmp_path / "statement.pdf"
+    trace: list = []
+    assert site.download_bill(page, tmp_path / "dl", day, out, title=period.TITLE, trace=trace), trace
+    assert out.read_bytes() == _pdf(day)
+    assert {"note": "the PDF came inside its JSON answer"} in trace, trace
+
+
+def test_each_document_is_saved_from_its_own_answer(page, answer, tmp_path):
     """The answer is tied to the request this press made, so the second
     document never takes the first one's."""
-    ctx, pg = _page(browser)
-    try:
-        for day in ("2025-11-30", "2026-02-28"):
-            out = tmp_path / ("%s.pdf" % day)
-            assert site.download_bill(pg, tmp_path / "dl", day, out, title=period.TITLE), day
-            assert out.read_bytes() == _pdf(day), day
-    finally:
-        ctx.close()
+    for day in ("2025-11-30", "2026-02-28"):
+        out = tmp_path / ("%s.pdf" % day)
+        assert site.download_bill(page, tmp_path / "dl", day, out, title=period.TITLE), day
+        assert out.read_bytes() == _pdf(day), day
 
 
-def test_a_late_download_does_not_take_this_documents_name(browser, tmp_path):
+def test_a_late_download_does_not_take_this_documents_name(page, answer, tmp_path):
     """A download event is not tied to the press, so this press's own
     answer wins over one that starts while the app is still waiting."""
-    ctx, pg = _page(browser, page_html=LATE_PAGE)
-    try:
-        day = "2025-11-30"
-        out = tmp_path / "statement.pdf"
-        assert site.download_bill(pg, tmp_path / "dl", day, out, title=period.TITLE)
-        assert out.read_bytes() == _pdf(day)
-    finally:
-        ctx.close()
+    answer["late"] = True
+    day = "2025-11-30"
+    out = tmp_path / "statement.pdf"
+    assert site.download_bill(page, tmp_path / "dl", day, out, title=period.TITLE)
+    assert out.read_bytes() == _pdf(day)
 
 
-def test_a_json_answer_with_no_pdf_in_it_saves_nothing(browser, tmp_path):
-    """And the attempt file says what the answer held instead, in counts
-    and fixed words, so the next round knows where the PDF went."""
-    ctx, pg = _page(browser, carries_pdf=False)
-    try:
-        out = tmp_path / "statement.pdf"
-        trace: list = []
-        assert not site.download_bill(pg, tmp_path / "dl", "2025-11-30", out, title=period.TITLE,
-                                      trace=trace)
-        assert not out.exists()
-        assert {"note": "the PDF came inside its JSON answer"} not in trace
-        shape = {"note": "its JSON answer held no PDF", "texts": 3, "longest": len("Statement.pdf"),
-                 "base64": False, "begins": "other"}
-        assert shape in trace, trace
-        assert "Statement.pdf" not in json.dumps(trace)
-    finally:
-        ctx.close()
+def test_a_json_answer_with_no_pdf_leaves_the_download_to_bring_it(page, answer, tmp_path):
+    """The attempt file says what the answer held instead, in counts and
+    fixed words, so the next round knows where the PDF went. The download
+    the page then starts is still taken, and since an answer wins over a
+    download, nothing read wrongly out of the answer could hide behind it."""
+    answer.update(carries_pdf=False, download=True)
+    day = "2025-11-30"
+    out = tmp_path / "statement.pdf"
+    trace: list = []
+    assert site.download_bill(page, tmp_path / "dl", day, out, title=period.TITLE, trace=trace), trace
+    assert out.read_bytes() == _pdf(day)
+    assert {"note": "the PDF came inside its JSON answer"} not in trace
+    shape = {"note": "its JSON answer held no PDF", "texts": 3, "longest": len("Statement.pdf"),
+             "base64": False, "begins": "other"}
+    assert shape in trace, trace
+    assert "Statement.pdf" not in json.dumps(trace)
 
 
 def test_only_text_that_is_a_pdf_is_read_out_of_an_answer():
