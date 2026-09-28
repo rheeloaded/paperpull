@@ -287,3 +287,84 @@ def test_a_store_that_asked_for_a_sign_in_is_skipped_without_pausing(tmp_path, m
     app.process_purchases([Purchase.from_dict(rec) for _p, rec in rows])
     assert asked == [("MLF0TEST01", "10000001")]
     assert len(paused) == 2, paused
+
+
+# -- a receipt Apple will not give ------------------------------------------------
+
+REFUSED = {"kind": site.REFUSED, "status": 400, "html": ""}
+
+
+def _runs(tmp_path, monkeypatch, rows, answers):
+    """One app kept across several runs, each with its own run key, the way
+    progress.json carries a purchase from one run to the next."""
+    discovery = {p.key: rec for p, rec in rows}
+    app, failures, _tabs, asked = _app(tmp_path, monkeypatch, discovery=discovery,
+                                       invoice_answers=answers)
+    spy = StrictDelivery().install(monkeypatch)
+
+    def run(key):
+        app._run_id = key
+        app.process_purchases([Purchase.from_dict(rec) for _p, rec in rows])
+    return app, spy, failures, asked, run
+
+
+def test_a_receipt_refused_on_three_runs_becomes_a_purchase_record(tmp_path, monkeypatch, capsys):
+    """Apple would not give the receipts of purchases before October 2016 at
+    all (2026-09-27). The first two refusals leave the purchase to be asked
+    again, and the third makes a record from Apple's purchase history."""
+    rows = [app_store("MLF0TEST01", "10000001")]
+    app, spy, _f, asked, run = _runs(tmp_path, monkeypatch, rows, {"MLF0TEST01": REFUSED})
+    for key, seen in (("run-1", ["run-1"]), ("run-2", ["run-1", "run-2"])):
+        run(key)
+        done = app.progress.get("App Store:MLF0TEST01")
+        assert done["state"] == State.FAILED.value and done["refused_runs"] == seen
+        assert spy.calls == [] and not app.stats["new_files"]
+    assert "on 2 of 3 separate runs" in capsys.readouterr().out
+
+    run("run-3")
+    assert [c.name for c in spy.calls] == ["render"]
+    assert spy.calls[0].arguments["expect"].number == "MLF0TEST01"
+    done = app.progress.get("App Store:MLF0TEST01")
+    assert done["state"] == State.COMPLETED.value and done["downloaded_ok"] is True
+    assert done["document_type"] == "Purchase Record"
+    assert done["refused_runs"] == ["run-1", "run-2", "run-3"]
+    assert [Path(p).name for p in app.stats["new_files"]] == [
+        "2026-05-14 Apple Apple One Purchase Record.pdf"]
+    assert app.stats["purchase_records"] == 1 and app.stats["receipts_downloaded"] == 0
+    row = app.index_csv.rows[-1]
+    assert row["Receipt Status"] == "Purchase record, Apple refused the receipt"
+    assert row["Document Type"] == "Purchase Record" and row["Receipt Count"] == 0
+    assert "a record from Apple's purchase history" in capsys.readouterr().out
+    assert len(asked) == 3, "Apple is asked on every run before the record is made"
+
+
+def test_a_refusal_is_counted_once_a_run(tmp_path, monkeypatch):
+    rows = [app_store("MLF0TEST01", "10000001")]
+    app, spy, _f, _a, run = _runs(tmp_path, monkeypatch, rows, {"MLF0TEST01": REFUSED})
+    for _ in range(3):
+        run("run-1")
+    assert app.progress.get("App Store:MLF0TEST01")["refused_runs"] == ["run-1"]
+    assert spy.calls == []
+
+
+def test_no_answer_at_all_is_not_a_refusal(tmp_path, monkeypatch):
+    """Only Apple saying no counts. A call that never came back says nothing
+    about the receipt."""
+    rows = [app_store("MLF0TEST01", "10000001")]
+    answers = {"MLF0TEST01": {"kind": site.FAILED, "status": 0, "html": ""}}
+    app, spy, _f, _a, run = _runs(tmp_path, monkeypatch, rows, answers)
+    for key in ("run-1", "run-2", "run-3"):
+        run(key)
+    done = app.progress.get("App Store:MLF0TEST01")
+    assert done["state"] == State.FAILED.value and not done.get("refused_runs")
+    assert spy.calls == []
+
+
+def test_a_purchase_with_a_record_is_not_asked_for_again(tmp_path, monkeypatch):
+    rows = [app_store("MLF0TEST01", "10000001")]
+    app, spy, _f, asked, run = _runs(tmp_path, monkeypatch, rows, {"MLF0TEST01": REFUSED})
+    for key in ("run-1", "run-2", "run-3"):
+        run(key)
+    app._already_done = app_mod.App._already_done.__get__(app)
+    run("run-4")
+    assert len(asked) == 3 and len(spy.calls) == 1

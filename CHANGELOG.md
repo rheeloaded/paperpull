@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Apple saves a purchase record for a receipt Apple will not give.**
+  Report a Problem refuses the receipt of older purchases with its own
+  internal error, every one before October 2016 on the maintainer's
+  account, and its own page cannot show them either. Such a purchase is
+  asked again on later runs, and once Apple has refused it on three
+  separate runs, the app saves a record made from Apple's purchase history
+  in its place, headed as not Apple's receipt, with the order ID, the date,
+  who bought it, the total and each item. It is filed as a Purchase Record
+  and checked for its own order ID like a receipt.
+
 ### Fixed
 - **One receipt Apple will not give no longer stops the App Store side.**
   Report a Problem answered one paid purchase's receipt with its own

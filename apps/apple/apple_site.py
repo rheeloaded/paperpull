@@ -56,6 +56,7 @@ edit, buy and report control, although nothing here presses one.
 """
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -770,6 +771,67 @@ def identity_for(purchase) -> Identity:
     so a receipt without its own is refused."""
     return Identity(number=getattr(purchase, "order_number", "") or "",
                     kind=getattr(purchase, "document_type", "") or "")
+
+
+# ---------------------------------------------------------------------------
+# A purchase record, for a receipt Apple will not give
+# ---------------------------------------------------------------------------
+
+# RECORDED 2026-09-27. Report a Problem refused the receipt of every purchase
+# from 2004 to September 2016 on the account this was built on, and of one
+# from 2021, answering 400 with its own internal error, and the page's own
+# receipt call answers those purchases with nothing, so the page cannot show
+# them either. Once a purchase has been refused on this many separate runs, a
+# record is made from Apple's own purchase history in its place.
+REFUSED_RUNS_FOR_RECORD = 3
+RECORD_TYPE = "Purchase Record"
+
+_RECORD_STYLE = (
+    "body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;"
+    " margin: 40px; color: #1d1d1f; font-size: 13px }"
+    " h1 { font-size: 22px; margin: 0 0 12px }"
+    " .note { border: 1px solid #d2d2d7; border-radius: 8px; padding: 10px 14px;"
+    " background: #f5f5f7; margin: 0 0 20px }"
+    " table { border-collapse: collapse; margin: 0 0 20px }"
+    " th, td { text-align: left; padding: 5px 14px 5px 0; vertical-align: top }"
+    " th { color: #6e6e73; font-weight: 600 }"
+    " .n { text-align: right }"
+    " .small { color: #6e6e73; font-size: 11px }")
+
+
+def purchase_record_html(purchase, lines, purchaser: str, runs: int, made_on: str) -> str:
+    """A plain record of one App Store purchase, made from Apple's purchase
+    history when Report a Problem refused its receipt on `runs` separate
+    runs. It says at the top that it is not Apple's receipt and why, and it
+    carries the order ID, which it is checked against like a receipt."""
+    esc = html.escape
+    items = []
+    for line in lines or []:
+        if isinstance(line, dict):
+            items.append((line.get("name"), line.get("detail"), line.get("media_type"),
+                          line.get("amount_paid")))
+    if not items:
+        items = [(it.name, "", "", it.line_total) for it in (purchase.items or [])]
+    item_rows = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td class='n'>%s</td></tr>"
+        % tuple(esc(str(v or "")) for v in row) for row in items)
+    facts = [("Order ID", purchase.order_number), ("Purchase date", purchase.purchase_date),
+             ("Purchased by", purchaser), ("Total", purchase.total)]
+    fact_rows = "".join("<tr><th>%s</th><td>%s</td></tr>" % (esc(k), esc(str(v or "")))
+                        for k, v in facts if v)
+    return (
+        "<html><head><meta charset='utf-8'><title>Apple purchase record</title>"
+        "<style>%s</style></head><body>"
+        "<h1>Apple purchase record</h1>"
+        "<p class='note'>This is not Apple's receipt. Apple's Report a Problem would not "
+        "give the receipt for this purchase on %d separate runs, so this record was made "
+        "from Apple's own purchase history. It shows what Apple lists for the purchase, "
+        "and not the tax, payment method or billing address that a receipt carries.</p>"
+        "<table>%s</table>"
+        "<table><tr><th>Item</th><th>Detail</th><th>Kind</th><th class='n'>Paid</th></tr>"
+        "%s</table>"
+        "<p class='small'>Made by PaperPull on %s from reportaproblem.apple.com.</p>"
+        "</body></html>" % (_RECORD_STYLE, int(runs), fact_rows, item_rows, esc(made_on)))
 
 
 # ---------------------------------------------------------------------------

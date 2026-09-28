@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import apple_site as site
+from paperpull_core.models import Item, Purchase
 
 ORGANIZER, CHILD = "10000001", "10000002"
 
@@ -406,3 +407,26 @@ def test_an_answer_with_no_receipt_in_it_gives_no_html():
     assert site.invoice_html_from({"invoice": None}) == ""
     assert site.invoice_html_from({"invoice": "plain text"}) == ""
     assert site.invoice_html_from("not a dict") == ""
+
+
+def test_a_purchase_record_says_it_is_not_apples_receipt():
+    """Made when Apple refused a purchase's receipt on three runs. Every value
+    is escaped, and the order ID it is checked against is on it."""
+    purchase = Purchase(purchase_type="App Store", purchase_date="2015-03-01",
+                        order_number="MLF0TEST09", total="$6.99")
+    lines = [{"name": "Gem Pack <3>", "detail": "Crystal & Quarry",
+              "media_type": "In-App Purchase", "amount_paid": "$6.99"}]
+    page = site.purchase_record_html(purchase, lines, "Quill", 3, made_on="2026-09-27")
+    assert "This is not Apple's receipt" in page and "on 3 separate runs" in page
+    for fact in ("MLF0TEST09", "2015-03-01", "Quill", "$6.99", "In-App Purchase", "2026-09-27"):
+        assert fact in page, fact
+    assert "Gem Pack &lt;3&gt;" in page and "Crystal &amp; Quarry" in page
+    assert "<3>" not in page and "<script" not in page
+
+
+def test_a_purchase_record_falls_back_to_the_items_when_no_lines_were_kept():
+    purchase = Purchase(purchase_type="App Store", purchase_date="2015-03-01",
+                        order_number="MLF0TEST09", total="$6.99",
+                        items=[Item(name="Crystal Quarry (Gem Pack 3)", line_total="$6.99")])
+    page = site.purchase_record_html(purchase, [], "", 3, made_on="2026-09-27")
+    assert "Crystal Quarry (Gem Pack 3)" in page and "Purchased by" not in page

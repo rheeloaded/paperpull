@@ -94,6 +94,24 @@ Either way the PDF is read back before it is filed, and a receipt that
 does not carry its own order number is destroyed rather than saved under
 the purchase's name.
 
+## Receipts Apple will not give
+
+On the account this was built on, Report a Problem would not give the
+receipt of any purchase from 2004 to September 2016, or of one from 2021.
+It answered each with its own internal error, and its own page cannot show
+those receipts either. A receipt Apple refuses while you are signed in is
+not taken for a sign-in, so the run carries on, and the purchase is asked
+again on later runs.
+
+Once Apple has refused a purchase's receipt on three separate runs, the
+tool saves a purchase record in its place,
+`2015-03-01 Apple Minecraft Purchase Record.pdf`. It is made from Apple's
+own purchase history, says at the top that it is not Apple's receipt, and
+carries the order ID, the date, who bought it, the total and each item
+with what was paid. It is checked for its own order ID like a receipt,
+and the purchase is then done and not asked again. `--redownload` asks
+Apple for the receipt once more.
+
 ## What is not covered yet
 
 - **Older Apple Store orders.** The order list says when older orders

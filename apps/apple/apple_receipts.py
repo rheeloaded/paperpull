@@ -88,6 +88,10 @@ class _SignedOut(Exception):
         self.page = page
 
 
+class _AppleRefused(Exception):
+    """Report a Problem answered, still signed in, and gave no receipt."""
+
+
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
@@ -757,17 +761,26 @@ class App:
             return  # state already recorded inside
 
         # ---- CSVs + progress ----
-        self._write_csv_rows(purchase, receipt_status="Downloaded",
+        is_record = purchase.document_type == site.RECORD_TYPE
+        self._write_csv_rows(purchase,
+                             receipt_status=("Purchase record, Apple refused the receipt"
+                                             if is_record else "Downloaded"),
                              processing_status="Review Needed" if review_needed else "Completed",
                              notes_extra=notes_extra)
         final_state = State.NEEDS_MANUAL_REVIEW if review_needed else State.COMPLETED
-        self._record_state(purchase, final_state,
-                           notes=("Low classification confidence" if review_needed else ""))
+        notes = "; ".join(n for n in (
+            "Low classification confidence" if review_needed else "",
+            "A purchase record, Apple refused its receipt" if is_record else "") if n)
+        self._record_state(purchase, final_state, notes=notes)
         if review_needed:
             self.stats["manual_review"] += 1
         self.journal.checkpoint('a document is saved')
-        self.stats["receipts_downloaded"] += 1
-        print(f"  Saved {purchase.pdf_filename}")
+        if is_record:
+            print(f"  Saved {purchase.pdf_filename}, a record from Apple's purchase history, "
+                  f"since Apple refused the receipt on {site.REFUSED_RUNS_FOR_RECORD} runs")
+        else:
+            self.stats["receipts_downloaded"] += 1
+            print(f"  Saved {purchase.pdf_filename}")
 
     # -- receipt saving -----------------------------------------------------
 
@@ -798,6 +811,8 @@ class App:
                                notes="Signed out before the receipt was read, revisited next run")
             self._signed_out(e.side, e.page)
             return False
+        except _AppleRefused:
+            return self._apple_refused(page, purchase, rec)
         except Exception as e:
             log.exception("PDF generation failed for %s", purchase.key)
             self._record_state(purchase, State.FAILED,
@@ -852,6 +867,10 @@ class App:
             raise _SignedOut(APP_STORE, page)
         if got["kind"] != site.ANSWERED or not got["html"]:
             log.warning("The receipt was answered %s (%s)", got["kind"], got["status"] or "no answer")
+            # Apple answered and gave no receipt. No answer at all is not
+            # counted, and neither is an order this app would not ask for.
+            if got["status"] and got["kind"] in (site.REFUSED, site.ANSWERED):
+                raise _AppleRefused()
             return None
         html = got["html"]
         self.journal.checkpoint("the receipt is in hand")
@@ -944,6 +963,86 @@ class App:
                             delivery_outcome=got.outcome,
                             mechanism=got.mechanism)
         return False
+
+    # -- a receipt Apple will not give -------------------------------------
+
+    def _run_key(self) -> str:
+        """This run, by the time it started, which is also the time in its
+        log file's name, so that a refusal is counted once per run however
+        often it is met, and each one can be traced to its run's log."""
+        if not getattr(self, "_run_id", ""):
+            self._run_id = str(self.stats.get("started") or "") or now_iso()
+        return self._run_id
+
+    def _apple_refused(self, page, purchase: Purchase, rec: dict) -> bool:
+        """Report a Problem answered, signed in, and gave no receipt. The
+        purchase is asked again on later runs, and once it has been refused
+        on REFUSED_RUNS_FOR_RECORD separate runs, a record made from Apple's
+        own purchase history is saved in its place."""
+        prog = self.progress.get(purchase.key) or {}
+        runs = [r for r in (prog.get("refused_runs") or []) if isinstance(r, str) and r]
+        if self._run_key() not in runs:
+            runs.append(self._run_key())
+        needed = site.REFUSED_RUNS_FOR_RECORD
+        if len(runs) >= needed:
+            return self._save_purchase_record(page, purchase, rec, runs)
+        self._record_state(purchase, State.FAILED, notes="Apple refused its receipt",
+                           extra={"refused_runs": runs})
+        self.stats["no_receipt"] += 1
+        self.stats["failed"] += 1
+        self.write_failure("fetch the receipt", "Apple refused the receipt")
+        self.journal.result("could not save the document")
+        print(f"  Apple would not give this receipt, on {len(runs)} of {needed} separate runs. "
+              f"It is asked again next run, and after {needed} a record is made from "
+              f"Apple's purchase history instead.")
+        return False
+
+    def _save_purchase_record(self, page, purchase: Purchase, rec: dict, runs: list) -> bool:
+        """The record of a purchase whose receipt Apple refused on enough
+        separate runs, printed like a receipt through delivery.render and
+        checked for its own order ID, and filed as a Purchase Record so it is
+        never taken for Apple's receipt."""
+        purchase.document_type = site.RECORD_TYPE
+        folder = self.paths.folder_for(purchase.purchase_type, purchase.document_type)
+        filename = build_pdf_filename(purchase.purchase_date, purchase.summary,
+                                      purchase.document_type, record=purchase)
+        out_path = unique_path(folder, filename, self.config["max_path_length"],
+                               distinguisher=purchase.order_number)
+        self.progress.update(purchase.key, {"refused_runs": runs})
+        page_html = site.purchase_record_html(purchase, rec.get("lines") or [],
+                                              str(rec.get("purchaser") or ""), len(runs),
+                                              made_on=datetime.now().date().isoformat())
+
+        def draw(staged):
+            receipt_pdf.print_html_to_pdf(page, page_html, staged)
+            site.drop_blank_last_pages(staged)
+
+        try:
+            got = delivery.render(page, draw, out_path, expect=site.identity_for(purchase),
+                                  journal=self.journal, strict=self._strict())
+        except Exception as e:
+            log.exception("The purchase record failed for %s", purchase.key)
+            got = None
+            why = f"the purchase record did not render, {e}"
+        else:
+            why = "the purchase record did not render, %s" % got.outcome
+        if got is not None and got.outcome == delivery.WRONG:
+            return self._refused(purchase, got)
+        if got is None or got.outcome != delivery.SAVED:
+            self._record_state(purchase, State.FAILED, notes=why)
+            self.stats["failed"] += 1
+            self.write_failure("save the purchase record", "the record did not render")
+            self.journal.result("could not save the document")
+            return False
+        ok = self._finish_pdf(page, purchase, out_path, reprint=False)
+        # A record is not a receipt, and the index says how many receipts
+        # a purchase has.
+        purchase.receipt_count = 0
+        if ok:
+            self.stats["purchase_records"] = self.stats.get("purchase_records", 0) + 1
+        self.journal.result("saved the document" if ok else "could not save the document",
+                            bytes_written=out_path.stat().st_size if out_path.exists() else 0)
+        return ok
 
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
                     popup=None, source_page=None, reprint: bool = True) -> bool:
@@ -1478,6 +1577,7 @@ class App:
             f"Apple Store orders known:  {s.get('apple_store_discovered', 0)}",
             f"NEW files this run:        {len(new_files)}",
             f"Receipts downloaded:       {s.get('receipts_downloaded', 0)}",
+            f"Purchase records made:     {s.get('purchase_records', 0)}",
             f"Skipped (already done):    {s.get('skipped_completed', 0)}",
             f"Free downloads skipped:    {s.get('free_skipped', 0)}",
             f"Pending purchases skipped: {s.get('pending_skipped', 0)}",

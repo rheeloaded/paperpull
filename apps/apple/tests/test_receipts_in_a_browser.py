@@ -21,7 +21,7 @@ import apple_receipts as app_mod
 import apple_site as site
 from paperpull_core import classification, delivery, receipt_pdf
 from paperpull_core.api_census import Requests
-from paperpull_core.models import Purchase
+from paperpull_core.models import Item, Purchase
 
 REPORT = "https://reportaproblem.apple.com"
 STORE = "https://www.apple.com"
@@ -186,6 +186,32 @@ def report_a_problem(browser, **pages):
 
 
 # -- the App Store receipt ----------------------------------------------------------
+
+def test_a_purchase_record_is_rendered_to_a_pdf_that_carries_its_order_id(browser, tmp_path):
+    """What is saved once Apple has refused a receipt on three runs. It goes
+    through the same check as a receipt, its own order ID, and it says it is
+    not Apple's receipt."""
+    fake, page = report_a_problem(browser)
+    app = _app(tmp_path, fake.context, page)
+    purchase = Purchase(purchase_type="App Store", purchase_date="2015-03-01",
+                        order_number="MLF0TEST09", total="$6.99",
+                        items=[Item(name="Crystal Quarry (Gem Pack 3)", line_total="$6.99")])
+    purchase.summary = "Crystal Quarry"
+    rec = {"dsid": ORGANIZER, "purchaser": "Dana Example",
+           "lines": [{"name": "Gem Pack 3", "detail": "Crystal Quarry",
+                      "media_type": "In-App Purchase", "amount_paid": "$6.99"}]}
+
+    assert app._save_purchase_record(page, purchase, rec, ["run-1", "run-2", "run-3"])
+
+    out = Path(purchase.pdf_path)
+    assert out.parent == tmp_path / "App Store" and "Purchase Record" in out.name
+    text = receipt_pdf.pdf_text(out)
+    assert "MLF0TEST09" in text and "not Apple" in text and "Gem Pack 3" in text
+    assert app.progress.get(purchase.key)["refused_runs"] == ["run-1", "run-2", "run-3"]
+    assert app.stats["purchase_records"] == 1
+    assert fake.seen and all("/api/" not in s[1] for s in fake.seen), "nothing is asked of Apple"
+    assert fake.context.pages == [page], "the blank tab it was drawn in is closed again"
+
 
 def test_an_app_store_receipt_is_rendered_to_a_pdf_that_carries_its_order_id(browser, tmp_path):
     invoice = "/api/order/MLF0TEST03/invoice.html"
