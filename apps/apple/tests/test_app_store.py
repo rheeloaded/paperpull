@@ -430,3 +430,47 @@ def test_a_purchase_record_falls_back_to_the_items_when_no_lines_were_kept():
                         items=[Item(name="Crystal Quarry (Gem Pack 3)", line_total="$6.99")])
     page = site.purchase_record_html(purchase, [], "", 3, made_on="2026-09-27")
     assert "Crystal Quarry (Gem Pack 3)" in page and "Purchased by" not in page
+
+
+# -- an account with no Family Sharing (#55) --------------------------------------
+
+LOGIN = {"dsid": ORGANIZER, "name": "Dana Example", "email": "dana@example.com",
+         "enableFamilyUI": False, "enableFamilyAPI": False}
+
+
+def test_an_account_with_no_family_is_searched_by_its_own_dsid():
+    """His family list answered 200 with no members, so nothing was
+    searched. The page then asks who is signed in and searches that one
+    account by a single dsid, which is what its own code does."""
+    page = _Page([ok({"members": []}), ok(LOGIN)])
+    got = site.read_searchers(page)
+    assert got["kind"] == site.ANSWERED and got["source"] == "account" and got["single"]
+    assert [(m.dsid, m.given_name, m.organizer) for m in got["members"]] == [(ORGANIZER, "Dana", True)]
+    assert [c["path"] for c in page.calls] == ["/api/family", "/api/login"]
+
+
+def test_a_family_is_never_asked_who_is_signed_in():
+    page = _Page([ok(FAMILY)])
+    got = site.read_searchers(page)
+    assert got["source"] == "family" and not got["single"] and len(got["members"]) == 2
+    assert [c["path"] for c in page.calls] == ["/api/family"]
+
+
+def test_a_single_account_is_searched_by_dsid_on_every_batch():
+    page = _Page([batch([APPLE_ONE], "BATCH-2"), batch([ICLOUD], None)])
+    got = site.walk_purchases(page, [ORGANIZER], single=True)
+    assert got["stop"] == site.END and got["batches"] == 2
+    assert [c["body"] for c in page.calls] == [
+        {"dsid": ORGANIZER}, {"batchId": "BATCH-2", "dsid": ORGANIZER}]
+
+
+def test_an_account_that_names_nobody_is_not_searched():
+    page = _Page([ok({"members": []}), ok({"name": "Dana Example"})])
+    got = site.read_searchers(page)
+    assert got["members"] == [] and not got["single"]
+
+
+def test_the_login_call_is_one_of_the_few_ever_made():
+    page = _Page([ok(LOGIN)])
+    assert site.read_self(page)["member"].dsid == ORGANIZER
+    assert page.calls[0]["path"] == "/api/login" and page.calls[0]["method"] == "GET"

@@ -36,6 +36,11 @@ Resume carries on.
 
 ## What it keeps
 
+An account without Family Sharing is read too. Its family list names
+nobody, so the tool asks, the way the page itself does on every load,
+which account is signed in, and searches that one account's purchases
+(#55).
+
 On the account this was built on, roughly four purchases in five were
 free app downloads, with no receipt to save. Only purchases where money
 was spent are kept, a purchase Apple has not charged yet is left for the

@@ -104,8 +104,12 @@ TOKEN_KEY = "x-apple-xsrf-token"
 # path that is not one of these three is refused before any call is made.
 FAMILY_PATH = "/api/family"
 SEARCH_PATH = "/api/purchase/search"
+# RECORDED (#55). The page asks this on every load, with the same headers,
+# and keeps the answer as who is signed in, their dsid and whether their
+# account has Family Sharing. Only the dsid and that flag are read.
+LOGIN_PATH = "/api/login"
 _ALLOWED_API_RE = re.compile(
-    r"^/api/(?:family|purchase/search|order/[A-Za-z0-9]{6,20}/invoice\.html)\Z")
+    r"^/api/(?:family|login|purchase/search|order/[A-Za-z0-9]{6,20}/invoice\.html)\Z")
 
 # RECORDED shapes. A paid purchase's weborder is ten letters and digits and a
 # free one's fourteen. A dsid is digits. A store order is W and ten digits.
@@ -467,25 +471,61 @@ def read_family(page) -> dict:
     return {"kind": kind, "status": got.get("status") or 0, "members": members}
 
 
+def read_self(page) -> dict:
+    """Who is signed in, from the page's own GET /api/login, as a Member,
+    and whether the account has Family Sharing.
+    {"kind", "status", "member", "family_ui"}"""
+    got = api_call(page, LOGIN_PATH)
+    kind = answer_kind(got)
+    data = got.get("data") if kind == ANSWERED and isinstance(got.get("data"), dict) else {}
+    dsid = str(data.get("dsid") or "").strip()
+    member = None
+    if DSID_RE.match(dsid):
+        first = (clean(data.get("name")) or "").split(" ")[0]
+        member = Member(dsid=dsid, given_name=first[:40], organizer=True)
+    return {"kind": kind, "status": got.get("status") or 0, "member": member,
+            "family_ui": data.get("enableFamilyUI") is True}
+
+
+def read_searchers(page) -> dict:
+    """Whose purchases the search is asked for. The family's members, or,
+    for an account with no Family Sharing, whose family list answers empty,
+    the one account signed in, which the page then searches by a single
+    dsid, RECORDED (#55). {"kind", "status", "members", "single", "source"}"""
+    family = read_family(page)
+    if family["kind"] != ANSWERED or family["members"]:
+        return dict(family, single=False, source="family")
+    me = read_self(page)
+    members = [me["member"]] if me["kind"] == ANSWERED and me["member"] else []
+    return {"kind": me["kind"], "status": me["status"], "members": members,
+            "single": bool(members) and not me["family_ui"], "source": "account"}
+
+
 def purchase_date_of(raw: dict) -> str:
     return local_date((raw or {}).get("purchaseDate"))
 
 
 def walk_purchases(page, dsids, limit_date: str = "", pause_ms: int = SEARCH_PAUSE_MS,
-                   max_batches: int = MAX_BATCHES) -> dict:
+                   max_batches: int = MAX_BATCHES, single: bool = False) -> dict:
     """Every purchase the family's search holds, a batch at a time.
 
     The first body names every member's dsid and each one after adds the
-    batchId the last answer gave as nextBatchId, RECORDED. It stops at the
-    end, when a whole batch is older than `limit_date`, since the list is
-    newest first and everything after it is older still, or at the first
-    answer that is not a 200, which is never asked again. A cursor seen
-    twice is the end too, rather than a loop.
+    batchId the last answer gave as nextBatchId, RECORDED. An account with
+    no Family Sharing is searched by one dsid instead, `single`, which is
+    how the page's own code asks for it (#55). It stops at the end, when a
+    whole batch is older than `limit_date`, since the list is newest first
+    and everything after it is older still, or at the first answer that is
+    not a 200, which is never asked again. A cursor seen twice is the end
+    too, rather than a loop.
 
     Returns {"purchases": [...], "stop": word, "status": n, "batches": n}."""
     dsids = [str(d) for d in dsids if DSID_RE.match(str(d))]
     purchases, seen = [], set()
-    body = {"dsids": dsids}
+
+    def who() -> dict:
+        return {"dsid": dsids[0]} if single and dsids else {"dsids": dsids}
+
+    body = who()
     batches, stop, status = 0, END, 0
     while True:
         if batches >= max_batches:
@@ -512,7 +552,7 @@ def walk_purchases(page, dsids, limit_date: str = "", pause_ms: int = SEARCH_PAU
             stop = DATE_LIMIT
             break
         seen.add(nxt)
-        body = {"batchId": nxt, "dsids": dsids}
+        body = dict({"batchId": nxt}, **who())
     return {"purchases": purchases, "stop": stop, "status": status, "batches": batches}
 
 

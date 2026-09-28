@@ -455,7 +455,9 @@ class App:
         floor, limit = self._floor(), self._walk_limit()
         self.journal.op("open_list", "read the app store purchases")
         ready = site.open_report_page(page)
-        family = site.read_family(page)
+        # The family's members, or the one account signed in when it has no
+        # Family Sharing, whose family list answers empty (#55).
+        family = site.read_searchers(page)
         if family["kind"] == site.SIGNED_OUT or (family["kind"] == site.FAILED and not ready):
             self._signed_out(APP_STORE, page)
             return 0
@@ -472,15 +474,15 @@ class App:
             return 0
         members = family["members"]
         if not members:
-            # GUESS. The account this was built on is a family of five, and
-            # the search refuses a call that names nobody. An account with no
-            # family has not been seen.
-            print("\n!! Report a Problem listed no family members, and its purchase")
-            print("   search needs at least one. Run Diagnose and send the survey.")
-            self.write_failure("read the family list", "the family list named nobody")
+            # The search refuses a call that names nobody, and neither the
+            # family list nor the page's own account said who is signed in.
+            print("\n!! Report a Problem named no family member and no account, and its")
+            print("   purchase search needs one. Run Diagnose and send the survey.")
+            self.write_failure("read the family list", "neither the family nor the account named anyone")
             return 0
         self.journal.op("read_rows", "search the purchases", members=len(members))
-        walk = site.walk_purchases(page, [m.dsid for m in members], limit_date=limit)
+        walk = site.walk_purchases(page, [m.dsid for m in members], limit_date=limit,
+                                   single=family.get("single", False))
         self.journal.result("searched the purchases", batches=walk["batches"],
                             purchases=len(walk["purchases"]))
         n_new, dropped, owner = 0, 0, self.config.get("owner", "")
@@ -508,7 +510,10 @@ class App:
                 dropped += 1
                 continue  # before the cutoff, never record or download
             n_new += self._remember(purchase, extras)
-        print(f"\nApp Store, {len(members)} family member(s), {len(walk['purchases'])} "
+        who = (f"{len(members)} family member(s)" if family.get("source") != "account"
+               else "one account, no Family Sharing" if family.get("single")
+               else "the account signed in")
+        print(f"\nApp Store, {who}, {len(walk['purchases'])} "
               f"purchase(s) read in {walk['batches']} batch(es). {paid} paid, "
               f"{self.stats['free_skipped']} free skipped, "
               f"{self.stats['pending_skipped']} pending skipped.")
@@ -1501,15 +1506,20 @@ class App:
                "stop": "", "reached_end": False, "purchases": 0, "paid": 0,
                "free": 0, "pending": 0, "paid_by_others": 0}
         out["session_token"] = site.open_report_page(page, wait_ms=20000)
-        family = site.read_family(page)
+        family = site.read_searchers(page)
         out["family_status"] = family["status"]
         out["signed_in"] = family["kind"] == site.ANSWERED
         members = family["members"]
         out["members"] = len(members)
         out["organizer_found"] = any(m.organizer for m in members)
+        # Whether the family list named the members or, with no Family
+        # Sharing, the page's own account did (#55).
+        out["searched_by"] = family.get("source") or "family"
+        out["single_account"] = bool(family.get("single"))
         if out["signed_in"] and members:
             walk = site.walk_purchases(page, [m.dsid for m in members],
-                                       max_batches=DIAGNOSE_BATCHES)
+                                       max_batches=DIAGNOSE_BATCHES,
+                                       single=bool(family.get("single")))
             out["batches"], out["stop"] = walk["batches"], walk["stop"]
             out["reached_end"] = walk["stop"] == site.END
             out.update(site.purchase_counts(walk["purchases"], members))

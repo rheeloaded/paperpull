@@ -21,6 +21,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and checked for its own order ID like a receipt.
 
 ### Fixed
+- **Apple reads an account without Family Sharing (#55).** Report a
+  Problem answers the family list of such an account with nobody in it,
+  and the app found whose purchases to search from that list alone, so a
+  tester's Discover found nothing. It now asks which account is signed
+  in, the way the page does on every load, and searches that account's
+  purchases by its one dsid, the form the page's own code uses for it.
 - **One receipt Apple will not give no longer stops the App Store side.**
   Report a Problem answered one paid purchase's receipt with its own
   internal error, a 400, while the session was fine, and the app read that

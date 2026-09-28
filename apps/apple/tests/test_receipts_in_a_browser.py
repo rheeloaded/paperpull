@@ -298,6 +298,32 @@ def test_the_app_store_is_read_from_inside_the_page_for_the_whole_family(browser
     assert api == {REPORT + "/api/family", REPORT + "/api/purchase/search"}
 
 
+def test_an_account_with_no_family_sharing_is_read_too(browser, tmp_path, capsys):
+    """His family list answered 200 and named nobody, and the run stopped
+    there with nothing found (#55). The search answers only in the form the
+    page's own code sends for such an account, a single dsid."""
+    def single_only(request):
+        body = json.loads(request.post_data or "{}")
+        if "dsids" in body or body.get("dsid") != ORGANIZER:
+            return json_answer({}, 400)
+        return json_answer({"batchId": body.get("batchId"), "nextBatchId": None,
+                            "query": body, "purchases": [APPLE_ONE, FREE_APP]})
+    fake, page = report_a_problem(browser, **{
+        "/api/family": json_answer({"members": []}),
+        "/api/login": json_answer({"dsid": ORGANIZER, "name": "Dana Example",
+                                   "enableFamilyUI": False, "enableFamilyAPI": False}),
+        "/api/purchase/search": single_only})
+    app = _app(tmp_path, fake.context, page)
+
+    assert app._discover_app_store() == 1
+
+    assert sorted(app.discovery.data) == ["App Store:MLF0TEST01"]
+    assert app.discovery.data["App Store:MLF0TEST01"]["dsid"] == ORGANIZER
+    assert "one account, no Family Sharing" in capsys.readouterr().out
+    for _method, _url, headers, _body in fake.requested(REPORT + "/api/login"):
+        assert headers.get("x-apple-xsrf-token") == TOKEN
+
+
 def test_a_403_stops_the_app_store_side_and_asks_for_a_sign_in(browser, tmp_path, capsys):
     fake, page = report_a_problem(browser, **{
         "/api/family": json_answer(FAMILY),
