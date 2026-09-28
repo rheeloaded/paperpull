@@ -741,7 +741,7 @@ def _entry(doc_id, address):
 
 def _read_list(monkeypatch, *entries):
     monkeypatch.setattr(site, "_capture_docs",
-                        lambda page: ([{"data": {"attributes": list(entries)}}], []))
+                        lambda page: ([{"data": {"attributes": list(entries)}}], [], []))
     return site.collect_download_docs(object())
 
 
@@ -869,7 +869,7 @@ def test_discovery_says_what_the_year_held_and_what_the_list_gave_as_addresses(m
                    ("ID Card", "invented-2", "Jane_Q_Invented"),
                    ("Declarations Page", "invented-3", ""))]
     monkeypatch.setattr(site, "_capture_docs",
-                        lambda page: ([{"data": {"attributes": entries}}], [_LIST + "?year="]))
+                        lambda page: ([{"data": {"attributes": entries}}], [_LIST + "?year="], [{}]))
     facts = {}
     docs = site.collect_download_docs(_YearPage(), facts)
     assert len(docs) == 3

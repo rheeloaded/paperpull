@@ -43,6 +43,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Statements saved before keep their names, so none is fetched twice. The
   guard no longer refuses a card statement, which it did twice over, by
   the bare word card and by reading edit inside Credit.
+- **State Farm asks for each earlier year the way the page does (#37).**
+  The tester's Discover on 0.38.0 showed the page's own read of the list
+  answering with four documents, while every year the app asked for, the
+  current one included, answered 401. The app asked with its cookies and
+  nothing more, and the page's own call carries headers of its own. Each
+  year is now asked with the headers the page's call sent, never a
+  cookie, and Discover says how many there were and whether an
+  authorization was among them, never what they held.
 - **review_names leaves a receipt you renamed alone (#47).** Renaming a
   receipt marked it Completed and left its confidence Low, so the next
   review asked again about every receipt already renamed, in all thirteen

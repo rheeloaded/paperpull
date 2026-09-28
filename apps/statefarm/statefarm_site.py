@@ -1331,19 +1331,44 @@ def is_future(iso: str) -> bool:
         return False
 
 
-def _capture_docs(page) -> Tuple[list, list]:
-    """Open the Document Center while catching the customerMetadata answer
-    and the address it was asked at, so discovery can ask for other years
-    the same way."""
+# Headers a fetch from inside the page may not set, or that the browser
+# adds on its own. Everything else the page's own list call sent is sent
+# again with each year, since that call answered and the year walk, which
+# sent cookies and an accept header alone, was refused 401 for every year,
+# the current one included (#37, his 0.38.0 Discover).
+_UNSENDABLE_HEADER_RE = re.compile(
+    r"^(cookie2?|host|connection|keep-alive|content-length|content-type|origin|referer|"
+    r"user-agent|accept-encoding|accept-charset|date|dnt|expect|te|trailer|"
+    r"transfer-encoding|upgrade|via|priority|sec-.*|proxy-.*|:.*)$", re.I)
+
+
+def _resendable_headers(headers) -> dict:
+    """The headers a page set on a request that a fetch from the same page
+    may set again, never a cookie, which the browser adds itself."""
+    return {k: v for k, v in (headers or {}).items()
+            if k and not _UNSENDABLE_HEADER_RE.match(k)}
+
+
+def _capture_docs(page) -> Tuple[list, list, list]:
+    """Open the Document Center while catching the customerMetadata answer,
+    the address it was asked at and the headers it was asked with, so
+    discovery can ask for other years the same way."""
     bodies: list = []
     urls: list = []
+    heads: list = []
 
     def on_response(res):
         try:
             url = res.url or ""
             if is_safe_url(url) and DOCS_API_RE.search(url):
+                try:
+                    sent = _resendable_headers(res.request.all_headers())
+                except Exception:
+                    sent = {}
+                body = res.json()
                 urls.append(url)
-                bodies.append(res.json())
+                bodies.append(body)
+                heads.append(sent)
         except Exception:
             pass
     page.on("response", on_response)
@@ -1362,13 +1387,15 @@ def _capture_docs(page) -> Tuple[list, list]:
         except Exception:
             pass
     dismiss_overlay(page)
-    return bodies, urls
+    return bodies, urls, heads
 
 
 # The answer's status and content type come back with it, so a year that
 # was refused can be told from a year with nothing in it.
-_FETCH_JSON = r"""async (u) => {
-    const r = await fetch(u, {credentials: 'include', headers: {accept: 'application/json'}});
+_FETCH_JSON = r"""async (arg) => {
+    const [u, h] = Array.isArray(arg) ? arg : [arg, {}];
+    const headers = Object.assign({accept: 'application/json'}, h || {});
+    const r = await fetch(u, {credentials: 'include', headers});
     const out = {status: r.status, type: r.headers.get('content-type') || ''};
     if (!r.ok) return out;
     try { out.body = await r.json(); } catch (e) { out.unreadable = true; }
@@ -1461,7 +1488,8 @@ def _year_word(url: str) -> str:
     return "some other value"
 
 
-def _years_from(page, url: str, first_year: int, facts: Optional[dict] = None) -> List[dict]:
+def _years_from(page, url: str, first_year: int, facts: Optional[dict] = None,
+                headers: Optional[dict] = None) -> List[dict]:
     """The same customerMetadata call for each earlier year, made from
     inside the page. The year is the only thing changed in the address.
 
@@ -1495,7 +1523,7 @@ def _years_from(page, url: str, first_year: int, facts: Optional[dict] = None) -
         entry: dict = {"year": year}
         asked.append(entry)
         try:
-            got_raw = page.evaluate(_FETCH_JSON, target)
+            got_raw = page.evaluate(_FETCH_JSON, [target, headers] if headers else target)
         except Exception as e:
             log.info("year %d: %s", year, e)
             entry["failed"] = _fetch_failure(e)
@@ -1540,7 +1568,7 @@ def collect_download_docs(page, facts: Optional[dict] = None) -> List[RawDoc]:
     download-attempt.json (#37)."""
     docs: List[RawDoc] = []
     seen = set()
-    bodies, urls = _capture_docs(page)
+    bodies, urls, heads = _capture_docs(page)
     found = []
     for body in bodies:
         found.extend(_docs_from_api(body))
@@ -1556,10 +1584,15 @@ def collect_download_docs(page, facts: Optional[dict] = None) -> List[RawDoc]:
         # carried none. What the value held is in the facts as a fixed
         # phrase, since the census kept only the parameter's name (#37).
         first = _four_digit_year(urls[0])
+        sent = heads[0] if heads else {}
         if facts is not None:
             facts["year_in_address"] = first != -1
             facts["year_value"] = _year_word(urls[0])
-        found.extend(_years_from(page, urls[0], first, facts))
+            # How many headers the page's own call carried and whether one
+            # was an authorization, never their names or values (#37).
+            facts["page_call_headers"] = len(sent)
+            facts["page_call_authorization"] = any(k.lower() == "authorization" for k in sent)
+        found.extend(_years_from(page, urls[0], first, facts, headers=sent))
     # What the list gave as each document's file address, counted. The one
     # document tried in his 0.37.1 file had "an id and no address", which
     # an empty filePathUrl and one with no slash in it both give, so these

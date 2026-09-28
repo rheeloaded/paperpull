@@ -184,6 +184,15 @@ def discovery_lines(facts) -> List[str]:
     # about what it was (#37).
     if facts.get("year_value"):
         out.append("The year in the page's own list address was %s." % _word(facts["year_value"]))
+    # Every year the walk asked for answered 401 on 0.38.0 while the page's
+    # own call answered, and the walk now sends that call's headers again.
+    # How many there were, and whether an authorization was among them, is
+    # what says whether that was the difference (#37).
+    if "page_call_headers" in facts:
+        out.append("The page's own list call carried %d header(s) of its own, %s." % (
+            _count(facts.get("page_call_headers")),
+            "an authorization among them" if facts.get("page_call_authorization") is True
+            else "no authorization among them"))
     years = [y for y in (facts.get("years") or []) if isinstance(y, dict)]
     for y in years[:10]:
         head = "Year %d" % _count(y.get("year"))
