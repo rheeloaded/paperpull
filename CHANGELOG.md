@@ -7,7 +7,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.39.1] - 2026-09-27
+
+Every account's statements for Golden 1, earlier years for State Farm,
+Apple accounts without Family Sharing and a record for the receipts
+Apple will not give, with Apple Card and E*TRADE confirmed on a
+tester's account.
 
 ### Added
 - **Apple saves a purchase record for a receipt Apple will not give.**
