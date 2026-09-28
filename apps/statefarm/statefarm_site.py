@@ -210,6 +210,20 @@ MONTH_YEAR_RE = re.compile(
 YEAR_RE = re.compile(r"\b(19|20)(\d{2})\b")
 
 
+def _iso_of(m, kind: str) -> str:
+    """One match of DATE_PATTERNS as YYYY-MM-DD. KeyError or ValueError
+    when it names no month or year."""
+    if kind == "mdY":
+        return f"{int(m.group(3)):04d}-{_MONTHS[m.group(1)[:3].lower()]:02d}-{int(m.group(2)):02d}"
+    if kind == "mdy_slash":
+        return f"{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    if kind == "mdy_slash2":
+        return f"{_full_year(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    if kind == "iso":
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    raise ValueError(kind)
+
+
 def _parse_date_from_page(text: str) -> Optional[str]:
     if not text:
         return None
@@ -218,14 +232,7 @@ def _parse_date_from_page(text: str) -> Optional[str]:
         if not m:
             continue
         try:
-            if kind == "mdY":
-                return f"{int(m.group(3)):04d}-{_MONTHS[m.group(1)[:3].lower()]:02d}-{int(m.group(2)):02d}"
-            if kind == "mdy_slash":
-                return f"{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
-            if kind == "mdy_slash2":
-                return f"{_full_year(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
-            if kind == "iso":
-                return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+            return _iso_of(m, kind)
         except (KeyError, ValueError):
             continue
     return None
@@ -238,6 +245,33 @@ def parse_date(text):
     that names a day which does not exist, because a reference number is
     shaped like a date and used to be taken for one."""
     return _checked_date(_parse_date_from_page(text), None)
+
+
+def _date_not_ahead(text) -> Optional[str]:
+    """The date `text` names, read the way parse_date reads it, passing
+    over any day after tomorrow.
+
+    A document that stays online for two years says until when, and once
+    its row is open that line is part of the row. His 0.39.1 Pilot found
+    the row, pressed its View Documents, saw the Payment Receipt it
+    revealed, and then found no row carrying the date, since the row that
+    was drawn again read as the day two years on (#37). No document is
+    dated ahead, the list's own dates are never taken past tomorrow either
+    (is_future), so a day ahead is never a row's. A day that does not exist
+    still reads as no date, as it does in parse_date."""
+    if not text:
+        return None
+    for pattern, kind in DATE_PATTERNS:
+        for m in pattern.finditer(text):
+            try:
+                iso = _iso_of(m, kind)
+            except (KeyError, ValueError):
+                break
+            checked = _checked_date(iso, None)
+            if checked and is_future(checked):
+                continue
+            return checked
+    return None
 
 
 def parse_period_date(text: str) -> Tuple[Optional[str], str]:
@@ -850,10 +884,10 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
                 h.dispose()
             except Exception:
                 pass
-    if not isinstance(got, list) or len(got) != 11:
+    if not isinstance(got, list) or len(got) != 12:
         return "the row's control could not be read again"
     (row_on, row_name, row_text, doc_on, doc_text, inside, outside, openers_inside,
-     in_parent, in_next, in_dialog) = got
+     in_parent, in_next, in_dialog, openers_anywhere) = got
     if not row_on:
         return "the row's control left the page"
     if _date_of({"name": str(row_name or "").strip(), "row": str(row_text or "")}) != iso:
@@ -869,6 +903,14 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
         return "another View Documents inside the row carries this date now"
     if openers_inside > 1:
         return "%d other View Documents inside the row carry this date now" % openers_inside
+    # Another row's View Documents inside the box, whatever date it reads.
+    # One whose opened row says only until when its document stays online
+    # reads no date at all, so counting only those that read this date let
+    # a row opened in place under a date heading pass as this one (#37).
+    if not isinstance(openers_anywhere, int) or openers_anywhere < 0:
+        return "the row's control could not be read again"
+    if openers_anywhere:
+        return "another View Documents sits inside the row"
     if not doc_on:
         return "it left the page"
     if " ".join(str(doc_text or "").split()) != name:
@@ -908,6 +950,38 @@ def _row_found_again(page, iso: str):
     if len(openers) != 1:
         return None, len(openers)
     return openers[0], 1
+
+
+def _openers_read(page, iso: str) -> dict:
+    """How each View Documents on the page reads its date now, as counts,
+    for the trace when the pressed row is not the one row carrying its date
+    after the press. A row whose every date is after tomorrow is counted
+    apart, so the next file says whether reading the dates is still what
+    stands in the way (#37)."""
+    counts = {"openers": 0, "with_this_date": 0, "with_another_date": 0,
+              "only_days_ahead": 0, "with_no_date": 0}
+    try:
+        handles = _bill_controls(page).element_handles()
+    except Exception:
+        return counts
+    for n, h in enumerate(handles):
+        got = _read_control(h) if n < 40 else None
+        try:
+            h.dispose()
+        except Exception:
+            pass
+        if got is None or not VIEW_DOCUMENTS_RE.match(" ".join(got["name"].split())):
+            continue
+        counts["openers"] += 1
+        day = _date_of(got)
+        if day == iso:
+            counts["with_this_date"] += 1
+        elif day:
+            counts["with_another_date"] += 1
+        else:
+            any_day = parse_date(got["name"]) or parse_date(got["row"])
+            counts["only_days_ahead" if any_day and is_future(any_day) else "with_no_date"] += 1
+    return counts
 
 
 def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
@@ -953,18 +1027,39 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
         note({"note": "the row's control changed before it was pressed, so nothing was pressed",
               "why": why})
         return False
+    # Whether the page asked for its list again after the press, counted.
+    # A list asked for again with the page's own period would drop a row
+    # from an earlier year, and his 0.39.1 file could not say (#37).
+    list_calls: list = []
+
+    def on_list(res):
+        try:
+            if is_safe_url(res.url or "") and DOCS_API_RE.search(res.url or ""):
+                list_calls.append(1)
+        except Exception:
+            pass
     try:
-        el.click(timeout=8000)
-        note({"note": "clicked", "control": _label_mask(label)})
-    except Exception as e:
-        note({"note": "click failed", "control": _label_mask(label), "why": _click_failure(e)})
-        return False
-    appeared: set = set()
-    for _ in range(8):
-        page.wait_for_timeout(500)
-        appeared = _control_texts(page) - before
-        if any(is_revealed_document(t) for t in appeared):
-            break
+        page.on("response", on_list)
+    except Exception:
+        pass
+    try:
+        try:
+            el.click(timeout=8000)
+            note({"note": "clicked", "control": _label_mask(label)})
+        except Exception as e:
+            note({"note": "click failed", "control": _label_mask(label), "why": _click_failure(e)})
+            return False
+        appeared: set = set()
+        for _ in range(8):
+            page.wait_for_timeout(500)
+            appeared = _control_texts(page) - before
+            if any(is_revealed_document(t) for t in appeared):
+                break
+    finally:
+        try:
+            page.remove_listener("response", on_list)
+        except Exception:
+            pass
     try:
         expanded_after = el.get_attribute("aria-expanded")
     except Exception:
@@ -985,7 +1080,8 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
                                     if is_revealed_document(t) and _type_key(t) == want),
           "refused_by_the_guard": sum(1 for t in appeared if _refused_document(t)),
           "expanded_before": _attr_word(expanded), "expanded_after": _attr_word(expanded_after),
-          "control_after_the_press": after})
+          "control_after_the_press": after,
+          "list_calls_after_the_press": len(list_calls)})
     # What appeared is this row's only while it can be tied to the row. A
     # list drawn again after the press, keeping its open row by its place,
     # put new nodes everywhere and opened the row above, and that row's
@@ -1009,8 +1105,11 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
     row, row_is = el, "the row that was pressed"
     if after == "left the page":
         row, rows = _row_found_again(page, iso)
-        note({"note": "the row's control left the page after its press, so its row was "
-                      "looked for again by this date", "rows_with_this_date": rows})
+        found = {"note": "the row's control left the page after its press, so its row was "
+                         "looked for again by this date", "rows_with_this_date": rows}
+        if rows != 1:
+            found.update(_openers_read(page, iso))
+        note(found)
         if row is None:
             note({"note": "no revealed document was pressed",
                   "why": ("no row carries this date after the press" if rows == 0 else
@@ -1268,14 +1367,71 @@ class RawDoc:
 # see what the row looked like. The tie between a revealed document and the
 # row that was pressed (_TIE_JS) walks the same way, so the row it holds the
 # document to is the one discovery read the date from (#37).
+#
+# A container whose every date is after tomorrow is walked past, since no
+# document is dated ahead and that date is a document's "available until".
+# His 0.39.1 Pilot pressed a row's View Documents, the row was drawn again
+# open, and no row carried its date after that, which is what a button
+# whose nearest dated container is the revealed document's own line would
+# give. Only a View Documents walks past such a container, only while the
+# container shows a document the row revealed, which is the opened row his
+# file describes, and never out of its own row, the nearest ancestor that
+# is a row, a table row or a list item. A row's date can sit in an element
+# with no control of its own, a document sent by mail or a date heading, so
+# stopping at another control alone let the walk take a neighbor's date,
+# which a review showed saving one document under another's (#37). Inside
+# its row it still never steps into a container that holds a control other
+# than this one and the documents it revealed. A container it cannot get
+# past is still the box, and its date is then read as none
+# (_date_not_ahead), where it used to read as the day ahead.
 _ROW_BOX_JS = r"""el => {
-  const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/i;
-  let node = el, depth = 0;
+  const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/ig;
+  const months = {jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7,
+                  sep: 8, oct: 9, nov: 10, dec: 11};
+  const today = new Date();
+  const limit = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2);
+  // A day as a Date, or null for one that does not exist or is not named by
+  // a month's own name. A two digit year is read as full_year reads it, up
+  // to next year this century.
+  const day = s => {
+    let g, y, m, d;
+    if ((g = s.match(/^(\d{4})-(\d{2})-(\d{2})$/))) {
+      y = +g[1]; m = +g[2] - 1; d = +g[3];
+    } else if ((g = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/))) {
+      m = +g[1] - 1; d = +g[2]; y = +g[3];
+      if (g[3].length === 2) { y += 2000; if (y > today.getFullYear() + 1) y -= 100; }
+    } else if ((g = s.match(/^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4})$/i))) {
+      m = months[g[1].slice(0, 3).toLowerCase()]; d = +g[2]; y = +g[3];
+    } else {
+      return null;
+    }
+    if (m === undefined) return null;
+    const t = new Date(y, m, d);
+    if (t.getFullYear() !== y || t.getMonth() !== m || t.getDate() !== d) return null;
+    return t;
+  };
+  // A day that does not exist is not ahead, so it ends the walk as before.
+  const ahead = s => { const t = day(s); return !!t && t >= limit; };
+  const words = c => ((c.getAttribute('aria-label') || c.innerText || '') + '').replace(/\s+/g, ' ').trim();
+  const opener = /^\s*view\s+documents?\s*\d*\s*$/i.test(words(el));
+  const own = el.closest('[role=row], tr, li');
+  const controls = n => [...n.querySelectorAll('a, button, [role=button], [role=link]')];
+  let node = el, depth = 0, aheadOnly = null;
+  const revealed = n => controls(n).some(c => c !== el && c.getClientRects().length > 0);
+  const holdsOthers = n => controls(n).some(c => c !== el && !aheadOnly.contains(c));
   while (node && depth < 6) {
-    if (dateRe.test((node.innerText || '').trim())) return node;
+    const days = (node.innerText || '').trim().match(dateRe) || [];
+    if (days.length) {
+      if (days.some(s => !ahead(s))) return node;
+      if (!aheadOnly) aheadOnly = node;
+      const up = node.parentElement;
+      if (!up || !opener || !own || !own.contains(up) || !revealed(aheadOnly) || holdsOthers(up)) {
+        return aheadOnly;
+      }
+    }
     node = node.parentElement; depth++;
   }
-  return null;
+  return aheadOnly;
 }"""
 _ROW_OF_JS = ("el => { const box = (" + _ROW_BOX_JS + ")(el); "
               "return box ? (box.innerText || '').trim().slice(0, 300) : ''; }")
@@ -1638,13 +1794,13 @@ def collect_download_docs(page, facts: Optional[dict] = None) -> List[RawDoc]:
         except Exception:
             href = ""
         row_text = ""
-        iso = parse_date(name)
+        iso = _date_not_ahead(name)
         if not iso:
             try:
                 row_text = el.evaluate(_ROW_OF_JS) or ""
             except Exception:
                 row_text = ""
-            iso = parse_date(row_text)
+            iso = _date_not_ahead(row_text)
         if not iso or iso in seen:
             continue
         seen.add(iso)
@@ -1692,7 +1848,10 @@ _TIE_JS = ("(row, [doc, dated, openers]) => { const box = (" + _ROW_BOX_JS + ")(
            "dated.filter((h, i) => h !== row && inside(h) && openers[i]).length, "
            "!!box && !!box.parentElement && box.parentElement.contains(doc), "
            "!!box && !!box.nextElementSibling && box.nextElementSibling.contains(doc), "
-           "!!doc.closest('dialog, [role=dialog], [aria-modal=true]')]; }")
+           "!!doc.closest('dialog, [role=dialog], [aria-modal=true]'), "
+           "box ? [...box.querySelectorAll('a, button, [role=button], [role=link]')].filter(c => "
+           "c !== row && c.getClientRects().length > 0 && /^\\s*view\\s+documents?\\s*\\d*\\s*$/i.test("
+           "((c.getAttribute('aria-label') || c.innerText || '') + '').replace(/\\s+/g, ' '))).length : 0]; }")
 
 
 def _read_control(el) -> Optional[dict]:
@@ -1711,8 +1870,9 @@ def _read_control(el) -> Optional[dict]:
 
 def _date_of(read: dict) -> Optional[str]:
     """The date a control belongs to, from its own name first and then from
-    the text around it, the way discovery reads it."""
-    return parse_date(read["name"]) or parse_date(read["row"])
+    the text around it, the way discovery reads it. A day after tomorrow is
+    never it (_date_not_ahead)."""
+    return _date_not_ahead(read["name"]) or _date_not_ahead(read["row"])
 
 
 def _controls_for(page, iso: str) -> list:
@@ -1789,10 +1949,10 @@ def _control_dates(page) -> list:
                 name = (el.get_attribute("aria-label") or el.inner_text(timeout=500) or "").strip()
             except Exception:
                 name = ""
-            found = parse_date(name)
+            found = _date_not_ahead(name)
             if not found:
                 try:
-                    found = parse_date(el.evaluate(_ROW_OF_JS) or "")
+                    found = _date_not_ahead(el.evaluate(_ROW_OF_JS) or "")
                 except Exception:
                     found = None
             out.append(found or "no date")

@@ -1950,8 +1950,13 @@ def test_two_rows_that_carry_the_date_have_no_document_pressed(tmp_path, drawn):
                     "so": "which row is this document's is not known, so none was pressed"} in trace
         else:
             assert clicked == ["View Documents0"], trace
-            assert {"note": "the row's control left the page after its press, so its row was looked "
-                            "for again by this date", "rows_with_this_date": 2} in trace, trace
+            [again] = [t for t in trace if t.get("note") == "the row's control left the page after "
+                       "its press, so its row was looked for again by this date"]
+            # How every View Documents read its date then, counted, since
+            # the one row with it was not found.
+            assert again == {"note": again["note"], "rows_with_this_date": 2, "openers": 3,
+                             "with_this_date": 2, "with_another_date": 1, "only_days_ahead": 0,
+                             "with_no_date": 0}, again
             assert {"note": "no revealed document was pressed",
                     "why": "2 rows carry this date after the press, so which one is this "
                            "document's is not known"} in trace, trace
