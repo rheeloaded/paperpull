@@ -148,7 +148,7 @@ SAFE_DOC_CONTROL_RE = re.compile(
 SECURITY_CHALLENGE_MARKERS = [
     "verify your identity", "enter the code", "verification code", "one-time",
     "are you a robot", "verify you are human", "checking your browser",
-    "access denied", "pardon our interruption", "press and hold",
+    "access denied", "pardon our interruption", "press & hold", "press and hold",
 ]
 
 RATE_LIMIT_MARKERS = [

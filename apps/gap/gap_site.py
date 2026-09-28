@@ -135,7 +135,7 @@ SAFE_DOC_CONTROL_RE = re.compile(
 # skipped entirely when order cards / a hydrated receipt render.
 SECURITY_CHALLENGE_MARKERS = [
     "enter the characters you see", "type the characters you see",
-    "are you a robot", "robot check", "press and hold",
+    "are you a robot", "robot check", "press & hold", "press and hold",
     "verify you are a human", "verify you are human",
     "checking your browser before accessing",
     "access to this page has been denied",

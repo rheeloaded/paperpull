@@ -92,7 +92,7 @@ except Exception:  # the shared core is optional at import time
 SAFE_DOC_CONTROL_RE = re.compile(r"(view\s+order\s+details|purchases|past\s+\d+\s+years|^20\d\d$)", re.I)
 
 SECURITY_CHALLENGE_MARKERS = [
-    "press and hold", "verify you are a human", "verify you are human",
+    "press & hold", "press and hold", "verify you are a human", "verify you are human",
     "are you a robot", "access denied", "enter the verification code",
     "enter the code we sent", "checking your browser before accessing",
 ]
