@@ -1,4 +1,4 @@
-"""Golden 1 statement and tax document downloader (local, supervised). UNVERIFIED, see golden1_site.py.
+"""Golden 1 statement and tax document downloader (local, supervised). PARTLY VERIFIED, see golden1_site.py.
 
 This app was written without a Golden 1 account so that someone who holds one
 can test it without writing code. The orchestrator below is the same one
@@ -414,7 +414,8 @@ class App:
             self.stats["skipped_out_of_scope"] += 1
             return 0
         doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+                       date=date, confidence=confidence, source_url=source_url,
+                       account=(r.account or "").strip())
         self._listed_keys.add(doc.key)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
@@ -595,7 +596,7 @@ class App:
             site.goto_documents(page)
         trace: list = []
         saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                   title=doc.title, trace=trace)
+                                   title=doc.title, trace=trace, account=doc.account)
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):

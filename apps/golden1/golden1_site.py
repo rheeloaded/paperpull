@@ -2,10 +2,13 @@
 
 When Golden 1 changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round five, repaired from three surveys (#35). Written
-without a Golden 1 account, so that someone who holds one can
-test it without writing code. Nothing below has run against the live
-signed-in site. On a first run it is deliberately cautious:
+STATUS: PARTLY VERIFIED (#35). Written without a Golden 1 account, so that
+someone who holds one can test it without writing code, and repaired from
+the surveys, failure files and a recording a tester sent. On his account
+a Pilot saved five checking statements. Reading every page of every
+account's statement history, the card's included, is round six's repair
+and has not yet run against the live site. On a first run it is
+deliberately cautious.
 
   * --login opens a real Edge or Chrome, since a credit union's sign-in is happiest in a real browser.
   * --diagnose surveys whatever the documents page turns out to be,
@@ -116,10 +119,13 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"(transfer|zelle|\bwire\b|\bpay\b|payment|bill\s*pay|autopay|auto\s*pay|"
     r"deposit|withdraw|send\s+money|request\s+money|move\s+money|"
     r"\bapply\b|open\s+(an?\s+)?account|close\s+account|\bloan\b|\bborrow|"
-    r"\bcard\b|\bcards\b|replace|activate|lock|unlock|\bpin\b|limit|"
+    # A card statement is a document, round six saves the card's, and every
+    # other card control, lock, replace, activate and the rest, is still
+    # refused by its own verb or by the bare noun.
+    r"\bcards?\b(?!\s+statements?\b)|replace|activate|lock|unlock|\bpin\b|limit|"
     r"overdraft|alerts?\b|\bbudget|\bgoal|\brewards?\b|\boffers?\b|"
     r"enroll|unenroll|sign\s+up|paperless|delivery\s+preference|"
-    r"enable|disable|change\b|edit\b|update\b|modify|manage\b|"
+    r"enable|disable|change\b|\bedit\b|update\b|modify|manage\b|"
     r"set\s+up|delete|remove|cancel|dispute|"
     r"password|passcode|username|profile\b|settings|preferences|contact\s+info|\baddress\b|"
     r"confirm\b|submit|agree|accept|authorize|\bchat\b|contact\s+us|"
@@ -1007,6 +1013,322 @@ def open_statement_history(page) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Accounts and pages (#35, round six)
+# ---------------------------------------------------------------------------
+# RECORDED, from the member's recording of 2026-09-27. The vendor's page
+# holds one panel per account, headed by an element carrying aria-expanded,
+# and each panel has its own Statement History link. The card was the
+# second panel, and the member opened it before pressing its Statement
+# History. Statement History opens a dialog of twelve statements a page,
+# under year headings, with NEXT under the list and Close beside it. The
+# app read the first panel's first page and nothing else, so older
+# statements were never listed and the card was never seen.
+NEXT_PAGE_RE = re.compile(r"^\s*next\s*$", re.I)
+CLOSE_RE = re.compile(r"^\s*close\s*$", re.I)
+# Seven years at twelve a page is seven pages. This only stops a list
+# that never ends.
+MAX_HISTORY_PAGES = 20
+# A panel whose heading says card holds the card's statements. The guard
+# refuses the word card on a control, so a panel heading has a guard of
+# its own, the money-moving words without it.
+CARD_PANEL_RE = re.compile(r"\b(visa|master\s*card|credit\s+card|card)\b", re.I)
+PANEL_HEADING_FORBIDDEN_RE = re.compile(
+    r"(transfer|zelle|\bwire\b|\bpay\b|payment|deposit|withdraw|send\s+money|"
+    r"close\s+account|\bcancel|\bdelete|\bremove|\block\b|activate|replace|dispute)", re.I)
+
+CARD_TITLE = "Credit Card Statement"
+ACCOUNT_TITLE = "Account Statement"
+
+
+def panel_heading_is_safe(text: str) -> bool:
+    """A panel's heading may be pressed to open the panel when it names no
+    money moving. It only shows or hides the account's own links."""
+    return bool((text or "").strip()) and not PANEL_HEADING_FORBIDDEN_RE.search(text)
+
+
+# Every Statement History link, the hidden ones in a closed panel too, and
+# for each the heading of the panel it sits in, the nearest element above
+# it with a child that carries aria-expanded. Each is marked so it can be
+# pressed by that mark and not by a position that may shift.
+_PANELS_JS = r"""(pattern) => {
+  const re = new RegExp(pattern, 'i');
+  const out = [];
+  const named = (el) => (el.getAttribute('aria-label') || el.textContent || '').trim();
+  const links = [...document.querySelectorAll('a, button, [role=link], [role=button], [role=tab]')]
+    .filter(el => re.test(named(el)));
+  links.forEach((el, i) => {
+    let header = null;
+    for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+      header = [...node.children].find(c => c.hasAttribute('aria-expanded') && !c.contains(el));
+      if (header) break;
+    }
+    el.setAttribute('data-paperpull-history', String(i));
+    if (header) header.setAttribute('data-paperpull-panel', String(i));
+    const shown = !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    const inner = header ? [...header.querySelectorAll('a, button, input, select, [role=button], [role=link]')] : [];
+    out.push({i, heading: header ? (header.innerText || header.textContent || '').trim() : '',
+              expanded: header ? header.getAttribute('aria-expanded') : '',
+              header: !!header,
+              header_controls: inner.map(c => (c.getAttribute('aria-label') || c.textContent || '').trim()),
+              shown});
+  });
+  return out;
+}"""
+
+
+def history_panels(page) -> List[dict]:
+    """Each account panel's Statement History, in page order, with the
+    panel's heading, whether it is open, and whether it is a card's."""
+    try:
+        got = page.evaluate(_PANELS_JS, STATEMENT_HISTORY_RE.pattern) or []
+    except Exception as e:
+        log.info("could not read the account panels: %s", e)
+        return []
+    for p in got:
+        p["card"] = bool(CARD_PANEL_RE.search(p.get("heading") or ""))
+    return got
+
+
+def _panel_account(panels: List[dict], panel: dict) -> str:
+    """What tells this panel's statements from another panel's of the same
+    kind. The first panel of a kind keeps an empty account, which is what
+    every statement saved before round six was keyed by, so nothing is
+    fetched twice. A later one is told apart by its heading, whose last
+    four digits the key keeps."""
+    same = [p for p in panels if p["card"] == panel["card"]]
+    return "" if same and same[0]["i"] == panel["i"] else (panel.get("heading") or "")
+
+
+def _panel_opens_safely(panel: dict) -> bool:
+    """A closed panel is opened only through a heading that names no money
+    moving, and whose own controls, a toggle say, name none either."""
+    inner = panel.get("header_controls") or []
+    return panel_heading_is_safe(panel.get("heading")) and all(
+        not (x or "").strip() or panel_heading_is_safe(x) for x in inner)
+
+
+def open_panel_history(page, panel: dict, trace: Optional[list] = None) -> bool:
+    """Open this panel if it is closed, through its own heading, then press
+    its Statement History. True when the history's dated list shows."""
+    i = panel["i"]
+    try:
+        if panel.get("expanded") == "false":
+            if not _panel_opens_safely(panel):
+                if trace is not None:
+                    trace.append({"note": "a panel's heading was not pressed", "panel": i,
+                                  "why": "it names a word the guard refuses"})
+                return False
+            head = page.locator('[data-paperpull-panel="%d"]' % i).first
+            head.click(timeout=5000)
+            page.wait_for_timeout(800)
+            # A heading that opens through a small toggle of its own, and
+            # did not open from a press on the heading, gets the toggle,
+            # when it is the heading's only control.
+            if head.get_attribute("aria-expanded") == "false" and len(panel.get("header_controls") or []) == 1:
+                head.locator("a, button, [role=button], [role=link]").first.click(timeout=5000)
+                page.wait_for_timeout(800)
+        link = page.locator('[data-paperpull-history="%d"]' % i).first
+        link.wait_for(state="visible", timeout=4000)
+        label = (link.get_attribute("aria-label") or link.inner_text(timeout=1500) or "").strip()
+        if not STATEMENT_HISTORY_RE.match(label) or not is_safe_control(label):
+            return False
+        link.click(timeout=5000)
+    except Exception as e:
+        log.info("could not open a panel's statement history: %s", e)
+        if trace is not None:
+            trace.append({"note": "a panel's statement history would not open", "panel": i,
+                          "error": _error_word(e)})
+        return False
+    for _ in range(20):
+        if _dated_count(page) > 0:
+            return True
+        page.wait_for_timeout(300)
+    return False
+
+
+def _dated_labels(page) -> List[str]:
+    """The labels of the dated statements showing, in order."""
+    try:
+        loc = _controls_named(page, DATE_ONLY_CONTROL_RE)
+        return [(loc.nth(i).inner_text(timeout=500) or "").strip() for i in range(loc.count())]
+    except Exception:
+        return []
+
+
+# The history dialog's own controls. The dialog is in the selector itself,
+# so a Next or a Close anywhere else on the vendor's page is never taken.
+_DIALOG_CONTROLS = ("[role=dialog] button, [role=dialog] a, [role=dialog] [role=button], "
+                    "[aria-modal=true] button, [aria-modal=true] [role=button]")
+
+
+def _pager(page, name_re):
+    """The history dialog's own control whose whole label, its aria-label
+    or else what it shows, matches `name_re`, showing and enabled, or None.
+    A control whose label cannot be read is never taken, and neither is
+    one the guard refuses."""
+    try:
+        loc = page.locator(_DIALOG_CONTROLS)
+        count = int(loc.count())
+    except Exception:
+        return None
+    for i in range(min(count, 40)):
+        el = loc.nth(i)
+        try:
+            label = (el.get_attribute("aria-label") or el.inner_text(timeout=500) or "").strip()
+            if not label or not name_re.match(label) or FORBIDDEN_CONTROL_RE.search(label):
+                continue
+            if el.is_visible() and el.is_enabled():
+                return el
+        except Exception:
+            continue
+    return None
+
+
+def next_history_page(page) -> bool:
+    """Press NEXT under the history, and wait for a different page of
+    dates. False on the last page, where NEXT is gone or disabled or the
+    list does not change."""
+    btn = _pager(page, NEXT_PAGE_RE)
+    if btn is None:
+        return False
+    before = _dated_labels(page)
+    try:
+        btn.click(timeout=5000)
+    except Exception as e:
+        log.info("NEXT did not press: %s", e)
+        return False
+    for _ in range(20):
+        page.wait_for_timeout(300)
+        after = _dated_labels(page)
+        if after and after != before:
+            return True
+    return False
+
+
+def close_history(page) -> None:
+    """Close the history dialog with its own Close, or Escape."""
+    btn = _pager(page, CLOSE_RE)
+    try:
+        if btn is not None:
+            btn.click(timeout=3000)
+        else:
+            page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+
+
+def _panel_for(panels: List[dict], title: str, account: str) -> Optional[dict]:
+    """The panel a statement was listed in, by its kind and account. A card
+    statement is in a card's panel and every other one in another panel,
+    and the first panel of the kind when no account was kept."""
+    card = (title or "").startswith(CARD_TITLE)
+    same = [p for p in panels if p["card"] == card]
+    if not same:
+        return None
+    if account:
+        return next((p for p in same if _panel_account(panels, p) == account), None)
+    return same[0]
+
+
+def _read_dated_list(page, kind: str, account: str, seen: set) -> List[RawDoc]:
+    """The statements on the history page showing, each named by nothing
+    but its date, as this panel's kind of statement."""
+    docs: List[RawDoc] = []
+    try:
+        loc = _controls_named(page, DATE_ONLY_CONTROL_RE)
+        count = loc.count()
+    except Exception:
+        return docs
+    for i in range(count):
+        el = loc.nth(i)
+        try:
+            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
+        except Exception:
+            continue
+        iso = parse_date(name) if is_safe_control(name) else None
+        if not iso or (kind, account, iso) in seen:
+            continue
+        seen.add((kind, account, iso))
+        try:
+            href = el.get_attribute("href") or ""
+        except Exception:
+            href = ""
+        disp = _human_date(iso)
+        docs.append(RawDoc(title=f"{kind} - {disp}", account=account, date_text=iso,
+                           href=href if PDF_HREF_RE.search(href or "") else "",
+                           text=f"Golden 1 {kind} {disp}", row_index=i,
+                           kind="statement", dated_by="label"))
+    return docs
+
+
+def _read_every_panel(page, panels: List[dict], trace: Optional[list]) -> List[RawDoc]:
+    """Every panel's history, every page of it, closed again after."""
+    if trace is not None:
+        trace.append({"note": "discovery found the account panels", "panels": len(panels),
+                      "cards": sum(1 for p in panels if p["card"]),
+                      "closed": sum(1 for p in panels if p.get("expanded") == "false")})
+    docs: List[RawDoc] = []
+    seen: set = set()
+    for first in panels:
+        now = history_panels(page)
+        panel = next((p for p in now if p["i"] == first["i"]), None)
+        if panel is None:
+            continue
+        if _pager(page, CLOSE_RE) is not None:
+            close_history(page)
+        if not open_panel_history(page, panel, trace):
+            if trace is not None:
+                trace.append({"note": "a panel's statement history did not show",
+                              "panel": panel["i"], "card": panel["card"]})
+            continue
+        expand_all(page)
+        kind = CARD_TITLE if panel["card"] else ACCOUNT_TITLE
+        account = _panel_account(now, panel)
+        pages = found = 0
+        while True:
+            pages += 1
+            got = _read_dated_list(page, kind, account, seen)
+            docs += got
+            found += len(got)
+            if pages >= MAX_HISTORY_PAGES or not next_history_page(page):
+                break
+        close_history(page)
+        if trace is not None:
+            trace.append({"note": "a panel's statement history was read", "panel": panel["i"],
+                          "card": panel["card"], "pages": pages, "dated": found})
+    return docs
+
+
+def _find_in_panels(page, panels: List[dict], iso_date: str, title: str, account: str,
+                    trace: Optional[list]):
+    """This statement's control, in its own panel's history, paged to."""
+    panel = _panel_for(panels, title, account)
+    if panel is None:
+        if trace is not None:
+            trace.append({"note": "no panel holds this kind of statement",
+                          "card": (title or "").startswith(CARD_TITLE), "panels": len(panels)})
+        return None, ""
+    if _pager(page, CLOSE_RE) is not None:
+        close_history(page)
+    if not open_panel_history(page, panel, trace):
+        if trace is not None:
+            trace.append({"note": "a panel's statement history did not show",
+                          "panel": panel["i"], "card": panel["card"]})
+        return None, ""
+    expand_all(page)
+    pages = 1
+    el, label = _control_for(page, iso_date)
+    while el is None and pages < MAX_HISTORY_PAGES and next_history_page(page):
+        pages += 1
+        el, label = _control_for(page, iso_date)
+    if trace is not None:
+        trace.append({"note": "the panel's statement history was searched", "panel": panel["i"],
+                      "card": panel["card"], "pages": pages, "found": el is not None})
+    return el, label
+
+
 def collect_download_docs(page, trace: Optional[list] = None) -> List[RawDoc]:
     """Read every statement and tax document the vendor's page offers.
     Each control's own name, or the row it sits in, carries the date.
@@ -1034,6 +1356,12 @@ def collect_download_docs(page, trace: Optional[list] = None) -> List[RawDoc]:
     if trace is not None:
         trace.append({"note": "discovery, the vendor's tab opened",
                       "on": _where(page.url), **_open_said()})
+    # One panel per account, each with its own history of twelve a page,
+    # read to its last page (round six). A vendor page that shows no
+    # Statement History at all is read the way it always was, below.
+    panels = history_panels(page)
+    if panels:
+        return _read_every_panel(page, panels, trace)
     docs: List[RawDoc] = []
     seen = set()
     # The vendor opens on the current statement, and the rest are behind
@@ -1375,7 +1703,7 @@ def _control_dates(page, limit: int = 30) -> list:
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
-                  trace: Optional[list] = None) -> bool:
+                  trace: Optional[list] = None, account: str = "") -> bool:
     """Save the document dated `iso_date`. A PDF link on the row is fetched
     from inside the page. Otherwise the row's own control is clicked, once
     it has passed the guard, and whichever the site produces is caught, a
@@ -1409,27 +1737,34 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     page = vendor
     if trace is not None:
         trace.append({"note": "the vendor's tab opened", "on": _where(page.url), **_open_said()})
-    # The same step discovery takes. The vendor opens on the current
-    # statement and the rest are behind its own Statement History, so a
-    # capture that skipped it would find nothing for any date but the
-    # newest (#35).
-    opened_history = open_statement_history(page)
-    expand_all(page)
-    # The 0.34.1 pilot found no Statement History control and yet twelve
-    # dated statements on the page, so the vendor can open straight on
-    # its list. A missing control is only a problem when no dated
-    # statement is listed either, and the trace now says which (#35).
-    listed = _dated_count(page)
-    if trace is not None:
-        if opened_history:
-            note = "the vendor's statement history opened"
-        elif listed:
-            note = "no statement history control, the vendor's page already lists dated statements"
-        else:
-            note = "no statement history control and no dated statement on the vendor's page"
-        trace.append({"note": note, "dated_statements": listed})
+    # The statement's own panel, by its kind and account, and its history
+    # paged until its date shows (round six). A vendor page that shows no
+    # Statement History at all is searched the way it always was.
+    panels = history_panels(page)
+    if panels:
+        el, label = _find_in_panels(page, panels, iso_date, title, account, trace)
+    else:
+        # The same step discovery takes. The vendor opens on the current
+        # statement and the rest are behind its own Statement History, so a
+        # capture that skipped it would find nothing for any date but the
+        # newest (#35).
+        opened_history = open_statement_history(page)
+        expand_all(page)
+        # The 0.34.1 pilot found no Statement History control and yet twelve
+        # dated statements on the page, so the vendor can open straight on
+        # its list. A missing control is only a problem when no dated
+        # statement is listed either, and the trace now says which (#35).
+        listed = _dated_count(page)
+        if trace is not None:
+            if opened_history:
+                note = "the vendor's statement history opened"
+            elif listed:
+                note = "no statement history control, the vendor's page already lists dated statements"
+            else:
+                note = "no statement history control and no dated statement on the vendor's page"
+            trace.append({"note": note, "dated_statements": listed})
 
-    el, label = _control_for(page, iso_date)
+        el, label = _control_for(page, iso_date)
     if el is None:
         log.info("no document control found for %s", iso_date)
         if trace is not None:

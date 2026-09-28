@@ -190,7 +190,7 @@ def _capturing_app(tmp_path, monkeypatch, printed: str):
     app.write_failure = lambda *a, **k: None
     monkeypatch.setattr(golden1_docs.site, "goto_documents", lambda page: True)
 
-    def fake_download(page, dl_dir, iso, out_path, title="", trace=None):
+    def fake_download(page, dl_dir, iso, out_path, title="", trace=None, account=""):
         _text_pdf(Path(out_path), printed)
         return True
     monkeypatch.setattr(golden1_docs.site, "download_bill", fake_download)

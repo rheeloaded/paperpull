@@ -1,11 +1,13 @@
 # Golden 1 document downloader
 
-**Not yet tested against a real account.** This app was built without
+**Partly tested against a real account.** This app was built without
 a Golden 1 checking, savings, credit card or loan account, so that someone who holds one can test it without
 writing code. It runs, its guards are tested, and every guess about
-golden1.com is marked in `golden1_site.py`. What it needs is a survey from a
-signed-in account, which the Diagnose button produces and which contains
-no personal data. The conversation is
+golden1.com is marked in `golden1_site.py`. On a real account a Pilot
+saved five checking statements. A recording then showed why the older
+ones and the credit card were missed, the history is paged twelve at a
+time and each account has a panel of its own, and reading every page of
+every account is this round's repair. The conversation is
 [issue #35](https://github.com/rheeloaded/paperpull/issues/35).
 
 Downloads your Golden 1 **statements and tax forms** as PDFs. Read-only,
@@ -76,11 +78,22 @@ paperpull golden1 pilot            REM once the site layer is confirmed
   clicked, once it has passed the guard, and whatever the site does, a
   download event, a PDF response or a new tab, is caught and saved to
   `Statements\` or `Tax Documents\`.
+- **Every account, every page.** The statements live with Golden 1's
+  document vendor, in a tab of their own, as one panel per account,
+  each with its own Statement History. A tester's recording showed the
+  history as a dialog of twelve statements a page, each a link named
+  only by its date, with NEXT under the list. The app opens each panel,
+  a closed one through its own heading, presses its Statement History,
+  reads every page by NEXT, and closes the dialog again. A statement
+  from a card's panel is a Credit Card Statement, and a download goes
+  back to the statement's own panel and pages to its date. The only new
+  things pressed are a panel's heading, which names no money moving,
+  NEXT and Close, each matched by its whole label.
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that transfers, pays, sends money by Zelle, wires, deposits, applies, opens or closes an account, locks a card, changes a limit or an address, or edits the account. A control must also look like a document action before it can be clicked.
 
 ## Scope
 
 - Whatever the eStatements area lists, statements and tax forms.
-- Golden 1 shows statements one account at a time behind an account picker, most likely. The first survey shows what that picker looks like, and the second round drives it, so a first Pilot may only see one account.
+- Each account's statements, from the panel the vendor shows it in, the credit card's included.
 - Delete-safe and multi-account like every PaperPull app
   (`paperpull golden1 add-account NAME`).

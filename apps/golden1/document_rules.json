@@ -49,6 +49,10 @@
       "summary": "Annual Statement"
     },
     {
+      "pattern": "credit\\s+card\\s+statement",
+      "summary": "Credit Card Statement"
+    },
+    {
       "pattern": "(checking|savings|credit\\s+card|card|loan|visa)\\s+statement",
       "summary": "Account Statement"
     },

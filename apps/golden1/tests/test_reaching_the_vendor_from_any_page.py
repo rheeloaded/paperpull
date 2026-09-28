@@ -552,7 +552,7 @@ def _app(tmp_path, monkeypatch, capture_trace):
     app.write_failure = lambda *a, **k: None
     monkeypatch.setattr(golden1_docs.site, "goto_documents", lambda page: True)
 
-    def no_pdf(page, dl_dir, iso, out_path, title="", trace=None):
+    def no_pdf(page, dl_dir, iso, out_path, title="", trace=None, account=""):
         trace.extend(capture_trace(iso))
         return False
     monkeypatch.setattr(golden1_docs.site, "download_bill", no_pdf)

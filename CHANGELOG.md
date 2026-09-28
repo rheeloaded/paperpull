@@ -31,6 +31,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   was written in the Windows code page, and printing a receipt named in
   Chinese failed that purchase. The panel always set UTF-8 for the apps it
   runs, and the terminal command now does the same.
+- **Golden 1 reads every page of every account's statements (#35).** A
+  Pilot on the tester's account saved five checking statements, and his
+  recording showed why the rest were missed. The vendor keeps one panel
+  per account, the credit card's included, each with its own Statement
+  History, a dialog of twelve statements a page with NEXT under the list,
+  and the app read the first panel's first page and nothing else. It now
+  opens each panel, a closed one through its own heading, reads every
+  page by NEXT, and names a card's statements Credit Card Statement. A
+  download goes back to its statement's own panel and pages to its date.
+  Statements saved before keep their names, so none is fetched twice. The
+  guard no longer refuses a card statement, which it did twice over, by
+  the bare word card and by reading edit inside Credit.
 - **review_names leaves a receipt you renamed alone (#47).** Renaming a
   receipt marked it Completed and left its confidence Low, so the next
   review asked again about every receipt already renamed, in all thirteen
