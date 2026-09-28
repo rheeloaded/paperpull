@@ -20,6 +20,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   was written in the Windows code page, and printing a receipt named in
   Korean failed that purchase. The panel always set UTF-8 for the apps it
   runs, and the terminal command now does the same.
+- **review_names leaves a receipt you renamed alone (#47).** Renaming a
+  receipt marked it Completed and left its confidence Low, so the next
+  review asked again about every receipt already renamed, in all thirteen
+  receipt apps. A renamed receipt is now marked High as well, and one
+  renamed on an earlier version is told apart by the note every rename
+  leaves, so only the receipts kept as they were are asked about again.
 
 ## [0.39.0] - 2026-09-27
 

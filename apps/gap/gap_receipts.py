@@ -860,8 +860,12 @@ class App:
 
     def cmd_review_names(self):
         rows = self.index_csv.read_all()
-        review = [r for r in rows if r.get("Classification Confidence") == "Low"
-                  or "Review" in (r.get("Processing Status") or "")]
+        # A row somebody already renamed is left out, even one renamed
+        # before its confidence was marked High as well (#47).
+        review = [r for r in rows
+                  if (r.get("Classification Confidence") == "Low"
+                      or "Review" in (r.get("Processing Status") or ""))
+                  and "renamed via --review-names" not in (r.get("Notes") or "")]
         if not review:
             print("No receipts need name review.")
             return
@@ -901,6 +905,7 @@ class App:
             r["PDF Full Path"] = str(new_path)
             r["Purchase Summary"] = new_summary
             r["Processing Status"] = "Completed"
+            r["Classification Confidence"] = "High"
             r["Notes"] = (r.get("Notes", "") + "; renamed via --review-names").strip("; ")
             for orow in order_rows:
                 if (orow.get("Order or Receipt Number") == r.get("Order or Receipt Number")
