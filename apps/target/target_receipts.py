@@ -341,6 +341,20 @@ class App:
                     self._delay()
                 n_cards = site.load_all_cards(page, ptype, delay_ms=int(
                     self.config["delay_min_seconds"] * 1000))
+                # A bot check that came up while the list was paged stops
+                # the run here, with the page left as it is, rather than on
+                # the next load of the orders page, which would throw away an
+                # answer the person had just given it (#48). Answered at a
+                # console, the tab and year are chosen again, since a sign-in
+                # on the way reloads the orders page, and the paging carries
+                # on. It is asked again for as long as the check is there.
+                while site.detect_security_challenge(page):
+                    self.check_session(page)
+                    site.select_history_tab(page, ptype)
+                    if option is not None:
+                        site.select_year_option(page, option)
+                    n_cards = site.load_all_cards(page, ptype, delay_ms=int(
+                        self.config["delay_min_seconds"] * 1000))
                 raw_cards = site.collect_cards(page, ptype)
                 log.info("%s: %d card elements, %d raw cards collected",
                          ptype, n_cards, len(raw_cards))
@@ -724,7 +738,19 @@ class App:
         return True
 
     def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
-        """No Print receipts control found. Optionally save invoice; record."""
+        """No Print receipts control found. Optionally save invoice; record.
+
+        A page covered by Target's bot check has no receipt control either,
+        and No Receipt Available is final, so a purchase the check hid would
+        never be asked for again. The check stops the run first, and one
+        answered at a console leaves this purchase for the next run, since
+        the page it was looked for on is gone (#48)."""
+        if site.detect_security_challenge(page) or site.looks_signed_out(page):
+            self.check_session(page)
+            self._record_state(purchase, State.FAILED,
+                               notes="Target's check came up before the receipt, tried again next run")
+            self.stats["failed"] += 1
+            return False
         invoices = site.find_invoice_controls(page)
         if invoices and self.config.get("include_invoices"):
             purchase.document_type = "Invoice"
