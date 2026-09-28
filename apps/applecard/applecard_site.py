@@ -2,16 +2,14 @@
 
 When Apple changes card.apple.com, repair this file only.
 
-STATUS: PARTLY VERIFIED. This app was written without an Apple Card
-or a Savings account, from the sign-in address the requester named (#52)
-and what Apple says in public about card.apple.com. The first Record and
-Diagnose from a real account (#52, round one) then showed how the three
-lists are reached and what their buttons are called, and the navigation
-and the labels below are rebuilt from that. Those facts are marked
-RECORDED. The first Pilot from a real account (0.37.1) saved three of the
-five newest statements, and what it showed about the other two is
-recorded at _catch_pdf. What nobody has seen is still marked GUESS. On a
-run it is deliberately cautious:
+STATUS: CONFIRMED on the tester's account (#52). A Pilot and then a full
+run saved the card's statements, the Savings statements and the 1099-INT
+forms, since 0.39.0 takes each PDF where the page builds it. This app was
+written without an Apple Card or a Savings account, from the sign-in
+address the requester named and what Apple says in public about
+card.apple.com, and rebuilt from the Record and Diagnose files he sent.
+Those facts are marked RECORDED, and what nobody has seen is still marked
+GUESS. On a run it is deliberately cautious.
 
   * --login opens a real Edge or Chrome at card.apple.com, whose sign-in
     (an Apple Account with a code sent to a trusted device) is the user's

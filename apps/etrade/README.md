@@ -1,11 +1,11 @@
 # E*TRADE document downloader
 
-**Partly tested against a real account.** This app was built without
-an E*TRADE brokerage or retirement account, so that someone who holds one can test it without
-writing code. It runs, its guards are tested, and every guess about
-etrade.com is marked in `etrade_site.py`. On a real account Discover
-found thirteen documents, and a Pilot saved two of four statements. The other two came back inside the site's answer to the
-press, as JSON, which the app now reads the PDF out of. The conversation is
+**Working on the tester's account.** This app was built without an
+E*TRADE brokerage or retirement account and repaired over several rounds
+from the surveys, failure files and download attempts one tester sent.
+Since 0.39.0 it reads each statement's PDF out of the site's own answer,
+and a Pilot and then a full run on his account saved every statement. No
+tax form has been seen yet, since his account has none. The conversation is
 [issue #36](https://github.com/rheeloaded/paperpull/issues/36).
 
 Downloads your E*TRADE **statements, trade confirmations and tax forms** as PDFs. Read-only,

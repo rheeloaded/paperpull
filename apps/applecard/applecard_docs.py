@@ -1,4 +1,4 @@
-"""Apple Card and Savings statement and tax form downloader (local, supervised). PARTLY VERIFIED, see applecard_site.py.
+"""Apple Card and Savings statement and tax form downloader (local, supervised). CONFIRMED on a tester's account, see applecard_site.py.
 
 This app was written without an Apple Card so that someone who holds one
 can test it without writing code (#52). The orchestrator below is the same

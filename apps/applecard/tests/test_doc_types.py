@@ -372,8 +372,11 @@ def test_apples_sign_in_frame_is_noticed_and_a_leftover_frame_is_not():
     assert not site.looks_signed_out(_Page("https://card.apple.com/statements"))
 
 
-def test_the_partly_verified_status_is_stated_where_a_tester_will_read_it():
+def test_the_confirmed_status_is_stated_where_a_tester_will_read_it():
+    """His Pilot and then a full run on 0.39.0 saved every statement and
+    the 1099-INT forms (#52)."""
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "PARTLY VERIFIED" in src.split('"""')[1]
+    assert "STATUS: CONFIRMED on the tester's account" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "Partly tested against a real account" in readme
+    assert readme.split("\n\n")[1].startswith("**Working on the tester's account.**")
+    assert "Partly tested" not in readme

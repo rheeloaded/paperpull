@@ -1,15 +1,12 @@
 # Apple Card and Savings document downloader
 
-**Partly tested against a real account.** This app was built without an
-Apple Card or a Savings account, so that someone who holds them can test
-it without writing code. The first recording from a real account has
-since shown how each list is reached and what its buttons are called,
-marked RECORDED in `applecard_site.py`, and what is still a guess is
-marked GUESS. The first Pilot on a real account, in 0.37.1, saved three of
-the five newest statements. The two it missed were each the first press
-on a list the app had just opened, which is now made once more when it
-produces nothing, and no tax form has been saved by a run yet. The
-conversation is
+**Working on the tester's account.** This app was built without an
+Apple Card or a Savings account and rebuilt from the recording and
+Diagnose files one tester sent, marked RECORDED in `applecard_site.py`,
+with what is still a guess marked GUESS. Since 0.39.0 it takes each
+statement's PDF where the page builds it, and a Pilot and then a full run
+on his account saved the card's statements, the Savings statements and
+the 1099-INT forms. The conversation is
 [issue #52](https://github.com/rheeloaded/paperpull/issues/52).
 
 Downloads your **Apple Card monthly statements, Savings monthly

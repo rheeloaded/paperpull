@@ -2,13 +2,12 @@
 
 When E*TRADE changes its site, repair this file only.
 
-STATUS: PARTLY VERIFIED (#36). Written without an E*TRADE account, so that
-someone who holds one can test it without writing code, and repaired from
-the surveys, failure files and download attempts a tester sent. On his
-account Discover found thirteen documents and a Pilot saved two of four
-statements. Reading the PDF out of the site's JSON answer, which the other
-two came back in, is this round's repair and has not yet run against the
-live site. On a first run it is deliberately cautious.
+STATUS: CONFIRMED on the tester's account (#36). A Pilot and then a full
+run saved every statement, since 0.39.0 reads each PDF out of the site's
+own JSON answer. Written without an E*TRADE account and repaired from the
+surveys, failure files and download attempts one tester sent. No tax form
+has been seen, since his account has none. On a first run it is
+deliberately cautious.
 
   * --login opens a real Edge or Chrome, since etrade.com runs bot protection that is happiest in a real browser.
   * --diagnose surveys whatever the documents page turns out to be,
