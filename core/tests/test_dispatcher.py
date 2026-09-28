@@ -121,8 +121,9 @@ def test_main_runs_in_the_apps_folder_and_returns_its_exit_code(root, monkeypatc
 
 def test_an_app_writes_utf8_wherever_its_output_goes(root, tmp_path, monkeypatch):
     """Output headed for a file was written in the Windows code page, and
-    printing a receipt named in Korean failed that purchase (Apple,
-    2026-09-27). The panel always set UTF-8, the terminal did not."""
+    printing a receipt named in Chinese failed that purchase (Apple,
+    2026-09-27, Cut the Rope). The panel always set UTF-8, the terminal
+    did not."""
     calls = []
     monkeypatch.setattr(paperpull.subprocess, "call", lambda argv, **kw: calls.append(kw) or 0)
     monkeypatch.delenv("PYTHONIOENCODING", raising=False)
@@ -136,10 +137,10 @@ def test_an_app_writes_utf8_wherever_its_output_goes(root, tmp_path, monkeypatch
     monkeypatch.delenv("PYTHONIOENCODING", raising=False)
     out = tmp_path / "run.log"
     with open(out, "wb") as sink:
-        rc = subprocess.run([sys.executable, "-c", "print('\\uce74\\uce74\\uc624\\ud1a1')"],
+        rc = subprocess.run([sys.executable, "-c", "print('\\u5272\\u7ef3\\u5b50')"],
                             stdout=sink, env=paperpull.app_env()).returncode
     assert rc == 0
-    assert out.read_bytes().decode("utf-8").strip() == "카카오톡"
+    assert out.read_bytes().decode("utf-8").strip() == "割绳子"
 
 
 def test_no_venv_and_no_core_stops_with_the_setup_command(root, monkeypatch):

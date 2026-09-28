@@ -204,7 +204,7 @@ def app_env() -> dict:
     """The environment an app runs in, with its output in UTF-8 as the panel
     sets it. A receipt's name can hold any letter, and Windows writes output
     headed for a file or a pipe in its own code page, which holds few of
-    them, so printing an app named in Korean failed that purchase. A setting
+    them, so printing an app named in Chinese failed that purchase. A setting
     of the person's own is kept."""
     env = dict(os.environ)
     env.setdefault("PYTHONIOENCODING", "utf-8")
