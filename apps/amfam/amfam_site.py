@@ -63,6 +63,7 @@ from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import take_same_tab as _core_take_same_tab
+from paperpull_core import blob_capture
 from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
@@ -72,13 +73,14 @@ from paperpull_core.dates import full_year as _full_year
 log = logging.getLogger("amfam_docs.site")
 
 BASE = "https://myaccount.amfam.com"
-# GUESS. My Account's sign-in is at /login (#45). The documents and
-# billing views are guesses at the paths a My Account app would use, with
-# the overview last, since its own links name the real ones and the survey
-# follows those.
+# RECORDED (#45). My Account's sign-in is at /login, and Billing & Payments
+# is /billing, in the same tab, where the tester opens his statements. The
+# app started at /documents until 0.41.0, a guess, which is the wrong place.
+# The other routes stay behind it, with the overview last, since its own
+# links name the real ones and the survey follows those.
 BILLING_CANDIDATES = [
-    f"{BASE}/documents",
     f"{BASE}/billing",
+    f"{BASE}/documents",
     f"{BASE}/policies",
     f"{BASE}/overview",
     f"{BASE}/",
@@ -122,9 +124,15 @@ SAFE_DOC_CONTROL_RE = re.compile(
     r"policy\s+documents?|declarations?|dec\s+page|see\s+(more|all|older)|show\s+(more|all|older)|load\s+more)", re.I)
 
 # A control that fetches one document. GUESS at the wording, wide on
-# purpose. "View", "Download", "View PDF", "Statement", "1099-INT".
+# purpose. "View", "Download", "View PDF", "Statement", "1099-INT", and the
+# words an insurer's billing page uses, "View bill", "Billing statement",
+# "Declarations page" and "ID card", which the README named and this never
+# matched until 0.41.0.
 BILL_CONTROL_RE = re.compile(
-    r"((download|view|print|open|get)\s*(my\s+|the\s+|this\s+|your\s+)?(statement|document|pdf|tax|letter|notice|1099|1098)|"
+    r"((download|view|print|open|get)\s*(my\s+|the\s+|this\s+|your\s+)?"
+    r"(statement|document|pdf|tax|letter|notice|1099|1098|bill\b|billing\s+statement|"
+    r"declarations?(\s+page)?|id\s+cards?)|"
+    r"billing\s+statement|declarations?\s+page|"
     r"(statement|document|tax\s+form|1099|1098|5498)\s*\(?\s*pdf\s*\)?|\bpdf\b|"
     r"^\s*(view|download|open)\s*$)", re.I)
 
@@ -161,13 +169,17 @@ FALLBACK = {
 # ---------------------------------------------------------------------------
 # Date parsing
 # ---------------------------------------------------------------------------
+# A date is bounded by what is not a digit, not by a word boundary. A row
+# built from spans with nothing between them reads "09/12/2026Amount due",
+# the way JSX leaves adjacent tags, and a word boundary after the year
+# refused it while the page's own row finder had found the date (#45).
 DATE_PATTERNS = [
     (re.compile(r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
                 r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
-                r"Dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4})", re.I), "mdY"),
-    (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"), "mdy_slash"),
-    (re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{2})\b"), "mdy_slash2"),
-    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!\d)"), "iso"),
+                r"Dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4})(?!\d)", re.I), "mdY"),
+    (re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})/(\d{4})(?!\d)"), "mdy_slash"),
+    (re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})/(\d{2})(?!\d)"), "mdy_slash2"),
+    (re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)"), "iso"),
 ]
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
@@ -577,6 +589,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     before = set(ctx.pages)
     seen = _snapshot(dl_dir)
     controls_before = _control_texts(page)
+    # RECORDED (#45). A statement opens in a new tab at a blob: address the
+    # page made, and a page can revoke that address as soon as the tab has
+    # it, after which it cannot be read back. So every PDF blob the page
+    # makes from here on is kept as it is made.
+    blob_capture.arm(page)
 
     def landed() -> bool:
         if downloads:
@@ -599,7 +616,15 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                     return True
             except Exception:
                 pass
-        return _take_new_pdf(dl_dir, seen, out_path)
+        if _take_new_pdf(dl_dir, seen, out_path):
+            return True
+        kept = blob_capture.take(page)
+        if kept:
+            out_path.write_bytes(kept[0])
+            if trace is not None:
+                trace.append({"note": "the page made the PDF itself, a blob it opened"})
+            return True
+        return False
 
     def wait_for_pdf(seconds: int) -> bool:
         for _ in range(seconds):
@@ -640,6 +665,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
         step, step_label = _second_step(page, appeared)
         if step is not None:
+            blob_capture.arm(page)
             try:
                 step.click(timeout=8000)
                 if trace is not None:
