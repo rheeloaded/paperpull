@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (42, plus sixteen built and waiting for a tester)
+## Supported (43, plus sixteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -68,6 +68,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`ups`](apps/ups) | UPS (Billing Center) | Shipping invoices from billing.ups.com, every invoice My Invoices lists. Built on the maintainer's own account | Shipping |
 | [`usaa`](apps/usaa) | USAA | Statements | Bank / insurance |
 | [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Card |
+| [`vanguard`](apps/vanguard) | Vanguard | Statements (2020-2026 across five account types incl. an employer 401(k)). Confirmed by @tylerverry, whose Pilot and full run saved every statement, 135 PDFs, all valid | Brokerage |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Telecom |
 | [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #31 | Telecom |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |

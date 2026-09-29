@@ -1,0 +1,3 @@
+Vanguard statements, tax forms, letters and trade confirmations
+
+See README.md for setup and supervised pilot instructions.
