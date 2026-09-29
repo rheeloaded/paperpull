@@ -32,6 +32,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   so much, about ten months of trips and two years of orders there.
 
 ### Changed
+- **State Farm names a document for the policy it belongs to (#37).**
+  The tester's Pilot saved a renewal notice for his auto policy and one for
+  his home, and both were named State Farm Renewal Notice. The title says
+  which, Renewal Notice - Auto and Renewal Notice - Homeowners, or the
+  vehicle on an auto policy, and the file name now keeps it, State Farm
+  Renewal Notice Auto. A receipt, whose title repeats its kind after the
+  dash, and a tax form keep their names. A file saved under the old name
+  is not downloaded again, since a document is remembered by its title,
+  and the next Discover gives its record the new name, so Rename moves the
+  file to it.
 - **Newrez is confirmed on the tester's account (#38).** His run walked
   three years of the statements page's year picker and saved every
   document, so it moves from partly tested to confirmed.

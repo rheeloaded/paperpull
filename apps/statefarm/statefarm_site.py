@@ -1498,6 +1498,29 @@ def is_future(iso: str) -> bool:
         return False
 
 
+_YEAR_ONLY_RE = re.compile(r"^\d{4}$")
+
+
+def title_detail(title: str) -> str:
+    """What a document's title says it is for, the part after the dash, or "".
+
+    RECORDED (#37). The Document Center titles a document by its kind, a
+    dash and the policy it belongs to, "Renewal Notice - Auto", "Renewal
+    Notice - Homeowners", or the vehicle on an auto policy, "Renewal
+    Notice - <year make model>". A receipt repeats its kind after the dash,
+    "Payment Receipt - Payment Receipt", which says nothing more, and a year
+    alone says nothing the date does not."""
+    head, sep, tail = (title or "").partition(" - ")
+    tail = re.sub(r"\s+", " ", tail).strip()
+    if not sep or not tail:
+        return ""
+    if tail.lower() == re.sub(r"\s+", " ", head).strip().lower():
+        return ""
+    if _YEAR_ONLY_RE.match(tail):
+        return ""
+    return tail
+
+
 # Headers a fetch from inside the page may not set, or that the browser
 # adds on its own. Everything else the page's own list call sent is sent
 # again with each year, since that call answered and the year walk, which
