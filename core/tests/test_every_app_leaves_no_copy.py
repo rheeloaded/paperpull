@@ -7,13 +7,18 @@ writes each download there under the site's own name, and that file is
 the only copy. Playwright still raises the download event, and its
 save_as then writes an empty file without complaint.
 
+Given the folder relative, as every install gave it with output_dir ".",
+the browser accepted the setting and canceled every download instead.
+
 What that did to the apps that point the browser at a folder, driven
 here in a real browser before this was fixed.
 
-- Eleven saw the empty file, asked the provider for the document a
-  second time, saved that answer, and left the browser's file in the
-  hidden folder. A second copy of every statement, which outlived the
-  one in the archive when somebody deleted it after importing it.
+- With the folder relative, no download landed at all, and every
+  document these apps saved came from asking the provider a second time.
+- With it absolute, eleven saw the empty file, asked the provider for the
+  document a second time, saved that answer, and left the browser's file
+  in the hidden folder. A second copy of every statement, which outlived
+  the one in the archive when somebody deleted it after importing it.
 - AT&T asks nothing twice and took the file from the folder. But the
   browser overwrites a finished file of the same name in place, and a
   folder compared by name alone never saw that download arrive. One file
@@ -230,6 +235,24 @@ def test_a_browser_pointed_at_a_folder_keeps_the_only_copy_there(page, provider,
     assert out.read_bytes()[:5] != b"%PDF-", "save_as now carries the bytes"
 
 
+def test_a_relative_folder_is_made_absolute_so_downloads_land(page, provider, tmp_path,
+                                                             monkeypatch):
+    """Every install passes its folder relative, output_dir being ".", and
+    given a relative downloadPath Chromium accepts it and then cancels every
+    download (measured 2026-09-29), so none of these apps' downloads had
+    ever landed in a real install."""
+    from paperpull_core.capture import set_download_dir
+    monkeypatch.chdir(tmp_path)
+    set_download_dir(page, Path(".downloads"))
+    provider.reset()
+    with page.expect_download() as info:
+        page.click("#d")
+    download = info.value
+    assert download.failure() is None, "the browser canceled the download"
+    download.save_as(str(tmp_path / "saved.pdf"))
+    assert (tmp_path / ".downloads" / NAME).read_bytes() == provider.served[0]
+
+
 def test_a_finished_file_of_the_same_name_is_overwritten_in_place(page, provider, tmp_path):
     from paperpull_core.capture import set_download_dir
     staging = tmp_path / ".downloads"
@@ -266,6 +289,22 @@ def test_the_browsers_file_is_taken_and_nothing_is_left(app, left, page, provide
     provider.reset()
     got = site._catch_pdf(page, page.locator("#d"), "Download statement", out, [], staging)
     check(app.name, got, provider, out, staging)
+
+
+@pytest.mark.parametrize("app", pending(SCAFFOLD))
+def test_the_folder_every_install_passes_works(app, page, provider, tmp_path, monkeypatch):
+    """The folder as a docs module passes it in an install whose output_dir
+    is ".", relative to where the app runs."""
+    site = site_of(app)
+    monkeypatch.setattr(site, "is_safe_url", lambda u: str(u).startswith(provider.base + "/"))
+    monkeypatch.chdir(tmp_path)
+    staging = Path(".%s-downloads" % app.name)
+    out = Path("Statements") / "2026-08-31 Statement.pdf"
+    out.parent.mkdir()
+    site.set_download_dir(page, staging)
+    provider.reset()
+    got = site._catch_pdf(page, page.locator("#d"), "Download statement", out, [], staging)
+    check(app.name, got, provider, tmp_path / out, tmp_path / staging)
 
 
 VERIZON_PAGE = b"""<!doctype html><meta charset='utf-8'>
@@ -411,6 +450,16 @@ def test_copies_an_earlier_version_left_are_cleared_on_the_next_run(app):
         assert calls_in(path, "clear_archived_copies"), (
             "%s points the browser at a folder and never clears what earlier "
             "versions left there" % path.name)
+
+
+@pytest.mark.parametrize("app", FOLDER_APPS, ids=lambda d: d.name)
+def test_the_browser_is_pointed_at_a_folder_only_through_the_core(app):
+    """capture.set_download_dir makes the folder absolute, which is what
+    stops the browser canceling every download. An app that sent the
+    DevTools call itself would skip that."""
+    for path in app_modules(app):
+        assert "Browser.setDownloadBehavior" not in path.read_text(encoding="utf-8",
+                                                                   errors="ignore"), path.name
 
 
 def test_the_source_reader_sees_through_the_underscore_imports(tmp_path):

@@ -40,7 +40,8 @@ UNFINISHED = (".crdownload", ".part", ".partial", ".tmp", ".download")
 # while it arrives, and that file is the ONLY copy. Playwright still raises
 # the download event, and the event's save_as then writes an empty file
 # without complaint. A finished file of the same name already in the folder
-# is written over in place.
+# is written over in place. Given a relative folder, as every install gave
+# it, the browser canceled every download instead.
 #
 # Eleven apps took the empty file for a failure, asked the provider for the
 # document a second time, saved that answer and left the browser's file in
@@ -57,12 +58,20 @@ def set_download_dir(page, dirpath) -> None:
 
     It reaches the browser's own context, the one an attached browser is
     used through. A context made with new_context is not pointed anywhere.
+
+    The folder is made absolute first. Every install passes it relative,
+    output_dir being ".", and given a relative folder Chromium accepts the
+    setting and then cancels every download (measured 2026-09-29), so until
+    then no app's download had ever landed in a real install. The setting
+    lasts while the app is attached, and the browser's own folder is back
+    once it has gone.
     """
     try:
-        Path(dirpath).mkdir(parents=True, exist_ok=True)
+        folder = Path(dirpath).resolve()
+        folder.mkdir(parents=True, exist_ok=True)
         cdp = page.context.new_cdp_session(page)
         cdp.send("Browser.setDownloadBehavior",
-                 {"behavior": "allow", "downloadPath": str(dirpath), "eventsEnabled": True})
+                 {"behavior": "allow", "downloadPath": str(folder), "eventsEnabled": True})
     except Exception as e:
         log.info("set_download_dir failed: %s", e)
 

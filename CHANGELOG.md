@@ -242,20 +242,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
   missed. A census test now follows every pattern handed to the browser
   back to where it is built, and fails any app that writes a bare slash
   into one or escapes text into one with a bare re.escape.
-- **Ten apps kept a hidden copy of every document, and asked the
-  provider for each one twice.** ADP, Apple Card, E*TRADE, Golden 1,
-  Newrez, SBA, SMUD, State Farm, Verizon Mobile and Wells Fargo point
-  the browser at a hidden folder of their own. Measured in a real
-  browser, a browser pointed at a folder saves the only copy of a
-  download there, and the download event the app sees then carries an
-  empty file. These apps took the empty file for a failure, asked the
-  provider for the document again and saved that answer, and the
-  browser's file stayed in the hidden folder, where it outlived the one
-  in the archive once that was deleted after an import. The browser's
-  file is now moved into place instead, so the provider is asked once
-  and nothing is left behind. The next run clears the copies earlier
-  versions left, and only files that are exact copies of a document
-  still in the archive. Nothing else in the folder is touched.
+- **In an install the panel set up, no download ever landed, and ten
+  apps asked the provider for every document twice.** The apps that
+  watch a hidden folder pointed the browser at it by a relative path,
+  which is what the default output folder gives, and measured in a real
+  browser, the browser then cancels every download. ADP, Apple Card,
+  E*TRADE, Golden 1, Newrez, SBA, SMUD, State Farm, Verizon Mobile and
+  Wells Fargo got each document by asking for it a second time, and AT&T
+  could not take a downloaded bill at all. The folder is now made
+  absolute before the browser is pointed at it.
+- **Where a download did land, a hidden copy of it was left behind.** A
+  browser pointed at a folder saves the only copy of a download there,
+  and the download event the app sees carries an empty file. In an
+  install with an absolute output folder, those ten apps took the empty
+  file for a failure, asked again, saved that answer, and left the
+  browser's file in the hidden folder, where it outlived the one in the
+  archive once that was deleted after an import. The browser's file is
+  now moved into place, so the provider is asked once and nothing is
+  left behind. The next run clears the copies earlier versions left, and
+  only files that are exact copies of a document still in the archive.
+  Nothing else in the folder is touched.
 - **AT&T and Verizon could stop saving bills after a single failure.**
   The browser writes a finished file of the same name over the old one
   in place, and both compared their folder by name alone, so one file
