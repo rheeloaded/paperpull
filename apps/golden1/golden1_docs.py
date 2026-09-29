@@ -467,7 +467,9 @@ class App:
     _discovery_trace: tuple = ()
 
     def _attempt_responses(self, trace: list) -> list:
-        return list(self._discovery_trace)[:4] + list(trace)[:80]
+        # Eight, room for the vendor's tab, the panels and a line for each
+        # account's history on a membership with several (#35).
+        return list(self._discovery_trace)[:8] + list(trace)[:80]
 
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
@@ -507,6 +509,10 @@ class App:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
+            # How each account's history was read, in fixed words, for a
+            # tester to paste (#35).
+            for line in site.discovery_lines(self._discovery_trace):
+                print(f"  {line}")
         return n_new
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:

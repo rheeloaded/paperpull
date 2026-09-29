@@ -902,12 +902,23 @@ def _write_if_pdf(data: bytes, out_path: Path) -> bool:
 
 
 def _date_needles(date: str) -> List[str]:
-    """The ways this ISO date can appear in a row."""
+    """The ways this ISO date can appear in a row.
+
+    A day below ten is looked for both ways, "September 6, 2026" and
+    "September 06, 2026". Rows are matched by substring and neither
+    spelling contains the other. Ally writes the zero (#56), and every
+    date the tests used was the 16th, where the two spellings agree.
+    """
     y, m, d = date[:4], date[5:7], date[8:10]
     month = ["January", "February", "March", "April", "May", "June", "July",
              "August", "September", "October", "November", "December"][int(m) - 1]
-    return [f"{int(m)}/{int(d)}/{y}", f"{m}/{d}/{y}",
-            f"{month} {int(d)}, {y}", f"{month[:3]} {int(d)}, {y}", date]
+    needles = [f"{int(m)}/{int(d)}/{y}", f"{m}/{d}/{y}"]
+    for name in (month, month[:3]):
+        for day in (str(int(d)), d):
+            needles.append(f"{name} {day}, {y}")
+    needles.append(date)
+    # a day of two digits is spelled one way, so keep each needle once
+    return list(dict.fromkeys(needles))
 
 
 def _row_download_control(row):

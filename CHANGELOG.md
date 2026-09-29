@@ -7,6 +7,127 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.40.0] - 2026-09-29
+
+Uber, the sixtieth app, saves the receipt of every ride and every Uber
+Eats order. State Farm names a document for the policy it belongs to,
+Newrez is confirmed on a tester's account, and the README links the
+Microsoft Store edition, which is now live.
+
+### Added
+- **Uber, the 60th app, rides and Uber Eats.** One app with two folders.
+  Rides holds Uber's own receipt PDF for every trip where money was spent,
+  and Uber Eats the same for every order, each fetched from inside the
+  signed-in page the way its Download PDF link fetches it. A trip canceled
+  before anything was charged and an order that cost nothing have no
+  receipt and are skipped. The trips are read through the page's own
+  GraphQL, three queries only, and a mutation is refused before it is sent,
+  so Resend Receipt can never email anyone. The Uber Eats orders and
+  receipts are read through two calls of the page's own, and everything is
+  paced two seconds apart and nothing is pressed. A ride receipt is filed
+  only when it carries its own receipt ID, and so is an Uber Eats receipt
+  from December 2025 on. An older one prints no ID and is checked for its
+  own date and total, and one that never prints the word Uber is still
+  recognized by its total, its store and its date. After an hour or two
+  idle the trips page's own calls answer
+  a redirect while the sign-in is still good, so a side is called signed
+  out only when loading its page once more does not bring the session
+  back. Built and run on the maintainer's own account, 24 receipts, 7 rides
+  and 17 Uber Eats orders back to December 2024. Uber's website only shows
+  so much, about ten months of trips and two years of orders there.
+
+### Changed
+- **State Farm names a document for the policy it belongs to (#37).**
+  The tester's Pilot saved a renewal notice for his auto policy and one for
+  his home, and both were named State Farm Renewal Notice. The title says
+  which, Renewal Notice - Auto and Renewal Notice - Homeowners, or the
+  vehicle on an auto policy, and the file name now keeps it, State Farm
+  Renewal Notice Auto. A receipt, whose title repeats its kind after the
+  dash, and a tax form keep their names. A file saved under the old name
+  is not downloaded again, since a document is remembered by its title,
+  and the next Discover gives its record the new name, so Rename moves the
+  file to it.
+- **Newrez is confirmed on the tester's account (#38).** His run walked
+  three years of the statements page's year picker and saved every
+  document, so it moves from partly tested to confirmed.
+- **The README links the Microsoft Store edition,** which is live, and no
+  longer says the listing is in review.
+
+## [0.39.2] - 2026-09-28
+
+Golden 1 reads each account from its own list, State Farm finds a row it
+has just opened, Meijer and Ally save what they found, and Target stops
+for its own bot check instead of working through it.
+
+### Fixed
+- **Golden 1 reads each account's statements from its own list (#35).**
+  The tester's Discover listed the credit card's twelve statements with
+  the checking account's twelve dates, and the Pilot then looked for a day
+  the card never had, since the card's list runs on the 20th. The history
+  is one dialog for every account, its new list arrives a moment after it
+  opens, and the app read the old one, most likely from the links of the
+  closed dialog, which a lookup by words takes in. Before Statement History
+  or NEXT is pressed every control is now marked, only a list drawn after
+  the press is read, only links that show, and a list left from another
+  account never is. NEXT is given twenty seconds where it had six, a NEXT
+  drawn as a disabled link counts as the last page, and Discover prints how
+  each account's list came, how many pages it read and why the paging
+  stopped, with the words its heading carries from a fixed list, so the
+  next report says what the card is called. A second account of one kind
+  is told apart by the masked number in its heading, else by the words of
+  its heading without numbers or months, and never by the whole heading,
+  which can carry a balance that changes. The wrongly dated records from
+  0.39.1 were never saved and are dropped by the next Discover.
+- **State Farm finds the row it has just opened (#37).** The tester's
+  Pilot found the Payment Receipt's row, pressed View Documents, saw the
+  receipt appear, and then found no row with its date, so it pressed
+  nothing. An opened row also says until when its document stays online,
+  two years on, and the row was read as that day. A date after tomorrow is
+  never a row's date now, in text from inside the control's own row. An
+  opened row's View Documents looks past a container naming only such a
+  day, only inside a row of its own, as his rows are, and only while it
+  shows the document the row revealed, so a row is never dated by its
+  neighbor. Two reviews tried pages his files do not show, a category drawn
+  as one list item, a help link beside a folded row, a neighbor sent by
+  mail with no control, a row that renames its button Hide Documents, and
+  none saves another document under a record's name. The trace also says
+  whether the page asked for its list again after the press, and how each
+  View Documents read its date when the row was not found.
+- **Meijer presses the receipt without crashing, and presses nothing
+  else (#42).** Every receipt on 0.39.1 raised AttributeError before
+  anything was pressed, since the download listener was a list's own
+  append method, which Playwright cannot mark. That had been so since the
+  press was written, so the press itself had never run on a real account,
+  and two reviews of it found it would have pressed other controls in the
+  row, an Email Receipt among them, a wrapper at its middle, or a hidden
+  copy, and taken a November receipt for a January purchase whose date
+  "1/19/2026" sits inside "11/19/2026". Only a link or a button that shows,
+  holds no other control and reads as the row's receipt is pressed now,
+  never one whose words or name send, share or print, and only on the one
+  row that fits the purchase. A window the press opens blank is kept until
+  it is filled, a download counts only from Meijer, and what the trace
+  says about a row's controls is built from fixed words, since a store's
+  street had reached it. A test in the core now fails any app that hands
+  Playwright a built-in, or takes a listener off with an object other than
+  the one it added.
+- **Ally finds a statement posted on the 1st to the 9th (#56).** Ally
+  writes "September 06, 2026", and the row was looked for as "September 6,
+  2026", so every statement of the tester's, all posted on the 6th, was
+  never found. Both spellings are looked for now.
+- **Target stops for its own bot check (#48).** A tester's Discover met a
+  "Quick verification" window asking to press and hold, and none of the
+  words the app knew for a check was on it, so it kept paging and then
+  reloaded the orders page while he answered it. The app knows that check
+  now, at the end of a long page and inside the frame its button sits in,
+  stops paging the moment it comes, and never presses it. A purchase the
+  check hid is never recorded as having no receipt, which would have been
+  final. Only the check's own words are read in frames, so a page's own
+  reCAPTCHA badge does not stop a run.
+- **Eight more apps know a press and hold check spelled with an
+  ampersand.** Best Buy, Costco, eBay, Gap, Home Depot, Kroger, Lowe's and
+  Meijer listed "press and hold" only, and compare the page's words as
+  they are written. A test in the core holds every app to both.
+
 ## [0.39.1] - 2026-09-27
 
 Every account's statements for Golden 1, earlier years for State Farm,

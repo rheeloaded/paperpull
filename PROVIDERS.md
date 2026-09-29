@@ -43,14 +43,14 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery. UNTESTED, built against an account with no purchases. Have one? Run Diagnose and attach the file to issue #41. Being tested by @jpfieber | Retail |
 | [`lowes`](apps/lowes) | Lowe's Home Improvement | Receipts for store purchases and online orders, and returns, from the purchase history back to 2023, each purchase's details page saved as the receipt. Built on the maintainer's own account, 41 purchases found and 6 saved in the first pilot | Retail |
 | [`github`](apps/github) | GitHub | Payment receipts for Pro, Copilot, Actions, Sponsors and anything else GitHub charged. Confirmed by @jpfieber on issue #43, whose Pilot saved five of the twenty-three receipts his account holds | Software services |
-| [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms. Built without an account and run against @watling777's (#35). A Pilot saved five checking statements, with a repair being tested for the older ones and the credit card | Credit union |
+| [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms. Built without an account and run against @watling777's (#35). Discover finds all 122 statements on both accounts and a Pilot saves them, and the second account's statements still need their own name | Credit union |
 | [`meijer`](apps/meijer) | Meijer | Order receipts, and in-store digital receipts where mPerks lists them. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #42. Being tested by @jpfieber | Retail |
 | [`myecp`](apps/myecp) | MILITARY STAR card (MyECP, Exchange Credit Program) | Monthly card statements, the three and a half years MyECP keeps online. Built on the maintainer's own account, 25 statements | Card |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Mortgage servicing |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits | Quarterly or monthly 401(k) statements, made to order and rendered; nothing clicked | Workplace retirement plan |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
-| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098. Built without an account and run against @watling777's (#38). This year's statements and the 1098s download, with a repair being tested for earlier years | Mortgage servicer |
+| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098. Confirmed by @watling777, whose run saved every document, three years of statements through the statements page's year picker and the 1098s (#38) | Mortgage servicer |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements, the three years the site keeps online. Tax forms not yet covered. Built on the maintainer's own account, 25 statements | Payments |
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements. Contributed by @appchamp. Repaired in 0.37.1 and confirmed on a real account by @watling777 (#33) | Utility |
@@ -64,6 +64,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
 | [`tsp`](apps/tsp) | Thrift Savings Plan (tsp.gov) | Participant statements, 1099-R | Federal retirement (government system) |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |
+| [`uber`](apps/uber) | Uber (rides and Uber Eats) | Receipts for every ride and every Uber Eats order paid for, each saved as Uber's own receipt PDF, with trips canceled before anything was charged and orders that cost nothing skipped. Uber's website only reaches back so far, about ten months of trips and two years of orders on the account it was built on. Built and run on the maintainer's own account, 24 receipts saved | Rides / food delivery |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements | Payroll |
 | [`ups`](apps/ups) | UPS (Billing Center) | Shipping invoices from billing.ups.com, every invoice My Invoices lists. Built on the maintainer's own account | Shipping |
 | [`usaa`](apps/usaa) | USAA | Statements | Bank / insurance |

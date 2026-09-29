@@ -103,7 +103,27 @@ SECURITY_CHALLENGE_MARKERS = [
     "are you a robot", "captcha", "recaptcha", "access denied",
     "verification code", "let's make sure", "prove you're human",
     "security check", "we need to verify",
+    # RECORDED, from a tester's Discover on 0.39.1 (#48). Target's own bot
+    # check, a "Quick verification" window on /orders that asks to press and
+    # hold a button to confirm you're not a bot. None of the words above was
+    # on it, so the run kept paging and reloading the orders page while he
+    # was answering it. It is his to answer, and the app stops for it.
+    "quick verification", "press & hold", "press and hold",
+    "robot or human", "verify you are a human", "verify you are human",
+    "access to this page has been denied",
 ]
+
+# The words of a press and hold check, and the only markers looked for at the
+# end of a page and inside its frames. A check drawn over a long list lands
+# past the first five thousand characters, and its button sits in a frame of
+# its own. A page's own frames and footer carry a reCAPTCHA badge or a "try
+# again later" of their own, and one of those read as a check would stop
+# every run (#48, review).
+PRESS_AND_HOLD_MARKERS = [
+    "quick verification", "press & hold", "press and hold", "robot or human",
+    "verify you are a human", "verify you are human",
+]
+_FRAME_WORDS_JS = "() => document.body ? document.body.innerText.slice(0, 2000) : ''"
 
 RATE_LIMIT_MARKERS = [
     "too many requests", "rate limit", "try again later",
@@ -224,7 +244,10 @@ def looks_signed_out(page) -> bool:
 
 
 def detect_security_challenge(page) -> Optional[str]:
-    """Return a description if a CAPTCHA / verification / block page appears."""
+    """Return a description if a CAPTCHA / verification / block page appears.
+
+    The end of the page and the frames that show are read as well, and only
+    read, for the words of a press and hold check alone (#48)."""
     try:
         title = (page.title() or "").lower()
     except Exception:
@@ -240,7 +263,32 @@ def detect_security_challenge(page) -> Optional[str]:
     for marker in RATE_LIMIT_MARKERS:
         if marker in haystack:
             return f"Possible rate limiting detected: '{marker}'"
+    later = body[-5000:] + "\n" + _frame_words(page)
+    for marker in PRESS_AND_HOLD_MARKERS:
+        if marker in later:
+            return f"Security challenge detected: '{marker}'"
     return None
+
+
+def _frame_words(page) -> str:
+    """The words of the page's frames that show on the page, the newest
+    first, since a check that comes partway through is attached last. Each
+    is read once and without waiting, so a frame with no body costs nothing
+    (review)."""
+    out = []
+    try:
+        frames = list(page.frames[1:])
+    except Exception:
+        return ""
+    for frame in reversed(frames[-8:]):
+        try:
+            box = frame.frame_element().bounding_box()
+            if not box or box["width"] < 10 or box["height"] < 10:
+                continue
+            out.append((frame.evaluate(_FRAME_WORDS_JS) or "").lower())
+        except Exception:
+            continue
+    return "\n".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -349,10 +397,16 @@ def select_year_option(page, option_text: str) -> bool:
 def load_all_cards(page, purchase_type: str = ONLINE,
                    delay_ms: int = 1500, max_rounds: int = 200) -> int:
     """Scroll / click Load More until the purchase list stops growing.
-    Returns the final card count."""
+    Returns the final card count.
+
+    Target's bot check can come up partway through, and the paging stops at
+    once when it does, before another press or scroll reaches the page. The
+    caller sees the check and stops the run (#48)."""
     last_count = -1
     stable_rounds = 0
     for _ in range(max_rounds):
+        if detect_security_challenge(page):
+            break
         count = _card_count(page, purchase_type)
         if count == last_count:
             stable_rounds += 1

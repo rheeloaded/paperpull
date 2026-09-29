@@ -68,6 +68,19 @@ def ask(prompt: str) -> str:
         raise SystemExit(3)
 
 
+def with_title_detail(summary: str, title: str, category: str) -> str:
+    """The summary with the policy the title names, "Renewal Notice Auto"
+    rather than "Renewal Notice", so the renewal notices of two policies
+    are told apart by their names (#37). Only an insurance document or a
+    statement takes it. A tax form is named for its form and its date."""
+    if category not in (doc_types.INSURANCE, doc_types.STATEMENT):
+        return summary
+    detail = site.title_detail(title)
+    if not detail or detail.lower() in (summary or "").lower():
+        return summary
+    return ("%s %s" % (summary, detail)).strip()
+
+
 class Document:
     """One State Farm document."""
 
@@ -486,6 +499,7 @@ class App:
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        summary = with_title_detail(summary, title, category)
         date = (r.date_text or "").strip()
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
             date, _ = site.parse_period_date(title)
@@ -525,9 +539,14 @@ class App:
             self.discovery.update(doc.key, rec, save=False)
             return 1
         # refresh which page the doc's download link lives on, and the
-        # address, so a record discovered before this change picks it up
+        # address, so a record discovered before this change picks it up.
+        # The name too, which is what Rename reads, so a file saved before
+        # the policy went into its name can take it without being
+        # downloaded again (#37). The key, which remembers the download, is
+        # the title and does not change.
         self.discovery.update(doc.key, {"source_url": source_url, "href": doc.href,
-                                        "shared_key": doc.shared_key}, save=False)
+                                        "shared_key": doc.shared_key,
+                                        "summary": doc.summary}, save=False)
         return 0
 
     def _begin_discovery_pass(self) -> None:

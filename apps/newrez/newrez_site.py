@@ -2,13 +2,12 @@
 
 When Newrez changes its site, repair this file only.
 
-STATUS: PARTLY VERIFIED (#38). Written without a Newrez account, so that
-someone who holds one can test it without writing code, and repaired from
-two surveys, failure files and a recording a tester sent. On his account
-0.37.1 saved this year's statements and both 1098s, named for the dates
-printed on them. Reading the earlier years through the statements page's
-year picker is this round's repair and has not yet run against the live
-site. On a first run it is deliberately cautious.
+STATUS: CONFIRMED on the tester's account (#38). Written without a Newrez
+account and repaired from two surveys, failure files and a recording one
+tester sent. Discover reads each year the statements page's year picker
+offers, and on his account it walked three years and every document
+downloaded, named for the dates printed on them. On a first run it is
+deliberately cautious.
 
   * --login opens a real Edge or Chrome, since Newrez's portal is happiest in a real browser.
   * --diagnose surveys whatever the documents page turns out to be,

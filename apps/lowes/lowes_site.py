@@ -128,7 +128,7 @@ SAFE_DOC_CONTROL_RE = re.compile(
     r"go\s+to\s+(next|previous)\s+page|^\d{1,3}$)", re.I)
 
 SECURITY_CHALLENGE_MARKERS = [
-    "press and hold", "verify you are a human", "verify you are human",
+    "press & hold", "press and hold", "verify you are a human", "verify you are human",
     "are you a robot", "access denied", "access to this page has been denied",
     "enter the verification code", "enter the code we sent",
     "checking your browser before accessing",

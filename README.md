@@ -41,12 +41,12 @@ to build it and to keep it working as sites change. If it saves you time, you ca
 appreciation and support future development by
 **[sponsoring on GitHub](https://github.com/sponsors/rheeloaded)** or
 **[donating on Ko-fi](https://ko-fi.com/rheeloaded)**, or by buying the
-**Microsoft Store edition** for $9.99, one time, the same program with a
+**[Microsoft Store edition](https://apps.microsoft.com/detail/9P5LZRR773FP)** for $9.99, one time, the same program with a
 signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Forty-seven providers are supported today, all built on the same pattern.
+Forty-nine providers are supported today, all built on the same pattern.
 Nine more, Wells Fargo, SBA, Verizon Mobile, State Farm,
 Kroger, Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -88,14 +88,14 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Lazy-loading history; ~13-month limit |
 | [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery | **Built against an account with no purchases yet. Have one? [Help test it](apps/kroger/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Purchase-history API and receipt page, nothing clicked, real Edge/Chrome |
 | [`github`](apps/github) | GitHub | Payment receipts (Pro, Copilot, Actions, Sponsors and the rest) | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#43](https://github.com/rheeloaded/paperpull/issues/43).** Receipt links fetched or printed, nothing clicked |
-| [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Partly tested.** A Pilot on [@watling777](https://github.com/watling777)'s account saved five checking statements, and a repair for the older ones and the credit card is being tested ([#35](https://github.com/rheeloaded/paperpull/issues/35)) |
+| [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Partly tested.** On [@watling777](https://github.com/watling777)'s account Discover finds all 122 statements on both accounts and a Pilot saves them, and the second account's statements still need their own name ([#35](https://github.com/rheeloaded/paperpull/issues/35)) |
 | [`meijer`](apps/meijer) | Meijer | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked |
 | [`myecp`](apps/myecp) | MILITARY STAR (Exchange Credit Program) | Card statements | **Built on the maintainer's own account, 25 statements back to 2023.** The MyECP statements list and download from inside the page, nothing clicked |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
-| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Partly tested.** On [@watling777](https://github.com/watling777)'s account this year's statements and the 1098s download, and a repair for earlier years is being tested ([#38](https://github.com/rheeloaded/paperpull/issues/38)) |
+| [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every document, three years of statements through the statements page's year picker and the 1098s ([#38](https://github.com/rheeloaded/paperpull/issues/38)) |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked; three years are online |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |
@@ -109,6 +109,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
+| [`uber`](apps/uber) | Uber (rides and Uber Eats) | Ride receipts and Uber Eats order receipts | **Built and run on the maintainer's own account, 24 receipts.** The trip list and the Uber Eats order list from inside each signed-in page, Uber's own receipt PDF for each paid purchase, checked for its receipt ID, nothing clicked, real Edge/Chrome |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements** | Per-employer tenant; JSON-API, nothing clicked |
 | [`ups`](apps/ups) | UPS Billing Center | Shipping invoices | **Built on the maintainer's own account.** The Billing Center's own invoice list and download from inside the page, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
@@ -428,7 +429,7 @@ native ARM64 build is one flag away in `packaging/build_windows.py` and
 will be shipped when someone needs it.
 
 **Two Windows editions, one program.** The GitHub release is free. The
-Microsoft Store edition is the same package from the same build, for
+[Microsoft Store edition](https://apps.microsoft.com/detail/9P5LZRR773FP) is the same package from the same build, for
 $9.99 one time, and what the price buys is convenience, a Store-signed
 package that installs with no warning, updates through the Store, and
 uninstalls cleanly, plus the knowledge that it keeps the project going.
@@ -520,15 +521,15 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **fifty-nine** apps pass their tests, the forty-seven that are
-  supported, the three with a known issue and the nine still waiting for a
-  tester, 9,668 of them across the repo. Most are in regular use by the author. The rest were built or
+- ✅ All **sixty** apps pass their tests, the forty-nine that are
+  supported, the two with a known issue and the nine still waiting for a
+  tester, 10,089 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,
-  both built by GitHub Actions from the tagged commit, with checksums. A
-  Microsoft Store listing and free open-source code signing for Windows are
-  in progress.
+  both built by GitHub Actions from the tagged commit, with checksums. The
+  Windows builds are code-signed, and the
+  [Microsoft Store edition](https://apps.microsoft.com/detail/9P5LZRR773FP) is live.
 - 🔜 **More providers:** community-driven, see [PROVIDERS.md](PROVIDERS.md).
 - 🔜 **Scheduled/assisted runs:** a monthly "nudge + sweep" (e.g. the 1st) that
   opens the login browsers and then runs discover + resume across every app once
@@ -574,10 +575,9 @@ the free build does.
 
 - **Sponsor on GitHub:** **[github.com/sponsors/rheeloaded](https://github.com/sponsors/rheeloaded)**, one-time or monthly, from a card you already have on GitHub.
 - **Donate on Ko-fi:** **[ko-fi.com/rheeloaded](https://ko-fi.com/rheeloaded)** ☕
-- **Buy the Microsoft Store edition** for $9.99, one time, the same
+- **[Buy the Microsoft Store edition](https://apps.microsoft.com/detail/9P5LZRR773FP)** for $9.99, one time, the same
   program from the same build, with a signed installer that opens with no
-  warning and updates through the Store. The listing is in review and will
-  be linked here once it is live. It unlocks nothing the free build lacks.
+  warning and updates through the Store. It unlocks nothing the free build lacks.
 
 You can also help without spending anything: test a provider you hold an
 account with (see [PROVIDERS.md](PROVIDERS.md)), report what breaks, or
