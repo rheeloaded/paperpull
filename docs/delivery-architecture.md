@@ -27,7 +27,7 @@ unclassified rather than guessed at.
 | | mechanism | what it means |
 |---|---|---|
 | A | attachment, download event | The provider sent `Content-Disposition: attachment`, or the markup carried a `download` attribute, and Playwright saw a download |
-| B | attachment, watched folder | The same thing against a browser the user launched, where Playwright's download event never fires |
+| B | attachment, watched folder | The same thing against a browser pointed at a folder, which saves the only copy there. The download event, when it fires at all, carries an empty file (measured 2026-09-29) |
 | C | inline, caught in a tab | `Content-Disposition: inline` or none, so the browser's viewer rendered it and the app went and got the bytes |
 | D | the `download` attribute, read | Where the app reads the attribute rather than merely looking for it |
 | E | blob and data URLs | The page built the file in its own memory |

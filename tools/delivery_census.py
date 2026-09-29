@@ -31,15 +31,16 @@ REPO = Path(__file__).resolve().parents[1]
 MECHANISMS = [
     ("attachment/event", "A",
      r"\bexpect_download\b|\[[\"']download[\"']\]\.save_as|"
-     r"save_download\(",
+     r"save_download\(|take_download\(",
      "The provider sent Content-Disposition: attachment, or the markup "
      "carried a download attribute, and Playwright saw the download."),
 
     ("attachment/dir", "B",
      r"take_new_pdf|_take_new_pdf\(|set_download_dir\(",
-     "The same thing, against a browser the user launched. Playwright's "
-     "download event never fires there, so the browser saves the file "
-     "itself and the app watches the folder."),
+     "The same thing, against a browser pointed at a folder. The browser "
+     "saves the only copy there, and the download event, when it fires at "
+     "all, carries an empty file (measured 2026-09-29), so the app takes "
+     "the file from the folder."),
 
     ("inline/tab", "C",
      r"take_new_tab|take_same_tab|_catch_pdf|expect_popup|"

@@ -21,6 +21,7 @@ sent to any external service.
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import capture
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -230,6 +231,12 @@ class App:
         # capture, so point them at a controlled temp dir under the output.
         self._vz_dl_dir = Path(self.config["output_dir"]) / ".vz-downloads"
         site.set_download_dir(self._work_page, self._vz_dl_dir)
+        # A file here that is an exact copy of a document in the archive
+        # is one the browser was left holding, and goes. Nothing else is
+        # touched (capture.clear_archived_copies).
+        capture.clear_archived_copies(
+            self._vz_dl_dir, [r.get("pdf_path") for r in self.progress.data.values()
+                 if isinstance(r, dict)])
         self.requests
         return self._work_page
 

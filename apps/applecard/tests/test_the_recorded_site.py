@@ -942,12 +942,14 @@ def test_every_word_a_trace_here_writes_is_one_the_attempt_file_keeps():
 # save the file is where the page built it.
 
 def _downloads_never_arrive(monkeypatch):
-    from paperpull_core import receipt_pdf
+    """Neither the download event nor the folder gives the file up. The
+    event is taken through capture.take_download, which reads both, so that
+    is where the loss is made."""
 
-    def lost(download, out_path):
-        raise RuntimeError("the browser kept this download to itself")
+    def lost(download, dl_dir, before, out_path):
+        return ""
 
-    monkeypatch.setattr(receipt_pdf, "save_download", lost)
+    monkeypatch.setattr(site, "_take_download", lost)
 
 
 def test_the_file_the_page_made_is_taken_when_the_download_never_arrives(browser, tmp_path, monkeypatch):

@@ -58,6 +58,8 @@ from paperpull_core.dates import human_date as _human_date
 # re-exported: this app's docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
+from paperpull_core.capture import take_download as _take_download
+from paperpull_core.capture import clear_copies as _clear_copies
 from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
@@ -2319,14 +2321,14 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     controls_before = _control_texts(page)
 
     def landed() -> bool:
-        if downloads:
-            try:
-                from paperpull_core.receipt_pdf import save_download
-                save_download(downloads[0], out_path)
-                if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-                    return True
-            except Exception as e:
-                log.info("download event save failed: %s", e)
+        # Pointed at a folder, the browser saves the only copy there and
+        # the event's own file is empty, so that file is taken rather than
+        # the document asked for a second time (capture.take_download).
+        # Not while an earlier press's download is still arriving, when
+        # the folder is not read at all.
+        if downloads and _take_download(downloads[0], None if unfinished else dl_dir,
+                                        seen, out_path):
+            return True
         if got.get("body"):
             out_path.write_bytes(got["body"])
             return True
@@ -2433,6 +2435,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 extra.close()
             except Exception:
                 pass
+        # What the browser saved into the folder while the document came
+        # some other way, read off the answer or asked for again, goes when
+        # it is an exact copy of the one saved (capture.clear_copies).
+        try:
+            _clear_copies(dl_dir, seen, out_path)
+        except Exception:
+            pass
 
 
 def _describe_tabs(pages) -> list:

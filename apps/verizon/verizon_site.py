@@ -32,6 +32,8 @@ from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import human_date as _human_date
 # re-exported: this app's docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
+from paperpull_core.capture import snapshot as _snapshot
+from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.controls import escape_for_locator
 
@@ -414,8 +416,6 @@ def collect_download_docs(page) -> List[RawDoc]:
 def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
     """Select the bill dated `iso_date`, choose 'Download PDF', click 'Get My
     Bill', and move the resulting PDF from the browser download dir to out_path."""
-    import os
-    import shutil
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     dl_dir = Path(dl_dir)
@@ -445,8 +445,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
     except Exception as e:
         log.info("could not pick 'Download PDF' for %s: %s", iso_date, e)
         return False
-    # 3) Get My Bill -> file lands in dl_dir
-    before = set(os.listdir(dl_dir))
+    # 3) Get My Bill -> file lands in dl_dir. The browser writes a bill over
+    # a finished file of the same name in place, and compared by name alone
+    # that bill never arrived, so the folder is read through the core.
+    before = _snapshot(dl_dir)
     try:
         page.locator("#getmybill").click(timeout=8000)
     except Exception as e:
@@ -454,19 +456,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
         return False
     for _ in range(40):                        # up to ~20s
         page.wait_for_timeout(500)
-        new = [f for f in os.listdir(dl_dir)
-               if f not in before and not f.endswith(".crdownload")
-               and f.lower().endswith(".pdf")]
-        if new:
-            src = dl_dir / new[0]
-            try:
-                if out_path.exists():
-                    out_path.unlink()
-                shutil.move(str(src), str(out_path))
-                return True
-            except Exception as e:
-                log.info("move failed for %s: %s", iso_date, e)
-                return False
+        if _take_new_pdf(dl_dir, before, out_path):
+            return True
     log.info("no PDF appeared for %s", iso_date)
     return False
 
