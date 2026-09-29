@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (42, plus sixteen built and waiting for a tester)
+## Supported (43, plus sixteen built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -64,6 +64,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
 | [`tsp`](apps/tsp) | Thrift Savings Plan (tsp.gov) | Participant statements, 1099-R | Federal retirement (government system) |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Telecom |
+| [`uber`](apps/uber) | Uber (rides and Uber Eats) | Receipts for every ride and every Uber Eats order paid for, each saved as Uber's own receipt PDF, with trips canceled before anything was charged and orders that cost nothing skipped. Uber's website only reaches back so far, about ten months of trips and two years of orders on the account it was built on. Built and run on the maintainer's own account, 24 receipts saved | Rides / food delivery |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | Pay statements | Payroll |
 | [`ups`](apps/ups) | UPS (Billing Center) | Shipping invoices from billing.ups.com, every invoice My Invoices lists. Built on the maintainer's own account | Shipping |
 | [`usaa`](apps/usaa) | USAA | Statements | Bank / insurance |

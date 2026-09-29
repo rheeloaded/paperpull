@@ -7,6 +7,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Uber, the 60th app, rides and Uber Eats.** One app with two folders.
+  Rides holds Uber's own receipt PDF for every trip where money was spent,
+  and Uber Eats the same for every order, each fetched from inside the
+  signed-in page the way its Download PDF link fetches it. A trip canceled
+  before anything was charged and an order that cost nothing have no
+  receipt and are skipped. The trips are read through the page's own
+  GraphQL, three queries only, and a mutation is refused before it is sent,
+  so Resend Receipt can never email anyone. The Uber Eats orders and
+  receipts are read through two calls of the page's own, and everything is
+  paced two seconds apart and nothing is pressed. A ride receipt is filed
+  only when it carries its own receipt ID, and so is an Uber Eats receipt
+  from December 2025 on. An older one prints no ID and is checked for its
+  own date and total, and one that never prints the word Uber is still
+  recognized by its total, its store and its date. After an hour or two
+  idle the trips page's own calls answer
+  a redirect while the sign-in is still good, so a side is called signed
+  out only when loading its page once more does not bring the session
+  back. Built and run on the maintainer's own account, 24 receipts, 7 rides
+  and 17 Uber Eats orders back to December 2024. Uber's website only shows
+  so much, about ten months of trips and two years of orders there.
+
+### Changed
+- **The README links the Microsoft Store edition,** which is live, and no
+  longer says the listing is in review.
+
 ## [0.39.2] - 2026-09-28
 
 Golden 1 reads each account from its own list, State Farm finds a row it

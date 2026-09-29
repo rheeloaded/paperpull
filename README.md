@@ -46,7 +46,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Forty-seven providers are supported today, all built on the same pattern.
+Forty-eight providers are supported today, all built on the same pattern.
 Nine more, Wells Fargo, SBA, Verizon Mobile, State Farm,
 Kroger, Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -109,6 +109,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
+| [`uber`](apps/uber) | Uber (rides and Uber Eats) | Ride receipts and Uber Eats order receipts | **Built and run on the maintainer's own account, 24 receipts.** The trip list and the Uber Eats order list from inside each signed-in page, Uber's own receipt PDF for each paid purchase, checked for its receipt ID, nothing clicked, real Edge/Chrome |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements** | Per-employer tenant; JSON-API, nothing clicked |
 | [`ups`](apps/ups) | UPS Billing Center | Shipping invoices | **Built on the maintainer's own account.** The Billing Center's own invoice list and download from inside the page, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
@@ -520,7 +521,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **fifty-nine** apps pass their tests, the forty-seven that are
+- ✅ All **sixty** apps pass their tests, the forty-eight that are
   supported, the three with a known issue and the nine still waiting for a
   tester, 9,876 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above

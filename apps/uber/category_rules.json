@@ -1,0 +1,5 @@
+{
+  "_comment": "Uber names every purchase itself, so nothing here is used to name one. A ride is named for where it went, as Uber's trip list shows it, and an Uber Eats order for the store it came from. The file is kept because every receipt app loads one, and a category added here is only ever a fallback. Edit freely, no code changes needed.",
+  "categories": {},
+  "significant_items": {}
+}

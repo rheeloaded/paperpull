@@ -59,6 +59,8 @@ config.json.*
 **/Online/
 **/App Store/
 **/Apple Store/
+**/Rides/
+**/Uber Eats/
 **/Logs/
 **/Diagnostics/
 **/Backups/
