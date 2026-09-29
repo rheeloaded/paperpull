@@ -18,17 +18,78 @@ All notable changes to PaperPull are recorded here. Versioning follows
   first. A scoped run never selects a year it does not want. Contributed
   by tylerverry, whose Pilot and full run saved 135 statements across
   five accounts back to 2020, every one a valid PDF, and whose second run
-  downloaded nothing. Before merging, the browser was pointed at a
-  staging folder of the app's own rather than the archive folder, where
-  it had left its own copy of every statement under Vanguard's name
-  beside the one the app saved. A statement saved by the browser without
-  the download event is now taken from that folder. A statement is named
+  downloaded nothing. Before release, the download was changed to take
+  the file the browser saves. Once a browser's download folder is set, as
+  this app sets it, the download event's own copy is empty and the
+  browser's file in that folder is the only one, measured on Chromium 149
+  to 153 and Edge 154. The contributed version took the empty copy and
+  left the browser's beside it in the archive, and a first review fix
+  merged to main took the empty copy too and then deleted the browser's,
+  so neither saved a statement on those browsers. Now the browser saves
+  into a staging folder of the app's own, its file there is moved into
+  place, nothing else in that folder is touched, and where setting the
+  folder has no effect the event's own copy is saved. The tests drive a
+  real browser against a local server in both cases. A statement is named
   for its account once, where the account had been named twice, and one
   already saved under the longer name takes the shorter one with Rename.
   Discover walks the year picker once instead of twice, and Diagnose
   reads the fields Vanguard sends and takes no screenshot of a page that
   shows every balance. Its own sign-in browser uses port 9282, since 9281
   is Uber's.
+
+### Fixed
+- **Kroger names a receipt's banner, reads only its items, and is confirmed
+  (#41).** The tester asked for the store in his file names, Metro Market
+  or Fred Meyer rather than what the receipt holds. The purchase list never
+  names the store, and the app kept the purchase type where the store goes,
+  so a {store} part of a name pattern said In-Store. Each receipt's store is
+  now read off its own page, where the header names it, and kept as the
+  store, so a pattern like {date:yyyy-mm-dd} {store|provider} {summary}
+  names the banner. Receipts saved before take their banner the next time
+  Rename runs, read off each saved PDF with nothing asked of Kroger. The
+  Order Summary's Original Item Total and Order Total were also read as
+  items on every receipt, since they print the way an item does, and the
+  items are now read from Item Details alone, with how many of each from
+  the line under its price, and Rename takes those two lines out of the
+  order history the Purchases workbook is built from, where earlier runs
+  wrote them. His Pilot on 2026-09-23 saved receipts that
+  read properly, so Kroger is supported, no longer waiting for a tester.
+- **Meijer tries a receipt it put aside again (#42).** A receipt that
+  failed the check that it mentions Meijer or the purchase was put aside in
+  Manual Review and then counted as done, since the step that decides
+  whether a purchase is finished read the file without its words, so the
+  next run skipped it for good. It is tried again now, and a receipt that
+  fails the same way every run is kept once in Manual Review, not once per
+  run. The log said such a receipt was being retried, and on the path that
+  presses the row's own receipt control it never was. That control is now
+  pressed once more before a receipt is put aside. A receipt put aside there
+  also writes the file to attach, saying how the PDF came and what it holds,
+  as counts and a fixed list of words and never its own words.
+- **Target lets go of the browser before its check is answered (#48).** When
+  Target's press and hold check came up during a run at a terminal, the run
+  waited for the answer with the app still attached to the browser, and a
+  check like that can refuse a hold in a browser under automation. Now what
+  was read is saved, the app lets go of the browser, which stays open, and
+  the run stops and says to reload the page, answer the check and press
+  Resume. A sign-in still waits at the terminal as before.
+- **American Family starts at Billing & Payments (#45).** The tester's
+  answers showed the statements are at myaccount.amfam.com/billing, in the
+  same tab, and open in a new tab at a blob: address the page makes itself.
+  The app started at a documents page, never matched a control reading View
+  bill, and read a blob tab only by its address, which a page can revoke the
+  moment the tab has it. Now it starts at Billing & Payments, knows the words
+  an insurer's billing page uses, and keeps each PDF the page makes as it is
+  made, through a small core module, paperpull_core.blob_capture. A date
+  printed right against the next word, the way adjacent tags leave it, is
+  read as well. Still waiting for a run on a real account.
+- **The recorder keeps a click on a control marked only with a test id
+  (#45).** American Family marks its controls with data-cy and nothing else,
+  and a click on the words inside one was thrown away as the mouse
+  wandering, so the tester's recording of the billing tab kept one click of
+  seven. Any of data-testid, data-test-id, data-test, data-qa, data-cy and
+  data-automation-id now marks a control. A framework's prefix for generated
+  ids, such as Angular's ng-, now counts only at the start of a value, where
+  anywhere in it took billing-nav for a generated id.
 
 ## [0.40.0] - 2026-09-29
 

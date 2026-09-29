@@ -46,16 +46,17 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Fifty providers are supported today, all built on the same pattern.
-Nine more, Wells Fargo, SBA, Verizon Mobile, State Farm,
-Kroger, Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
+Fifty-one providers are supported today, all built on the same pattern.
+Eight more, Wells Fargo, SBA, Verizon Mobile, State Farm,
+Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 [#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#31](https://github.com/rheeloaded/paperpull/issues/31),
 [#37](https://github.com/rheeloaded/paperpull/issues/37),
-[#41](https://github.com/rheeloaded/paperpull/issues/41),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
-[#45](https://github.com/rheeloaded/paperpull/issues/45)):
+[#45](https://github.com/rheeloaded/paperpull/issues/45),
+[#53](https://github.com/rheeloaded/paperpull/issues/53),
+[#54](https://github.com/rheeloaded/paperpull/issues/54)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -86,7 +87,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`fedex`](apps/fedex) | FedEx Billing Online | Shipping invoices | **Untested, built from a login not connected to Billing Online. Use it? [Help test it](apps/fedex/README.md#help-test-it-no-programming-needed)** Requested in [#54](https://github.com/rheeloaded/paperpull/issues/54) |
 | [`fidelity`](apps/fidelity) | Fidelity Investments | Statements, trade confirmations, tax forms | Document Access Hub API from inside the page, nothing clicked; real Edge/Chrome |
 | [`gap`](apps/gap) | Gap Inc. (Gap, Old Navy, Banana Republic, Athleta) | Order receipts | Lazy-loading history; ~13-month limit |
-| [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery | **Built against an account with no purchases yet. Have one? [Help test it](apps/kroger/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Purchase-history API and receipt page, nothing clicked, real Edge/Chrome |
+| [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#41](https://github.com/rheeloaded/paperpull/issues/41).** Each receipt names its banner, Metro Market or Fred Meyer, for a file name pattern. Purchase-history API and receipt page, nothing clicked, real Edge/Chrome |
 | [`github`](apps/github) | GitHub | Payment receipts (Pro, Copilot, Actions, Sponsors and the rest) | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#43](https://github.com/rheeloaded/paperpull/issues/43).** Receipt links fetched or printed, nothing clicked |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Partly tested.** On [@watling777](https://github.com/watling777)'s account Discover finds all 122 statements on both accounts and a Pilot saves them, and the second account's statements still need their own name ([#35](https://github.com/rheeloaded/paperpull/issues/35)) |
 | [`meijer`](apps/meijer) | Meijer | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked |
@@ -522,9 +523,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **sixty-one** apps pass their tests, the fifty that are
-  supported, the two with a known issue and the nine still waiting for a
-  tester, 10,235 of them across the repo. Most are in regular use by the author. The rest were built or
+- ✅ All **sixty-one** apps pass their tests, the fifty-one that are
+  supported, the two with a known issue and the eight still waiting for a
+  tester, 10,289 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,
@@ -607,9 +608,9 @@ found a bug and diagnosed it to the line.
 - [@liamrotheram](https://github.com/liamrotheram) and
   [@OberstK](https://github.com/OberstK), Amazon outside the United States.
 - [@jpfieber](https://github.com/jpfieber), who asked for eBay and became
-  PaperPull's first sponsor before it was even built, then tested eBay and
-  GitHub to working, eBay through every order back to 2017, and is testing
-  Kroger, Meijer, American Family and Target.
+  PaperPull's first sponsor before it was even built, then tested eBay,
+  GitHub and Kroger to working, eBay through every order back to 2017, and
+  is testing Meijer, American Family and Target.
 
 If you tested a provider and are not here, say so on the issue and you
 will be.
