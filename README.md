@@ -523,7 +523,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 - ✅ All **sixty** apps pass their tests, the forty-nine that are
   supported, the two with a known issue and the nine still waiting for a
-  tester, 9,876 of them across the repo. Most are in regular use by the author. The rest were built or
+  tester, 10,089 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,

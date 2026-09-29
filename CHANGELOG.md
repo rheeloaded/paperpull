@@ -7,7 +7,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.40.0] - 2026-09-29
+
+Uber, the sixtieth app, saves the receipt of every ride and every Uber
+Eats order. State Farm names a document for the policy it belongs to,
+Newrez is confirmed on a tester's account, and the README links the
+Microsoft Store edition, which is now live.
 
 ### Added
 - **Uber, the 60th app, rides and Uber Eats.** One app with two folders.
