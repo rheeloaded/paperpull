@@ -7,7 +7,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.41.0] - 2026-09-29
+
+Vanguard, the sixty-first app, saves the statements of every account on
+Vanguard's statements page, contributed by tylerverry. Kroger is
+confirmed on a tester's account and names each receipt for its store,
+Meijer tries a receipt it put aside again, Target lets go of the browser
+before its check is answered, American Family starts where its
+statements are, and Walmart and Best Buy no longer report a sign-in that
+never reached the order list.
 
 ### Added
 - **Vanguard, the 61st app, account statements (#57).** Every statement
