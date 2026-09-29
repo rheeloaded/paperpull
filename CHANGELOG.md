@@ -54,6 +54,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   order history the Purchases workbook is built from, where earlier runs
   wrote them. His Pilot on 2026-09-23 saved receipts that
   read properly, so Kroger is supported, no longer waiting for a tester.
+- **Walmart and Best Buy no longer call a page with no order list signed
+  in.** Login no longer says Success on a page whose order list never
+  appeared, such as one still behind a bot check, and a run's discovery
+  stops there instead of finding nothing and finishing clean.
 - **Meijer tries a receipt it put aside again (#42).** A receipt that
   failed the check that it mentions Meijer or the purchase was put aside in
   Manual Review and then counted as done, since the step that decides
