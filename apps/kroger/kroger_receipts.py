@@ -343,8 +343,12 @@ class App:
                     "receipt_url": purchase.receipt_url,
                     "total": purchase.total or self.discovery.get(key).get("total", ""),
                     "status": purchase.status or self.discovery.get(key).get("status", ""),
-                    "store_info": purchase.store_info
-                    or self.discovery.get(key).get("store_info", ""),
+                    # The store is read off the receipt page, never the
+                    # list, so the list's empty one keeps a banner already
+                    # read, and a purchase type written here before 0.41.0
+                    # is cleared rather than kept as the store (#41).
+                    "store_info": self._store_kept(key),
+                    "fulfillment": purchase.fulfillment,
                     "notes": purchase.notes,
                 }, save=False)
         self.discovery.save()
@@ -835,7 +839,91 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        apply = bool(getattr(self.args, "apply", False))
+        # A preview changes nothing. The stores read here name the files in
+        # the preview and are put back after it, and the order history is
+        # only cleaned with --apply (#41).
+        filled = self._fill_banners()
+        if filled:
+            print(f"Read the store from {len(filled)} receipt(s) already saved, off the PDF itself.")
+        extra = self._summary_rows()
+        if extra and apply:
+            self.order_csv.rewrite([r for r in self.order_csv.read_all()
+                                    if not self._is_summary_row(r)])
+            print(f"Took {extra} Order Summary line(s) out of the order history, where "
+                  "earlier runs wrote them as items.")
+        elif extra:
+            print(f"{extra} Order Summary line(s) that earlier runs wrote as items would "
+                  "be taken out of the order history.")
+        try:
+            renaming.run_for(self, apply_changes=apply)
+        finally:
+            if not apply:
+                self._put_back(filled)
+
+    # The two Order Summary lines runs before 0.41.0 wrote into the order
+    # history as items, one of each per receipt (#41). Only these exact
+    # names, which no product carries.
+    _SUMMARY_ROWS = {"original item total", "order total"}
+
+    def _is_summary_row(self, row: dict) -> bool:
+        return (row.get("Item Name") or "").strip().lower() in self._SUMMARY_ROWS
+
+    def _summary_rows(self) -> int:
+        """How many Order Summary lines earlier runs wrote into the order
+        history as items, which the Purchases workbook is rebuilt from.
+        Rename with --apply takes them out, the file backed up first."""
+        return sum(1 for r in self.order_csv.read_all() if self._is_summary_row(r))
+
+    def _store_kept(self, key: str) -> str:
+        """The store a purchase already has, when it is a store. Until 0.41.0
+        the purchase type was written as the store, "In-Store" or "Fuel
+        Center", and that is not kept (#41)."""
+        labels = {v[0] for v in site.PURCHASE_TYPE_LABELS.values()}
+        for store in (self.progress, self.discovery):
+            value = ((store.get(key) or {}).get("store_info") or "").strip()
+            if value and value not in labels:
+                return value
+        return ""
+
+    def _fill_banners(self) -> list:
+        """Give each receipt already saved the store its own PDF names, so a
+        name pattern with {store} in it can rename receipts saved before
+        0.41.0, which never had the banner read (#41). Read from the saved
+        file, nothing is asked of Kroger, and a store already known is kept.
+        Only in memory. The run saves it on the way out, and a preview puts
+        it back first. What it changed, to put back."""
+        labels = {v[0] for v in site.PURCHASE_TYPE_LABELS.values()}
+        changed = []
+        for key, rec in list(self.progress.data.items()):
+            if not isinstance(rec, dict):
+                continue
+            known = (rec.get("store_info") or "").strip()
+            if known and known not in labels:
+                continue
+            path = Path(rec.get("pdf_path") or "")
+            if not rec.get("pdf_path") or not path.exists():
+                continue
+            banner = site.banner_from_lines(receipt_pdf.pdf_text(path).splitlines())
+            if not banner:
+                continue
+            found = self.discovery.data.get(key)
+            found = found if isinstance(found, dict) else None
+            changed.append((key, rec.get("store_info"), found.get("store_info") if found else None))
+            rec["store_info"] = banner
+            if found is not None:
+                found["store_info"] = banner
+        return changed
+
+    def _put_back(self, changed: list) -> None:
+        """Undo _fill_banners, for a preview."""
+        for key, in_progress, in_discovery in changed:
+            rec = self.progress.data.get(key)
+            if isinstance(rec, dict):
+                rec["store_info"] = in_progress
+            found = self.discovery.data.get(key)
+            if isinstance(found, dict) and in_discovery is not None:
+                found["store_info"] = in_discovery
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"

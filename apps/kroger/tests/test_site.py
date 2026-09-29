@@ -52,7 +52,9 @@ def test_an_in_store_record_becomes_an_in_store_purchase_keyed_by_its_receipt():
     assert p.purchase_date == "2026-09-13"
     assert p.total == "$42.17"
     assert p.status == "Completed"
-    assert p.store_info == "In-Store"
+    # the purchase type is the fulfillment, and the store is read off the
+    # receipt page, which the record never names (#41)
+    assert p.fulfillment == "In-Store" and p.store_info == ""
     assert p.receipt_url == "https://www.kroger.com/mypurchases/image/011~00123~20260913~5~1234"
     assert [i.name for i in p.items] == ["Kroger 2% Milk", "UPC 0001111060903"]
     assert p.items[0].quantity == "2"
@@ -64,7 +66,9 @@ def test_a_pickup_order_with_a_receipt_is_online_and_keyed_by_the_receipt_not_th
     assert p.purchase_type == ONLINE
     assert p.order_number == "011~00123~20260910~9~4321"
     assert p.total == "$61.50"
-    assert p.store_info == "Pickup"
+    # the purchase type is the fulfillment, and the store is read off the
+    # receipt page, which the record never names (#41)
+    assert p.fulfillment == "Pickup" and p.store_info == ""
 
 
 def test_a_pending_order_is_kept_by_its_order_number_and_marked_pending():

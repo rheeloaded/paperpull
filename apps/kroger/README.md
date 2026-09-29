@@ -1,12 +1,9 @@
 # Kroger Receipts Downloader (local, supervised)
 
-**Not yet tested against an account with purchases.** This app was built
-against a Kroger account that had signed in but never bought anything, so
-the sign-in, the purchase-history page and its API were mapped for real
-and the receipt page was found, but no receipt has been rendered yet. What
-a real receipt looks like is marked GUESS in `kroger_site.py`. What it
-needs is a Diagnose file from an account with purchases, which contains no
-personal data. The conversation is
+**Working on a tester's account.** This app was built against a Kroger
+account that had never bought anything, and a tester's Diagnose file and
+Pilot on an account with purchases, receipts from Metro Market, confirmed
+it in September 2026. His receipts read properly. The conversation is
 [issue #41](https://github.com/rheeloaded/paperpull/issues/41).
 
 Downloads your Kroger purchase history and saves each purchase's receipt
@@ -25,7 +22,17 @@ One Kroger account covers Kroger, Pick 'n Save, Metro Market, Fred Meyer,
 Ralphs, King Soopers, Fry's, Smith's, QFC, Dillons, Harris Teeter and the
 rest of the family. Sign in at kroger.com and the purchase history there
 shows purchases from all of them. Which banner a purchase came from is
-recorded where the site says.
+read off its receipt, where the receipt names the store, and kept as the
+store. So a file name pattern with `{store}` in it names each receipt for
+its banner. In the control panel's File names tab, give Kroger its own
+pattern, for example
+
+    {date:yyyy-mm-dd} {store|provider} {summary}[ {kind}]
+
+which names a receipt `2026-09-20 Metro Market Groceries Receipt.pdf`, or
+Kroger where a receipt names no store. Receipts saved before 0.41.0 take
+their banner the next time you run Rename, which reads it off each saved
+PDF and asks Kroger for nothing.
 
 ## Help test it, no programming needed
 

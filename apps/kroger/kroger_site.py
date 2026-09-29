@@ -41,7 +41,19 @@ Diagnose file confirms or corrects.
   drives a real Edge or Chrome, and every API call is made from inside
   the page the way the page itself makes it. Nothing is clicked.
 
-Site layer verified against the live site (empty account): 2026-09-21
+RECORDED (#41), from a tester's Diagnose file of 2026-09-22 and his Pilot
+of 2026-09-23, which saved receipts that read properly. A record carries
+createdDateTime.value, handoffStoreId, total ("USD 21.48"), purchaseType,
+receiptKey, lineItems holding a upc and nothing else, and status
+("COMPLETED"), and never the store's name. The receipt page reads, from the
+top, the order's labelled lines (Order Type, Order Date, Order Number,
+Loyalty Card), the store, its street and its town, then Rewards, Order
+Summary, Item Details with each item's name, price, a "3 x $2.33 each"
+line and its UPC, and Payment Details. The header is
+[data-testid=PO-invoice-header].
+
+Site layer verified against the live site (empty account): 2026-09-21,
+and on a tester's account with purchases: 2026-09-23
 """
 from __future__ import annotations
 
@@ -378,7 +390,12 @@ def record_to_purchase(rec: dict) -> Optional[Purchase]:
         order_number=key,
         total=money_from_api(_first(rec, "total", "orderTotal", "grandTotal")),
         status=parse_status(str(_first(rec, "status", default=""))),
-        store_info=purchase_label(ptype) or "Kroger",
+        # The record names no store (#41, his Diagnose). The receipt page
+        # does, and extract_details reads it into store_info. The purchase
+        # type was here until 0.41.0, which is what a {store} name part then
+        # said, "In-Store", and it is where it belongs now, the fulfillment.
+        store_info="",
+        fulfillment=purchase_label(ptype),
         details_url=detail_url(key),
         receipt_url=receipt_url(key),
         items=items,
@@ -440,6 +457,7 @@ def receipt_failed(page) -> bool:
 # ends in a price and is not one of the summary labels is an item.
 _SUMMARY_LINE_RE = re.compile(
     r"^(sub\s*total|subtotal|total|tax|sales\s+tax|savings|total\s+savings|coupons?|discounts?|"
+    r"original\s+item\s+total|order\s+total|order\s+summary|item\s+coupons?|item\s+details|"
     r"tip|gratuity|fees?|delivery\s+fee|service\s+fee|bag\s+fee|bottle\s+deposit|"
     r"balance|change|payment|paid|amount\s+(due|paid)|ebt|snap|gift\s+card|visa|mastercard|"
     r"master\s*card|discover|amex|american\s+express|debit|credit|cash|refund|items?\s+purchased|"
@@ -448,9 +466,144 @@ _ITEM_LINE_RE = re.compile(
     r"^(?P<name>.+?)(?:\s+(?P<qty>\d+)\s*(?:x|@)\s*\$?\s*[\d,]+\.\d{2})?\s+\$\s*(?P<price>-?[\d,]+\.\d{2})\s*$")
 
 
-def _clean_item_name(name: str) -> str:
+# RECORDED (#41). The receipt page's header names the store the purchase was
+# made at, the banner and not Kroger, on the line after the order's labelled
+# lines and before its street and town. A tester's Metro Market receipt read
+# "Order Type: In Store", "Order Date", "Order Number", "Loyalty Card (last
+# 4)", then "Metro Market", then the address. The banners are the ones the
+# tester listed, which are Kroger's own.
+KROGER_BANNERS = (
+    "Kroger", "Ralphs", "Dillons", "Smith's", "King Soopers", "Fry's", "QFC",
+    "City Market", "Owen's", "Jay C", "Pay Less", "Baker's", "Gerbes",
+    "Fred Meyer", "Harris Teeter", "Pick 'n Save", "Metro Market", "Mariano's",
+    "Food 4 Less", "Foods Co", "Ruler Foods", "Copps",
+)
+# Longer names a banner's receipts can print, to the banner.
+_BANNER_ALIASES = {
+    "Smith's Food & Drug": "Smith's", "Fry's Food Stores": "Fry's",
+    "Fry's Food & Drug": "Fry's", "Jay C Food Stores": "Jay C",
+    "Pay Less Super Markets": "Pay Less", "Kroger Marketplace": "Kroger",
+    "Kroger Fuel Center": "Kroger", "Baker's Supermarkets": "Baker's",
+    "Fred Meyer Stores": "Fred Meyer", "King Soopers Marketplace": "King Soopers",
+}
+
+
+def _squash(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+_BANNER_BY_SQUASH = {_squash(b): b for b in KROGER_BANNERS}
+_BANNER_BY_SQUASH.update({_squash(k): v for k, v in _BANNER_ALIASES.items()})
+# Where the header ends, the first heading after it.
+_HEADER_END_RE = re.compile(r"^(rewards|order\s+summary|item\s+details|total\s+savings|payment\s+details)\b",
+                            re.I)
+# The order's own labelled lines in the header, "Order Date: ..." and the like.
+_LABELLED_RE = re.compile(r"^[A-Za-z][A-Za-z ()0-9]{0,40}:", re.I)
+# What a store's name looks like, words and nothing a street or a town has.
+_NAME_LINE_RE = re.compile(r"^[A-Za-z][A-Za-z'\u2019&.\- ]{1,38}[A-Za-z.]$")
+
+
+def _spaced(s: str) -> str:
+    return " %s " % " ".join(re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).split())
+
+
+# Longest first, so a longer name a banner prints is found before the banner
+# inside it.
+_BANNER_WORDS = sorted(((_spaced(k), v) for k, v in
+                        list(_BANNER_ALIASES.items()) + [(b, b) for b in KROGER_BANNERS]),
+                       key=lambda kv: -len(kv[0]))
+
+
+def banner_of(line: str) -> str:
+    """The banner a line names, spelled the banner's way, or empty. A store
+    number after it, "Kroger #123", is not part of it."""
+    core = re.sub(r"\s*(?:#\s*)?\d+\s*$", "", (line or "").strip())
+    return _BANNER_BY_SQUASH.get(_squash(core), "")
+
+
+def banner_from_lines(lines) -> str:
+    """The store a receipt's header names, from its lines, or empty. Only
+    the header is read, since the items below it include Kroger's own brand,
+    "Kroger White Corn Tortilla Chips", which is not where it was bought. A
+    banner this app does not list is taken from where the store's name sits,
+    the first plain line after the order's labelled ones."""
+    head = []
+    for ln in lines or []:
+        ln = (ln or "").strip()
+        if not ln:
+            continue
+        if _HEADER_END_RE.match(ln):
+            break
+        head.append(ln)
+    for ln in head:
+        found = banner_of(ln)
+        if found:
+            return found
+    # A printed receipt lays the order's lines and the store side by side,
+    # and a PDF's text can run them together, "Order Type: In Store Metro
+    # Market", so a banner is also looked for as whole words inside a line.
+    for ln in head:
+        spaced = _spaced(ln)
+        for words, banner in _BANNER_WORDS:
+            if words in spaced:
+                return banner
+    seen_label = False
+    for ln in head:
+        if _LABELLED_RE.match(ln):
+            seen_label = True
+            continue
+        if seen_label and _NAME_LINE_RE.match(ln):
+            return ln
+    return ""
+
+
+def read_banner(page) -> str:
+    """The store the open receipt page names in its header, or empty."""
+    for sel in ("[data-testid='PO-invoice-header']", FALLBACK["receipt_area"]):
+        try:
+            text = page.locator(sel).first.inner_text(timeout=5000)
+        except Exception:
+            continue
+        found = banner_from_lines(text.splitlines())
+        if found:
+            return found
+    return ""
+
+
+# RECORDED (#41). The items are the Item Details section, between its heading
+# and Payment Details. The Order Summary above it prints "Original Item Total"
+# and "Order Total" the way an item prints its price, a label and its amount
+# on the next line, and both were read as items until 0.41.0.
+_ITEMS_START_RE = re.compile(r"^item\s+details\b", re.I)
+_ITEMS_END_RE = re.compile(r"^(payment\s+details|alcoholic\s+beverages\s+fulfilled|order\s+summary)\b", re.I)
+# The line under an item's price, "3 x $2.49 each", or for something weighed
+# "0.62 lbs x $8.99 each (approx.)", which is one item, not 0.62 of one.
+_QTY_LINE_RE = re.compile(r"^(?P<n>\d+(?:\.\d+)?)\s*(?P<unit>lbs?|oz|kg|g)?\s*x\s*\$\s*(?P<each>[\d,]+\.\d{2})",
+                          re.I)
+
+
+def _item_lines(lines: List[str]):
+    """The Item Details section's lines, and whether the receipt has one."""
+    start = next((i for i, ln in enumerate(lines) if _ITEMS_START_RE.match(ln)), None)
+    if start is None:
+        return lines, False
+    end = next((i for i in range(start + 1, len(lines)) if _ITEMS_END_RE.match(lines[i])), len(lines))
+    return lines[start + 1:end], True
+
+
+# Inside Item Details only a line that is nothing but a summary label is not
+# an item. The start-of-name filter below would drop a real product whose
+# name begins with Total, Tax, Cash or Balance, the cereal among them.
+_SUMMARY_LABEL_RE = re.compile(
+    r"^(original\s+item\s+total|order\s+total|sub\s*total|subtotal|total|tax|sales\s+tax|"
+    r"total\s+savings|item\s+coupons?(/sales)?|item\s+coupon/sale|\d+\s+items?)$", re.I)
+
+
+def _clean_item_name(name: str, in_items: bool = False) -> str:
     name = _html.unescape(re.sub(r"\s+", " ", name or "")).strip(" -:*")
-    if len(name) < 3 or _SUMMARY_LINE_RE.match(name):
+    if len(name) < 3:
+        return ""
+    if (_SUMMARY_LABEL_RE if in_items else _SUMMARY_LINE_RE).match(name):
         return ""
     return name
 
@@ -463,21 +616,33 @@ def extract_items(page) -> List[Item]:
         text = page.locator(FALLBACK["receipt_area"]).first.inner_text(timeout=8000)
     except Exception:
         return []
+    return items_from_lines([ln.strip() for ln in text.splitlines() if ln.strip()])
+
+
+def items_from_lines(lines: List[str]) -> List[Item]:
+    """Line items from a receipt's lines, read only from its Item Details
+    section when it has one."""
     items: List[Item] = []
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    lines, in_items = _item_lines(lines)
     for i, ln in enumerate(lines):
         m = _ITEM_LINE_RE.match(ln)
         if m:
-            name = _clean_item_name(m.group("name"))
+            name = _clean_item_name(m.group("name"), in_items)
             if name:
                 items.append(Item(name=name[:300], quantity=m.group("qty") or "1",
                                   line_total=f"${m.group('price')}"))
             continue
-        # A name on one line and its price on the next.
+        # A name on one line and its price on the next, and then how many.
         if i + 1 < len(lines) and re.fullmatch(r"\$\s*-?[\d,]+\.\d{2}", lines[i + 1]):
-            name = _clean_item_name(ln)
+            name = _clean_item_name(ln, in_items)
             if name and not MONEY_RE.search(ln):
-                items.append(Item(name=name[:300], quantity="1",
+                qty, each = "1", ""
+                q = _QTY_LINE_RE.match(lines[i + 2]) if i + 2 < len(lines) else None
+                if q:
+                    each = "$" + q.group("each")
+                    if not q.group("unit"):
+                        qty = str(int(float(q.group("n")))) if float(q.group("n")) >= 1 else "1"
+                items.append(Item(name=name[:300], quantity=qty, unit_price=each,
                                   line_total="$" + re.sub(r"[^\d.,-]", "", lines[i + 1])))
     return items
 
@@ -501,6 +666,9 @@ def extract_details(page, purchase: Purchase) -> Purchase:
     items = extract_items(page)
     if items:
         purchase.items = items
+    banner = read_banner(page)
+    if banner:
+        purchase.store_info = banner
     return purchase
 
 
@@ -681,7 +849,7 @@ def survey_history_page(page) -> dict:
     for rec in (hist.get("records") or [])[:3]:
         p = record_to_purchase(rec)
         parsed.append({"key_shape": mask_text(p.order_number), "kind": p.purchase_type, "date": p.purchase_date,
-                       "total": p.total, "status": p.status, "label": p.store_info,
+                       "total": p.total, "status": p.status, "label": p.fulfillment,
                        "items": len(p.items), "pending": record_is_pending(rec)} if p else "record without a key")
     out["parsed"] = parsed
     return out
