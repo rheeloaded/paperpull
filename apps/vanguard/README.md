@@ -35,11 +35,14 @@ every statement with its account, period and a per-document id. Each
 statement's PDF is then saved by clicking its own row's download control
 (`title="Pdf download icon"` — the row's aria-labels carry non-breaking
 spaces that defeat text matching, the title attribute does not) and
-capturing the browser download event, with the browser pointed first at
-`.vanguard-downloads`, a staging folder in the output folder, so the event
-is reliable on any real Edge or Chrome. The browser's own copy is removed
-from there once the statement is saved, and a statement the browser saved
-without raising the event is taken from there instead.
+taking the file the browser saves, with the browser pointed first at
+`.vanguard-downloads`, a staging folder in the output folder, so a real
+Edge or Chrome that raises no download event still saves it where it is
+looked for. Once that folder is set, the browser's file there is the only
+copy, since the download event's own copy is then empty, so that file is
+moved into place under the app's name. Nothing else in the folder is
+touched. Where setting the folder has no effect, the download event's own
+copy is saved instead.
 Every account's statements arrive in one table, so the account filter is
 never driven; the year picker is a native `<select>` whose options must
 all be bare four-digit years before the app will touch it, and a year a

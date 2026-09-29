@@ -39,15 +39,15 @@ Site truth (verified live 2026-09-28 against the signed-in pages):
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.capture import set_download_dir as _set_download_dir
-from paperpull_core.capture import snapshot as _snapshot
-from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import UNFINISHED as _UNFINISHED
 from paperpull_core.controls import control_identity
 
@@ -493,21 +493,77 @@ def _row_account_key(title: str, account_id: str) -> str:
     return ""
 
 
-def _clear_new(dl_dir, before: set) -> None:
-    """Remove what the browser saved into the staging folder since `before`,
-    once the document is in its own place or has failed. The browser keeps
-    its own copy under Vanguard's name beside the one the app saves, and a
-    staging folder that kept every one would hold the whole archive twice."""
+def _folder_state(dl_dir) -> dict:
+    """Each file in the staging folder, by name, with its size and when it
+    was last written. A download that reuses a name the folder already
+    holds is written over it in place, so a name alone would not show it
+    as new."""
+    out: dict = {}
+    if not dl_dir:
+        return out
     try:
-        names = [n for n in _snapshot(dl_dir) if n not in before
-                 and not n.lower().endswith(_UNFINISHED)]
-    except Exception:
-        return
-    for name in names:
+        for entry in os.scandir(dl_dir):
+            if entry.is_file():
+                st = entry.stat()
+                out[entry.name] = (st.st_size, st.st_mtime_ns)
+    except OSError:
+        pass
+    return out
+
+
+def _take_browser_file(dl_dir, before: dict, out_path: Path, prefer: str = "") -> bool:
+    """Move the statement the browser saved into `dl_dir` since `before` to
+    `out_path`. The file the download event named is taken first, else the
+    newest new one. Only a finished file that starts with the PDF marker is
+    taken, and nothing else in the folder is touched, since a download the
+    person starts in another tab of that browser lands there as well."""
+    if not dl_dir:
+        return False
+    now = _folder_state(dl_dir)
+    new = [n for n, st in now.items()
+           if before.get(n) != st and not n.lower().endswith(_UNFINISHED)]
+    new.sort(key=lambda n: (n != prefer, -now[n][1]))
+    for name in new:
+        src = Path(dl_dir) / name
         try:
-            (Path(dl_dir) / name).unlink()
+            with src.open("rb") as f:
+                if f.read(5) != b"%PDF-":
+                    continue
         except OSError:
-            pass
+            continue
+        try:
+            os.replace(src, out_path)
+            return True
+        except OSError:
+            try:
+                shutil.copyfile(src, out_path)
+                src.unlink()
+                return True
+            except OSError:
+                continue
+    return False
+
+
+def _event_copy(dl) -> Optional[Path]:
+    """Playwright's own copy of a download, when it holds any bytes.
+
+    Measured 2026-09-29 on Chromium 149 to 153 and Edge 154 with Playwright
+    1.63, over CDP and in a persistent context alike. Once the browser's
+    download folder has been set over DevTools, which download_document
+    does, the download event still fires, but Playwright's copy never
+    exists and save_as writes an EMPTY file. The browser's own file in that
+    folder is then the only copy. Where setting the folder has no effect,
+    Playwright's copy holds the whole file."""
+    try:
+        p = dl.path()
+    except Exception:
+        return None
+    try:
+        if p and Path(p).exists() and Path(p).stat().st_size > 0:
+            return Path(p)
+    except OSError:
+        pass
+    return None
 
 
 def download_document(page, account_id: str, charitable: bool,
@@ -515,16 +571,18 @@ def download_document(page, account_id: str, charitable: bool,
                       occurrence: int = 0, document_id_hint: str = "",
                       on_demand_type_hint: str = "", dl_dir=None) -> bool:
     """Download one statement PDF by clicking its row's download icon
-    (title='Pdf download icon') and capturing the browser download event.
-    Verified live: the icon fires a real download with a descriptive
-    suggested filename. The row is matched by the ACCOUNT NUMBER (from the
-    title's trailing digits) and the row's own MM/DD/YYYY date text.
+    (title='Pdf download icon'). Verified live: the icon fires a real
+    download with a descriptive suggested filename. The row is matched by
+    the ACCOUNT NUMBER (from the title's trailing digits) and the row's own
+    MM/DD/YYYY date text.
 
     The browser saves into `dl_dir`, a staging folder of the app's own, and
-    never into the archive folder. Pointed at the archive, it saved its own
-    copy there under Vanguard's name beside every statement the app saved
-    (review of #57). Without `dl_dir` the browser is left where it is and
-    only the download event is taken."""
+    never into the archive folder. With the folder set, the browser's file
+    there is the statement, since save_as then writes an empty file (see
+    _event_copy), and it is moved to `out_path`. Where setting the folder
+    had no effect, the download event's own copy is saved. Nothing in the
+    folder is ever deleted. Without `dl_dir` the browser is left where it
+    is and only the download event is taken."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(dl_dir) if dl_dir else None
@@ -552,13 +610,13 @@ def download_document(page, account_id: str, charitable: bool,
 
     # Real pointer click on the row's download icon (title-matched: the
     # NBSP aria-labels defeat text locators — verified live). The
-    # attached browser is pointed at a run-local download folder first so
-    # the event reliably fires even when the browser would otherwise save
-    # into its own Downloads folder (the nine-scaffolds lesson; see
+    # attached browser is pointed at the app's own staging folder first, so
+    # a browser that saves the file itself and raises no event still saves
+    # it where it is looked for (the nine-scaffolds lesson; see
     # paperpull_core.capture.set_download_dir).
     if staging:
         _set_download_dir(page, staging)
-    before = _snapshot(staging)
+    before = _folder_state(staging)
     row = page.locator("table tr, [role=row]").filter(
         has_text=re.compile(re.escape(needle["account"])))\
         .filter(has_text=needle["dateText"]).first
@@ -574,26 +632,40 @@ def download_document(page, account_id: str, charitable: bool,
     if not is_safe_control(label):
         log.warning("REFUSED download control %r - guard", label[:90])
         return False
+    dl = None
     try:
+        with page.expect_download(timeout=30000) as dl_info:
+            icon.click(force=True)
+        dl = dl_info.value
         try:
-            with page.expect_download(timeout=30000) as dl_info:
-                icon.click(force=True)
-            dl = dl_info.value
+            dl.failure()   # returns once the download has finished
+        except Exception:
+            pass
+    except Exception as e:
+        log.info("no download event for %s (%s)", date,
+                 str(e).splitlines()[0][:70])
+    how = ""
+    if dl is not None and _event_copy(dl) is not None:
+        try:
             dl.save_as(str(out_path))
-            how = "download event (%s)" % (dl.suggested_filename or "")[:60]
+            how = "the download event (%s)" % (dl.suggested_filename or "")[:60]
         except Exception as e:
-            log.info("no download event for %s (%s)", date,
-                     str(e).splitlines()[0][:70])
-            # A real Edge or Chrome can save the file itself and raise no
-            # event, and then it is in the staging folder.
-            how = "staging folder" if _take_new_pdf(staging, before, out_path) else ""
-        if how and out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-            log.info("captured via %s", how)
-            return True
-        log.info("download for %s was not a PDF", date)
-    finally:
-        _clear_new(staging, before)
-    # A failed capture must not leave a partial file behind.
+            log.info("saving the download failed: %s", str(e).splitlines()[0][:70])
+    if not how and staging:
+        prefer = (dl.suggested_filename or "") if dl is not None else ""
+        # A browser that raised no event saves the file itself, so it is
+        # given longer to arrive.
+        for _ in range(20 if dl is not None else 60):
+            if _take_browser_file(staging, before, out_path, prefer):
+                how = "the browser's own file"
+                break
+            page.wait_for_timeout(500)
+    if how and out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
+        log.info("captured via %s", how)
+        return True
+    log.info("download for %s was not a PDF", date)
+    # A failed capture must not leave this app's file behind, empty or not
+    # a PDF. Only that file. Nothing in the browser's folder is deleted.
     try:
         if out_path.exists():
             out_path.unlink()
