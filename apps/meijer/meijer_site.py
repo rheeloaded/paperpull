@@ -52,6 +52,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urljoin, urlsplit
 
@@ -689,6 +690,10 @@ def press_row_receipt(page, purchase, trace=None):
     if c["href"] and is_safe_url(href):
         body = fetch_receipt_bytes(page, href)
         if body:
+            if trace is not None:
+                trace.append({"note": "the receipt came from the row's control",
+                              "control": mask_text(label)[:40],
+                              "how": "its own address, fetched from the page"})
             return body
     ctx = page.context
     got: dict = {}
@@ -707,6 +712,8 @@ def press_row_receipt(page, purchase, trace=None):
             body = res.body()
             if body[:5] == b"%PDF-":
                 got["body"] = body
+                got["how"] = ("an answer to the page" if res.frame.page is page
+                              else "an answer to the window it opened")
         except Exception:
             pass
 
@@ -775,6 +782,8 @@ def press_row_receipt(page, purchase, trace=None):
                         body = fetch_receipt_bytes(extra, u)
                     if body and body[:5] == b"%PDF-":
                         got["body"] = body
+                        got["how"] = ("the window it opened, a blob" if u.startswith("blob:")
+                                      else "the window it opened")
                 if not got and trace is not None:
                     trace.append({"note": "the control opened a window", "url": mask_href(u)})
             if got:
@@ -819,14 +828,45 @@ def press_row_receipt(page, purchase, trace=None):
             body = pathlib.Path(finished[id(downloads[0])]).read_bytes()
             if body[:5] == b"%PDF-":
                 got["body"] = body
+                got["how"] = "a download"
         except Exception as e:
             if trace is not None:
                 trace.append({"note": "download save failed", "error": type(e).__name__})
     if got.get("body"):
         if trace is not None:
-            trace.append({"note": "the receipt came from the row's control", "control": mask_text(label)[:40]})
+            trace.append({"note": "the receipt came from the row's control", "control": mask_text(label)[:40],
+                          "how": got.get("how", "")})
         return got["body"]
     return None
+
+
+# Words a receipt carries, from a fixed list. What pdf_facts says of a PDF is
+# only which of these it holds, so the file it goes into never carries a
+# purchase, a price, a card or a store of the member's own.
+RECEIPT_WORDS = ("meijer", "receipt", "subtotal", "total", "tax", "change",
+                 "balance", "visa", "mastercard", "debit", "credit", "cash",
+                 "mperks", "store", "thank", "items")
+
+
+def pdf_facts(path) -> dict:
+    """What a receipt that failed its check holds, for the file a tester
+    attaches: its size, its pages, how much text it has, whether a date or
+    an amount is printed, and which RECEIPT_WORDS appear. Never its words."""
+    facts: dict = {}
+    try:
+        p = Path(path)
+        facts["bytes"] = p.stat().st_size
+        from pypdf import PdfReader
+        reader = PdfReader(str(p))
+        facts["pages"] = len(reader.pages)
+        text = "".join((pg.extract_text() or "") for pg in reader.pages[:5]).lower()
+        facts["text_characters"] = len(text)
+        facts["prints_a_date"] = bool(re.search(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b", text))
+        facts["prints_an_amount"] = bool(re.search(r"\d+\.\d{2}\b", text))
+        facts["words"] = [w for w in RECEIPT_WORDS if w in text]
+    except Exception as e:
+        facts["error"] = type(e).__name__
+    return facts
 
 
 # What the row's own receipt control says. The member's recording showed a

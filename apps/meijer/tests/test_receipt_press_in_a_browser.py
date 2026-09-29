@@ -89,7 +89,7 @@ def test_a_receipt_the_row_downloads_is_saved(press):
         body = site.press_row_receipt(pg, _purchase(pg), trace)
         assert body and body.startswith(b"%PDF-") and b"invented receipt 09/19/2026" in body, trace
         assert {"note": "the receipt came from the row's control",
-                "control": "view receipt pdf"} in trace, trace
+                "control": "view receipt pdf", "how": "a download"} in trace, trace
     finally:
         browser.close()
         driver.stop()
@@ -176,9 +176,16 @@ def test_a_window_opened_blank_is_kept_until_it_is_filled():
     driver, browser, pg, purchase = _drive_page(html, [(pdf_url, lambda r: r.fulfill(
         status=200, content_type="application/pdf", body=pdf))])
     try:
-        body = site.press_row_receipt(pg, purchase, [])
+        trace: list = []
+        body = site.press_row_receipt(pg, purchase, trace)
         assert body and b"invented receipt 09/19/2026" in body
         assert len(pg.context.pages) == 1, "the window it opened is closed after"
+        # and the file to attach says how it came, in words of the app's own.
+        # A browser without a PDF viewer, this one, downloads what the window
+        # is sent to, and a real Chrome shows it there.
+        came = [t for t in trace if t.get("note") == "the receipt came from the row's control"]
+        assert len(came) == 1 and came[0]["how"] in (
+            "a download", "an answer to the window it opened", "the window it opened"), trace
     finally:
         browser.close()
         driver.stop()

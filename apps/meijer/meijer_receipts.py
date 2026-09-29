@@ -464,13 +464,16 @@ class App:
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.CANCELED.value):
             return True
-        # a review copy counts only if its PDF is still present and valid;
-        # a quarantined / failed one should be retried.
+        # A copy put aside for review counts only while it still passes the
+        # check that put it aside, its words included. Checked without them,
+        # a receipt put aside because its words were not this purchase's
+        # passed, counted as done, and was never fetched again (#42).
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
             return bool(pdf_path and Path(pdf_path).exists()
                         and receipt_pdf.validate_pdf(
-                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
+                            Path(pdf_path), self.config["min_pdf_bytes"],
+                            receipt_pdf.expected_tokens_for(purchase)).ok)
         return False
 
     # -- processing core ----------------------------------------------------
@@ -597,13 +600,19 @@ class App:
                 self._record_state(purchase, State.RECEIPT_LOCATED)
                 out_path.write_bytes(body)
                 log.info("Capture path: the row's own receipt control")
-                return self._finish_pdf(page, purchase, out_path, source_page=None)
-            import json as _json
-            attempt = self.paths.diagnostics / "download-attempt.json"
-            atomic_write_text(attempt, _json.dumps(
-                {"timestamp": now_iso(), "date": purchase.purchase_date,
-                 "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]}, indent=2))
-            print(f"  What the page answered is in {attempt}, attach it to the issue.")
+                # This path has no page to print again, so the one retry is a
+                # second press of the same control. Until 0.41.0 it said it
+                # was retrying and never did (#42).
+                if self._finish_pdf(page, purchase, out_path, source_page=None,
+                                    again=lambda: site.press_row_receipt(page, purchase, trace)):
+                    return True
+                if purchase.pdf_path:
+                    trace.append({"note": "the receipt was put aside",
+                                  "reason": (purchase.notes or "").split("; ")[-1][:120],
+                                  "pdf": site.pdf_facts(Path(purchase.pdf_path))})
+                self._write_attempt(page, purchase, trace)
+                return False
+            self._write_attempt(page, purchase, trace)
         if not url or not site.is_receipt_address(url):
             self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                                notes="The order row carries no receipt or details link")
@@ -692,8 +701,48 @@ class App:
         log.info("Capture path: plain page print")
         receipt_pdf.print_page_to_pdf(target_page, out_path)
 
+    def _write_attempt(self, page, purchase: Purchase, trace: list) -> None:
+        """What the press saw, to Diagnostics/download-attempt.json, for the
+        tester to attach. Built only from what press_row_receipt and
+        pdf_facts put in the trace, which never carry a receipt's words."""
+        import json as _json
+        attempt = self.paths.diagnostics / "download-attempt.json"
+        atomic_write_text(attempt, _json.dumps(
+            {"timestamp": now_iso(), "date": purchase.purchase_date,
+             "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]}, indent=2))
+        print(f"  What the page answered is in {attempt}, attach it to the issue.")
+
+    def _put_aside(self, out_path: Path) -> Path:
+        """Move a receipt that failed its check into Manual Review. The very
+        same file, under the same name, put aside by an earlier run is kept
+        once, since a receipt failing every run would otherwise add a copy
+        there every run, now that such a receipt is tried again (#42). The
+        file is matched rather than the record, which this run has already
+        written over by then."""
+        review = self.paths.manual_review
+        stem = out_path.stem
+        try:
+            data = out_path.read_bytes()
+            for prev in sorted(review.glob("*.pdf")):
+                if ((prev.stem == stem or prev.stem.startswith(stem + " ("))
+                        and prev.read_bytes() == data):
+                    out_path.unlink()
+                    return prev
+        except OSError:
+            pass
+        quarantine = unique_path(review, out_path.name, self.config["max_path_length"])
+        try:
+            out_path.replace(quarantine)
+        except OSError:
+            quarantine = out_path
+        return quarantine
+
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
-                    popup=None, source_page=None) -> bool:
+                    popup=None, source_page=None, again=None) -> bool:
+        """Check a saved receipt, and put it aside for review if it fails.
+        A receipt that fails is taken once more first, by printing
+        `source_page` again, or by `again`, which takes it the way it was
+        first taken and gives its bytes."""
         purchase.pdf_path = str(out_path)
         purchase.pdf_filename = out_path.name
         self._record_state(purchase, State.PDF_SAVED)
@@ -701,22 +750,24 @@ class App:
         tokens = receipt_pdf.expected_tokens_for(purchase)
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
         if not result.ok:
-            log.warning("Validation failed (%s); retrying once", result.reason)
             self.stats["validation_failures"] += 1
-            try:
-                if source_page is not None:
-                    receipt_pdf.print_page_to_pdf(source_page, out_path)
+            if source_page is not None or again is not None:
+                log.warning("Validation failed (%s); retrying once", result.reason)
+                try:
+                    if source_page is not None:
+                        receipt_pdf.print_page_to_pdf(source_page, out_path)
+                    else:
+                        body = again()
+                        if body:
+                            out_path.write_bytes(body)
                     result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
-            except Exception as e:
-                log.warning("Retry failed: %s", e)
+                except Exception as e:
+                    log.warning("Retry failed: %s", e)
+            else:
+                log.warning("Validation failed (%s)", result.reason)
         if not result.ok:
             # Quarantine the questionable file; never mark Completed.
-            quarantine = unique_path(self.paths.manual_review, out_path.name,
-                                     self.config["max_path_length"])
-            try:
-                out_path.replace(quarantine)
-            except OSError:
-                quarantine = out_path
+            quarantine = self._put_aside(out_path)
             purchase.pdf_path = str(quarantine)
             purchase.pdf_filename = quarantine.name
             self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
