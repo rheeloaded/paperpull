@@ -1,12 +1,12 @@
 # Newrez document downloader
 
-**Partly tested against a real account.** On a tester's account this
-year's statements and both 1098s download and are named for the dates
-printed on them, and reading the earlier years is this round's repair
-([issue #38](https://github.com/rheeloaded/paperpull/issues/38)). This app
-was built without a Newrez mortgage, so that someone who holds one can
-test it without writing code. Its guards are tested, and every guess
-about newrez.com that is left is marked in `newrez_site.py`.
+**Working on the tester's account.** This app was built without a
+Newrez mortgage and repaired over several rounds from the surveys,
+failure files and a recording one tester sent. Discover reads each year
+the statements page's year picker offers, and on his account it walked
+three years and every document downloaded, named for the dates printed
+on them. The conversation is
+[issue #38](https://github.com/rheeloaded/paperpull/issues/38).
 
 Downloads your Newrez **mortgage statements and 1098 forms** as PDFs. Read-only,
 delete-safe, part of [PaperPull](../../README.md).

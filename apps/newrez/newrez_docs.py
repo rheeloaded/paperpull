@@ -1,4 +1,4 @@
-"""Newrez statement and tax document downloader (local, supervised). PARTLY VERIFIED, see newrez_site.py.
+"""Newrez statement and tax document downloader (local, supervised). CONFIRMED on a tester's account, see newrez_site.py.
 
 This app was written without a Newrez account so that someone who holds one
 can test it without writing code. The orchestrator below is the same one

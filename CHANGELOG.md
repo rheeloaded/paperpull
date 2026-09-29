@@ -32,6 +32,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   so much, about ten months of trips and two years of orders there.
 
 ### Changed
+- **Newrez is confirmed on the tester's account (#38).** His run walked
+  three years of the statements page's year picker and saved every
+  document, so it moves from partly tested to confirmed.
 - **The README links the Microsoft Store edition,** which is live, and no
   longer says the listing is in review.
 
