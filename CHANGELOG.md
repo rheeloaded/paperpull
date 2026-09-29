@@ -37,26 +37,33 @@ for its own bot check instead of working through it.
   receipt appear, and then found no row with its date, so it pressed
   nothing. An opened row also says until when its document stays online,
   two years on, and the row was read as that day. A date after tomorrow is
-  never a row's date now. An opened row's View Documents looks past a
-  container naming only such a day, while that container shows the
-  document the row revealed and never outside its own row, so a row is
-  never dated by its neighbor. A row opened in place is refused when
-  another row's View Documents sits inside it, whatever date that one
-  reads. The trace also says whether the page asked for its list again
-  after the press, and how each View Documents read its date when the row
-  was not found.
+  never a row's date now, in text from inside the control's own row. An
+  opened row's View Documents looks past a container naming only such a
+  day, only inside a row of its own, as his rows are, and only while it
+  shows the document the row revealed, so a row is never dated by its
+  neighbor. Two reviews tried pages his files do not show, a category drawn
+  as one list item, a help link beside a folded row, a neighbor sent by
+  mail with no control, a row that renames its button Hide Documents, and
+  none saves another document under a record's name. The trace also says
+  whether the page asked for its list again after the press, and how each
+  View Documents read its date when the row was not found.
 - **Meijer presses the receipt without crashing, and presses nothing
   else (#42).** Every receipt on 0.39.1 raised AttributeError before
   anything was pressed, since the download listener was a list's own
   append method, which Playwright cannot mark. That had been so since the
   press was written, so the press itself had never run on a real account,
-  and a review of it found it would have pressed up to six of a row's
-  controls in turn, an Email Receipt or a control with no words among
-  them. Only the row's own View Receipt control is pressed now, and only
-  its address is fetched. A window the press opens blank is kept until it
-  is filled, and only this page and its own windows are listened to. A
-  test in the core now fails any app that hands Playwright a built-in, or
-  takes a listener off with an object other than the one it added.
+  and two reviews of it found it would have pressed other controls in the
+  row, an Email Receipt among them, a wrapper at its middle, or a hidden
+  copy, and taken a November receipt for a January purchase whose date
+  "1/19/2026" sits inside "11/19/2026". Only a link or a button that shows,
+  holds no other control and reads as the row's receipt is pressed now,
+  never one whose words or name send, share or print, and only on the one
+  row that fits the purchase. A window the press opens blank is kept until
+  it is filled, a download counts only from Meijer, and what the trace
+  says about a row's controls is built from fixed words, since a store's
+  street had reached it. A test in the core now fails any app that hands
+  Playwright a built-in, or takes a listener off with an object other than
+  the one it added.
 - **Ally finds a statement posted on the 1st to the 9th (#56).** Ally
   writes "September 06, 2026", and the row was looked for as "September 6,
   2026", so every statement of the tester's, all posted on the 6th, was
