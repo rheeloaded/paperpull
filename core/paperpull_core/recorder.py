@@ -167,7 +167,11 @@ _CAPTURE_JS = r"""
   window.__ppRecorderInstalled = true;
   const post = window[bindingName];
 
-  const HASHY = /(?:[0-9]{6,})|(?:^|[-_])[a-f0-9]{8,}(?:$|[-_])|(?:ng-|css-|sc-|jsx-|emotion-)/i;
+  // An id a build generates, which changes with every deploy. The framework
+  // prefixes count only at the start. Anywhere in the value they took
+  // "billing-nav" for Angular's ng- and "desc-field" for styled-components'
+  // sc-, and a site's own test id was thrown over for its words (#45).
+  const HASHY = /(?:[0-9]{6,})|(?:^|[-_])[a-f0-9]{8,}(?:$|[-_])|^(?:ng-|css-|sc-|jsx-|emotion-)/i;
   const stable = (v) => !!v && v.length < 80 && !HASHY.test(v);
 
   const roleOf = (el) => {
@@ -225,13 +229,27 @@ _CAPTURE_JS = r"""
     return "";
   };
 
+  // The attributes a site's own tests find its controls by. A control can
+  // carry one of these and nothing else, no role and no link. American
+  // Family marks its controls with data-cy alone, and a click on the words
+  // inside one was taken for the mouse wandering and thrown away, so his
+  // recording of the billing tab kept one click of seven (#45).
+  const TEST_IDS = ["data-testid", "data-test-id", "data-test", "data-qa",
+                    "data-cy", "data-automation-id"];
+  const testIdOf = (el) => {
+    for (const a of TEST_IDS) {
+      const v = el.getAttribute(a);
+      if (v) return v;
+    }
+    return null;
+  };
+
   // In preference order. Never a class, never a position among siblings.
   const locate = (el) => {
     const role = roleOf(el);
     const name = nameOf(el).slice(0, 80);
     if (role && name) return { how: "role", role: role, name: name };
-    const testid = el.getAttribute("data-testid") || el.getAttribute("data-test-id")
-                || el.getAttribute("data-qa") || el.getAttribute("data-cy");
+    const testid = testIdOf(el);
     if (stable(testid)) return { how: "testid", value: testid };
     const label = el.getAttribute("aria-label");
     if (label && label.trim()) return { how: "label", value: label.trim().slice(0, 80) };
@@ -251,7 +269,7 @@ _CAPTURE_JS = r"""
   const control = (start) => {
     let el = start;
     for (let i = 0; el && i < 6; i++) {
-      if (el.nodeType === 1 && (roleOf(el) || el.getAttribute("data-testid")))
+      if (el.nodeType === 1 && (roleOf(el) || testIdOf(el)))
         return el;
       el = up(el);
     }
@@ -405,6 +423,7 @@ _CAPTURE_JS = r"""
     if (tag === "html" || tag === "body") return;   // a click on nothing
     send({ action: "click", locator: locate(el), tag: tag,
            label: nameOf(el).slice(0, 120), at: Date.now(),
+           marked: !!testIdOf(el),
            in_shadow: !!(el.getRootNode && el.getRootNode() !== document),
            in_frame: inFrame(),
            structure: shapeOf(ev, el) });
@@ -736,11 +755,14 @@ class Recorder:
         label = str(record.get("label") or "")
 
         # A click that landed on nothing nameable, or on a heading or a
-        # paragraph, is the mouse wandering rather than a step.
+        # paragraph, is the mouse wandering rather than a step. Not one on
+        # an element the site marks with a test id, which is a control on a
+        # site that marks its controls that way and no other (#45).
         if action == "click" and loc.get("how") in ("unresolved", "text"):
             tag = record.get("tag")
             tag = tag if isinstance(tag, str) else ""
-            if not label.strip() or tag in _NOT_A_CONTROL:
+            marked = record.get("marked") is True
+            if not label.strip() or (tag in _NOT_A_CONTROL and not marked):
                 self.dropped["unresolved"] += 1
                 self._count_unresolved(record, tag, opened)
                 return
