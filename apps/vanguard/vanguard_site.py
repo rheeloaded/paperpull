@@ -40,13 +40,15 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date as _date
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.capture import set_download_dir as _set_download_dir
+from paperpull_core.capture import snapshot as _snapshot
+from paperpull_core.capture import take_new_pdf as _take_new_pdf
+from paperpull_core.capture import UNFINISHED as _UNFINISHED
 from paperpull_core.controls import control_identity
 
 log = logging.getLogger("vanguard_docs.site")
@@ -111,8 +113,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
 # do it — a provider-local rewrite is measurably weaker (the local AUTH
 # pattern missed "Logon", this provider's own sign-in flow) and bypasses
 # the guard lessons the core patterns encode.
-from paperpull_core.controls import (AUTH_CONTROL_RE, MONEY_CONTROL_RE,
-                                      SETTINGS_CONTROL_RE,
+from paperpull_core.controls import (AUTH_CONTROL_RE, SETTINGS_CONTROL_RE,
                                       is_forbidden_context as _core_forbidden)
 
 SAFE_DOC_CONTROL_RE = re.compile(
@@ -304,7 +305,6 @@ def collect_statements_json(page, years: Optional[List[str]] = None,
     keep, when given, says which picker options a scoped run wants; years
     it refuses are not selected at all, which is the round trips a scoped
     run should not spend (adding-a-provider.md Tips, the Chase pattern)."""
-    import typing
     import json as _json
     batches: List[dict] = []
 
@@ -493,17 +493,41 @@ def _row_account_key(title: str, account_id: str) -> str:
     return ""
 
 
+def _clear_new(dl_dir, before: set) -> None:
+    """Remove what the browser saved into the staging folder since `before`,
+    once the document is in its own place or has failed. The browser keeps
+    its own copy under Vanguard's name beside the one the app saves, and a
+    staging folder that kept every one would hold the whole archive twice."""
+    try:
+        names = [n for n in _snapshot(dl_dir) if n not in before
+                 and not n.lower().endswith(_UNFINISHED)]
+    except Exception:
+        return
+    for name in names:
+        try:
+            (Path(dl_dir) / name).unlink()
+        except OSError:
+            pass
+
+
 def download_document(page, account_id: str, charitable: bool,
                       doc_type: str, title: str, date: str, out_path,
                       occurrence: int = 0, document_id_hint: str = "",
-                      on_demand_type_hint: str = "") -> bool:
+                      on_demand_type_hint: str = "", dl_dir=None) -> bool:
     """Download one statement PDF by clicking its row's download icon
     (title='Pdf download icon') and capturing the browser download event.
     Verified live: the icon fires a real download with a descriptive
     suggested filename. The row is matched by the ACCOUNT NUMBER (from the
-    title's trailing digits) and the row's own MM/DD/YYYY date text."""
+    title's trailing digits) and the row's own MM/DD/YYYY date text.
+
+    The browser saves into `dl_dir`, a staging folder of the app's own, and
+    never into the archive folder. Pointed at the archive, it saved its own
+    copy there under Vanguard's name beside every statement the app saved
+    (review of #57). Without `dl_dir` the browser is left where it is and
+    only the download event is taken."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(dl_dir) if dl_dir else None
 
     if not ensure_statements(page):
         log.info("statements page not available for %s %s", account_id, date)
@@ -532,7 +556,9 @@ def download_document(page, account_id: str, charitable: bool,
     # the event reliably fires even when the browser would otherwise save
     # into its own Downloads folder (the nine-scaffolds lesson; see
     # paperpull_core.capture.set_download_dir).
-    _set_download_dir(page, out_path.parent)
+    if staging:
+        _set_download_dir(page, staging)
+    before = _snapshot(staging)
     row = page.locator("table tr, [role=row]").filter(
         has_text=re.compile(re.escape(needle["account"])))\
         .filter(has_text=needle["dateText"]).first
@@ -549,26 +575,31 @@ def download_document(page, account_id: str, charitable: bool,
         log.warning("REFUSED download control %r - guard", label[:90])
         return False
     try:
-        with page.expect_download(timeout=30000) as dl_info:
-            icon.click(force=True)
-        dl = dl_info.value
-        dl.save_as(str(out_path))
-        if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-            log.info("captured via download event (%s)",
-                     (dl.suggested_filename or "")[:60])
+        try:
+            with page.expect_download(timeout=30000) as dl_info:
+                icon.click(force=True)
+            dl = dl_info.value
+            dl.save_as(str(out_path))
+            how = "download event (%s)" % (dl.suggested_filename or "")[:60]
+        except Exception as e:
+            log.info("no download event for %s (%s)", date,
+                     str(e).splitlines()[0][:70])
+            # A real Edge or Chrome can save the file itself and raise no
+            # event, and then it is in the staging folder.
+            how = "staging folder" if _take_new_pdf(staging, before, out_path) else ""
+        if how and out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
+            log.info("captured via %s", how)
             return True
         log.info("download for %s was not a PDF", date)
-        return False
-    except Exception as e:
-        log.info("no download event for %s (%s)", date,
-                 str(e).splitlines()[0][:70])
-        # A failed capture must not leave a partial file behind.
-        try:
-            if out_path.exists():
-                out_path.unlink()
-        except OSError:
-            pass
-        return False
+    finally:
+        _clear_new(staging, before)
+    # A failed capture must not leave a partial file behind.
+    try:
+        if out_path.exists():
+            out_path.unlink()
+    except OSError:
+        pass
+    return False
 
 
 # ---------------------------------------------------------------- UI read

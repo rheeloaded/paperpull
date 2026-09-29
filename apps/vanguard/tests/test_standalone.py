@@ -18,7 +18,7 @@ def test_off_host_requests_are_refused(url):
 def test_open_browser_uses_its_own_profile_and_upstream_launcher(tmp_path, monkeypatch):
     config = json.loads((Path(__file__).parents[1] / "config.example.json").read_text())
     assert config["profile_dir"] == "./browser-profile"
-    assert config["cdp_url"] == "http://127.0.0.1:9281"
+    assert config["cdp_url"] == "http://127.0.0.1:9282"
     assert "browser_profile_mode" not in config
     profile = tmp_path / "provider-profile"
     config["profile_dir"] = str(profile)
@@ -28,6 +28,6 @@ def test_open_browser_uses_its_own_profile_and_upstream_launcher(tmp_path, monke
     app.cmd_open_browser()
     args, kwargs = captured[0]
     assert args[0] == str(profile)
-    assert str(args[1]) == "9281"
+    assert str(args[1]) == "9282"
     assert kwargs["mode"] == "auto"
     assert site.is_safe_url(args[2])

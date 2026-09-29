@@ -296,8 +296,6 @@ class _FakePage:
         """Runs the click body, then reports the timeout a fake page must
         report — the click itself is what the wiring tests measure, and it
         happens inside the with-block."""
-        page = self
-
         class _NoEvent:
             def __enter__(self):
                 return self

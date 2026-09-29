@@ -1,4 +1,4 @@
-# Vanguard statements, tax forms, letters and trade confirmations
+# Vanguard statements
 
 This provider reads documents from a browser where you sign in yourself.
 Passwords and verification codes are never handled by the downloader.
@@ -20,7 +20,7 @@ Mapped and run against a real account (2026-09-28): a pilot saved 5 of 5,
 a full run saved 135 statements across five accounts (2020-2026, including
 an employer 401(k)), every one a valid PDF, and a second run downloaded
 nothing. Uses current upstream core, standard launchers, a provider-local
-Python environment, and a separate browser profile on port 9281.
+Python environment, and a separate browser profile on port 9282.
 Automated tests cover parsing, filing, document identity, browser
 configuration, and request/control guards.
 
@@ -35,8 +35,11 @@ every statement with its account, period and a per-document id. Each
 statement's PDF is then saved by clicking its own row's download control
 (`title="Pdf download icon"` — the row's aria-labels carry non-breaking
 spaces that defeat text matching, the title attribute does not) and
-capturing the browser download event, with the browser pointed at the
-output folder first so the event is reliable on any real Edge or Chrome.
+capturing the browser download event, with the browser pointed first at
+`.vanguard-downloads`, a staging folder in the output folder, so the event
+is reliable on any real Edge or Chrome. The browser's own copy is removed
+from there once the statement is saved, and a statement the browser saved
+without raising the event is taken from there instead.
 Every account's statements arrive in one table, so the account filter is
 never driven; the year picker is a native `<select>` whose options must
 all be bare four-digit years before the app will touch it, and a year a

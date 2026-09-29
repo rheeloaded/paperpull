@@ -263,7 +263,7 @@ class App:
 
 
     def cmd_open_browser(self):
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), '9245')
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), '9282')
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         name = browser_launcher.open_signin_browser(profile, port, url, prefer_real=True,
@@ -325,8 +325,11 @@ class App:
 
         _cat, summary, confidence = doc_types.classify_document(title, self.rules)
         if category == CAT_STATEMENT:
-
-            summary, confidence = title or "Statement", doc_types.HIGH
+            # The kind alone. The title is "Account Statement - <account>",
+            # and the account is added once below, where it was being added
+            # a second time (review of #57).
+            kind = title.split(" - ", 1)[0].strip() if title else ""
+            summary, confidence = kind or "Statement", doc_types.HIGH
         elif category == CAT_CONFIRM:
 
             summary, confidence = title or "Trade Confirmation", doc_types.HIGH
@@ -377,6 +380,12 @@ class App:
             self.discovery.update(doc.key, {"document_id": doc.document_id,
                                             "on_demand_type": doc.on_demand_type},
                                   save=False)
+        # The name a known document would be given today, which is what
+        # Rename reads, so a file saved under an older name can take the new
+        # one without being downloaded again. The key is the title and does
+        # not change.
+        if existing.get("summary") != doc.summary:
+            self.discovery.update(doc.key, {"summary": doc.summary}, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
@@ -394,8 +403,10 @@ class App:
 
 
 
-        charitable_ids = {a["account_id"] for a in site.list_accounts(page)
-                          if a["charitable"]}
+        # No Vanguard account is a charitable one (list_accounts says so of
+        # every account), and asking it walked every year of the picker a
+        # second time before the walk that reads the statements.
+        charitable_ids: set = set()
         raw = site.collect_documents(
             page, keep=scope.period_filter(self.args, self.config))
         log.info("Vanguard: %d document(s) across all accounts", len(raw))
@@ -520,7 +531,8 @@ class App:
                                        doc.doc_type, doc.title, doc.date,
                                        out_path, occurrence=doc.occurrence,
                                        document_id_hint=doc.document_id,
-                                       on_demand_type_hint=doc.on_demand_type)
+                                       on_demand_type_hint=doc.on_demand_type,
+                                       dl_dir=Path(self.config["output_dir"]) / ".vanguard-downloads")
         # A failed capture must not leave a file behind. Playwright's
         # save_as creates the target before the bytes arrive, so a
         # capture that fails leaves a ZERO BYTE file with a convincing
@@ -823,6 +835,11 @@ class App:
             provider='Vanguard')
 
     def cmd_diagnose(self):
+        """The statements app as this browser sees it, in counts and field
+        names, to Diagnostics/diagnose-documents.json. One walk of the year
+        picker, the page's own calls listened to, nothing downloaded and no
+        screenshot taken, since a picture of a brokerage page carries every
+        balance and account number on it."""
         self.stats["mode"] = "diagnose"
         import json as _json
         page = self.page()
@@ -834,48 +851,24 @@ class App:
             info["title"] = page.title()
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-
-            accounts = site.list_accounts(page)
-            info["accounts_api"] = [{"label": site.redact_label(a["label"]),
-                                     "account_type": a["account_type"],
-                                     "charitable": a["charitable"],
-                                     "closed": a["closed"]}
-                                    for a in accounts]
-            docs = site.list_documents(page, accounts)
-            label_for_id = {a["account_id"]: site.redact_label(a["label"])
-                            for a in accounts}
-            kinds = {}
-            samples = []
-            by_account = {}
-            for d in docs:
-                cat, date, period, title = site.classify_document(d)
+            stmts = site.collect_statements_json(page)
+            kinds, by_account, samples = {}, {}, []
+            for s in stmts:
+                cat, date, period, _title = site.classify_document(s)
                 kinds[cat] = kinds.get(cat, 0) + 1
-                acct_id = site.account_id_from_display(d.get("accountDisplayName") or "")
-                label = label_for_id.get(acct_id, "(unknown account)")
+                label = site.redact_label(site.account_label_from_statement(s))
                 by_account[label] = by_account.get(label, 0) + 1
                 if len(samples) < 8:
-                    samples.append({"type": d.get("type"), "title": title[:80],
-                                    "category": cat, "date": date,
-                                    "period": period,
-                                    "downloadOptions": d.get("downloadOptions"),
-                                    "fields": sorted(d.keys())})
-            info["documents_total"] = len(docs)
+                    samples.append({"category": cat, "date": date, "period": period,
+                                    "frequency": s.get("frequencyType"),
+                                    "statement_type": s.get("statementType"),
+                                    "fields": sorted(k for k in s if isinstance(k, str))})
+            info["documents_total"] = len(stmts)
             info["documents_by_category"] = kinds
             info["documents_by_account"] = by_account
             info["samples"] = samples
-
             ui = site.read_page_ui(page) or {}
-            info["rendered"] = {
-                "selected_account": site.redact_label(ui.get("selectedAccount") or ""),
-                "chips": ui.get("chips"),
-                "date_range": ui.get("dateRange"),
-                "rows_on_screen": len(ui.get("rows") or []),
-                "row_labels": [site.redact_label(r) for r in (ui.get("rows") or [])[:8]],
-            }
-            info["controls"] = [{"text": c[:60], "safe": site.is_safe_control(c)}
-                                for c in (ui.get("buttons") or [])[:60]]
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            info["rendered"] = {"years": ui.get("years")}
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
@@ -885,16 +878,12 @@ class App:
         print("  carries the page's own words, so it stays on this machine")
         print("  unless you decide to send it.")
         print(f"Documents page found: {info.get('documents_page_found')}")
-        print(f"Accounts (API): {len(info.get('accounts_api') or [])}")
+        print(f"Accounts: {len(info.get('documents_by_account') or {})}")
         print(f"Documents (API): {info.get('documents_total')}  "
               f"{info.get('documents_by_category')}")
-        r = info.get("rendered") or {}
-        print(f"Rendered: account={r.get('selected_account')!r} "
-              f"chips={[(c or {}).get('text') for c in (r.get('chips') or [])]} "
-              f"rows on screen={r.get('rows_on_screen')}")
+        print(f"Years on the picker: {(info.get('rendered') or {}).get('years')}")
         if info.get("error"):
             print(f"Error: {info['error']}")
-
 
     def cmd_record(self):
         """Record the path a person takes to a document, so this app can be

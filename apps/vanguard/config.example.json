@@ -18,5 +18,5 @@
   "pilot_count": 5,
   "profile_dir": "./browser-profile",
   "browser": "auto",
-  "cdp_url": "http://127.0.0.1:9281"
+  "cdp_url": "http://127.0.0.1:9282"
 }
