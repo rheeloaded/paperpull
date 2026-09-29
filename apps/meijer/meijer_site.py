@@ -423,7 +423,12 @@ _ROW_CONTROLS_JS = r"""([text, money, dates]) => {
   // A row is also held to its own date when the purchase has one, so two
   // receipts from the same store for the same amount are never mistaken
   // for each other.
-  const dated = (t) => !dates || !dates.length || dates.some(d => t.includes(d));
+  // A date only counts with no digit on either side, since "1/19/2026"
+  // is inside "11/19/2026", and a November receipt was pressed for a
+  // January purchase of the same store and amount (review).
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+  const dateRes = (dates || []).map(d => new RegExp('(^|[^0-9])' + esc(d) + '(?![0-9])'));
+  const dated = (t) => !dateRes.length || dateRes.some(r => r.test(t));
   const walk = (el) => {
     for (const c of el.children) {
       const t = (c.innerText || '').trim();
@@ -437,8 +442,22 @@ _ROW_CONTROLS_JS = r"""([text, money, dates]) => {
   };
   walk(document.body);
   if (!rows.length) return {found: false};
-  rows.sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0));
-  const row = rows[0];
+  // Two rows that each hold the words are two receipts, and neither is
+  // guessed at.
+  const inner = rows.filter(r => !rows.some(o => o !== r && r.contains(o)));
+  if (inner.length > 1) return {found: false, ambiguous: inner.length};
+  // The words can sit in a block beside the control, so the row is the
+  // element above them that holds a control too, never one that holds a
+  // second amount, which is another row's (review).
+  const CTL = 'a, button, [role=button], [role=link]';
+  const amounts = /\$\s*-?[\d,]+\.\d{2}/g;
+  let row = inner[0];
+  for (let up = 0; up < 4 && !row.querySelector(CTL) && row.parentElement &&
+       row.parentElement !== document.body; up += 1) {
+    const p = row.parentElement;
+    if (((p.innerText || '').match(amounts) || []).length > 1) break;
+    row = p;
+  }
   const out = [];
   const collect = (el) => {
     for (const c of el.children) {
@@ -446,8 +465,9 @@ _ROW_CONTROLS_JS = r"""([text, money, dates]) => {
       const role = c.getAttribute('role') || '';
       const label = c.getAttribute('aria-label') || c.getAttribute('title') || '';
       const cls = (c.className || '').toString();
-      const clickable = tag === 'a' || tag === 'button' || role === 'button' || role === 'link' ||
-                        getComputedStyle(c).cursor === 'pointer';
+      const cs = getComputedStyle(c);
+      const interactive = tag === 'a' || tag === 'button' || role === 'button' || role === 'link';
+      const clickable = interactive || cs.cursor === 'pointer';
       // Its own words count too. A recording showed the control is a link
       // that reads "view receipt pdf", and round two looked only at the
       // label, the class and the address, so the one control on the row
@@ -456,14 +476,18 @@ _ROW_CONTROLS_JS = r"""([text, money, dates]) => {
         label + ' ' + cls + ' ' + (c.getAttribute('href') || '') + ' ' + (c.innerText || '').slice(0, 40));
       if (clickable || looksPdf) {
         out.push({el: c, text: (c.innerText || '').trim().slice(0, 40), label: label.slice(0, 40),
-                  href: c.getAttribute('href') || '', pdf: looksPdf});
+                  href: c.getAttribute('href') || '', pdf: looksPdf, interactive,
+                  shown: !!c.getClientRects().length && cs.visibility !== 'hidden',
+                  holdsControl: !!c.querySelector(CTL)});
       }
       collect(c);
     }
   };
   collect(row);
   out.sort((a, b) => (b.pdf ? 1 : 0) - (a.pdf ? 1 : 0));
-  return {found: true, cands: out.map(c => ({text: c.text, label: c.label, href: c.href, pdf: c.pdf})),
+  return {found: true, cands: out.map(c => ({text: c.text, label: c.label, href: c.href, pdf: c.pdf,
+                                             interactive: c.interactive, shown: c.shown,
+                                             holdsControl: c.holdsControl})),
           els: out.map(c => c.el), outline: (row.innerText || '').slice(0, 200)};
 }"""
 
@@ -485,15 +509,18 @@ def show_tab_for(page, purchase_type: str) -> bool:
     return open_tab(page, TAB_IN_STORE_RE if purchase_type == IN_STORE else TAB_ONLINE_RE)
 
 
-def row_controls(page, purchase):
+def row_controls(page, purchase, facts: Optional[dict] = None):
     """(candidates, handles) for the row this purchase came from, the PDF
-    icon first. None when the row is not on the page."""
+    icon first. None when the row is not on the page, or when more than one
+    row fits it, which `facts` then says as "ambiguous"."""
     money = purchase.total or ""
     text = (purchase.items[0].name if purchase.items else "") or purchase.purchase_date or ""
     try:
         h = page.evaluate_handle(_ROW_CONTROLS_JS, [text, money, row_dates(purchase.purchase_date)])
         props = h.get_properties()
         if "els" not in props:
+            if facts is not None and "ambiguous" in props:
+                facts["ambiguous"] = int(h.get_property("ambiguous").json_value() or 0)
             return None
         cands = h.get_property("cands").json_value()
         els = [v.as_element() for v in props["els"].get_properties().values()]
@@ -512,7 +539,7 @@ def receipt_links(card: RawCard) -> List[dict]:
         if not re.search(r"receipt|invoice|download|view|details|order", words, re.I):
             continue
         href = urljoin(BASE, ln.get("href") or "")
-        if not is_safe_url(href):
+        if not is_receipt_address(href):
             continue
         name = ln.get("text") or ln.get("label") or "Receipt"
         if FORBIDDEN_CONTROL_RE.search(name):
@@ -520,6 +547,14 @@ def receipt_links(card: RawCard) -> List[dict]:
         out.append({**ln, "href": href, "name": name})
     out.sort(key=lambda ln: (0 if (ln.get("download") or re.search(r"\.pdf(\?|$)|download", ln["href"], re.I)) else 1))
     return out
+
+
+def is_receipt_address(url: str) -> bool:
+    """A Meijer address that can be a receipt's. An empty link, a "#" or a
+    "/" resolves to Meijer's front page, and that page would have been
+    printed and filed as the receipt, since a Meijer page passes the check
+    on the word Meijer (review)."""
+    return is_safe_url(url) and urlsplit(url).path not in ("", "/")
 
 
 def _stable_key(card: RawCard, date: str, total: str) -> str:
@@ -608,27 +643,42 @@ def press_row_receipt(page, purchase, trace=None):
     # The tab's rows arrive after the tab is shown, so the row is given a
     # few seconds to appear before it is called missing.
     found = None
+    fit: dict = {}
     for _ in range(10):
-        found = row_controls(page, purchase)
-        if found:
+        found = row_controls(page, purchase, fit)
+        if found or fit.get("ambiguous"):
             break
         page.wait_for_timeout(1000)
     if not found:
         if trace is not None:
-            trace.append({"note": "the row for this purchase is not on the page"})
+            if fit.get("ambiguous"):
+                trace.append({"note": "more than one row fits this purchase, so none was pressed",
+                              "rows": fit["ambiguous"]})
+            else:
+                trace.append({"note": "the row for this purchase is not on the page"})
         return None
     cands, els = found
     if trace is not None:
+        # What may leave is listed, and the row's own words never do. A
+        # store's street reached this file through a control's words
+        # (review).
         trace.append({"note": "the row's controls",
-                      "candidates": [{**c, "text": mask_text(c["text"]), "label": mask_text(c["label"]),
-                                      "href": mask_href(c["href"])} for c in cands[:12]]})
+                      "candidates": [{"says": control_says(c), "href": _href_kind(c.get("href") or ""),
+                                      "pdf": bool(c.get("pdf")), "shown": bool(c.get("shown", True)),
+                                      "interactive": bool(c.get("interactive"))}
+                                     for c in cands[:12]]})
     # Only the row's own receipt control is pressed, and only its address is
     # fetched. Until 0.39.2 this function raised before its first press, so
     # the loop that pressed up to six of the row's controls in turn had never
     # run on a real account, and it would have pressed an Email Receipt, or
     # a control with no words at all, before the receipt (#42, review).
+    # And only a link or a button that is showing and holds no other
+    # control, so a wrapper is never pressed at its middle, where another
+    # control can sit, and a copy hidden at this width is never the one
+    # tried (review).
     picked = next(((c, el) for c, el in zip(cands, els)
-                   if el is not None and is_receipt_control(c)), None)
+                   if el is not None and c.get("interactive") and c.get("shown", True)
+                   and not c.get("holdsControl") and is_receipt_control(c)), None)
     if picked is None:
         if trace is not None:
             trace.append({"note": "no control on the row reads as its receipt", "controls": len(cands)})
@@ -644,6 +694,7 @@ def press_row_receipt(page, purchase, trace=None):
     got: dict = {}
     downloads: list = []
     popups: list = []
+    finished: dict = {}
 
     def on_response(res):
         # An answer from this page or a window this press opened. Another
@@ -665,14 +716,25 @@ def press_row_receipt(page, purchase, trace=None):
     # the one object the listener is taken off with below, where a second
     # downloads.append would be a different one.
     def on_download(dl):
+        # Only a download from a Meijer address, and it is waited for here,
+        # in the listener's own fiber, so the press can give up on one that
+        # never finishes (review).
+        u = dl.url or ""
+        if not is_safe_url(u[5:] if u.startswith("blob:") else u):
+            return
         downloads.append(dl)
+        try:
+            finished[id(dl)] = dl.path()
+        except Exception:
+            finished[id(dl)] = None
 
     def on_popup(p):
         popups.append(p)
-        try:
-            p.on("download", on_download)
-        except Exception:
-            pass
+        for event, handler in (("download", on_download), ("popup", on_popup)):
+            try:
+                p.on(event, handler)
+            except Exception:
+                pass
 
     looked: list = []
     try:
@@ -683,7 +745,8 @@ def press_row_receipt(page, purchase, trace=None):
             el.click(timeout=5000)
         except Exception as e:
             if trace is not None:
-                trace.append({"note": "click failed", "control": mask_text(label)[:40], "error": str(e)[:100]})
+                trace.append({"note": "click failed", "control": mask_text(label)[:40],
+                              "error": type(e).__name__})
         for _ in range(20):
             page.wait_for_timeout(500)
             if got or downloads:
@@ -701,22 +764,35 @@ def press_row_receipt(page, purchase, trace=None):
                 except Exception:
                     pass
                 if u.startswith("blob:") or is_safe_url(u):
-                    body = fetch_receipt_bytes(extra, u) if not u.startswith("blob:") else None
-                    if not body:
-                        # Its own name. Answered into `got`, a page that was
-                        # not the receipt read as a receipt found and ended
-                        # the wait before a download could land.
+                    # The window's address is fetched once.
+                    if u.startswith("blob:"):
                         try:
                             fetched = _fetch_with_status(extra, u)
                             body = base64.b64decode(fetched["b64"]) if fetched.get("b64") else None
                         except Exception:
                             body = None
+                    else:
+                        body = fetch_receipt_bytes(extra, u)
                     if body and body[:5] == b"%PDF-":
                         got["body"] = body
                 if not got and trace is not None:
                     trace.append({"note": "the control opened a window", "url": mask_href(u)})
             if got:
                 break
+        # A download is given twenty seconds to finish, then cancelled, so
+        # Download.path() cannot hold the run forever.
+        if downloads and not got:
+            for _ in range(40):
+                if id(downloads[0]) in finished:
+                    break
+                page.wait_for_timeout(500)
+            if id(downloads[0]) not in finished:
+                try:
+                    downloads[0].cancel()
+                except Exception:
+                    pass
+                if trace is not None:
+                    trace.append({"note": "the download did not finish in time"})
     finally:
         for target, event, handler in ((ctx, "response", on_response), (page, "download", on_download),
                                        (page, "popup", on_popup)):
@@ -725,28 +801,27 @@ def press_row_receipt(page, purchase, trace=None):
             except Exception:
                 pass
         for extra in popups:
-            try:
-                extra.remove_listener("download", on_download)
-            except Exception:
-                pass
+            for event, handler in (("download", on_download), ("popup", on_popup)):
+                try:
+                    extra.remove_listener(event, handler)
+                except Exception:
+                    pass
             try:
                 extra.close()
             except Exception:
                 pass
-    if downloads and not got:
+    if downloads and not got and finished.get(id(downloads[0])):
         # A download the browser saved for itself. Its own file is read
         # rather than moved, so nothing is left in the browser's folder
         # half-taken.
         try:
             import pathlib
-            saved = downloads[0].path()
-            if saved:
-                body = pathlib.Path(saved).read_bytes()
-                if body[:5] == b"%PDF-":
-                    got["body"] = body
+            body = pathlib.Path(finished[id(downloads[0])]).read_bytes()
+            if body[:5] == b"%PDF-":
+                got["body"] = body
         except Exception as e:
             if trace is not None:
-                trace.append({"note": "download save failed", "error": str(e)[:100]})
+                trace.append({"note": "download save failed", "error": type(e).__name__})
     if got.get("body"):
         if trace is not None:
             trace.append({"note": "the receipt came from the row's control", "control": mask_text(label)[:40]})
@@ -761,6 +836,13 @@ RECEIPT_PDF_LABEL_RE = re.compile(
     r"^\s*(view|download|open)\s+(the\s+|my\s+|your\s+)?(receipt\s+)?pdf\s*$", re.I)
 
 
+# Words that send, share or print a receipt, refused in the visible words
+# and in the name a screen reader hears alike. A link reading "view receipt
+# pdf" whose name says Email receipt is not the one to press (review).
+SENDS_CONTROL_RE = re.compile(
+    r"\b(e-?mail(ed|s)?|mail|share|send|sms|text|print|message|forward|copy\s+link)\b", re.I)
+
+
 def is_receipt_control(c: dict) -> bool:
     """Whether a row control is the one that fetches its receipt. Never one
     the guard refuses, and never one that only mentions a receipt, since
@@ -769,9 +851,36 @@ def is_receipt_control(c: dict) -> bool:
     label = " ".join((c.get("label") or "").split())
     if FORBIDDEN_CONTROL_RE.search(text) or FORBIDDEN_CONTROL_RE.search(label):
         return False
+    if SENDS_CONTROL_RE.search(text) or SENDS_CONTROL_RE.search(label):
+        return False
     if text:
         return bool(RECEIPT_LINK_RE.match(text))
     return bool(RECEIPT_LINK_RE.match(label) or RECEIPT_PDF_LABEL_RE.match(label))
+
+
+def control_says(c: dict) -> str:
+    """A control's words as one of a few fixed answers, for the trace,
+    never the words themselves."""
+    words = " ".join(((c.get("text") or "") + " " + (c.get("label") or "")).split())
+    if not words:
+        return "nothing"
+    if is_receipt_control(c):
+        return "the receipt"
+    if SENDS_CONTROL_RE.search(words):
+        return "sends or prints"
+    if FORBIDDEN_CONTROL_RE.search(words):
+        return "refused by the guard"
+    return "something else"
+
+
+def _href_kind(h: str) -> str:
+    if not h:
+        return "none"
+    if h.startswith("javascript:"):
+        return "script"
+    if h.startswith("#"):
+        return "fragment"
+    return "meijer" if is_safe_url(urljoin(BASE, h)) else "elsewhere"
 
 
 def goto_receipt_page(page, url: str) -> bool:

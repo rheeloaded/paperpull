@@ -582,7 +582,7 @@ class App:
         url = purchase.receipt_url or ""
         # An in-store receipt's row has a PDF icon and no link at all, so
         # the row itself is asked first when there is nothing to fetch (#42).
-        if not url or not site.is_safe_url(url):
+        if not url or not site.is_receipt_address(url):
             folder = self.paths.folder_for(purchase.purchase_type, "Receipt")
             filename = build_pdf_filename(purchase.purchase_date, purchase.summary, "Receipt", record=purchase)
             out_path = unique_path(folder, filename, self.config["max_path_length"],
@@ -604,7 +604,7 @@ class App:
                 {"timestamp": now_iso(), "date": purchase.purchase_date,
                  "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]}, indent=2))
             print(f"  What the page answered is in {attempt}, attach it to the issue.")
-        if not url or not site.is_safe_url(url):
+        if not url or not site.is_receipt_address(url):
             self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                                notes="The order row carries no receipt or details link")
             self._write_csv_rows(purchase, receipt_status="No receipt link on the row",
