@@ -115,12 +115,59 @@ def test_a_purchase_the_check_hid_is_never_marked_as_having_no_receipt(page, tmp
     assert rec.get("state") != State.NO_RECEIPT_AVAILABLE.value, rec
 
 
-def test_a_check_answered_at_a_console_leaves_the_purchase_for_the_next_run(page, tmp_path, monkeypatch):
+def test_at_a_console_too_the_check_stops_the_run_and_leaves_the_purchase(page, tmp_path, monkeypatch):
+    """Until 0.41.0 a console run waited here for the answer, with the app
+    still attached, and the check refused the hold (#48)."""
     app = _app(tmp_path, monkeypatch, "")
     page.set_content("<main>%s</main>" % CHECK)
     purchase = _purchase()
-    assert app._handle_no_receipt(page, purchase) is False
-    assert app.progress.get(purchase.key)["state"] == State.FAILED.value
+    with pytest.raises(SystemExit):
+        app._handle_no_receipt(page, purchase)
+    rec = app.progress.get(purchase.key) or {}
+    assert rec.get("state") != State.NO_RECEIPT_AVAILABLE.value, rec
+
+
+# -- 0.41.0, the check is answered with the app gone (#48) ------------------------
+
+def test_the_check_is_answered_with_the_app_gone(page, tmp_path, monkeypatch, capsys):
+    app = _app(tmp_path, monkeypatch, "")
+    happened = []
+    monkeypatch.setattr(target_receipts.browser_launcher, "ask_or_none",
+                        lambda prompt: happened.append("asked") or "")
+    real_close = app.close
+    monkeypatch.setattr(app, "close", lambda: happened.append("let go") or real_close())
+    page.set_content("<main>%s</main>" % CHECK)
+    with pytest.raises(SystemExit) as stop:
+        app.check_session(page)
+    assert stop.value.code == 0, "a clean stop, reported as stopped"
+    assert happened == ["let go"], "nobody is asked while the app is attached"
+    out = capsys.readouterr().out
+    assert "reload the page first" in out and "press Resume" in out
+
+
+def test_what_was_read_is_kept_when_the_check_stops_the_run(page, tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, "")
+    purchase = _purchase()
+    app.discovery.update(purchase.key, purchase.to_dict(), save=False)
+    page.set_content("<main>%s</main>" % CHECK)
+    with pytest.raises(SystemExit):
+        app.check_session(page)
+    on_disk = json.loads(app.paths.discovery_json.read_text(encoding="utf-8"))
+    assert purchase.key in on_disk
+
+
+def test_a_sign_out_still_waits_at_a_console(page, tmp_path, monkeypatch):
+    """A sign-in is not a bot check, and the app stays attached for it, so
+    the orders page can be opened again once it is answered."""
+    app = _app(tmp_path, monkeypatch, "")
+    asked = []
+    monkeypatch.setattr(target_receipts.browser_launcher, "ask_or_none",
+                        lambda prompt: asked.append(prompt) or "")
+    monkeypatch.setattr(site, "looks_signed_out", lambda p: True)
+    monkeypatch.setattr(site, "goto_orders", lambda p: None)
+    page.set_content("<main><h1>Sign in</h1></main>")
+    app.check_session(page)
+    assert len(asked) == 1
 
 
 # -- from the review of this change --------------------------------------------

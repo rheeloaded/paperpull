@@ -233,14 +233,7 @@ class App:
         # about it. Progress is already saved either way (#48).
         challenge = site.detect_security_challenge(page)
         if challenge:
-            self.progress.save(backup=True)
-            print(f"\n!! {challenge}")
-            print("Processing stopped. Please resolve the challenge yourself in the")
-            print("browser window. I will NOT attempt to bypass it.")
-            if browser_launcher.ask_or_none(
-                    "Press Enter once the page looks normal again (or Ctrl+C to quit)... ") is None:
-                print("Then press Resume here to carry on from where this stopped.")
-                raise SystemExit(0)
+            self._stop_for_the_check(challenge)
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
             print("\n!! Target appears to have signed you out.")
@@ -250,6 +243,31 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
             site.goto_orders(page)
+
+    def _stop_for_the_check(self, challenge: str) -> None:
+        """Target's bot check, a window asking to press and hold. It is the
+        person's to answer, never this app's, and it is answered with this
+        app gone. Until 0.41.0 a run at a console waited for the answer with
+        the app still attached to the browser, so the check was answered in
+        a browser under automation, and such a check can refuse a hold
+        however long it is held, which is what the tester met on 0.39.2 and
+        0.40.0 (#48). So what was read is saved, the app lets go of the
+        browser, which stays open where it is, and the run stops. Resume
+        carries on from there."""
+        self.progress.save(backup=True)
+        try:
+            self.discovery.save()
+        except Exception:
+            pass
+        self.close()
+        print(f"\n!! {challenge}")
+        print("Target wants to check that a person is at the keyboard. That is")
+        print("yours to answer, and this app never presses it or gets around it.")
+        print("It has let go of the browser and stopped, so the check sees only you.")
+        print("In the Target window, reload the page first, then press and hold.")
+        print("Once your orders show again, press Resume here, or run this again.")
+        print("Everything read so far is kept.")
+        raise SystemExit(0)
 
     # -- commands -----------------------------------------------------------
 
@@ -344,10 +362,10 @@ class App:
                 # A bot check that came up while the list was paged stops
                 # the run here, with the page left as it is, rather than on
                 # the next load of the orders page, which would throw away an
-                # answer the person had just given it (#48). Answered at a
-                # console, the tab and year are chosen again, since a sign-in
-                # on the way reloads the orders page, and the paging carries
-                # on. It is asked again for as long as the check is there.
+                # answer the person had just given it (#48). check_session
+                # lets go of the browser and stops the run, so the loop only
+                # goes round again if the check went away on its own between
+                # the two looks, and then the tab and year are chosen again.
                 while site.detect_security_challenge(page):
                     self.check_session(page)
                     site.select_history_tab(page, ptype)
@@ -742,8 +760,9 @@ class App:
 
         A page covered by Target's bot check has no receipt control either,
         and No Receipt Available is final, so a purchase the check hid would
-        never be asked for again. The check stops the run first, and one
-        answered at a console leaves this purchase for the next run, since
+        never be asked for again. The check stops the run first, and the
+        purchase is left as it was, to be asked for on the next run. A
+        sign-in answered at a console leaves it for the next run too, since
         the page it was looked for on is gone (#48)."""
         if site.detect_security_challenge(page) or site.looks_signed_out(page):
             self.check_session(page)
