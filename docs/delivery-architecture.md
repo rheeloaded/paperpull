@@ -45,9 +45,9 @@ unclassified rather than guessed at.
 | amazon |  |  |  |  |  | x | x |
 | amex | x |  |  |  | x | x |  |
 | amfam | x | x | x |  |  | x |  |
-| apple |  |  |  |  |  |  | x |
-| applecard | x | x | x |  |  | x |  |
 | anthem |  |  |  |  |  | x | x |
+| apple |  |  |  |  |  |  | x |
+| applecard | x | x | x |  | x | x |  |
 | att | x | x | x |  | x | x |  |
 | bestbuy |  |  |  |  |  |  | x |
 | capitalone |  |  |  |  |  | x |  |
@@ -57,7 +57,7 @@ unclassified rather than guessed at.
 | discovercard |  |  |  |  |  |  |  |
 | dominion | x |  |  |  | x | x |  |
 | ebay |  |  |  |  |  |  | x |
-| etrade | x | x | x |  |  | x |  |
+| etrade | x | x | x |  | x | x |  |
 | ezpassva |  |  |  |  |  | x |  |
 | fairfaxwater |  |  |  |  |  |  |  |
 | fedex |  |  |  |  |  | x |  |
@@ -68,11 +68,11 @@ unclassified rather than guessed at.
 | homedepot |  |  |  |  |  |  | x |
 | kroger |  |  |  |  |  |  | x |
 | lowes |  |  |  |  |  |  | x |
-| meijer |  |  |  | x | x | x | x |
+| meijer |  |  | x | x | x | x | x |
 | mtb |  |  |  |  |  | x |  |
 | myecp |  |  |  |  |  | x |  |
 | mypay |  |  |  |  |  | x |  |
-| navyfederal |  |  |  |  | x | x |  |
+| navyfederal |  |  | x |  | x | x |  |
 | netbenefits |  |  |  |  |  |  | x |
 | newrez | x | x | x |  |  | x |  |
 | paylocity |  |  |  |  |  | x |  |
@@ -83,8 +83,8 @@ unclassified rather than guessed at.
 | sba | x | x | x |  |  | x |  |
 | schwab |  |  |  |  |  | x |  |
 | smud | x | x | x |  |  | x |  |
+| statefarm | x | x | x |  | x | x |  |
 | stripe |  |  |  |  |  | x |  |
-| statefarm | x | x | x |  |  | x |  |
 | target | x |  |  |  |  |  | x |
 | tmobile | x |  |  |  |  |  |  |
 | tsp |  |  |  |  |  | x |  |
@@ -93,14 +93,15 @@ unclassified rather than guessed at.
 | ups |  |  |  |  |  | x |  |
 | usaa |  |  |  |  | x | x |  |
 | usbank | x |  |  |  | x | x |  |
+| vanguard | x | x |  |  |  |  |  |
 | verizon |  | x |  |  |  |  |  |
 | verizonmobile | x | x | x |  |  | x |  |
 | walmart |  |  |  |  |  |  | x |
 | wealthfront | x |  |  |  |  |  |  |
 | wellsfargo | x | x | x |  |  | x |  |
 
-Totals are A 23, B 12, C 13, D 3, E 11, F 33, G 12. **Twenty of the forty
-eight already carry three or more.**
+Totals are A 25, B 14, C 16, D 3, E 14, F 41, G 16. **Twenty-two of the
+sixty-one already carry three or more.**
 
 ### The two the census cannot classify
 

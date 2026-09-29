@@ -7,6 +7,29 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Vanguard, the 61st app, account statements (#57).** Every statement
+  the statements page lists, monthly and quarterly, for every account on
+  it, an employer 401(k) among them. The statements are read from the
+  page's own list while its year picker is walked, and each is saved by
+  pressing its own row's download control, whose label passes the guard
+  first. A scoped run never selects a year it does not want. Contributed
+  by tylerverry, whose Pilot and full run saved 135 statements across
+  five accounts back to 2020, every one a valid PDF, and whose second run
+  downloaded nothing. Before merging, the browser was pointed at a
+  staging folder of the app's own rather than the archive folder, where
+  it had left its own copy of every statement under Vanguard's name
+  beside the one the app saved. A statement saved by the browser without
+  the download event is now taken from that folder. A statement is named
+  for its account once, where the account had been named twice, and one
+  already saved under the longer name takes the shorter one with Rename.
+  Discover walks the year picker once instead of twice, and Diagnose
+  reads the fields Vanguard sends and takes no screenshot of a page that
+  shows every balance. Its own sign-in browser uses port 9282, since 9281
+  is Uber's.
+
 ## [0.40.0] - 2026-09-29
 
 Uber, the sixtieth app, saves the receipt of every ride and every Uber

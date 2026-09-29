@@ -46,7 +46,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Forty-nine providers are supported today, all built on the same pattern.
+Fifty providers are supported today, all built on the same pattern.
 Nine more, Wells Fargo, SBA, Verizon Mobile, State Farm,
 Kroger, Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -114,6 +114,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`ups`](apps/ups) | UPS Billing Center | Shipping invoices | **Built on the maintainer's own account.** The Billing Center's own invoice list and download from inside the page, nothing clicked |
 | [`usaa`](apps/usaa) | USAA | Statements | JSON-API enumeration |
 | [`usbank`](apps/usbank) | U.S. Bank | Credit-card statements | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
+| [`vanguard`](apps/vanguard) | Vanguard | Account statements | **Contributed by [@tylerverry](https://github.com/tylerverry), 135 statements across five accounts.** The statements page's own list, read while its year picker is walked, then each statement's own download control, pressed through the guard |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
 | [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/verizonmobile/README.md#help-test-it-no-programming-needed)** |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
@@ -521,9 +522,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **sixty** apps pass their tests, the forty-nine that are
+- ✅ All **sixty-one** apps pass their tests, the fifty that are
   supported, the two with a known issue and the nine still waiting for a
-  tester, 10,089 of them across the repo. Most are in regular use by the author. The rest were built or
+  tester, 10,235 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,
@@ -594,6 +595,8 @@ found a bug and diagnosed it to the line.
 - [@riordan](https://github.com/riordan), the Anthem BCBS app, the first
   health insurer.
 - [@appchamp](https://github.com/appchamp), the PG&E app.
+- [@tylerverry](https://github.com/tylerverry), the Vanguard app, built
+  and run against five accounts back to 2020.
 - [@marecabo](https://github.com/marecabo), Amazon's legal invoice PDFs on
   the German store.
 - [@watling777](https://github.com/watling777), the tester behind AT&T,
