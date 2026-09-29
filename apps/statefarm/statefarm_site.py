@@ -884,13 +884,14 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
                 h.dispose()
             except Exception:
                 pass
-    if not isinstance(got, list) or len(got) != 12:
+    if not isinstance(got, list) or len(got) != 13:
         return "the row's control could not be read again"
     (row_on, row_name, row_text, doc_on, doc_text, inside, outside, openers_inside,
-     in_parent, in_next, in_dialog, openers_anywhere) = got
+     in_parent, in_next, in_dialog, openers_anywhere, in_row) = got
     if not row_on:
         return "the row's control left the page"
-    if _date_of({"name": str(row_name or "").strip(), "row": str(row_text or "")}) != iso:
+    if _date_of({"name": str(row_name or "").strip(), "row": str(row_text or ""),
+                 "in_row": in_row is True}) != iso:
         return "the row's control no longer carries this date"
     if not isinstance(outside, int) or outside < 0 or \
             not isinstance(openers_inside, int) or openers_inside < 0:
@@ -1414,10 +1415,13 @@ _ROW_BOX_JS = r"""el => {
   const ahead = s => { const t = day(s); return !!t && t >= limit; };
   const words = c => ((c.getAttribute('aria-label') || c.innerText || '') + '').replace(/\s+/g, ' ').trim();
   const opener = /^\s*view\s+documents?\s*\d*\s*$/i.test(words(el));
-  const own = el.closest('[role=row], tr, li');
+  const near = el.closest('[role=row], tr, li');
+  const own = near && near.matches('[role=row]') ? near : null;
   const controls = n => [...n.querySelectorAll('a, button, [role=button], [role=link]')];
   let node = el, depth = 0, aheadOnly = null;
-  const revealed = n => controls(n).some(c => c !== el && c.getClientRects().length > 0);
+  const docShaped = c => /^[A-Za-z][A-Za-z0-9&\/'(). ]{1,60}?\s+-\s+\S/.test(words(c))
+    && !/^\s*view\s+documents?\s*\d*\s*$/i.test(words(c));
+  const revealed = n => controls(n).some(c => c !== el && c.getClientRects().length > 0 && docShaped(c));
   const holdsOthers = n => controls(n).some(c => c !== el && !aheadOnly.contains(c));
   while (node && depth < 6) {
     const days = (node.innerText || '').trim().match(dateRe) || [];
@@ -1435,6 +1439,13 @@ _ROW_BOX_JS = r"""el => {
 }"""
 _ROW_OF_JS = ("el => { const box = (" + _ROW_BOX_JS + ")(el); "
               "return box ? (box.innerText || '').trim().slice(0, 300) : ''; }")
+# Whether the box a control reads its date from lies inside the control's
+# own row. A day ahead is passed over only there. Outside it the box is a
+# heading or a list that holds other rows, and a date is read there as
+# v0.39.1 read it (review of 1662ac2).
+_IN_ROW_JS = ("el => { const box = (" + _ROW_BOX_JS + ")(el); "
+              "const own = el.closest('[role=row], tr, li'); "
+              "return !!box && !!own && own.matches('[role=row]') && own.contains(box); }")
 
 
 def _docs_from_api(body: dict) -> List[dict]:
@@ -1796,11 +1807,9 @@ def collect_download_docs(page, facts: Optional[dict] = None) -> List[RawDoc]:
         row_text = ""
         iso = _date_not_ahead(name)
         if not iso:
-            try:
-                row_text = el.evaluate(_ROW_OF_JS) or ""
-            except Exception:
-                row_text = ""
-            iso = _date_not_ahead(row_text)
+            got = _read_control(el)
+            row_text = got["row"] if got is not None else ""
+            iso = _date_of(got) if got is not None else None
         if not iso or iso in seen:
             continue
         seen.add(iso)
@@ -1818,7 +1827,8 @@ def collect_download_docs(page, facts: Optional[dict] = None) -> List[RawDoc]:
 # still on the page and its own link, read in one call so they describe one
 # moment.
 _NAME_AND_ROW_JS = ("el => [(el.getAttribute('aria-label') || el.innerText || '').trim(), ("
-                    + _ROW_OF_JS + ")(el), el.isConnected, el.getAttribute('href') || '']")
+                    + _ROW_OF_JS + ")(el), el.isConnected, el.getAttribute('href') || '', ("
+                    + _IN_ROW_JS + ")(el)]")
 
 # The pressed row's control, the document it revealed and every control that
 # carries the wanted date, read in one call so what it says holds for one
@@ -1850,8 +1860,10 @@ _TIE_JS = ("(row, [doc, dated, openers]) => { const box = (" + _ROW_BOX_JS + ")(
            "!!box && !!box.nextElementSibling && box.nextElementSibling.contains(doc), "
            "!!doc.closest('dialog, [role=dialog], [aria-modal=true]'), "
            "box ? [...box.querySelectorAll('a, button, [role=button], [role=link]')].filter(c => "
-           "c !== row && c.getClientRects().length > 0 && /^\\s*view\\s+documents?\\s*\\d*\\s*$/i.test("
-           "((c.getAttribute('aria-label') || c.innerText || '') + '').replace(/\\s+/g, ' '))).length : 0]; }")
+           "c !== row && c !== doc && c.getClientRects().length > 0 && (c.hasAttribute('aria-expanded') || "
+           "/^\\s*(view|hide|show|close)\\s+documents?\\s*\\d*\\s*$/i.test("
+           "((c.getAttribute('aria-label') || c.innerText || '') + '').replace(/\\s+/g, ' ')))).length : 0, "
+           "(" + _IN_ROW_JS + ")(row)]; }")
 
 
 def _read_control(el) -> Optional[dict]:
@@ -1861,18 +1873,20 @@ def _read_control(el) -> Optional[dict]:
         got = el.evaluate(_NAME_AND_ROW_JS)
     except Exception:
         return None
-    if not isinstance(got, list) or len(got) != 4:
+    if not isinstance(got, list) or len(got) != 5:
         return None
-    name, row, connected, href = got
+    name, row, connected, href, in_row = got
     return {"name": str(name or "").strip(), "row": str(row or ""),
-            "connected": bool(connected), "href": str(href or "")}
+            "connected": bool(connected), "href": str(href or ""), "in_row": in_row is True}
 
 
 def _date_of(read: dict) -> Optional[str]:
     """The date a control belongs to, from its own name first and then from
     the text around it, the way discovery reads it. A day after tomorrow is
-    never it (_date_not_ahead)."""
-    return _date_not_ahead(read["name"]) or _date_not_ahead(read["row"])
+    passed over only in text from inside the control's own row. Anywhere
+    else the text holds other rows, and it is read as v0.39.1 read it."""
+    row_date = _date_not_ahead if read.get("in_row") else parse_date
+    return _date_not_ahead(read["name"]) or row_date(read["row"])
 
 
 def _controls_for(page, iso: str) -> list:
@@ -1949,12 +1963,12 @@ def _control_dates(page) -> list:
                 name = (el.get_attribute("aria-label") or el.inner_text(timeout=500) or "").strip()
             except Exception:
                 name = ""
+            # Read the way _controls_for reads it, so the wait and the search
+            # never disagree about which date a control carries.
             found = _date_not_ahead(name)
             if not found:
-                try:
-                    found = _date_not_ahead(el.evaluate(_ROW_OF_JS) or "")
-                except Exception:
-                    found = None
+                got = _read_control(el)
+                found = _date_of(got) if got is not None else None
             out.append(found or "no date")
     except Exception as e:
         log.info("control dates: %s", e)

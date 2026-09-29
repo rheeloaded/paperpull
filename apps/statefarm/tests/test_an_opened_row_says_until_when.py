@@ -301,3 +301,153 @@ def test_a_row_opened_in_place_under_a_date_heading_is_refused(tmp_path, monkeyp
     finally:
         browser.close()
         driver.stop()
+
+
+# -- from the second review of this change ---------------------------------------
+#
+# The walk past a day ahead was bounded by the nearest row, table row or list
+# item, and a whole category drawn as one list item, or a layout table, is
+# a row by that measure. A row that prints no date then took a neighbor's,
+# one sent by mail with no control of its own. Any visible control also
+# counted as the document a row revealed, so a help link beside a folded
+# row's until line started the walk before any press. A control whose text
+# around it holds other rows had a day ahead passed over there too, and the
+# next date belonged to a neighbor. And an opened row that renames its button
+# Hide Documents went uncounted as another row's. Each page below must save
+# nothing, or only the document asked for.
+
+IN_A_CATEGORY_ITEM = (
+    "<main><ul id='cats'><li class='cat'><h2>Homeowners</h2>"
+    "<div class='doc'><span>03/14/2026</span> <span>Declarations Page, sent by mail</span></div>"
+    "<div class='doc'><span>Declarations Page</span> "
+    "<button class='view' onclick='this.nextElementSibling.hidden = false'>View Documents1</button>"
+    "<div class='docs' hidden><a href='#' onclick=\"pressDoc('the declarations of 01/27/2026');"
+    "return false\">Declarations Page - Homeowners</a> "
+    "<span>Available online until 01/27/%d</span></div></div>"
+    "</li></ul></main>" % LATER)
+
+IN_A_LAYOUT_TABLE = IN_A_CATEGORY_ITEM.replace(
+    "<ul id='cats'><li class='cat'>", "<table><tr><td>").replace("</li></ul>", "</td></tr></table>")
+
+REDRAWN_IN_A_CATEGORY_ITEM = """<main><ul id='cats'><li class='cat'><h2>Homeowners</h2>
+<div class='doc'><span>03/14/2026</span> <span>Declarations Page, sent by mail</span></div>
+<div class='doc' id='b'></div></li></ul></main><script>
+function drawB(open) {
+  const row = document.createElement('div');
+  row.className = 'doc';
+  row.id = 'b';
+  row.innerHTML = "<span>Declarations Page</span> <button class='view'></button>";
+  const b = row.querySelector('button');
+  b.textContent = open ? 'View Documents 1' : 'View Documents1';
+  b.onclick = () => drawB(!open);
+  if (open) {
+    const docs = document.createElement('div');
+    docs.innerHTML = "<a href='#'>Declarations Page - Homeowners</a> <span>Available online until 01/27/LATER</span>";
+    docs.querySelector('a').onclick = () => { pressDoc('the declarations of 01/27/2026'); return false; };
+    row.appendChild(docs);
+  }
+  document.getElementById('b').replaceWith(row);
+}
+drawB(false);
+</script>""".replace("LATER", str(LATER))
+
+HELP_LINK_WHILE_FOLDED = (
+    "<main><ul id='cats'><li class='cat'><h2>Homeowners</h2>"
+    "<div class='doc'><span>03/14/2026</span> <span>Declarations Page, sent by mail</span></div>"
+    "<div class='doc'><span>Declarations Page</span> "
+    "<span>Available online until 01/27/%d</span> <a href='#help' class='help'>What is this?</a> "
+    "<button class='view' onclick='this.nextElementSibling.hidden = false'>View Documents1</button>"
+    "<div class='docs' hidden><a href='#' onclick=\"pressDoc('the declarations of 01/27/2026');"
+    "return false\">Declarations Page - Homeowners</a></div></div>"
+    "</li></ul></main>" % LATER)
+
+DIRECT_LINK = (
+    "<main><div id='list'>"
+    "<div role='row'><span>03/14/2026</span> <span>Renewal Notice, sent by mail</span></div>"
+    "<div role='row'><a href='#' onclick=\"pressDoc('the undated notice');return false\">"
+    "Renewal Notice</a></div>"
+    "<div role='row'><span>02/02/2026</span> <a href='#' onclick=\"pressDoc('the declarations');"
+    "return false\">Declarations Page</a> <span>Available online until February 2, %d</span></div>"
+    "</div></main>" % LATER)
+
+VIEW_DOCUMENTS_UNDATED = (
+    "<main><div id='list'>"
+    "<div role='row'><span>03/14/2026</span> <span>Declarations Page, sent by mail</span></div>"
+    "<div role='row'><span>Declarations Page</span> "
+    "<button class='view' onclick='this.nextElementSibling.hidden = false'>View Documents1</button>"
+    "<div class='docs' hidden><a href='#' onclick=\"pressDoc('the undated declarations');"
+    "return false\">Declarations Page - Homeowners</a></div></div>"
+    "<div role='row'><span>02/02/2026</span> <a href='#' onclick=\"pressDoc('the renewal');"
+    "return false\">Renewal Notice</a> <span>Available online until February 2, %d</span></div>"
+    "</div></main>" % LATER)
+
+UNDER_ONE_DATE_HIDE = """<section id='day'><h3>03/14/2026</h3></section><script>
+let data = [{key: 'a', doc: 'Renewal Notice - 2017 Invented Roadster', tag: 'the roadster notice'}];
+const NEWER = {key: 'b', doc: 'Renewal Notice - 2019 Invented Coupe', tag: 'the coupe notice'};
+const kept = {};
+let openAt = -1;
+function rowFor(r) {
+  if (!kept[r.key]) {
+    const row = document.createElement('div');
+    row.setAttribute('role', 'row');
+    row.innerHTML = "<button class='view'></button><div class='docs' hidden><a href='#'></a>"
+      + " <span>Available online until 03/14/LATER</span></div>";
+    row.querySelector('a').textContent = r.doc;
+    row.querySelector('a').onclick = () => { pressDoc(r.tag); return false; };
+    row.querySelector('button').onclick = () => press(r.key);
+    kept[r.key] = row;
+  }
+  return kept[r.key];
+}
+function draw() {
+  const day = document.getElementById('day');
+  data.forEach((r, i) => {
+    const row = rowFor(r);
+    const b = row.querySelector('button');
+    b.textContent = i === openAt ? 'Hide Documents' : 'View Documents' + i;
+    b.setAttribute('aria-expanded', String(i === openAt));
+    row.querySelector('.docs').hidden = i !== openAt;
+    day.appendChild(row);
+  });
+}
+function press(key) {
+  openAt = data.findIndex(r => r.key === key);
+  draw();
+  setTimeout(() => { data = [NEWER].concat(data); draw(); }, 150);
+}
+draw();
+</script>""".replace("LATER", str(LATER))
+
+
+def _run(body, iso, title, tmp_path):
+    driver, browser, pg = _serve(body)
+    try:
+        out = tmp_path / "doc.pdf"
+        trace: list = []
+        site.download_bill(pg, None, iso, out, title=title, trace=trace)
+        return (out.read_bytes() if out.exists() else b""), pg.evaluate("window.docsPressed"), trace
+    finally:
+        browser.close()
+        driver.stop()
+
+
+@pytest.mark.parametrize("body,title,allowed", [
+    (IN_A_CATEGORY_ITEM, "Declarations Page - Homeowners", b""),
+    (IN_A_LAYOUT_TABLE, "Declarations Page - Homeowners", b""),
+    (REDRAWN_IN_A_CATEGORY_ITEM, "Declarations Page - Homeowners", b""),
+    (HELP_LINK_WHILE_FOLDED, "Declarations Page - Homeowners", b""),
+    (DIRECT_LINK, "Renewal Notice - Auto", b""),
+    (VIEW_DOCUMENTS_UNDATED, "Declarations Page - Homeowners", b""),
+    (UNDER_ONE_DATE_HIDE, "Renewal Notice - Auto", b"%PDF-1.4 the roadster notice"),
+], ids=["a category drawn as one list item", "a layout table row", "a row drawn anew in a category",
+        "a help link beside a folded row", "an undated document link", "an undated View Documents row",
+        "a row that renames its button Hide Documents"])
+def test_no_page_has_another_documents_file_saved_under_this_name(tmp_path, monkeypatch, body, title,
+                                                                     allowed):
+    # No row carries the date on most of these, so the page's wait would run
+    # its full length. Nothing pressed is proved as well by a short one.
+    monkeypatch.setattr(site, "ROWS_WAIT_MS", 3000)
+    saved, pressed, trace = _run(body, "2026-03-14", title, tmp_path)
+    assert saved in (b"", allowed), (saved, trace)
+    if not allowed:
+        assert pressed == 0, trace
