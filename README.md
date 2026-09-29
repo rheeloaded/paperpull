@@ -41,7 +41,7 @@ to build it and to keep it working as sites change. If it saves you time, you ca
 appreciation and support future development by
 **[sponsoring on GitHub](https://github.com/sponsors/rheeloaded)** or
 **[donating on Ko-fi](https://ko-fi.com/rheeloaded)**, or by buying the
-**Microsoft Store edition** for $9.99, one time, the same program with a
+**[Microsoft Store edition](https://apps.microsoft.com/detail/9P5LZRR773FP)** for $9.99, one time, the same program with a
 signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
@@ -428,7 +428,7 @@ native ARM64 build is one flag away in `packaging/build_windows.py` and
 will be shipped when someone needs it.
 
 **Two Windows editions, one program.** The GitHub release is free. The
-Microsoft Store edition is the same package from the same build, for
+[Microsoft Store edition](https://apps.microsoft.com/detail/9P5LZRR773FP) is the same package from the same build, for
 $9.99 one time, and what the price buys is convenience, a Store-signed
 package that installs with no warning, updates through the Store, and
 uninstalls cleanly, plus the knowledge that it keeps the project going.
@@ -526,9 +526,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,
-  both built by GitHub Actions from the tagged commit, with checksums. A
-  Microsoft Store listing and free open-source code signing for Windows are
-  in progress.
+  both built by GitHub Actions from the tagged commit, with checksums. The
+  Windows builds are code-signed, and the
+  [Microsoft Store edition](https://apps.microsoft.com/detail/9P5LZRR773FP) is live.
 - 🔜 **More providers:** community-driven, see [PROVIDERS.md](PROVIDERS.md).
 - 🔜 **Scheduled/assisted runs:** a monthly "nudge + sweep" (e.g. the 1st) that
   opens the login browsers and then runs discover + resume across every app once
@@ -574,10 +574,9 @@ the free build does.
 
 - **Sponsor on GitHub:** **[github.com/sponsors/rheeloaded](https://github.com/sponsors/rheeloaded)**, one-time or monthly, from a card you already have on GitHub.
 - **Donate on Ko-fi:** **[ko-fi.com/rheeloaded](https://ko-fi.com/rheeloaded)** ☕
-- **Buy the Microsoft Store edition** for $9.99, one time, the same
+- **[Buy the Microsoft Store edition](https://apps.microsoft.com/detail/9P5LZRR773FP)** for $9.99, one time, the same
   program from the same build, with a signed installer that opens with no
-  warning and updates through the Store. The listing is in review and will
-  be linked here once it is live. It unlocks nothing the free build lacks.
+  warning and updates through the Store. It unlocks nothing the free build lacks.
 
 You can also help without spending anything: test a provider you hold an
 account with (see [PROVIDERS.md](PROVIDERS.md)), report what breaks, or
