@@ -270,23 +270,70 @@ class App:
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
 
+    def _look_at_orders(self, page):
+        """Open the order list and say what is there, as (listed, challenge).
+
+        Only the list shows a signed-in session. When it does not come the
+        page is looked at again for a little while, because Walmart's bot
+        check can leave /orders blank and a moment later send the tab to
+        "Robot or human?", and one look at the blank page finds nothing to
+        name. That one look is how --login said Success on a page that was
+        about to be blocked."""
+        if site.goto_orders(page):
+            return True, site.detect_security_challenge(page)
+        challenge = site.challenge_after_a_moment(page)
+        return site.orders_listed(page), challenge
+
+    def _open_orders(self, page) -> None:
+        """Open the order list and go on only once it is there.
+
+        Discovery used to go on from a list that never came, find no orders
+        on the blank page and finish as though there were none, so a run
+        read as clean with its new purchases missed."""
+        while True:
+            listed, challenge = self._look_at_orders(page)
+            if listed:
+                # Checked once below, as it always was. Going round again
+                # here would ask forever about a word on a page that is fine.
+                break
+            if challenge or site.looks_signed_out(page):
+                # Asked about, or under the panel the run stops there.
+                self.check_session(page)
+                continue
+            self.progress.save(backup=True)
+            print("\n!! Your Walmart orders did not load, so this cannot find any of")
+            print("them. Look at the browser window. If Walmart is asking whether you")
+            print("are a robot or a human, or asking you to sign in, answer it there")
+            print("yourself. I will NOT attempt to bypass it.")
+            self.write_failure("open the order list", "the order list did not appear")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page shows your orders (or Ctrl+C to quit)... ") is None:
+                print("Once it shows your orders, run this again.")
+                raise SystemExit(0)
+        self.check_session(page)
+
     def cmd_login(self):
         if self.config.get("cdp_url"):
             # CDP mode: the browser is launched by login.bat (not here). This
             # just verifies we can connect and that you are signed in.
             print("Checking the connection to your signed-in Walmart browser...\n")
             page = self.page()
-            site.goto_orders(page)
-            challenge = site.detect_security_challenge(page)
+            listed, challenge = self._look_at_orders(page)
             if challenge:
                 print(f"!! {challenge}")
                 print("Resolve it yourself in the browser window, then re-run --login.")
             elif site.looks_signed_out(page):
                 print("Connected, but Walmart shows the signed-out page.")
                 print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-            else:
+            elif listed:
                 print("Success: connected to your signed-in Walmart session.")
                 print("Keep that browser window OPEN, then run the diagnostics or pilot.")
+            else:
+                print("Connected, but your Walmart orders did not load, so this cannot")
+                print("say whether you are signed in. Look at the browser window. If")
+                print("Walmart asks whether you are a robot or a human, or asks you to")
+                print("sign in, answer it there yourself, keep the window OPEN, then")
+                print("re-run --login.")
             self.close()
             return
         print("Opening Walmart.com in a dedicated supervised browser profile.")
@@ -301,12 +348,19 @@ class App:
         # the browser is deliberately left open.
         if not browser_launcher.pause_for_sign_in():
             return
-        site.goto_orders(page)
-        if site.looks_signed_out(page):
+        listed, challenge = self._look_at_orders(page)
+        if challenge:
+            print(f"!! {challenge}")
+            print("Resolve it yourself in the browser window, then run --login again.")
+        elif site.looks_signed_out(page):
             print("It still looks like you are signed out; the orders page bounced to login.")
             print("Sign in in the browser, then run:  python walmart_receipts.py --login")
-        else:
+        elif listed:
             print("Signed-in session detected.")
+        else:
+            print("Your Walmart orders did not load, so this cannot say whether you")
+            print("are signed in. Look at the browser window, answer anything Walmart")
+            print("asks there yourself, then run --login again.")
         self.close()
 
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
@@ -315,8 +369,7 @@ class App:
         page = self.page()
         counts = {}
         for ptype in types:
-            site.goto_orders(page)
-            self.check_session(page)
+            self._open_orders(page)
             found_tab = site.select_history_tab(page, ptype)
             if ptype == IN_STORE and not found_tab:
                 log.warning("In-store tab not found; recording zero in-store purchases "

@@ -28,6 +28,7 @@ from __future__ import annotations
 import html as _html
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -250,13 +251,59 @@ def detect_security_challenge(page) -> Optional[str]:
 # Purchase history navigation
 # ---------------------------------------------------------------------------
 
-def goto_orders(page) -> None:
+# How long the order list gets to appear, how long the page is left to
+# settle after that, and how long a page the list never came to is watched
+# for a bot check. Walmart's check can hold /orders blank while it decides
+# and only then send the tab to its "Robot or human?" page, so the list
+# running late is not the same as there being no orders.
+ORDERS_WAIT_MS = 30000
+SETTLE_MS = 2500
+CHALLENGE_WAIT_MS = 15000
+
+
+def goto_orders(page) -> bool:
+    """Open the order list. True when the list appeared.
+
+    False is not an empty history and not a signed-in session. A container
+    Chrome was told "Success" by --login while this said the list never
+    came, because the tab was still on /orders with nothing on it to name,
+    and a moment later it was on /blocked, titled "Robot or human?"."""
     page.goto(URLS["orders"], wait_until="domcontentloaded", timeout=60000)
     try:
-        page.wait_for_selector(FALLBACK["page_ready"], timeout=30000)
+        page.wait_for_selector(FALLBACK["page_ready"], timeout=ORDERS_WAIT_MS)
+        listed = True
     except Exception:
-        log.warning("Purchase-history content did not appear within 30s")
-    page.wait_for_timeout(2500)
+        log.warning("Purchase-history content did not appear within %gs",
+                    ORDERS_WAIT_MS / 1000)
+        listed = False
+    page.wait_for_timeout(SETTLE_MS)
+    return listed
+
+
+def orders_listed(page) -> bool:
+    """Whether the order list is on the page now. Nothing is waited for."""
+    try:
+        return page.locator(FALLBACK["page_ready"]).count() > 0
+    except Exception:
+        return False
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the order list never came to, looked
+    for several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    list turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 # Selecting the Order-type filter sets a URL parameter; navigating straight
@@ -275,7 +322,7 @@ def select_history_tab(page, purchase_type: str) -> bool:
         page.wait_for_selector(FALLBACK["page_ready"], timeout=30000)
     except Exception:
         log.warning("%s filtered order list did not render within 30s", purchase_type)
-    page.wait_for_timeout(2500)
+    page.wait_for_timeout(SETTLE_MS)
     return True
 
 

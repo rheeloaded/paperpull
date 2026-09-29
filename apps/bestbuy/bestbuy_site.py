@@ -47,6 +47,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 from typing import List, Optional
 from urllib.parse import quote, urlsplit
 
@@ -189,17 +190,56 @@ def hide_survey(page) -> None:
 # The history, one year at a time
 # ---------------------------------------------------------------------------
 
-def goto_orders(page, wait_ms: int = 30000) -> bool:
+# How long the purchase history gets to show its range menu, how long the
+# page is left to settle after that, and how long a page the menu never
+# came to is watched for a bot check that arrives a moment later.
+ORDERS_WAIT_MS = 30000
+SETTLE_MS = 1500
+CHALLENGE_WAIT_MS = 15000
+
+
+def goto_orders(page, wait_ms: Optional[int] = None) -> bool:
     """Open the purchase history and wait for its range menu. True when it
-    is there."""
+    is there.
+
+    False is not an empty history and not a signed-in session. The page can
+    sit blank while a bot check decides and only then turn into the check
+    itself, so one look at it finds nothing to name."""
     page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
     try:
-        page.wait_for_selector(YEAR_MENU, timeout=wait_ms)
+        page.wait_for_selector(YEAR_MENU, timeout=ORDERS_WAIT_MS if wait_ms is None else wait_ms)
     except Exception:
         return False
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(SETTLE_MS)
     hide_survey(page)
     return True
+
+
+def orders_listed(page) -> bool:
+    """Whether the history's range menu is on the page now. Nothing is
+    waited for."""
+    try:
+        return page.locator(YEAR_MENU).count() > 0
+    except Exception:
+        return False
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the range menu never came to, looked
+    for several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    menu turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 def year_choices(page) -> List[str]:
