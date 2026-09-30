@@ -730,3 +730,68 @@ def test_a_billing_page_with_nothing_to_take_writes_the_failure_file(monkeypatch
     monkeypatch.setattr(amfam_docs.site, "collect_download_docs", lambda page: [])
     app.cmd_discover(quiet=True)
     assert written == [("find the statements", "the billing page showed no statement to take")]
+
+
+# -- from the safety review of the statementPDF commit -------------------------------------
+
+def _marked_other(words: str, opens: str) -> str:
+    return ("<div data-cy='statementRow'><div><span>%s</span></div>"
+            "<div><a data-cy='statementPDF' title='View' onclick=\"openPdf('%s')\"><span>PDF</span></a></div></div>"
+            % (words, opens))
+
+
+@pytest.mark.parametrize("words", ["Payment plan agreement 09/12/2026", "Notice of cancellation 09/12/2026",
+                                   "Auto ID card 09/12/2026", "Bill paid 09/12/2026 $123.45"])
+def test_another_documents_marked_link_is_not_the_statement(billing, tmp_path, words):
+    """A site that marks every document's link the same way had another
+    document's link, above the statement with its date, saved as the
+    statement, and the statement itself never fetched."""
+    page = billing(_page(_marked_other(words, "other document")
+                         + _marked_row("09/12/2026", "statement 09/12/2026")))
+    assert [d.date_text for d in site.collect_download_docs(page)] == ["2026-09-12"]
+    out = tmp_path / "Statements" / "2026-09-12 American Family Account Statement.pdf"
+    assert site.download_bill(page, tmp_path / ".amfam-downloads", "2026-09-12", out) is True
+    assert b"statement 09/12/2026" in out.read_bytes()
+
+
+def test_a_payments_marked_link_is_not_a_statement(billing):
+    page = billing(_page(_marked_other("Payment received 09/20/2026 $123.45", "payment receipt")))
+    assert site.collect_download_docs(page) == []
+
+
+@pytest.mark.parametrize("control", [
+    "<input type='button' data-cy='statementPDF' value='Pay now' onclick=\"fetch('/changed')\">",
+    "<a data-cy='statementPDF' onclick=\"fetch('/changed')\"><svg width='12' height='12'>"
+    "<title>Enroll in paperless billing</title><rect width='12' height='12'/></svg></a>",
+    "<span id='what'>Enrolls you in paperless billing</span>"
+    "<a data-cy='statementPDF' aria-describedby='what' onclick=\"fetch('/changed')\"><span>PDF</span></a>",
+    "<a data-cy='statementPDF' title='View'><button onclick=\"fetch('/changed')\">PDF</button></a>",
+], ids=["an input", "an svg title", "described", "holding a button"])
+def test_a_marked_control_the_guard_cannot_read_is_never_pressed(billing, tmp_path, control):
+    row = "<div data-cy='statementRow'><span>Statement date 09/12/2026</span> %s</div>" % control
+    page = billing(_page(row))
+    changed = []
+    page.context.route("%s/changed" % BASE, lambda r: changed.append(1) or r.fulfill(status=204, body=""))
+    assert site.collect_download_docs(page) == []
+    out = tmp_path / "Statements" / "2026-09-12 American Family Account Statement.pdf"
+    assert site.download_bill(page, tmp_path / ".amfam-downloads", "2026-09-12", out) is False
+    assert changed == []
+
+
+@pytest.mark.parametrize("hide", ["aria-hidden='true'", "style='display:none'"])
+def test_a_hidden_marked_list_is_not_a_list_showing(billing, hide):
+    """A code prompt drawn over a list the page keeps mounted was not seen,
+    and the statement behind it was listed."""
+    page = billing(_page("<div role='dialog'><h2>Verify your identity</h2><p>Enter the code we sent.</p></div>"
+                         "<div data-cy='statements' %s>%s</div>"
+                         % (hide, _marked_row("09/12/2026", "statement 09/12/2026"))))
+    assert site.collect_download_docs(page) == []
+    assert site.detect_security_challenge(page)
+
+
+def test_a_hidden_copy_ahead_of_the_shown_link_is_never_the_one_pressed(billing, tmp_path):
+    hidden = ("<div style='display:none'>%s</div>" % _marked_row("09/12/2026", "hidden copy"))
+    page = billing(_page(hidden + _marked_row("09/12/2026", "statement 09/12/2026")))
+    out = tmp_path / "Statements" / "2026-09-12 American Family Account Statement.pdf"
+    assert site.download_bill(page, tmp_path / ".amfam-downloads", "2026-09-12", out) is True
+    assert b"statement 09/12/2026" in out.read_bytes()

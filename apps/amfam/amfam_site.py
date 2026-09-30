@@ -199,7 +199,11 @@ RATE_LIMIT_MARKERS = [
 # pressed <a data-cy="statementPDF">, a link with no address, so it has no
 # link role and no words of a statement's own, and every search by role and
 # words found nothing on his billing page. The site's own test id names it.
-STATEMENT_PDF_SELECTOR = '[data-cy="statementPDF"]'
+STATEMENT_PDF_SELECTOR = 'a[data-cy="statementPDF"]'
+# Only a mark the page shows. A list the page keeps mounted but hidden, under
+# a sign-in prompt or behind another tab, counted as a list showing, and a
+# hidden copy ahead of the shown one was the one pressed (review of #45).
+_SHOWN_MARKED = STATEMENT_PDF_SELECTOR + ':not([aria-hidden="true"]):not([aria-hidden="true"] *)'
 
 FALLBACK = {
     "statement_pdf": STATEMENT_PDF_SELECTOR,
@@ -429,7 +433,8 @@ def _bill_controls(page):
     """Every control on the page whose name says it fetches a document, and
     every one the site marks as a statement's PDF. The words are this
     provider's, the rest is the core's."""
-    return _controls_named(page, BILL_CONTROL_RE).or_(page.locator(STATEMENT_PDF_SELECTOR))
+    return _controls_named(page, BILL_CONTROL_RE).or_(
+        page.locator(_SHOWN_MARKED).filter(visible=True))
 
 
 def _marked(el) -> bool:
@@ -440,6 +445,25 @@ def _marked(el) -> bool:
         return False
 
 
+# A marked link that holds another control, whose press could land on that
+# control and do anything (review of #45).
+_HOLDS_A_CONTROL_JS = r"""e => !!e.querySelector(
+  'a, button, input, select, textarea, [role=button], [role=link], [role=menuitem], [role=checkbox], [role=switch]')"""
+
+
+def _marked_row_refuses(row_text: str, row_flat: str) -> bool:
+    """Whether a marked link's row names another kind of document, or a
+    payment without naming a statement. The mark says a statement's PDF, and
+    a site that marks every document's link the same way had another
+    document's link, above the statement with its date, saved as the
+    statement, and the statement itself never fetched (review of #45)."""
+    texts = [t for t in (row_text, row_flat) if t]
+    if any(_OTHER_DOCUMENT_RE.search(t) for t in texts):
+        return True
+    return (any(_PAYMENT_WORDS_RE.search(t) for t in texts)
+            and not _A_STATEMENT_RE.search(row_flat or row_text))
+
+
 def _safe_to_press(el, name: str) -> bool:
     """The guard's answer for a control about to be pressed. One the site
     marks as a statement's PDF has no statement words of its own, so every
@@ -447,9 +471,10 @@ def _safe_to_press(el, name: str) -> bool:
     if _marked(el):
         try:
             words = el.evaluate(_WORDS_OF_JS) or []
+            holds = el.evaluate(_HOLDS_A_CONTROL_JS)
         except Exception:
             return False
-        return not any(_refused(w) for w in words)
+        return not holds and not any(_refused(w) for w in words)
     return is_safe_control(name)
 
 
@@ -624,6 +649,16 @@ _WORDS_OF_JS = r"""el => {
   if (by) for (const id of by.split(/\s+/)) { const n = document.getElementById(id); if (n) add(n.textContent); }
   add(el.getAttribute('title'));
   add(el.innerText);
+  // What an input shows, what an SVG's title and aria-describedby announce,
+  // none of which innerText holds (review of #45).
+  for (const n of [el, ...el.querySelectorAll('input')]) {
+    if (n.tagName === 'INPUT') { add(n.value); add(n.getAttribute('value')); }
+  }
+  for (const t of el.querySelectorAll('svg title, title')) add(t.textContent);
+  for (const n of [el, ...el.querySelectorAll('[aria-describedby]')]) {
+    const d = n.getAttribute('aria-describedby');
+    if (d) for (const id of d.split(/\s+/)) { const m = document.getElementById(id); if (m) add(m.textContent); }
+  }
   // And each visible piece of its text alone, since spans that touch run
   // together in innerText, "View billPay now", where "pay" has no word
   // boundary to be refused by (review of 0.41.0).
@@ -786,6 +821,12 @@ def _statement_controls(page):
             continue
         if any(_refused(w) for w in words):
             continue
+        if marked:
+            try:
+                if el.evaluate(_HOLDS_A_CONTROL_JS):
+                    continue
+            except Exception:
+                continue
         try:
             row = el.evaluate(_ROW_OF_JS, {"pattern": BILL_CONTROL_RE.pattern,
                                            "marked": STATEMENT_PDF_SELECTOR}) or {}
@@ -793,6 +834,8 @@ def _statement_controls(page):
             row = {}
         row_text = str(row.get("text") or "") if isinstance(row, dict) else ""
         row_flat = str(row.get("flat") or "") if isinstance(row, dict) else ""
+        if marked and _marked_row_refuses(row_text, row_flat):
+            continue
         if (not marked and not _STATEMENT_WORDS_RE.search(name)
                 and not _row_names_a_statement(row_text, row_flat)):
             continue
