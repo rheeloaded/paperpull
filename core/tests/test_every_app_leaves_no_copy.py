@@ -394,6 +394,42 @@ def calls_in(path: Path, name: str) -> list:
     return out
 
 
+def cleanup_folder_mismatch(path: Path):
+    """What is wrong with the folder this module clears, or None.
+
+    The module that clears what earlier versions left also gives the
+    browser its folder, or hands a capture the folder as its dl_dir, and
+    every one of those must be the folder it clears, written the same way.
+    None given for dl_dir means no folder, and is not one."""
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+
+    def named(call):
+        f = call.func
+        return (f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")).lstrip("_")
+
+    def arg(call, position, keyword):
+        if len(call.args) > position:
+            return call.args[position]
+        return next((kw.value for kw in call.keywords if kw.arg == keyword), None)
+
+    clears = [c for c in calls if named(c) == "clear_archived_copies"]
+    if not clears:
+        return None
+    cleared = {ast.unparse(arg(c, 0, "dl_dir")) for c in clears}
+    given = [arg(c, 1, "dirpath") for c in calls if named(c) == "set_download_dir"]
+    handed = [kw.value for c in calls if named(c) != "clear_archived_copies"
+              for kw in c.keywords if kw.arg == "dl_dir"]
+    folders = {ast.unparse(e) for e in given + handed
+               if e is not None and not (isinstance(e, ast.Constant) and e.value is None)}
+    if not folders:
+        return "clears a folder it never gives the browser or a capture"
+    if folders != cleared:
+        return "clears %s but gives the browser or a capture %s" % (
+            sorted(cleared), sorted(folders))
+    return None
+
+
 @pytest.mark.parametrize("app", FOLDER_APPS, ids=lambda d: d.name)
 def test_a_download_event_is_saved_through_the_core(app):
     """In an app that points the browser at a folder, a download event's own
@@ -437,6 +473,49 @@ def test_copies_an_earlier_version_left_are_cleared_on_the_next_run(app):
     assert any(calls_in(p, "clear_archived_copies") for p in modules), (
         "%s points the browser at a folder and never clears what earlier "
         "versions left there" % app.name)
+
+
+@pytest.mark.parametrize("app", FOLDER_APPS, ids=lambda d: d.name)
+def test_the_next_run_clears_the_folder_the_browser_is_pointed_at(app):
+    """The cleanup and the browser are given the folder in separate calls.
+    Given another folder, the cleanup would never see the copies the
+    browser left, and would look through a folder where the browser saves
+    nothing. Vanguard writes its folder out twice in its docs module, once
+    for the cleanup and once for the capture, and its real-browser test
+    shows the capture points the browser at the folder it is handed."""
+    for path in app_modules(app):
+        wrong = cleanup_folder_mismatch(path)
+        assert wrong is None, "%s %s" % (path.name, wrong)
+
+
+def test_a_cleanup_given_another_folder_is_caught(tmp_path):
+    """The check above, on modules written to fail it."""
+    def module(name, text):
+        p = tmp_path / name
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    agree = module("a_docs.py", "def page(self):\n"
+                   "    site.set_download_dir(p, self._dl_dir)\n"
+                   "    capture.clear_archived_copies(self._dl_dir, [])\n")
+    assert cleanup_folder_mismatch(agree) is None
+    other = module("b_docs.py", "def page(self):\n"
+                   "    site.set_download_dir(p, self._dl_dir)\n"
+                   "    capture.clear_archived_copies(self._out_dir, [])\n")
+    assert "self._out_dir" in cleanup_folder_mismatch(other)
+    handed = module("c_docs.py", "def page(self):\n"
+                    "    capture.clear_archived_copies(Path(o) / '.x-downloads', [])\n"
+                    "def one(self):\n"
+                    "    site.download_document(p, dl_dir=Path(o) / '.y-downloads')\n")
+    assert ".y-downloads" in cleanup_folder_mismatch(handed)
+    alone = module("d_docs.py", "def page(self):\n"
+                   "    capture.clear_archived_copies(self._dl_dir, [])\n")
+    assert "never gives" in cleanup_folder_mismatch(alone)
+    unpointed = module("e_docs.py", "def page(self):\n"
+                       "    capture.clear_archived_copies(self._dl_dir, [])\n"
+                       "    site.download_document(p, dl_dir=self._dl_dir)\n"
+                       "    site.download_document(p, dl_dir=None)\n")
+    assert cleanup_folder_mismatch(unpointed) is None
 
 
 @pytest.mark.parametrize("app", FOLDER_APPS, ids=lambda d: d.name)

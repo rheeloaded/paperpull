@@ -332,6 +332,23 @@ def test_nothing_is_cleared_against_a_document_that_is_not_there(tmp_path):
     assert clear_copies(None, before, out) == 0
 
 
+def test_the_saved_document_is_never_cleared_as_a_copy_of_itself(tmp_path, monkeypatch):
+    """A document saved into the folder the browser was pointed at arrived
+    there after the snapshot and is byte for byte the document, so without
+    a check it is its own exact copy. It stays, however its path is
+    spelled."""
+    dl, _ = folder(tmp_path)
+    before = snapshot(dl)
+    out = dl / "2026-08-31 Statement.pdf"
+    out.write_bytes(PDF)
+    assert clear_copies(dl, before, out) == 0
+    monkeypatch.chdir(tmp_path)
+    assert clear_copies(Path(".app-downloads"), before,
+                        Path(".app-downloads") / "2026-08-31 Statement.pdf") == 0
+    assert clear_copies(dl, before, Path(".app-downloads") / "2026-08-31 Statement.pdf") == 0
+    assert out.read_bytes() == PDF
+
+
 # clear_archived_copies
 
 def test_copies_of_archived_documents_are_cleared_and_nothing_else(tmp_path):
