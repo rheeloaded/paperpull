@@ -41,6 +41,7 @@ from paperpull_core import browser as browser_launcher
 import robinhood_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
+from paperpull_core.keys import is_done
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
@@ -76,6 +77,17 @@ class Document:
         self.date_text = date_text  # the row's raw date string, for re-matching
         self.document_id = document_id  # Robinhood's stable per-document UUID
         self.source_url = kw.get("source_url", "")  # page where the doc's download link lives
+        # The year the page shows beside a tax form whose title carries none,
+        # so the download presses that year's control and no other (#62).
+        self.tax_year = kw.get("tax_year", "")
+        # The end of the tax year a form prints, for one the page gave no
+        # year. It names the file and its ledger row, never the key, which
+        # is what the page lists every run.
+        self.printed_date = kw.get("printed_date", "")
+        # The key a form saved without a date was remembered by, before the
+        # page's year gave it one. Kept so a page that shows it without a
+        # year again is still known to be done.
+        self.undated_key = kw.get("undated_key", "")
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -123,9 +135,91 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+class _Ledger:
+    """The index as a rename reads it, written through to the real one."""
+
+    def __init__(self, csv, rows):
+        self._csv, self._rows = csv, rows
+        self.columns = csv.columns
+
+    def read_all(self):
+        return self._rows
+
+    def rewrite(self, rows):
+        self._csv.rewrite(rows)
+
+
+class _Records:
+    """Records as a rename reads them, which is only ever `.data`."""
+
+    def __init__(self, data):
+        self.data = data
+
+
+class _DatedTaxForms:
+    """This app as a rename sees it, with a tax form saved without a date
+    dated after all (#62).
+
+    A form whose title named no year was saved as 0000-00-00, with a ledger
+    row that has no date. Rename names a file from its row, so a date the
+    record learned later never reached the file. Here each such row is
+    dated from what is known now, in this view only, so a preview changes
+    nothing and an applied rename writes the row along with the file.
+
+    The date is the one discovery moved the saved form to, when the page's
+    year says which listed form it is. Otherwise the year the saved file
+    prints. Neither known, the row keeps no date and the file its name. The
+    rename finds a row's record by its date and title, so it is shown a
+    copy of the undated record dated as its row is, and a naming pattern
+    that uses the record still has it."""
+
+    def __init__(self, app, read_text=None):
+        read_text = read_text or receipt_pdf.pdf_text
+        self.config = app.config
+        self.progress = app.progress
+        moved, undated = {}, {}
+        for rec in (getattr(app.progress, "data", None) or {}).values():
+            if not isinstance(rec, dict) or rec.get("category") != doc_types.TAX:
+                continue
+            title = (rec.get("title") or "").strip()
+            if rec.get("undated_key") and rec.get("date"):
+                moved.setdefault(title, []).append(rec)
+            elif not rec.get("date"):
+                undated.setdefault(title, []).append(rec)
+        rows = app.index_csv.read_all()
+        copies = {}
+        for row in rows:
+            if ((row.get("Category") or "").strip() != doc_types.TAX
+                    or (row.get("Document Date") or "").strip()):
+                continue
+            title = (row.get("Document Title") or "").strip()
+            date = ""
+            if len(moved.get(title, [])) == 1:
+                date = moved[title][0]["date"]
+            else:
+                path = (row.get("PDF Full Path") or "").strip()
+                if path and Path(path).exists():
+                    year = site.printed_tax_year(read_text(Path(path)))
+                    if year:
+                        date = f"{year}-12-31"
+                if date and len(undated.get(title, [])) == 1:
+                    copies["dated by form:%s:%s" % (date, title)] = dict(
+                        undated[title][0], date=date, period=f"Tax Year {date[:4]}")
+            if date:
+                row["Document Date"] = date
+                if not (row.get("Period") or "").strip():
+                    row["Period"] = f"Tax Year {date[:4]}"
+        self.index_csv = _Ledger(app.index_csv, rows)
+        data = dict(getattr(app.discovery, "data", None) or {})
+        data.update(copies)
+        self.discovery = _Records(data)
+
+
 class App:
     _journal = None
     _requests = None
+    # Every key the current discovery listed, None outside one.
+    _listed_now = None
 
     def __init__(self, args):
         self.args = args
@@ -385,8 +479,23 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        # A statement belongs to the account whose page lists it. A crypto
+        # statement and an individual one of the same month can carry the
+        # same title, and without the account they were one key, so the
+        # second was taken as done and its page could be pressed for the
+        # first (#62). The individual page gives no account, so every key
+        # and name saved before stays as it was. Anything else a statements
+        # page lists is the tax page's own document and keeps that key.
+        account = site.account_for(source_url) if category == doc_types.STATEMENT else ""
+        if account and account.lower() not in summary.lower():
+            summary = f"{account} {summary}"
+        tax_year = (getattr(r, "tax_year", "") or "").strip()
         doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+                       date=date, confidence=confidence, source_url=source_url,
+                       account=account, tax_year=tax_year,
+                       period=f"Tax Year {tax_year}" if tax_year else "")
+        if self._listed_now is not None:
+            self._listed_now.add(doc.key)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -399,6 +508,7 @@ class App:
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
         n_new = 0
+        self._listed_now = set()
         # Robinhood lists documents as click-to-download <a download> links on
         # per-section pages (Individual statements, Crypto statements, Tax
         # center). Scan each page and scrape its download links.
@@ -431,6 +541,10 @@ class App:
                      len(docs), n_new - before)
             self._delay(0.4)
 
+        moved = self._date_saved_forms(self._listed_now)
+        if moved:
+            print(f"  {moved} tax form(s) saved without a date now have the date "
+                  "their page shows. Rename gives their files that date.")
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
@@ -468,6 +582,12 @@ class App:
         if getattr(self.args, "redownload", False):
             return False
         rec = self.progress.get(doc.key)
+        if not rec and doc.category == doc_types.TAX and not doc.date:
+            # A form saved without a date and dated since is kept under its
+            # dated key. A page that lists it without a year again is still
+            # listing that form.
+            rec = next((r for r in self.progress.data.values()
+                        if isinstance(r, dict) and r.get("undated_key") == doc.key), None)
         if not rec:
             return False
         if rec.get("downloaded_ok"):
@@ -485,6 +605,99 @@ class App:
             return bool(p and Path(p).exists()
                         and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
         return False
+
+    def _date_saved_forms(self, listed_now: Optional[set] = None) -> int:
+        """Move a tax form saved without a date to the key its page now
+        dates it by (#62). Returns how many moved.
+
+        Before the page's year was read, a form whose title named no year
+        was saved as 0000-00-00 under a key with no date. The page now
+        gives that form a date and so a new key, and without this the form
+        would be fetched a second time beside the file already saved.
+
+        Only when it is certain which listed form the saved one is. The
+        year printed in the saved file says so when it can be read. Without
+        it, the one form of that title whose tax year had ended when the
+        saved one was first listed, because a form cannot be listed before
+        its year is over. Anything less certain moves nothing, and a second
+        copy is the worst that follows, never a form marked done that was
+        not saved.
+
+        The record moves, it is not copied, so it is counted once. The key
+        it came from goes with it, for _already_done. The ledger row keeps
+        its empty date until Rename, which reads the date from here, so the
+        file and its row change together.
+
+        `listed_now` is every key this discovery listed. A form of a title
+        the page now dates, listed before without a date and never saved,
+        is that old reading of the same page. It is taken off the list, or
+        the next run presses the first control of that title, whatever its
+        year, and saves it again as 0000-00-00."""
+        listed = {}
+        for key, rec in (self.discovery.data or {}).items():
+            if (isinstance(rec, dict) and rec.get("category") == doc_types.TAX
+                    and rec.get("date")
+                    and (listed_now is None or key in listed_now)):
+                listed.setdefault((rec.get("title", ""), rec.get("account", "")),
+                                  []).append((key, rec))
+        dropped = 0
+        if listed_now is not None:
+            for key, rec in list((self.discovery.data or {}).items()):
+                if (isinstance(rec, dict) and rec.get("category") == doc_types.TAX
+                        and not rec.get("date") and key not in listed_now
+                        and (rec.get("title", ""), rec.get("account", "")) in listed
+                        and not is_done(self.progress.get(key) or {})):
+                    self.discovery.data.pop(key, None)
+                    log.info("a tax form listed before without a date is listed "
+                             "by its year now")
+                    dropped += 1
+        moved = 0
+        for key, rec in list((self.progress.data or {}).items()):
+            if (not isinstance(rec, dict) or rec.get("category") != doc_types.TAX
+                    or rec.get("date") or not is_done(rec)):
+                continue
+            found = self._which_listed_form(
+                rec, listed.get((rec.get("title", ""), rec.get("account", "")), []))
+            if found is None:
+                continue
+            new_key, listed_rec = found
+            if self.progress.get(new_key) is not None:
+                continue
+            moved_rec = dict(rec)
+            moved_rec.update(date=listed_rec["date"],
+                             period=listed_rec.get("period") or rec.get("period", ""),
+                             tax_year=listed_rec.get("tax_year", ""),
+                             source_url=listed_rec.get("source_url") or rec.get("source_url", ""),
+                             undated_key=key)
+            del self.progress.data[key]
+            self.progress.update(new_key, moved_rec, save=False)
+            self.discovery.data.pop(key, None)
+            self.discovery.update(new_key, {"state": moved_rec.get("state", ""),
+                                            "undated_key": key}, save=False)
+            log.info("a tax form saved without a date is the one listed for %s",
+                     listed_rec["date"])
+            moved += 1
+        if moved:
+            self.progress.save(backup=True)
+        if moved or dropped:
+            self.discovery.save()
+        return moved
+
+    @staticmethod
+    def _which_listed_form(rec: dict, listed: list):
+        """(key, record) of the listed form a saved undated one is, or None."""
+        if not listed:
+            return None
+        path = (rec.get("pdf_path") or "").strip()
+        if path and Path(path).exists():
+            year = site.printed_tax_year(receipt_pdf.pdf_text(Path(path)))
+            if year:
+                same = [x for x in listed if x[1]["date"] == f"{year}-12-31"]
+                return same[0] if len(same) == 1 else None
+        seen = str(rec.get("discovered_at") or "")[:10]
+        could = [x for x in listed
+                 if seen and seen >= "%04d-01-01" % (int(x[1]["date"][:4]) + 1)]
+        return could[0] if len(could) == 1 else None
 
     # -- processing --------------------------------------------------------
 
@@ -553,7 +766,8 @@ class App:
             site.expand_all(page)
         except Exception as e:
             log.info("could not open source page %s: %s", source, e)
-        saved = site.download_named(page, doc.title, out_path)
+        saved = site.download_named(page, doc.title, out_path,
+                                    year=getattr(doc, "tax_year", "") or "")
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -608,14 +822,17 @@ class App:
         # used to be written out below, walking a list of extra links, and it
         # never ran once: the list was created empty and nothing ever put a
         # link in it. Removed rather than left looking like a feature.
+        if doc.category == doc_types.TAX and not doc.date:
+            out_path = self._dated_by_form(doc, out_path)
+            doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
         self._record(doc, State.COMPLETED)
         self.journal.checkpoint('a document is saved')
         self._write_row(doc, "Downloaded", "Completed")
         self.stats["new_files"].append(str(out_path))
-        if doc.date:
-            self.stats["dates"].append(doc.date)
+        if doc.date or doc.printed_date:
+            self.stats["dates"].append(doc.date or doc.printed_date)
         if doc.category == doc_types.TAX:
             self.stats["tax_documents"] += 1
         elif doc.category == doc_types.INSURANCE:
@@ -625,6 +842,34 @@ class App:
         else:
             self.stats["other"] += 1
         print(f"  Saved: {out_path.name}")
+
+    def _dated_by_form(self, doc: Document, out_path: Path) -> Path:
+        """Name a tax form the page gave no year for the year it prints.
+
+        The page is read first, and a form it dated never comes here. This
+        is for one it did not, which used to be saved as 0000-00-00 (#62).
+        The key keeps no date, because that is how the page lists it every
+        run. Only the file and its ledger row take the date, so Rename finds
+        the file already named for it. A form that prints no clear year
+        keeps the name it was saved under."""
+        year = site.printed_tax_year(receipt_pdf.pdf_text(out_path))
+        if not year:
+            log.info("no tax year could be read from %s", out_path.name)
+            return out_path
+        doc.printed_date = f"{year}-12-31"
+        doc.period = doc.period or f"Tax Year {year}"
+        name = build_pdf_filename(doc.printed_date, doc.summary, "", record=doc)
+        target = unique_path(out_path.parent, name, self.config["max_path_length"],
+                             ignoring=out_path.name)
+        if target == out_path:
+            return out_path
+        try:
+            out_path.replace(target)
+        except OSError as e:
+            # The row still carries the date, so Rename can finish this.
+            log.info("kept the undated name for %s: %s", doc.key, e)
+            return out_path
+        return target
 
     # -- records -----------------------------------------------------------
 
@@ -639,7 +884,8 @@ class App:
         notes = "; ".join(x for x in (doc.notes, status) if x)
         self.index_csv.append_rows([{
             "Account Holder": self.config.get("owner", ""),
-            "Document Date": doc.date,
+            # The date the file is named for, which is what Rename reads.
+            "Document Date": doc.date or doc.printed_date,
             "Category": doc.category,
             "Document Summary": doc.summary,
             "Document Title": doc.title,
@@ -725,9 +971,13 @@ class App:
         A naming scheme improves and the files on disk keep the old one.
         Nothing about them needs fetching, only their names are wrong, so
         nothing is asked of the provider here (#43, #49). A preview
-        unless --apply is given."""
+        unless --apply is given.
+
+        A tax form saved as 0000-00-00 is dated here, from the form it was
+        found to be or the year it prints, so it takes that name (#62)."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        renaming.run_for(_DatedTaxForms(self),
+                         apply_changes=bool(getattr(self.args, "apply", False)))
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"

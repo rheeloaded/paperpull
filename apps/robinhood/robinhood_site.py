@@ -175,6 +175,41 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
     return None, ""
 
 
+# The year a tax form prints for itself. Every 1099 names it beside the
+# form, "2025 1099-DIV" or "Form 1099-B 2025", or in the words "Tax Year
+# 2025". A year beside an amount is not one, so a digit, a point or a comma
+# on either side rules it out.
+_PRINTED_TAX_YEAR_RES = (
+    re.compile(r"\btax\s+year\s*:?\s*((?:19|20)\d{2})(?![\d.,])", re.I),
+    re.compile(r"(?<![\d.,$])\b((?:19|20)\d{2})\s+tax\s+(?:year|information|reporting)\b", re.I),
+    re.compile(r"(?<![\d.,$])\b((?:19|20)\d{2})(?:\s*\*\s*|\s+)(?:consolidated\s+)?(?:form\s+)?"
+               r"(?:1099|1042-?S|5498)\b", re.I),
+    re.compile(r"\b(?:form\s+)?(?:1099|1042-?S|5498)(?:-[A-Z]{1,4})?\*?[ \t]+"
+               r"((?:19|20)\d{2})(?![\d.,])", re.I),
+)
+
+
+def printed_tax_year(text: str, today=None) -> str:
+    """The tax year a saved form prints, or "".
+
+    For a form the page gave no year. The year most of those places name,
+    when it is more than half of them, and only a year that has ended,
+    since a form for a year still running does not exist yet. Anything
+    less certain gives "", and the form keeps the name it has."""
+    from collections import Counter
+    from datetime import date as _date
+    this_year = (today or _date.today()).year
+    said = Counter()
+    for rx in _PRINTED_TAX_YEAR_RES:
+        for m in rx.finditer(text or ""):
+            if int(m.group(1)) < this_year:
+                said[m.group(1)] += 1
+    if not said:
+        return ""
+    year, n = said.most_common(1)[0]
+    return year if n * 2 > sum(said.values()) else ""
+
+
 # ---------------------------------------------------------------------------
 # Session / safety
 # ---------------------------------------------------------------------------
@@ -335,6 +370,9 @@ class RawDoc:
     text: str = ""
     row_index: int = -1
     kind: str = "doc"
+    # The tax year the page shows beside a tax form whose own name carries
+    # none, "" otherwise. The download presses only a control of this year.
+    tax_year: str = ""
 
 
 _ROW_JS = r"""() => {
@@ -501,33 +539,207 @@ def download_by_url(page, url: str, out_path) -> bool:
 # download event. Statements live on per-account pages; tax docs on the tax
 # center. Trade confirmations are intentionally not listed here (out of scope).
 # ---------------------------------------------------------------------------
-# Crypto statements are intentionally excluded (the account holder does not
-# trade crypto). Re-add f"{BASE}/account/reports-statements/crypto" to collect
-# them again.
-STATEMENT_URLS = [
-    f"{BASE}/account/reports-statements/individual",
+# Every statements page this app reads, with the account each belongs to as
+# a file name says it. The individual investing account says nothing,
+# because every statement saved before a second page was read is keyed and
+# named without one, and a key that changed would fetch them all again.
+#
+# Robinhood Crypto statements were left out when this app was built, only
+# because the account it was built on does not trade crypto. A tester who
+# does got none of them (#62). The page was on this list before and is read
+# the same way as the individual one, under the same guards.
+STATEMENT_PAGES = [
+    (f"{BASE}/account/reports-statements/individual", ""),
+    (f"{BASE}/account/reports-statements/crypto", "Crypto"),
 ]
+STATEMENT_URLS = [url for url, _account in STATEMENT_PAGES]
 TAX_URL = f"{BASE}/account/reports-statements/tax"
 
 
 def document_source_urls() -> List[Tuple[str, str]]:
     """(url, source_label) pairs to scan for downloadable documents."""
-    pairs = [(u, "statements") for u in STATEMENT_URLS]
+    pairs = [(u, f"{a.lower()} statements" if a else "statements")
+             for u, a in STATEMENT_PAGES]
     pairs.append((TAX_URL, "tax"))
     return pairs
 
 
-_COLLECT_JS = r"""() => {
+def account_for(source_url: str) -> str:
+    """The account a statements page belongs to. "" for the individual
+    investing page, and for any page that is not a statements page."""
+    return dict(STATEMENT_PAGES).get(source_url or "", "")
+
+
+# What discovery and the download both run in the page, so the control that
+# is pressed is always the one that was listed.
+#
+# A tax form's title line does not always carry its year. Robinhood can
+# show "Consolidated 1099" with the year somewhere else, on a line of its
+# own in the card, as a heading over a year's forms, or as the chosen year
+# of a picker. Read from the title alone the form had no date, and the file
+# was named 0000-00-00 (#62). Forms of different years that share a title
+# were also one document, since they were told apart by the title alone, so
+# all but the first were dropped without a word.
+#
+# taxYearOf reads the year in this order, and gives "" rather than guess.
+#   1. The form's own card, the nearest box around its control that holds
+#      its title and something more, and no other form's control. Words
+#      like "Tax year 2025" first. Otherwise one lone year, once every date
+#      in the card is taken out, because "Available Feb 14, 2026" is when
+#      the 2025 form came out and its year is the wrong one. Two years in
+#      one card name nothing.
+#   2. The nearest year shown above the control that is not inside another
+#      form's card. A line that is only a year, or a heading with a year
+#      and a tax word. A year among other years, tabs or buttons or a
+#      dropdown, counts only when it is the chosen one, since the last tab
+#      before the list is the nearest and says nothing.
+_PAGE_JS_LIB = r"""
+  const TITLE_RE = /([A-Z][a-z]+ \d{4}[^\n]*Statement|[^\n]*Consolidated[^\n]*1099[^\n]*|[^\n]*Form 1099[^\n]*|[^\n]*\b1099\b[^\n]*|[^\n]*\b1042-?S\b[^\n]*|[^\n]*\b5498\b[^\n]*)/;
+  const TAX_TITLE_RE = /\b(1099|1042-?S|5498)\b/i;
+  const ANY_YEAR_RE = /\b(19|20)\d{2}\b/;
+  const YEAR_G = /\b((?:19|20)\d{2})\b/g;
+  const PHRASES = [
+    /\btax\s+year\s*:?\s*((?:19|20)\d{2})\b/gi,
+    /\b((?:19|20)\d{2})\s+tax\s+(?:year|documents?|forms?|season)\b/gi,
+    /\bTY\s*'?\s*((?:19|20)\d{2})\b/gi,
+    /\b((?:19|20)\d{2})\s+(?:consolidated\s+)?(?:form\s+)?(?:1099|1042-?S|5498)\b/gi,
+    /\b(?:1099|1042-?S|5498)(?:-[A-Z]{1,4})?\s+(?:for\s+)?((?:19|20)\d{2})\b/gi,
+  ];
+  const DATES_G = /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?(?:19|20)\d{2}\b|\b\d{1,2}[\/.-]\d{1,2}[\/.-](?:(?:19|20)\d{2}|\d{2})\b|\b(?:19|20)\d{2}[\/.-]\d{1,2}[\/.-]\d{1,2}\b/gi;
+  const NOT_YEARS_G = /(?:[\u2022*\u00B7\u2026#]+|\b[xX]{2,})\s?\d{2,}|\$\s?[\d,]+(?:\.\d+)?|\b(?:ending|ends)\s+in\s+\d+/gi;
+  const YEAR_HEADING = /^(?:(?:tax\s+year|ty|tax\s+documents?(?:\s+for)?)\s*:?\s*)?((?:19|20)\d{2})(?:\s+tax\s+(?:year|documents?|forms?|season))?\s*[\u25BE\u25BC\u2304\u02C5]?$/i;
+  const TAX_WORD = /\btax|1099|1042|5498|\bforms?\b/i;
+
+  function ownLabel(el) {
+    return ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim();
+  }
+  function isPdfControl(el) {
+    const own = ownLabel(el);
+    if (/download\s*csv/i.test(own)) return false;
+    if (/download\s*pdf/i.test(own)) return true;
+    return el.hasAttribute('download') && TITLE_RE.test(own);
+  }
+  function holdsAnother(node, el) {
+    for (const c of node.querySelectorAll('a[download], a, button, [role=button]')) {
+      if (c === el || c.contains(el) || el.contains(c)) continue;
+      if (isPdfControl(c)) return true;
+    }
+    return false;
+  }
+  function textOf(node) {
+    let t = node.innerText || '';
+    for (const s of node.querySelectorAll('select, [role=listbox], [role=menu]')) {
+      const st = s.innerText || '';
+      if (st.trim()) t = t.split(st).join('\n');
+    }
+    return t.replace(NOT_YEARS_G, ' ');
+  }
+  // A year, null when the text names two, undefined when it names none.
+  function yearIn(text) {
+    const said = new Set();
+    for (const re of PHRASES) for (const m of text.matchAll(re)) said.add(m[1]);
+    if (said.size > 1) return null;
+    if (said.size === 1) return [...said][0];
+    const years = new Set();
+    for (const m of text.replace(DATES_G, ' ').matchAll(YEAR_G)) years.add(m[1]);
+    if (years.size > 1) return null;
+    if (years.size === 1) return [...years][0];
+    return undefined;
+  }
+  function cardOf(el) {
+    let node = el;
+    for (let i = 0; i < 8 && node && node !== document.body; i++) {
+      const t = node.innerText || '';
+      if (TITLE_RE.test(t) && t.split('\n').filter(s => s.trim()).length > 1) {
+        if (t.length > 600 || holdsAnother(node, el)) return null;
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+  function labelOf(e) {
+    if (e.tagName === 'SELECT') {
+      const o = e.options[e.selectedIndex];
+      return o ? o.text.replace(/\s+/g, ' ').trim() : '';
+    }
+    if (e.closest('select')) return '';
+    return (e.innerText || '').replace(/\s+/g, ' ').trim();
+  }
+  function isHeading(e) {
+    return /^H[1-6]$/.test(e.tagName) || e.getAttribute('role') === 'heading'
+      || e.tagName === 'LEGEND' || e.tagName === 'CAPTION';
+  }
+  function isChoice(e) {
+    if (e.tagName === 'SELECT') return true;
+    if (e.closest('[role=tablist], [role=radiogroup], [role=listbox], [role=menu], [role=menubar]')) return true;
+    if (e.closest('[role=tab], [role=radio], [role=option], [role=menuitemradio]')) return true;
+    const box = e.closest('button, a, [role=button], label, li') || e;
+    for (const s of [box.previousElementSibling, box.nextElementSibling]) {
+      if (s && YEAR_HEADING.test(labelOf(s))) return true;
+    }
+    return false;
+  }
+  function isChosen(e) {
+    if (e.tagName === 'SELECT') return true;
+    let n = e;
+    for (let i = 0; i < 4 && n; i++, n = n.parentElement) {
+      for (const a of ['aria-selected', 'aria-checked', 'aria-pressed']) {
+        if (n.getAttribute(a) === 'true') return true;
+      }
+      const cur = n.getAttribute('aria-current');
+      if (cur && cur !== 'false') return true;
+      if (n.tagName === 'LABEL' && n.querySelector('input:checked')) return true;
+    }
+    return false;
+  }
+  function inAnotherCard(e, el) {
+    for (let n = e; n && n !== document.body; n = n.parentElement) {
+      if (n.contains(el)) return false;
+      if (holdsAnother(n, el)) return true;
+    }
+    return false;
+  }
+  function headingYear(el) {
+    const all = Array.from(document.body.querySelectorAll('*'));
+    for (let i = all.indexOf(el) - 1; i >= 0; i--) {
+      const e = all[i];
+      if (e.contains(el)) continue;
+      if (e.tagName !== 'SELECT' && !e.getClientRects().length) continue;
+      const text = labelOf(e);
+      if (!text || text.length > 80) continue;
+      let y = '';
+      const m = text.match(YEAR_HEADING);
+      if (m) y = m[1];
+      else if (isHeading(e) && TAX_WORD.test(text)) y = yearIn(text.replace(NOT_YEARS_G, ' ')) || '';
+      if (!y) continue;
+      if (inAnotherCard(e, el)) continue;
+      if (isChoice(e) && !isChosen(e)) continue;
+      return y;
+    }
+    return '';
+  }
+  function taxYearOf(el) {
+    const card = cardOf(el);
+    if (card) {
+      const y = yearIn(textOf(card));
+      if (y === null) return '';
+      if (y) return y;
+    }
+    return headingYear(el);
+  }
+"""
+
+_COLLECT_JS = r"""() => {""" + _PAGE_JS_LIB + r"""
   const out = [];
   const seen = new Set();
-  const titleRe = /([A-Z][a-z]+ \d{4}[^\n]*Statement|[^\n]*Consolidated[^\n]*1099[^\n]*|[^\n]*Form 1099[^\n]*|[^\n]*\b1099\b[^\n]*|[^\n]*\b1042-?S\b[^\n]*|[^\n]*\b5498\b[^\n]*)/;
   for (const el of document.querySelectorAll("a[download], a, button, [role=button]")) {
     const own = ((el.innerText||'') + ' ' + (el.getAttribute('aria-label')||'')).trim();
     const hasDlAttr = el.hasAttribute('download');
     const isPdfBtn = /download\s*pdf/i.test(own);
     const isCsvBtn = /download\s*csv/i.test(own);
     let title = '', is_pdf = false;
-    if (hasDlAttr && !isCsvBtn && titleRe.test(own)) {
+    if (hasDlAttr && !isCsvBtn && TITLE_RE.test(own)) {
       // statement link: <a download> whose own text IS the title
       title = own; is_pdf = true;
     } else if (isPdfBtn) {
@@ -535,7 +747,7 @@ _COLLECT_JS = r"""() => {
       let node = el;
       for (let i = 0; i < 12 && node; i++) {
         node = node.parentElement;
-        const m = ((node && node.innerText) || '').match(titleRe);
+        const m = ((node && node.innerText) || '').match(TITLE_RE);
         if (m) { title = m[1]; break; }
       }
       is_pdf = true;
@@ -544,13 +756,42 @@ _COLLECT_JS = r"""() => {
     }
     title = title.replace(/\s+/g, ' ').replace(/\s*Download (PDF|CSV)\s*/gi, ' ').trim();
     if (!title || title.length < 4) continue;
-    const key = title.toLowerCase();
+    // A tax form whose name has no year is one document per year it is
+    // shown under. Everything else is told apart by its title, as before.
+    // A reading that fails leaves the form undated, never the page unread.
+    let year = '';
+    if (TAX_TITLE_RE.test(title) && !ANY_YEAR_RE.test(title)) {
+      try { year = taxYearOf(el) || ''; } catch (e) { year = ''; }
+    }
+    const key = title.toLowerCase() + (year ? '|' + year : '');
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({title: title.slice(0, 160), is_pdf});
+    out.push({title: title.slice(0, 160), is_pdf, year});
   }
   return out;
 }"""
+
+_YEAR_OF_JS = r"""el => {""" + _PAGE_JS_LIB + r"""
+  return taxYearOf(el);
+}"""
+
+TAX_TITLE_RE = re.compile(r"\b(1099|1042-?S|5498)\b", re.I)
+
+
+def tax_year_of(title: str, year, today=None) -> str:
+    """The year the page showed beside a tax form, when the form's title
+    carries none, or "".
+
+    Only a year that has ended. A form for a year still running does not
+    exist yet, so a year that has not ended is some other date's year, an
+    issue date or the copyright line, and is never believed."""
+    from datetime import date as _date
+    year = str(year or "").strip()
+    if not TAX_TITLE_RE.search(title or "") or not re.fullmatch(r"(19|20)\d{2}", year):
+        return ""
+    if int(year) >= (today or _date.today()).year:
+        return ""
+    return year
 
 
 def collect_download_docs(page) -> List[RawDoc]:
@@ -568,14 +809,30 @@ def collect_download_docs(page) -> List[RawDoc]:
         if not title:
             continue
         date_text, _ = parse_period_date(title)
+        # A tax form whose own title names no date is filed at the end of
+        # the tax year the page shows beside it, the way this app files
+        # every tax form whose title does name its year.
+        tax_year = "" if date_text else tax_year_of(title, it.get("year"))
+        if tax_year:
+            date_text = f"{tax_year}-12-31"
         docs.append(RawDoc(title=title[:200], date_text=date_text or "",
-                           href="", text=title, kind="doc"))
-    return docs
+                           href="", text=title, kind="doc", tax_year=tax_year))
+    # A title shown with a year and also without one is kept once, with the
+    # year. Told apart by the title alone it was always one document, and the
+    # undated one would press the first control of that title, whatever its
+    # year, and save a second copy of it as 0000-00-00.
+    dated = {d.title for d in docs if d.tax_year}
+    return [d for d in docs if d.date_text or d.title not in dated]
 
 
-def download_named(page, title: str, out_path) -> bool:
+def download_named(page, title: str, out_path, year: str = "") -> bool:
     """Click the download control for the document whose title matches, and
-    capture the resulting download event to out_path."""
+    capture the resulting download event to out_path.
+
+    `year` is the tax year discovery read beside a form whose title has
+    none. Forms of several years can share one title, so only a control the
+    same reading places in that year is pressed, and no control at all is
+    pressed when none is."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     needle = re.sub(r"\s+", " ", title).strip()[:30]
@@ -609,13 +866,22 @@ def download_named(page, title: str, out_path) -> bool:
                         " if(n && (n.innerText||'').length>10) return n.innerText; } return ''; }")
                 except Exception:
                     hay = ""
-            if needle.lower() in (hay or "").lower():
-                control = el
-                break
+            if needle.lower() not in (hay or "").lower():
+                continue
+            if year:
+                try:
+                    shown = el.evaluate(_YEAR_OF_JS) or ""
+                except Exception:
+                    shown = ""
+                if shown != year:
+                    continue
+            control = el
+            break
     except Exception:
         pass
     if control is None:
-        log.info("download control not found for %r", title)
+        log.info("download control not found for %r%s", title,
+                 f" of tax year {year}" if year else "")
         return False
     return _click_and_capture(page, control, title, out_path)
 
@@ -730,7 +996,15 @@ def _click_and_capture(page, control, title: str, out_path) -> bool:
         return False
     url = str((body or {}).get("download_url") or "")
     if not is_document_store_url(url):
-        log.error("refusing to fetch %r from an unexpected host", title)
+        # The host only, never the link, which is signed. It is what says
+        # whether a page serves its documents from another bucket, which a
+        # statements page read for the first time might.
+        from urllib.parse import urlparse
+        try:
+            host = urlparse(url).hostname or "none"
+        except ValueError:
+            host = "unreadable"
+        log.error("refusing to fetch %r from an unexpected host (%s)", title, host)
         return False
     try:
         # page.request shares the browser's cookie jar and follows redirects.

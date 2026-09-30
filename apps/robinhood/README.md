@@ -35,7 +35,7 @@ Port 9226 keeps this separate from Walmart (9222), Amazon (9223), Wealthfront
 
 | Folder | Contents |
 |---|---|
-| `Statements\` | Monthly / account statements |
+| `Statements\` | Monthly statements of the individual investing account and of Robinhood Crypto |
 | `Tax Documents\` | Consolidated 1099, crypto 1099, 1099-B/DIV/INT, 1042-S, etc. |
 | `Other Documents\` | Anything else (only if you widen `document_types`) |
 | `Manual Review\` | Files that failed PDF validation |
@@ -46,7 +46,12 @@ add "Trade Confirmation" to `document_types` in `config.json`.
 
 Filenames: `YYYY-MM-DD Robinhood <Summary>.pdf`, e.g.
 `2025-12-31 Robinhood Monthly Statement.pdf`,
+`2025-12-31 Robinhood Crypto Monthly Statement.pdf`,
 `2025-12-31 Robinhood Consolidated 1099 Tax Form.pdf`.
+A tax form is dated at the end of its tax year. When its title does not
+name the year, the year is read from the page around it, or failing that
+from the form itself. A form saved before this as `0000-00-00` takes its
+date from **Rename**, without being downloaded again.
 
 ## If a site change breaks it
 
