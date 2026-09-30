@@ -118,6 +118,7 @@ class App:
         self._context = None
         self._browser = None
         self._cdp_mode = False
+        self._prints_caught = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "online_discovered": 0, "instore_discovered": 0,
@@ -180,10 +181,8 @@ class App:
                 raise SystemExit("That browser has no tab open. Open one and try again.")
             self._context = self._browser.contexts[0]
             self._cdp_mode = True
-            try:
-                self._context.add_init_script(receipt_pdf.PRINT_SUPPRESS_INIT_SCRIPT)
-            except Exception:
-                pass
+            # The print hook is not put on here. It goes on in _catch_prints,
+            # before the pages a receipt is printed from (#48).
             self._context.set_default_timeout(30000)
             return self._context
 
@@ -210,9 +209,27 @@ class App:
             viewport={"width": 1400, "height": 950},
             **({"executable_path": executable} if executable else {}),
         )
-        self._context.add_init_script(receipt_pdf.PRINT_SUPPRESS_INIT_SCRIPT)
         self._context.set_default_timeout(30000)
         return self._context
+
+    def _catch_prints(self) -> None:
+        """Put the print hook on every page opened from here on.
+
+        A receipt is taken at the moment Target calls print(), so the pages a
+        receipt is printed from need the hook. It used to go on the moment the
+        app attached, and then every page it opened carried a replaced
+        window.print and two globals of this app's own, which any script on
+        the page can see. That included the order list, where nothing is ever
+        printed and where Target's press and hold check came up for a tester
+        (#48). Now it goes on only before the purchases themselves, or the
+        pages Diagnose and Record look at, are opened."""
+        if getattr(self, "_prints_caught", False):
+            return
+        try:
+            self.browser().add_init_script(receipt_pdf.PRINT_SUPPRESS_INIT_SCRIPT)
+            self._prints_caught = True
+        except Exception:
+            pass
 
     def page(self):
         ctx = self.browser()
@@ -238,6 +255,7 @@ class App:
             pass
         self._context = None
         self._pw = None
+        self._prints_caught = False
 
     # -- session safety -----------------------------------------------------
 
@@ -395,7 +413,20 @@ class App:
         page = self.page()
         counts = {}
         for ptype in types:
-            site.goto_orders(page)
+            # The list Login opened a moment ago is read where it is, when
+            # nothing has been done to it and it is this kind's. Loading it
+            # again the moment Pilot was pressed was the first of four page
+            # loads a tester counted before Target's check came (#48). The
+            # session and any check are looked at next, just as after a load,
+            # so a check drawn over that list stops the run without the list
+            # being loaded again under it. The second kind still loads the
+            # page again, since by then the first kind's list is the one
+            # showing.
+            if site.orders_already_open(page, ptype):
+                log.info("Reading the %s order list already open, not loading it again",
+                         ptype)
+            else:
+                site.goto_orders(page)
             self.check_session(page)
             found_tab = site.select_history_tab(page, ptype)
             if ptype == IN_STORE and not found_tab:
@@ -545,6 +576,7 @@ class App:
 
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
         page = self.page()
+        self._catch_prints()
         for i, purchase in enumerate(purchases, 1):
             print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
                   f"{purchase.purchase_date or '(date unknown)'} "
@@ -1574,6 +1606,7 @@ class App:
         page = self.page()
         if not self.discovery.data:
             self.cmd_discover(quiet=True)
+        self._catch_prints()
         for ptype in (ONLINE, IN_STORE):
             candidates = self._select_purchases(ptype, limit=1)
             if self.args.order_number:
@@ -1631,6 +1664,7 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
+        self._catch_prints()
         record_session(self.page(), site, self.paths.diagnostics,
                        provider='Target',
                        owner=self.config.get("owner", ""))

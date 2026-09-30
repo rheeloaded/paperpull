@@ -17,6 +17,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -304,6 +305,89 @@ def goto_orders(page) -> None:
     except Exception:
         log.warning("Purchase-history content did not appear within 30s")
     page.wait_for_timeout(2500)
+
+
+# How long ago the orders page may have been loaded for a run to read it as it
+# stands. Login opens that page and the person presses Pilot a moment later.
+# A list loaded long before can be missing a purchase made since, so anything
+# older is loaded again, as it always was.
+FRESH_LIST_MS = 10 * 60 * 1000
+
+# Asked of the page straight over the debugging protocol, never through
+# Playwright. Every Playwright read marks a page as one somebody has clicked,
+# which was measured in Chromium, and the mark even outlives a reload, so this
+# is asked before anything else in a run reads the page. The age is by the
+# wall clock, since performance.now() leaves out the time a laptop slept.
+_UNTOUCHED_AGE_JS = ("({age: Date.now() - performance.timeOrigin, "
+                     "touched: navigator.userActivation "
+                     "? navigator.userActivation.hasBeenActive : null})")
+
+
+def orders_already_open(page, purchase_type: str,
+                        within_ms: Optional[int] = None) -> bool:
+    """Whether the tab already shows this kind's order list just as loading
+    it again would, so discovery can read it where it is (#48).
+
+    A tester counted four page loads between pressing Pilot and Target's
+    press and hold check, and the first of them loaded again the very list
+    Login had opened a moment before. That page is kept only when it is
+    plainly that list. The address is the orders page with nothing added to
+    it, nobody has clicked or typed on it, it was loaded within FRESH_LIST_MS,
+    and this kind's purchases are showing and the other kind's are not. A
+    filter or a tab chosen by hand leaves the address as it was, which is why
+    a page somebody has clicked is loaded again. Anything short of all of it
+    is loaded again as before. This says nothing about the session or a
+    check, which the caller looks at next either way."""
+    within_ms = FRESH_LIST_MS if within_ms is None else within_ms
+    if not _is_orders_address(page.url):
+        return False
+    facts = _untouched_age(page)
+    if not facts or facts.get("touched") is not False:
+        return False
+    age = facts.get("age")
+    if isinstance(age, bool) or not isinstance(age, (int, float)) \
+            or not 0 <= age <= within_ms:
+        return False
+    other = IN_STORE if purchase_type == ONLINE else ONLINE
+    try:
+        mine = page.locator(CARD_CONTAINER[purchase_type])
+        return (mine.count() > 0 and mine.first.is_visible()
+                and page.locator(CARD_CONTAINER[other]).count() == 0)
+    except Exception:
+        return False
+
+
+def _is_orders_address(url: str) -> bool:
+    """The orders page's own address, the one Login opens, and no other. A
+    query or a fragment could be a list narrowed to part of the history."""
+    try:
+        here, orders = urlsplit(url or ""), urlsplit(URLS["orders"])
+    except ValueError:
+        return False
+    return (here.scheme == orders.scheme
+            and here.netloc.lower() == orders.netloc.lower()
+            and here.path.rstrip("/") == orders.path.rstrip("/")
+            and not here.query and not here.fragment)
+
+
+def _untouched_age(page) -> Optional[dict]:
+    """How long ago the page was loaded, and whether anybody has clicked or
+    typed on it, or None when the page cannot say."""
+    session = None
+    try:
+        session = page.context.new_cdp_session(page)
+        got = session.send("Runtime.evaluate", {"expression": _UNTOUCHED_AGE_JS,
+                                                "returnByValue": True})
+        value = ((got or {}).get("result") or {}).get("value")
+        return value if isinstance(value, dict) else None
+    except Exception:
+        return None
+    finally:
+        if session is not None:
+            try:
+                session.detach()
+            except Exception:
+                pass
 
 
 def select_history_tab(page, purchase_type: str) -> bool:
@@ -945,7 +1029,12 @@ def open_invoice_list(page, url: str) -> bool:
 def find_printing_frame(page, wait_ms: int = 6000):
     """Find the hidden iframe from which Target called print() (suppressed by
     our init script, the flag is set on the iframe's own window). Falls back
-    to any iframe holding substantial receipt content."""
+    to any iframe holding substantial receipt content.
+
+    The flag is read with the core's own helper, under the name the core's
+    print hook writes. This used to read a name of its own that nothing wrote
+    once the hook moved to the core, so the frame that printed was never
+    found and the first frame that merely looked like a receipt was taken."""
     rounds = max(1, wait_ms // 500)
     for _ in range(rounds):
         for frame in page.frames:
