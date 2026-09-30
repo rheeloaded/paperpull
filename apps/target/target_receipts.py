@@ -563,8 +563,10 @@ class App:
                 site.goto_details(page, purchase)
                 # A sign-in answered here left the tab on the orders page, where
                 # the receipt was then looked for and the purchase marked No
-                # Receipt Available for good (review of 0.41.0).
-                if self.check_session(page):
+                # Receipt Available for good (review of 0.41.0). The purchase
+                # is opened again for as long as the check had to ask, so a
+                # person who pressed Enter before finishing is asked again.
+                while self.check_session(page):
                     site.goto_details(page, purchase)
                 break
             except Exception as e:

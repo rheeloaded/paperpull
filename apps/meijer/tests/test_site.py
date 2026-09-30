@@ -172,7 +172,9 @@ def test_the_empty_message_is_only_believed_after_both_tabs_were_read():
     import inspect
     from pathlib import Path
     src = (Path(site.__file__).parent / "meijer_receipts.py").read_text(encoding="utf-8")
-    block = src.split("for page_no in range(1, 60):")[1][:900]
+    # The loop's own body, up to the statement after it, rather than a
+    # fixed count of characters that a comment added to the loop outgrows.
+    block = src.split("for page_no in range(1, 60):")[1].split("\n        if not cards")[0]
     collect_at = block.index("collect_both_tabs")
     empty_at = block.index('history_state(page) == "empty"')
     assert collect_at < empty_at, "the tabs are read before the page is believed"

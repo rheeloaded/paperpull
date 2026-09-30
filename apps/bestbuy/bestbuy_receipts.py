@@ -217,8 +217,13 @@ class App:
 
     # -- session safety -----------------------------------------------------
 
-    def check_session(self, page) -> None:
-        """Raise/pause on sign-out or security challenges."""
+    def check_session(self, page) -> bool:
+        """Raise/pause on sign-out or security challenges.
+
+        True when the person was asked to sign in again and the page was
+        left on the order list, so a caller that had opened something
+        else has to open it again before it reads anything. False
+        otherwise."""
         challenge = site.detect_security_challenge(page)
         if challenge:
             self.progress.save(backup=True)
@@ -238,6 +243,8 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
             site.goto_orders(page)
+            return True
+        return False
 
     # -- commands -----------------------------------------------------------
 
@@ -562,7 +569,12 @@ class App:
         for attempt in (1, 2):
             try:
                 site.goto_details(page, purchase)
-                self.check_session(page)
+                # Signing in again at a console leaves the page on the
+                # purchase history, and the history was read as this
+                # purchase, which has no items on it. So the purchase is
+                # opened again for as long as the check had to ask.
+                while self.check_session(page):
+                    site.goto_details(page, purchase)
                 break
             except Exception as e:
                 log.warning("Details page failed (attempt %d): %s", attempt, e)

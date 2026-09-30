@@ -234,8 +234,13 @@ class App:
 
     # -- session safety -----------------------------------------------------
 
-    def check_session(self, page) -> None:
-        """Raise/pause on sign-out or security challenges."""
+    def check_session(self, page) -> bool:
+        """Raise/pause on sign-out or security challenges.
+
+        True when the person was asked to sign in again and the page was
+        left on the order list, so a caller that had opened something
+        else has to open it again before it reads anything. False
+        otherwise."""
         # Both of these used to wait at a prompt. Under the panel there is
         # nobody to answer, and waiting there took the run down with an
         # end-of-file rather than saying what had happened, so when there
@@ -260,6 +265,8 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
             site.goto_orders(page)
+            return True
+        return False
 
     # -- commands -----------------------------------------------------------
 
@@ -332,7 +339,12 @@ class App:
         seen_texts = set()
         for page_no in range(1, 60):
             site.goto_orders(page, page_no)
-            self.check_session(page)
+            # Signing in again at a console leaves the page on the first
+            # page, which would be read as this one, hold nothing new, and
+            # end the history here. So this page is opened again for as
+            # long as the check had to ask.
+            while self.check_session(page):
+                site.goto_orders(page, page_no)
             found = site.collect_both_tabs(page) if page_no == 1 else site.collect_cards(page)
             # "You haven't placed any orders yet" is the ONLINE tab saying
             # so, and that is the tab this page opens on. A tester who only
@@ -661,7 +673,12 @@ class App:
                 return self._finish_pdf(page, purchase, out_path, source_page=None)
             log.info("Capture path: receipt page printed to PDF")
             site.goto_receipt_page(page, url)
-            self.check_session(page)
+            # Signing in again at a console leaves the page on the order
+            # list, which has amounts and the word order on it, so the list
+            # would be printed and filed as this receipt. The receipt is
+            # opened again for as long as the check had to ask.
+            while self.check_session(page):
+                site.goto_receipt_page(page, url)
             site.scroll_full_page(page)
             if not site.receipt_is_present(page):
                 self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,

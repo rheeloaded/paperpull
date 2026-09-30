@@ -220,10 +220,15 @@ class App:
 
     # -- session safety -----------------------------------------------------
 
-    def check_session(self, page) -> None:
+    def check_session(self, page) -> bool:
         """Raise/pause on sign-out or security challenges. eBay's daily
         limit on details pages ends the run, there is nothing to wait for
-        today, and --resume continues tomorrow."""
+        today, and --resume continues tomorrow.
+
+        True when the person was asked to sign in again and the page was
+        left on the order list, so a caller that had opened something
+        else has to open it again before it reads anything. False
+        otherwise."""
         if site.hit_daily_limit(page):
             raise DailyLimitReached()
         challenge = site.detect_security_challenge(page)
@@ -245,6 +250,8 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
             site.goto_orders(page)
+            return True
+        return False
 
     # -- commands -----------------------------------------------------------
 
@@ -348,7 +355,13 @@ class App:
 
         for year in self._years_to_walk():
             site.goto_orders(page, year)
-            self.check_session(page)
+            # Signing in again at a console leaves the page on the
+            # unfiltered history, which would be read as this year, every
+            # card on it already seen, and this year's own orders never
+            # found. So the year is opened again for as long as the check
+            # had to ask.
+            while self.check_session(page):
+                site.goto_orders(page, year)
             site.scroll_all_orders(page)
             found = site.collect_cards(page)
             fresh = [c for c in found
@@ -522,7 +535,12 @@ class App:
         for attempt in (1, 2):
             try:
                 site.goto_details(page, purchase)
-                self.check_session(page)
+                # Signing in again at a console leaves the page on the order
+                # list, and the list was read as this purchase. So the
+                # purchase is opened again for as long as the check had to
+                # ask.
+                while self.check_session(page):
+                    site.goto_details(page, purchase)
                 break
             except DailyLimitReached:
                 raise

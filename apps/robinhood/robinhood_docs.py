@@ -239,7 +239,13 @@ class App:
 
     # -- session safety ----------------------------------------------------
 
-    def check_session(self, page) -> None:
+    def check_session(self, page) -> bool:
+        """Raise/pause on sign-out or security challenges.
+
+        True when the person was asked to sign in again and the page was
+        left on the documents page, so a caller that had opened something
+        else has to open it again before it reads anything. False
+        otherwise."""
         # Both of these used to wait at a prompt. Under the panel there is
         # nobody to answer, and waiting there took the run down with an
         # end-of-file rather than saying what had happened, so when there
@@ -264,6 +270,8 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
             site.goto_documents(page)
+            return True
+        return False
 
     # -- commands ----------------------------------------------------------
 
@@ -401,9 +409,14 @@ class App:
             except Exception as e:
                 log.info("could not open %s: %s", url, e)
                 continue
-            self.check_session(page)
-            if site.looks_signed_out(page):
-                self.check_session(page)
+            # Signing in again at a console leaves the page on the first
+            # documents page, not this section, and its links would be
+            # recorded as this section's. So the section is opened again for
+            # as long as the check had to ask, which also asks again when
+            # the person answered before they had signed in.
+            while self.check_session(page):
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(4000)
             # Robinhood paginates statements behind a "View More" button; click
             # it (and any lazy-load) until the full list is present.
             site.expand_all(page)
@@ -526,7 +539,13 @@ class App:
         try:
             page.goto(source, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
-            self.check_session(page)
+            # Signing in again at a console leaves the page on the first
+            # documents page, and this document was looked for by its title
+            # there. So its own section is opened again for as long as the
+            # check had to ask.
+            while self.check_session(page):
+                page.goto(source, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(3000)
             # Older statements are hidden behind "View More" pagination, so the
             # list must be fully expanded before the control can be found.
             site.expand_all(page)

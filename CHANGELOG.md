@@ -7,6 +7,25 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A run that signs in again at a console reads the page it had opened.**
+  When a site signed the person out partway through a run started from a
+  terminal, the run asked them to sign in again, opened the order list,
+  and then read that list as whatever it had opened before. In Walmart the
+  list was printed and saved as an order's invoice, with another order's
+  date, and the order was marked as downloaded for good. Best Buy filed
+  good receipts as Mixed Purchases for review. Amazon, Costco, eBay, Gap,
+  Home Depot, Kroger, Lowe's and Target opened a purchase the same way,
+  GitHub printed its payment history as a receipt, and Amazon, eBay,
+  GitHub, Meijer and Lowe's could end a walk of their history early with
+  purchases never found. Robinhood looked for a statement on another
+  section's page. Each now opens its page again after the sign-in, and
+  asks again if the person pressed Enter before they had signed in. A run
+  from the control panel was never affected, since it stops there and
+  waits for Resume.
+
 ## [0.41.0] - 2026-09-29
 
 Vanguard, the sixty-first app, saves the statements of every account on

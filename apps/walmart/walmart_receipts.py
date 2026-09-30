@@ -220,8 +220,13 @@ class App:
 
     # -- session safety -----------------------------------------------------
 
-    def check_session(self, page) -> None:
-        """Raise/pause on sign-out or security challenges."""
+    def check_session(self, page) -> bool:
+        """Raise/pause on sign-out or security challenges.
+
+        True when the person was asked to sign in again and the page was
+        left on the order list, so a caller that had opened something
+        else has to open it again before it reads anything. False
+        otherwise."""
         # Both of these used to wait at a prompt. Under the panel there is
         # nobody to answer, and waiting there took the run down with an
         # end-of-file rather than saying what had happened, so when there
@@ -246,6 +251,8 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
             site.goto_orders(page)
+            return True
+        return False
 
     # -- commands -----------------------------------------------------------
 
@@ -519,7 +526,12 @@ class App:
         for attempt in (1, 2):
             try:
                 site.goto_details(page, purchase)
-                self.check_session(page)
+                # Signing in again at a console leaves the page on the order
+                # list, and the list was read and printed as this purchase,
+                # with another order's date. So the purchase is opened again
+                # for as long as the check had to ask.
+                while self.check_session(page):
+                    site.goto_details(page, purchase)
                 break
             except Exception as e:
                 log.warning("Details page failed (attempt %d): %s", attempt, e)
