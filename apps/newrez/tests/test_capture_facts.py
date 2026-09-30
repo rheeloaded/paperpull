@@ -759,3 +759,106 @@ def test_every_step_the_capture_writes_has_public_words():
         parts.setdefault(part, []).append(name)
     assert all(len(names) <= 18 for names in parts.values()), parts
     assert len(site._TRAFFIC_COUNTS) <= 20
+
+
+# -- a download an earlier press asked for -----------------------------------
+#
+# Pointed at a folder, the browser saves the only copy of a download there
+# and the event's own file is empty, so the capture takes the browser's file
+# by the event's name. A download event is not tied to the press, though.
+# The statement an earlier press asked for can begin during a Form 1098's
+# capture and raise the first event, and a review of the download folder
+# fix found it saved as the 1098 and never asked for again. The event's
+# file is taken now only when it is the one document that arrived, and
+# otherwise the folder rules decide, as they did before.
+
+LATE_STATEMENT = b"%PDF-1.4\nJANUARY 2026 MONTHLY STATEMENT" + b"0" * 2000
+FORM_1098 = b"%PDF-1.4\nFORM 1098 FOR 2025" + b"0" * 2000
+STATEMENT_URL = "https://servicing.newrez.com/api/documents/statement-2026-01.pdf"
+FORM_URL = "https://servicing.newrez.com/api/documents/form-1098-2025.pdf"
+
+
+class _DownloadingPage(_Page):
+    """A page that raises download events."""
+
+    def __init__(self, clock):
+        super().__init__(clock)
+        self.listeners: list = []
+
+    def on(self, event, fn):
+        if event == "download":
+            self.listeners.append(fn)
+
+    def remove_listener(self, event, fn):
+        if event == "download" and fn in self.listeners:
+            self.listeners.remove(fn)
+
+    def downloads(self, download):
+        for fn in list(self.listeners):
+            fn(download)
+
+
+class _Download:
+    """Pointed at a folder, save_as waits for the download to finish and
+    then writes an empty file."""
+
+    def __init__(self, clock, url, name, done_at):
+        self.clock, self.url, self.suggested_filename, self.done_at = clock, url, name, done_at
+
+    def save_as(self, path):
+        if self.clock.t < self.done_at:
+            self.clock.advance(self.done_at - self.clock.t)
+        Path(path).write_bytes(b"")
+
+
+def _a_1098_while_a_statement_arrives(clock, tmp_path, statement_done, form_done):
+    dl = tmp_path / ".newrez-downloads"
+    dl.mkdir()
+    out = tmp_path / "Tax" / "2025-12-31 Form 1098.pdf"
+    out.parent.mkdir()
+    page = _DownloadingPage(clock)
+    late = _Download(clock, STATEMENT_URL, "Monthly Statement.pdf", statement_done)
+    mine = _Download(clock, FORM_URL, "Form 1098.pdf", form_done)
+
+    def begin(download, part):
+        page.downloads(download)
+        (dl / part).write_bytes(b"%PDF-1.4 part")
+
+    def finish(part, name, data):
+        (dl / part).unlink()
+        (dl / name).write_bytes(data)
+
+    def press():
+        page.context.fire("request", _Req(FORM_URL, "document"))
+        clock.later(1, lambda: begin(late, "Unconfirmed 1.crdownload"))
+        clock.later(2, lambda: begin(mine, "Unconfirmed 2.crdownload"))
+        clock.later(form_done, lambda: finish("Unconfirmed 2.crdownload", "Form 1098.pdf", FORM_1098))
+        clock.later(statement_done, lambda: finish("Unconfirmed 1.crdownload",
+                                                   "Monthly Statement.pdf", LATE_STATEMENT))
+
+    el = _El(press, label="Form 1098 for 2025")
+    got = site._catch_pdf(page, el, "Form 1098 for 2025", out, [], dl)
+    clock.advance(10)          # whatever was still arriving lands after the capture
+    return got, (out.read_bytes() if out.exists() else b""), dl
+
+
+def test_a_statement_the_last_press_started_is_not_this_document(clock, tmp_path):
+    """Its event comes first and it lands last. Both documents are in the
+    folder by then, so the folder cannot say which is the 1098 and nothing
+    is saved, the document is asked for again on the next run."""
+    got, saved, dl = _a_1098_while_a_statement_arrives(clock, tmp_path, statement_done=6,
+                                                       form_done=3)
+    assert saved != LATE_STATEMENT
+    assert not got and saved == b""
+    assert sorted(p.name for p in dl.iterdir()) == ["Form 1098.pdf", "Monthly Statement.pdf"]
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "known before the download folder fix, and not made worse by it. A download the last "
+    "press started that lands before this press's own does is, when it lands, the only new "
+    "PDF in the folder, and nothing here can tell it from this press's"))
+def test_a_statement_the_last_press_started_that_lands_alone_is_not_this_document(clock,
+                                                                                 tmp_path):
+    got, saved, _dl = _a_1098_while_a_statement_arrives(clock, tmp_path, statement_done=3,
+                                                        form_done=6)
+    assert saved != LATE_STATEMENT

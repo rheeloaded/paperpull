@@ -252,12 +252,12 @@ def test_a_file_under_another_name_is_never_taken_as_this_download(tmp_path):
     assert not out.exists(), "and no empty file is left under the document's name"
 
 
-def test_two_files_that_could_be_this_download_mean_neither(tmp_path):
+def test_two_different_files_that_could_be_this_download_mean_neither(tmp_path):
     dl, out = folder(tmp_path)
     (dl / "Statement.pdf").write_bytes(OTHER)
     before = snapshot(dl)
     rewrite(dl / "Statement.pdf", PDF)
-    (dl / "Statement (1).pdf").write_bytes(PDF)
+    (dl / "Statement (1).pdf").write_bytes(OTHER + b"\n% another month")
     assert take_download(Download(), dl, before, out) == ""
     assert sorted(p.name for p in dl.iterdir()) == ["Statement (1).pdf", "Statement.pdf"]
 
@@ -385,3 +385,69 @@ def test_empty_files_are_nobodys_copies(tmp_path):
 def test_no_folder_is_not_an_error(tmp_path):
     assert clear_archived_copies(None, []) == (0, 0)
     assert clear_archived_copies(tmp_path / "missing", [str(tmp_path)]) == (0, 0)
+
+
+# which download is this attempt's (two reviews of the download folder fix)
+#
+# A download event is not tied to the press that caused it, and one the
+# last press started can raise the first event during this capture. Its
+# name alone took it as this document.
+
+
+def test_the_events_file_is_not_taken_while_another_document_arrived_too(tmp_path):
+    """The last press's August raised the first event, and September's own
+    file is there as well. The folder cannot say which is which."""
+    dl, out = folder(tmp_path)
+    before = snapshot(dl)
+    (dl / "August.pdf").write_bytes(OTHER)
+    (dl / "September.pdf").write_bytes(PDF)
+    assert take_download(Download(name="August.pdf"), dl, before, out) == ""
+    assert sorted(p.name for p in dl.iterdir()) == ["August.pdf", "September.pdf"]
+    assert not out.exists()
+
+
+def test_a_file_that_is_not_a_pdf_does_not_count_against_it(tmp_path):
+    """An error page, or anything else that is not a PDF, is nobody's
+    document."""
+    dl, out = folder(tmp_path)
+    before = snapshot(dl)
+    (dl / "Statement.pdf").write_bytes(PDF)
+    (dl / "notice.html").write_bytes(b"<html>signed out elsewhere</html>")
+    assert take_download(Download(), dl, before, out) == "folder"
+    assert out.read_bytes() == PDF
+
+
+def test_two_pdfs_that_differ_are_one_too_many(tmp_path):
+    """The folder cannot say which is this document, and the first one in
+    name order used to be taken (#38)."""
+    dl, out = folder(tmp_path)
+    before = snapshot(dl)
+    (dl / "a.pdf").write_bytes(PDF)
+    (dl / "b.pdf").write_bytes(OTHER)
+    out.parent.mkdir()
+    assert take_new_pdf(dl, before, out) is False
+    assert sorted(p.name for p in dl.iterdir()) == ["a.pdf", "b.pdf"]
+
+
+def test_the_same_document_twice_is_still_taken(tmp_path):
+    """A press made twice leaves two copies of one document, and the one left
+    behind is an exact copy that clear_copies then removes."""
+    dl, out = folder(tmp_path)
+    before = snapshot(dl)
+    (dl / "Statement.pdf").write_bytes(PDF)
+    (dl / "Statement (1).pdf").write_bytes(PDF)
+    out.parent.mkdir()
+    assert take_new_pdf(dl, before, out) is True
+    assert clear_copies(dl, before, out) == 1
+    assert list(dl.iterdir()) == []
+
+
+def test_the_event_names_two_copies_of_one_document_and_one_is_taken(tmp_path):
+    dl, out = folder(tmp_path)
+    (dl / "Statement.pdf").write_bytes(OTHER)
+    before = snapshot(dl)
+    rewrite(dl / "Statement.pdf", PDF)
+    (dl / "Statement (1).pdf").write_bytes(PDF)
+    assert take_download(Download(), dl, before, out) == "folder"
+    assert out.read_bytes() == PDF
+    assert clear_copies(dl, before, out) == 1

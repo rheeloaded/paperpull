@@ -74,7 +74,6 @@ SAFETY (this is a credit card and a bank account, both able to move money):
 from __future__ import annotations
 
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -96,11 +95,11 @@ from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
 from paperpull_core.capture import take_download as _take_download
 from paperpull_core.capture import clear_copies as _clear_copies
+from paperpull_core.capture import arrived as _folder_arrived
 from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import take_same_tab as _core_take_same_tab
-from paperpull_core.capture import UNFINISHED as _UNFINISHED
 from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
@@ -1521,14 +1520,10 @@ def _is_apple_file_host(url: str) -> bool:
 
 def _new_names(dl_dir, before: set) -> List[str]:
     """The finished files that appeared in the download folder since
-    `before`, by name."""
-    if not dl_dir:
-        return []
-    try:
-        return sorted(f for f in os.listdir(dl_dir)
-                      if f not in before and not f.lower().endswith(_UNFINISHED))
-    except OSError:
-        return []
+    `before`, or were written again in place since, by name. The same files
+    take_new_pdf may take, so none of them is taken before Apple's name for
+    it is read (review of the download folder fix)."""
+    return _folder_arrived(dl_dir, before)
 
 
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,

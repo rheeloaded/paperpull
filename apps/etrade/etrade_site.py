@@ -2021,6 +2021,9 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         # Pointed at a folder, the browser saves the only copy there and
         # the event's own file is empty, so that file is taken rather than
         # the document asked for a second time (capture.take_download).
+        # The event is not tied to the click, so its file is taken only
+        # when it is the one document that arrived, and otherwise this
+        # attempt's own answer below decides.
         if downloads and _take_download(downloads[0], dl_dir, seen, out_path):
             return True
         if got.get("refetch"):

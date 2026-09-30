@@ -158,6 +158,18 @@ def _starts_like_pdf(path) -> bool:
         return False
 
 
+def _all_same(paths) -> bool:
+    """Whether every one of `paths` holds the same bytes, as a second
+    download of the same document does."""
+    try:
+        first = paths[0]
+        size = first.stat().st_size
+        return all(p.stat().st_size == size and filecmp.cmp(str(first), str(p), shallow=False)
+                   for p in paths[1:])
+    except (OSError, IndexError):
+        return False
+
+
 def take_new_pdf(dl_dir, before: set, out_path: Path) -> bool:
     """Move a finished PDF that appeared in `dl_dir` since `before` to
     `out_path`.
@@ -169,7 +181,9 @@ def take_new_pdf(dl_dir, before: set, out_path: Path) -> bool:
     A file written again in place since `before` counts as appeared, when
     `before` came from snapshot(). Nothing is taken while a download that
     was still being written at `before` has finished since, because it may
-    have finished as the very file that looks new.
+    have finished as the very file that looks new, and nothing is taken
+    when two PDFs that differ arrived, since the folder cannot say which
+    is this document. Newrez learned both on a tester's account (#38).
     """
     if not dl_dir:
         return False
@@ -181,11 +195,20 @@ def take_new_pdf(dl_dir, before: set, out_path: Path) -> bool:
         log.info("an earlier download finished during this one, so the download "
                  "folder cannot say which file is this document")
         return False
+    pdfs = []
     for name in names:
         src = Path(dl_dir) / name
         try:
-            if src.stat().st_size == 0 or not _starts_like_pdf(src):
-                continue
+            if src.stat().st_size and _starts_like_pdf(src):
+                pdfs.append(src)
+        except OSError:
+            continue
+    if len(pdfs) > 1 and not _all_same(pdfs):
+        log.info("%d different PDFs arrived in the download folder, so none was "
+                 "taken as this document", len(pdfs))
+        return False
+    for src in pdfs:
+        try:
             if out_path.exists():
                 out_path.unlink()
             shutil.move(str(src), str(out_path))
@@ -217,9 +240,18 @@ def take_download(download, dl_dir, before, out_path) -> str:
     so the provider is asked once.
 
     The folder's file is taken only when the folder can say it is this
-    download's. It carries the event's name, or the " (2)" form of it, it
-    is the only such file that arrived since `before`, and no download that
-    was still being written at `before` has finished since."""
+    download's. It carries the event's name, or the " (2)" form of it,
+    every PDF that arrived since `before` is that same document, and no
+    download that was still being written at `before` has finished since.
+
+    A download event is not tied to the press that caused it, and one the
+    last press started can arrive during this capture and raise the first
+    event (#38). Two reviews found that the event's name alone then took
+    it as this document. With another PDF there as well, nothing is taken,
+    and the app's own ways of telling decide, as they did before. A
+    download the last press started that lands before this press's own
+    does is the only new PDF when it lands, and cannot be told from it
+    here, as it never could."""
     out_path = Path(out_path)
     saved = False
     try:
@@ -243,19 +275,28 @@ def take_download(download, dl_dir, before, out_path) -> str:
         name = download.suggested_filename or ""
     except Exception:
         name = ""
-    mine = _named(arrived(dl_dir, before), name)
+    names = arrived(dl_dir, before)
+    mine = _named(names, name)
     if not mine:
         return ""
     if earlier_finished(dl_dir, before):
         log.info("an earlier download finished during this one, so the download "
                  "folder cannot say which file is this document")
         return ""
-    if len(mine) > 1:
-        log.info("%d files in the download folder could be this download, "
-                 "so none was taken", len(mine))
-        return ""
     src = Path(dl_dir) / mine[0]
-    if not _starts_like_pdf(src):
+    pdfs = []
+    for n in names:
+        path = Path(dl_dir) / n
+        try:
+            if path.stat().st_size and _starts_like_pdf(path):
+                pdfs.append(path)
+        except OSError:
+            continue
+    if src not in pdfs:
+        return ""
+    if len(pdfs) > 1 and not _all_same(pdfs):
+        log.info("%d different PDFs arrived in the download folder, so none was "
+                 "taken as this download", len(pdfs))
         return ""
     try:
         if out_path.exists():
@@ -333,16 +374,20 @@ def clear_archived_copies(dl_dir, archived) -> tuple:
         return 0, 0
     if not here:
         return 0, 0
+    try:
+        home = folder.resolve()
+    except (OSError, RuntimeError):
+        home = folder
     by_size: dict = {}
     for item in archived or ():
         try:
             if not item or not isinstance(item, (str, os.PathLike)):
                 continue
             path = Path(item)
-            if not path.is_file() or path.parent.resolve() == folder.resolve():
+            if not path.is_file() or path.parent.resolve() == home:
                 continue
             size = path.stat().st_size
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
             continue
         if size:
             by_size.setdefault(size, []).append(path)

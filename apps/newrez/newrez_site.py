@@ -2074,8 +2074,10 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         """The way a PDF arrived, or "" while none has."""
         # Pointed at a folder, the browser saves the only copy there and
         # the event's own file is empty, so that file is taken rather than
-        # the document asked for a second time (capture.take_download),
-        # and only when the folder can say it is this download's.
+        # the document asked for a second time (capture.take_download).
+        # The event is not tied to the press, so its file is taken only
+        # when it is the one document that arrived, and otherwise the
+        # folder rules below decide, as they did before (#38).
         if downloads:
             how = _take_download(downloads[0], dl_dir, seen, out_path)
             if how == "event":

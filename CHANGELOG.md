@@ -242,26 +242,31 @@ All notable changes to PaperPull are recorded here. Versioning follows
   missed. A census test now follows every pattern handed to the browser
   back to where it is built, and fails any app that writes a bare slash
   into one or escapes text into one with a bare re.escape.
-- **Eleven apps kept a hidden copy of every document, and asked the
-  provider for each one twice.** ADP, American Family, Apple Card,
-  E*TRADE, Golden 1, Newrez, SBA, SMUD, State Farm, Verizon Mobile and
-  Wells Fargo point the browser at a hidden folder of their own.
-  Measured in a real browser, a browser pointed at a folder saves the
-  only copy of a download there, and the download event the app sees
-  then carries an empty file. These apps took the empty file for a
-  failure, asked the provider for the document again and saved that
-  answer, and the browser's file stayed in the hidden folder, where it
-  outlived the one in the archive once that was deleted after an import.
-  The browser's file is now moved into place instead, so the provider is
-  asked once and nothing is left behind. The next run clears the copies
-  earlier versions left, and only files that are exact copies of a
-  document still in the archive. Nothing else in the folder is touched.
+- **Ten apps kept a hidden copy of every document, and asked the
+  provider for each one twice.** ADP, Apple Card, E*TRADE, Golden 1,
+  Newrez, SBA, SMUD, State Farm, Verizon Mobile and Wells Fargo point
+  the browser at a hidden folder of their own. Measured in a real
+  browser, a browser pointed at a folder saves the only copy of a
+  download there, and the download event the app sees then carries an
+  empty file. These apps took the empty file for a failure, asked the
+  provider for the document again and saved that answer, and the
+  browser's file stayed in the hidden folder, where it outlived the one
+  in the archive once that was deleted after an import. The browser's
+  file is now moved into place instead, so the provider is asked once
+  and nothing is left behind. The next run clears the copies earlier
+  versions left, and only files that are exact copies of a document
+  still in the archive. Nothing else in the folder is touched.
 - **AT&T and Verizon could stop saving bills after a single failure.**
   The browser writes a finished file of the same name over the old one
   in place, and both compared their folder by name alone, so one file
   left there under a bill's usual name hid every later bill of that
   name. A file written again now counts as a new one, in every app that
   watches a folder.
+- **Two different PDFs arriving in the download folder during one
+  capture now mean neither is taken.** The folder cannot say which is
+  the document asked for, and a download the last press started can be
+  one of them. The statement is left for the next run rather than filed
+  under the wrong name.
 
 ## [0.41.1] - 2026-09-30
 
