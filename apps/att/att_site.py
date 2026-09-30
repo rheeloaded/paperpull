@@ -148,8 +148,11 @@ BILLING_CANDIDATES = [
 # in the second survey, and the API the page calls to fill it.
 HISTORY_URL = f"{BASE}/acctmgmt/billing/billandpaymenthistory?filter=bill"
 HISTORY_API_RE = re.compile(r"/msapi/webbillexpms/v1/billandpaymenthistory\b", re.I)
-# The two buttons that fetch a bill's PDF, exact text from the survey.
-PDF_BUTTON_RE = re.compile(r"^\s*(download\s+pdf|view\s*/\s*print\s+pdf)\s*$", re.I)
+# The two buttons that fetch a bill's PDF, exact text from the survey. The
+# slash is written \/ because Playwright ends a pattern handed to a locator
+# at a bare one and the locator then raises, which kept View/print PDF from
+# ever being found here.
+PDF_BUTTON_RE = re.compile(r"^\s*(download\s+pdf|view\s*\/\s*print\s+pdf)\s*$", re.I)
 # A past bill on the history page, "Bill\nJul 23 - Aug 22\n$xx.xx".
 BILL_BUTTON_RE = re.compile(r"^\s*bill\s", re.I)
 _PERIOD_RE = re.compile(
@@ -1653,7 +1656,7 @@ _VIEWER_JS = r"""() => {
 
 
 _REGULAR_PDF_RE = re.compile(r"^\s*regular\s+pdf\s*$", re.I)
-_VIEW_PRINT_RE = re.compile(r"^\s*view\s*/\s*print\s+pdf\s*$", re.I)
+_VIEW_PRINT_RE = re.compile(r"^\s*view\s*\/\s*print\s+pdf\s*$", re.I)
 
 # Every element whose own text says PDF, with what it is and whether it
 # can be seen. The menu under "Download PDF" is made of elements that are
@@ -1743,7 +1746,7 @@ def _take_viewer(page, out_path: Path, trace: Optional[list]) -> bool:
 
 def _view_print_button(page):
     """The "View/print PDF" button, once it has passed the guard, or None."""
-    pat = re.compile(r"^\s*view\s*/\s*print\s+pdf\s*$", re.I)
+    pat = re.compile(r"^\s*view\s*\/\s*print\s+pdf\s*$", re.I)
     try:
         loc = page.get_by_role("button", name=pat).or_(page.get_by_role("link", name=pat))
         for i in range(min(loc.count(), 4)):

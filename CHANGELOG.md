@@ -224,6 +224,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   escape_for_locator writes the slash so the browser reads it, and a
   real browser presses a revealed View/print PDF through each of the
   twelve apps' own words and guard.
+- **AT&T finds its View/print PDF button (#26).** Two of the patterns
+  that name the bill's View/print PDF control kept its slash bare, so
+  Playwright refused them and neither ever matched. A bill showing only
+  that control was reported as having no PDF control, and the fallback
+  tried when Download PDF gives nothing had not found its button once
+  since it was added in 0.28.3.
 
 ## [0.41.1] - 2026-09-30
 
