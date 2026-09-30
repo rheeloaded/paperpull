@@ -1129,7 +1129,9 @@ class App:
 
     def _file_invoices(self, purchase: Purchase, walk: dict) -> bool:
         """What the walk came to. The order is done when every invoice it
-        has is on file, and tried again next run when one is not."""
+        has is on file, and tried again next run when one is not. True when
+        it is done, and process_one then writes it down and counts it, as it
+        does a receipt."""
         said = [e for e in walk["saved"] if e["part"]]
         total = max((int(e["part"].split(" of ")[1]) for e in said), default=0)
         held, walk["held"] = walk["held"], []
@@ -1198,20 +1200,19 @@ class App:
         if aside:
             notes.append("Put aside in Manual Review "
                          + ", ".join(Path(e["file"]).name for e in aside))
-        self._record_state(purchase, State.PDF_VERIFIED, notes=". ".join(notes), extra={
-            "pdf_size": doc.get("size", ""), "pdf_pages": doc.get("pages", ""),
-            "downloaded_ok": True, "receipt_count": purchase.receipt_count,
-            "invoices": walk["saved"]})
-        self._write_csv_rows(
-            purchase, receipt_status="No printable receipt available",
-            processing_status="Review Needed",
-            notes_extra="Invoice saved instead of receipt (distinct document)")
-        # No Receipt Available is final, so with its invoices saved this
-        # purchase is not downloaded again on resume.
-        self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                           notes="Invoice saved; no printable receipt exists")
-        self.stats["invoices_downloaded"] += 1
-        self.stats["manual_review"] += 1
+        # Done for good, as a receipt is, so it is not downloaded again on
+        # resume. The rows, the final state and the counts are process_one's,
+        # written once on this answer. They were written here too, so every
+        # invoice order went into both CSVs twice, first as Review Needed, and
+        # was counted twice as an invoice and once for review whatever its
+        # name, and review_names offered every one of them for renaming. The
+        # last note is the one every invoice order's record has carried, kept
+        # word for word so a new record reads like those already in an archive.
+        self._record_state(purchase, State.PDF_VERIFIED, notes="; ".join(
+            x for x in (". ".join(notes), "Invoice saved; no printable receipt exists") if x),
+            extra={"pdf_size": doc.get("size", ""), "pdf_pages": doc.get("pages", ""),
+                   "downloaded_ok": True, "receipt_count": purchase.receipt_count,
+                   "invoices": walk["saved"]})
         if len(kept) == 1:
             print("  No printable receipt; invoice saved to Invoices folder.")
         else:

@@ -918,48 +918,6 @@ class App:
         except Exception:
             return ""
 
-    def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
-        """No in-store store receipt ("View receipt details"). Online orders
-        expose "Print invoice" instead; capture that invoice dialog-free by
-        rendering the live details page with print media (same no-click
-        printToPDF used for receipts)."""
-        invoices = site.find_invoice_controls(page)
-        if invoices and self.config.get("include_invoices"):
-            purchase.document_type = "Invoice"
-            filename = build_pdf_filename(purchase.purchase_date, purchase.summary, "Invoice", record=purchase)
-            out_path = unique_path(self.paths.invoices, filename,
-                                   self.config["max_path_length"])
-            try:
-                purchase.receipt_url = page.url
-                # No click: the invoice/order summary is embedded in the live
-                # page with print-only CSS. printToPDF reproduces it cleanly
-                # without opening Walmart's native print dialog.
-                self._capture_document(page, purchase, out_path)
-                ok = self._finish_pdf(page, purchase, out_path)
-                if ok:
-                    self._write_csv_rows(
-                        purchase, receipt_status="Invoice (no store receipt)",
-                        processing_status="Completed",
-                        notes_extra="Online order: invoice saved (no in-store receipt exists)")
-                    self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                                       notes="Invoice saved; online order has no store receipt")
-                    self.stats["invoices_downloaded"] += 1
-                    print("  Online invoice saved to Invoices folder.")
-                return ok
-            except Exception as e:
-                log.warning("Invoice save failed: %s", e)
-
-        self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                           notes="No printable receipt available")
-        self._write_csv_rows(purchase, receipt_status="No printable receipt available",
-                             processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                             notes_extra="No Print receipts control found"
-                             + ("" if not invoices else "; invoice exists (use --include-invoices)"))
-        self.stats["no_receipt"] += 1
-        self.stats["manual_review"] += 1
-        print("  No printable receipt available - marked for manual review.")
-        return False
-
     # -- records ------------------------------------------------------------
 
     def _record_state(self, purchase: Purchase, state: State,

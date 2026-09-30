@@ -44,7 +44,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import target_receipts as app_mod
 import target_site as site
 from paperpull_core import browser as browser_launcher
-from paperpull_core import receipt_pdf
+from paperpull_core import receipt_pdf, run_reporting
 from paperpull_core.models import ONLINE, Item, Purchase
 
 # Every host name fails to resolve, and only this machine's own address is
@@ -98,6 +98,12 @@ TIPPED = Order("902000000000041", "2026-02-05", "Thu, Feb 5, 2026",
                [("Invented Wooden Puzzle Box", "$34.56")],
                [("10000000000000042", ["10000042 - shipt_tip"], "$4.32"),
                 ("10000000000000041", ["10000041 - Invented Wooden Puzzle Box"], "$34.56")])
+
+# An item the category rules know nothing of, so the name the order is filed
+# under is a guess, and the order is written down as needing review.
+UNSURE = Order("902000000000051", "2026-02-09", "Mon, Feb 9, 2026",
+               [("Invented Frobnicator", "$4.71")],
+               [("10000000000000051", ["10000051 - Invented Frobnicator"], "$4.71")])
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Orders : %s</title></head>
 <body><header><p>Ship to 00000</p><a href="/">Home</a></header>
@@ -471,7 +477,7 @@ def invoice_numbers(paths):
     return sorted(n for p in paths for n, _, _ in ALL_INVOICES if n in text_of(p))
 
 
-ALL_INVOICES = [v for o in (SPLIT, SINGLE, DIRECT, TIPPED) for v in o.invoices]
+ALL_INVOICES = [v for o in (SPLIT, SINGLE, DIRECT, TIPPED, UNSURE) for v in o.invoices]
 
 
 def opened(path):
@@ -481,6 +487,23 @@ def opened(path):
 def new_this_run(tmp_path):
     lines = (tmp_path / "out" / "new-this-run.txt").read_text(encoding="utf-8").splitlines()
     return sorted(Path(ln).name for ln in lines if ln and not ln.startswith("#"))
+
+
+INDEX, HISTORY = "Target Receipt Index.csv", "Target Order History.csv"
+
+
+def rows_of(tmp_path, name, order):
+    """This order's rows in one of the app's two CSVs, in the order written."""
+    columns = storage.RECEIPT_INDEX_COLUMNS if name == INDEX else storage.ORDER_HISTORY_COLUMNS
+    return [r for r in storage.CsvFile(tmp_path / "out" / name, columns).read_all()
+            if r["Order or Receipt Number"] == order.number]
+
+
+def counted(tmp_path):
+    """What the run summary counted, by the label it gives each count."""
+    text = (tmp_path / "out" / "run-summary.txt").read_text(encoding="utf-8")
+    return {k.strip(): v.strip() for k, v in
+            (ln.split(":", 1) for ln in text.splitlines() if ":" in ln)}
 
 
 def test_every_invoice_of_every_order_is_saved(attached, tmp_path):
@@ -586,6 +609,53 @@ def test_signed_out_between_two_invoices_the_run_stops_and_resumes(attached, tmp
     assert record(tmp_path, SPLIT)["downloaded_ok"] is True
 
 
+def test_an_invoice_order_is_written_down_once_as_it_ends(attached, tmp_path, monkeypatch,
+                                                           capsys):
+    """The invoice step wrote each order into both CSVs as Review Needed and
+    counted it, then process_one wrote it again as Completed and counted it
+    again, as it does a receipt. In the owner's archive 22 of 23 invoice
+    orders had two index rows for their one file and every item of them
+    twice in the order history, every one was counted as needing review, and
+    review_names offered every one for renaming. Now each is written once,
+    the way it ends, and counted once. The order whose name is a guess is
+    the only one needing review, and the tip put aside is still reported,
+    as a file that did not pass its check."""
+    SITE.show(SINGLE, SPLIT, TIPPED, UNSURE)
+    assert run(tmp_path, attached, "--pilot-online") == 0
+    said = capsys.readouterr().out
+
+    for order, status, state in ((SINGLE, "Completed", "Completed"),
+                                 (SPLIT, "Completed", "Completed"),
+                                 (TIPPED, "Completed", "Completed"),
+                                 (UNSURE, "Review Needed", "Needs Manual Review")):
+        rec = record(tmp_path, order)
+        assert rec["state"] == state, rec
+        index = rows_of(tmp_path, INDEX, order)
+        assert [(r["Receipt Status"], r["Processing Status"], r["Document Type"])
+                for r in index] == [("Downloaded", status, "Invoice")], (order.number, index)
+        assert same_file(index[0]["PDF Full Path"], rec["pdf_path"]), index
+        history = rows_of(tmp_path, HISTORY, order)
+        assert sorted(r["Item Name"] for r in history) == sorted(n for n, _ in order.items), \
+            (order.number, history)
+        assert {r["Processing Status"] for r in history} == {status}, history
+    assert "Also saved" in rows_of(tmp_path, INDEX, SPLIT)[0]["Notes"], \
+        "the order's other invoice is named on its one row"
+
+    counts = counted(tmp_path)
+    assert counts["Invoices downloaded"] == "4", counts
+    assert counts["Needs manual review"] == "1", "only the order whose name is a guess, %s" % counts
+    assert counts["PDF validation failures"] == "1", "the tip put aside, %s" % counts
+    # What the panel is told, which it shows as "1 need review".
+    line = next(ln for ln in said.splitlines() if ln.startswith(run_reporting.PREFIX))
+    result = json.loads(line[len(run_reporting.PREFIX):])
+    assert (result["manual_review"], result["validation_failures"]) == (1, 1), result
+
+    asked = []
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: asked.append(prompt) or "")
+    assert run(tmp_path, attached, "--review-names") == 0
+    assert len(asked) == 1, "only the name it was unsure of is offered for renaming, %s" % asked
+
+
 def print_to(cdp_url, url, out):
     """A page printed the way the app prints one, in a Playwright of the
     test's own that is stopped before the app starts its own."""
@@ -643,6 +713,13 @@ def test_a_redownload_saves_the_missing_invoice_and_not_the_first_again(
     rec = record(tmp_path, TIPPED)
     assert rec["downloaded_ok"] is True, rec
     assert same_file(rec["pdf_path"], item[0]), rec
+    # The two rows the old code left are left as they were, and this run
+    # adds one, for the invoice the record now points at.
+    index = rows_of(tmp_path, INDEX, TIPPED)
+    assert [(r["Receipt Status"], r["Processing Status"]) for r in index] == [
+        ("No printable receipt available", "Review Needed"), ("Downloaded", "Completed"),
+        ("Downloaded", "Completed")], index
+    assert same_file(index[-1]["PDF Full Path"], item[0]), index
 
 
 # -- the rules, each on its own -------------------------------------------------
@@ -685,6 +762,9 @@ def test_the_record_points_at_the_invoice_naming_the_items_when_a_tip_passes(tmp
     assert rec["pdf_path"] == str(item) and rec["pdf_size"] == 5000, rec
     assert rec["downloaded_ok"] is True and rec["receipt_count"] == 2, rec
     assert "Also saved tip.pdf" in rec["notes"], rec["notes"]
+    # Writing the order down and counting it is process_one's, once.
+    assert app.index_csv.read_all() == [] and app.order_csv.read_all() == []
+    assert (app.stats["invoices_downloaded"], app.stats["manual_review"]) == (0, 0), app.stats
 
 
 def test_an_invoice_saved_before_counts_after_its_file_is_deleted(tmp_path):

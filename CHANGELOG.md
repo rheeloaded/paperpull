@@ -303,6 +303,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   safe as well. A failure part way used to leave part of a PDF under the
   document's name and the archive out of sight, and now leaves the
   archive kept and nothing half written.
+- **Target writes an invoice order down once.** An online order saved as
+  its invoice went into the receipt index and the order history twice,
+  first as No printable receipt available and Review Needed by the step
+  that saved the invoice, then as Downloaded and Completed once the run was
+  told the invoice was saved. It was counted twice as an invoice and once
+  as needing review however good its name, so review_names offered every
+  invoice order for renaming and the purchases workbook listed each of
+  their items twice. In a real archive 22 of 23 invoice orders had two rows
+  for their one file. Now each is written once, the way it ends, Completed
+  unless the name it is filed under is a guess, and counted once. A tip's
+  invoice put aside in Manual Review is still reported, as a file that did
+  not pass its check. Rows written before are left as they are. Walmart
+  kept a copy of the same step that nothing called, and it is gone. A check
+  across the repository now refuses a step that writes a purchase down and
+  then tells the method that asked, which writes it again, that it saved
+  it.
 
 ## [0.41.1] - 2026-09-30
 
