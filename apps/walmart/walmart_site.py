@@ -30,6 +30,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
@@ -822,6 +823,98 @@ def find_receipt_iframe(page):
     except Exception:
         pass
     return None
+
+
+# ---------------------------------------------------------------------------
+# What a saved document is checked for
+# ---------------------------------------------------------------------------
+
+# Walmart prints an order number as groups of digits joined by hyphens, and
+# never as the one run of digits the order is known by here. Measured over
+# saved Walmart documents, value free, every online invoice printed it as
+# seven digits, a hyphen and eight, twice, and every store receipt as groups
+# of four, while the unbroken number the check looked for was in none of
+# them. Nearly every invoice also leaves out the word Walmart, and none
+# prints a date the way the check writes one, so an invoice passed only when
+# an item name read from the order's page came out on the paper too. On a
+# tester's pages none did, and all three invoices went to Manual Review (#63).
+_PRINTED_NUMBER_RE = re.compile(r"\d+(?:\s*-\s*\d+)+")
+
+
+def _printed_forms(text: str, order_number: str) -> List[str]:
+    """Every place `text` prints this order's number in hyphenated groups,
+    as it is printed there. A number counts only when its digits are
+    exactly the order's, so a longer number holding them does not."""
+    digits = re.sub(r"\D", "", order_number or "")
+    if len(digits) < 10:
+        return []
+    return [re.sub(r"\s+", "", m.group())
+            for m in _PRINTED_NUMBER_RE.finditer(text or "")
+            if re.sub(r"\D", "", m.group()) == digits]
+
+
+def order_number_as_printed(text: str, order_number: str) -> List[str]:
+    """This order's own number the way a Walmart document prints it, found
+    in `text`, to add to the words a saved document is checked for.
+    Nothing when it is not there.
+
+    Only on a document that prints an amount as well. An invoice and a
+    receipt always do, and a page that merely names the order, a heading
+    over an invoice that never came, need not."""
+    if not MONEY_RE.search(text or ""):
+        return []
+    return _printed_forms(text, order_number)[:1]
+
+
+# Words a Walmart document or a page in its place may carry, from a fixed
+# list. What pdf_facts says of a saved file is only which of these it holds,
+# so the failure file it goes into never carries anything of the person's.
+DOCUMENT_WORDS = ("invoice", "receipt", "order", "subtotal", "total", "tax",
+                  "qty", "payment", "delivered", "shipping", "pickup",
+                  "return", "robot", "human", "sign in", "verify",
+                  "something went wrong", "try again", "not available")
+
+
+def pdf_facts(path, purchase: Purchase, page_url: str = "") -> dict:
+    """What a saved document that failed its check holds, for the failure
+    file a tester attaches. Its size, its pages, how much text it has,
+    whether it says Walmart, prints this order's number, a date or an
+    amount, how many of the item names read from the order's page it
+    prints, which DOCUMENT_WORDS appear, and whether the page it was
+    printed from was still this order's. Never its words."""
+    facts: dict = {}
+    try:
+        from pypdf import PdfReader
+        facts["kilobytes"] = Path(path).stat().st_size // 1024
+        reader = PdfReader(str(path))
+        facts["pages"] = len(reader.pages)
+        text = "\n".join((pg.extract_text() or "") for pg in reader.pages[:5])
+        low = text.lower()
+        squashed = re.sub(r"\s+", "", low)
+        number = re.sub(r"\D", "", purchase.order_number or "")
+        names = [(i.name or "").strip() for i in purchase.items[:5]]
+        names = [n[:24] for n in names if len(n) >= 6]
+        facts.update({
+            "text_characters": len(text),
+            "says_walmart": "walmart" in squashed,
+            "prints_this_order_number": bool(number) and bool(
+                _printed_forms(text, number)
+                or re.search(r"(?<!\d)%s(?!\d)" % number, text)),
+            "prints_a_date": bool(parse_date(text)),
+            "prints_an_amount": bool(MONEY_RE.search(text)),
+            "item_names_read": len(names),
+            # The way the check itself looks for them, spaces aside.
+            "item_names_printed": sum(
+                1 for n in names if re.sub(r"\s+", "", n.lower()) in squashed),
+            "words": [w for w in DOCUMENT_WORDS if re.search(
+                r"\b" + r"\s+".join(map(re.escape, w.split())) + r"\b", low)],
+        })
+    except Exception as e:
+        facts["error"] = type(e).__name__
+    if page_url:
+        facts["printed_from_this_order"] = bool(
+            purchase.order_number and purchase.order_number in page_url)
+    return facts
 
 
 # ---------------------------------------------------------------------------

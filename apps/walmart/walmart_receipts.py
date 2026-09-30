@@ -50,6 +50,13 @@ from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("walmart_receipts")
 
+# What process_one says of a purchase it opened and then left alone, in a
+# run limited to some dates, because its order page placed it outside them
+# or showed no date to place it by. Anything else means it was taken, or
+# tried (#63).
+OUTSIDE_DATES = "outside the dates"
+NO_DATE = "no date"
+
 
 def ask(prompt: str) -> str:
     """input() that stops cleanly (progress already saved by callers) when
@@ -110,6 +117,7 @@ class App:
             "skipped_completed": 0, "canceled": 0, "no_receipt": 0,
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
             "validation_failures": 0, "dates_processed": [], "new_files": [],
+            "outside_dates": 0,
         }
 
     # -- infrastructure -----------------------------------------------------
@@ -435,6 +443,33 @@ class App:
 
     # -- selection ----------------------------------------------------------
 
+    def _dates_asked(self) -> bool:
+        """Whether this run is limited to some dates, by --year, --start-date,
+        --end-date or the default_start_date setting."""
+        args = self.args
+        return bool(getattr(args, "year", None) or getattr(args, "start_date", None)
+                    or getattr(args, "end_date", None)
+                    or self.config.get("default_start_date"))
+
+    def _within_dates(self, date: str) -> bool:
+        """Whether a purchase of this date is inside the dates this run is
+        limited to. A date nobody knows is inside none of them.
+
+        The floor keeps a run from walking older orders again once an
+        archive already holds them, and --start-date takes its place when
+        both are given, as it always has."""
+        args = self.args
+        if not date:
+            return False
+        if args.year and not date.startswith(str(args.year)):
+            return False
+        floor = args.start_date or self.config.get("default_start_date")
+        if floor and date < floor:
+            return False
+        if args.end_date and date > args.end_date:
+            return False
+        return True
+
     def _select_purchases(self, ptype: Optional[str] = None,
                           limit: Optional[int] = None,
                           newest_first: bool = True) -> List[Purchase]:
@@ -446,21 +481,32 @@ class App:
             purchases = [p for p in purchases if p.purchase_type == ptype]
         if args.order_number:
             purchases = [p for p in purchases if p.order_number == args.order_number]
-        if args.year:
-            purchases = [p for p in purchases if p.purchase_date.startswith(str(args.year))]
-        # Hard floor: never process orders before the configured start date, so
-        # an archive that already holds the older years never walks them again.
-        floor = args.start_date or self.config.get("default_start_date")
-        if floor:
+        # The date its order page gave, once a run has read it, over the
+        # card's, which for an online order is none or a later one.
+        progress = getattr(self, "progress", None)
+        if progress is not None:
+            for p in purchases:
+                read = (progress.get(p.key) or {}).get("purchase_date")
+                if read:
+                    p.purchase_date = read
+        by_dates = self._dates_asked()
+        if by_dates:
+            # A purchase whose card shows no date stays in, and its order
+            # page places it once it is open. Walmart's online order cards
+            # show none, so these used to leave out every online order
+            # without a word (#63).
             purchases = [p for p in purchases
-                         if p.purchase_date and p.purchase_date >= floor]
-        if args.start_date:
-            purchases = [p for p in purchases if p.purchase_date and p.purchase_date >= args.start_date]
-        if args.end_date:
-            purchases = [p for p in purchases if p.purchase_date and p.purchase_date <= args.end_date]
+                         if not p.purchase_date or self._within_dates(p.purchase_date)]
         purchases.sort(key=lambda p: p.purchase_date or "0000", reverse=newest_first)
         limit = limit if limit is not None else args.max_purchases
-        if limit:
+        if limit and by_dates:
+            # The limit is for purchases inside the dates, and one with no
+            # date yet is only placed once its page is read. So every one of
+            # those follows the dated ones, and the run itself stops at the
+            # limit, counting only what it takes.
+            purchases = ([p for p in purchases if p.purchase_date][:limit]
+                         + [p for p in purchases if not p.purchase_date])
+        elif limit:
             purchases = purchases[:limit]
         return purchases
 
@@ -493,15 +539,43 @@ class App:
 
     # -- processing core ----------------------------------------------------
 
-    def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
+    def process_purchases(self, purchases: List[Purchase], dry_run: bool = False,
+                          limits: Optional[dict] = None,
+                          by_dates: bool = False) -> List[Purchase]:
+        """Take each purchase in turn, and return the ones taken or tried.
+
+        `limits` caps how many of each kind of purchase are taken. A
+        purchase counts toward it when the run takes or tries it, or finds
+        it already taken, and never when its order page places it outside
+        the dates the run is limited to or shows no date at all, so one
+        opened only to learn its date does not use up a place (#63).
+        `by_dates` is whether the run is limited to some dates, and only
+        then is a purchase placed by the date its order page shows."""
         page = self.page()
-        for i, purchase in enumerate(purchases, 1):
+        counted: dict = {}
+        left: dict = {}
+        reached: List[Purchase] = []
+        # The purchases the run looks at, numbered as it reaches them. One
+        # past its kind's limit is not looked at and takes no number.
+        i = 0
+        for purchase in purchases:
+            kind = purchase.purchase_type
+            cap = (limits or {}).get(kind)
+            if cap and counted.get(kind, 0) >= cap:
+                left[kind] = left.get(kind, 0) + 1
+                continue
+            i += 1
             print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if self._already_done(purchase):
                 print("  Already completed and PDF verified - skipping.")
                 self.stats["skipped_completed"] += 1
+                # Inside the dates when it has one, since the selection
+                # left out every dated purchase outside them.
+                if not by_dates or purchase.purchase_date:
+                    counted[kind] = counted.get(kind, 0) + 1
+                    reached.append(purchase)
                 continue
             # Which document the run is on, so a failure file says how far
             # it got and whether it ever reached a second one.
@@ -510,8 +584,10 @@ class App:
                                 "take a document", ordinal=i)
             except Exception:
                 pass
+            outcome = None
             try:
-                self.process_one(page, purchase, dry_run=dry_run)
+                outcome = self.process_one(page, purchase, dry_run=dry_run,
+                                           by_dates=by_dates)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress is saved; run --resume to continue.")
                 raise
@@ -519,9 +595,19 @@ class App:
                 log.exception("Unhandled failure on %s", purchase.key)
                 self._record_state(purchase, State.FAILED, notes=f"Unhandled error: {e}")
                 self.stats["failed"] += 1
+            if outcome != OUTSIDE_DATES:
+                reached.append(purchase)
+            if outcome not in (OUTSIDE_DATES, NO_DATE):
+                counted[kind] = counted.get(kind, 0) + 1
             self._delay()
+        for kind, more in left.items():
+            print(f"\n{kind}: this run's limit of {limits[kind]} was reached, so "
+                  f"{more} purchase{'' if more == 1 else 's'} not looked at "
+                  f"{'is' if more == 1 else 'are'} left for another run.")
+        return reached
 
-    def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+    def process_one(self, page, purchase: Purchase, dry_run: bool = False,
+                    by_dates: bool = False):
         # ---- open details (retry once, per spec 22) ----
         for attempt in (1, 2):
             try:
@@ -547,6 +633,30 @@ class App:
 
         # ---- extract ----
         purchase = site.extract_details(page, purchase)
+
+        # ---- the dates this run is limited to ----
+        # Placed by its order page's date now that the page is read, which
+        # for an online order is the only date there is (#63).
+        if by_dates:
+            if not purchase.purchase_date:
+                self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                                   notes="No date on its order page, so it could not be "
+                                         "placed in the dates this run is limited to")
+                self.stats["manual_review"] += 1
+                print("  Its order page shows no date, so I cannot tell whether it is")
+                print("  inside the dates asked for. Nothing was saved, and it is left for")
+                print("  manual review. A run without dates takes it as before.")
+                return NO_DATE
+            if not self._within_dates(purchase.purchase_date):
+                # Not saved and not recorded, so it stays as discovered and
+                # a run that includes its date takes it. Only the date is
+                # kept, so that run and every other places it unopened.
+                self.discovery.update(purchase.key, {"purchase_date": purchase.purchase_date})
+                self.stats["outside_dates"] += 1
+                print(f"  Its order page dates it {purchase.purchase_date}, outside the dates")
+                print("  asked for, so it is left for a run that includes them.")
+                return OUTSIDE_DATES
+
         self._record_state(purchase, State.DETAILS_EXTRACTED)
         if purchase.purchase_date:
             self.stats["dates_processed"].append(purchase.purchase_date)
@@ -688,21 +798,38 @@ class App:
         log.info("Capture path: plain page print")
         receipt_pdf.print_page_to_pdf(target_page, out_path)
 
+    def _check(self, path: Path, purchase: Purchase, printed_from: str = ""):
+        """The check a saved document goes through.
+
+        The words it looks for include this order's number the way Walmart
+        prints it, in hyphenated groups, when the page it was printed from
+        is this order's own. The unbroken number was on none of the Walmart
+        documents measured, and an invoice that never says Walmart otherwise
+        passed only when an item name came out on the paper the way it was
+        read from the page (#63). A page that is not this order's, a list of
+        orders among them, gets nothing from this."""
+        tokens = receipt_pdf.expected_tokens_for(purchase)
+        if purchase.order_number and purchase.order_number in (printed_from or ""):
+            tokens += site.order_number_as_printed(receipt_pdf.pdf_text(path),
+                                                   purchase.order_number)
+        return receipt_pdf.validate_pdf(path, self.config["min_pdf_bytes"], tokens)
+
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
                     popup=None, source_page=None) -> bool:
         purchase.pdf_path = str(out_path)
         purchase.pdf_filename = out_path.name
         self._record_state(purchase, State.PDF_SAVED)
 
-        tokens = receipt_pdf.expected_tokens_for(purchase)
-        result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
+        printed_from = self._address_of(source_page or page)
+        result = self._check(out_path, purchase, printed_from)
         if not result.ok:
             log.warning("Validation failed (%s); retrying once", result.reason)
             self.stats["validation_failures"] += 1
             try:
                 retry_page = source_page or page
                 receipt_pdf.print_page_to_pdf(retry_page, out_path)
-                result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
+                printed_from = self._address_of(retry_page)
+                result = self._check(out_path, purchase, printed_from)
             except Exception as e:
                 log.warning("Retry failed: %s", e)
         if not result.ok:
@@ -722,6 +849,17 @@ class App:
                                  notes_extra=f"Validation: {result.reason}")
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
+            # What the file holds, never its words, so the next report says
+            # which of a blank print, another page or an invoice unlike the
+            # ones this app was built on it was. A put-aside used to leave
+            # nothing to attach, and Diagnose looks at the page later, by
+            # which time it may be showing something else (#63).
+            try:
+                facts = site.pdf_facts(quarantine, purchase, printed_from)
+            except Exception:
+                facts = {}
+            self.write_failure("check the saved document",
+                               "it did not read as this purchase", postmortem=facts)
             return False
 
         purchase.receipt_count = 1
@@ -732,6 +870,13 @@ class App:
             "downloaded_ok": True})
         self.stats["new_files"].append(str(out_path))
         return True
+
+    @staticmethod
+    def _address_of(page) -> str:
+        try:
+            return page.url or ""
+        except Exception:
+            return ""
 
     def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
         """No in-store store receipt ("View receipt details"). Online orders
@@ -786,7 +931,12 @@ class App:
         if extra:
             rec.update(extra)
         self.progress.update(purchase.key, rec)  # atomic save on every update
-        self.discovery.update(purchase.key, {"state": state.value})
+        found = {"state": state.value}
+        if purchase.purchase_date:
+            # The order page's date once it is read, so a run limited to some
+            # dates places this purchase before opening its page (#63).
+            found["purchase_date"] = purchase.purchase_date
+        self.discovery.update(purchase.key, found)
 
     def _write_csv_rows(self, purchase: Purchase, receipt_status: str,
                         processing_status: str, notes_extra: str = ""):
@@ -845,16 +995,39 @@ class App:
         print("PILOT MODE - limited supervised test run.")
         self.cmd_discover(types=types, quiet=False)
         selected: List[Purchase] = []
+        limits = {}
         if online:
-            selected += self._select_purchases(ONLINE, limit=self.config["pilot_online"])
+            limits[ONLINE] = self.config["pilot_online"]
+            selected += self._select_purchases(ONLINE, limit=limits[ONLINE])
         if instore:
-            selected += self._select_purchases(IN_STORE, limit=self.config["pilot_instore"])
+            limits[IN_STORE] = self.config["pilot_instore"]
+            selected += self._select_purchases(IN_STORE, limit=limits[IN_STORE])
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
-        self.process_purchases(selected, dry_run=self.args.dry_run)
-        self._pilot_report(selected)
+        by_dates = self._dates_asked()
+        self._about_undated(selected, by_dates)
+        reached = self.process_purchases(selected, dry_run=self.args.dry_run,
+                                         limits=limits, by_dates=by_dates)
+        self._pilot_report(reached)
+
+    @staticmethod
+    def _about_undated(selected: List[Purchase], by_dates: bool) -> None:
+        unplaced = sum(1 for p in selected if not p.purchase_date)
+        if by_dates and unplaced:
+            print(f"{unplaced} of them {'shows' if unplaced == 1 else 'show'} no date "
+                  "until {} order page is open. Any that".format(
+                      "its" if unplaced == 1 else "their"))
+            print("turns out to be outside the dates asked for is left alone, and is")
+            print("not counted as taken.")
+
+    def _say_outside(self) -> None:
+        outside = self.stats.get("outside_dates", 0)
+        if outside:
+            print(f"\n{outside} purchase(s) turned out to be outside the dates asked for.")
+            print("They were not saved and not marked done, so a run that includes")
+            print("their dates takes them.")
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -874,13 +1047,19 @@ class App:
             if fn:
                 path = Path(rec.get("pdf_path", ""))
                 exists = path.exists()
-                print(f"    PDF exists: {exists}  "
-                      f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
+                # Measured from the file itself. The size and pages were
+                # only ever recorded for a file that passed its check, so a
+                # file put aside in Manual Review read "? bytes, ? pages"
+                # although it was right there to measure (#63).
+                size, pages = self._measured(path) if exists else ("?", "?")
+                print(f"    PDF exists: {exists}  ({size} bytes, {pages} pages)")
                 if not exists:
                     problems.append(f"{p.key}: PDF missing")
             if state in (State.NEEDS_MANUAL_REVIEW.value, State.FAILED.value,
                          State.NO_RECEIPT_AVAILABLE.value):
                 problems.append(f"{p.key}: {state} - {rec.get('notes','')}")
+        # Not a problem. They are simply not this run's (#63).
+        self._say_outside()
         print("\n" + "-" * 70)
         if problems:
             print("Needs attention:")
@@ -892,6 +1071,17 @@ class App:
         print(f"  {self.paths.root}")
         print("Nothing further will run until you explicitly start a full command,")
         print("e.g.:  python walmart_receipts.py --all")
+
+    @staticmethod
+    def _measured(path: Path):
+        """A file's size in bytes and its page count, "?" for pages that
+        cannot be counted."""
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return "?", "?"
+        pages = receipt_pdf.validate_pdf(path, 0).page_count
+        return size, (pages or "?")
 
     def cmd_run(self, types: List[str], mode_name: str):
         self.stats["mode"] = mode_name
@@ -906,7 +1096,13 @@ class App:
         for t in types:
             selected += self._select_purchases(t)
         print(f"\nProcessing {len(selected)} purchase(s)...")
-        self.process_purchases(selected, dry_run=self.args.dry_run)
+        by_dates = self._dates_asked()
+        self._about_undated(selected, by_dates)
+        cap = self.args.max_purchases
+        self.process_purchases(selected, dry_run=self.args.dry_run,
+                               limits={t: cap for t in types} if cap else None,
+                               by_dates=by_dates)
+        self._say_outside()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
@@ -1214,6 +1410,7 @@ class App:
             f"Failed:                    {s['failed']}",
             f"Duplicate filenames (#'d): {s['duplicate_filenames']}",
             f"PDF validation failures:   {s['validation_failures']}",
+            f"Outside the dates asked:   {s.get('outside_dates', 0)}",
             f"Earliest date processed:   {dates[0] if dates else '-'}",
             f"Latest date processed:     {dates[-1] if dates else '-'}",
             "",
