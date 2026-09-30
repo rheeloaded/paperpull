@@ -115,6 +115,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
 # the guard lessons the core patterns encode.
 from paperpull_core.controls import (AUTH_CONTROL_RE, SETTINGS_CONTROL_RE,
                                       is_forbidden_context as _core_forbidden)
+from paperpull_core.controls import escape_for_locator
 
 SAFE_DOC_CONTROL_RE = re.compile(
     r"(download|save|print|pdf|statement|document|"
@@ -650,7 +651,7 @@ def download_document(page, account_id: str, charitable: bool,
         _set_download_dir(page, staging)
     before = _folder_state(staging)
     row = page.locator("table tr, [role=row]").filter(
-        has_text=re.compile(re.escape(needle["account"])))\
+        has_text=re.compile(escape_for_locator(needle["account"])))\
         .filter(has_text=needle["dateText"]).first
     icon = row.get_by_title("Pdf download icon").first
     # The one real click in this app goes through the guard like every

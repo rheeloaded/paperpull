@@ -102,6 +102,7 @@ from paperpull_core.capture import UNFINISHED as _UNFINISHED
 from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
+from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
 
@@ -1193,7 +1194,7 @@ def _exactly_named(page, name: str):
     document, even when the list gains or loses a row between reading it
     and pressing it, and fails when two controls carry that name."""
     words = (name or "").split()
-    rx = re.compile(r"^\s*" + r"\s+".join(re.escape(w) for w in words) + r"\s*$", re.I)
+    rx = re.compile(r"^\s*" + r"\s+".join(escape_for_locator(w) for w in words) + r"\s*$", re.I)
     return _controls_named(page, rx)
 
 
@@ -1990,7 +1991,7 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
                 continue
             try:
                 link = page.get_by_role(c["role"], name=re.compile(
-                    "^" + re.escape(c["text"].replace("#", "")) + "$", re.I)).first
+                    "^" + escape_for_locator(c["text"].replace("#", "")) + "$", re.I)).first
                 if link.count() == 0:
                     continue
                 before = page.url

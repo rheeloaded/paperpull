@@ -68,6 +68,7 @@ from paperpull_core import blob_capture
 from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
+from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
 
@@ -1289,7 +1290,7 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
                 continue
             try:
                 link = page.get_by_role(c["role"], name=re.compile(
-                    "^" + re.escape(c["text"].replace("#", "")) + "$", re.I)).first
+                    "^" + escape_for_locator(c["text"].replace("#", "")) + "$", re.I)).first
                 if link.count() == 0:
                     continue
                 before = page.url

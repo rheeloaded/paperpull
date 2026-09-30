@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import escape_for_locator
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -585,7 +586,7 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
                 continue
             try:
                 link = page.get_by_role("link", name=re.compile(
-                    "^" + re.escape(c["text"].replace("#", "")) + "$", re.I)).first
+                    "^" + escape_for_locator(c["text"].replace("#", "")) + "$", re.I)).first
                 if link.count() == 0:
                     continue
                 before = page.url

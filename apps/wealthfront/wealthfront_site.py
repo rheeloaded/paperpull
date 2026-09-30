@@ -30,6 +30,7 @@ from typing import List, Optional, Tuple
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.controls import safe_selects as _safe_selects
+from paperpull_core.controls import escape_for_locator
 
 log = logging.getLogger("wealthfront_docs.site")
 
@@ -498,12 +499,12 @@ def set_document_type(page, label: str) -> bool:
             page.wait_for_timeout(1200)
             for role in ("option", "menuitem", "menuitemradio", "button", "link"):
                 opt = page.get_by_role(role, name=re.compile(
-                    rf"^\s*{re.escape(label)}\s*$", re.I))
+                    rf"^\s*{escape_for_locator(label)}\s*$", re.I))
                 if opt.count() > 0 and opt.first.is_visible():
                     opt.first.click()
                     page.wait_for_timeout(2500)
                     return True
-            opt = page.get_by_text(re.compile(rf"^\s*{re.escape(label)}\s*$", re.I))
+            opt = page.get_by_text(re.compile(rf"^\s*{escape_for_locator(label)}\s*$", re.I))
             if opt.count() > 0 and opt.first.is_visible():
                 opt.first.click()
                 page.wait_for_timeout(2500)

@@ -258,6 +258,15 @@ open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
   dropdown or "load more", walk all of them during discovery.
 - **Broken `aria-label`s happen.** Derive dates from the visible row text, not a
   label the site failed to interpolate (see `redcard`).
+- **A pattern handed to a locator is read by the browser, not by Python.**
+  Playwright writes it into its selector between slashes, so a `/` outside
+  a character class ends it early, and a named group `(?P<x>...)` is
+  refused outright. Write the slash as `\/`, and put text into a pattern
+  with `paperpull_core.controls.escape_for_locator`, never `re.escape`,
+  which leaves `/` bare. The locator fails only when it is used, and the
+  callers catch that, so nothing else will say so.
+  `core/tests/test_every_app_hands_playwright_a_pattern_it_can_read.py`
+  follows each pattern back to where it is built and names the one.
 
 Read the `*_site.py` of the app closest to yours, it's the best template, and
 each one's top comment documents that provider's quirks.

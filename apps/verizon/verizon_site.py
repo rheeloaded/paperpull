@@ -33,6 +33,7 @@ from paperpull_core.dates import human_date as _human_date
 # re-exported: this app's docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.controls import escape_for_locator
 
 log = logging.getLogger("verizon_docs.site")
 
@@ -428,7 +429,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
         log.info("bill-date dropdown not found for %s", iso_date)
         return False
     try:
-        page.get_by_role("option", name=re.compile(re.escape(display), re.I)).first.click()
+        page.get_by_role("option", name=re.compile(escape_for_locator(display), re.I)).first.click()
         page.wait_for_timeout(800)
     except Exception as e:
         log.info("could not pick date %s: %s", display, e)

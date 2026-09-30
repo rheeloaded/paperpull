@@ -74,6 +74,7 @@ from typing import List, Optional, Tuple
 from paperpull_core import controls as _controls
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.controls import click_next_page as _click_next_page
+from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 from paperpull_core.dates import checked as _checked_date
@@ -751,7 +752,7 @@ def row_label_re(date: str, account: str, action: str = "Saves document"):
     day = date[8:10]
     day_pat = f"0?{int(day)}"                      # "Aug 9" or "Aug 09"
     return re.compile(rf"{month}\s+{day_pat},\s*{date[:4]}.*"
-                      rf"{re.escape(account)}.*{re.escape(action)}", re.I | re.S)
+                      rf"{escape_for_locator(account)}.*{escape_for_locator(action)}", re.I | re.S)
 
 
 def chase_download(page, ctx, account: str, date: str, out_path,

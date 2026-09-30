@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.controls import click_next_page as _click_next_page
+from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 
@@ -748,7 +749,7 @@ def select_account(page, label: str) -> bool:
             return False
         btn.first.click()
         page.wait_for_timeout(1000)
-        opt = page.get_by_role("option", name=re.compile(re.escape(label)))
+        opt = page.get_by_role("option", name=re.compile(escape_for_locator(label)))
         if opt.count() == 0:
             page.keyboard.press("Escape")
             log.info("account %r not offered", label[:40])

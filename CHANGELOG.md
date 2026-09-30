@@ -231,6 +231,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   tried when Download PDF gives nothing had not found its button once
   since it was added in 0.28.3. View/print PDF is pressed once at most,
   and only after Download PDF has had as long to appear as it always had.
+- **Every app escapes the text it puts into a pattern for the browser.**
+  Twenty-two more apps built such a pattern from text read off the page
+  or out of their own records the same way, leaving any slash bare.
+  Apple Card, Chase and U.S. Bank had nothing else to find the control
+  with, so a document button, row or card whose name held a slash was
+  never found. E*TRADE and State Farm fell back to finding it by its
+  text, and the rest either cannot meet a slash today or reach the
+  browser a way that reads one anyway. No document is known to have been
+  missed. A census test now follows every pattern handed to the browser
+  back to where it is built, and fails any app that writes a bare slash
+  into one or escapes text into one with a bare re.escape.
 
 ## [0.41.1] - 2026-09-30
 

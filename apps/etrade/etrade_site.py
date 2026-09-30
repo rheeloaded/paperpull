@@ -177,6 +177,7 @@ from paperpull_core.capture import take_same_tab as _core_take_same_tab
 from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
+from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
 
@@ -1332,7 +1333,7 @@ def names_title(name: str, title: str) -> bool:
 
 def _title_name_re(title: str):
     """names_title as a pattern, for a locator's accessible name."""
-    return re.compile(r"^\s*" + re.escape(title.strip()) + r"(\s+pdf(\s+for\s+\S.*)?)?\s*$", re.I)
+    return re.compile(r"^\s*" + escape_for_locator(title.strip()) + r"(\s+pdf(\s+for\s+\S.*)?)?\s*$", re.I)
 
 
 def _guard_word(word: str, title: str = "") -> str:
@@ -1387,7 +1388,7 @@ def _date_text_re(iso_date: str):
     a piece of a longer number or date."""
     y, m, d = iso_date.split("-")
     forms = [f"{m}/{d}/{y[2:]}", f"{m}/{d}/{y}"]
-    return re.compile(r"(^|[^\d/])(" + "|".join(re.escape(f) for f in forms) + r")($|[^\d/])")
+    return re.compile(r"(^|[^\d/])(" + "|".join(escape_for_locator(f) for f in forms) + r")($|[^\d/])")
 
 
 def _dates_in(text: str) -> set:
@@ -1647,7 +1648,7 @@ def _short_visible_texts(page) -> set:
 def _click_text(page, text: str) -> bool:
     """Click the visible element whose whole text is `text`, by role
     first, then by text alone. The text has passed is_date_filter."""
-    pat = re.compile("^\\s*" + re.escape(text) + "\\s*$", re.I)
+    pat = re.compile("^\\s*" + escape_for_locator(text) + "\\s*$", re.I)
     for role in ("menuitem", "option", "radio", "menuitemradio", "button", "link", "tab"):
         try:
             opt = page.get_by_role(role, name=pat)
@@ -2133,12 +2134,11 @@ def _named_link(row, title: str, trace: Optional[list] = None):
     36792330947)."""
     looks = (row.get_by_role("link", name=_title_name_re(title)),
              row.get_by_role("link").filter(has_text=re.compile(
-                 "^\\s*" + re.escape(title.strip()) + "\\s*$", re.I)))
+                 "^\\s*" + escape_for_locator(title.strip()) + "\\s*$", re.I)))
     unread, unmade = False, 0
     for loc in looks:
-        # A look that cannot be made at all, as a role's name pattern with
-        # a slash in the title, gives way to the next one. Only when no
-        # look could be made is the row unread.
+        # A look that cannot be made at all gives way to the next one. Only
+        # when no look could be made is the row unread.
         try:
             many = min(loc.count(), 4)
         except Exception:
@@ -3346,7 +3346,7 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
                 continue
             try:
                 link = page.get_by_role(c["role"], name=re.compile(
-                    "^" + re.escape(c["text"].replace("#", "")) + "$", re.I)).first
+                    "^" + escape_for_locator(c["text"].replace("#", "")) + "$", re.I)).first
                 if link.count() == 0:
                     continue
                 before = page.url
