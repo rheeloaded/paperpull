@@ -19,6 +19,7 @@ from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import stable_occurrences as _stable_occurrences
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core import failure
+from paperpull_core import capture
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -216,6 +217,12 @@ class App:
             self._work_page = vanguard[0] if vanguard else ctx.new_page()
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        # A file in the download folder that is an exact copy of a document
+        # in the archive is one the browser was left holding, and goes.
+        # Nothing else is touched (capture.clear_archived_copies).
+        capture.clear_archived_copies(
+            Path(self.config["output_dir"]) / ".vanguard-downloads",
+            [r.get("pdf_path") for r in self.progress.data.values() if isinstance(r, dict)])
         self.requests
         return self._work_page
 

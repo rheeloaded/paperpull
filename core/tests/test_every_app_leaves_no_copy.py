@@ -101,22 +101,6 @@ def has_scaffold_capture(app: Path) -> bool:
 
 SCAFFOLD = [d for d in FOLDER_APPS if has_scaffold_capture(d)]
 
-# Two apps another session was rewriting when this was written, to be
-# converted once its 0.41.0 is cut. Strict, so each one fails here the
-# moment it passes, and the entry has to go.
-PENDING = {
-    "amfam": "American Family is being reworked in round-0929b, converted after 0.41.0",
-    "vanguard": "Vanguard's download is being fixed in round-0929b, converted after 0.41.0",
-}
-
-
-def pending(apps):
-    """`apps` as parameters, the pending ones marked as known failures."""
-    return [pytest.param(d, id=d.name, marks=pytest.mark.xfail(
-        strict=True, reason=PENDING[d.name])) if d.name in PENDING else
-        pytest.param(d, id=d.name) for d in apps]
-
-
 # -- the provider ------------------------------------------------------------
 
 class Provider:
@@ -279,7 +263,7 @@ def test_the_apps_that_point_the_browser_at_a_folder_are_found():
 
 
 @pytest.mark.parametrize("left", [False, True], ids=["empty folder", "same name already there"])
-@pytest.mark.parametrize("app", pending(SCAFFOLD))
+@pytest.mark.parametrize("app", SCAFFOLD, ids=lambda d: d.name)
 def test_the_browsers_file_is_taken_and_nothing_is_left(app, left, page, provider,
                                                         tmp_path, monkeypatch):
     site = site_of(app)
@@ -291,7 +275,7 @@ def test_the_browsers_file_is_taken_and_nothing_is_left(app, left, page, provide
     check(app.name, got, provider, out, staging)
 
 
-@pytest.mark.parametrize("app", pending(SCAFFOLD))
+@pytest.mark.parametrize("app", SCAFFOLD, ids=lambda d: d.name)
 def test_the_folder_every_install_passes_works(app, page, provider, tmp_path, monkeypatch):
     """The folder as a docs module passes it in an install whose output_dir
     is ".", relative to where the app runs."""
@@ -407,7 +391,7 @@ def calls_in(path: Path, name: str) -> list:
     return out
 
 
-@pytest.mark.parametrize("app", pending(FOLDER_APPS))
+@pytest.mark.parametrize("app", FOLDER_APPS, ids=lambda d: d.name)
 def test_a_download_event_is_saved_through_the_core(app):
     """In an app that points the browser at a folder, a download event's own
     file is empty. Saving it directly and trusting the result is the bug,
@@ -438,17 +422,18 @@ def test_every_capture_that_takes_a_download_clears_what_is_left(app):
                     % (path.name, fn.name))
 
 
-@pytest.mark.parametrize("app", pending(FOLDER_APPS))
+@pytest.mark.parametrize("app", FOLDER_APPS, ids=lambda d: d.name)
 def test_copies_an_earlier_version_left_are_cleared_on_the_next_run(app):
     """Before this, eleven apps left the browser's copy of every document in
-    the folder. Whichever module points the browser at the folder also
-    clears the ones that are exact copies of documents in the archive."""
-    pointing = [p for p in app_modules(app) if calls_in(p, "set_download_dir")]
-    assert pointing
-    for path in pointing:
-        assert calls_in(path, "clear_archived_copies"), (
-            "%s points the browser at a folder and never clears what earlier "
-            "versions left there" % path.name)
+    an install with an absolute output folder. An app that points the browser
+    at a folder also clears the ones that are exact copies of documents in
+    its archive, from wherever it keeps its records. Vanguard points the
+    browser from its site module and clears from its docs module."""
+    modules = app_modules(app)
+    assert any(calls_in(p, "set_download_dir") for p in modules)
+    assert any(calls_in(p, "clear_archived_copies") for p in modules), (
+        "%s points the browser at a folder and never clears what earlier "
+        "versions left there" % app.name)
 
 
 @pytest.mark.parametrize("app", FOLDER_APPS, ids=lambda d: d.name)
