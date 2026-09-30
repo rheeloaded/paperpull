@@ -63,6 +63,21 @@ def ask(prompt: str) -> str:
         raise SystemExit(3)
 
 
+def _discard(path) -> None:
+    """Remove a staging file, if it is still there."""
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _part_order(entry: dict):
+    """An invoice's place among its order's, "2 of 3" coming second. One
+    whose page said nothing of it sorts last."""
+    part = entry.get("part") or ""
+    return int(part.split(" of ")[0]) if part else 99
+
+
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
@@ -808,73 +823,34 @@ class App:
         self.stats["new_files"].append(str(out_path))
         return True
 
-    def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
-        """No Print receipts control found. Optionally save invoice; record.
+    def _left_for_next_run(self, page, purchase: Purchase, before: str) -> bool:
+        """True when Target's check or its sign-in page is in front, and the
+        purchase is then left to be asked for on the next run.
 
         A page covered by Target's bot check has no receipt control either,
         and No Receipt Available is final, so a purchase the check hid would
         never be asked for again. The check stops the run first, and the
         purchase is left as it was, to be asked for on the next run. A
         sign-in answered at a console leaves it for the next run too, since
-        the page it was looked for on is gone (#48)."""
-        if site.detect_security_challenge(page) or site.looks_signed_out(page):
-            self.check_session(page)
-            self._record_state(purchase, State.FAILED,
-                               notes="Target's check came up before the receipt, tried again next run")
-            self.stats["failed"] += 1
+        the page it was looked for on is gone (#48). The same goes for each
+        invoice of an order, which is looked for on a page of its own."""
+        if not (site.detect_security_challenge(page) or site.looks_signed_out(page)):
+            return False
+        self.check_session(page)
+        self._record_state(purchase, State.FAILED,
+                           notes="Target's check came up before %s, tried again next run"
+                           % before)
+        self.stats["failed"] += 1
+        return True
+
+    def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
+        """No Print receipts control found. Optionally save the order's
+        invoices, and record."""
+        if self._left_for_next_run(page, purchase, "the receipt"):
             return False
         invoices = site.find_invoice_controls(page)
         if invoices and self.config.get("include_invoices"):
-            purchase.document_type = "Invoice"
-            filename = build_pdf_filename(purchase.purchase_date, purchase.summary, "Invoice", record=purchase)
-            out_path = unique_path(self.paths.invoices, filename,
-                                   self.config["max_path_length"])
-            popup = None
-            try:
-                kind, obj = site.trigger_print_receipt(page, invoices[0])
-                target_page = obj if kind == "popup" else page
-                popup = obj if kind == "popup" else None
-                if kind == "download":
-                    receipt_pdf.save_download(obj, out_path)
-                else:
-                    try:
-                        target_page.wait_for_load_state("networkidle", timeout=15000)
-                    except Exception:
-                        pass
-                    target_page.wait_for_timeout(1500)
-                    # An invoice *list* page may need one more click on a
-                    # per-invoice print/view control.
-                    again = site.find_invoice_controls(target_page)
-                    if again and site.find_printing_frame(target_page, wait_ms=1000) is None:
-                        kind2, obj2 = site.trigger_print_receipt(target_page, again[0])
-                        if kind2 == "download":
-                            receipt_pdf.save_download(obj2, out_path)
-                            kind = "download"
-                        elif kind2 == "popup":
-                            target_page = obj2
-                    if kind != "download":
-                        self._capture_document(target_page, purchase, out_path)
-                if popup is not None:
-                    try:
-                        popup.close()
-                    except Exception:
-                        pass
-                ok = self._finish_pdf(page, purchase, out_path)
-                if ok:
-                    self._write_csv_rows(
-                        purchase, receipt_status="No printable receipt available",
-                        processing_status="Review Needed",
-                        notes_extra="Invoice saved instead of receipt (distinct document)")
-                    # NO_RECEIPT_AVAILABLE is a terminal state: the invoice is
-                    # saved and this purchase won't be re-downloaded on resume.
-                    self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                                       notes="Invoice saved; no printable receipt exists")
-                    self.stats["invoices_downloaded"] += 1
-                    self.stats["manual_review"] += 1
-                    print("  No printable receipt; invoice saved to Invoices folder.")
-                return ok
-            except Exception as e:
-                log.warning("Invoice save failed: %s", e)
+            return self._save_invoices(page, purchase, invoices)
 
         self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                            notes="No printable receipt available")
@@ -885,6 +861,356 @@ class App:
         self.stats["no_receipt"] += 1
         self.stats["manual_review"] += 1
         print("  No printable receipt available - marked for manual review.")
+        return False
+
+    # -- invoices -----------------------------------------------------------
+
+    def _save_invoices(self, page, purchase: Purchase, controls: list) -> bool:
+        """Save every invoice the order has, each checked on its own.
+
+        Target splits an order into invoices, one for each shipment and one
+        for a delivery driver's tip, and lists them on a page of their own
+        that shows one invoice at a time. Until this, only the first control
+        was pressed, the order was marked done, and its other invoices were
+        never asked for again. Real orders kept "Invoice 1 of 2" alone, and
+        for one of them the first was the tip while the item bought was on
+        the second.
+
+        So each invoice is opened from the list in turn, printed, and read
+        back for the "Invoice 2 of 2" Target prints on it, which names its
+        file the way Amazon names a seller's second invoice. One that names
+        this purchase goes to Invoices. One that does not, a tip naming no
+        item, goes to Manual Review for a person to look at, and the order's
+        record points at an invoice that names its items.
+
+        The order is marked done only once every invoice it has is on file.
+        Until then it is tried again on each run, and an invoice saved before
+        is not saved a second time, even after its file is deleted, which is
+        the promise every download here makes."""
+        purchase.document_type = "Invoice"
+        self._record_state(purchase, State.RECEIPT_LOCATED)
+        walk = {"tokens": self._invoice_tokens(purchase),
+                "saved": self._invoices_on_file(purchase),
+                "held": [], "missed": [], "count": 0, "list_page": None}
+        try:
+            if not self._walk_invoices(page, purchase, controls, walk):
+                return False
+            return self._file_invoices(purchase, walk)
+        finally:
+            for held in walk["held"]:
+                _discard(held["staged"])
+            if walk["list_page"] not in (None, page):
+                try:
+                    walk["list_page"].close()
+                except Exception:
+                    pass
+
+    def _walk_invoices(self, page, purchase: Purchase, controls: list, walk: dict) -> bool:
+        """Press each of the order's invoices from its list, and take each.
+
+        The first control either opens the list, "View detailed invoices"
+        on the receipts page, or is one invoice's own, when the page it is
+        on lists them. False when Target's check came up, and the purchase
+        was left for the next run."""
+        list_page, list_url = page, page.url
+        try:
+            landing = self._press_invoice(page, controls[0])
+            if self._left_for_next_run(landing[2], purchase, "the order's invoices"):
+                return False
+            shown = landing[2]
+            deeper = [] if landing[0] == "download" else site.find_invoice_controls(shown)
+            if deeper and site.find_printing_frame(shown, wait_ms=1000) is None:
+                # What was pressed opened the order's list of invoices, and
+                # each on it is pressed from it in turn.
+                list_page, list_url, controls, landing = shown, shown.url, deeper, None
+                walk["list_page"] = list_page
+            purchase.receipt_url = list_url
+            walk["count"] = count = len(controls)
+            for k in range(count):
+                if landing is None:
+                    if k:
+                        # Opened afresh for each, so what is pressed is on
+                        # the list, and nothing a print changed is left.
+                        self._delay(0.5)
+                        if not site.open_invoice_list(list_page, list_url):
+                            walk["missed"].append("the list of invoices would not open")
+                            break
+                        if self._left_for_next_run(list_page, purchase,
+                                                   "invoice %d" % (k + 1)):
+                            return False
+                        controls = site.find_invoice_controls(list_page)
+                        if len(controls) != count:
+                            walk["missed"].append("the list of invoices changed")
+                            break
+                    landing = self._press_invoice(list_page, controls[k])
+                    if self._left_for_next_run(landing[2], purchase, "invoice %d" % (k + 1)):
+                        return False
+                self._take_invoice(landing, purchase, k, walk)
+                landing = None
+        except Exception as e:
+            log.warning("Stopped among the invoices of %s: %s", purchase.key, e)
+            walk["missed"].append("an invoice did not open (%s)" % type(e).__name__)
+        return True
+
+    def _press_invoice(self, page, control):
+        """Press one invoice control and wait for what it opened. Returns
+        the kind, what came with it, and the page showing the result, a new
+        tab when one opened."""
+        receipt_pdf.clear_print_snapshot(page)
+        kind, obj = site.trigger_print_receipt(page, control)
+        shown = obj if kind == "popup" else page
+        if kind != "download":
+            try:
+                shown.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass
+            shown.wait_for_timeout(site.INVOICE_SETTLE_MS)
+        return kind, obj, shown
+
+    def _take_invoice(self, landing, purchase: Purchase, k: int, walk: dict) -> None:
+        """Print one invoice to a staging file, read which of the order's
+        invoices it is, and file it. One that does not say which is held
+        until the walk is over."""
+        kind, obj, shown = landing
+        staged = self.paths.invoices / (".%s-%d.pdf.delivering" % (purchase.order_number, k + 1))
+        held = False
+        try:
+            if kind == "download":
+                receipt_pdf.save_download(obj, staged)
+            else:
+                self._capture_document(shown, purchase, staged)
+            text = receipt_pdf.pdf_text(staged)
+            part, number = site.invoice_identity(text)
+            if part is None:
+                walk["held"].append({"staged": staged, "k": k, "number": number, "text": text})
+                held = True
+                return
+            if self._on_file(walk, part, number):
+                return
+            result = receipt_pdf.validate_pdf(staged, self.config["min_pdf_bytes"],
+                                              walk["tokens"])
+            if not result.ok and kind != "download":
+                # Printed again once, as a receipt is, in case the page had
+                # not finished drawing. To a file of its own, and taken only
+                # when it is the same invoice and passes, since the page in
+                # front may be the list rather than the invoice.
+                log.warning("Invoice %d of %d did not pass (%s), printing it again",
+                            part[0], part[1], result.reason)
+                again = staged.with_name(staged.name + ".again")
+                try:
+                    receipt_pdf.print_page_to_pdf(shown, again)
+                    again_text = receipt_pdf.pdf_text(again)
+                    if site.invoice_identity(again_text) == (part, number):
+                        again_result = receipt_pdf.validate_pdf(
+                            again, self.config["min_pdf_bytes"], walk["tokens"])
+                        if again_result.ok:
+                            again.replace(staged)
+                            text, result = again_text, again_result
+                finally:
+                    _discard(again)
+            self._place_invoice(staged, purchase, part, part, number, result, text, walk)
+        except Exception as e:
+            log.warning("Invoice %d of %s could not be saved: %s", k + 1, purchase.key, e)
+            walk["missed"].append("invoice %d did not print (%s)" % (k + 1, type(e).__name__))
+        finally:
+            if not held:
+                _discard(staged)
+            if kind == "popup":
+                try:
+                    obj.close()
+                except Exception:
+                    pass
+
+    def _place_invoice(self, staged: Path, purchase: Purchase, part, name_part, number: str,
+                       result, text: str, walk: dict) -> None:
+        """Move a checked invoice into place and write it down. Invoices when
+        it names this purchase, Manual Review when it does not, never thrown
+        away. `part` is what the page said it was, `name_part` what its file
+        is called by."""
+        kept = result.ok
+        folder = self.paths.invoices if kept else self.paths.manual_review
+        name = build_pdf_filename(purchase.purchase_date, purchase.summary, "Invoice",
+                                  part=name_part, record=purchase)
+        out = unique_path(folder, name, self.config["max_path_length"],
+                          distinguisher=purchase.order_number)
+        try:
+            staged.replace(out)
+        except OSError as e:
+            log.warning("Could not put an invoice of %s in place: %s", purchase.key, e)
+            walk["missed"].append("an invoice could not be put in place")
+            return
+        if kept:
+            self.stats["new_files"].append(str(out))
+        else:
+            self.stats["validation_failures"] += 1
+            which = "Invoice %d of %d" % name_part if name_part else "An invoice"
+            print("  !! %s did not pass its check (%s). Put aside in Manual Review."
+                  % (which, result.reason))
+        walk["saved"].append({
+            "file": str(out), "part": "%d of %d" % part if part else "", "number": number,
+            "kept": kept, "names": self._names_the_order(text, purchase),
+            "size": result.size_bytes, "pages": result.page_count})
+        # Written down at once, so a run stopped before the next invoice
+        # does not save this one again.
+        self._record_state(purchase, State.PDF_SAVED, extra={"invoices": walk["saved"]})
+
+    def _file_invoices(self, purchase: Purchase, walk: dict) -> bool:
+        """What the walk came to. The order is done when every invoice it
+        has is on file, and tried again next run when one is not."""
+        said = [e for e in walk["saved"] if e["part"]]
+        total = max((int(e["part"].split(" of ")[1]) for e in said), default=0)
+        held, walk["held"] = walk["held"], []
+        placed_texts = set()
+        for h in held:
+            words = " ".join(h["text"].split())
+            if total:
+                # Target numbers each invoice, so a page that says no number
+                # is not one of this order's, an error page perhaps.
+                walk["missed"].append("invoice %d opened a page that is not an invoice"
+                                      % (h["k"] + 1))
+            elif not ((h["number"] and self._on_file(walk, None, h["number"]))
+                      or words in placed_texts):
+                # Nothing numbers them, so each is named for the order it
+                # was pressed in, and the same page twice is kept once.
+                placed_texts.add(words)
+                result = receipt_pdf.validate_pdf(h["staged"], self.config["min_pdf_bytes"],
+                                                  walk["tokens"])
+                self._place_invoice(h["staged"], purchase, None, (h["k"] + 1, walk["count"]),
+                                    h["number"], result, h["text"], walk)
+            _discard(h["staged"])
+
+        have = {e["part"] for e in walk["saved"] if e["part"]}
+        lacking = [p for p in ("%d of %d" % (i, total) for i in range(1, total + 1))
+                   if p not in have]
+        if not walk["saved"] or (lacking if total else walk["missed"]):
+            what = (", ".join("invoice " + p for p in lacking) or ", ".join(walk["missed"])
+                    or "none was saved")
+            self._record_state(purchase, State.FAILED,
+                               notes="Not every invoice is saved yet (%s), tried again next run"
+                               % what,
+                               extra={"invoices": walk["saved"], "downloaded_ok": False})
+            self.stats["failed"] += 1
+            print("  !! Not every invoice of this order could be saved (%s). "
+                  "It is tried again next run." % what)
+            if walk["missed"]:
+                self.write_failure("save every invoice of an order",
+                                   "an invoice of the order did not open")
+            return False
+
+        kept = sorted((e for e in walk["saved"] if e["kept"]), key=_part_order)
+        aside = [e for e in walk["saved"] if not e["kept"]]
+        if not kept:
+            purchase.pdf_path = aside[0]["file"]
+            purchase.pdf_filename = Path(aside[0]["file"]).name
+            self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                               notes="No invoice of the order passed its check",
+                               extra={"invoices": walk["saved"]})
+            self._write_csv_rows(purchase, receipt_status="Validation Failed",
+                                 processing_status=State.NEEDS_MANUAL_REVIEW.value,
+                                 notes_extra="Every invoice put aside in Manual Review")
+            self.stats["manual_review"] += 1
+            print("  !! No invoice of this order passed its check. Each is in Manual Review.")
+            return False
+
+        # The order's record points at an invoice that names its items, not
+        # at a tip that happens to come first.
+        doc = next((e for e in kept if e["names"]), kept[0])
+        purchase.pdf_path = doc["file"]
+        purchase.pdf_filename = Path(doc["file"]).name
+        purchase.receipt_count = len(kept)
+        notes = []
+        others = [Path(e["file"]).name for e in kept if e is not doc]
+        if others:
+            notes.append("Also saved " + ", ".join(others))
+        if aside:
+            notes.append("Put aside in Manual Review "
+                         + ", ".join(Path(e["file"]).name for e in aside))
+        self._record_state(purchase, State.PDF_VERIFIED, notes=". ".join(notes), extra={
+            "pdf_size": doc.get("size", ""), "pdf_pages": doc.get("pages", ""),
+            "downloaded_ok": True, "receipt_count": purchase.receipt_count,
+            "invoices": walk["saved"]})
+        self._write_csv_rows(
+            purchase, receipt_status="No printable receipt available",
+            processing_status="Review Needed",
+            notes_extra="Invoice saved instead of receipt (distinct document)")
+        # No Receipt Available is final, so with its invoices saved this
+        # purchase is not downloaded again on resume.
+        self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
+                           notes="Invoice saved; no printable receipt exists")
+        self.stats["invoices_downloaded"] += 1
+        self.stats["manual_review"] += 1
+        if len(kept) == 1:
+            print("  No printable receipt; invoice saved to Invoices folder.")
+        else:
+            print("  No printable receipt. The order's %d invoices are saved to the "
+                  "Invoices folder." % len(kept))
+        return True
+
+    def _invoice_tokens(self, purchase: Purchase) -> list:
+        """What an invoice has to mention to be this order's. The core's
+        check reads an order's first five items, and an order split into
+        invoices can carry its sixth on another one."""
+        tokens = receipt_pdf.expected_tokens_for(purchase)
+        for item in purchase.items[5:]:
+            name = (item.name or "").strip()
+            if len(name) >= 6:
+                tokens.append(name[:24])
+        return tokens
+
+    def _invoices_on_file(self, purchase: Purchase) -> list:
+        """The order's invoices already saved, so none is saved twice.
+
+        One saved counts even after its file is deleted, the promise every
+        download here makes, unless --redownload asks for missing files
+        again. An order saved before every invoice was walked has one, its
+        row in the receipt index, known by what its file says."""
+        rec = self.progress.get(purchase.key) or {}
+        again = getattr(self.args, "redownload", False)
+        if rec.get("invoices"):
+            return [dict(e) for e in rec["invoices"]
+                    if isinstance(e, dict) and e.get("file")
+                    and (not again or Path(e["file"]).exists())]
+        entries, seen = [], set()
+        for row in self.index_csv.read_all():
+            path = (row.get("PDF Full Path") or "").strip()
+            if (row.get("Order or Receipt Number") != purchase.order_number
+                    or row.get("Purchase Type") != purchase.purchase_type
+                    or row.get("Document Type") != "Invoice"
+                    or not path or path in seen or not Path(path).exists()):
+                continue
+            seen.add(path)
+            text = receipt_pdf.pdf_text(Path(path))
+            part, number = site.invoice_identity(text)
+            if part or number:
+                entries.append({
+                    "file": path, "part": "%d of %d" % part if part else "", "number": number,
+                    "kept": Path(path).parent.name != self.paths.manual_review.name,
+                    "names": self._names_the_order(text, purchase),
+                    "size": row.get("PDF File Size", ""), "pages": row.get("PDF Page Count", "")})
+        return entries
+
+    def _on_file(self, walk: dict, part, number: str) -> bool:
+        """Whether this invoice is one of the order's already saved. By its
+        number where both carry one, else by which of the order's it is."""
+        for e in walk["saved"]:
+            if number and e.get("number"):
+                if e["number"] == number:
+                    return True
+            elif part and e.get("part") == "%d of %d" % part:
+                return True
+        return False
+
+    @staticmethod
+    def _names_the_order(text: str, purchase: Purchase) -> bool:
+        """Whether a saved invoice names this order's items or its number,
+        read the way the core's check reads one."""
+        flat = " ".join((text or "").lower().split())
+        tight = flat.replace(" ", "")
+        facts = [purchase.order_number] + [(i.name or "").strip()[:24] for i in purchase.items]
+        for fact in facts:
+            fact = " ".join((fact or "").lower().split())
+            if len(fact) >= 6 and (fact in flat or fact.replace(" ", "") in tight):
+                return True
         return False
 
     # -- records ------------------------------------------------------------

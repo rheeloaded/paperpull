@@ -856,15 +856,89 @@ def find_print_receipt_controls(page) -> list:
 
 
 def find_invoice_controls(page) -> list:
+    """The controls that open an order's invoices. On the receipts page that
+    is "View detailed invoices", which opens the order's list of them, and
+    on that list it is one control for each invoice. The app presses every
+    one of those now, not only the first, so each passes the same guard the
+    Print receipts controls do."""
     controls = []
     for role in ("button", "link"):
         try:
             loc = page.get_by_role(role, name=INVOICE_RE)
             for i in range(loc.count()):
-                controls.append(loc.nth(i))
+                el = loc.nth(i)
+                try:
+                    name = el.inner_text(timeout=1500) or ""
+                except Exception:
+                    name = ""
+                if GIFT_RECEIPT_RE.search(name) or FORBIDDEN_CONTROL_RE.search(name):
+                    continue
+                controls.append(el)
         except Exception:
             continue
     return controls
+
+
+# Each invoice page says which of the order's invoices it is, "Invoice 2 of
+# 2", and gives its invoice number. Read from the text of the saved PDF,
+# never handed to the page. Verified 2026-09-30 against invoices saved by
+# earlier runs, every one read.
+INVOICE_PART_RE = re.compile(r"\binvoice\s+(\d{1,2})\s+of\s+(\d{1,2})\b", re.I)
+INVOICE_NUMBER_RE = re.compile(r"\binvoice\s+(?:number|no\.?|#)\s*:?\s*(\d{6,})", re.I)
+
+# How long an invoice page, or the list of them, is given to finish drawing
+# once the network is quiet, before anything is read or printed from it.
+INVOICE_SETTLE_MS = 1500
+
+
+def invoice_identity(text: str):
+    """Which of its order's invoices a saved page is, as ((i, n), number).
+
+    Either half is None or "" when the page does not say. A page naming
+    two, the list of an order's invoices printed by mistake, names neither,
+    so it is never taken for one of them."""
+    parts = {(int(a), int(b)) for a, b in INVOICE_PART_RE.findall(text or "")
+             if 0 < int(a) <= int(b)}
+    numbers = set(INVOICE_NUMBER_RE.findall(text or ""))
+    part = parts.pop() if len(parts) == 1 else None
+    number = numbers.pop() if len(numbers) == 1 else ""
+    return part, number
+
+
+def _at(page, url: str) -> bool:
+    return (page.url or "").split("#")[0].rstrip("/") == (url or "").split("#")[0].rstrip("/")
+
+
+def open_invoice_list(page, url: str) -> bool:
+    """Go back to the order's list of invoices, to press the next one's
+    control from it. Back, the way a person would, since Target is one page
+    that draws each route itself and asks for a fresh sign-in around its
+    receipts. Loaded at the address the app itself found it at when back
+    does not reach it, or when the tab never left it, since a print on the
+    list itself may have changed it. Only an address on Target is opened."""
+    if not is_safe_url(url):
+        log.warning("refusing to open an invoice list that is not on Target: %s",
+                    (url or "")[:80])
+        return False
+    left = not _at(page, url)
+    if left:
+        # Until the navigation commits only. Waiting for the page's load
+        # event waited out the whole timeout on every back in a test
+        # browser.
+        try:
+            page.go_back(wait_until="commit", timeout=15000)
+        except Exception:
+            pass
+    if not left or not _at(page, url):
+        if left:
+            log.info("back did not reach the list of invoices, opening it at its address")
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+    page.wait_for_timeout(INVOICE_SETTLE_MS)
+    return True
 
 
 def find_printing_frame(page, wait_ms: int = 6000):

@@ -100,6 +100,25 @@ All notable changes to PaperPull are recorded here. Versioning follows
   of the guard's own words did. Every name a screen reader may give the
   control, from aria-labelledby and title as well as aria-label, is asked
   too.
+- **Target saves every invoice of an online order.** An order with no
+  store receipt is saved as its invoice, and Target splits an order into
+  invoices, one for each shipment and one for a delivery driver's tip,
+  shown one at a time from a list of their own. Only the first was ever
+  pressed, and the order was then marked done, so the others were never
+  asked for. In a real archive the invoice saved for one order was the
+  tip, while the item bought was on the invoice never saved. Now each
+  invoice on the list is saved and checked on its own, named "(1 of 2)"
+  and "(2 of 2)" the way Amazon names a seller's second invoice. One that
+  names nothing of the order, a tip usually, is put in Manual Review
+  rather than filed as the order's invoice, and the order's record points
+  at the invoice that names its items. An order is marked done only once
+  every invoice it has is saved. Until then it is tried again on each run,
+  and an invoice saved before is not saved a second time. An order saved
+  by an older version can be fetched again with `--online --order-number
+  N --redownload`, and the invoice already on file is recognized by its
+  invoice number and left alone. Each invoice control now passes the same
+  guard the Print receipts controls do, since every one on the list is
+  pressed.
 
 ## [0.41.0] - 2026-09-29
 

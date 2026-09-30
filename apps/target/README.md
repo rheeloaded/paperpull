@@ -59,6 +59,16 @@ Filenames: `YYYY-MM-DD Target <Purchase Summary> Receipt.pdf`
 (e.g. `2024-12-31 Target Groceries Receipt.pdf`). Collisions get ` (2)`,
 ` (3)`…, an existing PDF is **never overwritten**.
 
+An online order with no store receipt is saved as its invoices. Target
+splits an order into invoices, one for each shipment and one for a
+delivery driver's tip, and each is saved, named
+`YYYY-MM-DD Target <Purchase Summary> Invoice (1 of 2).pdf` and so on. An
+invoice that names nothing of the order, a tip usually, goes to
+`Manual Review\` instead. An order is marked done only once every invoice
+it has is saved. To fetch an invoice that an older version missed, run
+the order again with `--online --order-number N --redownload`, and the
+invoice already on file is not saved a second time.
+
 ## Classification
 
 `category_rules.json` holds editable keyword → category rules. Classification
