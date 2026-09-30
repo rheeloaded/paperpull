@@ -41,6 +41,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
   in, so every purchase is read the way a run's first always was, and a
   check across the repository refuses any call that tries to put the media
   back with None. Purchases already saved keep what they were read with.
+- **A saved receipt has to name its purchase, and the provider's name no
+  longer does.** Every receipt app checks a saved PDF against its purchase
+  before keeping it, and the check was satisfied by any one word it was
+  handed, the first of which was the provider's own name. Every page of a
+  provider's site carries that name, so any page passed. Walmart's order
+  list, printed in the middle of a run after a sign-in, was kept that way
+  as an online order's invoice and marked downloaded, so the invoice itself
+  would never have been asked for. Now a PDF with text has to show the
+  purchase's order number, its date in the form 2026-06-03, or the start
+  of an item's name, and the provider's name counts for nothing, whoever
+  hands it over, Uber's rides included, whose store is Uber. A scan, or one
+  whose few words include the name, is kept as before. Costco, GitHub,
+  Kroger and Meijer also hand over the date and total their list showed for
+  a purchase, which count together, for a receipt with no number and no
+  item the check could find, such as a Meijer till receipt or a Costco gas
+  receipt, and a Costco gas receipt that did not say Costco, put aside
+  before for that, is kept now. Measured before it was enabled on real
+  saved receipts, it keeps every one but a Target invoice holding only a
+  delivery tip, which Target's app files when an order has more than one
+  invoice and the tip's comes first, and that is put aside now rather than
+  kept as the order's invoice. A page naming only the provider, accepted
+  before for nearly every purchase, is refused for every one, and the
+  receipt of the purchase next to one on the list, accepted before in
+  nearly every pair, is accepted in about one pair in forty, nearly all of
+  them two purchases of the same item. What it does not catch is a list
+  that names the purchase itself. GitHub's payment history shows a
+  payment's own date and amount, so it passes as that payment's receipt,
+  and only a check of the page before it is printed can tell them apart.
 
 ## [0.41.0] - 2026-09-29
 

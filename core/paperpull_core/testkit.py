@@ -22,6 +22,10 @@ capture and that is exercised too.
         app.process([doc])
         assert spy.calls and spy.calls[0].name == "deliver"
 
+text_pdf is the other half, a PDF that says something, for a test of
+whether a saved document names what it was saved as, and receipt_app and
+file_a_receipt hand one to a receipt app's own check.
+
 Nothing here is used by a run. It is in the package so every app's tests
 can import it the same way they import everything else.
 """
@@ -29,6 +33,7 @@ from __future__ import annotations
 
 import inspect
 import io
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +56,73 @@ def sample_pdf(min_bytes: int = 4000) -> bytes:
     buf = io.BytesIO()
     writer.write(buf)
     return buf.getvalue()
+
+
+def text_pdf(lines, min_bytes: int = 4000) -> bytes:
+    """A one-page PDF whose lines pypdf reads back as text, for a test of
+    what a saved receipt says rather than whether it is a PDF. Helvetica,
+    so Latin-1 only, and padded past every app's minimum size."""
+    def literal(line: str) -> str:
+        return str(line).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = "".join("BT /F1 11 Tf 40 %d Td (%s) Tj ET\n" % (760 - 16 * i, literal(line))
+                     for i, line in enumerate(lines)).encode("latin-1")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for n, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % n + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1, xref)
+    return bytes(out) + b" " * max(0, min_bytes - len(out))
+
+
+def receipt_app(app_module, tmp_path, **config):
+    """A receipt app's own App, built the way its main() builds it, with its
+    output and browser profile under `tmp_path`. Nothing is opened."""
+    cfg = Path(tmp_path) / "config.json"
+    cfg.write_text(json.dumps({
+        "owner": "Dana Example", "output_dir": str(Path(tmp_path) / "out"),
+        "profile_dir": str(Path(tmp_path) / "profile"),
+        "delay_min_seconds": 0, "delay_max_seconds": 0, **config}), encoding="utf-8")
+    return app_module.App(app_module.build_parser().parse_args(["--config", str(cfg)]))
+
+
+@dataclass
+class Filed:
+    kept: bool          # what _finish_pdf answered
+    path: Path          # where the PDF is now
+    record: dict        # the purchase's record in progress.json
+
+
+def file_a_receipt(app, purchase, lines, listed=None) -> Filed:
+    """Hand an app's own _finish_pdf a PDF reading `lines`, left where its
+    capture would have left it, and say what became of it. `listed` is the
+    purchase's row as the order list showed it, put where the app's
+    discovery keeps it. There is no page, so a retry that prints the page
+    again fails, as it does when the page has gone."""
+    if listed is not None:
+        app.discovery.update(purchase.key, dict(listed))
+    out = app.paths.root / "Saved" / "receipt.pdf"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(text_pdf(lines))
+    # Most take the page first. Uber's has no page to print again.
+    if next(iter(inspect.signature(app._finish_pdf).parameters)) == "page":
+        kept = app._finish_pdf(None, purchase, out)
+    else:
+        kept = app._finish_pdf(purchase, out)
+    return Filed(bool(kept), Path(purchase.pdf_path), app.progress.get(purchase.key) or {})
 
 
 @dataclass

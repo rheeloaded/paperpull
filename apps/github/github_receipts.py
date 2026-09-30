@@ -650,7 +650,12 @@ class App:
         purchase.pdf_filename = out_path.name
         self._record_state(purchase, State.PDF_SAVED)
 
-        tokens = receipt_pdf.expected_tokens_for(purchase)
+        # Nobody here has seen whether GitHub's receipt prints the id its
+        # link carries, so the date and amount the row showed count
+        # together as well, which any receipt prints. The purchase's own
+        # when the list kept no record of it.
+        tokens = receipt_pdf.expected_tokens_for(
+            purchase, listed=self.discovery.get(purchase.key) or purchase)
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
         if not result.ok:
             log.warning("Validation failed (%s); retrying once", result.reason)

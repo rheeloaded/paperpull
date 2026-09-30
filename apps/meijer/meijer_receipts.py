@@ -803,7 +803,12 @@ class App:
         purchase.pdf_filename = out_path.name
         self._record_state(purchase, State.PDF_SAVED)
 
-        tokens = receipt_pdf.expected_tokens_for(purchase)
+        # A till receipt prints no number and names no item this check
+        # could know, so the date and total its row showed count together
+        # as well (#42), or the purchase's own when the list kept no record
+        # of it.
+        tokens = receipt_pdf.expected_tokens_for(
+            purchase, listed=self.discovery.get(purchase.key) or purchase)
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
         if not result.ok:
             self.stats["validation_failures"] += 1

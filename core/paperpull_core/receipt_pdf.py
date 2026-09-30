@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Optional
 
+from .identity import MIN_TEXT, amount_variants, date_variants
 from .models import ValidationResult
 
 log = logging.getLogger("paperpull.pdf")
@@ -24,10 +25,10 @@ log = logging.getLogger("paperpull.pdf")
 # ---------------------------------------------------------------------------
 # Provider binding
 # ---------------------------------------------------------------------------
-# Everything in this module is provider-agnostic except three facts: the name
-# to look for when validating a PDF, the host to use as <base href> when
-# re-rendering a saved HTML snapshot, and the name shown in a failure message.
-# The app binds its AppSpec once at import time.
+# Everything in this module is provider-agnostic except three facts, the name
+# that validating a PDF must not be satisfied by, the host to use as
+# <base href> when re-rendering a saved HTML snapshot, and the name shown in a
+# failure message. The app binds its AppSpec once at import time.
 
 _SPEC = None
 
@@ -44,6 +45,29 @@ def _provider_name() -> str:
 
 def _provider_token() -> str:
     return _SPEC.token if _SPEC else ""
+
+
+_NOT_ALNUM = re.compile(r"[^0-9a-z]")
+
+
+def _plain(value) -> str:
+    """Lowercase letters and digits only, so Lowe's, LOWES and lowes are
+    one word."""
+    return _NOT_ALNUM.sub("", str(value or "").lower())
+
+
+def _provider_words() -> set:
+    """The provider's own name, as the bound AppSpec gives it.
+
+    Never evidence that a PDF is one purchase's receipt. Every page of the
+    provider's site carries it, the order list, the sign-in page and the
+    front page included. On 2026-09-29 a Walmart order list, printed after
+    a sign-in in the middle of a run, passed the check on the word Walmart
+    alone and was filed as an online order's invoice, marked downloaded so
+    the real one would never be asked for."""
+    if not _SPEC:
+        return set()
+    return {w for w in (_plain(_SPEC.token), _plain(_SPEC.provider)) if w}
 
 
 def _base_href() -> str:
@@ -448,12 +472,26 @@ def pdf_text(path: Path) -> str:
         return ""
 
 
+class Together(tuple):
+    """Facts that name a purchase only together.
+
+    Each member is the list of ways one fact might print, and every member
+    has to be found somewhere in the text. See expected_tokens_for for the
+    one pair asked for this way, a date and a total."""
+
+
 def validate_pdf(path: Path, min_bytes: int = 3000,
                  expect_tokens: Optional[Iterable[str]] = None) -> ValidationResult:
-    """Verify a saved PDF: exists, non-trivial size, PDF signature, opens
-    with pypdf, has >= 1 page. Optionally check extracted text for expected
-    tokens (the provider, date, order number, item names). An image-based PDF with
-    little text is NOT rejected for missing tokens."""
+    """Verify a saved PDF, that it exists, is not trivially small, carries
+    the PDF signature, opens with pypdf and has a page. Optionally check
+    extracted text for expected tokens, the facts that name one purchase
+    (see expected_tokens_for).
+
+    Any one token is enough, and a token that is only the provider's name
+    never counts, from the caller or from an app's own list. See
+    _provider_words for why. An image-based PDF with little text is NOT
+    rejected for missing tokens, and neither is a scan whose few words
+    include the provider's name, which the name alone used to pass."""
     path = Path(path)
     if not path.exists():
         return ValidationResult(False, "File does not exist")
@@ -481,7 +519,8 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
         return ValidationResult(False, "PDF has no pages", size_bytes=size, page_count=0)
 
     token_found = False
-    if expect_tokens:
+    tokens = [t for t in (expect_tokens or ()) if t]
+    if tokens:
         try:
             text = ""
             for pg in reader.pages[:5]:
@@ -495,13 +534,33 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
                 t = str(tok).lower()
                 return t in text_lower or re.sub(r"\s+", "", t) in squashed
 
-            token_found = any(t and _has(t) for t in expect_tokens)
+            def _found(tok) -> bool:
+                if isinstance(tok, Together):
+                    return all(any(_has(v) for v in fact if v) for fact in tok)
+                return _has(tok)
+
+            provider = _provider_words()
+            own = [t for t in tokens
+                   if isinstance(t, Together) or _plain(t) not in provider]
+            if own:
+                token_found = any(_found(t) for t in own)
+                missing = "this purchase's order number, date or items"
+            else:
+                # Nothing but the provider's name was asked for, so it is
+                # all there is to look for, as it always was.
+                token_found = any(_has(t) for t in tokens)
+                missing = _provider_name()
             if text_lower.strip() and not token_found:
-                # Text was extractable but none of the expected tokens appear.
-                return ValidationResult(
-                    False,
-                    f"Extractable text does not mention {_provider_name()}/order details",
-                    size_bytes=size, page_count=pages, text_token_found=False)
+                # A scan with a few words of text on it, one of them the
+                # provider's name, was accepted on that name. It still
+                # is. Anything longer is a page, and a page that names
+                # nothing of this purchase is somebody else's.
+                scan = (bool(own) and len(squashed) < MIN_TEXT
+                        and any(w in _plain(text) for w in provider))
+                if not scan:
+                    return ValidationResult(
+                        False, f"Extractable text does not mention {missing}",
+                        size_bytes=size, page_count=pages, text_token_found=False)
             # Little/no extractable text: likely image-based PDF -> accept.
         except Exception:
             pass  # text extraction problems never fail an otherwise-valid PDF
@@ -510,9 +569,25 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
                             text_token_found=token_found)
 
 
-def expected_tokens_for(purchase) -> list:
-    """Tokens whose presence in the PDF text confirms it is the right receipt."""
-    tokens = [t for t in (_provider_token(),) if t]
+def expected_tokens_for(purchase, listed=None) -> list:
+    """What a saved PDF has to mention to be this purchase's receipt.
+
+    Its order number, its date written the ISO way, or the start of one of
+    its items' names, and any one of them is enough. The provider's own
+    name is not among them, see _provider_words.
+
+    `listed` is the purchase as the order list showed it, the app's
+    discovery record, from before any page of the purchase was read. Given
+    it, the date the list showed, printed the ways a receipt prints a date,
+    together with the total the list showed, is enough as well. It is for
+    the apps whose receipts can carry no number and no item this check
+    would find, a Meijer till receipt or a Costco gas receipt, which does
+    not always say Costco either. The list's date and not the purchase's
+    own, because a page read by mistake writes its date into the purchase,
+    and a check built from it would pass the page it was read from. Where
+    the list kept no record of the purchase, the purchase's own date and
+    total stand in (see _a_listing)."""
+    tokens = []
     if purchase.order_number:
         tokens.append(purchase.order_number)
         # order numbers sometimes render with dashes/spaces stripped
@@ -523,4 +598,34 @@ def expected_tokens_for(purchase) -> list:
         name = (item.name or "").strip()
         if len(name) >= 6:
             tokens.append(name[:24])
+    if listed is not None:
+        if not _a_listing(listed):
+            listed = purchase
+        dates = date_variants(_as_listed(listed, "purchase_date")[:10])
+        totals = amount_variants(_as_listed(listed, "total"))
+        if dates and totals:
+            tokens.append(Together((dates, totals)))
     return tokens
+
+
+def _a_listing(record) -> bool:
+    """Whether a record says what the list showed.
+
+    A discovery record is the purchase as it was discovered, every field
+    there even when empty. An app also writes a bare state into the same
+    store as it goes, before this check among other places, and for a
+    purchase the list never held that is all the record there is. It says
+    nothing the list showed, so the purchase's own date and total stand in,
+    as they do for no record at all. Taken for a listing, it left a Meijer
+    till receipt with nothing to be named by, and it was put aside."""
+    if isinstance(record, dict):
+        return "purchase_date" in record or "total" in record
+    return True
+
+
+def _as_listed(record, name: str) -> str:
+    """One field of a discovery record, or of a Purchase standing in for
+    one."""
+    if isinstance(record, dict):
+        return str(record.get(name) or "")
+    return str(getattr(record, name, "") or "")

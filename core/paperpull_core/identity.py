@@ -3,8 +3,10 @@
 `receipt_pdf.validate_pdf` already asks whether a saved file is a real
 PDF from this provider. That is not the same question. It takes an
 `expect_tokens` list, satisfied when ANY token appears, and the first
-token it is usually given is the provider's own name, which every page of
-every statement carries. A file can pass it while being the wrong month.
+token it was given was the provider's own name, which every page of
+every statement carries. A file could pass it while being the wrong
+month. Since 2026-09-29 the name counts for nothing there, but any one of
+a purchase's facts still passes it, a shared date among them.
 
 Nothing checks the other question today. Of the 148 places that call
 `validate_pdf`, 129 pass no tokens at all.
