@@ -196,6 +196,7 @@ class FakeTarget:
         self.signed_in = True
         self.lapse_at = set()    # paths whose opening ends the session
         self.broken = set()      # paths that answer an error page
+        self.moved = {}          # paths sent on to another path
 
     def show(self, *orders):
         self.orders = {o.number: o for o in orders}
@@ -246,6 +247,13 @@ class _Handler(BaseHTTPRequestHandler):
             return self._to_sign_in()
         if path in SITE.broken:
             return self._answer(BROKEN, status=500)
+        if path in SITE.moved:
+            self.send_response(302)
+            self.send_header("Location", SITE.moved[path])
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
         parts = path.strip("/").split("/")
         o = SITE.orders.get(parts[1]) if len(parts) > 1 and parts[0] == "orders" else None
         if parts == ["orders"]:
@@ -580,6 +588,25 @@ def test_an_invoice_that_did_not_open_is_asked_for_on_the_next_run(attached, tmp
     assert invoice_numbers(saved) == sorted(inv for inv, _, _ in SPLIT.invoices), saved
     assert len(saved) == 2, "the first invoice is on file once, %s" % saved
     assert record(tmp_path, SPLIT)["downloaded_ok"] is True
+
+
+def test_another_orders_invoice_page_is_never_printed_for_this_order(attached, tmp_path):
+    """A press of this order's second invoice landed on another order's
+    invoice page. Its address names that order, so it is turned away before
+    it is printed, nothing of it is filed under this order, in Invoices or
+    in Manual Review, and this order is asked for again on the next run.
+    The invoice pages are reached by presses from the order's own page,
+    which was checked, and nothing looked at them before (page_check)."""
+    SITE.show(SPLIT, SINGLE)
+    second = "/orders/%s/invoices/%s" % (SPLIT.number, SPLIT.invoices[1][0])
+    SITE.moved[second] = "/orders/%s/invoices/%s" % (SINGLE.number, SINGLE.invoices[0][0])
+    assert run(tmp_path, attached, "--pilot-online") == 0
+
+    assert opened(second) == 1, SITE.seen
+    filed = pdfs(tmp_path, "Invoices", SPLIT) + pdfs(tmp_path, "Manual Review", SPLIT)
+    assert invoice_numbers(filed) == [SPLIT.invoices[0][0]], filed
+    rec = record(tmp_path, SPLIT)
+    assert not rec.get("downloaded_ok"), rec
 
 
 def test_signed_out_between_two_invoices_the_run_stops_and_resumes(attached, tmp_path,

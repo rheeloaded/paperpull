@@ -319,6 +319,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
   across the repository now refuses a step that writes a purchase down and
   then tells the method that asked, which writes it again, that it saved
   it.
+- **A purchase's page is checked to be its own before it is printed.**
+  Amazon, Gap, GitHub, Meijer, Target and Walmart print a purchase's page
+  and keep it as the receipt, and the check on the saved file cannot tell
+  a list from a receipt when the list names the purchase. Walmart's order
+  list shows each order's items, GitHub's payment history each payment's
+  date, amount and id, and a wrong page read first writes its own date
+  and items into the purchase, so each of these, printed in a purchase's
+  place, was kept as its receipt and marked downloaded. Now the page is
+  read first, the way Best Buy reads the number on its details page. Its
+  address has to name the purchase, and the number the page gives its
+  purchase has to be this one and no other, Walmart's Order# or TC#,
+  Amazon's order id, Gap's Purchase # and the number over Target's details
+  page. GitHub and Meijer print a page only when a receipt link answers
+  with one rather than a PDF, and that page has to be the one the link
+  points to and not the list. A page that is not the purchase's is not
+  saved, the purchase is asked for again on the next run, and the run
+  reports a wrong document. A Target order's invoices are reached by
+  presses from the order's page, and each invoice's page has to be at that
+  order's address before it is printed, since an invoice never prints the
+  order's number. One that is not is left unprinted, and the order is
+  asked for again on the next run. The order list sent in place of an
+  Amazon, Gap or Target purchase's page used to be recorded as that
+  purchase having no receipt, which is final, so it was never asked for
+  again, and it is not now. Measured first on saved receipts, every
+  Amazon, Gap, Target and Walmart receipt was printed at an address naming
+  its purchase, and every Amazon, Gap and Walmart one names its purchase
+  the way the check reads it. Costco, eBay and Kroger do not read their
+  page yet.
 
 ## [0.41.1] - 2026-09-30
 

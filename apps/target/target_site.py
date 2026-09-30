@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import page_check as _page_check
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
@@ -1183,6 +1184,35 @@ def wait_for_receipt_content(page, timeout_ms: int = 15000) -> str:
         if time.monotonic() >= deadline:
             return ""
         page.wait_for_timeout(500)
+
+
+# The purchase a page is about. A details page heads itself "Order details"
+# or "Purchase details" over "#" and the number, and the online receipts page
+# names it in its trail, "Orders/", the number, "Receipts". The order list
+# has neither, only "#" and a number on each online card. Read from the page
+# as the screen shows it, which is where they were recorded (2026-07).
+_PAGE_NUMBER_RES = (
+    re.compile(r"\b(?:Order|Purchase)\s+details\s*#\s*(\d[\d-]{4,}\d)", re.I),
+    re.compile(r"\bOrders/[ \t]*\n?\s*(\d[\d-]{4,}\d)/?[ \t]*\n\s*Receipts\b", re.I),
+)
+
+
+def not_this_purchase(page, order_number: str) -> str:
+    """"" when the page in front of the app is this purchase's own, its
+    details page or its receipts page, else why it is not, in fixed words.
+
+    Its address has to name the purchase, /orders/<number> or
+    /orders/stores/<id>, and a number the page heads itself with has to be
+    this one. A page with no such heading stands on its address, since only
+    a few of Target's pages were recorded. The order list is at /orders, a
+    sign-in page names the purchase only in its return address, and another
+    purchase's page heads itself with its own. See paperpull_core.page_check.
+    """
+    if not _page_check.address_names(page.url, order_number):
+        return _page_check.NOT_ITS_ADDRESS
+    text = _page_check.page_text(page, "screen")
+    shown = [n for rx in _PAGE_NUMBER_RES for n in rx.findall(text)]
+    return _page_check.names_only(shown, order_number) if shown else ""
 
 
 def count_store_receipts(page) -> int:

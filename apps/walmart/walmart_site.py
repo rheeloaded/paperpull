@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from paperpull_core import page_check as _page_check
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.controls import click_next_page as _click_next_page
@@ -474,6 +475,29 @@ def goto_details(page, purchase: Purchase) -> None:
                          % (purchase.details_url or "")[:80])
     page.goto(purchase.details_url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3000)
+
+
+# The number the printed details page gives its purchase, "Order#" over an
+# online order's invoice and "TC#" over a store receipt. Dashes aside its
+# digits are the id the app keys the purchase on, which is why it is the
+# check (measured on saved receipts, 2026-09-29). It is read from the page
+# as it prints, since the receipt is print-only, and it never runs on past
+# its line.
+PAGE_NUMBER_RE = re.compile(r"\b(?:Order|TC)[ \t]*#[ \t]*:?\s*(\d[\d-]{6,}\d)", re.I)
+
+
+def not_this_purchase(page, order_number: str) -> str:
+    """"" when the page in front of the app is this purchase's own details
+    page, else why it is not, in fixed words.
+
+    Its address has to be /orders/<this id>, and the page as it prints has
+    to name this purchase and no other. The order list is at /orders, a
+    sign-in page names the order only in its return address, and another
+    order's page prints its own number. See paperpull_core.page_check."""
+    if not _page_check.address_names(page.url, order_number):
+        return _page_check.NOT_ITS_ADDRESS
+    shown = PAGE_NUMBER_RE.findall(_page_check.page_text(page, "print"))
+    return _page_check.names_only(shown, order_number)
 
 
 def extract_details(page, purchase: Purchase) -> Purchase:

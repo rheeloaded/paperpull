@@ -37,6 +37,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
+from paperpull_core import page_check as _page_check
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
@@ -783,6 +784,39 @@ def receipt_is_present(page) -> bool:
         return True
     return bool(HYDRATED_RE.search(body)
                 and PURCHASE_SUMMARY_LABEL.lower() in body.lower())
+
+
+# The number the details page gives its purchase, "Purchase #:" with the id
+# the app keys it on after it, on the next line (measured on saved online
+# receipts, 2026-09-29). An id always has a digit in it, so a label whose
+# value is missing never reads the next line's word as one.
+PURCHASE_NUMBER_RE = re.compile(r"\bpurchase\s*#\s*:?\s*([A-Za-z0-9-]*\d[A-Za-z0-9-]*)", re.I)
+
+
+def _same_kind(number: str, order_id: str) -> bool:
+    """Whether a printed number is the kind of id this purchase has. An
+    online order's is seven letters and digits, a store purchase's is
+    twenty-four digits."""
+    a, b = _page_check.plain(number), _page_check.plain(order_id)
+    return len(a) == len(b) and a.isdigit() == b.isdigit()
+
+
+def not_this_purchase(page, order_id: str) -> str:
+    """"" when the page in front of the app is this purchase's own details
+    page, else why it is not, in fixed words.
+
+    Its address has to be order-details/<this id>, and a Purchase # the
+    page prints of this purchase's kind has to be this one. A store
+    purchase's page has not been measured, so a page that prints none, or
+    only a number of another kind, stands on its address. The order history
+    is at an address of its own, a sign-in page names the purchase only in
+    its return address, and another purchase's page prints its own number.
+    See paperpull_core.page_check."""
+    if not _page_check.address_names(page.url, order_id):
+        return _page_check.NOT_ITS_ADDRESS
+    shown = [n for n in PURCHASE_NUMBER_RE.findall(_page_check.page_text(page, "print"))
+             if _same_kind(n, order_id)]
+    return _page_check.names_only(shown, order_id) if shown else ""
 
 
 # Gap ships no print stylesheet, so printToPDF would otherwise capture the

@@ -27,6 +27,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+from paperpull_core import page_check as _page_check
 from paperpull_core.models import ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
@@ -813,6 +814,21 @@ def receipt_is_present(page) -> bool:
     if ORDER_ID_RE.search(body) and re.search(TOTAL_LABEL_RE, body, re.I):
         return True
     return False
+
+
+def not_this_purchase(page, order_id: str) -> str:
+    """"" when the page in front of the app is this order's printable
+    summary, else why it is not, in fixed words.
+
+    Its address names the order in orderID, and every order id on the page
+    as it prints is this one (both measured on saved summaries,
+    2026-09-29). The order list names several orders and no orderID, a
+    sign-in page names the order only in its return address, and another
+    order's summary prints its own id. See paperpull_core.page_check."""
+    if not _page_check.address_names(page.url, order_id, query="orderID"):
+        return _page_check.NOT_ITS_ADDRESS
+    shown = ORDER_ID_RE.findall(_page_check.page_text(page, "print"))
+    return _page_check.names_only(shown, order_id)
 
 
 # ---------------------------------------------------------------------------

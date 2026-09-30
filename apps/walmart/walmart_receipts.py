@@ -774,6 +774,15 @@ class App:
 
         site.scroll_full_page(page)  # force lazy content (items, totals) to render
 
+        # The page has to be this purchase's before it is printed. The order
+        # list names its purchases' dates, totals and items, and the check
+        # on the saved file would find this purchase's facts there. The
+        # number is the one it was listed under, since extract_details only
+        # fills in a missing one.
+        why = site.not_this_purchase(page, purchase.order_number)
+        if why:
+            return self._refuse_page(purchase, why)
+
         is_online = purchase.purchase_type == ONLINE
         purchase.document_type = "Invoice" if is_online else "Receipt"
         folder = self.paths.invoices if is_online else self.paths.folder_for(
@@ -799,6 +808,20 @@ class App:
                                notes=f"PDF generation failed: {e}")
             self.stats["failed"] += 1
             return False
+
+    def _refuse_page(self, purchase: Purchase, why: str) -> bool:
+        """Leave a page that is not this purchase's unprinted, as Best Buy
+        does. A receipt filed under another purchase's name is worse than
+        none, because nobody looks for it. Nothing is saved and the
+        purchase is asked for again on the next run. `why` is fixed words
+        from paperpull_core.page_check, never the page's."""
+        said = why[:1].upper() + why[1:]
+        self._record_state(purchase, State.NEEDS_MANUAL_REVIEW, notes=said)
+        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+        self.stats["manual_review"] += 1
+        self.write_failure("check the receipt", why)
+        print(f"  {said}, so nothing was saved.")
+        return False
 
     def _capture_document(self, target_page, purchase: Purchase,
                           out_path: Path, content_kind: str = "") -> None:

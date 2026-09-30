@@ -692,6 +692,14 @@ class App:
             while self.check_session(page):
                 site.goto_receipt_page(page, url)
             site.scroll_full_page(page)
+            # The page has to be this order's receipt before anything is
+            # taken from it. The orders page shows the order's date and
+            # total, which the check on the saved file would find, and a
+            # page that is not the receipt says nothing about whether there
+            # is one, so it is not recorded as having none, which is final.
+            why = site.not_this_purchase(page, url)
+            if why:
+                return self._refuse_page(purchase, why)
             if not site.receipt_is_present(page):
                 self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                                    notes="Receipt page did not show a receipt")
@@ -765,6 +773,20 @@ class App:
             print("Meijer may be slowing requests down, so nothing more is asked of it now.")
             print("Wait a while, then press Resume to carry on from where this stopped.")
             raise SystemExit(0)
+        return False
+
+    def _refuse_page(self, purchase: Purchase, why: str) -> bool:
+        """Leave a page that is not this order's receipt unprinted, as Best
+        Buy does. A receipt filed under another order's name is worse than
+        none, because nobody looks for it. Nothing is saved and the order
+        is asked for again on the next run. `why` is fixed words from
+        paperpull_core.page_check, never the page's."""
+        said = why[:1].upper() + why[1:]
+        self._record_state(purchase, State.NEEDS_MANUAL_REVIEW, notes=said)
+        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+        self.stats["manual_review"] += 1
+        self.write_failure("check the receipt", why)
+        print(f"  {said}, so nothing was saved.")
         return False
 
     def _capture_document(self, target_page, purchase: Purchase,

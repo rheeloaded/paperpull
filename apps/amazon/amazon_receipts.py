@@ -39,6 +39,7 @@ from paperpull_core import classification, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import amazon_site as site
 from paperpull_core.models import (ONLINE, Item, Purchase, State)
+from paperpull_core.page_check import NAMES_NONE
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -609,6 +610,17 @@ class App:
             page.wait_for_timeout(2000)
         site.scroll_full_page(page)
 
+        # The page has to be this order's summary before anything is taken
+        # from it. The order list shows each order's id and total, which the
+        # check on the saved file would find, and a page that is not this
+        # order's says nothing about whether it has a summary, so it is not
+        # recorded as having none, which is final. One that names no order
+        # at all is left to that question. The id is the one the order was
+        # listed under, since extract_details only fills in a missing one.
+        why = site.not_this_purchase(page, purchase.order_number)
+        if why and why != NAMES_NONE:
+            return self._refuse_page(purchase, why)
+
         if not site.receipt_is_present(page):
             self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                                notes="No printable order summary available")
@@ -620,6 +632,8 @@ class App:
             self.stats["manual_review"] += 1
             print("  No printable order summary - marked for manual review.")
             return False
+        if why:
+            return self._refuse_page(purchase, why)
 
         purchase.document_type = "Receipt"
         folder = self.paths.online
@@ -699,6 +713,20 @@ class App:
                                notes="Also saved: " + ", ".join(extra_names),
                                extra={"receipt_count": purchase.receipt_count})
         return True
+
+    def _refuse_page(self, purchase: Purchase, why: str) -> bool:
+        """Leave a page that is not this order's unprinted, as Best Buy
+        does. A receipt filed under another order's name is worse than
+        none, because nobody looks for it. Nothing is saved and the order
+        is asked for again on the next run. `why` is fixed words from
+        paperpull_core.page_check, never the page's."""
+        said = why[:1].upper() + why[1:]
+        self._record_state(purchase, State.NEEDS_MANUAL_REVIEW, notes=said)
+        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+        self.stats["manual_review"] += 1
+        self.write_failure("check the receipt", why)
+        print(f"  {said}, so nothing was saved.")
+        return False
 
     def _capture_document(self, target_page, purchase: Purchase,
                           out_path: Path, content_kind: str = "") -> None:

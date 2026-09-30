@@ -604,6 +604,11 @@ class App:
             self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+        # The number the purchase was listed under. extract_details takes a
+        # labelled number off the page in its place, so a wrong page would
+        # otherwise be checked against its own number.
+        listed = purchase.order_number
+
         # ---- open details (retry once, per spec 22) ----
         for attempt in (1, 2):
             try:
@@ -661,7 +666,7 @@ class App:
             return
 
         # ---- locate + save receipt ----
-        saved = self._save_receipt(page, purchase)
+        saved = self._save_receipt(page, purchase, listed)
         if not saved:
             return  # state already recorded inside
 
@@ -684,9 +689,13 @@ class App:
 
     # -- receipt saving -----------------------------------------------------
 
-    def _save_receipt(self, page, purchase: Purchase) -> bool:
+    def _save_receipt(self, page, purchase: Purchase, listed: str = "") -> bool:
         """Locate the printable receipt and save it as a verified PDF.
-        Returns True on success; records failure states otherwise."""
+        Returns True on success, and records the state it failed in
+        otherwise.
+
+        `listed` is the number the purchase was listed under, which the
+        page is checked against before anything is printed."""
         opened = site.open_receipt_section(page)
 
         # Target requires fresh authentication to view Receipts & invoices.
@@ -708,6 +717,18 @@ class App:
         controls = site.find_print_receipt_controls(page)
         popup = None
 
+        # The page has to be this purchase's before anything is taken from
+        # it, its details page with the receipt open on it, or its receipts
+        # page. A wrong page read first writes its own facts into the
+        # purchase, and the check on the saved file would then find them.
+        # The order list has no receipt on it, and a page that is not this
+        # purchase's says nothing about whether it has one, so it is not
+        # recorded as having none, which is final. Target's own check is
+        # left to _handle_no_receipt, which stops the run for it (#48).
+        why = site.not_this_purchase(page, listed or purchase.order_number)
+        if why and not site.detect_security_challenge(page):
+            return self._refuse_page(purchase, why)
+
         if opened is None or controls.unread:
             # A control naming the receipt could not be read or pressed, so
             # nothing is pressed and nothing is concluded (_left_unread).
@@ -715,10 +736,12 @@ class App:
                 self._left_unread(purchase, "the receipt")
             return False
         if not controls and not opened:
-            return self._handle_no_receipt(page, purchase)
+            return self._handle_no_receipt(page, purchase, listed)
         if opened and not controls and not content_kind:
             # Section opened but nothing receipt-like ever rendered.
-            return self._handle_no_receipt(page, purchase)
+            return self._handle_no_receipt(page, purchase, listed)
+        if why:
+            return self._refuse_page(purchase, why)
 
         self._record_state(purchase, State.RECEIPT_LOCATED)
         folder = self.paths.folder_for(purchase.purchase_type)
@@ -775,6 +798,20 @@ class App:
                 except Exception:
                     pass
             receipt_pdf.restore_print(page)
+
+    def _refuse_page(self, purchase: Purchase, why: str) -> bool:
+        """Leave a page that is not this purchase's unprinted, as Best Buy
+        does. A receipt filed under another purchase's name is worse than
+        none, because nobody looks for it. Nothing is saved and the
+        purchase is asked for again on the next run. `why` is fixed words
+        from paperpull_core.page_check, never the page's."""
+        said = why[:1].upper() + why[1:]
+        self._record_state(purchase, State.NEEDS_MANUAL_REVIEW, notes=said)
+        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+        self.stats["manual_review"] += 1
+        self.write_failure("check the receipt", why)
+        print(f"  {said}, so nothing was saved.")
+        return False
 
     def _capture_document(self, target_page, purchase: Purchase,
                           out_path: Path, content_kind: str = "") -> None:
@@ -902,7 +939,7 @@ class App:
         print("  !! A control naming %s could not be read. It is tried again next run." % what)
         return False
 
-    def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
+    def _handle_no_receipt(self, page, purchase: Purchase, listed: str = "") -> bool:
         """No Print receipts control found. Optionally save the order's
         invoices, and record."""
         if self._left_for_next_run(page, purchase, "the receipt"):
@@ -911,7 +948,7 @@ class App:
         if invoices.unread:
             return self._left_unread(purchase, "an invoice")
         if invoices and self.config.get("include_invoices"):
-            return self._save_invoices(page, purchase, invoices)
+            return self._save_invoices(page, purchase, invoices, listed)
 
         self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                            notes="No printable receipt available")
@@ -926,7 +963,8 @@ class App:
 
     # -- invoices -----------------------------------------------------------
 
-    def _save_invoices(self, page, purchase: Purchase, controls: list) -> bool:
+    def _save_invoices(self, page, purchase: Purchase, controls: list,
+                       listed: str = "") -> bool:
         """Save every invoice the order has, each checked on its own.
 
         Target splits an order into invoices, one for each shipment and one
@@ -952,7 +990,8 @@ class App:
         self._record_state(purchase, State.RECEIPT_LOCATED)
         walk = {"tokens": self._invoice_tokens(purchase),
                 "saved": self._invoices_on_file(purchase),
-                "held": [], "missed": [], "count": 0, "list_page": None}
+                "held": [], "missed": [], "count": 0, "list_page": None,
+                "listed": listed or purchase.order_number}
         try:
             if not self._walk_invoices(page, purchase, controls, walk):
                 return False
@@ -1051,6 +1090,20 @@ class App:
             if kind == "download":
                 receipt_pdf.save_download(obj, staged)
             else:
+                # The invoice's own page has to be this order's before it
+                # is printed, as the order's page was. It is reached by
+                # presses from that page, the list and then each invoice,
+                # in this tab or one of its own, and nothing looked at it,
+                # so another order's invoice was printed under this order's
+                # name. An invoice page never prints the order's number,
+                # so it stands on its address, /orders/<n>/invoices/<id>.
+                # One that is not this order's is left unprinted, and the
+                # order is asked for again on the next run (page_check).
+                why = site.not_this_purchase(shown, walk["listed"])
+                if why:
+                    log.info("Invoice %d of %s was not printed, %s", k + 1, purchase.key, why)
+                    walk["missed"].append("invoice %d was on a page that is not this order's" % (k + 1))
+                    return
                 self._capture_document(shown, purchase, staged)
             text = receipt_pdf.pdf_text(staged)
             part, number = site.invoice_identity(text)

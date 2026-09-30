@@ -19,10 +19,12 @@ on screen can be missing from the paper, and the invoice is known by the
 order number it prints instead.
 
 Nothing that is not this order's document may pass for it because of
-that. Another order's invoice, a longer number holding this one, a heading
-that names the order over an invoice that never came, and a page other than
-the order's own are all still put aside. A file put aside also used to be
-reported as "? bytes, ? pages" and left nothing to attach.
+that. A page printing another order's number, or a longer number holding
+this one, and a page other than the order's own are turned away before
+anything is printed, since the page is checked first (page_check), and the
+order is asked for again on the next run. A heading that names the order
+over an invoice that never came is printed and put aside. A file put aside
+also used to be reported as "? bytes, ? pages" and left nothing to attach.
 
 Every page is invented and served to Playwright's own Chromium from inside
 the test. Every other request is refused, so nothing reaches Walmart or
@@ -175,6 +177,20 @@ def put_aside(tmp_path, rec):
             and path.parent == tmp_path / "out" / "Manual Review" and path.exists())
 
 
+def refused(tmp_path, rec):
+    """Turned away before anything was printed, and left for the next run."""
+    return (rec["state"] == "Needs Manual Review" and not rec.get("downloaded_ok")
+            and not list((tmp_path / "out").rglob("*.pdf")))
+
+
+# An invoice that prints this order's own number, from an order page that
+# shows no amount, so no total was read and the number is not enough. It
+# passes the check of the page and is printed, then put aside.
+NO_TOTAL = invoice().replace(
+    "<p>Subtotal $12.47</p><p>Tax $0.87</p><p>Total $13.34</p>", "").replace(
+    '<span data-testid="line-price">$12.47</span>', "")
+
+
 # -- the invoice is known by its own order number ------------------------------------
 
 def test_an_invoice_that_never_says_walmart_is_known_by_its_order_number(tmp_path, shown):
@@ -202,18 +218,18 @@ def test_an_invoice_that_prints_its_item_names_passes_as_before(tmp_path, shown)
 
 # -- and nothing that is not this order's document passes because of it -----------
 
-def test_another_orders_invoice_is_still_put_aside(tmp_path, shown):
+def test_another_orders_invoice_is_refused_before_it_is_printed(tmp_path, shown):
     app, purchase, rec = run_one(tmp_path, shown, invoice(number=ANOTHER))
 
-    assert put_aside(tmp_path, rec), rec
+    assert refused(tmp_path, rec), rec
 
 
 @pytest.mark.parametrize("longer", ["91000000-00000011", "1000000-000000111",
                                     "1000000-00000011-5"])
-def test_a_longer_number_holding_this_one_is_still_put_aside(tmp_path, shown, longer):
+def test_a_longer_number_holding_this_one_is_refused_before_it_is_printed(tmp_path, shown, longer):
     app, purchase, rec = run_one(tmp_path, shown, invoice(number=longer))
 
-    assert put_aside(tmp_path, rec), rec
+    assert refused(tmp_path, rec), rec
 
 
 def test_a_heading_over_an_invoice_that_never_came_is_still_put_aside(tmp_path, shown):
@@ -227,13 +243,14 @@ def test_a_heading_over_an_invoice_that_never_came_is_still_put_aside(tmp_path, 
 def test_a_page_that_is_not_this_orders_gets_nothing_from_its_number(tmp_path, shown):
     """The order's address sends the tab on to the list of orders, and
     what is printed there shows this order's number and an amount. Only
-    the order's own page is known by the number it prints."""
+    the order's own page is known by the number it prints, and the list is
+    turned away before it is printed."""
     shown["list"] = invoice()
     app, purchase, rec = run_one(
         tmp_path, shown, "<!doctype html><script>location.replace('/orders')</script>")
 
     assert shown["page"].url == LIST, "the tab really did move on"
-    assert put_aside(tmp_path, rec), rec
+    assert refused(tmp_path, rec), rec
 
 
 # -- a file put aside says what it is --------------------------------------------------
@@ -241,7 +258,7 @@ def test_a_page_that_is_not_this_orders_gets_nothing_from_its_number(tmp_path, s
 def test_the_pilot_report_measures_a_file_put_aside(tmp_path, shown, capsys):
     """It read "? bytes, ? pages" for a file sitting in Manual Review,
     because the size and pages were only recorded for a file that passed."""
-    app, purchase, rec = run_one(tmp_path, shown, invoice(number=ANOTHER))
+    app, purchase, rec = run_one(tmp_path, shown, NO_TOTAL)
     assert put_aside(tmp_path, rec), rec
     capsys.readouterr()
 
@@ -256,7 +273,7 @@ def test_the_pilot_report_measures_a_file_put_aside(tmp_path, shown, capsys):
 def test_a_file_put_aside_leaves_a_failure_file_with_none_of_its_words(tmp_path, shown):
     """What the file holds, as counts and yes or no, so the next report says
     whether it was an invoice, a blank print or another page altogether."""
-    app, purchase, rec = run_one(tmp_path, shown, invoice(number=ANOTHER))
+    app, purchase, rec = run_one(tmp_path, shown, NO_TOTAL)
     assert put_aside(tmp_path, rec), rec
 
     written = list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
@@ -267,7 +284,7 @@ def test_a_file_put_aside_leaves_a_failure_file_with_none_of_its_words(tmp_path,
     assert report["step"] == "check the saved document", report
     assert facts["pages"] == 1 and facts["text_characters"] > 100, facts
     assert facts["says_walmart"] is False, facts
-    assert facts["prints_this_order_number"] is False, facts
+    assert facts["prints_this_order_number"] is True, facts
     assert facts["prints_an_amount"] is True and facts["prints_a_date"] is True, facts
     assert facts["item_names_read"] == 1 and facts["item_names_printed"] == 0, facts
     assert {"invoice", "subtotal", "total", "tax", "qty", "payment"} <= set(facts["words"]), facts

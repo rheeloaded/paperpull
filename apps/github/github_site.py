@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 from urllib.parse import urljoin, urlsplit
 
+from paperpull_core import page_check as _page_check
 from paperpull_core.models import ONLINE, Item, Purchase
 from storage import now_iso
 
@@ -413,7 +414,26 @@ def receipt_is_present(page) -> bool:
 
 
 def on_receipt_page(page, url: str) -> bool:
-    return (page.url or "").split("#")[0].rstrip("/") == url.split("#")[0].rstrip("/")
+    """Whether the browser is still at the receipt's own address, as
+    GitHub might write it, see paperpull_core.page_check.same_address."""
+    return _page_check.same_address(page.url or "", url)
+
+
+def not_this_purchase(page, url: str) -> str:
+    """"" when the page in front of the app is the receipt this payment's
+    row links to, else why it is not, in fixed words.
+
+    The payment history shows each payment's own date, amount and id, so
+    nothing in its words tells it from a receipt, and printed in a
+    payment's place it passed the check on the saved file. Where the page
+    is tells them apart. A receipt link that leads anywhere else, the
+    history or a sign-in page among them, is not the receipt, and neither
+    is a row's link that is the history itself."""
+    if _page_check.same_address(url, ORDERS_URL):
+        return _page_check.IS_THE_LIST
+    if not on_receipt_page(page, url):
+        return _page_check.NOT_ITS_ADDRESS
+    return ""
 
 
 def scroll_full_page(page, rounds: int = 2, delay_ms: int = 400) -> None:

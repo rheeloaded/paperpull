@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urljoin, urlsplit
 
+from paperpull_core import page_check as _page_check
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
 
@@ -991,7 +992,28 @@ def receipt_is_present(page) -> bool:
 
 
 def on_receipt_page(page, url: str) -> bool:
-    return (page.url or "").split("#")[0].rstrip("/") == url.split("#")[0].rstrip("/")
+    """Whether the browser is still at the receipt's own address, as
+    Meijer might write it, see paperpull_core.page_check.same_address."""
+    return _page_check.same_address(page.url or "", url)
+
+
+def not_this_purchase(page, url: str) -> str:
+    """"" when the page in front of the app is the receipt this order's row
+    links to, else why it is not, in fixed words.
+
+    The orders page shows each order's own date and total, which is what
+    the check on the saved file looks for, so printed in an order's place
+    it passed. Where the page is tells them apart. A receipt link that
+    leads anywhere else, the orders page or a sign-in page among them, is
+    not the receipt, and neither is a row's link that is one of the order
+    lists itself. Nobody has seen an online order's receipt page, so an
+    address that only shares a list's path is not taken for the list."""
+    for listed in ORDER_CANDIDATES:
+        if _page_check.same_address(url, listed) and _page_check.same_address(listed, url):
+            return _page_check.IS_THE_LIST
+    if not on_receipt_page(page, url):
+        return _page_check.NOT_ITS_ADDRESS
+    return ""
 
 
 def scroll_full_page(page, rounds: int = 2, delay_ms: int = 400) -> None:
