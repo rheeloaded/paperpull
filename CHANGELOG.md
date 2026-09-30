@@ -41,6 +41,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   receipt check's date and total pair, which Costco, GitHub, Kroger and
   Meijer hand over, finds a date by the same rule and is given both forms
   as well.
+- **Apple Card reads a list it could not open because the session had
+  run out.** Discovery opens the card's statements, the Savings
+  statements and the tax forms in turn. When Apple had signed the person
+  out by the time one of them was opened, a run started from a terminal
+  asked them to sign in again and then went on to the next list, so the
+  one that would not open was missing from that run. When it was the tax
+  forms, nothing said so. Now that list is opened again after the
+  sign-in, and the question is asked again if the person pressed Enter
+  before they had signed in. A run from the control panel stops there as
+  before.
 
 ## [0.41.1] - 2026-09-30
 

@@ -998,3 +998,134 @@ def test_only_apples_own_hosts_may_hand_over_a_pdf_in_passing():
                 "https://evilapple.com/a.pdf", "https://user@statements.apple.com/a.pdf",
                 "https://statements.apple.com:8443/a.pdf", "not a url", ""):
         assert not site._is_apple_file_host(url), url
+
+
+# -- signed out partway through discovery ---------------------------------------
+#
+# Discovery opens the three lists in turn, and Apple can sign the person out
+# between one and the next. The front page is then Apple's sign-in. A run
+# started from a terminal asks the person to sign in again and opens the
+# card's statements, and the list that would not open was left out of the
+# run. When that was the last one, the tax forms, nothing said so, because
+# the card's list had been found, and the run read as clean.
+
+SIGN_IN = """<!doctype html><html><head><title>Apple Card</title></head><body>
+<main><h1>Sign in to Apple Card</h1><form>
+<label>Apple Account <input type="email"></label>
+<label>Password <input type="password"></label>
+<button type="button">Continue</button></form></main></body></html>"""
+
+EVERY_DOCUMENT = sorted(
+    ["Apple Card Statement - " + m for m in ("March 2031", "February 2031", "January 2031",
+                                             "December 2030")]
+    + ["Savings Statement - " + m for m in ("March 2031", "February 2031", "January 2031")]
+    + ["Tax Document - 2030", "Tax Document - 2029"])
+
+
+def _signed_out_at(page, monkeypatch, kind):
+    """The session runs out just as discovery opens `kind`'s list, after the
+    lists before it were read signed in. Tied to the app opening that list,
+    not to a clock. From then on the front page and /savings answer Apple's
+    sign-in, until whoever answers the question has signed in again."""
+    session = {"signed_in": True, "lapsed": []}
+
+    def sign_in(route, request):
+        if session["signed_in"] or urlsplit(request.url).path not in ("/", "/savings"):
+            route.fallback()
+        else:
+            route.fulfill(status=200, content_type="text/html", body=SIGN_IN)
+
+    # Added after the made-up site's own route, so it is asked first.
+    page.context.route("https://card.apple.com/**", sign_in)
+    real = site.goto_section
+
+    def opening(pg, k, trace=None):
+        if k == kind and not session["lapsed"]:
+            session["lapsed"].append(k)
+            session["signed_in"] = False
+            # The site notices and puts its sign-in up in place of the list.
+            pg.reload()
+        return real(pg, k, trace)
+
+    monkeypatch.setattr(site, "goto_section", opening)
+    return session
+
+
+def _answering(monkeypatch, session, signs_in_at=1, limit=5):
+    """Somebody at the console, who presses Enter at every question and has
+    signed in again by the `signs_in_at`th. Past `limit` questions they give
+    up with Ctrl+C, so a loop that asks forever fails here rather than
+    hanging the suite."""
+    from paperpull_core import browser as browser_launcher
+    asked = []
+
+    def answer(prompt):
+        asked.append(prompt)
+        if len(asked) > limit:
+            raise KeyboardInterrupt
+        if len(asked) >= signs_in_at:
+            session["signed_in"] = True
+        return ""
+
+    monkeypatch.setattr(browser_launcher, "ask_or_none", answer)
+    return asked
+
+
+def _discover(page, tmp_path):
+    """Discovery on the page, and the title of every document it found."""
+    from storage import JsonStore
+    app = _app(page, tmp_path)
+    app.progress = JsonStore(tmp_path / "progress.json")
+    app.cmd_discover(quiet=True)
+    return sorted(v["title"] for v in app.discovery.data.values())
+
+
+@pytest.mark.parametrize("kind", [site.SAVINGS, site.TAX])
+def test_a_list_the_session_ran_out_on_is_read_once_the_person_has_signed_in(
+        browser, tmp_path, monkeypatch, capsys, kind):
+    page, served = _open(browser)
+    page.goto("https://card.apple.com/")
+    session = _signed_out_at(page, monkeypatch, kind)
+    asked = _answering(monkeypatch, session)
+
+    titles = _discover(page, tmp_path)
+    out = " ".join(capsys.readouterr().out.split())
+
+    assert session["lapsed"] == [kind]
+    assert len(asked) == 1 and "signed in" in asked[0], asked
+    assert "appears to have signed you out" in out, out
+    assert [t for t in titles if site.kind_of_title(t) == kind] == \
+        [t for t in EVERY_DOCUMENT if site.kind_of_title(t) == kind], titles
+    assert titles == EVERY_DOCUMENT
+    assert not list(tmp_path.glob("failure-*.json"))
+
+
+def test_a_person_who_answers_before_signing_in_is_asked_again(browser, tmp_path, monkeypatch):
+    """Enter pressed while the sign-in is still up. The tax forms are not
+    left out for that. The question is put again, and they are read once
+    the person really has signed in."""
+    page, served = _open(browser)
+    page.goto("https://card.apple.com/")
+    session = _signed_out_at(page, monkeypatch, site.TAX)
+    asked = _answering(monkeypatch, session, signs_in_at=2)
+
+    assert _discover(page, tmp_path) == EVERY_DOCUMENT
+    assert len(asked) == 2, asked
+
+
+def test_under_the_panel_discovery_still_stops_where_the_session_ran_out(
+        browser, tmp_path, monkeypatch, capsys):
+    """Nobody to ask. The run stops as it did before and says to press
+    Resume, rather than going on without the list."""
+    from paperpull_core import browser as browser_launcher
+    page, served = _open(browser)
+    page.goto("https://card.apple.com/")
+    _signed_out_at(page, monkeypatch, site.TAX)
+    monkeypatch.setattr(browser_launcher, "ask_or_none", lambda prompt: None)
+
+    with pytest.raises(SystemExit) as stopped:
+        _discover(page, tmp_path)
+    out = " ".join(capsys.readouterr().out.split())
+
+    assert stopped.value.code == 0, out
+    assert "press Resume" in out, out

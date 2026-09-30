@@ -319,7 +319,13 @@ class App:
 
     # -- session safety ----------------------------------------------------
 
-    def check_session(self, page) -> None:
+    def check_session(self, page) -> bool:
+        """Raise/pause on sign-out or security challenges.
+
+        True when the person was asked to sign in again and the page was
+        taken to the card's statements, so a caller that had opened another
+        list has to open it again before it reads anything. False
+        otherwise."""
         # Both of these used to wait at a prompt. Under the panel there is
         # nobody to answer, and waiting there took the run down with an
         # end-of-file rather than saying what had happened, so when there
@@ -344,6 +350,8 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
             site.goto_documents(page)
+            return True
+        return False
 
     # -- commands ----------------------------------------------------------
 
@@ -485,7 +493,16 @@ class App:
         refused = []
         for kind in site.KINDS:
             trace: list = []
-            if not site.goto_section(page, kind, trace):
+            opened = site.goto_section(page, kind, trace)
+            if not opened and site.looks_signed_out(page):
+                # Signing in again at a console leaves the page on the card's
+                # statements, and this list was then left out of the run,
+                # without a word when it was the last one. So it is opened
+                # again for as long as the check had to ask, which also asks
+                # again when the person answered before they had signed in.
+                while self.check_session(page):
+                    opened = site.goto_section(page, kind, trace)
+            if not opened:
                 checks = _refusal(trace, kind)
                 if checks:
                     refused.append(checks)
@@ -493,8 +510,6 @@ class App:
                              ", ".join("%s %s" % (k, v) for k, v in checks.items() if k != "kind"))
                 else:
                     log.info("The %s section was not found", kind)
-                if site.looks_signed_out(page):
-                    self.check_session(page)
                 continue
             found_any = True
             docs = site.collect_download_docs(page, kind)

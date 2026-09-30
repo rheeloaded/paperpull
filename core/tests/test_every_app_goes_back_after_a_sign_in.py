@@ -218,27 +218,19 @@ def _somewhere_in_particular(census, opened, check) -> bool:
     return not only_the_page and not _as_the_check_lands(census, opened, check)
 
 
-def _needs_no_answer(census, check, stmt, opened, parent) -> bool:
-    """Whatever the check did, nothing is read from the page it left. The
-    page is opened again at once with the very call that opened it, or
-    the loop goes round to its next item and the first thing it does
-    there is open a page.
+def _needs_no_answer(check, stmt, opened, parent) -> bool:
+    """Whatever the check did, nothing is read from the page it left,
+    because the page is opened again at once with the very call that
+    opened it.
 
-    That last one is Apple Card's sections. A section that would not open
-    because the person had been signed out is left for the next run
-    rather than read from the wrong page, which is a different matter."""
+    Going around a loop to its next item after a discarded check is not
+    enough. Apple Card did that with a section that would not open after
+    a sign-in, and the section was left out of the run without a word."""
     if not (isinstance(stmt, ast.Expr) and stmt.value is check):
         return False
     after = _next_statement(stmt, parent)
     if after is None:
         return False
-    if isinstance(after, ast.Continue):
-        loop = parent[after]
-        while not isinstance(loop, (ast.For, ast.While)):
-            loop = parent[loop]
-        first = _calls(loop.test if isinstance(loop, ast.While)
-                       else ast.Module(body=loop.body, type_ignores=[]))
-        return bool(first) and census.moves(first[0])
     return any(ast.dump(c) == ast.dump(opened) for c in _calls(after))
 
 
@@ -281,7 +273,7 @@ def _particular(census):
     return [(name, check, stmt, opened, parent)
             for name, check, stmt, opened, parent in census.places()
             if opened is not None and _somewhere_in_particular(census, opened, check)
-            and not _needs_no_answer(census, check, stmt, opened, parent)]
+            and not _needs_no_answer(check, stmt, opened, parent)]
 
 
 # The apps whose check has to say whether it moved the page.
