@@ -229,7 +229,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Playwright refused them and neither ever matched. A bill showing only
   that control was reported as having no PDF control, and the fallback
   tried when Download PDF gives nothing had not found its button once
-  since it was added in 0.28.3.
+  since it was added in 0.28.3. View/print PDF is pressed once at most,
+  and only after Download PDF has had as long to appear as it always had.
 
 ## [0.41.1] - 2026-09-30
 

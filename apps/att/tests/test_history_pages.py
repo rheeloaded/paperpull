@@ -503,3 +503,86 @@ def test_the_date_range_is_opened_on_the_list_as_first_shown(browser, tmp_path, 
     first, second = [x for x in trace if x.get("note") == "bill list pages"]
     assert first["pager"] == "next disabled" and first["turned"] == 2
     assert second["pager"] == "found" and second["period_buttons"] == [8, 8, 8]
+
+
+# View/print PDF was never found by role before its slash was escaped, so
+# the paths that press it had never run. Once they could, a bill whose
+# Download PDF gave nothing had View/print PDF pressed three times, once
+# from Download PDF's attempt, once as the fallback and once more when the
+# fallback searched for it by its words, and a View/print PDF drawn before
+# Download PDF won the wait for Download PDF. These pin it to one press
+# and Download PDF first.
+
+_DOWNLOAD_GIVES_NOTHING = "download = function () { presses.download++; };"
+
+_VIEW_PRINT_ONLY = r"""
+  panel = function () {
+    return '<div class="panel"><button>Internet<br>$1.00</button>' +
+      '<button onclick="presses.view++">View/print PDF</button></div>';
+  };
+  draw();"""
+
+# Download PDF drawn five seconds after the panel it belongs to, and only
+# for the panel drawn last. download_bill first looks two seconds after
+# pressing the bill, and waits up to ten more.
+_DOWNLOAD_PDF_LATE = _VIEW_PRINT_ONLY.replace("return '<div", r"""
+    const mine = (window.drawn = (window.drawn || 0) + 1);
+    setTimeout(function () {
+      const p = document.querySelector('.panel');
+      if (window.drawn !== mine || !p || p.querySelector('.dl')) return;
+      p.insertAdjacentHTML('beforeend',
+        '<button class="dl" onclick="download()">Download PDF</button>');
+    }, 5000);
+    return '<div""", 1)
+
+
+def _presses_on_leaving(page, monkeypatch) -> dict:
+    """The history page's counts as they stood when download_bill left it
+    for the billing center, which it opens after a bill gave nothing. The
+    counts go with the page. Every wait is made instant, since nothing on
+    these pages is late."""
+    counts = {}
+    real = page.goto
+
+    def goto(url, **kwargs):
+        if "mybillingcenter" in url:
+            counts.update(page.evaluate("window.presses") or {})
+        return real(url, **kwargs)
+
+    monkeypatch.setattr(page, "goto", goto)
+    monkeypatch.setattr(page, "wait_for_timeout", lambda ms: None)
+    return counts
+
+
+def test_view_print_is_pressed_once_when_download_pdf_gives_nothing(
+        browser, tmp_path, monkeypatch):
+    bills = _bills(_newest_now(), 16)
+    presses = _presses_on_leaving(browser[0], monkeypatch)
+    ok, out, trace, page = _download(
+        browser, tmp_path, _history(bills, extra=_DOWNLOAD_GIVES_NOTHING), bills[1]["iso"])
+    assert not ok and not out.exists()
+    assert _press_note(trace) == "pressed"
+    assert presses["download"] == 1
+    assert presses["view"] == 1, "View/print PDF was pressed %d times" % presses["view"]
+
+
+def test_view_print_alone_is_pressed_once(browser, tmp_path, monkeypatch):
+    bills = _bills(_newest_now(), 16)
+    presses = _presses_on_leaving(browser[0], monkeypatch)
+    ok, out, trace, page = _download(
+        browser, tmp_path, _history(bills, extra=_VIEW_PRINT_ONLY), bills[1]["iso"])
+    assert not ok and not out.exists()
+    assert presses["download"] == 0
+    assert presses["view"] == 1, "View/print PDF was pressed %d times" % presses["view"]
+
+
+def test_download_pdf_drawn_after_view_print_is_still_the_one_pressed(browser, tmp_path):
+    """In real time, since what is tested is the wait."""
+    bills = _bills(_newest_now(), 16)
+    wanted = bills[1]["iso"]
+    ok, out, trace, page = _download(
+        browser, tmp_path, _history(bills, extra=_DOWNLOAD_PDF_LATE), wanted)
+    assert ok and f"bill {wanted}".encode() in out.read_bytes()
+    presses = page.evaluate("window.presses")
+    assert presses["download"] == 1
+    assert presses["view"] == 0, "View/print PDF was taken before Download PDF appeared"

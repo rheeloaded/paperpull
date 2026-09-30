@@ -1760,12 +1760,13 @@ def _view_print_button(page):
 
 
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
-               dl_dir=None) -> bool:
+               dl_dir=None, pressed: Optional[list] = None) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
     in `dl_dir`, a download event, a PDF response in this tab, a new tab,
     an embedded viewer, or a second control the click revealed. `trace`
     collects what happened, the click's own outcome included, so a failed
-    attempt says which of those it was not."""
+    attempt says which of those it was not. `pressed`, when given, gets the
+    words of every control pressed, so the caller can tell what was tried."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
@@ -1824,6 +1825,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             pass
         try:
             el.click(timeout=8000)
+            if pressed is not None:
+                pressed.append(label)
             if trace is not None:
                 trace.append({"note": "clicked", "control": redact(label)[:60]})
         except Exception as e:
@@ -1832,6 +1835,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 trace.append({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
             try:
                 el.evaluate("el => el.click()")
+                if pressed is not None:
+                    pressed.append(label)
                 if trace is not None:
                     trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
             except Exception as e2:
@@ -1857,7 +1862,9 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         step, step_label = _menu_entry(page, _REGULAR_PDF_RE)
         if step is None:
             step, step_label = _second_step(page, appeared)
-        if step is None:
+        # Not when View/print PDF is the control just pressed, which its
+        # words would find again and press a second time.
+        if step is None and not _VIEW_PRINT_RE.match(label or ""):
             step, step_label = _menu_entry(page, _VIEW_PRINT_RE, wait_ms=1000)
         if step is None and trace is not None:
             trace.append({"note": "no menu entry found after the click",
@@ -1865,6 +1872,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         if step is not None:
             try:
                 step.click(timeout=8000)
+                if pressed is not None:
+                    pressed.append(step_label)
                 if trace is not None:
                     trace.append({"note": "second step clicked", "control": redact(step_label)[:60]})
             except Exception as e:
@@ -1943,22 +1952,30 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
             page.wait_for_timeout(2000)
             dismiss_overlay(page)
             # The bill opens in place or on its own page, and its Download
-            # PDF may take a moment to appear.
+            # PDF may take a moment to appear. It is waited for as long as
+            # ever. View/print PDF, which PDF_BUTTON_RE names too, is taken
+            # only once that wait is over, so a page that draws it first
+            # still gets Download PDF.
             btn, blabel = None, ""
             for _ in range(10):
                 btn, blabel = _pdf_button(page)
-                if btn is not None:
+                if btn is not None and not _VIEW_PRINT_RE.match(blabel):
                     break
                 page.wait_for_timeout(1000)
             if btn is not None:
-                if _catch_pdf(page, btn, blabel, out_path, trace, dl_dir):
+                tried: list = []
+                if _catch_pdf(page, btn, blabel, out_path, trace, dl_dir, tried):
                     return True
                 # Download PDF gave nothing. View/print PDF is the other
                 # control the survey saw, and it may open the PDF in a tab.
-                alt, alabel = _view_print_button(page)
-                if alt is not None and alabel.lower() != blabel.lower():
-                    if _catch_pdf(page, alt, alabel, out_path, trace, dl_dir):
-                        return True
+                # It is pressed once at most, so not when that attempt has
+                # pressed it already, as the button or from Download PDF's
+                # menu.
+                if not any(_VIEW_PRINT_RE.match(t or "") for t in tried):
+                    alt, alabel = _view_print_button(page)
+                    if alt is not None and alabel.lower() != blabel.lower():
+                        if _catch_pdf(page, alt, alabel, out_path, trace, dl_dir):
+                            return True
             else:
                 log.info("no Download PDF after opening the bill for %s", iso_date)
                 if trace is not None:
