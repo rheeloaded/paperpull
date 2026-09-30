@@ -102,7 +102,7 @@ def test_no_app_reads_a_key_off_the_one_that_returns_a_string():
                            + ", ".join(sorted(set(offenders))))
 
 
-# -- a browser pointed at a folder (measured 2026-09-29) ---------------------
+# -- a browser pointed at a folder (measured 2026-09-29 on Windows) ----------
 #
 # Once set_download_dir has pointed the browser at a folder, the browser's
 # file there is the only copy of a download, and the event's save_as writes

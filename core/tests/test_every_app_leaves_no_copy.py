@@ -1,14 +1,17 @@
 """A download the browser saved into a folder is taken from there, once.
 
-MEASURED 2026-09-29 on Chromium 149, 151 and 153 and Edge 154, attached
-over DevTools and launched alike, headed and headless. Once
+MEASURED 2026-09-29 on Windows, in Chromium 149, 151 and 153 and Edge 154,
+attached over DevTools and launched alike, headed and headless. Once
 capture.set_download_dir has pointed the browser at a folder, the browser
 writes each download there under the site's own name, and that file is
 the only copy. Playwright still raises the download event, and its
-save_as then writes an empty file without complaint.
+save_as then writes an empty file without complaint. A tester's Chrome
+154 on macOS gave the event the whole file instead (see capture.py),
+which take_download keeps.
 
-Given the folder relative, as every install gave it with output_dir ".",
-the browser accepted the setting and canceled every download instead.
+Given the folder relative, as an install gives it by default with
+output_dir ".", the browser accepted the setting and canceled every
+download instead.
 
 What that did to the apps that point the browser at a folder, driven
 here in a real browser before this was fixed.
@@ -221,10 +224,10 @@ def test_a_browser_pointed_at_a_folder_keeps_the_only_copy_there(page, provider,
 
 def test_a_relative_folder_is_made_absolute_so_downloads_land(page, provider, tmp_path,
                                                              monkeypatch):
-    """Every install passes its folder relative, output_dir being ".", and
-    given a relative downloadPath Chromium accepts it and then cancels every
-    download (measured 2026-09-29), so none of these apps' downloads had
-    ever landed in a real install."""
+    """An install passes its folder relative by default, output_dir being
+    ".", and given a relative downloadPath Chromium on Windows accepts it
+    and then cancels every download (measured 2026-09-29), so in that
+    browser none of these apps' downloads had landed in such an install."""
     from paperpull_core.capture import set_download_dir
     monkeypatch.chdir(tmp_path)
     set_download_dir(page, Path(".downloads"))

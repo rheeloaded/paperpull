@@ -1623,8 +1623,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 suggested = ""
             if not named_right(suggested):
                 return False
-            # Pointed at a folder, the browser saves the only copy there
-            # and the event's own file is empty, so that file is taken
+            # Pointed at a folder, the browser can save the only copy there
+            # and leave the event's own file empty, so that file is taken
             # rather than the document asked for a second time.
             if _take_download(downloads[0], dl_dir, seen, out_path):
                 return True

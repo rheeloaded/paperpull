@@ -2018,8 +2018,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         if got.get("body"):
             out_path.write_bytes(got["body"])
             return True
-        # Pointed at a folder, the browser saves the only copy there and
-        # the event's own file is empty, so that file is taken rather than
+        # Pointed at a folder, the browser can save the only copy there and
+        # leave the event's own file empty, so that file is taken rather than
         # the document asked for a second time (capture.take_download).
         # The event is not tied to the click, so its file is taken only
         # when it is the one document that arrived, and otherwise this

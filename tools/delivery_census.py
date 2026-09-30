@@ -37,10 +37,10 @@ MECHANISMS = [
 
     ("attachment/dir", "B",
      r"take_new_pdf|_take_new_pdf\(|set_download_dir\(",
-     "The same thing, against a browser pointed at a folder. The browser "
-     "saves the only copy there, and the download event, when it fires at "
-     "all, carries an empty file (measured 2026-09-29), so the app takes "
-     "the file from the folder."),
+     "The same thing, against a browser pointed at a folder. Chromium and "
+     "Edge on Windows save the only copy there, and the download event, "
+     "when it fires at all, carries an empty file (measured 2026-09-29), so "
+     "the app takes the file from the folder."),
 
     ("inline/tab", "C",
      r"take_new_tab|take_same_tab|_catch_pdf|expect_popup|"

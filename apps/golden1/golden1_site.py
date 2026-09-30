@@ -2048,8 +2048,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     controls_before = _control_texts(page)
 
     def landed() -> bool:
-        # Pointed at a folder, the browser saves the only copy there and
-        # the event's own file is empty, so that file is taken rather than
+        # Pointed at a folder, the browser can save the only copy there and
+        # leave the event's own file empty, so that file is taken rather than
         # the document asked for a second time (capture.take_download).
         if downloads and _take_download(downloads[0], dl_dir, seen, out_path):
             return True

@@ -1,7 +1,7 @@
 """A download the last press asked for is never saved as this document.
 
-Pointed at a folder, the browser saves the only copy of a download there
-and the download event's own file is empty, so the capture takes the
+Pointed at a folder, the browser can save the only copy of a download there
+and leave the download event's own file empty, so the capture takes the
 browser's file by the event's name. A download event is not tied to the
 press that caused it, which is why this capture already let only an
 answer to its own request win over one. A review of the download folder

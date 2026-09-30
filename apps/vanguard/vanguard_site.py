@@ -512,13 +512,14 @@ def download_document(page, account_id: str, charitable: bool,
     MM/DD/YYYY date text.
 
     The browser saves into `dl_dir`, a staging folder of the app's own, and
-    never into the archive folder, given as a full path, since a browser
-    told a relative one cancels every download (review of 0.41.0). With the
-    folder set, the browser's file there is the statement, since save_as
-    then writes an empty file, and the file the download event names is
-    moved to `out_path` by capture.take_download, only when it is the one
-    document that arrived. Where setting the folder had no effect, the
-    event's own copy is saved. Nothing is taken when the download failed or
+    never into the archive folder, given as a full path, since Chromium and
+    Edge on Windows, told a relative one, cancel every download (review of
+    0.41.0). With the folder set, the browser's file there is the statement
+    in those browsers, since save_as then writes an empty file, and the
+    file the download event names is moved to `out_path` by
+    capture.take_download, only when it is the one document that arrived.
+    Where the event's own copy is whole, as it was in a tester's Chrome on
+    macOS, that copy is saved. Nothing is taken when the download failed or
     no download began, and nothing else in the folder is touched, but an
     exact copy of the statement. Without `dl_dir` the browser is left where
     it is and only the download event is taken.

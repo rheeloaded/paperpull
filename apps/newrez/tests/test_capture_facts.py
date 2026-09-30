@@ -763,8 +763,8 @@ def test_every_step_the_capture_writes_has_public_words():
 
 # -- a download an earlier press asked for -----------------------------------
 #
-# Pointed at a folder, the browser saves the only copy of a download there
-# and the event's own file is empty, so the capture takes the browser's file
+# Pointed at a folder, the browser can save the only copy of a download there
+# and leave the event's own file empty, so the capture takes the browser's file
 # by the event's name. A download event is not tied to the press, though.
 # The statement an earlier press asked for can begin during a Form 1098's
 # capture and raise the first event, and a review of the download folder

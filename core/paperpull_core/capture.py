@@ -33,21 +33,27 @@ UNFINISHED = (".crdownload", ".part", ".partial", ".tmp", ".download")
 
 # -- a browser pointed at a folder ---------------------------------------------
 #
-# MEASURED 2026-09-29 on Chromium 149, 151 and 153 and Edge 154, attached
-# over DevTools and launched alike, headed and headless. Once
+# MEASURED 2026-09-29 on Windows, in Chromium 149, 151 and 153 and Edge 154,
+# attached over DevTools and launched alike, headed and headless. Once
 # set_download_dir has pointed the browser at a folder, the browser writes
 # each download there under the site's own name, as "<name>.crdownload"
 # while it arrives, and that file is the ONLY copy. Playwright still raises
 # the download event, and the event's save_as then writes an empty file
 # without complaint. A finished file of the same name already in the folder
-# is written over in place. Given a relative folder, as every install gave
-# it, the browser canceled every download instead.
+# is written over in place. Given a relative folder, as an install gives it
+# by default, the browser canceled every download instead.
 #
 # Eleven apps took the empty file for a failure, asked the provider for the
 # document a second time, saved that answer and left the browser's file in
 # the folder, a second copy of every document that outlived the archived
 # one. core/tests/test_every_app_leaves_no_copy.py drives each app that
 # points the browser at a folder, in a real browser, to hold all of this.
+#
+# Not every browser does this. A tester's Chrome 154 on macOS, attached over
+# DevTools, gave the download event the whole file and left no copy in the
+# output folder (#57, 2026-09-29), and why is not known. So take_download
+# keeps the event's file whenever it is a PDF, and goes to the folder only
+# when it is not.
 
 def set_download_dir(page, dirpath) -> None:
     """Point the attached browser's downloads at `dirpath`, over CDP.
@@ -59,12 +65,12 @@ def set_download_dir(page, dirpath) -> None:
     It reaches the browser's own context, the one an attached browser is
     used through. A context made with new_context is not pointed anywhere.
 
-    The folder is made absolute first. Every install passes it relative,
-    output_dir being ".", and given a relative folder Chromium accepts the
-    setting and then cancels every download (measured 2026-09-29), so until
-    then no app's download had ever landed in a real install. The setting
-    lasts while the app is attached, and the browser's own folder is back
-    once it has gone.
+    The folder is made absolute first. An install passes it relative by
+    default, output_dir being ".", and given a relative folder Chromium and
+    Edge on Windows accept the setting and then cancel every download
+    (measured 2026-09-29). In those browsers, no download had landed in
+    such an install before this. The setting lasts while the app is
+    attached, and the browser's own folder is back once it has gone.
     """
     try:
         folder = Path(dirpath).resolve()
