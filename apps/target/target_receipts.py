@@ -209,8 +209,10 @@ class App:
         return page
 
     def close(self):
+        # Attached to the person's own browser, only the connection is let
+        # go, never its context and its tabs (review of 0.41.0).
         try:
-            if self._context:
+            if self._context and not getattr(self, "_cdp_mode", False):
                 self._context.close()
         except Exception:
             pass
@@ -224,16 +226,41 @@ class App:
 
     # -- session safety -----------------------------------------------------
 
-    def check_session(self, page) -> None:
-        """Raise/pause on sign-out or security challenges."""
+    def check_session(self, page) -> bool:
+        """Raise/pause on sign-out or security challenges. True when a sign-in,
+        or a step of one, was answered and the orders page opened again, so
+        the caller opens the page it was on again (reviews of 0.41.0)."""
         # Both of these used to wait at a prompt. Under the panel there is
         # nobody to answer, and waiting there took the run down with an
         # end-of-file rather than saying what had happened, so when there
         # is no console the run stops on its own terms and says what to do
         # about it. Progress is already saved either way (#48).
         challenge = site.detect_security_challenge(page)
-        if challenge:
+        # Only the press and hold check is answered with the app gone, and
+        # only in the person's own browser. A sign-in step-up, "Enter the
+        # verification code", is answered at a prompt as before, and an
+        # install from before cdp_url owns its window, which letting go of it
+        # would close (review of 0.41.0).
+        if (challenge and self.config.get("cdp_url")
+                and any(m in challenge.lower() for m in site.PRESS_AND_HOLD_MARKERS)):
             self._stop_for_the_check(challenge)
+        elif challenge:
+            self.progress.save(backup=True)
+            print(f"\n!! {challenge}")
+            print("Processing stopped. Please resolve the challenge yourself in the")
+            print("browser window. I will NOT attempt to bypass it.")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page looks normal again (or Ctrl+C to quit)... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
+            # Answered, and the tab is wherever the step-up left it, so the
+            # orders page is opened again and the caller opens its own page.
+            # A purchase was read where the tab was left, found no receipt
+            # and was marked No Receipt Available for good (second review of
+            # 0.41.0).
+            if not site.looks_signed_out(page):
+                site.goto_orders(page)
+                return True
         if site.looks_signed_out(page):
             self.progress.save(backup=True)
             print("\n!! Target appears to have signed you out.")
@@ -243,6 +270,8 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
             site.goto_orders(page)
+            return True
+        return False
 
     def _stop_for_the_check(self, challenge: str) -> None:
         """Target's bot check, a window asking to press and hold. It is the
@@ -253,7 +282,8 @@ class App:
         however long it is held, which is what the tester met on 0.39.2 and
         0.40.0 (#48). So what was read is saved, the app lets go of the
         browser, which stays open where it is, and the run stops. Resume
-        carries on from there."""
+        carries on from there, discovering again first when the check came
+        during Discover."""
         self.progress.save(backup=True)
         try:
             self.discovery.save()
@@ -327,8 +357,25 @@ class App:
             print(f"browser profile: {self.config['profile_dir']}")
         self.close()
 
+    def _unfinished_mark(self) -> Path:
+        """Present while a Discover is under way and after one that stopped,
+        so Resume knows to discover again first (review of 0.41.0)."""
+        return self.paths.discovery_json.with_name(".discovery-unfinished")
+
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
         """Discovery pass over one or both history sections. Saves discovery.json."""
+        try:
+            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
+        except OSError:
+            pass
+        counts = self._discover(types, quiet)
+        try:
+            self._unfinished_mark().unlink()
+        except OSError:
+            pass
+        return counts
+
+    def _discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
         types = types or [ONLINE, IN_STORE]
         page = self.page()
         counts = {}
@@ -514,7 +561,11 @@ class App:
         for attempt in (1, 2):
             try:
                 site.goto_details(page, purchase)
-                self.check_session(page)
+                # A sign-in answered here left the tab on the orders page, where
+                # the receipt was then looked for and the purchase marked No
+                # Receipt Available for good (review of 0.41.0).
+                if self.check_session(page):
+                    site.goto_details(page, purchase)
                 break
             except Exception as e:
                 log.warning("Details page failed (attempt %d): %s", attempt, e)
@@ -969,6 +1020,12 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # A run stopped by Target's check during Discover listed only part of
+        # the history. Resume read that part and finished clean, and the rest
+        # was never looked at (review of 0.41.0).
+        if self._unfinished_mark().exists():
+            print("The last Discover stopped partway, so it runs again first.")
+            self.cmd_discover(quiet=True)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]
         pend = [p for p in pend if not self._already_done(p)]

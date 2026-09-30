@@ -39,15 +39,33 @@ PAGE = ("<!doctype html><html><head><meta charset='utf-8'></head><body><table>"
         "</table></body></html>" % LABEL).encode("utf-8")
 
 
+# What /doc answers, set by a test. "pdf" the statement, "html" a signed-out
+# page sent as the download, "cut" the statement cut off halfway, "none" no
+# download at all, a plain page.
+ANSWER = {"doc": "pdf"}
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path.startswith("/doc"):
+        mode = ANSWER["doc"]
+        if self.path.startswith("/doc") and mode != "none":
+            body = PDF if mode in ("pdf", "cut") else b"<html>Please sign in</html>" + b" " * 5000
             self.send_response(200)
-            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Type", "application/pdf" if mode != "html" else "text/html")
             self.send_header("Content-Disposition", 'attachment; filename="%s"' % NAME)
-            self.send_header("Content-Length", str(len(PDF)))
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(PDF)
+            if mode == "cut":
+                self.wfile.write(body[: len(body) // 2])
+                self.wfile.flush()
+                self.connection.shutdown(2)
+                return
+            self.wfile.write(body)
+        elif self.path.startswith("/doc"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"<html><body>Nothing to download here</body></html>")
         else:
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -172,3 +190,76 @@ def test_a_failed_download_leaves_no_empty_file_and_deletes_nothing(browser_page
     assert got is False
     assert _listing(archive) == []
     assert [n for n, _size in _listing(staging)] == [NAME], "the browser's file is kept"
+
+
+# -- from the pre-release review of 0.41.0 ---------------------------------------------
+
+@pytest.fixture()
+def answer():
+    yield ANSWER
+    ANSWER["doc"] = "pdf"
+
+
+def _another_tab(staging: Path, after_s: float, name="their own download.pdf"):
+    """A download the person starts in another tab of the same browser, which
+    lands in the same folder while this statement is being waited for."""
+    import threading
+    import time
+    body = b"%PDF-1.4\n% somebody else's download\n" + b"1" * 5000
+
+    def land():
+        time.sleep(after_s)
+        staging.mkdir(parents=True, exist_ok=True)
+        (staging / name).write_bytes(body)
+    t = threading.Thread(target=land, daemon=True)
+    t.start()
+    return t, name, body
+
+
+def test_a_relative_staging_folder_still_saves_the_statement(browser_page, tmp_path, monkeypatch):
+    """Every install's output_dir is ".", so the folder was relative, and a
+    browser told a relative folder cancels every download. No statement was
+    saved in a real install."""
+    monkeypatch.chdir(tmp_path)
+    page = browser_page(True)
+    out = tmp_path / "Statements" / "2026-08-31 Vanguard Account Statement.pdf"
+    got = site.download_document(page, account_id="123400000000001", charitable=False,
+                                 doc_type="Statement", title=TITLE, date="2026-08-31",
+                                 out_path=out, dl_dir=Path(".vanguard-downloads"))
+    assert got is True and out.read_bytes() == PDF
+
+
+def test_a_signed_out_page_is_not_saved_and_another_tabs_pdf_is_not_taken(browser_page, tmp_path, answer):
+    answer["doc"] = "html"
+    page = browser_page(True)
+    t, theirs, body = _another_tab(tmp_path / ".vanguard-downloads", 0.3)
+    got, archive, staging, out = _download(page, tmp_path)
+    t.join()
+    assert got is False
+    assert _listing(archive) == []
+    assert (staging / theirs).read_bytes() == body, "the person's own file is left where it is"
+
+
+def test_a_download_cut_off_is_not_saved_and_nothing_else_is_taken(browser_page, tmp_path, answer):
+    answer["doc"] = "cut"
+    page = browser_page(True)
+    t, theirs, body = _another_tab(tmp_path / ".vanguard-downloads", 0.3)
+    got, archive, staging, out = _download(page, tmp_path)
+    t.join()
+    assert got is False
+    assert _listing(archive) == []
+    assert (staging / theirs).read_bytes() == body
+
+
+def test_a_press_that_starts_no_download_takes_nothing(browser_page, tmp_path, answer, monkeypatch):
+    """With no download of its own, the newest PDF in the folder was taken,
+    which could be another tab's, or an earlier statement answered late."""
+    answer["doc"] = "none"
+    monkeypatch.setattr(site, "EVENT_WAIT_MS", 3000)
+    page = browser_page(True)
+    t, theirs, body = _another_tab(tmp_path / ".vanguard-downloads", 0.5)
+    got, archive, staging, out = _download(page, tmp_path)
+    t.join()
+    assert got is False
+    assert _listing(archive) == []
+    assert (staging / theirs).read_bytes() == body

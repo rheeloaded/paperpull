@@ -230,11 +230,15 @@ def test_receipts_saved_before_take_their_banner_at_rename(tmp_path, capsys):
 
 def test_the_purchase_list_never_brings_the_type_back_as_the_store(tmp_path):
     app = _app(tmp_path)
-    app.progress.update("In-Store:a", {"store_info": "Fred Meyer"})
+    app.progress.update("In-Store:a", {"store_info": "Fred Meyer", "store_read": True})
     app.discovery.update("In-Store:a", {"store_info": "In-Store"})
     assert app._store_kept("In-Store:a") == "Fred Meyer"
     app.discovery.update("In-Store:b", {"store_info": "Fuel Center"})
     assert app._store_kept("In-Store:b") == ""
+    # and what 0.40 wrote with no purchase type, or a type title-cased, is not a store
+    app.progress.update("In-Store:c", {"store_info": "Kroger"})
+    app.discovery.update("In-Store:d", {"store_info": "Ship To Store"})
+    assert app._store_kept("In-Store:c") == "" and app._store_kept("In-Store:d") == ""
 
 
 def test_a_product_whose_name_begins_like_a_summary_line_is_still_an_item():

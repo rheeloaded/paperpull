@@ -6,6 +6,7 @@ walked up looking for a role or a data-testid, found neither, and threw the
 click away as the mouse wandering. His recording of the billing tab kept one
 click of seven (#45). In a real browser, since where a click lands is the
 browser's doing. Every page here is made up."""
+import json
 import sys
 from pathlib import Path
 
@@ -83,13 +84,14 @@ def test_every_kind_of_test_id_marks_a_control(page):
     assert step["locator"] == {"how": "testid", "value": "policy-card"}
 
 
-def test_a_test_id_too_changeable_to_find_by_is_still_a_step(page):
-    """A generated id is no good to find the control by next time, so it is
-    named by its words, and kept, since it is still a control."""
+def test_a_changeable_test_id_is_dropped_and_its_words_never_written(page):
+    """A generated id is no good to find the element by next time, and its
+    words may be a section of an account page, so the click is dropped as
+    one that cannot be named (review of 0.41.0)."""
     report = _record(page, HASHY)
-    [step] = report["steps"]
-    assert step["locator"]["how"] == "text"
-    assert report["dropped"]["unresolved"] == 0
+    assert report["steps"] == []
+    assert report["dropped"]["unresolved"] == 1
+    assert "September" not in json.dumps(report)
 
 
 def test_a_paragraph_or_plain_words_are_still_the_mouse_wandering(page):
@@ -102,7 +104,10 @@ def test_his_billing_tab_keeps_every_click(page):
     """Seven clicks of his, as near as this page can have them, of which the
     recorder kept one."""
     report = _record(page, BP, DEEP, HASHY, QA)
-    assert len(report["steps"]) == 4
+    assert [st["locator"] for st in report["steps"]] == [
+        {"how": "testid", "value": "billing-nav"}, {"how": "testid", "value": "view-bill"},
+        {"how": "testid", "value": "policy-card"}]
+    assert all(st["label"] == "" for st in report["steps"]), "found by its id, never its words"
 
 
 def test_a_framework_prefix_counts_only_at_the_start():
@@ -116,3 +121,117 @@ def test_a_framework_prefix_counts_only_at_the_start():
     for generated in ("ng-tns-c12-3", "css-1a2b3c", "sc-bdVaJa", "jsx-123", "emotion-0",
                       "statement-8f3a9c21d0e1", "row-1234567"):
         assert hashy.search(generated), generated
+
+
+# -- from the pre-release review of 0.41.0, what a recording may carry ------------
+
+SECTION = """<!doctype html><html><body><main data-cy="billing-page">
+<section data-cy="policy-summary"><h2>Auto policy</h2>
+<p>Policy 00-1234-5678-90, named insured Invented Person and Another Person,
+2019 Invented Sedan, 1417 Example Avenue, Anytown</p></section>
+<table><tr role="row"><td>Checking ending in 4821</td><td>Balance 1,234.56</td></tr></table>
+</main></body></html>"""
+
+
+@pytest.fixture()
+def section_page():
+    pw = pytest.importorskip("playwright.sync_api")
+    try:
+        driver = pw.sync_playwright().start()
+        browser = driver.chromium.launch(headless=True)
+    except Exception as e:
+        pytest.skip("no browser to drive: %s" % e)
+    ctx = browser.new_context()
+    ctx.route("%s/**" % HOST, lambda route: route.fulfill(
+        status=200, content_type="text/html", body=SECTION))
+    pg = ctx.new_page()
+    pg.goto("%s/billing" % HOST)
+    yield pg
+    browser.close()
+    driver.stop()
+
+
+def test_a_click_inside_a_marked_section_never_writes_the_sections_words(section_page):
+    """The click stopped at the section its site marks with data-cy, and the
+    section's own words, names, a policy number and an address, became the
+    step's label, in a file testers post publicly."""
+    report = _record(section_page, "section p")
+    [step] = report["steps"]
+    assert step["locator"] == {"how": "testid", "value": "policy-summary"}
+    assert step["label"] == ""
+    text = json.dumps(report)
+    for private in ("Invented Person", "Another Person", "Example Avenue", "Sedan", "5678"):
+        assert private not in text, private
+
+
+def test_a_click_inside_a_row_is_the_row_and_never_its_words(section_page):
+    report = _record(section_page, "tr td >> nth=1")
+    [step] = report["steps"]
+    assert step["locator"] == {"how": "role", "role": "row"}
+    assert step["label"] == ""
+    assert "Balance" not in json.dumps(report) and "4821" not in json.dumps(report)
+
+
+# -- from the second review of 0.41.0 ---------------------------------------------------
+
+LABELED = """<!doctype html><html><body>
+<section data-cy="policy-8f3a9c21d0e1" aria-label="Auto policy for Invented Person">
+<p class="one">Coverage details</p></section>
+<div role="region" aria-label="Accounts of Another Person"><p class="two">Balances</p></div>
+<div role="listitem" aria-label="Policy 00-1234-5678 for Invented Person"><span class="three">Home</span></div>
+<button aria-label="View bill"><span class="four">View</span></button>
+</body></html>"""
+
+
+@pytest.fixture()
+def labeled_page():
+    pw = pytest.importorskip("playwright.sync_api")
+    try:
+        driver = pw.sync_playwright().start()
+        browser = driver.chromium.launch(headless=True)
+    except Exception as e:
+        pytest.skip("no browser to drive: %s" % e)
+    ctx = browser.new_context()
+    ctx.route("%s/**" % HOST, lambda route: route.fulfill(
+        status=200, content_type="text/html", body=LABELED))
+    pg = ctx.new_page()
+    pg.goto("%s/billing" % HOST)
+    yield pg
+    browser.close()
+    driver.stop()
+
+
+def test_a_containers_aria_label_is_never_written(labeled_page):
+    """A section marked with a generated test id fell through to its
+    aria-label, the policyholder's name in it, and 0.40.0 had dropped the
+    click. A region or a list item named for an account holder is the same."""
+    report = _record(labeled_page, ".one", ".two", ".three")
+    text = json.dumps(report)
+    for private in ("Invented Person", "Another Person", "5678", "Auto policy for"):
+        assert private not in text, private
+
+
+def test_a_controls_own_aria_label_is_still_its_name(labeled_page):
+    report = _record(labeled_page, ".four")
+    [step] = report["steps"]
+    assert step["locator"] == {"how": "role", "role": "button", "name": "View bill"}
+    assert step["label"] == "View bill"
+
+
+def test_a_name_joined_into_an_id_is_pointed_out():
+    """A click inside a marked container is kept by its test id, and a site
+    can build one from a name, which the check for name-shaped words did
+    not see through the dashes."""
+    report = {"steps": [{"locator": {"how": "testid", "value": "holder-Invented-Person"}},
+                        {"locator": {"how": "id", "value": "insured_Another_Person"}},
+                        {"locator": {"how": "testid", "value": "view-bill"}}]}
+    said = " ".join(recorder.concerns(report))
+    assert "Invented Person" in said and "Another Person" in said
+    assert "view bill" not in said.lower()
+
+
+def test_a_name_after_a_dashed_word_is_still_pointed_out():
+    """Read with its dashes as spaces, "Bill-To-John Smith" is "Bill To
+    John", a control's words, and "John Smith" went unseen."""
+    said = " ".join(recorder.concerns({"steps": [{"label": "Bill-To-John Smith"}]}))
+    assert "John Smith" in said

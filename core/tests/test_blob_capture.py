@@ -103,3 +103,49 @@ def test_a_page_that_cannot_be_asked_gives_nothing_and_raises_nothing():
             raise RuntimeError("target closed")
     assert blob_capture.arm(_Gone()) is False
     assert blob_capture.take(_Gone()) is None
+
+
+# -- from the pre-release review of 0.41.0 ---------------------------------------------
+
+PAGE_TWO = """<!doctype html><html><body>
+<button id="both">View statement</button>
+<button id="twoopen">Open two</button>
+<script>
+const pdf = (tag) => new Blob(['%PDF-1.4 invented ' + tag + ' ' + 'x'.repeat(300)],
+                               {type: 'application/pdf'});
+document.getElementById('both').onclick = () => {
+  window.open(URL.createObjectURL(pdf('statement')), '_blank');
+  URL.createObjectURL(pdf('id card'));
+};
+document.getElementById('twoopen').onclick = () => {
+  window.open(URL.createObjectURL(pdf('first')), '_blank');
+  window.open(URL.createObjectURL(pdf('second')), '_blank');
+};
+</script></body></html>"""
+
+
+def _two(page):
+    """PAGE_TWO at an address of its own, so its script runs in a fresh window."""
+    page.context.route("%s/two" % HOST, lambda route: route.fulfill(
+        status=200, content_type="text/html", body=PAGE_TWO))
+    page.goto("%s/two" % HOST)
+
+
+def test_only_the_pdf_the_page_opened_is_taken(page):
+    """The newest PDF the page made was taken, and a press can make another,
+    an ID card, after the statement it opens (review)."""
+    _two(page)
+    assert blob_capture.arm(page)
+    page.click("#both")
+    page.wait_for_timeout(300)
+    assert b"invented id card" in blob_capture.take(page)[0], "the newest, the old way"
+    data, _name = blob_capture.take(page, opened=True)
+    assert b"invented statement" in data
+
+
+def test_two_pdfs_opened_by_one_press_are_a_guess_and_neither_is_taken(page):
+    _two(page)
+    assert blob_capture.arm(page)
+    page.click("#twoopen")
+    page.wait_for_timeout(300)
+    assert blob_capture.take(page, opened=True) is None

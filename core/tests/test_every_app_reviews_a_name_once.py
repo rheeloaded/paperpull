@@ -82,6 +82,7 @@ def test_a_renamed_receipt_is_not_asked_about_again(app, tmp_path, monkeypatch, 
                            _row(tmp_path, "ORDER-0002", "2026-05-14 Other Receipt.pdf")])
     inst.order_csv = _Csv([])
     inst.progress = _Store()
+    inst.discovery = _Store()
     inst.config = {"max_path_length": 240}
 
     answers = iter(["Garden Hose", ""])          # rename the first, keep the second
@@ -108,6 +109,7 @@ def test_a_receipt_renamed_before_the_fix_is_not_asked_about_either(app, tmp_pat
     inst.index_csv = _Csv([old])
     inst.order_csv = _Csv([])
     inst.progress = _Store()
+    inst.discovery = _Store()
     inst.config = {"max_path_length": 240}
     asked = []
     monkeypatch.setattr(mod, "ask", lambda prompt: asked.append(prompt) or "")

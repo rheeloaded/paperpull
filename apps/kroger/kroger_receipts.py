@@ -46,6 +46,9 @@ from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
+# A key a record did not have, so a preview can put a record back exactly.
+_MISSING = object()
+
 log = logging.getLogger("kroger_receipts")
 
 
@@ -338,16 +341,18 @@ class App:
                 self.discovery.update(key, rec, save=False)
                 n_new += 1
             else:
+                kept = self._store_kept(key)
                 self.discovery.update(key, {
                     "details_url": purchase.details_url,
                     "receipt_url": purchase.receipt_url,
                     "total": purchase.total or self.discovery.get(key).get("total", ""),
                     "status": purchase.status or self.discovery.get(key).get("status", ""),
                     # The store is read off the receipt page, never the
-                    # list, so the list's empty one keeps a banner already
-                    # read, and a purchase type written here before 0.41.0
-                    # is cleared rather than kept as the store (#41).
-                    "store_info": self._store_kept(key),
+                    # list, so the list's empty one keeps a store already
+                    # read, and anything else, the purchase type written
+                    # here before 0.41.0, is cleared (#41).
+                    "store_info": kept,
+                    "store_read": bool(kept),
                     "fulfillment": purchase.fulfillment,
                     "notes": purchase.notes,
                 }, save=False)
@@ -461,6 +466,10 @@ class App:
             self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+        # Before anything is recorded, even a page that fails to load, since
+        # every record writes the purchase's store (second review of 0.41.0).
+        self._forget_unread_store(purchase)
+
         # ---- an order still pending has no receipt yet ----
         if "Pending order" in (purchase.notes or "") or (purchase.status or "").lower() == "pending":
             # Not a terminal state, so the next run looks at it again.
@@ -490,7 +499,9 @@ class App:
 
         # ---- extract ----
         purchase = site.extract_details(page, purchase)
-        self._record_state(purchase, State.DETAILS_EXTRACTED)
+        self._record_state(purchase, State.DETAILS_EXTRACTED,
+                           extra={"store_read": bool(purchase.store_info)})
+        self._note_store(purchase)
         if purchase.purchase_date:
             self.stats["dates_processed"].append(purchase.purchase_date)
 
@@ -840,26 +851,20 @@ class App:
         unless --apply is given."""
         self.stats["mode"] = "rename"
         apply = bool(getattr(self.args, "apply", False))
-        # A preview changes nothing. The stores read here name the files in
-        # the preview and are put back after it, and the order history is
-        # only cleaned with --apply (#41).
-        filled = self._fill_banners()
-        if filled:
-            print(f"Read the store from {len(filled)} receipt(s) already saved, off the PDF itself.")
-        extra = self._summary_rows()
-        if extra and apply:
-            self.order_csv.rewrite([r for r in self.order_csv.read_all()
-                                    if not self._is_summary_row(r)])
-            print(f"Took {extra} Order Summary line(s) out of the order history, where "
-                  "earlier runs wrote them as items.")
-        elif extra:
-            print(f"{extra} Order Summary line(s) that earlier runs wrote as items would "
-                  "be taken out of the order history.")
+        # A preview changes nothing. The stores settled here name the files
+        # in the preview and are put back after it however it ends, cut short
+        # or failing included, since the run saves both stores on its way
+        # out. The order history is only cleaned with --apply (#41).
+        changed: list = []
         try:
+            read = self._settle_stores(changed)
+            if read:
+                print(f"Read the store from {read} receipt(s) already saved, off the PDF itself.")
+            self._clean_order_history(apply)
             renaming.run_for(self, apply_changes=apply)
         finally:
             if not apply:
-                self._put_back(filled)
+                self._put_back(changed)
 
     # The two Order Summary lines runs before 0.41.0 wrote into the order
     # history as items, one of each per receipt (#41). Only these exact
@@ -869,61 +874,107 @@ class App:
     def _is_summary_row(self, row: dict) -> bool:
         return (row.get("Item Name") or "").strip().lower() in self._SUMMARY_ROWS
 
-    def _summary_rows(self) -> int:
-        """How many Order Summary lines earlier runs wrote into the order
-        history as items, which the Purchases workbook is rebuilt from.
-        Rename with --apply takes them out, the file backed up first."""
-        return sum(1 for r in self.order_csv.read_all() if self._is_summary_row(r))
+    def _clean_order_history(self, apply: bool) -> None:
+        """Take the Order Summary lines that earlier runs read as items out
+        of the order history, which the Purchases workbook is rebuilt from,
+        with --apply, the file backed up first. A purchase with no other row,
+        one whose real items 0.40 refused, a gift card alone for instance,
+        keeps one row with its item left blank, the shape a purchase with no
+        items read is written in, so it never drops out of the workbook
+        (review of 0.41.0)."""
+        try:
+            rows = self.order_csv.read_all()
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            print(f"The order history could not be read to clean it ({type(e).__name__}).")
+            return
+        others = {r.get("Order or Receipt Number") for r in rows if not self._is_summary_row(r)}
+        blanked: set = set()
+        out, taken = [], 0
+        for r in rows:
+            if not self._is_summary_row(r):
+                out.append(r)
+                continue
+            taken += 1
+            number = r.get("Order or Receipt Number")
+            if number not in others and number not in blanked:
+                blanked.add(number)
+                out.append(dict(r, **{"Item Name": "", "Quantity": "", "Unit Price": "",
+                                      "Line Item Total": ""}))
+        if not taken:
+            return
+        if apply:
+            self.order_csv.rewrite(out)
+            print(f"Took {taken} Order Summary line(s) out of the order history, where "
+                  "earlier runs wrote them as items.")
+        else:
+            print(f"{taken} Order Summary line(s) that earlier runs wrote as items would "
+                  "be taken out of the order history.")
 
     def _store_kept(self, key: str) -> str:
-        """The store a purchase already has, when it is a store. Until 0.41.0
-        the purchase type was written as the store, "In-Store" or "Fuel
-        Center", and that is not kept (#41)."""
-        labels = {v[0] for v in site.PURCHASE_TYPE_LABELS.values()}
+        """The store read off this purchase's receipt, or empty. Only a store
+        marked store_read, which 0.41.0 on writes when it reads one, is kept.
+        Anything else in store_info was written before 0.41.0, the purchase
+        type, "In-Store", "Fuel Center" or a type title-cased, or Kroger when
+        there was no type, and is never kept (#41, review of 0.41.0)."""
         for store in (self.progress, self.discovery):
-            value = ((store.get(key) or {}).get("store_info") or "").strip()
-            if value and value not in labels:
-                return value
+            rec = store.get(key) or {}
+            if rec.get("store_read") and (rec.get("store_info") or "").strip():
+                return str(rec["store_info"]).strip()
         return ""
 
-    def _fill_banners(self) -> list:
-        """Give each receipt already saved the store its own PDF names, so a
-        name pattern with {store} in it can rename receipts saved before
-        0.41.0, which never had the banner read (#41). Read from the saved
-        file, nothing is asked of Kroger, and a store already known is kept.
-        Only in memory. The run saves it on the way out, and a preview puts
-        it back first. What it changed, to put back."""
-        labels = {v[0] for v in site.PURCHASE_TYPE_LABELS.values()}
-        changed = []
-        for key, rec in list(self.progress.data.items()):
-            if not isinstance(rec, dict):
-                continue
-            known = (rec.get("store_info") or "").strip()
-            if known and known not in labels:
-                continue
-            path = Path(rec.get("pdf_path") or "")
-            if not rec.get("pdf_path") or not path.exists():
-                continue
-            banner = site.banner_from_lines(receipt_pdf.pdf_text(path).splitlines())
-            if not banner:
-                continue
-            found = self.discovery.data.get(key)
-            found = found if isinstance(found, dict) else None
-            changed.append((key, rec.get("store_info"), found.get("store_info") if found else None))
-            rec["store_info"] = banner
-            if found is not None:
-                found["store_info"] = banner
-        return changed
+    def _forget_unread_store(self, purchase: Purchase) -> None:
+        """Before a receipt is read, drop a store that was never read off one.
+        Resume works from the purchase list without refreshing it, and a list
+        from before 0.41.0 carries the purchase type there (review)."""
+        purchase.store_info = self._store_kept(purchase.key)
+
+    def _note_store(self, purchase: Purchase) -> None:
+        """The purchase list says the same as the record, since Rename reads
+        the list over the record (review)."""
+        if self.discovery.get(purchase.key) is not None:
+            self.discovery.update(purchase.key, {
+                "store_info": purchase.store_info,
+                "store_read": bool(purchase.store_info)}, save=False)
+
+    def _settle_stores(self, changed: list) -> int:
+        """Give every purchase the store its receipt names, or none, in the
+        record and the purchase list alike, before Rename builds names from
+        them (#41, review of 0.41.0).
+
+        A store read off a receipt is kept, and the list is made to agree,
+        since Rename reads the list over the record. Anything else was
+        written before 0.41.0 and is dropped, unless the saved PDF names the
+        store, which is then read off it with nothing asked of Kroger. In
+        memory only, each change noted in `changed`, so a preview can put it
+        back. Returns how many stores were read off a PDF."""
+        n = 0
+        for key in set(self.progress.data) | set(self.discovery.data):
+            recs = [r for r in (self.progress.data.get(key), self.discovery.data.get(key))
+                    if isinstance(r, dict)]
+            store = self._store_kept(key)
+            if not store:
+                prog = self.progress.data.get(key)
+                where = (prog or {}).get("pdf_path") if isinstance(prog, dict) else ""
+                if where and Path(where).exists():
+                    store = site.banner_from_lines(receipt_pdf.pdf_text(Path(where)).splitlines())
+                    n += bool(store)
+            for rec in recs:
+                if (rec.get("store_info") or "") != store:
+                    changed.append((rec, "store_info", rec.get("store_info", _MISSING)))
+                    rec["store_info"] = store
+                if bool(rec.get("store_read")) != bool(store):
+                    changed.append((rec, "store_read", rec.get("store_read", _MISSING)))
+                    rec["store_read"] = bool(store)
+        return n
 
     def _put_back(self, changed: list) -> None:
-        """Undo _fill_banners, for a preview."""
-        for key, in_progress, in_discovery in changed:
-            rec = self.progress.data.get(key)
-            if isinstance(rec, dict):
-                rec["store_info"] = in_progress
-            found = self.discovery.data.get(key)
-            if isinstance(found, dict) and in_discovery is not None:
-                found["store_info"] = in_discovery
+        """Undo _settle_stores exactly, for a preview, a key that was not
+        there taken away again."""
+        for rec, key, old in reversed(changed):
+            if old is _MISSING:
+                rec.pop(key, None)
+            else:
+                rec[key] = old
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
@@ -988,7 +1039,10 @@ class App:
             old_path = Path(r.get("PDF Full Path") or "")
             date = r.get("Purchase Date") or (old_path.name[:10] if old_path.name else "")
             doc_type = r.get("Document Type") or "Receipt"
-            new_name = build_pdf_filename(date, new_summary, doc_type, record=prog)
+            # The store read off the receipt, never a label 0.40 wrote where
+            # the store goes (second review of 0.41.0).
+            new_name = build_pdf_filename(date, new_summary, doc_type,
+                                          record=dict(prog, store_info=self._store_kept(key)))
             if old_path.exists():
                 new_path = unique_path(old_path.parent, new_name,
                                        self.config["max_path_length"])

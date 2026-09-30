@@ -44,6 +44,25 @@ from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
+def _reason_words(reason: str) -> str:
+    """Why a receipt failed its check, in words of the app's own. The check's
+    own text can quote an error that carries a file path, and so the
+    account's name, and the attempt file this goes into is posted publicly
+    (review of 0.41.0)."""
+    r = (reason or "").lower()
+    for key, words in (("does not mention", "its words are not this purchase's"),
+                       ("zero bytes", "it is empty"),
+                       ("smaller than minimum", "it is too small"),
+                       ("missing %pdf", "it is not a PDF"),
+                       ("could not open", "it could not be opened"),
+                       ("cannot read", "it could not be read"),
+                       ("no pages", "it has no pages"),
+                       ("does not exist", "it is not there")):
+        if key in r:
+            return words
+    return "it failed its check"
+
+
 log = logging.getLogger("meijer_receipts")
 
 
@@ -464,16 +483,16 @@ class App:
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.CANCELED.value):
             return True
-        # A copy put aside for review counts only while it still passes the
-        # check that put it aside, its words included. Checked without them,
-        # a receipt put aside because its words were not this purchase's
-        # passed, counted as done, and was never fetched again (#42).
+        # A copy put aside for review counts as done while it is still in
+        # Manual Review, and deleting it is how a person asks for the receipt
+        # again (#42). Trying it again on its own every run added a copy a run,
+        # and replacing the earlier copy could replace another purchase's
+        # (reviews of 0.41.0).
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
             return bool(pdf_path and Path(pdf_path).exists()
                         and receipt_pdf.validate_pdf(
-                            Path(pdf_path), self.config["min_pdf_bytes"],
-                            receipt_pdf.expected_tokens_for(purchase)).ok)
+                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
         return False
 
     # -- processing core ----------------------------------------------------
@@ -608,7 +627,7 @@ class App:
                     return True
                 if purchase.pdf_path:
                     trace.append({"note": "the receipt was put aside",
-                                  "reason": (purchase.notes or "").split("; ")[-1][:120],
+                                  "reason": _reason_words(getattr(self, "_last_reason", "")),
                                   "pdf": site.pdf_facts(Path(purchase.pdf_path))})
                 self._write_attempt(page, purchase, trace)
                 return False
@@ -712,37 +731,57 @@ class App:
              "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]}, indent=2))
         print(f"  What the page answered is in {attempt}, attach it to the issue.")
 
-    def _put_aside(self, out_path: Path) -> Path:
-        """Move a receipt that failed its check into Manual Review. The very
-        same file, under the same name, put aside by an earlier run is kept
-        once, since a receipt failing every run would otherwise add a copy
-        there every run, now that such a receipt is tried again (#42). The
-        file is matched rather than the record, which this run has already
-        written over by then."""
-        review = self.paths.manual_review
-        stem = out_path.stem
+    def _in_review(self, path) -> bool:
         try:
-            data = out_path.read_bytes()
-            for prev in sorted(review.glob("*.pdf")):
-                if ((prev.stem == stem or prev.stem.startswith(stem + " ("))
-                        and prev.read_bytes() == data):
-                    out_path.unlink()
-                    return prev
+            return Path(path).resolve().parent == self.paths.manual_review.resolve()
         except OSError:
-            pass
-        quarantine = unique_path(review, out_path.name, self.config["max_path_length"])
+            return False
+
+    def _put_aside(self, out_path: Path) -> Path:
+        """Move a receipt that failed its check into Manual Review, under a
+        name of its own. A file already there is left where it is and never
+        matched to itself (review of 0.41.0)."""
+        if self._in_review(out_path):
+            return out_path
+        quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                 self.config["max_path_length"])
         try:
             out_path.replace(quarantine)
         except OSError:
             quarantine = out_path
         return quarantine
 
+    def _second_capture(self, out_path: Path, tokens, first, take):
+        """Take a receipt that failed its check once more, with `take(path)`,
+        into a file beside the first under a name that is not a PDF. It takes
+        the first one's place only if it passes, and the check's result is
+        returned, `first` when it did not. A second print used to replace the
+        first even when it failed too, a page that had moved on to "Your
+        session has ended" in place of the receipt (review of 0.41.0)."""
+        second = out_path.with_name(out_path.name + ".second")
+        try:
+            take(second)
+            retried = receipt_pdf.validate_pdf(second, self.config["min_pdf_bytes"], tokens)
+            if retried.ok:
+                second.replace(out_path)
+                return retried
+        except Exception as e:
+            log.warning("Retry failed: %s", e)
+        finally:
+            try:
+                if second.exists():
+                    second.unlink()
+            except OSError:
+                pass
+        return first
+
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
                     popup=None, source_page=None, again=None) -> bool:
         """Check a saved receipt, and put it aside for review if it fails.
         A receipt that fails is taken once more first, by printing
         `source_page` again, or by `again`, which takes it the way it was
-        first taken and gives its bytes."""
+        first taken and gives its bytes. A second capture that also fails
+        never replaces the first."""
         purchase.pdf_path = str(out_path)
         purchase.pdf_filename = out_path.name
         self._record_state(purchase, State.PDF_SAVED)
@@ -751,22 +790,26 @@ class App:
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
         if not result.ok:
             self.stats["validation_failures"] += 1
-            if source_page is not None or again is not None:
+            if again is not None:
                 log.warning("Validation failed (%s); retrying once", result.reason)
+                body = None
                 try:
-                    if source_page is not None:
-                        receipt_pdf.print_page_to_pdf(source_page, out_path)
-                    else:
-                        body = again()
-                        if body:
-                            out_path.write_bytes(body)
-                    result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
+                    body = again()
                 except Exception as e:
                     log.warning("Retry failed: %s", e)
+                if body:
+                    result = self._second_capture(out_path, tokens, result,
+                                                  lambda path: path.write_bytes(body))
+            elif source_page is not None:
+                log.warning("Validation failed (%s); retrying once", result.reason)
+                result = self._second_capture(
+                    out_path, tokens, result,
+                    lambda path: receipt_pdf.print_page_to_pdf(source_page, path))
             else:
                 log.warning("Validation failed (%s)", result.reason)
         if not result.ok:
             # Quarantine the questionable file; never mark Completed.
+            self._last_reason = result.reason
             quarantine = self._put_aside(out_path)
             purchase.pdf_path = str(quarantine)
             purchase.pdf_filename = quarantine.name
@@ -776,7 +819,7 @@ class App:
                                  processing_status=State.NEEDS_MANUAL_REVIEW.value,
                                  notes_extra=f"Validation: {result.reason}")
             self.stats["manual_review"] += 1
-            print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
+            print(f"  !! Validation failed ({_reason_words(result.reason)}); moved to Manual Review.")
             return False
 
         purchase.receipt_count = 1

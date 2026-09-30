@@ -244,19 +244,42 @@ _CAPTURE_JS = r"""
     return null;
   };
 
+  // The roles of a control a person presses or types in. Anything else with
+  // a role, a row, a list item, a region, holds other things, and its name
+  // is every word inside it.
+  const CONTROL_ROLES = new Set(["button", "link", "menuitem", "menuitemcheckbox",
+    "menuitemradio", "tab", "checkbox", "radio", "option", "combobox", "textbox",
+    "searchbox", "switch", "slider", "spinbutton", "treeitem"]);
+
+  // Whether an element may be named by its own words. A control may, and so
+  // may an element nothing marks. A container may not, one a site marks with
+  // a test id or one whose role is not a control, since its words can be a
+  // whole section of an account page, names, a policy number, an address
+  // (review of 0.41.0). It is found by its test id or its role instead.
+  const speaks = (el) => {
+    const role = roleOf(el);
+    if (role) return CONTROL_ROLES.has(role);
+    return !testIdOf(el);
+  };
+
   // In preference order. Never a class, never a position among siblings.
   const locate = (el) => {
     const role = roleOf(el);
-    const name = nameOf(el).slice(0, 80);
+    const talk = speaks(el);
+    const name = talk ? nameOf(el).slice(0, 80) : "";
     if (role && name) return { how: "role", role: role, name: name };
     const testid = testIdOf(el);
     if (stable(testid)) return { how: "testid", value: testid };
-    const label = el.getAttribute("aria-label");
+    // A container's aria-label is its words too. A section marked with a
+    // test id a build generates fell through to "Auto policy for" and the
+    // policyholder's name (second review of 0.41.0).
+    const label = talk ? el.getAttribute("aria-label") : "";
     if (label && label.trim()) return { how: "label", value: label.trim().slice(0, 80) };
     if (stable(el.id)) return { how: "id", value: el.id };
     const nm = el.getAttribute("name");
     if (stable(nm)) return { how: "name", value: nm };
     if (name) return { how: "text", value: name };
+    if (role) return { how: "role", role: role };   // a container, by its role and never its words
     return { how: "unresolved", tag: el.tagName.toLowerCase() };
   };
 
@@ -422,7 +445,7 @@ _CAPTURE_JS = r"""
     const tag = el.tagName.toLowerCase();
     if (tag === "html" || tag === "body") return;   // a click on nothing
     send({ action: "click", locator: locate(el), tag: tag,
-           label: nameOf(el).slice(0, 120), at: Date.now(),
+           label: speaks(el) ? nameOf(el).slice(0, 120) : "", at: Date.now(),
            marked: !!testIdOf(el),
            in_shadow: !!(el.getRootNode && el.getRootNode() !== document),
            in_frame: inFrame(),
@@ -1122,11 +1145,18 @@ def _strings(obj, path="", found=None, depth=0) -> list:
 
 def _name_shaped(text: str) -> list:
     out = []
-    for hit in _NAME_SHAPED.findall(text):
-        words = [w.lower() for w in hit.split()]
-        if any(w in _CONTROL_WORDS for w in words):
-            continue
-        out.append(hit)
+    # A name also comes joined into an id, "holder-Invented-Person", since a
+    # click inside a marked container is kept by its test id or its id, and
+    # a site can build those from what it shows (review of 0.41.0).
+    # Both ways, since read with its dashes as spaces "Bill-To-John Smith"
+    # is "Bill To John", and "John Smith" was no longer seen (review of
+    # 0.41.0).
+    for source in (text, re.sub(r"[-_]+", " ", text)):
+        for hit in _NAME_SHAPED.findall(source):
+            words = [w.lower() for w in hit.split()]
+            if hit in out or any(w in _CONTROL_WORDS for w in words):
+                continue
+            out.append(hit)
     return out
 
 

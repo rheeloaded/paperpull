@@ -494,9 +494,14 @@ def _squash(s: str) -> str:
 
 _BANNER_BY_SQUASH = {_squash(b): b for b in KROGER_BANNERS}
 _BANNER_BY_SQUASH.update({_squash(k): v for k, v in _BANNER_ALIASES.items()})
-# Where the header ends, the first heading after it.
-_HEADER_END_RE = re.compile(r"^(rewards|order\s+summary|item\s+details|total\s+savings|payment\s+details)\b",
-                            re.I)
+# Where the header ends, the first heading after it. Matched with its spaces
+# taken out, since pypdf can split a heading, "RE WARDS", "Order Summar y"
+# (review of 0.41.0).
+_HEADER_END_WORDS = ("rewards", "ordersummary", "itemdetails", "totalsavings",
+                     "paymentdetails", "alcoholicbeverages")
+# What sits where a store's name could, and is not one. A purchase type, the
+# value of "Order Type:" when a page prints it on a line of its own.
+_NOT_A_STORE = {"instore", "pickup", "delivery", "shiptohome", "fuelcenter", "print"}
 # The order's own labelled lines in the header, "Order Date: ..." and the like.
 _LABELLED_RE = re.compile(r"^[A-Za-z][A-Za-z ()0-9]{0,40}:", re.I)
 # What a store's name looks like, words and nothing a street or a town has.
@@ -532,7 +537,7 @@ def banner_from_lines(lines) -> str:
         ln = (ln or "").strip()
         if not ln:
             continue
-        if _HEADER_END_RE.match(ln):
+        if _squash(ln).startswith(_HEADER_END_WORDS):
             break
         head.append(ln)
     for ln in head:
@@ -547,12 +552,20 @@ def banner_from_lines(lines) -> str:
         for words, banner in _BANNER_WORDS:
             if words in spaced:
                 return banner
-    seen_label = False
+    seen_label = value_next = False
     for ln in head:
         if _LABELLED_RE.match(ln):
             seen_label = True
+            # a label with nothing after its colon has its value on the next line
+            value_next = ln.rstrip().endswith(":")
             continue
-        if seen_label and _NAME_LINE_RE.match(ln):
+        if value_next:
+            value_next = False
+            continue
+        words = ln.split()
+        spaced_out = len(words) >= 3 and sum(map(len, words)) / len(words) < 2
+        if (seen_label and _NAME_LINE_RE.match(ln) and _squash(ln) not in _NOT_A_STORE
+                and not spaced_out):
             return ln
     return ""
 
@@ -561,7 +574,11 @@ def read_banner(page) -> str:
     """The store the open receipt page names in its header, or empty."""
     for sel in ("[data-testid='PO-invoice-header']", FALLBACK["receipt_area"]):
         try:
-            text = page.locator(sel).first.inner_text(timeout=5000)
+            loc = page.locator(sel)
+            # asked first, so a page without it costs nothing, not a wait
+            if not loc.count():
+                continue
+            text = loc.first.inner_text(timeout=5000)
         except Exception:
             continue
         found = banner_from_lines(text.splitlines())
@@ -575,7 +592,8 @@ def read_banner(page) -> str:
 # and "Order Total" the way an item prints its price, a label and its amount
 # on the next line, and both were read as items until 0.41.0.
 _ITEMS_START_RE = re.compile(r"^item\s+details\b", re.I)
-_ITEMS_END_RE = re.compile(r"^(payment\s+details|alcoholic\s+beverages\s+fulfilled|order\s+summary)\b", re.I)
+_ITEMS_END_RE = re.compile(r"^(payment\s+details|alcoholic\s+beverages\s+fulfilled|order\s+summary|"
+                           r"terminal\s+id)\b", re.I)
 # The line under an item's price, "3 x $2.49 each", or for something weighed
 # "0.62 lbs x $8.99 each (approx.)", which is one item, not 0.62 of one.
 _QTY_LINE_RE = re.compile(r"^(?P<n>\d+(?:\.\d+)?)\s*(?P<unit>lbs?|oz|kg|g)?\s*x\s*\$\s*(?P<each>[\d,]+\.\d{2})",
@@ -596,7 +614,10 @@ def _item_lines(lines: List[str]):
 # name begins with Total, Tax, Cash or Balance, the cereal among them.
 _SUMMARY_LABEL_RE = re.compile(
     r"^(original\s+item\s+total|order\s+total|sub\s*total|subtotal|total|tax|sales\s+tax|"
-    r"total\s+savings|item\s+coupons?(/sales)?|item\s+coupon/sale|\d+\s+items?)$", re.I)
+    r"total\s+savings|savings|balance|change|bottle\s+deposit|bag\s+fee|"
+    r"item\s+coupons?(/sales)?|item\s+coupon/sale|\d+\s+items?|"
+    r"(visa|master\s*card|amex|american\s+express|discover|debit|credit|ebt|snap|cash|"
+    r"gift\s+card)(\s+\W*\d+)?)$", re.I)
 
 
 def _clean_item_name(name: str, in_items: bool = False) -> str:

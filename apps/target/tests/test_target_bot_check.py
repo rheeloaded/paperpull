@@ -208,3 +208,105 @@ def test_an_item_whose_name_starts_like_a_bot_is_not_a_check(page):
     page.set_content("<main><a data-test='order-details-link' href='/orders/1'>"
                      "Order 1, not a bottle opener but a corkscrew</a></main>")
     assert site.detect_security_challenge(page) is None
+
+
+# -- from the pre-release review of 0.41.0 ---------------------------------------------
+
+def test_a_sign_in_step_up_still_waits_at_a_console(page, tmp_path, monkeypatch):
+    """Only the press and hold check is answered with the app gone. "Enter
+    the verification code" is a sign-in step, answered at a prompt, and the
+    press and hold words would be wrong for it."""
+    app = _app(tmp_path, monkeypatch, "")
+    asked, happened = [], []
+    monkeypatch.setattr(target_receipts.browser_launcher, "ask_or_none",
+                        lambda prompt: asked.append(prompt) or "")
+    monkeypatch.setattr(app, "close", lambda: happened.append("let go"))
+    monkeypatch.setattr(site, "goto_orders", lambda p: happened.append("orders"))
+    page.set_content("<main><h1>Let's make sure it's you</h1><p>Enter the verification code we sent.</p></main>")
+    app.check_session(page)
+    assert len(asked) == 1 and happened == ["orders"]
+
+
+def test_an_install_that_owns_its_window_is_not_let_go_of(page, tmp_path, monkeypatch):
+    """Without cdp_url the app launched the window itself, and letting go of
+    it would close the very window the check is in."""
+    app = _app(tmp_path, monkeypatch, "")
+    app.config["cdp_url"] = ""
+    happened = []
+    monkeypatch.setattr(app, "close", lambda: happened.append("let go"))
+    monkeypatch.setattr(site, "goto_orders", lambda p: happened.append("orders"))
+    page.set_content("<main>%s</main>" % CHECK)
+    app.check_session(page)
+    assert happened == ["orders"]
+
+
+def test_resume_after_a_discover_the_check_stopped_discovers_again(page, tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, "")
+    walked = []
+
+    def stopped(types=None, quiet=False):
+        walked.append("stopped")
+        raise SystemExit(0)
+    monkeypatch.setattr(app, "_discover", stopped)
+    with pytest.raises(SystemExit):
+        app.cmd_discover()
+    assert app._unfinished_mark().exists(), "a Discover that stopped leaves its mark"
+
+    monkeypatch.setattr(app, "_discover", lambda types=None, quiet=False: walked.append("again") or {})
+    monkeypatch.setattr(app, "process_purchases", lambda pend, dry_run=False: None)
+    app.args.max_purchases = None
+    app.args.dry_run = False
+    app.cmd_resume()
+    assert walked == ["stopped", "again"]
+    assert not app._unfinished_mark().exists(), "and one that finished clears it"
+
+
+def test_a_sign_in_answered_mid_purchase_opens_its_details_again(tmp_path, monkeypatch):
+    """It stayed on the orders page, looked for the receipt there, and
+    marked the purchase No Receipt Available for good."""
+    app = _app(tmp_path, monkeypatch, "")
+    visits = []
+    monkeypatch.setattr(site, "goto_details", lambda page, purchase: visits.append("details"))
+    answers = iter([True, False])
+    monkeypatch.setattr(app, "check_session", lambda page: next(answers))
+
+    class _Stop(Exception):
+        pass
+
+    def stop_here(page, purchase):
+        raise _Stop
+    monkeypatch.setattr(site, "extract_details", stop_here)
+    with pytest.raises(_Stop):
+        app.process_one(object(), _purchase())
+    assert visits == ["details", "details"]
+
+
+def test_letting_go_never_closes_the_persons_browser(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, "")
+    stopped, closed = [], []
+
+    class _Context:
+        def close(self):
+            closed.append(True)
+
+    class _Driver:
+        def stop(self):
+            stopped.append(True)
+    app._context, app._pw, app._cdp_mode = _Context(), _Driver(), True
+    app.close()
+    assert closed == [], "the person's browser context was closed"
+    assert stopped == [True]
+
+
+def test_a_step_up_answered_mid_purchase_opens_the_orders_page_again(page, tmp_path, monkeypatch):
+    """Answered at the prompt, the step-up left the tab wherever it went,
+    and the purchase was read there, found no receipt and was marked No
+    Receipt Available for good (second review of 0.41.0). Now the orders
+    page is opened again and the caller told so, and process_one opens the
+    purchase's details again."""
+    app = _app(tmp_path, monkeypatch, "")
+    went = []
+    monkeypatch.setattr(site, "goto_orders", lambda p: went.append("orders"))
+    page.set_content("<main><h1>Let's make sure it's you</h1><p>Enter the verification code we sent.</p></main>")
+    assert app.check_session(page) is True
+    assert went == ["orders"]

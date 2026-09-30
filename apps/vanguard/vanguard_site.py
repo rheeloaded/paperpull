@@ -493,38 +493,54 @@ def _row_account_key(title: str, account_id: str) -> str:
     return ""
 
 
+# How long a press is given to start its download. A statement answered in
+# 62 seconds gave up at 60 and was then taken for the next statement in the
+# pre-release review, so the wait is long, and a download that starts later
+# than this is the one case left open (see download_document).
+EVENT_WAIT_MS = 90000
+
+
 def _folder_state(dl_dir) -> dict:
     """Each file in the staging folder, by name, with its size and when it
     was last written. A download that reuses a name the folder already
     holds is written over it in place, so a name alone would not show it
-    as new."""
+    as new. A file that goes while the folder is read is left out, not the
+    rest of the folder with it."""
     out: dict = {}
     if not dl_dir:
         return out
     try:
-        for entry in os.scandir(dl_dir):
+        entries = list(os.scandir(dl_dir))
+    except OSError:
+        return out
+    for entry in entries:
+        try:
             if entry.is_file():
                 st = entry.stat()
                 out[entry.name] = (st.st_size, st.st_mtime_ns)
-    except OSError:
-        pass
+        except OSError:
+            continue
     return out
 
 
-def _take_browser_file(dl_dir, before: dict, out_path: Path, prefer: str = "") -> bool:
-    """Move the statement the browser saved into `dl_dir` since `before` to
-    `out_path`. The file the download event named is taken first, else the
-    newest new one. Only a finished file that starts with the PDF marker is
-    taken, and nothing else in the folder is touched, since a download the
-    person starts in another tab of that browser lands there as well."""
-    if not dl_dir:
+def _take_named_file(dl_dir, before: dict, name: str, out_path: Path) -> bool:
+    """Move the file the browser saved into `dl_dir` under the download
+    event's own `name`, or its " (2)" form, to `out_path`, when it arrived
+    after `before` and is a finished PDF. Nothing else in the folder is ever
+    taken, since a download the person starts in another tab of that browser
+    lands there as well, and so can an earlier statement answered late
+    (review of 0.41.0). Nothing in the folder is deleted but the file taken."""
+    if not dl_dir or not name:
         return False
+    stem, dot, ext = name.rpartition(".")
+    stem, ext = (stem, "." + ext) if dot else (name, "")
+    variant = re.compile(r"^%s \(\d+\)%s$" % (re.escape(stem), re.escape(ext)))
     now = _folder_state(dl_dir)
-    new = [n for n, st in now.items()
-           if before.get(n) != st and not n.lower().endswith(_UNFINISHED)]
-    new.sort(key=lambda n: (n != prefer, -now[n][1]))
-    for name in new:
-        src = Path(dl_dir) / name
+    for found in sorted((n for n in now if n == name or variant.match(n)),
+                        key=lambda n: (n != name, -now[n][1])):
+        if before.get(found) == now[found] or found.lower().endswith(_UNFINISHED):
+            continue
+        src = Path(dl_dir) / found
         try:
             with src.open("rb") as f:
                 if f.read(5) != b"%PDF-":
@@ -535,12 +551,19 @@ def _take_browser_file(dl_dir, before: dict, out_path: Path, prefer: str = "") -
             os.replace(src, out_path)
             return True
         except OSError:
+            # Another drive. Copied beside the target first, so a copy cut
+            # short never sits under the statement's name.
+            part = out_path.with_name(out_path.name + ".part")
             try:
-                shutil.copyfile(src, out_path)
+                shutil.copyfile(src, part)
+                os.replace(part, out_path)
                 src.unlink()
                 return True
             except OSError:
-                continue
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
     return False
 
 
@@ -577,15 +600,24 @@ def download_document(page, account_id: str, charitable: bool,
     MM/DD/YYYY date text.
 
     The browser saves into `dl_dir`, a staging folder of the app's own, and
-    never into the archive folder. With the folder set, the browser's file
-    there is the statement, since save_as then writes an empty file (see
-    _event_copy), and it is moved to `out_path`. Where setting the folder
-    had no effect, the download event's own copy is saved. Nothing in the
-    folder is ever deleted. Without `dl_dir` the browser is left where it
-    is and only the download event is taken."""
+    never into the archive folder, given as a full path, since a browser
+    told a relative one cancels every download (review of 0.41.0). With the
+    folder set, the browser's file there is the statement, since save_as
+    then writes an empty file (see _event_copy), and the file the download
+    event names is moved to `out_path`. Where setting the folder had no
+    effect, the event's own copy is saved. Nothing is taken when the
+    download failed or no download began, and nothing else in the folder is
+    ever touched. Without `dl_dir` the browser is left where it is and only
+    the download event is taken.
+
+    One case stays open until the core's take_download replaces this. A
+    press whose download begins later than EVENT_WAIT_MS after it fails,
+    and that download's own event can then arrive inside the next press's
+    wait and be taken for the next statement, whatever the file is named
+    (second review of 0.41.0). No run has shown a download that late."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(dl_dir) if dl_dir else None
+    staging = Path(dl_dir).resolve() if dl_dir else None
 
     if not ensure_statements(page):
         log.info("statements page not available for %s %s", account_id, date)
@@ -610,10 +642,10 @@ def download_document(page, account_id: str, charitable: bool,
 
     # Real pointer click on the row's download icon (title-matched: the
     # NBSP aria-labels defeat text locators — verified live). The
-    # attached browser is pointed at the app's own staging folder first, so
-    # a browser that saves the file itself and raises no event still saves
-    # it where it is looked for (the nine-scaffolds lesson; see
-    # paperpull_core.capture.set_download_dir).
+    # attached browser is pointed at the app's own staging folder first,
+    # and the file the download event names is taken from there (see
+    # paperpull_core.capture.set_download_dir). A file that arrives with
+    # no event is not taken, since nothing ties it to this press.
     if staging:
         _set_download_dir(page, staging)
     before = _folder_state(staging)
@@ -633,37 +665,40 @@ def download_document(page, account_id: str, charitable: bool,
         log.warning("REFUSED download control %r - guard", label[:90])
         return False
     dl = None
+    failed = ""
     try:
-        with page.expect_download(timeout=30000) as dl_info:
+        with page.expect_download(timeout=EVENT_WAIT_MS) as dl_info:
             icon.click(force=True)
         dl = dl_info.value
         try:
-            dl.failure()   # returns once the download has finished
-        except Exception:
-            pass
+            failed = dl.failure() or ""   # returns once the download has finished
+        except Exception as e:
+            failed = str(e).splitlines()[0][:70] if str(e) else type(e).__name__
     except Exception as e:
-        log.info("no download event for %s (%s)", date,
+        log.info("no download began for %s (%s)", date,
                  str(e).splitlines()[0][:70])
     how = ""
-    if dl is not None and _event_copy(dl) is not None:
+    if dl is not None and failed:
+        # A download that failed is not taken from anywhere, and whatever
+        # else reached the folder meanwhile is not this statement.
+        log.info("the download for %s failed (%s)", date, failed[:70])
+    elif dl is not None and _event_copy(dl) is not None:
         try:
             dl.save_as(str(out_path))
             how = "the download event (%s)" % (dl.suggested_filename or "")[:60]
         except Exception as e:
             log.info("saving the download failed: %s", str(e).splitlines()[0][:70])
-    if not how and staging:
-        prefer = (dl.suggested_filename or "") if dl is not None else ""
-        # A browser that raised no event saves the file itself, so it is
-        # given longer to arrive.
-        for _ in range(20 if dl is not None else 60):
-            if _take_browser_file(staging, before, out_path, prefer):
+    elif dl is not None and staging:
+        name = dl.suggested_filename or ""
+        for _ in range(20):
+            if _take_named_file(staging, before, name, out_path):
                 how = "the browser's own file"
                 break
             page.wait_for_timeout(500)
     if how and out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
         log.info("captured via %s", how)
         return True
-    log.info("download for %s was not a PDF", date)
+    log.info("nothing was saved for %s", date)
     # A failed capture must not leave this app's file behind, empty or not
     # a PDF. Only that file. Nothing in the browser's folder is deleted.
     try:

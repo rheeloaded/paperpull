@@ -5,8 +5,13 @@ own control, failed the check that it mentions Meijer or the purchase, and
 was put aside in Manual Review. The log said it was retrying, and on that
 path nothing was retried. His second Pilot then skipped it, because a copy
 put aside counted as done whenever it passed the check without its words.
-He opened that receipt by hand and it was a normal one. Every amount, store
-and word below is invented."""
+He opened that receipt by hand and it was a normal one.
+
+A receipt put aside stays in Manual Review, and counts as done while it is
+there. Deleting it is how a person asks for it again. Trying it again on its
+own every run added a copy a run, and replacing an earlier run's copy could
+replace another purchase's (reviews of 0.41.0). Every amount, store and word
+below is invented."""
 import json
 import sys
 from pathlib import Path
@@ -109,7 +114,7 @@ def _pdfs(folder: Path):
 
 # -- the done check ---------------------------------------------------------------
 
-def test_a_receipt_put_aside_for_its_words_is_tried_again(tmp_path):
+def test_a_receipt_put_aside_is_fetched_again_once_its_copy_is_removed(tmp_path):
     aside = tmp_path / "Manual Review" / "2026-09-19 Meijer Mixed Purchases Receipt.pdf"
     aside.parent.mkdir(parents=True, exist_ok=True)
     aside.write_bytes(SOMETHING_ELSE)
@@ -117,7 +122,9 @@ def test_a_receipt_put_aside_for_its_words_is_tried_again(tmp_path):
     app = _app(tmp_path, {p.key: {"state": State.NEEDS_MANUAL_REVIEW.value,
                                   "pdf_path": str(aside),
                                   "notes": "PDF validation failed: Extractable text does not mention Meijer/order details"}})
-    assert app._already_done(p) is False
+    assert app._already_done(p) is True, "while its copy is in Manual Review"
+    aside.unlink()
+    assert app._already_done(p) is False, "and asked for again once it is removed"
 
 
 def test_a_receipt_saved_under_a_low_confidence_name_is_still_done(tmp_path):
@@ -155,31 +162,54 @@ def test_the_row_receipt_is_pressed_once_more_before_it_is_put_aside(tmp_path, m
     assert app.progress.get(p.key)["downloaded_ok"] is True
 
 
-def test_a_receipt_failing_every_run_is_kept_once_in_manual_review(tmp_path, monkeypatch):
+def test_a_receipt_put_aside_is_not_pressed_again_by_the_next_run(tmp_path, monkeypatch):
+    """So nothing piles up in Manual Review or in the ledgers, run after run."""
     presses = _pressing(monkeypatch, SOMETHING_ELSE)
     app = _app(tmp_path)
-    assert app._save_receipt(PAGE, _purchase()) is False
-    assert len(presses) == 2, "pressed, then pressed once more"
-    # the next run tries it again, since it is not done, and fails the same way
     p = _purchase()
-    assert app._already_done(p) is False
     assert app._save_receipt(PAGE, p) is False
+    assert len(presses) == 2, "pressed, then pressed once more"
+    assert app._already_done(_purchase()) is True
     assert len(_pdfs(app.paths.manual_review)) == 1
-    assert _pdfs(app.paths.folder_for(IN_STORE, "Receipt")) == []
-    rec = app.progress.get(p.key)
-    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value
-    assert Path(rec["pdf_path"]).exists()
+    assert len(app.index_csv.read_all()) == 1
 
 
-def test_a_different_file_put_aside_the_next_run_is_kept_beside_the_first(tmp_path, monkeypatch):
-    """Two different wrong files are two pieces of evidence, both kept."""
-    other = _text_pdf(["ZEBRAFISH ANNUAL", "Page 1 of 2"])
-    _pressing(monkeypatch, SOMETHING_ELSE)
+def test_the_first_capture_is_kept_when_the_second_also_fails(tmp_path, monkeypatch):
+    """The second press overwrote the first capture, which could be the one
+    a person could use, even when the second failed too (review)."""
+    broken = b"%PDF-1.4 not really a pdf" + b"x" * 5000
+    _pressing(monkeypatch, SOMETHING_ELSE, broken)
+    app = _app(tmp_path)
+    assert app._save_receipt(PAGE, _purchase()) is False
+    [kept] = _pdfs(app.paths.manual_review)
+    assert (app.paths.manual_review / kept).read_bytes() == SOMETHING_ELSE
+    assert list(app.paths.folder_for(IN_STORE, "Receipt").iterdir()) == []
+
+
+def test_a_file_already_in_manual_review_is_never_moved_or_deleted(tmp_path):
+    app = _app(tmp_path)
+    there = app.paths.manual_review / "x.pdf"
+    there.write_bytes(SOMETHING_ELSE)
+    assert app._put_aside(there) == there
+    assert there.read_bytes() == SOMETHING_ELSE
+
+
+def test_the_reason_in_the_file_to_attach_is_never_the_checks_own_text(tmp_path, monkeypatch):
+    """A check that could not read the file quotes the error, and the error
+    carries the file's path, and so the account's name (review)."""
+    real = mr.receipt_pdf.validate_pdf
+
+    def unreadable(path, min_bytes=3000, expect_tokens=None):
+        r = real(path, min_bytes, expect_tokens)
+        r.ok, r.reason = False, r"Cannot read file: [Errno 13] Permission denied: 'C:\Users\someone\x.pdf'"
+        return r
+    monkeypatch.setattr(mr.receipt_pdf, "validate_pdf", unreadable)
+    _pressing(monkeypatch, RECEIPT)
     app = _app(tmp_path)
     app._save_receipt(PAGE, _purchase())
-    _pressing(monkeypatch, other)
-    app._save_receipt(PAGE, _purchase())
-    assert len(_pdfs(app.paths.manual_review)) == 2
+    text = (app.paths.diagnostics / "download-attempt.json").read_text(encoding="utf-8")
+    assert "Users" not in text and "someone" not in text
+    assert "it could not be read" in text
 
 
 # -- the file to attach --------------------------------------------------------------
@@ -195,7 +225,7 @@ def test_the_file_to_attach_says_what_was_put_aside_and_never_its_words(tmp_path
     info = json.loads(text)
     aside = [t for t in info["responses"] if t.get("note") == "the receipt was put aside"]
     assert len(aside) == 1
-    assert "does not mention" in aside[0]["reason"]
+    assert aside[0]["reason"] == "its words are not this purchase's"
     facts = aside[0]["pdf"]
     assert facts["pages"] == 1 and facts["prints_a_date"] is True
     assert facts["prints_an_amount"] is False and facts["words"] == []
@@ -210,3 +240,42 @@ def test_pdf_facts_names_only_words_from_its_own_list(tmp_path):
     assert facts["prints_an_amount"] is True
     assert set(facts) == {"bytes", "pages", "text_characters", "prints_a_date",
                           "prints_an_amount", "words"}
+
+
+# -- the receipt page's print, from the review of the simplified change ---------------
+
+SESSION_ENDED = _text_pdf(["Your session has ended", "Please sign in again", "09/19/26"])
+
+
+def _printing(monkeypatch, body):
+    printed = []
+
+    def print_page(page, path):
+        printed.append(Path(path).name)
+        Path(path).write_bytes(body)
+    monkeypatch.setattr(mr.receipt_pdf, "print_page_to_pdf", print_page)
+    return printed
+
+
+def test_a_second_print_that_also_fails_never_replaces_the_first(tmp_path, monkeypatch):
+    """The receipt page had moved on between the two prints, and Manual
+    Review held "Your session has ended" while the receipt's print was gone."""
+    _printing(monkeypatch, SESSION_ENDED)
+    app = _app(tmp_path)
+    out = app.paths.folder_for(IN_STORE, "Receipt") / "2026-09-19 Meijer Mixed Purchases Receipt.pdf"
+    out.write_bytes(SOMETHING_ELSE)
+    assert app._finish_pdf(PAGE, _purchase(), out, source_page=PAGE) is False
+    [kept] = _pdfs(app.paths.manual_review)
+    assert (app.paths.manual_review / kept).read_bytes() == SOMETHING_ELSE
+    assert list(out.parent.iterdir()) == []
+
+
+def test_a_second_print_that_passes_takes_the_first_ones_place(tmp_path, monkeypatch):
+    printed = _printing(monkeypatch, RECEIPT)
+    app = _app(tmp_path)
+    out = app.paths.folder_for(IN_STORE, "Receipt") / "2026-09-19 Meijer Mixed Purchases Receipt.pdf"
+    out.write_bytes(SOMETHING_ELSE)
+    assert app._finish_pdf(PAGE, _purchase(), out, source_page=PAGE) is True
+    assert out.read_bytes() == RECEIPT
+    assert printed == [out.name + ".second"], "printed beside the first, never over it"
+    assert sorted(f.name for f in out.parent.iterdir()) == [out.name]

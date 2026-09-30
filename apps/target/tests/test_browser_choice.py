@@ -115,9 +115,10 @@ def test_a_run_that_meets_a_challenge_stops_instead_of_dying():
     assert "ask_or_none(" in SESSION
     assert "raise SystemExit(0)" in SESSION, "a clean stop, not a crash"
     assert "press Resume" in SESSION
-    # Only the sign-out waits at a prompt. The bot check is answered with
-    # the app gone, so nobody is ever asked to answer it while it waits (#48).
-    assert SESSION.count("ask_or_none(") == 1, "the sign-out only"
+    # The press and hold check is answered with the app gone, so nobody is
+    # asked to answer it while the app waits (#48). A sign-in step-up and the
+    # sign-out still wait at a prompt.
+    assert SESSION.count("ask_or_none(") == 2, "a step-up and the sign-out"
     stop = inspect.getsource(target_receipts.App._stop_for_the_check)
     assert "ask_or_none(" not in stop
     assert stop.index("self.close()") < stop.index("raise SystemExit(0)")

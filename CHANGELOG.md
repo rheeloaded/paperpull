@@ -12,10 +12,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
 Vanguard, the sixty-first app, saves the statements of every account on
 Vanguard's statements page, contributed by tylerverry. Kroger is
 confirmed on a tester's account and names each receipt for its store,
-Meijer tries a receipt it put aside again, Target lets go of the browser
-before its check is answered, American Family starts where its
-statements are, and Walmart and Best Buy no longer report a sign-in that
-never reached the order list.
+Meijer presses a receipt twice before putting it aside, Target lets go
+of the browser before its check is answered, American Family starts
+where its statements are, and Walmart and Best Buy no longer report a
+sign-in that never reached the order list.
 
 ### Added
 - **Vanguard, the 61st app, account statements (#57).** Every statement
@@ -33,11 +33,20 @@ never reached the order list.
   to 153 and Edge 154. The contributed version took the empty copy and
   left the browser's beside it in the archive, and a first review fix
   merged to main took the empty copy too and then deleted the browser's,
-  so neither saved a statement on those browsers. Now the browser saves
-  into a staging folder of the app's own, its file there is moved into
-  place, nothing else in that folder is touched, and where setting the
-  folder has no effect the event's own copy is saved. The tests drive a
-  real browser against a local server in both cases. A statement is named
+  so neither saved a statement on those browsers. A pre-release review
+  found two more. Every install's folder is relative, and a browser told a
+  relative download folder cancels every download, so no install would
+  have saved a statement, and taking the newest PDF in a folder the whole
+  browser shares could save another tab's download under this statement's
+  name. Now the browser saves into a staging folder of the app's own,
+  given as a full path, only the file the download event names is moved
+  into place, nothing is taken when the download failed or never began,
+  nothing else in that folder is touched, and where setting the folder has
+  no effect the event's own copy is saved. One case stays open. A
+  download that begins more than 90 seconds after its press, which no run
+  has shown, can be taken for the next statement. The tests drive a real browser against a local server, with a
+  relative folder, another tab's download landing mid-wait, a signed-out
+  page, a download cut off and a press that starts none. A statement is named
   for its account once, where the account had been named twice, and one
   already saved under the longer name takes the shorter one with Rename.
   Discover walks the year picker once instead of twice, and Diagnose
@@ -60,48 +69,91 @@ never reached the order list.
   items are now read from Item Details alone, with how many of each from
   the line under its price, and Rename takes those two lines out of the
   order history the Purchases workbook is built from, where earlier runs
-  wrote them. His Pilot on 2026-09-23 saved receipts that
-  read properly, so Kroger is supported, no longer waiting for a tester.
+  wrote them. A pre-release review found that Resume then Rename renamed
+  good receipts back to In-Store, since Resume works from a purchase list
+  0.40 wrote and Rename reads the list over the record, and that the
+  cleanup could take out a purchase whose only rows were those two lines. A
+  store is now only ever one read off a receipt, and anything else, old
+  labels included, is dropped wherever it is met, a purchase with no other
+  row keeps one with its item left blank, and a Rename preview puts back
+  whatever it read however it ends. His Pilot on 2026-09-23 saved receipts
+  that read properly, so Kroger is supported, no longer waiting for a tester.
 - **Walmart and Best Buy no longer call a page with no order list signed
   in.** Login no longer says Success on a page whose order list never
   appeared, such as one still behind a bot check, and a run's discovery
   stops there instead of finding nothing and finishing clean.
-- **Meijer tries a receipt it put aside again (#42).** A receipt that
-  failed the check that it mentions Meijer or the purchase was put aside in
-  Manual Review and then counted as done, since the step that decides
-  whether a purchase is finished read the file without its words, so the
-  next run skipped it for good. It is tried again now, and a receipt that
-  fails the same way every run is kept once in Manual Review, not once per
-  run. The log said such a receipt was being retried, and on the path that
-  presses the row's own receipt control it never was. That control is now
-  pressed once more before a receipt is put aside. A receipt put aside there
-  also writes the file to attach, saying how the PDF came and what it holds,
-  as counts and a fixed list of words and never its own words.
+- **Meijer presses a receipt twice before putting it aside (#42).** The log
+  said a receipt that failed the check that it mentions Meijer or the
+  purchase was being retried, and on the path that presses the row's own
+  receipt control it never was. That control is now pressed once more, and
+  a second capture that also fails never replaces the first. A receipt put
+  aside in Manual Review still counts as done while it is there, and
+  deleting it from there is how to ask for it again, since trying it again
+  on its own every run added a copy a run, and replacing an earlier copy
+  could replace another purchase's (reviews before release). A receipt put
+  aside there also writes the file to attach, saying how the PDF came and
+  what it holds, as counts and a fixed list of words, with the reason in
+  words of the app's own, never the check's text, which can carry a file
+  path.
 - **Target lets go of the browser before its check is answered (#48).** When
   Target's press and hold check came up during a run at a terminal, the run
   waited for the answer with the app still attached to the browser, and a
   check like that can refuse a hold in a browser under automation. Now what
   was read is saved, the app lets go of the browser, which stays open, and
   the run stops and says to reload the page, answer the check and press
-  Resume. A sign-in still waits at the terminal as before.
+  Resume. Resume discovers again first when the check came during Discover,
+  where it had read only the purchases already listed and finished clean. A
+  sign-in step, such as a code, still waits at the terminal, and a sign-in
+  or a sign-in step answered partway through a purchase now opens its
+  details again, where it had looked for the receipt wherever the tab was
+  left and marked it No Receipt Available for good.
 - **American Family starts at Billing & Payments (#45).** The tester's
   answers showed the statements are at myaccount.amfam.com/billing, in the
   same tab, and open in a new tab at a blob: address the page makes itself.
   The app started at a documents page, never matched a control reading View
   bill, and read a blob tab only by its address, which a page can revoke the
-  moment the tab has it. Now it starts at Billing & Payments, knows the words
-  an insurer's billing page uses, and keeps each PDF the page makes as it is
-  made, through a small core module, paperpull_core.blob_capture. A date
-  printed right against the next word, the way adjacent tags leave it, is
-  read as well. Still waiting for a run on a real account.
+  moment the tab has it. Now it opens Billing & Payments and no other page,
+  and presses a control only when the whole of its words is a read verb and
+  a statement's name, such as View bill or View billing statement for
+  September 2026, with nothing after it but a date, a policy's last digits
+  or "opens in a new tab". So nothing that changes how statements arrive,
+  online, by mail, by text or as reminders, is ever pressed, where a word
+  anywhere in a label had matched "Get your statements online". Every word
+  a control shows or announces has to pass the guard too, its label, its
+  visible text, an image's alt, text a style adds, and a press is refused
+  where another control sits at its center. A bare View or Download PDF is
+  taken only from a row of its own that names a bill or statement and no
+  other document or payment, never from a list whose summary names a
+  statement. Of a row's several dates only the one written right before as
+  the statement's own is taken, and none where another is written as the
+  next or a previous statement's, so no statement is filed under another's
+  date. A row and a control's words are read with a space between their
+  pieces as well, since spans that touch run their words together, and a
+  word run into a number, "10/01/2026Next bill date", had slipped past every
+  check that looks for a whole word. A Show all that would leave the page is not followed, and a billing
+  page that sends the tab elsewhere is not read. Each PDF the page makes is kept as it is made,
+  through a small core module, paperpull_core.blob_capture, and only the one
+  PDF the press opened is taken. After a press that brought nothing the page
+  is loaded again, so a PDF the page opens late is never taken for the next
+  statement. Closing an overlay presses only Close, Dismiss, No thanks or
+  Not now as the whole of a control's words, where anything that began
+  with Close was pressed, "Close my account" among it. A date printed right
+  against the next word, the way adjacent tags leave it, is read as well.
+  Still waiting for a run on a real account.
 - **The recorder keeps a click on a control marked only with a test id
   (#45).** American Family marks its controls with data-cy and nothing else,
   and a click on the words inside one was thrown away as the mouse
   wandering, so the tester's recording of the billing tab kept one click of
   seven. Any of data-testid, data-test-id, data-test, data-qa, data-cy and
-  data-automation-id now marks a control. A framework's prefix for generated
-  ids, such as Angular's ng-, now counts only at the start of a value, where
-  anywhere in it took billing-nav for a generated id.
+  data-automation-id now marks a control, and a click inside one is kept
+  and found by its test id, never by its words. Neither is a container
+  with a role that is not a control, a row or a region, and a container's
+  aria-label counts as its words, since the words of a section of an
+  account page are names, numbers and addresses, in a file testers post
+  publicly. The check a person reads before posting a recording now sees a
+  name joined into an id, such as holder-Invented-Person. A framework's prefix for generated ids, such as
+  Angular's ng-, now counts only at the start of a value, where anywhere in
+  it took billing-nav for a generated id.
 
 ## [0.40.0] - 2026-09-29
 

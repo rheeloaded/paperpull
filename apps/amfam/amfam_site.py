@@ -45,6 +45,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
@@ -76,8 +77,8 @@ BASE = "https://myaccount.amfam.com"
 # RECORDED (#45). My Account's sign-in is at /login, and Billing & Payments
 # is /billing, in the same tab, where the tester opens his statements. The
 # app started at /documents until 0.41.0, a guess, which is the wrong place.
-# The other routes stay behind it, with the overview last, since its own
-# links name the real ones and the survey follows those.
+# Only the first of these is where statements are looked for. The others
+# are where 0.40.0 looked, and the overview's links name the real ones.
 BILLING_CANDIDATES = [
     f"{BASE}/billing",
     f"{BASE}/documents",
@@ -111,6 +112,14 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"set\s+up|delete|remove|cancel|dispute|"
     r"password|passcode|username|profile\b|settings|preferences|contact\s+info|\baddress\b|"
     r"confirm\b|submit|agree|accept|authorize|\bchat\b|contact\s+us|"
+    r"close\s+(my\s+|this\s+|your\s+|the\s+)?(account|policy)|"
+    # How a bill or a document is delivered, and what a person is sent. None
+    # of these is a document, and each changes a setting or asks for
+    # something (review of 0.41.0).
+    r"e-?mail|\btext\s+me\b|\bby\s+text\b|\bby\s+mail\b|\bmail\s+me\b|remind|notif|"
+    r"\breceive\b|\bswitch\b|stop\s+mailing|combine|reinstate|\brenew\b|\brequest\b|\bsend\b|"
+    r"online|electronic|\bpaper\b|postal|\bmail(ed|ing)?\b|u\.?s\.?\s+mail|deliver|\btexted\b|"
+    r"via\s+text|quarterly|spanish|\blanguage|frequency|different\s+date|"
     r"beneficiar|nickname|"
     r"(?<!excludes )\bclaims?\b|file\s+a\s+claim|report\s+(a\s+)?claim|coverage|\bquote\b|"
     r"add\s+(a\s+)?(vehicle|driver|car|home|policy)|change\s+(my\s+)?policy|cancel\s+policy|renew\s+now|"
@@ -123,18 +132,48 @@ SAFE_DOC_CONTROL_RE = re.compile(
     r"id\s+cards?|insurance\s+cards?|renewal\s+(notice|bill)|receipts?\b|\bbills?\b|billing\b|"
     r"policy\s+documents?|declarations?|dec\s+page|see\s+(more|all|older)|show\s+(more|all|older)|load\s+more)", re.I)
 
-# A control that fetches one document. GUESS at the wording, wide on
-# purpose. "View", "Download", "View PDF", "Statement", "1099-INT", and the
-# words an insurer's billing page uses, "View bill", "Billing statement",
-# "Declarations page" and "ID card", which the README named and this never
-# matched until 0.41.0.
+# A control that fetches one document, as the whole of its words. A read
+# verb and a statement's name, "View bill", "Download statement (PDF)",
+# "View bill for September 12, 2026", "View billing statement for policy
+# ending 1234", or a statement's name and date, "Billing statement
+# 09/12/2026", or a bare "View" or "Download PDF", whose row must then name
+# a bill or statement. Never "Get ...", and nothing after the name but a
+# date, a policy's last digits or "opens in a new tab". A word anywhere in a
+# label matched "Get your statements online", and the guard's refusals, a
+# list of phrasings, knew none of them (reviews of 0.41.0).
+_DATE_TEXT = (r"(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}"
+              r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}"
+              r"|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})")
+# Escaped, since Playwright writes the pattern into a selector between
+# slashes, and a bare one ends it there.
+_READ = r"(?:view|download|open)"
+_THE = (r"(?:(?:my|the|this|your)\s+)?"
+        r"(?:(?:current|latest|last|previous|recent|past|paid|full|printable)\s+)?")
+_DOC = (r"(?:bill|billing\s+statement|statement|document|tax\s+(?:form|document)"
+        r"|1099(?:-[a-z]{1,4})?|1098|5498)")
+_AS_PDF = r"(?:\s*\(?\s*pdf\s*\)?)?"
+_WHEN = r"(?:\s*[,-]?\s*(?:(?:for|from|dated|of)\s+)?" + _DATE_TEXT + r")?"
+_WHOSE = r"(?:\s*,?\s*for\s+policy\s+(?:number\s+)?ending\s+(?:in\s+)?\d{2,6})?"
+_NEW_TAB = r"(?:\s*[,-]?\s*\(?\s*opens\s+in\s+(?:a\s+)?new\s+(?:tab|window)\s*\)?)?"
 BILL_CONTROL_RE = re.compile(
-    r"((download|view|print|open|get)\s*(my\s+|the\s+|this\s+|your\s+)?"
-    r"(statement|document|pdf|tax|letter|notice|1099|1098|bill\b|billing\s+statement|"
-    r"declarations?(\s+page)?|id\s+cards?)|"
-    r"billing\s+statement|declarations?\s+page|"
-    r"(statement|document|tax\s+form|1099|1098|5498)\s*\(?\s*pdf\s*\)?|\bpdf\b|"
-    r"^\s*(view|download|open)\s*$)", re.I)
+    r"^\s*(?:" + _READ + r"\s+" + _THE + _DOC + _AS_PDF + _WHEN + _WHOSE + _NEW_TAB
+    + r"|" + _DOC + _AS_PDF + r"\s*[,-]?\s*(?:(?:for|from|dated|of)\s+)?" + _DATE_TEXT + _WHOSE + _NEW_TAB
+    + r"|" + _DOC + r"\s*\(?\s*pdf\s*\)?"
+    + r"|" + _READ + r"(?:\s+" + _THE + r"pdf)?" + _NEW_TAB
+    + r")\s*\.?\s*$", re.I)
+
+# Words that name a statement or a tax form. A control whose own words name
+# none, a bare View or Download PDF, is taken only from a row that does, and
+# never from one that names another kind of document. A payment plan
+# agreement and an ID card were each listed as an Account Statement, and the
+# first control carrying a date was the one pressed (review of 0.41.0).
+_STATEMENT_WORDS_RE = re.compile(
+    r"\b(bills?|billing\s+statements?|statements?|1099|1098|5498|tax\s+(forms?|documents?))\b", re.I)
+_OTHER_DOCUMENT_RE = re.compile(
+    r"\b(id\s+cards?|insurance\s+cards?|proof\s+of\s+insurance|declarations?|dec\s+page|"
+    r"agreements?|contracts?|applications?|endorsements?|"
+    r"policy\s+(documents?|packets?|booklets?|changes?)|cancell?ations?|non-?renewals?|"
+    r"claims?|letters?|notices?|confirmations?|schedules?)\b", re.I)
 
 # A link that points straight at a PDF, from a row's href.
 PDF_HREF_RE = re.compile(r"\.pdf(\?|$)|/pdf\b|format=pdf|statement.*download|download.*statement|docId|documentId", re.I)
@@ -331,6 +370,25 @@ def _take_new_tab(page, new_pages, out_path: Path) -> bool:
 # Billing page
 # ---------------------------------------------------------------------------
 
+# What closes an overlay, as the whole of a control's words. Anything that
+# began with Close was pressed, "Close my account" and "Close policy" among
+# it (review of 0.41.0).
+_DISMISS_RE = re.compile(
+    r"^\s*(close|dismiss|no\s+thanks|not\s+now)"
+    r"(\s+(this\s+)?(dialog|banner|window|message|pop-?up|survey|notice|alert|panel|menu))?\s*[×✕x]?\s*$",
+    re.I)
+
+
+# A close button that shows only its glyph, the way Bootstrap draws one.
+_CLOSE_GLYPH_RE = re.compile(r"^\s*[×✕✖xX]\s*$")
+
+
+def _refused(words: str) -> bool:
+    """Whether any of `words` is something the guard refuses."""
+    return bool(words and (FORBIDDEN_CONTROL_RE.search(words) or SETTINGS_CONTROL_RE.search(words)
+                           or AUTH_CONTROL_RE.search(words)))
+
+
 def dismiss_overlay(page) -> None:
     """Close a cookie banner, a survey prompt or a promo overlay, the things
     that sit over signed-in pages and intercept clicks. Escape first, then
@@ -341,13 +399,16 @@ def dismiss_overlay(page) -> None:
     except Exception:
         pass
     try:
-        cl = page.get_by_role("button", name=re.compile(r"^(close|dismiss|no thanks|not now)\b", re.I))
+        cl = page.get_by_role("button", name=_DISMISS_RE)
         for i in range(min(cl.count(), 6)):
             el = cl.nth(i)
             try:
                 if el.is_visible():
-                    label = el.inner_text(timeout=500) or ""
-                    if FORBIDDEN_CONTROL_RE.search(label):
+                    label = (el.inner_text(timeout=500) or "").strip()
+                    if label and not (_DISMISS_RE.search(label) or _CLOSE_GLYPH_RE.search(label)):
+                        continue
+                    if (_refused(label) or _refused(el.get_attribute("aria-label") or "")
+                            or _refused(el.get_attribute("title") or "")):
                         continue
                     el.click(timeout=1000)
                     page.wait_for_timeout(250)
@@ -377,28 +438,39 @@ def _looks_like_billing(page) -> bool:
                           body, re.I))
 
 
+def _on_billing(page) -> bool:
+    """The tab is at Billing & Payments, or a page under it, on this
+    provider's host."""
+    try:
+        here, there = urlsplit(page.url or ""), urlsplit(BILLING_URL)
+    except ValueError:
+        return False
+    # The page itself. A page under it, /billing/autopay, was taken for it
+    # and read (review of 0.41.0).
+    path, home = here.path.rstrip("/"), there.path.rstrip("/")
+    return is_safe_url(page.url or "") and here.netloc == there.netloc and path == home
+
+
 def goto_documents(page) -> bool:
-    """Open Statements & Documents. The first candidate that is not a
-    sign-in page and shows something statement-shaped wins, and the URL it
-    lands on is remembered so a later call does not walk the list again."""
-    global BILLING_URL
+    """Open Billing & Payments, where the tester's statements are (#45), and
+    only that page. Another page that looked statement-shaped, the overview
+    or the documents page, carries ID cards and other documents, and one was
+    saved as a statement (reviews of 0.41.0)."""
     dismiss_overlay(page)
-    if is_safe_url(page.url or "") and not looks_signed_out(page) and _looks_like_billing(page):
+    if _on_billing(page) and not looks_signed_out(page) and _looks_like_billing(page):
         return True
-    for url in [BILLING_URL] + [u for u in BILLING_CANDIDATES if u != BILLING_URL]:
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
-        except Exception as e:
-            log.info("goto %s failed: %s", url, e)
-            continue
-        dismiss_overlay(page)
-        if looks_signed_out(page):
-            return False
-        if _looks_like_billing(page):
-            BILLING_URL = url
-            return True
-    return False
+    try:
+        page.goto(BILLING_URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
+    except Exception as e:
+        log.info("goto %s failed: %s", BILLING_URL, e)
+        return False
+    dismiss_overlay(page)
+    if looks_signed_out(page):
+        return False
+    # Where the address went is checked too. A billing page that sent the tab
+    # on to the overview was read as billing (review of 0.41.0).
+    return _on_billing(page) and _looks_like_billing(page)
 
 
 def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
@@ -416,7 +488,10 @@ def expand_all(page) -> None:
     """Click 'See more' / 'Show more' / 'View older statements' repeatedly
     to surface anything the page loads on demand. The label is
     checked against the guard before every click."""
-    pat = re.compile(r"^\s*(show|load|view|see)\s+(more|all|older)(\s+(bills?|statements?|documents?))?\s*$|"
+    # Bills and statements only. "View all documents" took the app to the
+    # documents page, where an ID card was saved as a statement (review of
+    # 0.41.0).
+    pat = re.compile(r"^\s*(show|load|view|see)\s+(more|all|older)(\s+(bills?|statements?))?\s*$|"
                      r"^\s*(older|previous)\s+(bills?|statements?)\s*$", re.I)
     for _ in range(30):
         clicked = False
@@ -432,6 +507,13 @@ def expand_all(page) -> None:
                         break
             except Exception:
                 continue
+        if clicked and not _on_billing(page):
+            log.info("a show-more control left Billing & Payments, going back")
+            try:
+                page.goto(BILLING_URL, wait_until="domcontentloaded", timeout=60000)
+            except Exception:
+                pass
+            break
         if not clicked:
             break
 
@@ -447,20 +529,234 @@ class RawDoc:
     kind: str = "doc"
 
 
-# The date a bill control belongs to. The control's own name first, then
-# the nearest enclosing row or card whose text carries a date, up to six
-# levels up. Returned with the container's text so a repair can see what
-# the row looked like.
-_ROW_OF_JS = r"""el => {
+# The row a bill control sits in, the nearest enclosing element whose
+# text carries a date, up to six levels up, read whole. None when that
+# element holds another row, another bill control whose own dated row is
+# inside it. A document in a row with no date of its own climbed to the
+# whole list, whose summary said "billing statement was issued 09/12/2026",
+# and a payment plan agreement was saved as that statement (review of
+# 0.41.0).
+_ROW_OF_JS = r"""(el, pattern) => {
   const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/i;
-  let node = el, depth = 0;
-  while (node && depth < 6) {
-    const txt = (node.innerText || '').trim();
-    if (dateRe.test(txt)) return txt.slice(0, 300);
-    node = node.parentElement; depth++;
+  const bill = new RegExp(pattern, 'i');
+  const wordsOf = (c) => ((c.getAttribute('aria-label') || c.innerText || '')).replace(/\s+/g, ' ').trim();
+  const rowOf = (c) => {
+    let node = c, depth = 0;
+    while (node && depth < 6) {
+      if (dateRe.test(node.innerText || '')) return node;
+      node = node.parentElement; depth++;
+    }
+    return null;
+  };
+  const mine = rowOf(el);
+  if (!mine) return '';
+  for (const c of mine.querySelectorAll('a, button, [role=button], [role=link]')) {
+    if (c === el || el.contains(c) || c.contains(el) || !bill.test(wordsOf(c))) continue;
+    const theirs = rowOf(c);
+    if (theirs && theirs !== mine && mine.contains(theirs)) return '';
   }
-  return '';
+  // Each visible piece of text with a space between, since spans that
+  // touch run their words together in innerText, "10/01/2026Next bill
+  // date", where no word boundary falls, and innerText as well (review of
+  // 0.41.0).
+  const parts = [];
+  const walker = document.createTreeWalker(mine, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const host = n.parentElement;
+    if (!host || !host.getClientRects().length) continue;
+    const t = (n.textContent || '').replace(/\s+/g, ' ').trim();
+    if (t) parts.push(t);
+  }
+  const text = parts.join(' ');
+  const flat = (mine.innerText || '').trim();
+  // A row is short. Read whole, a section whose words said "statement"
+  // far from a document of another kind was taken for its row (review of
+  // 0.41.0).
+  if (text.length > 300 || flat.length > 300) return '';
+  return {text, flat};
 }"""
+
+# Every word a control shows or announces, its label, what its labelledby
+# names, its title, an image's alt, its visible text, and text a style puts
+# before or after it. Each has to pass the guard. A button labelled "View
+# bill" that showed "Go paperless", and one announced as "Enroll in
+# paperless billing" that showed "View bill", were pressed (review of
+# 0.41.0).
+_WORDS_OF_JS = r"""el => {
+  const out = [];
+  const add = (t) => { t = (t || '').replace(/\s+/g, ' ').trim(); if (t) out.push(t.slice(0, 300)); };
+  add(el.getAttribute('aria-label'));
+  const by = el.getAttribute('aria-labelledby');
+  if (by) for (const id of by.split(/\s+/)) { const n = document.getElementById(id); if (n) add(n.textContent); }
+  add(el.getAttribute('title'));
+  add(el.innerText);
+  // And each visible piece of its text alone, since spans that touch run
+  // together in innerText, "View billPay now", where "pay" has no word
+  // boundary to be refused by (review of 0.41.0).
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let pieces = 0;
+  for (let n = walker.nextNode(); n && pieces < 60; n = walker.nextNode()) {
+    const host = n.parentElement;
+    if (host && host.getClientRects().length) { add(n.textContent); pieces++; }
+  }
+  const parts = [el, ...Array.from(el.querySelectorAll('*')).slice(0, 60)];
+  for (const n of parts) {
+    if (n !== el) { add(n.getAttribute('aria-label')); add(n.getAttribute('alt')); add(n.getAttribute('title')); }
+    for (const where of ['::before', '::after']) {
+      const c = getComputedStyle(n, where).content;
+      if (c && c !== 'none' && c !== 'normal') add(c.replace(/^["']|["']$/g, ''));
+    }
+  }
+  return out;
+}"""
+
+# Where a press would land, which has to be the control itself. A card
+# labelled "View bill for September 12, 2026" with a "Set up autopay"
+# button at its center pressed the button (review of 0.41.0).
+_CENTER_JS = r"""el => {
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return true;
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  if (!hit || !el.contains(hit)) return true;
+  const ctl = hit.closest('a[href], button, input, select, textarea, [role=button], [role=link], [role=menuitem], [role=checkbox], [role=switch]');
+  if (!ctl || ctl === el || !el.contains(ctl)) return true;
+  // One control wrapped in another, a link around a button with the same
+  // words, is the same control, and was refused (review of 0.41.0).
+  const words = (n) => (n.innerText || '').replace(/\s+/g, ' ').trim();
+  return words(ctl) !== '' && words(ctl) === words(el);
+}"""
+
+# Any word of a payment. A bare View in a row that mentions one can be a
+# payment's own record, worded any number of ways, "Bill payment
+# 09/20/2026", "Bill paid", "Payment applied to statement 09/12/2026", and
+# every list of its phrasings missed some (reviews of 0.41.0). Such a row is
+# left alone. A control whose own words name the statement, View bill, is
+# found whatever its row says.
+_PAYMENT_WORDS_RE = re.compile(r"\b(payments?|paid|receipts?)\b", re.I)
+# The tax form numbers only as numbers of their own. Inside a reference or
+# policy number, "Ref 44109921", a payment's receipt was saved as a tax
+# document (review of 0.41.0).
+_A_STATEMENT_RE = re.compile(
+    r"\b(billing\s+)?statements?\b|(?<![$\d.,])\b(1099|1098|5498)\b(?![.,]\d)|\btax\s+(forms?|documents?)\b", re.I)
+_A_BILL_RE = re.compile(r"\bbills?\b", re.I)
+_A_TAX_FORM_RE = re.compile(
+    r"(?<![$\d.,])\b(1099|1098|5498)\b(?![.,]\d)|\btax\s+(forms?|documents?|statements?)\b", re.I)
+
+
+def _row_names_a_statement(row_text: str, row_flat: str = "") -> bool:
+    """Whether a row says it is a statement or a bill and nothing else. A
+    row that also names another kind of document, or a payment, read either
+    way, is left alone. `row_flat` is the row's innerText, and naming a
+    statement is read from it, `row_text` its pieces with spaces between."""
+    flat = row_flat or row_text
+    if not flat:
+        return False
+    for text in (row_text, flat):
+        if _OTHER_DOCUMENT_RE.search(text) or _PAYMENT_WORDS_RE.search(text):
+            return False
+    return bool(_A_STATEMENT_RE.search(flat) or _A_BILL_RE.search(flat))
+
+
+# The words just before a date that make it the statement's own date.
+_STATEMENT_DATE_RE = re.compile(
+    r"(statement(\s+date)?|issued(\s+on)?|bill(ing)?\s+date|billed(\s+on)?)\s*:?\s*(on\s+)?$", re.I)
+# A row that writes another statement's date anywhere, the next one or an
+# earlier one. "Next bill date 10/12/2026" is the next statement's own date,
+# and a statement filed under it made the real one count as saved already,
+# for good. Anywhere in the row, since a card's header row, "Statement date
+# | Next bill date", sits apart from the dates it names (reviews of 0.41.0).
+_ANOTHER_STATEMENT_RE = re.compile(
+    r"(?<![a-z])(next|upcoming|future|following|previous|prior|last)\s+(bill|billing|statement)", re.I)
+
+
+def _dates_in(text: str) -> list:
+    """Each full date in `text`, as (where it starts, where it ends,
+    YYYY-MM-DD), in order."""
+    found = set()
+    for pattern, _kind in DATE_PATTERNS:
+        for m in pattern.finditer(text or ""):
+            iso = parse_date(m.group(0))
+            if iso:
+                found.add((m.start(), m.end(), iso))
+    return sorted(found)
+
+
+def _labelled_dates(text: str) -> list:
+    """Each full date in `text` with the words just before it, back to the
+    date before it, as (words, YYYY-MM-DD)."""
+    out, last = [], 0
+    for start, end, iso in _dates_in(text):
+        out.append((text[max(last, start - 40):start], iso))
+        last = end
+    return out
+
+
+def _statement_date(name: str, row_text: str, row_flat: str = "") -> Optional[str]:
+    """The date of the statement a control fetches, only where the page
+    leaves no doubt. Its own words first. None when the row writes another
+    statement's date anywhere, the next or a previous one. Then a month its
+    words name, as the one date of that month in its row. Then the row's
+    one date. Of a row's several dates, only the one written right before as
+    the statement's own, "Statement date", "issued", and none when none or
+    two are written. Choosing among several dates by where they sit or by
+    what they were not filed statements under a due date, a payment's date
+    and the next statement's own date, which would have made the real one
+    count as saved (reviews of 0.41.0)."""
+    own = parse_date(name)
+    if own:
+        return own
+    # The dates are read as the page shows them, from innerText. The pieces
+    # with spaces between also hold text the page hides, a collapsed panel's
+    # "Bill date 08/12/2026", and split a date React writes in five pieces,
+    # so they are read only for what refuses a row (review of 0.41.0).
+    dates = _labelled_dates(row_flat or row_text)
+    distinct = sorted({iso for _words, iso in dates})
+    if not distinct:
+        return None
+    if _ANOTHER_STATEMENT_RE.search(row_text) or _ANOTHER_STATEMENT_RE.search(row_flat):
+        return None
+    month = MONTH_YEAR_RE.search(name or "")
+    if month:
+        want = "%s-%02d" % (month.group(2), _MONTHS[month.group(1)[:3].lower()])
+        inside = [iso for iso in distinct if iso.startswith(want)]
+        return inside[0] if len(inside) == 1 else None
+    if len(distinct) == 1:
+        return distinct[0]
+    written = {iso for words, iso in dates if _STATEMENT_DATE_RE.search(words)}
+    return next(iter(written)) if len(written) == 1 else None
+
+
+def _statement_controls(page):
+    """Each control on the page that fetches one statement or tax form, as
+    (position, element, its words, its date, its row's words). Discovery
+    and the download find a control the same way, through this."""
+    ctrls = _bill_controls(page)
+    for i in range(ctrls.count()):
+        el = ctrls.nth(i)
+        try:
+            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
+        except Exception:
+            continue
+        name = re.sub(r"\s+", " ", name)
+        if not is_safe_control(name) or not BILL_CONTROL_RE.search(name):
+            continue
+        try:
+            words = el.evaluate(_WORDS_OF_JS) or []
+        except Exception:
+            continue
+        if any(_refused(w) for w in words):
+            continue
+        try:
+            row = el.evaluate(_ROW_OF_JS, BILL_CONTROL_RE.pattern) or {}
+        except Exception:
+            row = {}
+        row_text = str(row.get("text") or "") if isinstance(row, dict) else ""
+        row_flat = str(row.get("flat") or "") if isinstance(row, dict) else ""
+        if not _STATEMENT_WORDS_RE.search(name) and not _row_names_a_statement(row_text, row_flat):
+            continue
+        iso = _statement_date(name, row_text, row_flat)
+        if iso:
+            yield i, el, name, iso, row_text
 
 
 def collect_download_docs(page) -> List[RawDoc]:
@@ -470,32 +766,19 @@ def collect_download_docs(page) -> List[RawDoc]:
     seen = set()
     expand_all(page)
     scroll_full_page(page)
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
-        except Exception:
-            name = ""
-        if not is_safe_control(name):
+    for i, el, name, iso, row_text in _statement_controls(page):
+        if iso in seen:
             continue
+        seen.add(iso)
         try:
             href = el.get_attribute("href") or ""
         except Exception:
             href = ""
-        row_text = ""
-        iso = parse_date(name)
-        if not iso:
-            try:
-                row_text = el.evaluate(_ROW_OF_JS) or ""
-            except Exception:
-                row_text = ""
-            iso = parse_date(row_text)
-        if not iso or iso in seen:
-            continue
-        seen.add(iso)
         disp = _human_date(iso)
-        tax = bool(re.search(r"1099|1098|5498|tax", name + " " + row_text, re.I))
+        # A tax form's number only as a number of its own, and tax only as a
+        # tax form. Anywhere in a row, a reference number or "Premium tax"
+        # made a statement a Tax Document (review of 0.41.0).
+        tax = bool(_A_TAX_FORM_RE.search(name + " " + row_text))
         kind_title = "Tax Document" if tax else "Account Statement"
         docs.append(RawDoc(title=f"{kind_title} - {disp}", date_text=iso,
                            href=href if PDF_HREF_RE.search(href or "") else "",
@@ -507,19 +790,7 @@ def collect_download_docs(page) -> List[RawDoc]:
 def _control_for(page, iso: str):
     """The control for the document dated `iso`, matched the same way
     discovery found it, or None."""
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
-        except Exception:
-            name = ""
-        found = parse_date(name)
-        if not found:
-            try:
-                found = parse_date(el.evaluate(_ROW_OF_JS) or "")
-            except Exception:
-                found = None
+    for _i, el, name, found, _row in _statement_controls(page):
         if found == iso:
             return el, name
     return None, ""
@@ -618,7 +889,12 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 pass
         if _take_new_pdf(dl_dir, seen, out_path):
             return True
-        kept = blob_capture.take(page)
+        # Only the one PDF blob this press opened in a new tab, by the tab's
+        # address or by the page's own asking to open it. The newest PDF the
+        # page made could be another document the same press made, or a late
+        # one from an earlier press (review of 0.41.0).
+        shown = [p.url for p in ctx.pages if p not in before and (p.url or "").startswith("blob:")]
+        kept = blob_capture.take(page, urls=shown, opened=True)
         if kept:
             out_path.write_bytes(kept[0])
             if trace is not None:
@@ -638,6 +914,14 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             el.scroll_into_view_if_needed(timeout=4000)
         except Exception:
             pass
+        try:
+            if not el.evaluate(_CENTER_JS):
+                if trace is not None:
+                    trace.append({"note": "another control sits where the press would land",
+                                  "control": redact(label)[:60]})
+                return False
+        except Exception:
+            return False
         try:
             el.click(timeout=8000)
             if trace is not None:
@@ -743,7 +1027,26 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             if trace is not None:
                 trace.append({"note": "the control's own link did not answer with a PDF",
                               "url": redact(target)[:160]})
-    return _catch_pdf(page, el, label, out_path, trace, dl_dir)
+    ok = _catch_pdf(page, el, label, out_path, trace, dl_dir)
+    if not ok:
+        _leave_the_press(page)
+    return ok
+
+
+def _leave_the_press(page) -> None:
+    """Load Billing & Payments again after a press that brought no PDF. The
+    page makes each statement itself, and one that came after the app had
+    given up on its press was opened inside the next press's wait and taken
+    for the next statement. Loading the page again ends whatever the press
+    left running (review of 0.41.0)."""
+    try:
+        page.goto(BILLING_URL, wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        log.info("loading billing again after a press failed: %s", e)
+        try:
+            page.goto("about:blank")
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
