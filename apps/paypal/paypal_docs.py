@@ -320,8 +320,16 @@ class App:
             print("Success: connected and signed in to PayPal.")
             print("Keep that browser window OPEN, then run:  paperpull paypal pilot")
         else:
-            print("Connected, but I could not open the PayPal statements page.")
-            print("Open Settings, Statements & Taxes in that browser yourself, then run --diagnose.")
+            where = site.landed_elsewhere(page)
+            if where:
+                # Say where PayPal sent the tab, a business account's
+                # settings in #61, rather than send the person looking for
+                # a page that account may not have.
+                self._say_sent_elsewhere(site.SentElsewhere(
+                    where, business=site.is_business_page(page.url or "")))
+            else:
+                print("Connected, but I could not open the PayPal statements page.")
+                print("Open Settings, Statements & Taxes in that browser yourself, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -377,19 +385,60 @@ class App:
         self.discovery.update(doc.key, {"source_url": source_url, "href": r.href or ""}, save=False)
         return 0
 
+    def _read_statements(self, page):
+        """The statements list, from one load of the statements page.
+
+        A sign-in page or a security check goes to the person at the
+        console, and the list is asked for once more after they have dealt
+        with it. Nothing else is tried twice. This used to open the page,
+        open it again, load it fresh and load it once more after a
+        failure, and a business account's settings came back all four
+        times (#61)."""
+        try:
+            return site.collect_download_docs(page)
+        except site.SessionExpired:
+            if not (site.looks_signed_out(page) or site.detect_security_challenge(page)):
+                raise
+            self.check_session(page)
+        return site.collect_download_docs(page)
+
+    def _say_sent_elsewhere(self, e, stopping: bool = False) -> None:
+        """What the run saw instead of the statements, and what would show
+        this app the way. Said once, with no traceback."""
+        print(f"\n!! PayPal opened {e.where} instead of the statements page.")
+        if e.business:
+            print("   That is a business account's settings page, not a sign-in page,")
+            print("   so signing in again would not change it. This app has only been")
+            print("   shown where a personal account keeps its monthly statements.")
+        else:
+            print("   That is not a sign-in page, and not a page this app knows.")
+        if stopping:
+            print("   So the run stops here rather than load it again. Nothing was")
+            print("   downloaded.")
+        print("   Either of these would show this app the way to your statements.")
+        print("     Record, then click your way to one monthly statement in the")
+        print("       browser window and open it, then stop the recording. Nothing")
+        print("       you type is recorded.")
+        print("     Diagnose, which reads the page and downloads nothing.")
+        print('   Both are under "more" in the panel, or --record and --diagnose')
+        print("   from a terminal. Read the file it writes in the Diagnostics")
+        print("   folder, then attach it to the PayPal issue on GitHub.")
+
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
         n_new = 0
-        # Be on the statements page, then ask for the list.
-        if not site.goto_documents(page):
-            self.check_session(page)
-            site.goto_documents(page)
-        self.check_session(page)
         try:
-            docs = site.collect_download_docs(page)
-        except site.SessionExpired:
-            self.check_session(page)
-            docs = site.collect_download_docs(page)
+            docs = self._read_statements(page)
+        except site.SentElsewhere as e:
+            self._say_sent_elsewhere(e, stopping=True)
+            raise SystemExit(0)
+        except site.SessionExpired as e:
+            # Once, and in words. It used to leave as a traceback.
+            print(f"\n!! PayPal did not hand over the statements list ({e}).")
+            print("   Nothing was downloaded. If the browser window asks you to sign")
+            print("   in, sign in there and run this again. If it stops here again,")
+            print("   run Diagnose and attach its file to the PayPal issue on GitHub.")
+            raise SystemExit(0)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()

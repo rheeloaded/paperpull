@@ -30,6 +30,17 @@ NOT COVERED
   Custom date-range statements are a request PayPal prepares, and are
   never submitted. Statements older than three years are not online.
 
+  Business accounts. Asked for the statements address, PayPal sent a
+  tester's business account to /businessmanage/account/accountAccess, its
+  settings page (#61). PayPal's public help sends people to
+  /reports/accountStatements for monthly statements instead, where a month
+  is requested and prepared before it can be downloaded. Nobody has
+  recorded that page or its requests, so none of it is built. Landing on
+  any other PayPal page that is not a sign-in page or a security check
+  raises SentElsewhere, and the run stops once and names the page. It used
+  to call the page a sign-in page and load the statements address four
+  times.
+
 SAFETY (this account moves money):
   Strictly READ-ONLY. This module makes the two requests above and nothing
   else. It never sends or requests money, transfers a balance, applies
@@ -80,6 +91,11 @@ URLS = {
 
 LOGIN_URL_MARKERS = ["/signin", "/signout", "/login", "/authflow", "/checkpoint",
                      "/stepup", "/challenge"]
+
+# Where PayPal keeps a business account's settings. A business account asked
+# for the statements address is sent here (#61). It is not a sign-in page,
+# and there is nothing on it for this app to read.
+BUSINESS_PATHS = ("/businessmanage/",)
 
 # ---------------------------------------------------------------------------
 # HARD SAFETY GUARD. Tuned for a wallet that moves money. This app clicks
@@ -262,6 +278,69 @@ class SessionExpired(RuntimeError):
     """PayPal answered with a sign-in page instead of the thing asked for."""
 
 
+class SentElsewhere(RuntimeError):
+    """PayPal sent the tab to one of its own pages that is neither the
+    statements nor a sign-in page nor a security check. A business
+    account's settings is the one seen (#61). Loading the statements
+    address again lands there again, and signing in changes nothing, so
+    the run stops and names the page. `where` is its address as
+    page_named() gives it, and `business` says it is a business account's."""
+
+    def __init__(self, where: str, business: bool = False):
+        super().__init__("PayPal opened %s instead of the statements page" % where)
+        self.where = where
+        self.business = business
+
+
+# One part of an address that is a plain word, "businessmanage" or
+# "accountAccess". Anything else, a part with a digit in it above all, is
+# where a site puts an account or a transaction, and is not repeated.
+_PLAIN_PART_RE = re.compile(r"[A-Za-z][A-Za-z_-]{0,39}")
+
+
+def page_named(url: str) -> str:
+    """A page's address as a message may say it. The path only, and of that
+    only the parts that are plain words, each other part as "...". The
+    query is left off. A person may paste the message into a public issue,
+    so it is built from what may be said rather than cleaned afterwards.
+    The host is named only when it is not www.paypal.com."""
+    try:
+        u = urlparse(url or "")
+        host = u.hostname or ""
+    except ValueError:
+        return "..."
+    parts = [p if _PLAIN_PART_RE.fullmatch(p) else "..." for p in u.path.split("/") if p]
+    path = "/" + "/".join(parts)
+    return path if host == "www.paypal.com" else "%s%s" % (host if is_safe_url(url) else "...", path)
+
+
+def is_business_page(url: str) -> bool:
+    """One of the pages where PayPal keeps a business account's settings."""
+    try:
+        path = urlparse(url or "").path.lower()
+    except ValueError:
+        return False
+    return is_safe_url(url) and path.startswith(BUSINESS_PATHS)
+
+
+def landed_elsewhere(page) -> str:
+    """Where the tab is, as page_named() says it, when that is a PayPal page
+    other than the statements and it is not a sign-in page or a security
+    check. "" for anything else, so a sign-in or a check still goes to the
+    person and a page off paypal.com is never named as PayPal's.
+
+    Every page that was not the statements used to be called a sign-in
+    page. A business account's settings was one, and the run went round the
+    sign-in check and the statements address four times before it stopped
+    with a traceback (#61)."""
+    url = page.url or ""
+    if not is_safe_url(url) or on_myaccount(page) or looks_signed_out(page):
+        return ""
+    if detect_security_challenge(page):
+        return ""
+    return page_named(url)
+
+
 # ---------------------------------------------------------------------------
 # Requests, made from inside the signed-in page
 # ---------------------------------------------------------------------------
@@ -352,14 +431,26 @@ class RawDoc:
     kind: str = "statement"
 
 
-def collect_download_docs(page) -> List[RawDoc]:
-    """Every monthly statement the site lists. `href` is the download
-    address, built back from the month so nothing else rides along."""
-    if not goto_documents(page, fresh=True):
-        raise SessionExpired("PayPal showed a sign-in page")
+def _listed(page) -> List[RawDoc]:
     return [RawDoc(title=s["title"], date_text=s["date"], href=s["href"],
                    text=f"PayPal {s['title']}")
             for s in list_statements(page)]
+
+
+def collect_download_docs(page) -> List[RawDoc]:
+    """Every monthly statement the site lists. `href` is the download
+    address, built back from the month so nothing else rides along.
+
+    The statements page is loaded once here. Another PayPal page that is
+    not a sign-in page or a security check raises SentElsewhere. A sign-in
+    page, a check, or a page off paypal.com raises SessionExpired."""
+    if not goto_documents(page, fresh=True):
+        where = landed_elsewhere(page)
+        if where:
+            raise SentElsewhere(where, business=is_business_page(page.url or ""))
+        raise SessionExpired("PayPal showed a sign-in page" if looks_signed_out(page)
+                             else "the PayPal statements page did not open")
+    return _listed(page)
 
 
 def parse_href(href: str) -> str:
@@ -457,9 +548,12 @@ def survey(page, dwell_ms: int = 2000, max_follow: int = 0) -> dict:
 
 
 def collect_documents(page) -> List[RawDoc]:
-    """Used only by --diagnose. The same list discovery reads."""
+    """Used only by --diagnose, which has opened the statements page
+    already. The same list discovery reads, asked for from the page the tab
+    is on. It used to load the statements address again first, one more
+    trip to a business account's settings page (#61)."""
     try:
-        return collect_download_docs(page)
+        return _listed(page)
     except Exception:
         return []
 

@@ -25,6 +25,11 @@ date-range statements are a request PayPal prepares, and are never
 submitted. PayPal keeps three years online, so run this at least once a
 year to keep a full history.
 
+**Business accounts are not covered yet.** Asked for these statements,
+PayPal sent a tester's business account to its settings page instead, and
+the run stops there and says so. A Record of opening one monthly statement
+on a business account is what it would take to add them (#61).
+
 ## Sign-in
 
 Sign-in uses your own installed Edge or Chrome, in a separate profile. You
