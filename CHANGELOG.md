@@ -69,6 +69,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
   that names the purchase itself. GitHub's payment history shows a
   payment's own date and amount, so it passes as that payment's receipt,
   and only a check of the page before it is printed can tell them apart.
+- **Golden 1 names a card under a heading in the plural (#35).** The
+  tester's card sits under the vendor's heading "Credit Cards / Home
+  Equity Lines of Credit", and the app looked for card as a whole word,
+  so the card was read as an account and its statements were saved as
+  Account Statement. Credit cards in the plural now counts, and a bare
+  Cards still does not. Only a panel the plural alone reads as a card
+  changes. It takes the key its own heading gives it, every other panel
+  keeps the key it had, and a card and a home equity line under the same
+  heading are both left as they were. Its statements saved under a key
+  its own heading gave are carried to the card's on the next Discover,
+  with whether they were downloaded and where the file is, so Rename
+  gives the files the card's name and they are not fetched again. Ones it
+  saved as the page's first panel, a key another panel may hold since,
+  are listed again under the card's name instead, a second copy being the
+  price of never passing one account's statement to another. The heading
+  names a home equity line as well, and the only member known to have it
+  holds a card, so it is read as a card's.
 
 ## [0.41.0] - 2026-09-29
 
@@ -2123,7 +2140,7 @@ A prerelease for the Kroger tester. Latest stays 0.29.0.
 - **Amazon reads any country's store.** `marketplace` in `config.json`
   (`amazon.co.uk`, `amazon.de`, `amazon.ca` and eleven more, default
   `amazon.com`) points the app at that store and moves the host allowlist
-  with it. Money is found by shape, `£12.99` and `12,99 €` alike, and
+  with it. Money is found by shape, `Â£12.99` and `12,99 â‚¬` alike, and
   written back in one canonical form. Dates read in the store's order,
   including `5 January 2025` and `5. Januar 2025`. On a store whose pages
   are not in English every URL asks for English, which Amazon remembers.
@@ -3018,10 +3035,10 @@ item below is a real defect that was found and fixed, not a precaution.
   This mattered beyond one app: `docs/adding-a-provider.md` recommends cloning
   `dominion` for statement providers, so every new app inherited it.
 - **Contributor docs sent people onto a port already in use.** The issue
-  template and PR checklist said "9222–9232 are taken; use 9233+" and
+  template and PR checklist said "9222â€“9232 are taken; use 9233+" and
   CONTRIBUTING said "9234+", but Gap is 9233 and UKG is 9234. A colliding port
   makes two apps share one browser profile, which has previously merged two
-  accounts' documents. All four documents now say 9222–9234 taken, 9235+ free.
+  accounts' documents. All four documents now say 9222â€“9234 taken, 9235+ free.
 - **`.gitignore` covered every output folder except `Pay Statements`**, the
   UKG one, holding the most sensitive documents in the project. PDFs were
   already ignored by `*.pdf`, so nothing leaked, but the folder was the only

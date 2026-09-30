@@ -85,7 +85,12 @@ paperpull golden1 pilot            REM once the site layer is confirmed
   only by its date, with NEXT under the list. The app opens each panel,
   a closed one through its own heading, presses its Statement History,
   reads every page by NEXT, and closes the dialog again. A statement
-  from a card's panel is a Credit Card Statement, and a download goes
+  from a card's panel is a Credit Card Statement, a heading that says
+  credit cards in the plural included, as "Credit Cards / Home Equity
+  Lines of Credit" does. Statements saved earlier under the account's
+  name and its heading's own words or number are carried to the card's
+  on the next Discover, so Rename renames the files instead of fetching
+  them again. A download goes
   back to the statement's own panel and pages to its date. The only new
   things pressed are a panel's heading, which names no money moving,
   NEXT and Close, each matched by its whole label.

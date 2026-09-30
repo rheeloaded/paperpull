@@ -548,6 +548,11 @@ class RawDoc:
     # read from the one date around it. The orchestrator trusts a list
     # read from labels enough to retire what is no longer on it (#35).
     dated_by: str = ""
+    # The title and account this statement was saved under before its panel
+    # was read as the other kind, when that happened, so its record is
+    # carried to the new ones rather than the statement listed again (#35).
+    legacy_title: str = ""
+    legacy_account: str = ""
 
 
 # The date a bill control belongs to. The control's own name first, then
@@ -1032,7 +1037,17 @@ MAX_HISTORY_PAGES = 20
 # A panel whose heading says card holds the card's statements. The guard
 # refuses the word card on a control, so a panel heading has a guard of
 # its own, the money-moving words without it.
-CARD_PANEL_RE = re.compile(r"\b(visa|master\s*card|credit\s+card|card)\b", re.I)
+# The plural counts only as "credit cards" or "mastercards". The member's
+# card sits under the vendor's heading "Credit Cards / Home Equity Lines of
+# Credit", which the singular missed, so its statements were saved as an
+# account's (#35). A bare "Cards" can head debit or gift cards, which hold no
+# card's statements. The heading names a home equity line as well, and the
+# only member we know of with it holds a card, so it is read as a card's.
+CARD_PANEL_RE = re.compile(r"\b(visa|master\s*cards?|credit\s+cards?|card)\b", re.I)
+# The rule before plurals. Every panel it reads keeps the kind and key it
+# gave, and only a panel the plural alone reads as a card changes, in
+# _assign_kinds.
+_CARD_PANEL_RE_SINGULAR = re.compile(r"\b(visa|master\s*card|credit\s+card|card)\b", re.I)
 PANEL_HEADING_FORBIDDEN_RE = re.compile(
     r"(transfer|zelle|\bwire\b|\bpay\b|payment|deposit|withdraw|send\s+money|"
     r"close\s+account|\bcancel|\bdelete|\bremove|\block\b|activate|replace|dispute)", re.I)
@@ -1221,7 +1236,11 @@ _HEADING_WORDS = (
     "member", "membership", "money", "market", "mortgage", "platinum", "premier",
     "premium", "rewards", "savings", "secured", "share", "signature", "statement",
     "statements", "travel", "visa")
-_HEADING_WORD_RE = re.compile(r"\b(%s)\b" % "|".join(_HEADING_WORDS), re.I)
+# A plural counts as its word, "Cards" as card and "Lines" as line (#35).
+# Longest first, so a word the list holds in the plural, statements, is
+# still given as it is written.
+_HEADING_WORD_RE = re.compile(
+    r"\b(%s)s?\b" % "|".join(sorted(_HEADING_WORDS, key=len, reverse=True)), re.I)
 
 # A masked account number in a heading, "****4321", "x4321", "...4321" or
 # "ending in 4321", with the suffix a credit union writes after a member
@@ -1237,9 +1256,16 @@ _MONTH_WORD_RE = re.compile(
     r"oct(ober)?|nov(ember)?|dec(ember)?)$", re.I)
 
 
+_HEADING_WORD_OF = {w.casefold(): w for w in _HEADING_WORDS}
+
+
 def _heading_words(text: str) -> List[str]:
-    """The words from the list above that `text` carries, lowercase."""
-    return sorted({m.group(1).lower() for m in _HEADING_WORD_RE.finditer(text or "")})
+    """The words from the list above that `text` carries, each given as the
+    list writes it. A letter the match folds, a long s say, never reaches a
+    trace as the page wrote it."""
+    found = (_HEADING_WORD_OF.get(m.group(1).casefold())
+             for m in _HEADING_WORD_RE.finditer(text or ""))
+    return sorted({w for w in found if w})
 
 
 def _panel_facts(panel: dict) -> dict:
@@ -1298,12 +1324,61 @@ def history_panels(page) -> List[dict]:
     except Exception as e:
         log.info("could not read the account panels: %s", e)
         return []
-    for p in got:
-        p["card"] = bool(CARD_PANEL_RE.search(p.get("heading") or ""))
+    _assign_kinds(got)
     return got
 
 
+def _own_key(panel: dict) -> str:
+    """The key a panel's own heading gives it, its masked number or its
+    words, or ""."""
+    return _masked_key(panel) or _words_key(panel)
+
+
+def _assign_kinds(panels: List[dict]) -> None:
+    """Each panel's kind, account key and what its statements were saved
+    under, set in place as "card", "account_key" and "legacy".
+
+    Every panel keeps the kind and the key 0.41.0 gave it, so nothing it
+    saved is listed again, except a panel only the plural reads as a card
+    (#35). That one becomes a card's and takes the key its own heading
+    gives it, never the empty key or a place, which the saved statements of
+    another panel may hold. When its heading's key is not its alone, it
+    stays what it was, since two panels sharing a key would pass one
+    account's statements to the other. A member with a card and a home
+    equity line under the same heading keeps both as they were.
+
+    `legacy` is the (kind, account) its statements were saved under, and
+    only when that too came from its own heading. A place or the empty key
+    it held before may since belong to another panel's statements, if the
+    page changed, so those are left where they are (review before release)."""
+    for p in panels:
+        p["card"] = bool(_CARD_PANEL_RE_SINGULAR.search(p.get("heading") or ""))
+    for p in panels:
+        p["account_key"] = _account_by_place(panels, p)
+        p["legacy"] = None
+    taken = {p["account_key"] for p in panels if p["card"]}
+    for p in panels:
+        if p["card"] or not CARD_PANEL_RE.search(p.get("heading") or ""):
+            continue
+        mine = _own_key(p)
+        if not mine or mine in taken or sum(1 for q in panels if _own_key(q) == mine) != 1:
+            continue
+        old = p["account_key"]
+        p["card"], p["account_key"] = True, mine
+        taken.add(mine)
+        if old and not re.fullmatch(r"account \d+", old):
+            p["legacy"] = (ACCOUNT_TITLE, old)
+
+
 def _panel_account(panels: List[dict], panel: dict) -> str:
+    """The panel's account key, as _assign_kinds gave it, or as a panel's
+    place among those of its kind gives it for a panel read elsewhere."""
+    if "account_key" in panel:
+        return panel["account_key"]
+    return _account_by_place(panels, panel)
+
+
+def _account_by_place(panels: List[dict], panel: dict) -> str:
     """What tells this panel's statements from another panel's of the same
     kind. The first panel of a kind keeps an empty account, which is what
     every statement saved before round six was keyed by, so nothing is
@@ -1515,19 +1590,21 @@ def _panel_for(panels: List[dict], title: str, account: str) -> Optional[dict]:
     and the first panel of the kind when no account was kept."""
     card = (title or "").startswith(CARD_TITLE)
     same = [p for p in panels if p["card"] == card]
-    if not same:
-        return None
-    if account:
-        return next((p for p in same if _panel_account(panels, p) == account), None)
-    return same[0]
+    # The empty key is looked up like any other. The first panel of a kind
+    # in page order held it until a card only the plural reads could come
+    # first, and then a Visa's statements were looked for in the other
+    # card's history, where a statement of the same day was saved as the
+    # Visa's (review before release).
+    return next((p for p in same if _panel_account(panels, p) == account), None)
 
 
 def _read_dated_list(page, kind: str, account: str, seen: set,
-                     fresh_only: bool = False) -> List[RawDoc]:
+                     fresh_only: bool = False, legacy=None) -> List[RawDoc]:
     """The statements on the history page showing, each named by nothing
     but its date, as this panel's kind of statement. Only statements that
     show are read, and only those drawn after the last press when
-    `fresh_only`, so a list left over from another account is not (#35)."""
+    `fresh_only`, so a list left over from another account is not (#35).
+    `legacy` is the (kind, account) they were saved under before, if any."""
     docs: List[RawDoc] = []
     try:
         loc = _controls_named(page, DATE_ONLY_CONTROL_RE).filter(visible=True)
@@ -1554,7 +1631,9 @@ def _read_dated_list(page, kind: str, account: str, seen: set,
         docs.append(RawDoc(title=f"{kind} - {disp}", account=account, date_text=iso,
                            href=href if PDF_HREF_RE.search(href or "") else "",
                            text=f"Golden 1 {kind} {disp}", row_index=i,
-                           kind="statement", dated_by="label"))
+                           kind="statement", dated_by="label",
+                           legacy_title=f"{legacy[0]} - {disp}" if legacy else "",
+                           legacy_account=legacy[1] if legacy else ""))
     return docs
 
 
@@ -1589,12 +1668,14 @@ def _read_every_panel(page, panels: List[dict], trace: Optional[list]) -> List[R
         expand_all(page)
         kind = CARD_TITLE if panel["card"] else ACCOUNT_TITLE
         account = _panel_account(now, panel)
+        legacy = panel.get("legacy")
         fresh_only = opened.get("list") != SHOWN
         pages = found = 0
         stopped, waits = "", []
         while True:
             pages += 1
-            got = _read_dated_list(page, kind, account, seen, fresh_only=fresh_only)
+            got = _read_dated_list(page, kind, account, seen, fresh_only=fresh_only,
+                                   legacy=legacy)
             docs += got
             found += len(got)
             if pages >= MAX_HISTORY_PAGES:

@@ -416,6 +416,7 @@ class App:
         doc = Document(title=title, category=category, summary=summary,
                        date=date, confidence=confidence, source_url=source_url,
                        account=(r.account or "").strip())
+        self._carry_over(doc, r)
         self._listed_keys.add(doc.key)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
@@ -427,6 +428,98 @@ class App:
         return 0
 
     _listed_keys: set = set()
+
+    def _carry_over(self, doc: Document, r) -> None:
+        """Moves a statement's records from the title and account it was saved
+        under to the ones its panel gives it now, once.
+
+        A heading in the plural moved the member's card from the account kind
+        to the card kind, so its statements, saved as Account Statement, would
+        otherwise be listed again as new and fetched a second time, beside the
+        files already saved (#35). The record keeps whether it was downloaded
+        and where the file is, and takes the new title and name, which is what
+        Rename then renames the file to, and it keeps the title it came from.
+        Only a record at exactly the old key moves, never over one already at
+        the new key, and each store moves on its own, so a run stopped between
+        the two saves finishes the move on the next Discover rather than
+        listing the statement again as new. The site gives an old key only
+        when the panel's own heading made it (review before release)."""
+        legacy_title = (getattr(r, "legacy_title", "") or "").strip()
+        if not legacy_title:
+            return
+        legacy_category, _, _ = doc_types.classify_document(legacy_title, self.rules)
+        old = Document(title=legacy_title, category=legacy_category, date=doc.date,
+                       account=(getattr(r, "legacy_account", "") or "").strip())
+        if old.key == doc.key:
+            return
+        moved = False
+        for store in (self.progress, self.discovery):
+            if store.get(doc.key) is not None or store.get(old.key) is None:
+                continue
+            rec = store.data.pop(old.key)
+            rec.update(title=doc.title, account=doc.account, summary=doc.summary,
+                       category=doc.category, confidence=doc.confidence,
+                       carried_from=legacy_title)
+            store.data[doc.key] = rec
+            moved = True
+        if moved:
+            self.__dict__.setdefault("_carried", []).append(doc.key)
+
+    def _carry_index_rows(self) -> int:
+        """Gives the index row of each carried statement its new title and
+        name, so Rename matches the saved file to its record by date and title
+        and renames it.
+
+        A row is matched by the title its record came from and the record's
+        whole file path, and only when exactly one row has both, never by the
+        title alone, since another account can hold a statement of that kind
+        on the same day, and never by the bare file name, which a file in
+        Manual Review, or a name freed by a deleted file, can share with
+        another account's (review before release). It is worked out from
+        progress on every Discover, so a row left behind by a stopped run or
+        by an index open in another program is put right by a later one, and
+        a record whose row is put right is marked, so that no row written
+        after, under a path a deleted file freed, is ever taken for its."""
+        wanted = {}
+        for key, rec in self.progress.data.items():
+            if isinstance(rec, dict) and rec.get("carried_from") and rec.get("pdf_path") \
+                    and not rec.get("index_carried"):
+                wanted[(rec["carried_from"], str(rec["pdf_path"]).strip())] = key
+        if not wanted:
+            return 0
+        try:
+            rows = self.index_csv.read_all()
+            have, found = set(), {}
+            for n, row in enumerate(rows):
+                pair = ((row.get("Document Title") or "").strip(),
+                        (row.get("PDF Full Path") or "").strip())
+                have.add(pair)
+                if pair in wanted:
+                    found.setdefault(pair, []).append(n)
+            done, changed = [], 0
+            for pair, key in wanted.items():
+                rec = self.progress.get(key) or {}
+                if ((rec.get("title") or "").strip(), pair[1]) in have:
+                    done.append(key)    # put right by an earlier run whose mark was lost
+                    continue
+                at = found.get(pair, [])
+                if len(at) != 1:
+                    continue
+                rows[at[0]]["Document Title"] = rec.get("title") or ""
+                rows[at[0]]["Document Summary"] = rec.get("summary") or ""
+                changed += 1
+                done.append(key)
+            if changed:
+                self.index_csv.rewrite(rows)
+            if done:
+                for key in done:
+                    self.progress.data[key]["index_carried"] = True
+                self.progress.save()
+            return changed
+        except OSError as e:
+            log.info("the index could not take the carried titles yet, "
+                     "the next Discover tries again: %s", e)
+            return 0
 
     def _retire_unlisted(self, docs) -> int:
         """Forget discovered documents the vendor's own list no longer names.
@@ -483,10 +576,16 @@ class App:
         self._discovery_trace = []
         docs = site.collect_download_docs(page, trace=self._discovery_trace)
         self._listed_keys = set()
+        self._carried = []
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self._retire_unlisted(docs)
+        # Progress first, since it is the one that says a statement is done.
+        # A run stopped before discovery is saved finishes the move next time.
+        if self._carried:
+            self.progress.save(backup=True)
         self.discovery.save()
+        self._carry_index_rows()
         log.info("documents page: %d documents, %d new", len(docs), n_new)
 
         self.stats["discovered"] = len(self.discovery.data)
@@ -513,6 +612,12 @@ class App:
             # tester to paste (#35).
             for line in site.discovery_lines(self._discovery_trace):
                 print(f"  {line}")
+            if self._carried:
+                saved = sum(1 for k in self._carried
+                            if (self.progress.get(k) or {}).get("pdf_filename"))
+                print(f"  {len(self._carried)} statement(s) now carry their account's new name, "
+                      f"{saved} of them already saved. Those are not downloaded again. "
+                      f"Rename gives the saved files the new name.")
         return n_new
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
