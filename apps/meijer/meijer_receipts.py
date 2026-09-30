@@ -84,6 +84,10 @@ def ask(prompt: str) -> str:
 class App:
     _journal = None
     _requests = None
+    # Purchases in a row whose list did not show on either look, and how
+    # many of those end the run (see _list_did_not_load).
+    _lists_missed = 0
+    LISTS_MISSED_TO_STOP = 3
 
     def __init__(self, args):
         self.args = args
@@ -516,7 +520,16 @@ class App:
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if self._already_done(purchase):
-                print("  Already completed and PDF verified - skipping.")
+                rec = self.progress.get(purchase.key) or {}
+                if (rec.get("state") == State.NEEDS_MANUAL_REVIEW.value
+                        and not rec.get("downloaded_ok")):
+                    # A copy put aside counts as done while it is in Manual
+                    # Review. It never passed its check, and this line used
+                    # to say it had, to a tester asking why it was skipped (#42).
+                    print("  Put aside in Manual Review by an earlier run, so it is skipped. "
+                          "Delete it there to have it fetched again.")
+                else:
+                    print("  Already completed and PDF verified - skipping.")
                 self.stats["skipped_completed"] += 1
                 continue
             # Which document the run is on, so a failure file says how far
@@ -622,10 +635,7 @@ class App:
             out_path = unique_path(folder, filename, self.config["max_path_length"],
                                    distinguisher=purchase.order_number)
             trace: list = []
-            site.goto_orders(page)
-            trace.append({"note": "the purchase's tab",
-                          "opened": site.show_tab_for(page, purchase.purchase_type)})
-            body = site.press_row_receipt(page, purchase, trace)
+            body, listed = self._press_its_row(page, purchase, trace)
             if body:
                 purchase.document_type = "Receipt"
                 self._record_state(purchase, State.RECEIPT_LOCATED)
@@ -644,6 +654,8 @@ class App:
                 self._write_attempt(page, purchase, trace)
                 return False
             self._write_attempt(page, purchase, trace)
+            if not listed:
+                return self._list_did_not_load(purchase)
         if not url or not site.is_receipt_address(url):
             self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                                notes="The order row carries no receipt or details link")
@@ -699,6 +711,61 @@ class App:
             self._record_state(purchase, State.FAILED, notes=f"PDF generation failed: {e}")
             self.stats["failed"] += 1
             return False
+
+    def _press_its_row(self, page, purchase: Purchase, trace: list):
+        """The receipt from the purchase's own row, as (its bytes or None,
+        whether its list showed on either look).
+
+        The orders page is opened on the purchase's tab and its rows are
+        waited for before the row is pressed. When that gives nothing the
+        page is opened once more, after a pause, and the row looked for
+        again. His Run All met a page holding only the list's heading after
+        most of the list had been saved, looked once, and wrote the purchase
+        down as a row with no receipt (#42)."""
+        listed = False
+        for look in range(2):
+            if look:
+                self._delay(2)
+            site.goto_orders(page)
+            # The page just opened is the one the row is read from, so it is
+            # the one checked. Only the page the previous purchase left
+            # behind used to be.
+            while self.check_session(page):
+                site.goto_orders(page)
+            shown = site.show_list_for(page, purchase.purchase_type)
+            trace.append({"note": "the purchase's tab", "opened": bool(shown.get("opened")),
+                          "rows": int(shown.get("rows") or 0)})
+            if not shown.get("rows"):
+                continue
+            listed = True
+            self._lists_missed = 0
+            body = site.press_row_receipt(page, purchase, trace)
+            if body:
+                return body, True
+        return None, listed
+
+    def _list_did_not_load(self, purchase: Purchase) -> bool:
+        """A purchase whose tab showed no rows on either look.
+
+        Its row was never seen, so it is not written down as a row without a
+        receipt, and the next run looks for it again. One of them never ends
+        the run. Three in a row do, since Meijer is then not answering, and
+        asking again for every purchase left would only ask it more often."""
+        self._lists_missed += 1
+        self._record_state(purchase, State.FAILED,
+                           notes=f"The {purchase.purchase_type} list did not load")
+        self.stats["failed"] += 1
+        self.write_failure("open the purchase list", "the list did not load")
+        print(f"  The {purchase.purchase_type} list did not load, so this receipt was not "
+              "looked for. The next run looks for it again.")
+        if self._lists_missed >= self.LISTS_MISSED_TO_STOP:
+            self.progress.save(backup=True)
+            print(f"\n!! The {purchase.purchase_type} list did not load for "
+                  f"{self._lists_missed} purchases in a row.")
+            print("Meijer may be slowing requests down, so nothing more is asked of it now.")
+            print("Wait a while, then press Resume to carry on from where this stopped.")
+            raise SystemExit(0)
+        return False
 
     def _capture_document(self, target_page, purchase: Purchase,
                           out_path: Path, content_kind: str = "") -> None:
@@ -951,8 +1018,17 @@ class App:
             if fn:
                 path = Path(rec.get("pdf_path", ""))
                 exists = path.exists()
+                size, pages = rec.get("pdf_size"), rec.get("pdf_pages")
+                # Only a receipt that passed its check has its size and pages
+                # written down, so one put aside in Manual Review read "? bytes,
+                # ? pages" here while it was on disk (#42). It is measured.
+                if exists and (size in (None, "") or pages in (None, "")):
+                    facts = site.pdf_facts(path)
+                    size = facts.get("bytes") if size in (None, "") else size
+                    pages = facts.get("pages") if pages in (None, "") else pages
                 print(f"    PDF exists: {exists}  "
-                      f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
+                      f"({'?' if size in (None, '') else size} bytes, "
+                      f"{'?' if pages in (None, '') else pages} pages)")
                 if not exists:
                     problems.append(f"{p.key}: PDF missing")
             if state in (State.NEEDS_MANUAL_REVIEW.value, State.FAILED.value,

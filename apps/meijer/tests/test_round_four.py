@@ -107,9 +107,13 @@ def test_a_date_is_matched_however_the_row_prints_it():
 
 
 def test_the_receipt_step_opens_the_purchases_tab_before_pressing():
+    import inspect
     src = (Path(site.__file__).parent / "meijer_receipts.py").read_text(encoding="utf-8")
-    block = src.split("def _save_receipt")[1]
-    assert block.index("show_tab_for") < block.index("press_row_receipt")
+    # Since round six the tab is opened, and its rows waited for, by
+    # show_list_for, in the step that presses the row.
+    block = src.split("def _press_its_row")[1].split("\n    def ")[0]
+    assert block.index("show_list_for") < block.index("press_row_receipt")
+    assert "show_tab_for" in inspect.getsource(site.show_list_for)
 
 
 # -- what an earlier version left behind ---------------------------------------

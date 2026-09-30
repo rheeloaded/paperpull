@@ -101,6 +101,9 @@ def _pressing(monkeypatch, *bodies):
     monkeypatch.setattr(site, "looks_signed_out", lambda page: False)
     monkeypatch.setattr(site, "goto_orders", lambda page, page_no=1: None)
     monkeypatch.setattr(site, "show_tab_for", lambda page, t: True)
+    # and the tab shows its list (round six)
+    monkeypatch.setattr(site, "show_list_for", lambda page, t, wait_ms=None: {"opened": True, "rows": 1},
+                        raising=False)
     monkeypatch.setattr(site, "press_row_receipt", press)
     return presses
 

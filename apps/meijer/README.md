@@ -109,11 +109,15 @@ already on your machine is used and not the bundled one.
   `printToPDF`. Nothing is submitted, no button is pressed, and the native
   print dialog is never involved. Files land in `Online\` as
   `YYYY-MM-DD Meijer <Category> Receipt.pdf`.
-- **A receipt that fails its check**, that it mentions Meijer or the
-  purchase, is taken once more, and put aside in `Manual Review\` if it
-  fails again. It counts as done while it is there, so a later run does
-  not fetch it again. Delete it from `Manual Review\` to have the next run
-  try it again.
+- **A receipt that fails its check**, that its words are this purchase's,
+  is taken once more, and put aside in `Manual Review\` if it fails again.
+  It counts as done while it is there, so a later run does not fetch it
+  again. Delete it from `Manual Review\` to have the next run try it again.
+- **A list that does not show** is waited for, then the orders page is
+  opened once more. A purchase whose list never shows is left for the next
+  run, and the run goes on to the next purchase. Three of those in a row
+  stop the run, so Meijer is not asked again and again while it is not
+  answering. Wait a while, then press **Resume**.
 - **In-store purchases** are the open question. Meijer shows them as
   digital receipts under mPerks when the loyalty account is linked, and
   where that list lives is the first thing the Diagnose file will settle.

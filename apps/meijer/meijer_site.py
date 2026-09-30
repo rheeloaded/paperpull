@@ -51,6 +51,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -378,7 +379,10 @@ _COLLECT_ROWS_JS = r"""
       label: a.getAttribute('aria-label') || a.getAttribute('title') || '',
       download: a.hasAttribute('download'),
     }));
-    out.push({text: (r.innerText || '').trim().slice(0, 600), links});
+    // Whether the row is drawn at all. A row on a hidden tab still hands
+    // back its text, and it cannot be pressed.
+    out.push({text: (r.innerText || '').trim().slice(0, 600), links,
+              shown: r.getClientRects().length > 0});
     if (out.length >= 400) break;
   }
   return out;
@@ -508,6 +512,51 @@ def show_tab_for(page, purchase_type: str) -> bool:
     so an in-store receipt was looked for on a tab that only ever said
     there were no orders, and Pilot pressed nothing ten times (#42)."""
     return open_tab(page, TAB_IN_STORE_RE if purchase_type == IN_STORE else TAB_ONLINE_RE)
+
+
+def rows_showing(page, purchase_type: str) -> int:
+    """How many rows of a purchase's kind the page is drawing now, In-Store
+    rows for a store receipt and the others for an online order. Nothing is
+    waited for."""
+    try:
+        raw = page.evaluate(_COLLECT_ROWS_JS, FALLBACK["row"]) or []
+    except Exception:
+        return 0
+    in_store = purchase_type == IN_STORE
+    return sum(1 for r in raw if r.get("shown")
+               and bool(IN_STORE_ROW_RE.search(r.get("text") or "")) == in_store)
+
+
+# How long the orders page is given to show a purchase's tab and its rows.
+LIST_WAIT_MS = 30000
+
+
+def show_list_for(page, purchase_type: str, wait_ms: Optional[int] = None) -> dict:
+    """Show the tab a purchase's row lives on, and wait until its rows show.
+
+    The tab is looked for until it is there, and pressed once. Its rows are
+    then waited for, up to `wait_ms` in all. His Run All, after most of
+    the list had been saved from the same page, met one drawing only the
+    list's heading and a line under it, with no tabs and no rows. It looked
+    for the tab once, and for the row for ten seconds, and wrote the
+    purchase down as a row with no receipt (#42).
+
+    Returns what it found, whether the tab was pressed ("opened") and how
+    many rows of the purchase's kind are showing ("rows"). No rows is a list
+    that did not come."""
+    wait_ms = LIST_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    opened, rows = False, 0
+    while True:
+        if not opened:
+            opened = show_tab_for(page, purchase_type)
+        rows = rows_showing(page, purchase_type)
+        if rows or time.monotonic() >= deadline:
+            return {"opened": opened, "rows": rows}
+        try:
+            page.wait_for_timeout(1000)
+        except Exception:
+            return {"opened": opened, "rows": rows}
 
 
 def row_controls(page, purchase, facts: Optional[dict] = None):
