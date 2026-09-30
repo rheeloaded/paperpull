@@ -241,14 +241,29 @@ def restore_print(page) -> None:
         pass
 
 
+# What the page is laid out for now. Playwright cannot be asked what it was
+# told to emulate, so the page is asked what it matches.
+_MEDIA_NOW = "() => matchMedia('print').matches ? 'print' : 'screen'"
+
+
 def print_page_to_pdf(page, out_path: Path) -> None:
     """Render the current page to a PDF file via CDP Page.printToPDF.
 
-    Applies print media emulation first so print-specific CSS is used.
+    Applies print media emulation first so print-specific CSS is used, then
+    puts back the media the page was in, print only when a caller had set
+    it. This used to end with emulate_media(media=None), which in Playwright
+    for Python leaves the emulation as it is ("null" takes it off). The page
+    stayed in print through every navigation after it, so everything an app
+    read after its first print was read in the printed layout, and the tab
+    somebody was watching showed that layout until the run ended.
     Raises on failure so the caller can fall back.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        before = page.evaluate(_MEDIA_NOW)
+    except Exception:
+        before = None
     try:
         page.emulate_media(media="print")
     except Exception:
@@ -268,7 +283,7 @@ def print_page_to_pdf(page, out_path: Path) -> None:
         out_path.write_bytes(data)
     finally:
         try:
-            page.emulate_media(media=None)
+            page.emulate_media(media="print" if before == "print" else "null")
         except Exception:
             pass
 

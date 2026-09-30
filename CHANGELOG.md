@@ -25,6 +25,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   asks again if the person pressed Enter before they had signed in. A run
   from the control panel was never affected, since it stops there and
   waits for Resume.
+- **A printed page goes back to the screen.** Most receipt apps save a
+  purchase by printing its page, and the page was switched to print media
+  for that and never switched back. The call meant to undo it,
+  `emulate_media(media=None)`, leaves the emulation as it is in Playwright
+  for Python, where only "null" takes it off. So from a run's first printed
+  purchase to the end of the run, every page the app read was read in its
+  printed layout, the next purchase's page included, and the tab being
+  watched showed that layout until the app let go of the browser. Walmart
+  read the items of a run's later purchases without their quantities, every
+  one on an in-store purchase and most on an online order. Saved runs show
+  it, and a purchase read once each way differs in nothing else. The other
+  receipt apps with saved runs to compare show no difference between a run's
+  first purchase and the rest. Now the page goes back to the media it was
+  in, so every purchase is read the way a run's first always was, and a
+  check across the repository refuses any call that tries to put the media
+  back with None. Purchases already saved keep what they were read with.
 
 ## [0.41.0] - 2026-09-29
 
