@@ -7,6 +7,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A receipt's date and total count only as numbers of their own.**
+  Costco, GitHub, Kroger and Meijer accept a receipt that prints the date
+  and total their list showed for a purchase, and the two were looked for
+  as plain text, so "1/19/26" was found inside "11/19/26" and "1.23"
+  inside "31.23". A January 19 purchase of $1.23 would have kept November
+  19's receipt for $31.23 as its own. Each now has to stand as a number of
+  its own, with no digit touching either end, while a till's spaced out
+  print and a date followed by a time still match. Measured on real saved
+  receipts, no receipt's own date and total stopped matching.
+
 ## [0.41.1] - 2026-09-30
 
 Repairs from testers' reports on 0.41.0. American Family finds its

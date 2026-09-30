@@ -199,6 +199,40 @@ def test_the_date_alone_or_the_total_alone_is_not_enough(tmp_path):
     assert not check(tmp_path, other_date, tokens).ok
 
 
+JANUARY_ROW = {"purchase_date": "2026-01-19", "total": "$1.23"}
+
+
+def january_purchase():
+    return Purchase(order_number="pexample0119", purchase_date="2026-01-19", total="$1.23")
+
+
+def test_a_date_and_total_inside_longer_numbers_are_not_this_purchases(tmp_path):
+    """A January 19 purchase of $1.23 and a November 19 receipt for $31.23.
+    "1/19/26" sits inside "11/19/26" and "1.23" inside "31.23", and a plain
+    search took the one for the other (found by another session measuring
+    main, 2026-09-30)."""
+    receipt_pdf.bind(MEIJER)
+    november = ["MEIJER STORE 000", "11/19/26 14:02", "SUBTOTAL 29.40", "TAX 1.83",
+                "TOTAL 31.23", "THANK YOU"]
+    tokens = receipt_pdf.expected_tokens_for(january_purchase(), listed=JANUARY_ROW)
+    assert not check(tmp_path, november, tokens).ok
+
+
+def test_its_own_date_and_total_name_it_however_they_are_spaced(tmp_path):
+    """The purchase's own receipt still passes, with a time after the date,
+    with a dollar sign, and spaced out a letter at a time the way a till can
+    print, long enough that it is a page and not a scan's few words."""
+    receipt_pdf.bind(MEIJER)
+    tokens = receipt_pdf.expected_tokens_for(january_purchase(), listed=JANUARY_ROW)
+    for lines in (["MEIJER STORE 000", "01/19/26 14:02", "SUBTOTAL 1.15", "TAX 0.08",
+                   "TOTAL 1.23", "THANK YOU"],
+                  ["MEIJER STORE 000", "Jan 19, 2026", "SUBTOTAL $1.15", "TAX $0.08",
+                   "TOTAL $1.23", "THANK YOU"],
+                  ["M E I J E R", "0 1 / 1 9 / 2 6   1 4 : 0 2", "S U B T O T A L   1 . 1 5",
+                   "T A X   0 . 0 8", "T O T A L   1 . 2 3", "T H A N K   Y O U"]):
+        assert check(tmp_path, lines, tokens).ok, lines
+
+
 def test_the_pair_is_the_lists_and_not_the_page_that_was_misread(tmp_path):
     """The online order's card showed no date, so the list gives no pair.
     The date the misread page wrote into the purchase is never used, since

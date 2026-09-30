@@ -476,8 +476,30 @@ class Together(tuple):
     """Facts that name a purchase only together.
 
     Each member is the list of ways one fact might print, and every member
-    has to be found somewhere in the text. See expected_tokens_for for the
-    one pair asked for this way, a date and a total."""
+    has to be found somewhere in the text, each as a number of its own (see
+    _on_its_own). See expected_tokens_for for the one pair asked for this
+    way, a date and a total."""
+
+
+def _on_its_own(variant, text_lower: str) -> bool:
+    """Whether a way of printing a date or an amount is in the text as that
+    number, and not as the end of a longer one.
+
+    A plain search found "1/19/26" inside "11/19/26" and "1.23" inside
+    "31.23", so a January 19 purchase of $1.23 took a November 19 receipt
+    for $31.23 as its own (2026-09-30). So a digit may not touch the front of
+    one that starts with a digit, nor a point or a comma joining it to one,
+    and a digit may not touch the end of one that ends with a digit.
+    Whitespace may fall between its characters, since a till can print a
+    receipt a letter at a time, and a date followed by a time is still that
+    date."""
+    v = re.sub(r"\s+", "", str(variant or "").lower())
+    if not v:
+        return False
+    body = r"\s*".join(re.escape(ch) for ch in v)
+    before = r"(?<![0-9.,])" if v[0].isdigit() else ""
+    after = r"(?![0-9])" if v[-1].isdigit() else ""
+    return re.search(before + body + after, text_lower) is not None
 
 
 def validate_pdf(path: Path, min_bytes: int = 3000,
@@ -536,7 +558,8 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
 
             def _found(tok) -> bool:
                 if isinstance(tok, Together):
-                    return all(any(_has(v) for v in fact if v) for fact in tok)
+                    return all(any(_on_its_own(v, text_lower) for v in fact if v)
+                               for fact in tok)
                 return _has(tok)
 
             provider = _provider_words()

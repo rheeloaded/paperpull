@@ -73,6 +73,18 @@ def test_a_page_naming_only_meijer_is_put_aside(tmp_path):
     assert filed.path.parent.name == "Manual Review" and filed.path.exists()
 
 
+def test_a_till_receipt_whose_numbers_only_hold_the_rows_is_put_aside(tmp_path):
+    """A January 19 purchase of $1.23, and November 19's receipt for $31.23,
+    whose date and total hold the row's inside longer numbers."""
+    row = {"purchase_date": "2026-01-19", "total": "$1.23", "order_number": "pexample0119"}
+    january = Purchase(purchase_type=IN_STORE, order_number="pexample0119",
+                       purchase_date="2026-01-19", total="$1.23",
+                       items=[Item(name="1234 Example Rd, Anytown MI")])
+    november = [ln.replace("09/19/26", "11/19/26").replace("22.37", "31.23") for ln in TILL]
+    filed = file_a_receipt(receipt_app(app_mod, tmp_path), january, november, listed=row)
+    assert not filed.kept and not filed.record.get("downloaded_ok")
+
+
 def test_another_days_till_receipt_is_put_aside(tmp_path):
     other = [ln.replace("09/19/26", "09/12/26").replace("22.37", "31.23") for ln in TILL]
     filed = file_a_receipt(receipt_app(app_mod, tmp_path), till_purchase(), other, listed=ROW)
