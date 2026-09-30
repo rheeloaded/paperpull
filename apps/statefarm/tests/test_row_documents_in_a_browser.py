@@ -586,10 +586,12 @@ def test_a_failed_press_is_not_made_through_the_page_once_the_control_changed(pa
 
 
 def test_a_revealed_document_the_guard_refuses_says_so_without_its_description(tmp_path):
-    """The guard reads a revealed document's whole name, and "Limited"
-    holds "limit". It stays refused. The trace says it was a document the
-    guard refused, which "another control" could not."""
-    rows = [("03/14/2026", "Renewal Notice - 2017 Invented Limited")]
+    """A description that acts is refused, however well the name is shaped.
+    The trace says it was a document the guard refused, and the guard's own
+    word for why, which "another control" could not. A money noun in a
+    description, "Limited" on a vehicle say, no longer refuses a document
+    (#37, test_a_description_that_names_money)."""
+    rows = [("03/14/2026", "Renewal Notice - Cancel 2017 Invented Limited")]
     driver, browser, pg = _drive(lambda: PAGE % _row_html(rows=rows))
     try:
         out = tmp_path / "doc.pdf"
@@ -599,7 +601,7 @@ def test_a_revealed_document_the_guard_refuses_says_so_without_its_description(t
         assert not out.exists() and len(pg.context.pages) == 1
         assert [t["control"] for t in trace if t.get("note") == "clicked"] == ["View Documents0"]
         [row] = [t for t in trace if t.get("note") == "the row's documents"]
-        assert row["appeared"] == ["Renewal Notice - ..., refused by the guard"], row
+        assert row["appeared"] == ["Renewal Notice - ..., refused by the guard for cancel"], row
         assert row["refused_by_the_guard"] == 1 and row["look_like_documents"] == 0, row
         [said] = [t for t in trace if t.get("note") == "no revealed document was pressed"]
         assert said["why"] == "what the row revealed looks like a document and the guard refuses it"
@@ -748,10 +750,12 @@ def test_a_revealed_document_with_a_long_name_is_found_and_saved(tmp_path):
 
 
 def test_a_refused_word_past_the_sixtieth_character_still_keeps_the_press_away(tmp_path):
-    """The name that appeared is cut before "Limited", which the guard
-    refuses. The node found is read whole and the guard is asked again."""
-    name = "Renewal Notice - 2021 Invented Motorworks Grand Tourer Touring Limited"
-    assert "limit" not in name[:site._CUT_AT].lower() and site.is_revealed_document(name[:site._CUT_AT])
+    """The name that appeared is cut before "pay now", which the guard
+    refuses anywhere in a description. The node found is read whole and the
+    guard is asked again."""
+    name = "Renewal Notice - 2021 Invented Motorworks Grand Tourer Touring, pay now"
+    assert "pay" not in name[:site._CUT_AT].lower() and site.is_revealed_document(name[:site._CUT_AT])
+    assert not site.is_revealed_document(name)
     driver, browser, pg = _drive(lambda: PAGE % _row_html(rows=[("03/14/2026", name)]))
     try:
         out = tmp_path / "doc.pdf"
@@ -763,7 +767,7 @@ def test_a_refused_word_past_the_sixtieth_character_still_keeps_the_press_away(t
         [said] = [t for t in trace if t.get("note") == "no revealed document was pressed"]
         assert said["why"] == "the guard refuses the document's whole name", said
         written = json.dumps(trace)
-        assert "Limited" not in written and "Invented" not in written, written
+        assert "Motorworks" not in written and "Invented" not in written, written
     finally:
         browser.close()
         driver.stop()
@@ -1684,9 +1688,11 @@ def test_an_address_that_is_not_https_says_so():
 def test_a_control_is_named_from_a_list():
     assert site._label_mask("View Documents2") == "View Documents2"
     assert site._label_mask("Renewal Notice - 2017 Invented Roadster") == "Renewal Notice - ..."
-    assert site._label_mask("Renewal Notice - 2017 Invented Limited") == \
-        "Renewal Notice - ..., refused by the guard"
-    assert site._label_mask("Pay Now - Payment Receipt") == "another type - ..., refused by the guard"
+    assert site._label_mask("Renewal Notice - 2017 Invented Limited") == "Renewal Notice - ..."
+    assert site._label_mask("Renewal Notice - Cancel 2017 Invented Limited") == \
+        "Renewal Notice - ..., refused by the guard for cancel"
+    assert site._label_mask("Pay Now - Payment Receipt") == \
+        "another type - ..., refused by the guard for pay"
     assert site._label_mask("Quilted Umbrella Rider - Jane Q Invented") == "another type - ..."
     assert site._label_mask("Download PDF") == "download pdf"
     assert site._label_mask("Jane Q Invented") == "another control"

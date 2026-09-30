@@ -545,34 +545,160 @@ def reveal_documents(page, limit: int = 20) -> int:
 REVEALED_DOC_RE = re.compile(r"^\s*[A-Za-z][A-Za-z0-9&/'(). ]{1,60}?\s+-\s+\S.{0,80}$")
 
 
+# A revealed document's description, after the dash, names what the
+# document is about, a vehicle, a policy, how a payment was made. The whole
+# guard read a money noun there as a control that pays, "Payments" in the
+# list's own "Payment Receipt - Billing/Payments", and his Payment Receipt of
+# 2025-03-11 was never fetched (#37). A description is read three ways. It is
+# refused when it tells someone to do something, a verb at its start or one
+# of a few commands anywhere in it, and when it asks to sign in.
+_DESCRIPTION_ACTION_RE = re.compile(
+    r"^\s*(pay|transfer|send|request|move|apply|activate|replace|lock|unlock|enroll|unenroll|"
+    r"enable|disable|change|edit|update|modify|manage|set\s+up|delete|remove|cancel|dispute|"
+    r"confirm|submit|agree|accept|authorize|consent|certify|add|renew|stop|schedule|close|"
+    r"open|withdraw|deposit|buy|sell|place\s+(an\s+)?order|rebalance|reallocate|liquidate|"
+    r"turn\s+(on|off)|opt\s*(in|out)|save\s+(changes?|settings?|preferences?)|"
+    r"sign\s+(up|in|on)|log\s*in|chat|contact|call)\b"
+    r"|\bpay\s+(now|online|today|(your|my|the)\s+(bill|premium|balance))\b|"
+    r"\bmake\s+(a\s+)?payment|\bsign\s+up\b|\bfile\s+a\s+claim|\breport\s+(a\s+)?claim|"
+    r"\brenew\s+now|\bstart\s+(a\s+)?quote|\b(send|move|request)\s+money", re.I)
+
+# And the description faces the whole guard too, less the few nouns a
+# document is known to be named by, and only in the shape they take. A money
+# noun is let off only when it is the whole description, the category a
+# receipt is listed under or how it was paid, and Limited only in a vehicle's
+# name, a model year and the plain words of a make and model. A word nobody
+# has seen on a document is still refused, and the trace says which. Reviews
+# before release found a list of verbs alone letting through every way of
+# saying pay, switch or file that it did not name, "Switch to autopay" and
+# "Go paperless", and a noun let off wherever it sat carrying a verb in,
+# "Use this card ending 4321", "Switch to Limited Tort", a coverage election.
+_WHOLE_NOUN_RE = re.compile(
+    r"billing\s*/\s*payments?"
+    r"|\b((credit|debit)\s+)?card\s+ending(\s+in)?\s+[\dxX*\u2022.]{2,}"
+    r"|auto\s*pay|payments?|wire|bill\s*pay", re.I)
+# A vehicle's name, a model year and words that each start with a letter or
+# a digit, so a lone dash or slash cannot join a second clause to it. Its
+# Limited is the trim only at the end, or before Edition, a drive or a
+# powertrain word, since "2025 Switch to Limited Tort" is shaped like a
+# vehicle too (a third review before release).
+_VEHICLE_RE = re.compile(r"(19|20)\d\d(\s+[A-Za-z0-9][A-Za-z0-9&'./-]*)+")
+_LIMITED_TRIM_RE = re.compile(
+    r"\blimited(?=(\s+(edition|awd|fwd|rwd|4wd|4x4|platinum|hybrid))*$)", re.I)
+
+
+def _description_left(description: str) -> str:
+    """What of a description faces the whole guard. Nothing when the whole
+    of it is one of the known nouns, a vehicle's name less its trim Limited,
+    else all of it."""
+    text = " ".join((description or "").split())
+    if _WHOLE_NOUN_RE.fullmatch(text):
+        return ""
+    if _VEHICLE_RE.fullmatch(text):
+        return _LIMITED_TRIM_RE.sub(" ", text)
+    return text
+
+
+def _description_rules(description: str):
+    """The (text, rule) pairs a description is read by, in order."""
+    left = _description_left(description)
+    return [(description, _DESCRIPTION_ACTION_RE), (description, AUTH_CONTROL_RE),
+            (left, FORBIDDEN_CONTROL_RE), (left, SETTINGS_CONTROL_RE)]
+
+
+_DOCUMENT_PARTS_RE = re.compile(r"^\s*(.+?)\s+-\s+(.*?)\s*$")
+
+
+def _document_parts(label: str):
+    """(type, description) of a name shaped like a revealed document, split
+    at the first dash, or None."""
+    m = _DOCUMENT_PARTS_RE.match(" ".join((label or "").split()))
+    return (m.group(1), m.group(2)) if m else None
+
+
 def is_revealed_document(label: str) -> bool:
     """A document link a row revealed, once the guard has had its say.
-    The forbidden words are checked first, so "Pay Now - Payment Receipt"
-    is refused however well it is shaped."""
-    label = (label or "").strip()
-    if not label:
+
+    The type, before the dash, faces the whole guard, so "Pay Now - Payment
+    Receipt" is refused however well it is shaped. The description, after
+    it, faces the words that act, and the whole guard too once the nouns a
+    document is known to be named by are taken out of it (#37)."""
+    label = " ".join((label or "").split())
+    if not label or VIEW_DOCUMENTS_RE.match(label) or not REVEALED_DOC_RE.match(label):
         return False
-    if FORBIDDEN_CONTROL_RE.search(label):
+    parts = _document_parts(label)
+    if parts is None:
         return False
-    if SETTINGS_CONTROL_RE.search(label) or AUTH_CONTROL_RE.search(label):
+    kind, description = parts
+    if _guard_refuses_words(kind):
         return False
-    if VIEW_DOCUMENTS_RE.match(label):
+    return not any(rule.search(text) for text, rule in _description_rules(description))
+
+
+def _guard_refuses_name(text: str, want=None) -> bool:
+    """The guard on a whole name, the name a control gives a screen reader
+    say. A name shaped like a revealed document, and of the wanted type
+    when `want` is given, is read the way a document's own words are.
+    Anything else faces the whole guard, since "Make a - payment" is shaped
+    like a document and its type is nobody's."""
+    text = " ".join((text or "").split())
+    if not text:
         return False
-    return bool(REVEALED_DOC_RE.match(label))
+    if REVEALED_DOC_RE.match(text) and not VIEW_DOCUMENTS_RE.match(text) and \
+            (want is None or _type_key(text) == want):
+        return not is_revealed_document(text)
+    return _guard_refuses_words(text)
 
 
 def _refused_document(label: str) -> bool:
     """Shaped like a revealed document and refused by the guard.
 
-    The guard reads the whole name, the description included, so a vehicle
-    whose description holds one of its words ("Limited" holds "limit") is
-    refused like a control that pays. That is the safe way round and stays.
     The trace used to call such a document "another control", which cannot
     be told from something that is not a document at all (#37)."""
     label = " ".join((label or "").split())
     if not label or VIEW_DOCUMENTS_RE.match(label) or not REVEALED_DOC_RE.match(label):
         return False
     return not is_revealed_document(label)
+
+
+# The words a trace may give for why the guard refused a document, the
+# guard's own and nothing the page printed. A match not listed here is
+# "another word".
+_GUARD_WORDS = frozenset([
+    "transfer", "zelle", "wire", "pay", "payment", "bill pay", "billpay", "autopay", "auto pay",
+    "deposit", "withdraw", "send money", "request money", "move money", "apply", "loan",
+    "borrow", "card", "cards", "replace", "activate", "lock", "unlock", "pin", "limit",
+    "overdraft", "alert", "alerts", "budget", "goal", "reward", "rewards", "offer", "offers",
+    "enroll", "unenroll", "sign up", "paperless", "delivery preference", "enable", "disable",
+    "change", "edit", "update", "modify", "manage", "set up", "delete", "remove", "cancel",
+    "dispute", "password", "passcode", "username", "profile", "settings", "preferences",
+    "contact info", "address", "confirm", "submit", "agree", "accept", "authorize", "chat",
+    "contact us", "beneficiar", "nickname", "order checks", "stop payment", "claim", "claims",
+    "file a claim", "coverage", "quote", "roadside", "agent", "contact agent", "policy change",
+    "renew now", "drive safe", "send", "request", "move", "stop", "schedule", "close", "open",
+    "add", "sign in", "sign on", "login", "log in", "call", "contact", "make a payment",
+    "make payment", "pay now", "pay online", "pay today", "report a claim", "report claim",
+    "start a quote", "start quote", "consent", "certify", "buy", "sell", "place order",
+    "place an order", "rebalance", "reallocate", "liquidate", "turn on", "turn off", "opt in",
+    "opt out", "optin", "optout", "save changes", "save change", "save settings",
+    "save setting", "save preferences", "save preference", "withholding", "authorization",
+    "application", "beneficiary", "beneficiaries", "set up"])
+
+
+def _refusing_word(label: str) -> str:
+    """The guard's own word for why it refused a revealed document, from
+    _GUARD_WORDS, else "another word". Nothing the page printed leaves."""
+    parts = _document_parts(label)
+    if parts is None:
+        return "another word"
+    kind, description = parts
+    checks = [(kind, FORBIDDEN_CONTROL_RE), (kind, SETTINGS_CONTROL_RE), (kind, AUTH_CONTROL_RE)]
+    for text, rule in checks + _description_rules(description):
+        m = rule.search(text)
+        if m:
+            word = " ".join(m.group(0).lower().split())
+            return word if word in _GUARD_WORDS else "another word"
+    return "another word"
 
 
 def _type_key(text: str) -> str:
@@ -673,7 +799,7 @@ def _label_mask(label: str) -> str:
     if is_revealed_document(text):
         return "%s - ..." % _type_word(text)
     if _refused_document(text):
-        return "%s - ..., refused by the guard" % _type_word(text)
+        return "%s - ..., refused by the guard for %s" % (_type_word(text), _refusing_word(text))
     if _SECOND_STEP_RE.match(text):
         return text.lower()[:30]
     return "another control"
@@ -734,21 +860,32 @@ def _visible_named(page, text: str, whole: bool = False) -> list:
     return []
 
 
-_DOC_NAME_JS = "el => [el.innerText || '', el.getAttribute('aria-label') || '', el.isConnected]"
+# Every name a screen reader may give the node, aria-label, the text of the
+# elements aria-labelledby points at, and title, each asked of the guard. The
+# node is found by any of them, so reading aria-label alone let a control
+# labelled elsewhere as one that pays through (#37).
+_DOC_NAME_JS = r"""el => {
+  const by = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+    .map(id => { const n = document.getElementById(id); return n ? (n.textContent || '') : ''; })
+    .join(' ');
+  return [el.innerText || '', el.getAttribute('aria-label') || '', by,
+          el.getAttribute('title') || '', el.isConnected];
+}"""
 
 
 def _doc_name(el) -> Optional[dict]:
-    """A revealed document's whole name, its aria-label and whether it is on
-    the page, read off the node in one call, or None."""
+    """A revealed document's whole name, the names it gives a screen reader
+    and whether it is on the page, read off the node in one call, or None."""
     try:
         got = el.evaluate(_DOC_NAME_JS)
     except Exception:
         return None
-    if not isinstance(got, list) or len(got) != 3:
+    if not isinstance(got, list) or len(got) != 5:
         return None
-    text, aria, connected = got
-    return {"name": " ".join(str(text or "").split()), "aria": " ".join(str(aria or "").split()),
-            "connected": bool(connected)}
+    text, aria, labelled_by, title, connected = got
+    names = [" ".join(str(n or "").split()) for n in (aria, labelled_by, title)]
+    return {"name": " ".join(str(text or "").split()), "aria": names[0],
+            "names": [n for n in names if n], "connected": bool(connected)}
 
 
 def _guard_refuses_words(text: str) -> bool:
@@ -798,7 +935,7 @@ def _revealed_document(page, appeared: set, title: str):
         return None, "", "the control found by that name does not read as that document"
     # Its own words start with the type and the start of the description it
     # was found by, so only the guard is asked again, about the whole name.
-    if not is_revealed_document(name) or (read["aria"] and _guard_refuses_words(read["aria"])):
+    if not is_revealed_document(name) or any(_guard_refuses_name(n, want) for n in read["names"]):
         return None, "", "the guard refuses the document's whole name"
     return el, name, ""
 

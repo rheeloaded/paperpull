@@ -86,6 +86,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   price of never passing one account's statement to another. The heading
   names a home equity line as well, and the only member known to have it
   holds a card, so it is read as a card's.
+- **State Farm presses a document whose description names money (#37).**
+  A Payment Receipt whose list entry carried no file address was never
+  saved, because the guard read the document's whole name, and the
+  list's own name for it, "Payment Receipt - Billing/Payments", holds a
+  word the guard refuses on a control. A revealed document's type, before
+  the dash, still faces the whole guard and has to be the type the list
+  gives. Its description faces the words that act, and the whole guard
+  too, less a few nouns in their own shape, a description that is only
+  Billing/Payments, Payments, Autopay, Wire, Bill Pay or a card ending in
+  its digits, and Limited in a vehicle's name. Anything else in a
+  description still keeps the press away, and the trace now says which
+  of the guard's own words did. Every name a screen reader may give the
+  control, from aria-labelledby and title as well as aria-label, is asked
+  too.
 
 ## [0.41.0] - 2026-09-29
 

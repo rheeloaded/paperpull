@@ -134,7 +134,12 @@ paperpull statefarm pilot            REM once the site layer is confirmed
   from inside the page with the session's own cookies. Otherwise its row
   is found by its date, the row's View Documents is pressed once, and the
   document the row reveals is pressed only once it has passed the guard
-  and sits inside the one row on the page that carries that date. The PDF
+  and sits inside the one row on the page that carries that date. Its
+  type, before the dash, faces the whole guard and has to be the type the
+  list gives. Its description faces the whole guard as well, less a
+  description that is only Billing/Payments or how a payment was made,
+  and the trim Limited in a vehicle's name, so those no longer keep a
+  document away. The PDF
   it opens is caught and saved to `Statements\` or `Insurance Documents\`.
   A document from an earlier year is looked for in the list of its own
   year.
