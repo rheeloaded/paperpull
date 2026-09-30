@@ -667,3 +667,66 @@ def test_a_date_written_in_pieces_is_read_whole(billing):
     script = "document.getElementById('when').append('09', '/', '12', '/', '2026');"
     page = billing(_page(row, script))
     assert [d.date_text for d in site.collect_download_docs(page)] == ["2026-09-12"]
+
+
+# -- from the tester's recording on 0.41.0 --------------------------------------------------
+
+def _marked_row(date: str, words: str, title: str = "View statement") -> str:
+    """One row of the statements list the way his recording shows it, a row
+    marked with a test id, and in it a link with no address marked
+    statementPDF, holding an icon, a short word and another icon."""
+    return ("<div data-cy='statementRow'><div><div><span>Statement date %s</span> <span>$123.45</span></div>"
+            "<div><a class='link' data-cy='statementPDF' title='%s' onclick=\"openPdf('%s')\">"
+            "<div style='display:inline-block;width:12px;height:12px'></div><span>PDF</span>"
+            "<div style='display:inline-block;width:12px;height:12px'></div></a></div></div></div>"
+            % (date, title, words))
+
+
+def test_the_statement_link_his_recording_pressed_is_found(billing, tmp_path):
+    """A link with no address has no link role, and "PDF" is not a
+    statement's words, so discovery on his billing page found nothing."""
+    page = billing(_page("<div data-cy='statements'>"
+                         + _marked_row("09/12/2026", "statement 09/12/2026")
+                         + _marked_row("08/12/2026", "statement 08/12/2026")
+                         + _marked_row("07/12/2026", "statement 07/12/2026") + "</div>"))
+    assert [d.date_text for d in site.collect_download_docs(page)] == [
+        "2026-09-12", "2026-08-12", "2026-07-12"]
+    out = tmp_path / "Statements" / "2026-08-12 American Family Account Statement.pdf"
+    assert site.download_bill(page, tmp_path / ".amfam-downloads", "2026-08-12", out) is True
+    assert b"statement 08/12/2026" in out.read_bytes()
+    assert page.evaluate("window.__paid") is False
+
+
+@pytest.mark.parametrize("title", ["Go paperless", "Enroll in paperless billing", "Set up autopay"])
+def test_a_marked_link_whose_words_refuse_is_never_pressed(billing, tmp_path, title):
+    page = billing(_page(_marked_row("09/12/2026", "statement 09/12/2026", title=title)))
+    assert site.collect_download_docs(page) == []
+    out = tmp_path / "Statements" / "2026-09-12 American Family Account Statement.pdf"
+    assert site.download_bill(page, tmp_path / ".amfam-downloads", "2026-09-12", out) is False
+    assert not out.exists()
+
+
+def test_two_marked_links_in_one_row_are_left_alone(billing):
+    """Which statement each one opens cannot be told."""
+    row = ("<div data-cy='statementRow'><span>Statement date 09/12/2026</span> "
+           "<a data-cy='statementPDF' title='View statement' onclick=\"openPdf('first')\"><span>PDF</span></a> "
+           "<a data-cy='statementPDF' title='View statement' onclick=\"openPdf('second')\"><span>PDF</span></a>"
+           "</div>")
+    page = billing(_page(row))
+    assert site.collect_download_docs(page) == []
+
+
+def test_a_billing_page_with_nothing_to_take_writes_the_failure_file(monkeypatch):
+    """His Pilot found nothing and finished with no file to send."""
+    import amfam_docs
+    app = object.__new__(amfam_docs.App)
+    app.stats = {}
+    written = []
+    app.page = lambda: object()
+    app.check_session = lambda page: None
+    app.write_failure = lambda step, reason, *a, **k: written.append((step, reason))
+    app.discovery = type("D", (), {"data": {}, "save": lambda self: None})()
+    monkeypatch.setattr(amfam_docs.site, "goto_documents", lambda page: True)
+    monkeypatch.setattr(amfam_docs.site, "collect_download_docs", lambda page: [])
+    app.cmd_discover(quiet=True)
+    assert written == [("find the statements", "the billing page showed no statement to take")]

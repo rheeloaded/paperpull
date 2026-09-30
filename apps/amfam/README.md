@@ -78,18 +78,23 @@ paperpull amfam pilot             REM once the site layer is confirmed
 - **You sign in** in that window. The tool reuses the signed-in tab.
 - **Documents and billing.** Discovery reads Billing & Payments,
   myaccount.amfam.com/billing, where your statements are, and no other
-  page. A control is read only when the whole of its words is a read verb
-  and a statement's name, such as "View bill", "View statement" or "View
-  billing statement for September 2026", with nothing after it but a date,
-  a policy's last digits or "opens in a new tab", and every word it shows
-  or announces passes the guard. A bare "View" or "Download PDF" is read
-  only from a row of its own that names a bill or statement and no other
-  document or payment. The date comes from the control's name or the row it sits in,
-  and of a row's several dates only the one written right before as the
-  statement's own is taken, never where another is the next or a previous
-  statement's. A press is refused
-  where another control sits at its center. Anything that changes how statements arrive, online, by mail,
-  by text, paperless, reminders or renewals, is refused.
+  page. A statement's control is found two ways. One is the link American
+  Family marks for its own tests as `statementPDF`, a link with no address
+  and no statement words of its own, which is what a tester's recording
+  pressed. The other is a control whose whole words are a read verb and a
+  statement's name, such as "View bill", "View statement" or "View billing
+  statement for September 2026", with nothing after it but a date, a
+  policy's last digits or "opens in a new tab". Either way every word it
+  shows or announces passes the guard, and a press is refused where
+  another control sits at its center. A bare "View" or "Download PDF" is
+  read only from a row of its own that names a bill or statement and no
+  other document or payment. The date comes from the control's words or
+  its own row, and of a row's several dates only the one written right
+  before as the statement's own is taken, never where the row names the
+  next or a previous statement. A row with two marked links is left alone.
+  Anything that changes how statements arrive, online, by mail, by text,
+  paperless, reminders or renewals, is refused. A billing page with
+  nothing to take writes the failure file.
 - **Downloads.** A row that links straight to a PDF is fetched from inside
   the page with the session's own cookies. Otherwise the row's control is
   clicked, once it has passed the guard, and whatever the site does, a

@@ -195,7 +195,14 @@ RATE_LIMIT_MARKERS = [
 # ---------------------------------------------------------------------------
 # Fallback selectors (used by --diagnose only)
 # ---------------------------------------------------------------------------
+# RECORDED (#45, on 0.41.0). The tester's recording of opening a statement
+# pressed <a data-cy="statementPDF">, a link with no address, so it has no
+# link role and no words of a statement's own, and every search by role and
+# words found nothing on his billing page. The site's own test id names it.
+STATEMENT_PDF_SELECTOR = '[data-cy="statementPDF"]'
+
 FALLBACK = {
+    "statement_pdf": STATEMENT_PDF_SELECTOR,
     "doc_row": ("table tbody tr, [role='row'], [class*='statement'], [class*='Statement'], "
                 "li[class*='document'], [class*='document']"),
     "doc_link": "a[href*='.pdf'], a[download], button[class*='download']",
@@ -419,9 +426,31 @@ def dismiss_overlay(page) -> None:
 
 
 def _bill_controls(page):
-    """Every control on the page whose name says it fetches a document.
-    The words are this provider's, the rest is the core's."""
-    return _controls_named(page, BILL_CONTROL_RE)
+    """Every control on the page whose name says it fetches a document, and
+    every one the site marks as a statement's PDF. The words are this
+    provider's, the rest is the core's."""
+    return _controls_named(page, BILL_CONTROL_RE).or_(page.locator(STATEMENT_PDF_SELECTOR))
+
+
+def _marked(el) -> bool:
+    """Whether the site marks this control as a statement's PDF."""
+    try:
+        return bool(el.evaluate("(e, s) => e.matches(s)", STATEMENT_PDF_SELECTOR))
+    except Exception:
+        return False
+
+
+def _safe_to_press(el, name: str) -> bool:
+    """The guard's answer for a control about to be pressed. One the site
+    marks as a statement's PDF has no statement words of its own, so every
+    word it shows or announces is checked instead."""
+    if _marked(el):
+        try:
+            words = el.evaluate(_WORDS_OF_JS) or []
+        except Exception:
+            return False
+        return not any(_refused(w) for w in words)
+    return is_safe_control(name)
 
 
 def _looks_like_billing(page) -> bool:
@@ -536,9 +565,10 @@ class RawDoc:
 # whole list, whose summary said "billing statement was issued 09/12/2026",
 # and a payment plan agreement was saved as that statement (review of
 # 0.41.0).
-_ROW_OF_JS = r"""(el, pattern) => {
+_ROW_OF_JS = r"""(el, arg) => {
   const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/i;
-  const bill = new RegExp(pattern, 'i');
+  const bill = new RegExp(arg.pattern, 'i');
+  const marked = (c) => c.matches(arg.marked);
   const wordsOf = (c) => ((c.getAttribute('aria-label') || c.innerText || '')).replace(/\s+/g, ' ').trim();
   const rowOf = (c) => {
     let node = c, depth = 0;
@@ -551,9 +581,13 @@ _ROW_OF_JS = r"""(el, pattern) => {
   const mine = rowOf(el);
   if (!mine) return '';
   for (const c of mine.querySelectorAll('a, button, [role=button], [role=link]')) {
-    if (c === el || el.contains(c) || c.contains(el) || !bill.test(wordsOf(c))) continue;
+    if (c === el || el.contains(c) || c.contains(el)) continue;
+    if (!bill.test(wordsOf(c)) && !marked(c)) continue;
     const theirs = rowOf(c);
     if (theirs && theirs !== mine && mine.contains(theirs)) return '';
+    // Two statement PDFs the site marks in one row, and which statement
+    // each one opens cannot be told (review of #45).
+    if (theirs === mine && marked(c) && marked(el)) return '';
   }
   // Each visible piece of text with a space between, since spans that
   // touch run their words together in innerText, "10/01/2026Next bill
@@ -733,12 +767,18 @@ def _statement_controls(page):
     ctrls = _bill_controls(page)
     for i in range(ctrls.count()):
         el = ctrls.nth(i)
+        marked = _marked(el)
         try:
             name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
+            if marked and not name:
+                name = (el.get_attribute("title") or "").strip()
         except Exception:
             continue
         name = re.sub(r"\s+", " ", name)
-        if not is_safe_control(name) or not BILL_CONTROL_RE.search(name):
+        # A control the site marks as a statement's PDF is one by the site's
+        # own word, and has none of its own to match, so only the guard's
+        # check of every word below applies to it.
+        if not marked and (not is_safe_control(name) or not BILL_CONTROL_RE.search(name)):
             continue
         try:
             words = el.evaluate(_WORDS_OF_JS) or []
@@ -747,12 +787,14 @@ def _statement_controls(page):
         if any(_refused(w) for w in words):
             continue
         try:
-            row = el.evaluate(_ROW_OF_JS, BILL_CONTROL_RE.pattern) or {}
+            row = el.evaluate(_ROW_OF_JS, {"pattern": BILL_CONTROL_RE.pattern,
+                                           "marked": STATEMENT_PDF_SELECTOR}) or {}
         except Exception:
             row = {}
         row_text = str(row.get("text") or "") if isinstance(row, dict) else ""
         row_flat = str(row.get("flat") or "") if isinstance(row, dict) else ""
-        if not _STATEMENT_WORDS_RE.search(name) and not _row_names_a_statement(row_text, row_flat):
+        if (not marked and not _STATEMENT_WORDS_RE.search(name)
+                and not _row_names_a_statement(row_text, row_flat)):
             continue
         iso = _statement_date(name, row_text, row_flat)
         if iso:
@@ -1005,7 +1047,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     if el is None:
         log.info("no document control found for %s", iso_date)
         return False
-    if not is_safe_control(label):
+    if not _safe_to_press(el, label):
         log.info("refusing unsafe control %r for %s", label, iso_date)
         return False
 

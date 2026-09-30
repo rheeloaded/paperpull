@@ -424,6 +424,11 @@ class App:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
         log.info("Statements & Documents page: %d documents, %d new", len(docs), n_new)
+        if not docs:
+            # Finding nothing is written down too. A Pilot that found nothing
+            # finished with no file to send, and the page it read is the
+            # thing to look at (#45).
+            self.write_failure("find the statements", "the billing page showed no statement to take")
 
         self.stats["discovered"] = len(self.discovery.data)
 
