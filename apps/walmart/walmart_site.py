@@ -36,6 +36,7 @@ from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core import receipt_pdf
 from storage import now_iso
 
 log = logging.getLogger("walmart_receipts.site")
@@ -796,11 +797,12 @@ def find_printing_frame(page, wait_ms: int = 6000):
         for frame in page.frames:
             if frame == page.main_frame:
                 continue
-            try:
-                if frame.evaluate("() => window.__targetReceiptsPrintCalled === true"):
-                    return frame
-            except Exception:
-                continue
+            # Asked of the core, whose hook makes the mark. This used to read
+            # the mark by the name Walmart's own hook (a copy of Target's)
+            # gave it, which the core's never set, so from the move onto the
+            # core no frame was found this way.
+            if receipt_pdf.was_print_called(frame):
+                return frame
         page.wait_for_timeout(500)
     return find_receipt_iframe(page)
 

@@ -119,6 +119,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   invoice number and left alone. Each invoice control now passes the same
   guard the Print receipts controls do, since every one on the list is
   pressed.
+- **Target sees its Print receipts press print.** The press builds the
+  receipt and prints it, and the shared core keeps the receipt at that
+  moment and marks the page as having printed. Since Target moved onto the
+  core in August, the app looked for that mark under the name its own code
+  had used before, which nothing sets. So it never saw a print, and every
+  press waited out fifteen seconds before the receipt was saved, which it
+  still was, only later. The step meant to forget an earlier press's print
+  forgot nothing, so a later press on the same page that printed nothing
+  would have been handed the earlier receipt. Now the app asks the core,
+  forgets any earlier print in the page and its frames before it presses,
+  and moves on as soon as the print comes. Walmart looked for the frame a
+  receipt printed from by the same old name, and never found one either.
+  A check across the repository now fails any app that reads those marks
+  itself rather than asking the core.
 
 ## [0.41.0] - 2026-09-29
 

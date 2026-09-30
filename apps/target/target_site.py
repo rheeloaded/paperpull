@@ -22,6 +22,7 @@ from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.controls import safe_selects as _safe_selects
+from paperpull_core import receipt_pdf
 from storage import now_iso
 
 log = logging.getLogger("target_receipts.site")
@@ -950,11 +951,12 @@ def find_printing_frame(page, wait_ms: int = 6000):
         for frame in page.frames:
             if frame == page.main_frame:
                 continue
-            try:
-                if frame.evaluate("() => window.__targetReceiptsPrintCalled === true"):
-                    return frame
-            except Exception:
-                continue
+            # Asked of the core, whose hook makes the mark. This used to read
+            # the mark by the name Target's own hook gave it, which the core's
+            # never set, so from the move onto the core no frame was found
+            # this way.
+            if receipt_pdf.was_print_called(frame):
+                return frame
         page.wait_for_timeout(500)
     return find_receipt_iframe(page)
 
@@ -1001,12 +1003,11 @@ def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, 
     page.on("download", on_download)
     page.context.on("page", on_popup)
     try:
-        # reset any stale print snapshot from a previous click on this page
-        try:
-            page.evaluate("() => { window.__targetReceiptsPrintHTML = null; "
-                          "window.__targetReceiptsPrintCalled = false; }")
-        except Exception:
-            pass
+        # A print left by an earlier press on this document would be taken
+        # for this one's, so it is forgotten first. In every frame, since
+        # the core's hook marks the frame that printed as well as the page.
+        for frame in page.frames:
+            receipt_pdf.clear_print_snapshot(frame)
         control.scroll_into_view_if_needed()
         control.click()
         page.wait_for_timeout(1500)
@@ -1021,11 +1022,8 @@ def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, 
                 except Exception:
                     pass
                 return "popup", popup
-            try:
-                if page.evaluate("() => window.__targetReceiptsPrintCalled === true"):
-                    return "print_called", page
-            except Exception:
-                pass
+            if receipt_pdf.was_print_called(page):
+                return "print_called", page
             if page.url != old_url:
                 return "navigated", page
             page.wait_for_timeout(500)
