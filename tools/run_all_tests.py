@@ -28,10 +28,23 @@ So each suite is run with the first environment that can actually import
 what it needs, and any suite with nothing to run it is reported rather
 than skipped quietly. On CI one environment has the lot and all of this
 collapses to a single answer.
+
+WHICH CORE IT TESTS
+
+This checkout's own, whichever environment runs the suite. An
+environment's installed copy was what an app suite imported before, and
+that was not always this core. apps/walmart/.venv and apps/target/.venv
+hold a plain copy from 2026-09-23 that shadows their editable install,
+so those two suites tested a core six days old, and in a worktree every
+other app suite tested the main checkout's core rather than the
+worktree's, so a change to the core never met the apps at all. Found
+2026-09-29, when a new Walmart test could not import what the core it
+was written against provides.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -39,6 +52,14 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def with_this_core() -> dict:
+    """The environment a suite runs in, this checkout's core first."""
+    env = dict(os.environ)
+    rest = [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p]
+    env["PYTHONPATH"] = os.pathsep.join([str(REPO / "core")] + rest)
+    return env
 
 # What a suite has to be able to import before it is worth running.
 NEEDS = {
@@ -137,7 +158,8 @@ def main() -> int:
             under_equipped.append((name, lack))
         r = subprocess.run([str(py), "-m", "pytest", "-q", "--no-header",
                             "-rsfE", "-p", "no:cacheprovider"],
-                           cwd=d, capture_output=True, text=True, timeout=1800)
+                           cwd=d, capture_output=True, text=True, timeout=1800,
+                           env=with_this_core())
         out = (r.stdout or "") + (r.stderr or "")
         lines = [ln for ln in out.strip().splitlines() if ln.strip()]
         summary = lines[-1] if lines else "no output"
