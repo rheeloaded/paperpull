@@ -356,7 +356,6 @@ VANGUARD_PAGE = ("<!doctype html><meta charset='utf-8'><table><tr><td>%s</td>"
                  % (VANGUARD_ROW, VANGUARD_LABEL)).encode("utf-8")
 
 
-@pytest.mark.xfail(strict=True, reason=PENDING["vanguard"])
 @pytest.mark.parametrize("left", [False, True], ids=["empty folder", "same name already there"])
 def test_vanguard_takes_its_statement_from_the_folder(left, browser_context, provider,
                                                       tmp_path, monkeypatch):
