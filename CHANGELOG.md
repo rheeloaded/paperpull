@@ -133,6 +133,65 @@ All notable changes to PaperPull are recorded here. Versioning follows
   receipt printed from by the same old name, and never found one either.
   A check across the repository now fails any app that reads those marks
   itself rather than asking the core.
+- **American Family finds a statement by the site's own mark (#45).** A
+  tester's recording on 0.41.0 showed each statement opens from a link
+  American Family marks statementPDF for its own tests, a link with no
+  address and no words of a statement's own, and the app looked only for
+  a button or link that said View bill or the like, so a Pilot on his
+  billing page found nothing. That link is found by its mark now, with
+  every other check kept. Every word it shows or announces has to pass
+  the guard, a press lands on it alone, its date comes from its own row,
+  and a row with two of them is left alone. A billing page with nothing
+  to take now writes the failure file, where the Pilot had finished with
+  nothing to send.
+- **Meijer waits for the In-Store list before it looks for a receipt
+  (#42).** Well into a tester's Run All the orders page drew only its
+  heading, and the app looked for the tab once and for the receipt's row
+  for about ten seconds, then recorded that purchase as having no
+  receipt, which is final. Now it waits for the list and opens the page
+  once more if the list does not come. A purchase whose list never shows
+  is left for the next run, and three in a row stop the run with word to
+  wait and press Resume. A receipt put aside in Manual Review is no
+  longer reported as completed and verified when a Pilot skips it, and
+  the Pilot report measures a put-aside file instead of printing question
+  marks.
+- **Target leaves the order list as it is while reading it (#48).** The
+  press and hold check refused a tester's hold with nothing attached, so
+  being attached at the hold was not the cause, and the likelier one is
+  that Target had already scored the session as automated. The app now
+  reads the orders page Login opened where it is, when nobody has clicked
+  in it and it is fresh, instead of loading it again, and no longer puts
+  its print hook on the order list it reads at the start of a run.
+- **Walmart keeps an invoice that prints the order number its own way
+  (#63).** A saved invoice has to name its purchase, and a Walmart invoice
+  prints the order number with a hyphen in the middle and rarely says
+  Walmart, so a tester's three invoices were put aside. The order number
+  is accepted the way Walmart prints it, when the invoice came from that
+  order's own page and shows an amount. A put-aside invoice writes a small
+  failure file of counts and yes or no facts, and the Pilot report
+  measures it. A run limited to dates, by --year, a start or end date or
+  the default start date, dropped every online order, since Walmart's
+  online cards show no date. Such an order is opened to read its date
+  now, one outside the dates is left for a later run and not counted as a
+  failure, and its date is remembered.
+- **PayPal says where it landed instead of calling it a sign-in (#61).**
+  On a tester's business account PayPal sent the statements address to
+  the business settings page, and the app took every page outside the
+  personal account for a sign-in page, loaded the address four times and
+  stopped with a traceback. Now it loads once, and a PayPal page that is
+  neither the statements, a sign-in nor a security check stops the run
+  with a plain message that names the page and asks for a Record. A
+  business account's statements are not covered yet.
+- **Robinhood dates a tax form by its tax year and reads the crypto
+  statements again (#62).** A tax form whose title line did not carry its
+  year was named 0000-00-00. Its year is read from its card, the year
+  shown above it or the year printed on the form, and it is filed on
+  December 31 of that year, and Rename gives a form already saved that
+  way its date without downloading it again. Forms of different years
+  under one title had been counted as one, so only the first was saved.
+  The Robinhood Crypto statements page, left out when the app was built
+  on an account that does not trade crypto, is read again, and a crypto
+  statement carries Crypto in its name.
 
 ## [0.41.0] - 2026-09-29
 
