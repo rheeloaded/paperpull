@@ -280,6 +280,20 @@ def control_texts(page, roles=("button", "link", "menuitem")) -> Survey:
     return out
 
 
+def escape_for_locator(text: str) -> str:
+    """Text made safe to put inside a pattern handed to a Playwright locator.
+
+    re.escape does most of it, but since Python 3.7 it leaves "/" alone.
+    Playwright writes a pattern into its selector between slashes, as
+    name=/pattern/flags, so a slash in the text ends the pattern early and
+    the locator raises InvalidSelectorError the first time it is used.
+    Every caller catches that, so a control reading "View/print PDF" was
+    simply never found. The extra backslash changes nothing for Python's
+    own matching.
+    """
+    return re.escape(text).replace("/", "\\/")
+
+
 def second_step(page, appeared: set, pattern: Pattern, is_safe_control):
     """A control the click revealed whose text says it finishes a download,
     as (locator, text), or (None, "").
@@ -303,7 +317,8 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control):
         if pattern.match(text) and is_safe_control(text):
             for role in ("button", "link", "menuitem"):
                 try:
-                    loc = page.get_by_role(role, name=re.compile("^" + re.escape(text) + "$", re.I))
+                    loc = page.get_by_role(role, name=re.compile(
+                        "^" + escape_for_locator(text) + "$", re.I))
                     if loc.count() and loc.first.is_visible():
                         return loc.first, text
                 except Exception:

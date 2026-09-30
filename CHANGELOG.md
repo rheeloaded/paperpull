@@ -211,6 +211,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   in a browser before the change. Wells Fargo is still untested and nobody
   has reported running it, so no archive is known to hold a misfiled
   document.
+- **A menu entry whose name holds a slash is pressed.** When a Download
+  button opens a small menu, the entry that finishes the download is
+  found by the words it showed, and "View/print PDF", which every
+  provider cut from the scaffold looks for, could never be pressed. The
+  pattern built from those words kept the slash bare, Playwright ends a
+  pattern at a bare slash, and the locator failed the moment it was
+  used, a failure that was caught without a word. The twelve apps that
+  use it are ADP, American Family, Apple Card, AT&T, E*TRADE, Golden 1,
+  Newrez, SBA, SMUD, State Farm, Verizon Mobile and Wells Fargo, and only
+  AT&T found the entry another way, by its text. The core's new
+  escape_for_locator writes the slash so the browser reads it, and a
+  real browser presses a revealed View/print PDF through each of the
+  twelve apps' own words and guard.
 
 ## [0.41.1] - 2026-09-30
 
