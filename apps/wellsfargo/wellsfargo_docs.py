@@ -97,6 +97,10 @@ class Document:
         self.pdf_pages = kw.get("pdf_pages", "")
         self.notes = kw.get("notes", "")
         self.discovered_at = kw.get("discovered_at", now_iso())
+        # How many rows of the page discovery last found holding a document
+        # of this date and kind. More than one cannot be told apart, and the
+        # download refuses it even when it can only see one of them.
+        self.rows = kw.get("rows", 1)
 
     @property
     def key(self) -> str:
@@ -399,15 +403,18 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        rows = getattr(r, "rows", 1)
         doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+                       date=date, confidence=confidence, source_url=source_url,
+                       rows=rows)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
-        # refresh which page the doc's download link lives on
-        self.discovery.update(doc.key, {"source_url": source_url}, save=False)
+        # refresh which page the doc's download link lives on, and how many
+        # rows it was found in this time
+        self.discovery.update(doc.key, {"source_url": source_url, "rows": rows}, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
@@ -534,7 +541,7 @@ class App:
             site.goto_documents(page)
         trace: list = []
         saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                   title=doc.title, trace=trace)
+                                   title=doc.title, trace=trace, rows=doc.rows)
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):
@@ -863,8 +870,15 @@ class App:
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
             found_docs = site.collect_download_docs(page) if found else []
-            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_pdf_link": bool(b.href)}
+            # A document whose date and kind more than one row holds is one
+            # the download refuses, a control that would not answer is one
+            # nothing was learned from, and a control read two ways that
+            # disagree is one left for a person, so a repair needs all three.
+            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "rows": b.rows,
+                                             "has_pdf_link": bool(b.href)}
                                             for b in found_docs[:40]]
+            info["document_controls_unread"] = getattr(found_docs, "unread", 0)
+            info["document_controls_unsure"] = getattr(found_docs, "unsure", 0)
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)
             info["samples"] = []

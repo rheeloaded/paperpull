@@ -184,6 +184,33 @@ All notable changes to PaperPull are recorded here. Versioning follows
   next run the same way. Target names its own gift receipt control "Print
   gift receipt", which the Print receipts name never matches, so no real
   run is known to have pressed one.
+- **Wells Fargo tells a statement from a tax form of the same day.**
+  Discovery kept one document for each date, named for the first control
+  of that date it could read, and the download pressed the first control
+  carrying the date, whatever it fetched. So when a 1099 and a statement
+  shared a date only one of them was ever found. And when the 1099 could
+  not be read while the page was surveyed, the date was recorded as the
+  statement, and the download pressed the 1099 and filed it as the
+  statement. Nothing checked which document the saved file was. Now
+  discovery and the download read a control the same way, and a document
+  is its date, its kind and the entry it sits in, its table or grid row,
+  or else the part of the page around it that prints words of its own. A
+  statement and a 1099 of one day are two documents, each pressed for
+  itself, while View and Download of one statement stay one. Each control
+  is read two ways, the way this app always read it, and with care, never
+  taking another control's words or dates or a date printed over a list of
+  rows. It is filed only where the two agree on its date and its kind, and
+  where they disagree it is left for a person and counted in Diagnose, so
+  nothing is filed under a kind or a date the old reading would not have
+  given it. Two entries of one day holding the same kind cannot be told
+  apart, two accounts under one date heading for instance, and that
+  document is refused rather than guessed at, even when the download can
+  see only one of the two. A control that would not answer stops the
+  download from choosing past it, and the control chosen is read again as
+  the element that is then pressed. Found by reading the code and proven
+  in a browser before the change. Wells Fargo is still untested and nobody
+  has reported running it, so no archive is known to hold a misfiled
+  document.
 
 ## [0.41.1] - 2026-09-30
 
