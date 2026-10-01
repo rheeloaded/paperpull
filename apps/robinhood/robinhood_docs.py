@@ -135,6 +135,16 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+def _clear(path) -> None:
+    """Remove a file this run made and is not keeping."""
+    if not path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 class _Ledger:
     """The index as a rename reads it, written through to the real one."""
 
@@ -166,49 +176,48 @@ class _DatedTaxForms:
     dated from what is known now, in this view only, so a preview changes
     nothing and an applied rename writes the row along with the file.
 
-    The date is the one discovery moved the saved form to, when the page's
-    year says which listed form it is. Otherwise the year the saved file
-    prints. Neither known, the row keeps no date and the file its name. The
-    rename finds a row's record by its date and title, so it is shown a
-    copy of the undated record dated as its row is, and a naming pattern
-    that uses the record still has it."""
+    A row is dated only by the year its own file prints. A date some record
+    of the same title has is not evidence about this file, and several
+    rows of one title each carry their own. A row whose file is gone or
+    prints no clear year keeps no date, and the file its name. The rename
+    finds a row's record by its date and title, so when no record is dated
+    that way it is shown a copy of the undated record dated as its row is,
+    and a naming pattern that uses the record still has it."""
 
     def __init__(self, app, read_text=None):
         read_text = read_text or receipt_pdf.pdf_text
         self.config = app.config
         self.progress = app.progress
-        moved, undated = {}, {}
-        for rec in (getattr(app.progress, "data", None) or {}).values():
-            if not isinstance(rec, dict) or rec.get("category") != doc_types.TAX:
-                continue
-            title = (rec.get("title") or "").strip()
-            if rec.get("undated_key") and rec.get("date"):
-                moved.setdefault(title, []).append(rec)
-            elif not rec.get("date"):
-                undated.setdefault(title, []).append(rec)
+        dated, undated = set(), {}
+        for store in (app.progress, app.discovery):
+            for rec in (getattr(store, "data", None) or {}).values():
+                if not isinstance(rec, dict) or rec.get("category") != doc_types.TAX:
+                    continue
+                title = (rec.get("title") or "").strip()
+                if rec.get("date"):
+                    dated.add((rec["date"], title))
+                elif store is app.progress:
+                    undated.setdefault(title, []).append(rec)
         rows = app.index_csv.read_all()
         copies = {}
         for row in rows:
             if ((row.get("Category") or "").strip() != doc_types.TAX
                     or (row.get("Document Date") or "").strip()):
                 continue
+            path = (row.get("PDF Full Path") or "").strip()
+            if not path or not Path(path).exists():
+                continue
+            year = site.printed_tax_year(read_text(Path(path)))
+            if not year:
+                continue
+            date = f"{year}-12-31"
             title = (row.get("Document Title") or "").strip()
-            date = ""
-            if len(moved.get(title, [])) == 1:
-                date = moved[title][0]["date"]
-            else:
-                path = (row.get("PDF Full Path") or "").strip()
-                if path and Path(path).exists():
-                    year = site.printed_tax_year(read_text(Path(path)))
-                    if year:
-                        date = f"{year}-12-31"
-                if date and len(undated.get(title, [])) == 1:
-                    copies["dated by form:%s:%s" % (date, title)] = dict(
-                        undated[title][0], date=date, period=f"Tax Year {date[:4]}")
-            if date:
-                row["Document Date"] = date
-                if not (row.get("Period") or "").strip():
-                    row["Period"] = f"Tax Year {date[:4]}"
+            row["Document Date"] = date
+            if not (row.get("Period") or "").strip():
+                row["Period"] = f"Tax Year {year}"
+            if (date, title) not in dated and len(undated.get(title, [])) == 1:
+                copies["dated by form:%s:%s" % (date, title)] = dict(
+                    undated[title][0], date=date, period=f"Tax Year {year}")
         self.index_csv = _Ledger(app.index_csv, rows)
         data = dict(getattr(app.discovery, "data", None) or {})
         data.update(copies)
@@ -220,6 +229,9 @@ class App:
     _requests = None
     # Every key the current discovery listed, None outside one.
     _listed_now = None
+    # (title, date) of what the individual page listed in the current
+    # discovery, None outside one.
+    _individual_listed = None
 
     def __init__(self, args):
         self.args = args
@@ -259,6 +271,7 @@ class App:
             "other": 0, "skipped_completed": 0, "skipped_out_of_scope": 0,
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
             "validation_failures": 0, "dates": [], "new_files": [],
+            "crypto_refused": 0, "wrong_document": 0, "notes": [],
         }
 
     # -- infrastructure ----------------------------------------------------
@@ -471,7 +484,12 @@ class App:
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        tax_year = (getattr(r, "tax_year", "") or "").strip()
         date = (r.date_text or "").strip()
+        if tax_year and source_url != site.TAX_URL:
+            # Only the tax page dates a form by what surrounds it. Anywhere
+            # else the years around it are statement years.
+            tax_year = date = ""
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
             date, _ = site.parse_period_date(title)
             date = date or ""
@@ -479,6 +497,19 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        # The crypto address can show another account's list. A crypto page
+        # document with the title and date of one the individual page listed
+        # in this run is that list, or a statement named exactly like it, and
+        # either way saving it would save the individual statement twice. It
+        # is refused, and the run says so (#62).
+        if self._individual_listed is not None:
+            if source_url == site.STATEMENT_URLS[0]:
+                self._individual_listed.add((title, date))
+            elif site.account_for(source_url) and (title, date) in self._individual_listed:
+                self.stats["crypto_refused"] = self.stats.get("crypto_refused", 0) + 1
+                log.warning("refused %r from the %s page, the individual page lists "
+                            "it too", title, site.account_for(source_url))
+                return 0
         # A statement belongs to the account whose page lists it. A crypto
         # statement and an individual one of the same month can carry the
         # same title, and without the account they were one key, so the
@@ -489,7 +520,6 @@ class App:
         account = site.account_for(source_url) if category == doc_types.STATEMENT else ""
         if account and account.lower() not in summary.lower():
             summary = f"{account} {summary}"
-        tax_year = (getattr(r, "tax_year", "") or "").strip()
         doc = Document(title=title, category=category, summary=summary,
                        date=date, confidence=confidence, source_url=source_url,
                        account=account, tax_year=tax_year,
@@ -500,19 +530,75 @@ class App:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
+            if account:
+                self._adopt_legacy(doc)
             return 1
         # refresh which page the doc's download link lives on
         self.discovery.update(doc.key, {"source_url": source_url}, save=False)
         return 0
 
+    @staticmethod
+    def _legacy_key(doc: Document) -> str:
+        """The key a statement of an account page had before the account
+        was part of it, when the crypto page was read before and its
+        statements were keyed like the individual ones."""
+        return Document.from_dict(dict(doc.to_dict(), account="")).key
+
+    def _legacy_record(self, doc: Document) -> Optional[dict]:
+        """The record a statement was saved under before its account was in
+        its key, or None. Only one that was saved from this account's own
+        page, since the same key is also an individual statement's."""
+        if not doc.account:
+            return None
+        rec = self.progress.get(self._legacy_key(doc))
+        if isinstance(rec, dict) and site.account_for(rec.get("source_url", "")) == doc.account:
+            return rec
+        return None
+
+    def _adopt_legacy(self, doc: Document) -> None:
+        """Move a crypto statement saved under its old key to its new one.
+
+        Only a finished record saved from the crypto page itself, and only
+        when nothing holds the new key. Its discovery entry goes with it
+        when that entry is the crypto page's too, or the next run would
+        press the crypto page for it under the old key and save it twice."""
+        rec = self._legacy_record(doc)
+        if rec is None or not is_done(rec) or self.progress.get(doc.key) is not None:
+            return
+        old = self._legacy_key(doc)
+        moved = dict(rec, account=doc.account, summary=doc.summary, legacy_key=old)
+        del self.progress.data[old]
+        self.progress.update(doc.key, moved, save=False)
+        self.progress.save(backup=True)
+        listed = self.discovery.data.get(old)
+        if isinstance(listed, dict) and listed.get("source_url") == doc.source_url:
+            self.discovery.data.pop(old, None)
+        self.discovery.update(doc.key, {"state": moved.get("state", "")}, save=False)
+        log.info("a %s statement saved under its old key is kept under its new one",
+                 doc.account)
+
+    def _note(self, text: str) -> None:
+        """Something the run did not do, said in the log, on screen and in
+        the run summary, never silently."""
+        log.warning(text)
+        print("  !! " + text)
+        self.stats.setdefault("notes", []).append(text)
+
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
         n_new = 0
         self._listed_now = set()
+        self._individual_listed = set()
+        individual_read = False
         # Robinhood lists documents as click-to-download <a download> links on
         # per-section pages (Individual statements, Crypto statements, Tax
         # center). Scan each page and scrape its download links.
         for url, label in site.document_source_urls():
+            account = site.account_for(url)
+            if account and not individual_read:
+                self._note(f"The {label} page was not read, because the individual "
+                           "statements it is checked against were not read in this run.")
+                continue
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(4000)
@@ -527,19 +613,41 @@ class App:
             while self.check_session(page):
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(4000)
+            # An account page is read only where it was asked for. Checked
+            # before anything is pressed and again before the list is read.
+            if account and not site.at_address(page.url, url):
+                self._note(f"The {label} page opened another address and was not read.")
+                continue
             # Robinhood paginates statements behind a "View More" button; click
             # it (and any lazy-load) until the full list is present.
             site.expand_all(page)
             site.scroll_full_page(page, rounds=6)
             site.expand_all(page)
-            docs = site.collect_download_docs(page)
+            if account and not site.at_address(page.url, url):
+                self._note(f"The {label} page moved to another address and was not read.")
+                continue
+            docs = site.collect_download_docs(page, tax_page=(url == site.TAX_URL))
             before = n_new
             for r in docs:
                 n_new += self._record_rawdoc(r, url)
             self.discovery.save()
             log.info("%s (%s): %d download links, %d new", label, url,
                      len(docs), n_new - before)
+            if url == site.STATEMENT_URLS[0]:
+                individual_read = True
             self._delay(0.4)
+
+        refused = self.stats.get("crypto_refused", 0)
+        if refused:
+            # Counted as refused documents too, so the panel says the run
+            # needs attention rather than that it was clean.
+            self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + refused
+            self._note(f"{refused} document(s) on the crypto statements page were not "
+                       "read, because each has the title and date of one on the "
+                       "individual page. That is the page showing the individual "
+                       "account's list, or crypto statements named exactly like "
+                       "individual ones. Nothing was saved for them.")
+        self._individual_listed = None
 
         moved = self._date_saved_forms(self._listed_now)
         if moved:
@@ -588,6 +696,10 @@ class App:
             # listing that form.
             rec = next((r for r in self.progress.data.values()
                         if isinstance(r, dict) and r.get("undated_key") == doc.key), None)
+        if not rec:
+            # A crypto statement saved when the crypto page was read before,
+            # keyed as an individual one. Only a record saved from that page.
+            rec = self._legacy_record(doc)
         if not rec:
             return False
         if rec.get("downloaded_ok"):
@@ -685,19 +797,18 @@ class App:
 
     @staticmethod
     def _which_listed_form(rec: dict, listed: list):
-        """(key, record) of the listed form a saved undated one is, or None."""
-        if not listed:
-            return None
+        """(key, record) of the listed form a saved undated one is, or None.
+
+        Only by the year printed in the saved file itself. When it was
+        listed or saved says nothing about which year's form it is, since a
+        form comes out in the year after its own, so a file that is gone or
+        prints no clear year moves nowhere."""
         path = (rec.get("pdf_path") or "").strip()
-        if path and Path(path).exists():
-            year = site.printed_tax_year(receipt_pdf.pdf_text(Path(path)))
-            if year:
-                same = [x for x in listed if x[1]["date"] == f"{year}-12-31"]
-                return same[0] if len(same) == 1 else None
-        seen = str(rec.get("discovered_at") or "")[:10]
-        could = [x for x in listed
-                 if seen and seen >= "%04d-01-01" % (int(x[1]["date"][:4]) + 1)]
-        return could[0] if len(could) == 1 else None
+        if not listed or not path or not Path(path).exists():
+            return None
+        year = site.printed_tax_year(receipt_pdf.pdf_text(Path(path)))
+        same = [x for x in listed if year and x[1]["date"] == f"{year}-12-31"]
+        return same[0] if len(same) == 1 else None
 
     # -- processing --------------------------------------------------------
 
@@ -766,9 +877,16 @@ class App:
             site.expand_all(page)
         except Exception as e:
             log.info("could not open source page %s: %s", source, e)
+        # A tax form lands beside its place first, and is put in place only
+        # once the year it prints has been read against what it was listed as.
+        target = out_path
+        if doc.category == doc_types.TAX:
+            out_path = target.with_name(target.name + ".delivering")
+            _clear(out_path)
         saved = site.download_named(page, doc.title, out_path,
                                     year=getattr(doc, "tax_year", "") or "")
         if not saved:
+            _clear(out_path if out_path != target else None)
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
             self._write_row(doc, "Capture failed", "Needs Manual Review")
@@ -779,7 +897,7 @@ class App:
 
         # Some tax forms arrive as a ZIP containing the PDF(s).
         if receipt_pdf.is_zip(out_path):
-            extracted = receipt_pdf.extract_pdfs_from_zip(out_path, out_path)
+            extracted = receipt_pdf.extract_pdfs_from_zip(out_path, target)
             if not extracted:
                 self._record(doc, State.NEEDS_MANUAL_REVIEW,
                              notes="Downloaded archive contained no PDF")
@@ -802,7 +920,7 @@ class App:
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"])
         if not result.ok:
             self.stats["validation_failures"] += 1
-            quarantine = unique_path(self.paths.manual_review, out_path.name,
+            quarantine = unique_path(self.paths.manual_review, target.name,
                                      self.config["max_path_length"])
             try:
                 out_path.replace(quarantine)
@@ -822,8 +940,10 @@ class App:
         # used to be written out below, walking a list of extra links, and it
         # never ran once: the list was created empty and nothing ever put a
         # link in it. Removed rather than left looking like a feature.
-        if doc.category == doc_types.TAX and not doc.date:
-            out_path = self._dated_by_form(doc, out_path)
+        if doc.category == doc_types.TAX:
+            out_path = self._settle_tax_form(doc, out_path, target)
+            if out_path is None:
+                return
             doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
@@ -843,33 +963,97 @@ class App:
             self.stats["other"] += 1
         print(f"  Saved: {out_path.name}")
 
-    def _dated_by_form(self, doc: Document, out_path: Path) -> Path:
-        """Name a tax form the page gave no year for the year it prints.
+    def _settle_tax_form(self, doc: Document, path: Path, target: Path) -> Optional[Path]:
+        """Put a tax form in place once the year it prints has been read, or
+        say why it was not, and return where it is, or None (#62).
 
-        The page is read first, and a form it dated never comes here. This
-        is for one it did not, which used to be saved as 0000-00-00 (#62).
-        The key keeps no date, because that is how the page lists it every
-        run. Only the file and its ledger row take the date, so Rename finds
-        the file already named for it. A form that prints no clear year
-        keeps the name it was saved under."""
-        year = site.printed_tax_year(receipt_pdf.pdf_text(out_path))
-        if not year:
-            log.info("no tax year could be read from %s", out_path.name)
-            return out_path
-        doc.printed_date = f"{year}-12-31"
-        doc.period = doc.period or f"Tax Year {year}"
-        name = build_pdf_filename(doc.printed_date, doc.summary, "", record=doc)
-        target = unique_path(out_path.parent, name, self.config["max_path_length"],
-                             ignoring=out_path.name)
-        if target == out_path:
-            return out_path
+        A form the page dated that prints another year goes to Manual
+        Review and neither year is recorded as done, since one of the two
+        readings is wrong and nothing says which. A form the page gave no
+        year is named for the year it prints. If a form of that title and
+        that year is saved already, this is a second copy of it and is not
+        kept, and the listing is remembered as that form. A form that
+        prints no clear year keeps the name it was saved under."""
+        year = site.printed_tax_year(receipt_pdf.pdf_text(path))
+        listed = doc.date[:4] if doc.date.endswith("-12-31") else ""
+        final = target
+        if doc.date:
+            if listed and year and year != listed:
+                self._refuse_other_year(doc, path, target, listed, year)
+                return None
+        elif year:
+            twin = self._saved_form_of_year(doc, year)
+            if twin is not None:
+                key, rec = twin
+                _clear(path)
+                # The listing is that form. Nothing of its own is kept, not
+                # even the note that a file was on its way.
+                self.progress.data.pop(doc.key, None)
+                self.progress.update(key, {"undated_key": doc.key})
+                self.stats["skipped_completed"] += 1
+                print(f"  Already saved as {rec.get('pdf_filename') or 'a form of that year'}"
+                      " - this copy was not kept.")
+                return None
+            doc.printed_date = f"{year}-12-31"
+            doc.period = doc.period or f"Tax Year {year}"
+            final = unique_path(target.parent,
+                                build_pdf_filename(doc.printed_date, doc.summary, "", record=doc),
+                                self.config["max_path_length"], ignoring=path.name)
+        else:
+            log.info("no tax year could be read from %s", target.name)
+        if path == final:
+            return final
         try:
-            out_path.replace(target)
+            path.replace(final)
         except OSError as e:
             # The row still carries the date, so Rename can finish this.
-            log.info("kept the undated name for %s: %s", doc.key, e)
-            return out_path
-        return target
+            log.info("could not put %s in place: %s", final.name, e)
+            return path
+        return final
+
+    def _saved_form_of_year(self, doc: Document, year: str):
+        """(key, record) of a saved form of this title and tax year, or None.
+        Not one whose own file prints another year."""
+        want = f"{year}-12-31"
+        for key, rec in (self.progress.data or {}).items():
+            if (not isinstance(rec, dict) or rec.get("category") != doc_types.TAX
+                    or rec.get("date") != want or not is_done(rec)
+                    or (rec.get("title") or "") != doc.title
+                    or (rec.get("account") or "") != (doc.account or "")):
+                continue
+            own = (rec.get("pdf_path") or "").strip()
+            if own and Path(own).exists():
+                printed = site.printed_tax_year(receipt_pdf.pdf_text(Path(own)))
+                if printed and printed != year:
+                    continue
+            return key, rec
+        return None
+
+    def _refuse_other_year(self, doc: Document, path: Path, target: Path,
+                           listed: str, printed: str) -> None:
+        """A form listed for one tax year that prints another goes to Manual
+        Review. The record keeps no path, so the copy there never counts as
+        done, and the next run asks for it again."""
+        quarantine = unique_path(self.paths.manual_review, target.name,
+                                 self.config["max_path_length"])
+        try:
+            path.replace(quarantine)
+        except OSError as e:
+            log.info("could not move %s to manual review: %s", target.name, e)
+            _clear(path)
+            quarantine = None
+        said = (f"Listed for tax year {listed}, and the form prints {printed}. Moved "
+                "to Manual Review, and neither year is recorded as done.")
+        doc.notes = (doc.notes + "; " if doc.notes else "") + said
+        doc.pdf_path = str(quarantine) if quarantine else ""
+        doc.pdf_filename = quarantine.name if quarantine else ""
+        self._write_row(doc, "Prints another tax year", "Needs Manual Review")
+        doc.pdf_path = doc.pdf_filename = ""
+        self._record(doc, State.NEEDS_MANUAL_REVIEW)
+        self.write_failure('check the saved tax form', 'the form prints another tax year')
+        self.stats["manual_review"] += 1
+        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+        print("  !! " + said)
 
     # -- records -----------------------------------------------------------
 
@@ -1188,10 +1372,13 @@ class App:
             f"Failed:                    {s['failed']}",
             f"Duplicate filenames (#'d): {s['duplicate_filenames']}",
             f"PDF validation failures:   {s['validation_failures']}",
+            f"Refused as the wrong one:  {s.get('wrong_document', 0)}",
+            f"Crypto listings refused:   {s.get('crypto_refused', 0)}",
             f"Earliest date processed:   {dates[0] if dates else '-'}",
             f"Latest date processed:     {dates[-1] if dates else '-'}",
             "",
-        ]))
+        ] + [f"Not done: {note}" for note in s.get("notes", [])]
+            + ([""] if s.get("notes") else [])))
         # A plain list of exactly the files downloaded THIS run (all new,
         # since already-downloaded documents are skipped). Handy for knowing
         # what to import into paperless-ngx, and safe to ignore/delete.

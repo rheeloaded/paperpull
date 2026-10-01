@@ -177,15 +177,17 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
 
 # The year a tax form prints for itself. Every 1099 names it beside the
 # form, "2025 1099-DIV" or "Form 1099-B 2025", or in the words "Tax Year
-# 2025". A year beside an amount is not one, so a digit, a point or a comma
-# on either side rules it out.
+# 2025". A year that is part of an amount, an id or a date is not one, so
+# "2025.50", "2025-0045" and "2025/01" are ruled out, and so is a year with
+# a letter or a digit against it.
+_PRINTED_YEAR = r"(?<![\w.,$\-/])((?:19|20)\d{2})(?!\d|[.,\-/]\d)"
 _PRINTED_TAX_YEAR_RES = (
-    re.compile(r"\btax\s+year\s*:?\s*((?:19|20)\d{2})(?![\d.,])", re.I),
-    re.compile(r"(?<![\d.,$])\b((?:19|20)\d{2})\s+tax\s+(?:year|information|reporting)\b", re.I),
-    re.compile(r"(?<![\d.,$])\b((?:19|20)\d{2})(?:\s*\*\s*|\s+)(?:consolidated\s+)?(?:form\s+)?"
+    re.compile(r"\btax\s+year\s*:?\s*" + _PRINTED_YEAR, re.I),
+    re.compile(_PRINTED_YEAR + r"\s+tax\s+(?:year|information|reporting)\b", re.I),
+    re.compile(_PRINTED_YEAR + r"(?:\s*\*\s*|\s+)(?:consolidated\s+)?(?:form\s+)?"
                r"(?:1099|1042-?S|5498)\b", re.I),
     re.compile(r"\b(?:form\s+)?(?:1099|1042-?S|5498)(?:-[A-Z]{1,4})?\*?[ \t]+"
-               r"((?:19|20)\d{2})(?![\d.,])", re.I),
+               + _PRINTED_YEAR, re.I),
 )
 
 
@@ -570,45 +572,64 @@ def account_for(source_url: str) -> str:
     return dict(STATEMENT_PAGES).get(source_url or "", "")
 
 
+def at_address(current: str, wanted: str) -> bool:
+    """True when the tab is on the page it was sent to.
+
+    The query and the fragment may differ, the host and the path may not.
+    An address Robinhood sends elsewhere, an account without crypto say,
+    is not the page that was asked for, and what it lists is not read as
+    that page's documents."""
+    from urllib.parse import urlparse
+    try:
+        now, want = urlparse(current or ""), urlparse(wanted or "")
+    except ValueError:
+        return False
+    return (now.scheme == want.scheme and bool(want.hostname)
+            and (now.hostname or "").lower() == want.hostname.lower()
+            and now.path.rstrip("/") == want.path.rstrip("/"))
+
+
 # What discovery and the download both run in the page, so the control that
 # is pressed is always the one that was listed.
 #
 # A tax form's title line does not always carry its year. Robinhood can
-# show "Consolidated 1099" with the year somewhere else, on a line of its
-# own in the card, as a heading over a year's forms, or as the chosen year
-# of a picker. Read from the title alone the form had no date, and the file
-# was named 0000-00-00 (#62). Forms of different years that share a title
-# were also one document, since they were told apart by the title alone, so
-# all but the first were dropped without a word.
+# show "Consolidated 1099" with the year somewhere else. Read from the title
+# alone the form had no date, and the file was named 0000-00-00 (#62).
+# Forms of different years that share a title were also one document, since
+# they were told apart by the title alone, so all but the first were dropped
+# without a word.
+#
+# Only on the tax page, and only words that name a tax year as such, "Tax
+# year 2025", "2025 tax year", "2025 tax documents" or "Tax forms for 2025".
+# A bare year is not one. It can be when a form came out, and "2025 tax
+# season" is the season a 2024 form is filed in. Nor is a year inside an id
+# or an account, "Account ID 2023-0045" or "(...2021)". A form nothing
+# names a tax year for keeps no date rather than a guessed one, and the
+# year it prints is read once it is saved.
 #
 # taxYearOf reads the year in this order, and gives "" rather than guess.
 #   1. The form's own card, the nearest box around its control that holds
-#      its title and something more, and no other form's control. Words
-#      like "Tax year 2025" first. Otherwise one lone year, once every date
-#      in the card is taken out, because "Available Feb 14, 2026" is when
-#      the 2025 form came out and its year is the wrong one. Two years in
-#      one card name nothing.
-#   2. The nearest year shown above the control that is not inside another
-#      form's card. A line that is only a year, or a heading with a year
-#      and a tax word. A year among other years, tabs or buttons or a
+#      its title and something more, and no other form's control. A card
+#      that names two tax years names none.
+#   2. The nearest text above the control, outside every other form's card,
+#      that is such words and nothing else, or a heading holding them with
+#      no date beside them. One among several, tabs or buttons or a
 #      dropdown, counts only when it is the chosen one, since the last tab
 #      before the list is the nearest and says nothing.
 _PAGE_JS_LIB = r"""
   const TITLE_RE = /([A-Z][a-z]+ \d{4}[^\n]*Statement|[^\n]*Consolidated[^\n]*1099[^\n]*|[^\n]*Form 1099[^\n]*|[^\n]*\b1099\b[^\n]*|[^\n]*\b1042-?S\b[^\n]*|[^\n]*\b5498\b[^\n]*)/;
   const TAX_TITLE_RE = /\b(1099|1042-?S|5498)\b/i;
   const ANY_YEAR_RE = /\b(19|20)\d{2}\b/;
-  const YEAR_G = /\b((?:19|20)\d{2})\b/g;
-  const PHRASES = [
-    /\btax\s+year\s*:?\s*((?:19|20)\d{2})\b/gi,
-    /\b((?:19|20)\d{2})\s+tax\s+(?:year|documents?|forms?|season)\b/gi,
-    /\bTY\s*'?\s*((?:19|20)\d{2})\b/gi,
-    /\b((?:19|20)\d{2})\s+(?:consolidated\s+)?(?:form\s+)?(?:1099|1042-?S|5498)\b/gi,
-    /\b(?:1099|1042-?S|5498)(?:-[A-Z]{1,4})?\s+(?:for\s+)?((?:19|20)\d{2})\b/gi,
+  // A year written as a year, and never part of an id, an account or a date.
+  const Y = String.raw`(?<![\w.\-\/])((?:19|20)\d{2})(?!\d|[.\-\/]\d)`;
+  const NAMED = [
+    String.raw`tax\s+year\s*:?\s*` + Y,
+    Y + String.raw`\s+tax\s+(?:year|documents?|forms?)\b`,
+    String.raw`tax\s+(?:documents?|forms?)\s+for\s+` + Y,
   ];
-  const DATES_G = /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?(?:19|20)\d{2}\b|\b\d{1,2}[\/.-]\d{1,2}[\/.-](?:(?:19|20)\d{2}|\d{2})\b|\b(?:19|20)\d{2}[\/.-]\d{1,2}[\/.-]\d{1,2}\b/gi;
-  const NOT_YEARS_G = /(?:[\u2022*\u00B7\u2026#]+|\b[xX]{2,})\s?\d{2,}|\$\s?[\d,]+(?:\.\d+)?|\b(?:ending|ends)\s+in\s+\d+/gi;
-  const YEAR_HEADING = /^(?:(?:tax\s+year|ty|tax\s+documents?(?:\s+for)?)\s*:?\s*)?((?:19|20)\d{2})(?:\s+tax\s+(?:year|documents?|forms?|season))?\s*[\u25BE\u25BC\u2304\u02C5]?$/i;
-  const TAX_WORD = /\btax|1099|1042|5498|\bforms?\b/i;
+  const PHRASES = NAMED.map(p => new RegExp(String.raw`\b` + p, 'gi'));
+  const YEAR_HEADING = new RegExp(String.raw`^(?:` + NAMED.join('|') + String.raw`)\s*[\u25BE\u25BC\u2304\u02C5]?$`, 'i');
+  const A_DATE = /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2}\b|\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/i;
 
   function ownLabel(el) {
     return ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim();
@@ -632,18 +653,15 @@ _PAGE_JS_LIB = r"""
       const st = s.innerText || '';
       if (st.trim()) t = t.split(st).join('\n');
     }
-    return t.replace(NOT_YEARS_G, ' ');
+    return t;
   }
-  // A year, null when the text names two, undefined when it names none.
+  // The tax year the text names as such, null when it names two,
+  // undefined when it names none.
   function yearIn(text) {
     const said = new Set();
     for (const re of PHRASES) for (const m of text.matchAll(re)) said.add(m[1]);
     if (said.size > 1) return null;
     if (said.size === 1) return [...said][0];
-    const years = new Set();
-    for (const m of text.replace(DATES_G, ' ').matchAll(YEAR_G)) years.add(m[1]);
-    if (years.size > 1) return null;
-    if (years.size === 1) return [...years][0];
     return undefined;
   }
   function cardOf(el) {
@@ -708,10 +726,9 @@ _PAGE_JS_LIB = r"""
       if (e.tagName !== 'SELECT' && !e.getClientRects().length) continue;
       const text = labelOf(e);
       if (!text || text.length > 80) continue;
-      let y = '';
-      const m = text.match(YEAR_HEADING);
-      if (m) y = m[1];
-      else if (isHeading(e) && TAX_WORD.test(text)) y = yearIn(text.replace(NOT_YEARS_G, ' ')) || '';
+      if (!YEAR_HEADING.test(text) && !(isHeading(e) && !A_DATE.test(text))) continue;
+      const y = yearIn(text);
+      if (y === null) return '';
       if (!y) continue;
       if (inAnotherCard(e, el)) continue;
       if (isChoice(e) && !isChosen(e)) continue;
@@ -730,7 +747,7 @@ _PAGE_JS_LIB = r"""
   }
 """
 
-_COLLECT_JS = r"""() => {""" + _PAGE_JS_LIB + r"""
+_COLLECT_JS = r"""(readYears) => {""" + _PAGE_JS_LIB + r"""
   const out = [];
   const seen = new Set();
   for (const el of document.querySelectorAll("a[download], a, button, [role=button]")) {
@@ -756,11 +773,12 @@ _COLLECT_JS = r"""() => {""" + _PAGE_JS_LIB + r"""
     }
     title = title.replace(/\s+/g, ' ').replace(/\s*Download (PDF|CSV)\s*/gi, ' ').trim();
     if (!title || title.length < 4) continue;
-    // A tax form whose name has no year is one document per year it is
-    // shown under. Everything else is told apart by its title, as before.
-    // A reading that fails leaves the form undated, never the page unread.
+    // On the tax page, a tax form whose name has no year is one document
+    // per tax year it is shown under. Everything else, and everything on
+    // any other page, is told apart by its title, as before. A reading that
+    // fails leaves the form undated, never the page unread.
     let year = '';
-    if (TAX_TITLE_RE.test(title) && !ANY_YEAR_RE.test(title)) {
+    if (readYears && TAX_TITLE_RE.test(title) && !ANY_YEAR_RE.test(title)) {
       try { year = taxYearOf(el) || ''; } catch (e) { year = ''; }
     }
     const key = title.toLowerCase() + (year ? '|' + year : '');
@@ -794,12 +812,17 @@ def tax_year_of(title: str, year, today=None) -> str:
     return year
 
 
-def collect_download_docs(page) -> List[RawDoc]:
+def collect_download_docs(page, tax_page: bool = False) -> List[RawDoc]:
     """Every downloadable PDF document on the current page (skips CSV-only
-    items like the tax transactions export)."""
+    items like the tax transactions export).
+
+    `tax_page` is True only for the tax documents page, the one page where
+    what surrounds a tax form is read for its year. A form a statements
+    page lists is dated by its title alone, as it always was, because the
+    years around it there are statement years."""
     docs: List[RawDoc] = []
     try:
-        items = page.evaluate(_COLLECT_JS)
+        items = page.evaluate(_COLLECT_JS, bool(tax_page))
     except Exception:
         items = []
     for it in items:
@@ -812,7 +835,7 @@ def collect_download_docs(page) -> List[RawDoc]:
         # A tax form whose own title names no date is filed at the end of
         # the tax year the page shows beside it, the way this app files
         # every tax form whose title does name its year.
-        tax_year = "" if date_text else tax_year_of(title, it.get("year"))
+        tax_year = "" if (date_text or not tax_page) else tax_year_of(title, it.get("year"))
         if tax_year:
             date_text = f"{tax_year}-12-31"
         docs.append(RawDoc(title=title[:200], date_text=date_text or "",

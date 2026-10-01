@@ -11,7 +11,12 @@ month, and a title and a date were all a key was made of, so the second
 would have been taken as done, and its page could be pressed for the first.
 A statement now belongs to the account of the page that lists it. The
 individual page names no account, so every key and file name saved before
-stays exactly as it was.
+stays exactly as it was, and a crypto statement saved under its old key
+when the crypto page was read before still counts as done.
+
+The crypto page is read only as itself, at its own address and after the
+individual page, and a document on it with the title and date of an
+individual one is refused, and the run says so.
 
 The titles here are invented, in the shape the statement links take.
 """
@@ -122,3 +127,108 @@ def test_a_tax_form_a_statements_page_lists_is_the_tax_pages_form(tmp_path):
     assert len(docs) == 1
     (doc,) = docs.values()
     assert doc.account == "" and doc.summary == "Crypto 1099 Tax Form"
+
+
+# -- a crypto statement saved when the crypto page was read before -------------
+
+TITLE = "January 2022 Monthly Statement"
+
+
+def _legacy(app, source):
+    """A statement saved before its account was part of its key."""
+    old = robinhood_docs.Document(title=TITLE, category=doc_types.STATEMENT,
+                                  summary="Monthly Statement", date="2022-01-31",
+                                  source_url=source)
+    old.downloaded_ok, old.state = True, "Completed"
+    old.pdf_filename = "2022-01-31 Robinhood Monthly Statement.pdf"
+    app.progress.update(old.key, old.to_dict())
+    app.discovery.update(old.key, old.to_dict())
+    return old
+
+
+def _crypto():
+    return robinhood_docs.Document(title=TITLE, category=doc_types.STATEMENT,
+                                   summary="Crypto Monthly Statement", date="2022-01-31",
+                                   source_url=CRYPTO, account="Crypto")
+
+
+def test_a_crypto_statement_saved_under_its_old_key_is_done(tmp_path):
+    app = _app(tmp_path)
+    old = _legacy(app, CRYPTO)
+    assert old.key.endswith(":Unnamed")
+    assert app._already_done(_crypto())
+    # the same key saved from the individual page is not the crypto statement
+    app = _app(tmp_path / "individual")
+    _legacy(app, INDIVIDUAL)
+    assert not app._already_done(_crypto())
+
+
+def test_discovery_keeps_it_under_its_new_key(tmp_path):
+    app = _app(tmp_path)
+    old = _legacy(app, CRYPTO)
+    _record(app, TITLE, CRYPTO, "2022-01-31")
+    rec = app.progress.get(_crypto().key)
+    assert rec and rec["downloaded_ok"] and rec["summary"] == "Crypto Monthly Statement"
+    assert app.progress.get(old.key) is None
+    assert app.discovery.get(old.key) is None, "the old crypto listing would be pressed again"
+
+
+# -- the crypto page is read only as itself ------------------------------------
+
+class _Tab:
+    def __init__(self, lands=None, broken=()):
+        self.url, self.lands, self.broken = "", lands or {}, broken
+
+    def goto(self, url, **kw):
+        if url in self.broken:
+            raise RuntimeError("could not open")
+        self.url = self.lands.get(url, url)
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+def _run(tmp_path, monkeypatch, listings, **tab):
+    app = _app(tmp_path)
+    app.config.update(delay_min_seconds=0, delay_max_seconds=0)
+    app.stats = {"mode": "all", "started": "", "ended": "", "discovered": 0,
+                 "statements": 0, "tax_documents": 0, "insurance_documents": 0,
+                 "other": 0, "skipped_completed": 0, "skipped_out_of_scope": 0,
+                 "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
+                 "validation_failures": 0, "dates": [], "new_files": [],
+                 "crypto_refused": 0, "wrong_document": 0, "notes": []}
+    page = _Tab(**tab)
+    app.page = lambda: page
+    app.check_session = lambda page: False
+    monkeypatch.setattr(site, "collect_download_docs", lambda page, **kw: [
+        site.RawDoc(title=t, date_text=d, text=t) for t, d in listings.get(page.url, [])])
+    monkeypatch.setattr(site, "expand_all", lambda page: None)
+    monkeypatch.setattr(site, "scroll_full_page", lambda page, **kw: None)
+    app.cmd_discover(quiet=True)
+    return app
+
+
+def test_a_crypto_page_showing_the_individual_list_is_refused_and_said(tmp_path, monkeypatch):
+    same = [(TITLE, "2022-01-31")]
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, CRYPTO: same})
+    assert [d.account for d in _docs(app).values()] == [""], "saved twice"
+    assert app.stats["crypto_refused"] == 1 and app.stats["wrong_document"] == 1
+    assert any("crypto statements page were not read" in n for n in app.stats["notes"])
+    app.write_run_summary()
+    assert "Crypto listings refused:   1" in app.paths.run_summary.read_text(encoding="utf-8")
+
+
+def test_a_crypto_address_that_opens_elsewhere_is_not_read(tmp_path, monkeypatch):
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+               lands={CRYPTO: "https://robinhood.com/account"})
+    assert [d.account for d in _docs(app).values()] == [""]
+    assert any("opened another address" in n for n in app.stats["notes"])
+
+
+def test_the_crypto_page_waits_for_the_individual_one(tmp_path, monkeypatch):
+    """It is checked against the individual page, so without that page in
+    the same run it is not read."""
+    app = _run(tmp_path, monkeypatch, {CRYPTO: [(TITLE, "2022-01-31")]},
+               broken=(INDIVIDUAL,))
+    assert _docs(app) == {}
+    assert any("were not read in this run" in n for n in app.stats["notes"])

@@ -49,8 +49,9 @@ Filenames: `YYYY-MM-DD Robinhood <Summary>.pdf`, e.g.
 `2025-12-31 Robinhood Crypto Monthly Statement.pdf`,
 `2025-12-31 Robinhood Consolidated 1099 Tax Form.pdf`.
 A tax form is dated at the end of its tax year. When its title does not
-name the year, the year is read from the page around it, or failing that
-from the form itself. A form saved before this as `0000-00-00` takes its
+name the year, it is read from words on the tax page that name a tax year,
+such as "Tax year 2025", or failing that from the year the form prints. A
+form listed for one year that prints another goes to Manual Review. A form saved before this as `0000-00-00` takes its
 date from **Rename**, without being downloaded again.
 
 ## If a site change breaks it

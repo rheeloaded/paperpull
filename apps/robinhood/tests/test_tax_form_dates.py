@@ -10,12 +10,15 @@ date the saved form was found to have, or the year it prints, into the row
 it renames from, in a view, so a preview changes nothing.
 
 The page's year gives the form a new key. Without a move the form would be
-fetched a second time beside the saved one. It moves only when it is
-certain which listed form the saved one is, by the year the file prints,
-or as the one form of its title whose tax year had ended when the saved
-one was first listed, since a form cannot be listed before its year is
-over. A second copy is the worst an unsure case can cost, never a form
-marked done that was not saved.
+fetched a second time beside the saved one. It moves only by the year
+the saved file itself prints, since when a form was listed or saved says
+nothing about its year. A second copy is the worst an unsure case can cost,
+never a form marked done that was not saved.
+
+A form listed for one year that prints another goes to Manual Review and
+neither year is done. A form already saved under its year is not kept a
+second time when the page lists it without one. Rename dates a row only by
+the year its own file prints.
 
 A form the page gives no year at all is named for the year it prints when
 it is saved, and keeps the undated key the page lists it by.
@@ -149,7 +152,7 @@ def _listing(*years):
 
 def _discover(app, monkeypatch, listing):
     monkeypatch.setattr(site, "document_source_urls", lambda: [(site.TAX_URL, "tax")])
-    monkeypatch.setattr(site, "collect_download_docs", lambda page: list(listing))
+    monkeypatch.setattr(site, "collect_download_docs", lambda page, **kw: list(listing))
     monkeypatch.setattr(site, "expand_all", lambda page: None)
     monkeypatch.setattr(site, "scroll_full_page", lambda page, **kw: None)
     app.cmd_discover(quiet=True)
@@ -224,10 +227,10 @@ def test_a_form_that_prints_no_clear_year_keeps_its_name(tmp_path):
 # -- discovery, with the page's year -----------------------------------------
 
 def test_the_form_the_page_now_dates_is_not_fetched_again(tmp_path, monkeypatch):
-    """The saved file prints no year it can be read by, so the one form of
-    that title the page lists for a year that had ended is the saved one."""
+    """The saved file prints the year the page now lists it for, so it is
+    that listed form."""
     app = _app(tmp_path, apply=True)
-    doc, path = _saved_undated(app, lines=["Robinhood Securities LLC"])
+    doc, path = _saved_undated(app, lines=FORM_2022)
     _discover(app, monkeypatch, _listing("2022"))
 
     dated = _listed("2022")
@@ -337,3 +340,81 @@ def test_a_dated_form_is_pressed_for_its_own_year(tmp_path, monkeypatch):
     app.download_one(_Page(), doc, storage.build_pdf_filename(doc.date, doc.summary, ""))
     assert pressed == ["2021"]
     assert _names(app) == ["2021-12-31 Robinhood Consolidated 1099 Tax Form.pdf"]
+
+
+def test_a_saved_form_whose_file_prints_no_year_is_not_moved(tmp_path, monkeypatch):
+    """When it was listed says nothing about which year's form it is, since
+    a form comes out in the year after its own. Nothing is marked done that
+    was not saved, and the saved record stays where it was."""
+    app = _app(tmp_path)
+    doc, _ = _saved_undated(app, lines=["Robinhood Securities LLC"])
+    _discover(app, monkeypatch, _listing("2022"))
+    assert not app._already_done(_listed("2022"))
+    assert app.progress.get(doc.key)["downloaded_ok"]
+
+
+# -- what the saved form prints, against what it was listed as ----------------
+
+def _fake_download(monkeypatch, lines):
+    def fake(page, title, out_path, year=""):
+        _text_pdf(Path(out_path), lines)
+        return True
+    monkeypatch.setattr(site, "download_named", fake)
+
+
+def _everything(app):
+    return sorted(p.name for p in app.paths.root.rglob("*") if p.is_file()
+                  and p.suffix != ".json" and not p.name.endswith(".csv"))
+
+
+def test_a_form_listed_for_one_year_that_prints_another_goes_to_manual_review(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    _fake_download(monkeypatch, FORM_2022)
+    doc = _listed("2021")
+    app.download_one(_Page(), doc, storage.build_pdf_filename(doc.date, doc.summary, ""))
+    assert _names(app) == []
+    assert [p.name for p in app.paths.manual_review.glob("*.pdf")] == [
+        "2021-12-31 Robinhood Consolidated 1099 Tax Form.pdf"]
+    rec = app.progress.get(doc.key)
+    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value and rec["pdf_path"] == ""
+    assert not app._already_done(doc), "the copy in Manual Review must not count as done"
+    assert not app._already_done(_listed("2022"))
+    assert app.stats["wrong_document"] == 1
+
+
+def test_a_form_saved_under_its_year_is_not_kept_again_from_an_undated_listing(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    saved = _listed("2022")
+    path = app.paths.folder_for(doc_types.TAX) / "2022-12-31 Robinhood Consolidated 1099 Tax Form.pdf"
+    _text_pdf(path, FORM_2022)
+    saved.pdf_path, saved.pdf_filename = str(path), path.name
+    saved.downloaded_ok, saved.state = True, State.COMPLETED.value
+    app.progress.update(saved.key, saved.to_dict())
+
+    _fake_download(monkeypatch, FORM_2022)
+    undated = robinhood_docs.Document(title=TITLE, category=doc_types.TAX,
+                                      summary="Consolidated 1099 Tax Form", date="",
+                                      source_url=site.TAX_URL)
+    app.download_one(_Page(), undated, storage.build_pdf_filename("", undated.summary, ""))
+    assert _everything(app) == [path.name], "a second copy was kept"
+    assert app._already_done(undated), "the undated listing is that saved form"
+
+
+def test_rename_dates_each_row_only_by_its_own_file(tmp_path):
+    """A form moved to 2022 by the year its file prints, and a second row of
+    the same title whose file prints none. Only the first takes 2022."""
+    app = _app(tmp_path, apply=True)
+    doc, path = _saved_undated(app, lines=FORM_2022)
+    moved = dict(app.progress.get(doc.key), date="2022-12-31", undated_key=doc.key)
+    del app.progress.data[doc.key]
+    app.progress.update(_listed("2022").key, moved)
+    other = app.paths.folder_for(doc_types.TAX) / "0000-00-00 Robinhood Consolidated 1099 Tax Form b.pdf"
+    _text_pdf(other, ["Robinhood Securities LLC"])
+    app.index_csv.append_rows([{"Category": doc_types.TAX, "Document Date": "",
+                                "Document Title": TITLE,
+                                "Document Summary": "Consolidated 1099 Tax Form",
+                                "PDF Filename": other.name, "PDF Full Path": str(other)}])
+    app.cmd_rename()
+    assert sorted(r["Document Date"] for r in app.index_csv.read_all()) == ["", "2022-12-31"]
+    assert [n for n in _names(app) if n.startswith("2022")] == [
+        "2022-12-31 Robinhood Consolidated 1099 Tax Form.pdf"]
