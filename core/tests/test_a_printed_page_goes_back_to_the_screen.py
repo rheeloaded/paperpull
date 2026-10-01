@@ -23,11 +23,14 @@ is invented.
 """
 import ast
 import importlib
+import itertools
+import json
 import os
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -91,6 +94,16 @@ WALMART_PAGES = {
 # but the server this file starts.
 NO_HOSTS = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
 
+# The page a tab of the attached browser is opened on. Once it has drawn it
+# tells the server so, by the name its tab was opened with, never through the
+# debugging port.
+DRAWN = """<!doctype html><html><head><title>Ready</title></head><body><script>
+fetch('/beacon/%(tab)s', {cache: 'no-store'}).catch(() => {});
+</script></body></html>"""
+
+# The names of the tabs whose page has drawn.
+DRAWN_TABS = set()
+
 
 class _Site(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -100,7 +113,12 @@ class _Site(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
-        if path in WALMART_PAGES:
+        if path.startswith("/beacon/"):
+            DRAWN_TABS.add(path[len("/beacon/"):])
+            body = "ok"
+        elif path.startswith("/drawn/"):
+            body = DRAWN % {"tab": path[len("/drawn/"):]}
+        elif path in WALMART_PAGES:
             body = WALMART % WALMART_PAGES[path]
         else:
             body = PAGE % {"name": path.strip("/") or "first"}
@@ -206,18 +224,17 @@ def test_a_print_that_fails_puts_the_page_back_too(site, page, tmp_path, monkeyp
     assert media(page) == "screen"
 
 
-@pytest.fixture(scope="module")
-def attached(pw, tmp_path_factory):
-    """A browser started as a program of its own with a debugging port,
-    the way login.bat leaves one open. Its address, for connect_over_cdp."""
-    found = browser_launcher.browser_candidates(mode=browser_launcher.BUNDLED)
-    if not found:
-        pytest.skip("no browser to drive")
-    profile = tmp_path_factory.mktemp("attached-profile")
+def _start_browser(exe, profile):
+    """The browser as a program of its own with a debugging port, and its
+    address, or None for the address when it opened no port.
+
+    It starts with no window of its own, so its only tabs are the ones
+    opened here. The blank tab a browser starts with was sometimes never
+    listed by Playwright at all, and taking it raised IndexError on CI."""
     proc = subprocess.Popen(
-        [found[0][1], "--headless=new", "--remote-debugging-port=0",
-         "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check",
-         NO_HOSTS, "about:blank"],
+        [exe, "--headless=new", "--remote-debugging-port=0",
+         "--user-data-dir=%s" % profile, "--disable-extensions", "--disable-sync",
+         "--no-first-run", "--no-default-browser-check", "--no-startup-window", NO_HOSTS],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port, deadline = "", time.monotonic() + 30
     while not port and time.monotonic() < deadline and proc.poll() is None:
@@ -226,9 +243,102 @@ def attached(pw, tmp_path_factory):
         except (OSError, IndexError):
             time.sleep(0.1)
     if not port or not browser_launcher.wait_for_debug_port(port):
+        return proc, None
+    return proc, "http://127.0.0.1:%s" % port
+
+
+def _page_targets(cdp_url):
+    with urllib.request.urlopen(cdp_url + "/json/list", timeout=10) as r:
+        return [t for t in json.loads(r.read().decode("utf-8")) if t.get("type") == "page"]
+
+
+def _addresses(cdp_url):
+    return [t.get("url") for t in _page_targets(cdp_url)]
+
+
+def _close_tab(cdp_url, target_id):
+    urllib.request.urlopen(cdp_url + "/json/close/" + target_id, timeout=10).read()
+
+
+def _gone(cdp_url, target_id, seconds=10):
+    """Until the tab is off the browser's list."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if all(t["id"] != target_id for t in _page_targets(cdp_url)):
+            return
+        time.sleep(0.1)
+
+
+def _drawn(name, seconds) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if name in DRAWN_TABS:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _only_tab_left(cdp_url, target_id, seconds) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if [t["id"] for t in _page_targets(cdp_url)] == [target_id]:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+_TAB_NAMES = itertools.count(1)
+
+
+def _open_drawn(cdp_url, site):
+    """A tab the browser itself opens on a page of this file's server, once
+    that page has drawn, as its id and address, or None.
+
+    The first tab a fresh browser opens sometimes never sends a single
+    request, for a minute and more. It was 3 fresh starts in 50 for this
+    file, and about two in five in a count made for the Target test. A
+    second tab always drew. So a tab that has not drawn in 10 seconds is
+    closed, and another opened once it is gone, three at most."""
+    for _attempt in range(3):
+        name = "tab%d" % next(_TAB_NAMES)
+        address = "%s/drawn/%s" % (site, name)
+        request = urllib.request.Request(cdp_url + "/json/new?" + address, method="PUT")
+        with urllib.request.urlopen(request, timeout=10) as r:
+            tab = json.loads(r.read().decode("utf-8"))
+        if _drawn(name, 10):
+            return {"id": tab["id"], "address": address}
+        _close_tab(cdp_url, tab["id"])
+        _gone(cdp_url, tab["id"])
+    return None
+
+
+@pytest.fixture(scope="module")
+def attached(pw, site, tmp_path_factory):
+    """A browser started as a program of its own with a debugging port,
+    the way login.bat leaves one open. Its address, for connect_over_cdp.
+
+    It is handed over with one tab, on a page of this file's server that
+    has drawn. A browser that cannot get there is closed and another
+    started, three at most, and a failure says what each one did."""
+    found = browser_launcher.browser_candidates(mode=browser_launcher.BUNDLED)
+    if not found:
+        pytest.skip("no browser to drive")
+    tried = []
+    for _start in range(3):
+        proc, url = _start_browser(found[0][1], tmp_path_factory.mktemp("attached-profile"))
+        if url is None:
+            proc.kill()
+            proc.wait(timeout=15)
+            pytest.skip("the browser opened no debugging port")
+        ready = _open_drawn(url, site)
+        if ready is not None and _only_tab_left(url, ready["id"], 10):
+            break
+        tried.append("%s, tabs %r" % ("no tab drew its page" if ready is None else
+                                      "a tab never closed", _addresses(url)))
         proc.kill()
-        pytest.skip("the browser opened no debugging port")
-    url = "http://127.0.0.1:%s" % port
+        proc.wait(timeout=15)
+    else:
+        pytest.fail("three fresh browsers in a row were not ready, %s" % "; ".join(tried))
     yield url
     try:
         pw.chromium.connect_over_cdp(url).new_browser_cdp_session().send("Browser.close")
@@ -241,10 +351,19 @@ def attached(pw, tmp_path_factory):
 def test_the_tab_somebody_is_watching_goes_back_to_screen(site, pw, attached, tmp_path):
     """Target prints in the tab the person signed in with, and the others
     print in a tab of that person's browser. It showed the printed layout
-    from the first purchase until the app let go of the browser."""
+    from the first purchase until the app let go of the browser.
+
+    The tab is one the browser opened itself, as the person's was, and its
+    page drew before anything attached."""
+    own = _open_drawn(attached, site)
+    if own is None:
+        pytest.fail("the test's own tab never drew its page, tabs %r" % _addresses(attached))
     connected = pw.chromium.connect_over_cdp(attached)
     try:
-        tab = connected.contexts[0].pages[0]
+        listed = connected.contexts[0].pages
+        tab = next((p for p in listed if p.url == own["address"]), None)
+        assert tab is not None, "Playwright does not list the tab, only %r" % [
+            p.url for p in listed]
         tab.goto(site + "/first")
         receipt_pdf.print_page_to_pdf(tab, tmp_path / "r.pdf")
         assert media(tab) == "screen"
