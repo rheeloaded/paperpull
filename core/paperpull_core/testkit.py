@@ -26,6 +26,9 @@ text_pdf is the other half, a PDF that says something, for a test of
 whether a saved document names what it was saved as, and receipt_app and
 file_a_receipt hand one to a receipt app's own check.
 
+stall_reads makes chosen elements of a real page fail to answer, for a
+test of what an app does with an element it could not read.
+
 Nothing here is used by a run. It is in the package so every app's tests
 can import it the same way they import everything else.
 """
@@ -123,6 +126,40 @@ def file_a_receipt(app, purchase, lines, listed=None) -> Filed:
     else:
         kept = app._finish_pdf(purchase, out)
     return Filed(bool(kept), Path(purchase.pdf_path), app.progress.get(purchase.key) or {})
+
+
+def stall_reads(monkeypatch, stalled, locator=("element_handle",), handle=(), scripts=()):
+    """Reading an element whose data-guid is in `stalled` raises
+    Playwright's TimeoutError, the way reads did on the stalled CI runner
+    of run 36792330947, and every other read answers as it would.
+
+    `locator` names the Locator methods that stall and `handle` the
+    ElementHandle methods. When `scripts` is given, an evaluate of an
+    element stalls only for those scripts, so the page's other questions
+    about it still answer. The element is known by its own data-guid,
+    read the way the page would give it, before the stalled read runs."""
+    from playwright.sync_api import ElementHandle, Locator, TimeoutError as PlaywrightTimeout
+    stalled = set(stalled)
+    guid_of_locator = Locator.get_attribute
+    guid_of_handle = ElementHandle.get_attribute
+
+    def stalling(name, real, guid_of, is_locator):
+        def read(self, *args, **kwargs):
+            if scripts and name in ("evaluate", "evaluate_handle") \
+                    and (args[0] if args else kwargs.get("expression")) not in scripts:
+                return real(self, *args, **kwargs)
+            try:
+                guid = guid_of(self, "data-guid", timeout=2000) if is_locator else guid_of(self, "data-guid")
+            except Exception:
+                guid = None
+            if guid in stalled:
+                raise PlaywrightTimeout("Timeout exceeded, a stalled read (testkit.stall_reads).")
+            return real(self, *args, **kwargs)
+        return read
+    for name in locator:
+        monkeypatch.setattr(Locator, name, stalling(name, getattr(Locator, name), guid_of_locator, True))
+    for name in handle:
+        monkeypatch.setattr(ElementHandle, name, stalling(name, getattr(ElementHandle, name), guid_of_handle, False))
 
 
 @dataclass

@@ -2267,3 +2267,23 @@ def test_a_change_to_the_list_call_is_taken_off_even_when_adding_it_raised():
     facts = site._fresh_list(pg, "2025-10-16", year=2025)
     assert facts.get("reloaded") is False, facts
     assert len(pg.added) == 1 and pg.taken_off == pg.added, (pg.added, pg.taken_off)
+
+
+def test_documents_a_row_shows_five_seconds_after_its_press_are_found(tmp_path):
+    """The row shows its documents five seconds after View Documents is
+    pressed. Eight looks half a second apart used to wait well past four
+    seconds on a real page, since each look read every control one at a
+    time, and the core reads them in one call now, so the wait is kept by
+    the clock (the review after the census that followed CI run
+    36792330947)."""
+    late = "<script>const shown = toggle; toggle = (b) => setTimeout(() => shown(b), 5000);</script>"
+    driver, browser, pg = _drive(lambda: _rows().replace("</body>", late + "</body>"))
+    try:
+        out = tmp_path / "doc.pdf"
+        trace: list = []
+        assert site.download_bill(pg, None, D_RECEIPT, out, title="Payment Receipt - Billing/Payments",
+                                  trace=trace), trace
+        assert out.read_bytes().startswith(b"%PDF-")
+    finally:
+        browser.close()
+        driver.stop()

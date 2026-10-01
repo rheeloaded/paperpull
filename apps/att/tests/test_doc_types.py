@@ -363,6 +363,7 @@ class _RoleLoc:
     def __init__(self, items): self._items = items
     def count(self): return len(self._items)
     def nth(self, i): return self._items[i]
+    def all_inner_texts(self): return [c.inner_text() for c in self._items]
     @property
     def first(self): return self._items[0]
 

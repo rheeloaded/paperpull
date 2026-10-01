@@ -29,6 +29,9 @@ class FakeLoc:
     def inner_text(self, timeout=None):
         return self._texts[0]
 
+    def all_inner_texts(self):
+        return list(self._texts)
+
     def is_visible(self):
         return self._visible
 
@@ -113,3 +116,34 @@ def test_something_that_is_not_visible_is_not_chosen():
 def test_nothing_appeared_at_all():
     page = FakePage({"button": ["Download"]})
     assert second_step(page, set(), PATTERN, allow_all) == (None, "")
+
+
+# -- a survey that could not read everything ------------------------------------
+
+def test_a_survey_that_could_not_read_a_role_says_so_through_the_difference():
+    """A role that would not answer still leaves the rest read, and the
+    survey says it is not whole, before and after a click alike."""
+    class Grumpy(FakePage):
+        def get_by_role(self, role, name=None):
+            if role == "button":
+                raise RuntimeError("detached")
+            return super().get_by_role(role, name)
+    whole = control_texts(FakePage({"link": ["Statements"]}))
+    part = control_texts(Grumpy({"button": ["Download"], "link": ["Statements", "Download PDF"]}))
+    assert whole.complete is True and part.complete is False
+    assert (part - whole).complete is False and (whole - part).complete is False
+    assert (part - whole) == {"Download PDF"}
+
+
+def test_nothing_is_chosen_from_a_survey_that_was_not_whole():
+    """A control already on the page could be in it, or the plain choice
+    could be missing from it, so the second step presses nothing."""
+    class Grumpy(FakePage):
+        def get_by_role(self, role, name=None):
+            if role == "menuitem":
+                raise RuntimeError("detached")
+            return super().get_by_role(role, name)
+    page = FakePage({"button": ["Download PDF"]})
+    appeared = control_texts(Grumpy({"button": ["Download PDF"]})) - control_texts(FakePage({}))
+    assert appeared == {"Download PDF"}
+    assert second_step(page, appeared, PATTERN, allow_all) == (None, "")

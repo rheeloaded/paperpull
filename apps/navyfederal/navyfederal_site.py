@@ -500,9 +500,19 @@ def group_names(page) -> List[str]:
     return out
 
 
-def expand_only(page, name_needle: str) -> bool:
+def expand_only(page, name_needle: str) -> Optional[bool]:
     """Expand the group whose header contains name_needle; collapse the others
-    so the visible rows belong to only that group."""
+    so the visible rows belong to only that group.
+
+    True when that group was opened, False when no group's header names it,
+    and None when a group whose header does not name it is still open
+    afterward. A group whose header could not be read is passed over,
+    neither opened nor folded, and one left open that way kept its rows on
+    the page, so its row of the date would be pressed for another account
+    (the census after CI run 36792330947). So once the others are folded
+    every group is read again in one call. The selector can also match an
+    element inside a header that has no words to read, so the groups are
+    judged as they stand rather than by the reads that failed."""
     dismiss_timeout(page)
     loc = page.locator(GROUP_SEL)
     n = loc.count()
@@ -528,7 +538,33 @@ def expand_only(page, name_needle: str) -> bool:
             except Exception:
                 pass
     dismiss_timeout(page)
+    if _another_group_open(page, name_needle):
+        log.info("an account group other than this one is still open")
+        return None
     return opened
+
+
+# Every account group's words and whether it is open, read in one call. A
+# match with no words of its own as an element answers its text content.
+_GROUP_STATES_JS = r"""els => els.map(e => [(e.innerText || e.textContent || ''),
+                                             (e.getAttribute('aria-expanded') || '').toLowerCase()])"""
+
+
+def _another_group_open(page, name_needle: str) -> bool:
+    """Whether a group whose header does not name `name_needle` is open,
+    judged the way expand_only judges one, for every group at once. True
+    when the groups could not be read."""
+    try:
+        states = page.locator(GROUP_SEL).evaluate_all(_GROUP_STATES_JS)
+    except Exception:
+        return True
+    needle = (name_needle or "").lower()
+    for state in states or []:
+        if not isinstance(state, list) or len(state) != 2:
+            return True
+        if state[1] == "true" and needle not in str(state[0] or "").lower():
+            return True
+    return False
 
 
 _NFCU_ROW_JS = r"""() => {
@@ -639,9 +675,14 @@ def statement_request(page, account: str, date: str):
     once read, because a full archive is hundreds of statements and
     each one used to leave a tab behind.
 
-    None when the row cannot be reached."""
-    if not expand_only(page, account):
-        expand_only(page, account.split()[0] if account else account)
+    None when the row cannot be reached, and when a group could not be
+    read, since its rows could still be showing above this account's."""
+    opened = expand_only(page, account)
+    if opened is False:
+        opened = expand_only(page, account.split()[0] if account else account)
+    if opened is None:
+        log.info("statement row not taken for %s, a group could not be read", date)
+        return None
     dismiss_timeout(page)
 
     # In the 'Previous Statements' archive, the rows for a given year only show

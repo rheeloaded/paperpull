@@ -103,6 +103,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   still hands back the tab a receipt is printed from. None of these sites
   is known to open such a tab, and made-up pages in a real browser show
   each case.
+- **A control that could not be read is never taken to be absent.** On a
+  slow page, a control, row or button that did not answer in time was
+  passed over as if it were not there, and what to press was chosen from
+  the rest. E*TRADE presses a document's control only when one names it,
+  so of two controls naming one document, one of them slow, it would
+  press the other as the only one. The same counting could go wrong in
+  its row link step and for the page's Download button, and in PG&E,
+  State Farm and Apple Card. Ally tells the statements of a date apart
+  only by their place, so a row it could not read would move the next
+  statement into that place and the wrong statement would be saved. Navy
+  Federal left an account's group open when it could not read its
+  header, so that account's row could be pressed for another account. In
+  the core, a second step after a click was chosen from what the click
+  revealed, and a control left out of the survey taken before the click
+  looked revealed after it. Each now refuses when it could not read
+  everything it chooses from, and the steps after it still look. A check
+  across every app keeps it that way. Found when one E*TRADE test failed
+  on a stalled CI machine, and nothing shows it happened on a real run.
 
 ## [0.41.1] - 2026-09-30
 

@@ -929,11 +929,20 @@ def _row_download_control(row):
     control's own accessible name must pass is_safe_control(), so a money
     control in a row could never be picked up by the wider pass.
     """
+    return _row_control_read(row)[0]
+
+
+def _row_control_read(row):
+    """_row_download_control's answer, and whether a control of the row
+    could not be read, as (control, unread). A row whose control could
+    not be read is not a row without one."""
+    unread = False
     for sel in (ROW_CONTROL_SEL, ROW_CONTROL_FALLBACK_SEL):
         try:
             ctrl = row.locator(sel)
             n = min(ctrl.count(), 8)
         except Exception:
+            unread = True
             continue
         for j in range(n):
             c = ctrl.nth(j)
@@ -942,33 +951,43 @@ def _row_download_control(row):
                          (c.get_attribute("aria-label") or "") + " " +
                          (c.get_attribute("href") or ""))
             except Exception:
+                unread = True
                 continue
             if is_safe_control(label):
-                return c
-    return None
+                return c, False
+    return None, unread
 
 
 def _rows_for_date(page, date: str):
     """Every statement row shown for this date, in page order, as
-    (row, text) pairs."""
+    (row, text) pairs, and whether a row of the date could not be read.
+
+    A row whose words or control could not be read used to be left out,
+    which moved every row after it up one place, and the statements of a
+    date are told apart only by their place. So the next statement's row
+    would be taken (the census after CI run 36792330947)."""
     for needle in _date_needles(date):
         try:
             rows = page.locator("tr, [role='row'], li").filter(has_text=needle)
             n = min(rows.count(), 40)
         except Exception:
-            continue
-        found = []
+            return [], True
+        found, unread = [], False
         for i in range(n):
             row = rows.nth(i)
             try:
                 text = re.sub(r"\s+", " ", row.inner_text(timeout=800) or "")
             except Exception:
+                unread = True
                 continue
-            if _row_download_control(row) is not None:
+            ctrl, missed = _row_control_read(row)
+            if ctrl is not None:
                 found.append((row, text))
-        if found:
-            return found
-    return []
+            elif missed:
+                unread = True
+        if found or unread:
+            return found, unread
+    return [], False
 
 
 def _find_row_control(page, date: str, account: str = "", occurrence: int = 0):
@@ -990,9 +1009,13 @@ def _find_row_control(page, date: str, account: str = "", occurrence: int = 0):
 
     Returns None rather than guessing when the row it wants is not there -
     downloading the wrong statement under a confident filename is far worse
-    than downloading nothing.
+    than downloading nothing. A row of the date that could not be read
+    leaves every place in doubt, so it returns None then too.
     """
-    rows = _rows_for_date(page, date)
+    rows, unread = _rows_for_date(page, date)
+    if unread:
+        log.info("a row for %s could not be read, so no row is taken by its place", date)
+        return None
     if not rows:
         return None
 
@@ -1682,7 +1705,12 @@ def _find_tax_row_control(page, title: str, account: str = "",
     short = re.sub(r"^\s*form\s+", "", needle, flags=re.I)
     short = re.sub(r"\s*(tax\s*)?(form|document)s?\s*$", "", short, flags=re.I).strip()
 
+    # A row that could not be read stops the choosing. Its words used to
+    # be taken as none, so a trust's form passed for a plain one, and a row
+    # whose control could not be read was left out, which moved the next
+    # form into its place (the census after CI run 36792330947).
     matches = []
+    unread = False
     for candidate in [code.group(0) if code else "", short, needle]:
         if not candidate:
             continue
@@ -1690,18 +1718,25 @@ def _find_tax_row_control(page, title: str, account: str = "",
             rows = page.locator("tr, [role='row'], li").filter(has_text=candidate)
             n = min(rows.count(), 20)
         except Exception:
-            continue
+            unread = True
+            break
         for i in range(n):
             row = rows.nth(i)
-            if _row_download_control(row) is None:
+            ctrl, missed = _row_control_read(row)
+            if ctrl is None:
+                unread = unread or missed
                 continue
             try:
                 text = re.sub(r"\s+", " ", row.inner_text(timeout=800) or "")
             except Exception:
-                text = ""
+                unread = True
+                continue
             matches.append((row, text))
-        if matches:
+        if matches or unread:
             break
+    if unread:
+        log.info("a tax row for %r could not be read, so none is taken by its place", title)
+        return None
     if not matches:
         log.info("no tax row found for %r", title)
         return None

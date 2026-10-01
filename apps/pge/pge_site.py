@@ -1028,14 +1028,6 @@ _ROW_OF_JS = r"""el => {
 }""" % _UP_JS
 
 
-def _row_of(el):
-    """The row a control sits in, or None."""
-    try:
-        return el.evaluate_handle(_ROW_OF_JS).as_element()
-    except Exception:
-        return None
-
-
 def _same_node(a, b) -> bool:
     """Two handles on one element. When the page cannot say, they are taken
     to be two, which can only make the page wide look refuse."""
@@ -1045,9 +1037,10 @@ def _same_node(a, b) -> bool:
         return False
 
 
-def _bill_rows_page_wide(page, want_date: str) -> Tuple[list, int]:
+def _bill_rows_page_wide(page, want_date: str) -> Tuple[list, int, int]:
     """Every bill row dated `want_date` that a control on the page sits in,
-    each row once, and how many of them read View Bill PDF more than once.
+    each row once, how many of them read View Bill PDF more than once, and
+    how many controls' rows could not be read.
 
     The controls are the ones that could be a bill's PDF, a link or button
     reading View Bill PDF, a link to a PDF and a link marked as a download.
@@ -1063,20 +1056,31 @@ def _bill_rows_page_wide(page, want_date: str) -> Tuple[list, int]:
     the row of every control in it. Its first date can be this bill's
     while the only link in it is another bill's, and a press inside it
     saved one bill under another's date. download_bill refuses such a row,
-    and the count says it was there."""
-    rows, crowded = [], 0
+    and the count says it was there.
+
+    A control whose row could not be found for the asking, or a row whose
+    words could not be read, is counted as unread, and download_bill
+    presses nothing then. It was left out, so of two bill rows with the
+    date the other one would be pressed as the only one (the census after
+    CI run 36792330947)."""
+    rows, crowded, unread = [], 0, 0
     try:
         cands = page.query_selector_all(FALLBACK["download_control"])
     except Exception as e:
         log.info("the page wide look could not ask the page (%s)", type(e).__name__)
-        return rows, crowded
+        return rows, crowded, unread
     for cand in cands:
-        own = _row_of(cand)
+        try:
+            own = cand.evaluate_handle(_ROW_OF_JS).as_element()
+        except Exception:
+            unread += 1
+            continue
         if own is None:
             continue
         try:
             text = own.inner_text() or ""
         except Exception:
+            unread += 1
             continue
         if "View Bill PDF" not in text or parse_date(text) != want_date:
             continue
@@ -1085,7 +1089,7 @@ def _bill_rows_page_wide(page, want_date: str) -> Tuple[list, int]:
         rows.append(own)
         if text.count("View Bill PDF") > 1:
             crowded += 1
-    return rows, crowded
+    return rows, crowded, unread
 
 
 _VIEW_PDF_RE = re.compile(r"^\s*view\s+(bill\s+)?pdf\s*$", re.I)
@@ -2003,9 +2007,11 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
         page_rows = page_crowded = 0
         if not link and want_date and row is None:
             looked = True
-            reached, page_crowded = _bill_rows_page_wide(page, want_date)
+            reached, page_crowded, page_unread = _bill_rows_page_wide(page, want_date)
             page_rows = len(reached)
-            if page_rows > 1:
+            if page_unread:
+                _trace("refused a bill row that could not be read", rows=page_rows, unread=page_unread)
+            elif page_rows > 1:
                 _trace("refused more than one bill row with the date", rows=page_rows)
             elif page_crowded:
                 _trace("refused a row that holds more than one bill")

@@ -1082,14 +1082,17 @@ _ROW_OF_JS = r"""el => {
 }"""
 
 
-def _label_of(el) -> str:
+def _label_of(el) -> Optional[str]:
+    """A control's label, or None when it could not be read. It used to be
+    "" then, which read as no document at all (the census after CI run
+    36792330947)."""
     try:
         return (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
     except Exception:
-        return ""
+        return None
 
 
-def _read_control(el, kind: str) -> Tuple[str, str, Optional[str], str]:
+def _read_control(el, kind: str) -> Tuple[Optional[str], str, Optional[str], str]:
     """A control's label, the kind it belongs to, its date, and its row's
     text. Only a button of the recorded shape (DOC_BUTTON_RE) is given a
     date, and only from its own name, so nothing else on a list, a PDF
@@ -1100,8 +1103,11 @@ def _read_control(el, kind: str) -> Tuple[str, str, Optional[str], str]:
     names its button the way it names a statement's, filed at the year the
     button names (tax_list_date). On a statements list it is that list's
     statement, filed at the end of the month it names. A statement row
-    whose own text says tax is left undated, since it is neither."""
+    whose own text says tax is left undated, since it is neither. A label
+    that could not be read is None, and so is the date."""
     name = _label_of(el)
+    if name is None:
+        return None, kind, None, ""
     row_text = ""
     try:
         row_text = el.evaluate(_ROW_OF_JS) or ""
@@ -1161,15 +1167,23 @@ def collect_download_docs(page, kind: str = CARD, trace: Optional[list] = None) 
     return docs
 
 
-def _dated(page, kind: str, iso: str) -> List[str]:
+def _dated(page, kind: str, iso: str) -> Optional[List[str]]:
     """The name of every document button on the list on screen that reads
-    as the `kind` document dated `iso`, the same way discovery read it."""
+    as the `kind` document dated `iso`, the same way discovery read it, or
+    None when a button's name could not be read, since it may read as that
+    document too."""
     ctrls = _doc_buttons(page)
     names = []
+    unread = 0
     for i in range(max(_count(ctrls), 0)):
         name, own, got, _row = _read_control(ctrls.nth(i), kind)
+        if name is None:
+            unread += 1
+            continue
         if own == kind and got == iso and is_safe_control(name):
             names.append(name)
+    if unread:
+        return None
     return names
 
 
@@ -1187,9 +1201,10 @@ def _control_for(page, kind: str, iso: str):
     """The button for the `kind` document dated `iso`, matched the same way
     discovery found it, as (control, name), or (None, "") when no button or
     more than one reads as that document, since pressing one of two would
-    be a guess."""
+    be a guess. A button whose name could not be read could be the second,
+    so then nothing is chosen either."""
     names = _dated(page, kind, iso)
-    if len(names) != 1:
+    if names is None or len(names) != 1:
         return None, ""
     return _exactly_named(page, names[0]), names[0]
 
@@ -1322,6 +1337,7 @@ _TRACE_WORDS = frozenset(KINDS) | frozenset({
     "pressed a section menu entry", "the menu was never drawn", "the section was not found",
     "the list on screen was not taken", "the list's link counted none", "read a section",
     "no control carried this document's date", "more than one control carried this document's date",
+    "a control's name could not be read",
     "clicked", "click failed", "clicked through the DOM instead", "DOM click failed too",
     "after the click", "second step clicked", "second step click failed",
     "pressed again", "the second press failed",
@@ -1758,10 +1774,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
 
     el, label = _control_for(page, kind, iso_date)
     if el is None:
-        same = len(_dated(page, kind, iso_date))
+        dated = _dated(page, kind, iso_date)
+        same = len(dated or [])
         log.info("%d %s document buttons read as %s, none pressed", same, kind, iso_date)
         if trace is not None:
-            trace.append({"note": ("more than one control carried this document's date" if same
+            trace.append({"note": ("a control's name could not be read" if dated is None else
+                                   "more than one control carried this document's date" if same
                                    else "no control carried this document's date"),
                           "kind": kind, "document_controls": _count(_doc_buttons(page)),
                           "with_this_date": same})

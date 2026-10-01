@@ -150,6 +150,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -740,8 +741,13 @@ def plan_periods(options) -> List[str]:
 def _find_picker(page):
     """The period picker and the period it shows, or (None, ""). A button
     whose name carries the picker's own label is preferred, so a year in
-    an open list is never taken for the picker."""
+    an open list is never taken for the picker. A button that could not be
+    read may have been the picker's own, so then only a button carrying
+    the label is taken. A year in the open list would be taken for the
+    picker when the picker's own button did not answer in time (found
+    beside CI run 36792330947)."""
     found = []
+    unread = 0
     try:
         loc = page.get_by_role("button", name=PICKER_NAME_RE)
         for i in range(min(loc.count(), 8)):
@@ -752,12 +758,16 @@ def _find_picker(page):
                 if period and el.is_visible():
                     found.append((not re.search(r"time\s*frame", label, re.I), i, el, period))
             except Exception:
+                unread += 1
                 continue
     except Exception:
         pass
     if not found:
         return None, ""
     found.sort(key=lambda f: (f[0], f[1]))
+    if found[0][0] and unread:
+        log.info("a period button could not be read, so no button without the picker's label is taken")
+        return None, ""
     return found[0][2], found[0][3]
 
 
@@ -781,6 +791,8 @@ def _option_texts(page) -> set:
 # The periods the picker offered when it was last opened, so a download
 # whose period is already showing does not open it again.
 _OFFERED: List[str] = []
+# How much longer an opened list may take to show its periods.
+PERIODS_WAIT_S = 4
 
 
 def _periods_offered(page, picker, current: str = "") -> Tuple[List[str], int]:
@@ -791,9 +803,12 @@ def _periods_offered(page, picker, current: str = "") -> Tuple[List[str], int]:
     what is new since the list opened, and the picker's own text was there
     before, so a list of plain elements lost the period it was showing. A
     year that was showing then looked unoffered, and a document of that
-    year was sent to "Year To Date" (#36, review). A read that finds no
-    period at all, a list drawing late, returns nothing and leaves the
-    periods remembered from the last read as they were.
+    year was sent to "Year To Date" (#36, review). A list drawing late is
+    read again for a few seconds. Reading the controls one at a time used
+    to give it a second or so more before the visible texts were read, and
+    the core reads them in one call now (the census after CI run
+    36792330947). A read that still finds no period returns nothing and
+    leaves the periods remembered from the last read as they were.
 
     Short texts already showing before the list opened are left out as
     well as controls. Only controls used to be, so every short text on the
@@ -802,8 +817,13 @@ def _periods_offered(page, picker, current: str = "") -> Tuple[List[str], int]:
     before = _control_texts(page) | _short_visible_texts(page)
     picker.click(timeout=5000)
     page.wait_for_timeout(1500)
-    offered = _option_texts(page) | ((_control_texts(page) | _short_visible_texts(page)) - before)
-    periods = {re.sub(r"\s+", " ", t).strip() for t in offered if is_date_filter(t)}
+    until = time.monotonic() + PERIODS_WAIT_S
+    while True:
+        offered = _option_texts(page) | ((_control_texts(page) | _short_visible_texts(page)) - before)
+        periods = {re.sub(r"\s+", " ", t).strip() for t in offered if is_date_filter(t)}
+        if periods or time.monotonic() >= until:
+            break
+        page.wait_for_timeout(500)
     others = len(offered) - len(periods)
     if not periods:
         return [], others
@@ -1232,6 +1252,8 @@ _REFUSALS = (
     "the one control of this date may be for something else",
     "the control holds something else that could be pressed",
     "the control sits outside any one row",
+    "a control on the page could not be read",
+    "a row of this date could not be read",
 )
 
 # Why a row may hold more than this document, in the only words that may
@@ -1426,24 +1448,34 @@ def _control_for(page, iso: str, title: str = "", trace: Optional[list] = None):
     It is pressed only through _tick_and_download. Each control is held as
     the element itself from the check to the press. It was found again by
     its place among the page's controls when pressed, so a list that
-    changed in between moved the press onto another document (review)."""
+    changed in between moved the press onto another document (review).
+
+    A control that could not be read, one that did not answer in time or
+    whose words or row could not be had, stops the choosing, and the row
+    walk decides. It used to be passed over as if it were not on the page,
+    so with none answering nothing was written down (CI run 36792330947),
+    and of two controls naming the document the one that answered would be
+    pressed as the only one."""
     ctrls = _bill_controls(page)
     matches = []
+    unread = 0
     for i in range(min(ctrls.count(), 80)):
         try:
             el = ctrls.nth(i).element_handle(timeout=2000)
         except Exception:
+            unread += 1
             continue
         if el is None:
+            unread += 1
             continue
-        aria = text = ""
         try:
             if not el.is_visible():
                 continue
             aria = el.get_attribute("aria-label") or ""
             text = el.evaluate(_WORDS_JS) or ""
         except Exception:
-            pass
+            unread += 1
+            continue
         name = (aria or text).strip()
         if _DOWNLOAD_BUTTON_RE.match(name) or _DOWNLOAD_BUTTON_RE.match(text):
             continue
@@ -1452,12 +1484,17 @@ def _control_for(page, iso: str, title: str = "", trace: Optional[list] = None):
             try:
                 row_text = el.evaluate(_ROW_OF_JS) or ""
             except Exception:
-                row_text = ""
+                unread += 1
+                continue
             if len(_dates_in(row_text)) > 1:
                 continue
             found = parse_date(row_text)
         if found == iso and not _is_insert_text((text,), title, (aria,)):
             matches.append((el, name, (aria, text)))
+    if unread:
+        _refuse(trace, "control", "a control on the page could not be read", iso, len(matches),
+                sum(1 for m in matches if any(names_title(w, title) for w in m[2])))
+        return None, ""
     if not matches:
         return None, ""
     if title:
@@ -1465,6 +1502,9 @@ def _control_for(page, iso: str, title: str = "", trace: Optional[list] = None):
                  and _guard_allows(m[2], title)]
         if len(named) == 1:
             around = _around(named[0][0], title)
+            if not around:
+                _refuse(trace, "control", "a control on the page could not be read", iso, len(matches), 1)
+                return None, ""
             if not around.get("clean"):
                 _refuse(trace, "control", "the control holds something else that could be pressed",
                         iso, len(matches), 1)
@@ -1482,6 +1522,9 @@ def _control_for(page, iso: str, title: str = "", trace: Optional[list] = None):
         el, name, (aria, text) = matches[0]
         mine = {"text": (text or "").strip(), "aria": (aria or "").strip()}
         around = _around(el, title)
+        if not around:
+            _refuse(trace, "control", "a control on the page could not be read", iso, 1, 0)
+            return None, ""
         if not around.get("clean"):
             _refuse(trace, "control", "the control holds something else that could be pressed", iso, 1, 0)
             return None, ""
@@ -2080,30 +2123,55 @@ def _named_link(row, title: str, trace: Optional[list] = None):
     a role=link element wrapping a notice's link, is passed over, since a
     press lands on its middle, and the trace says so in fixed words
     (review). The link comes back as the element itself, the one that was
-    checked, never found again by its place when it is pressed (review)."""
-    for loc in (row.get_by_role("link", name=_title_name_re(title)),
-                row.get_by_role("link").filter(has_text=re.compile(
-                    "^\\s*" + re.escape(title.strip()) + "\\s*$", re.I))):
+    checked, never found again by its place when it is pressed (review).
+
+    The answer is the link or None, and whether a link could not be read.
+    A link that could not be read may have been the one naming the
+    document, so the caller does not count this row as naming nothing. It
+    used to be passed over, and of two rows naming the document the other
+    one's link would be pressed as the only one (found beside CI run
+    36792330947)."""
+    looks = (row.get_by_role("link", name=_title_name_re(title)),
+             row.get_by_role("link").filter(has_text=re.compile(
+                 "^\\s*" + re.escape(title.strip()) + "\\s*$", re.I)))
+    unread, unmade = False, 0
+    for loc in looks:
+        # A look that cannot be made at all, as a role's name pattern with
+        # a slash in the title, gives way to the next one. Only when no
+        # look could be made is the row unread.
         try:
-            for j in range(min(loc.count(), 4)):
+            many = min(loc.count(), 4)
+        except Exception:
+            unmade += 1
+            continue
+        for j in range(many):
+            try:
                 el = loc.nth(j).element_handle(timeout=2000)
-                if el is None or not el.is_visible():
+                if el is None:
+                    unread = True
+                    continue
+                if not el.is_visible():
                     continue
                 shows = el.inner_text()
                 labels = (el.get_attribute("aria-label"), el.get_attribute("title"))
-                if _is_insert_text((shows,), title, labels):
-                    continue
-                if not _guard_allows((shows,) + labels, title):
-                    continue
-                if not _around(el, title).get("clean"):
-                    if trace is not None:
-                        trace.append({"note": "a link naming this document holds something else that "
-                                              "could be pressed, so it was passed over"})
-                    continue
-                return el
-        except Exception:
-            continue
-    return None
+            except Exception:
+                unread = True
+                continue
+            if _is_insert_text((shows,), title, labels):
+                continue
+            if not _guard_allows((shows,) + labels, title):
+                continue
+            around = _around(el, title)
+            if not around:
+                unread = True
+                continue
+            if not around.get("clean"):
+                if trace is not None:
+                    trace.append({"note": "a link naming this document holds something else that "
+                                          "could be pressed, so it was passed over"})
+                continue
+            return el, False
+    return None, unread or unmade == len(looks)
 
 
 def _may_press_unnamed(cands, row_names_it: bool) -> List[bool]:
@@ -2151,22 +2219,36 @@ def _row_link_for(page, iso_date: str, title: str, trace: Optional[list] = None)
     When the rows of the date hold no link this step can see, as when a
     table in a shadow root shows links slotted in from outside it, it says
     so and leaves the choice to the row walk, rather than writing a
-    refusal ahead of a download that then succeeds (review)."""
+    refusal ahead of a download that then succeeds (review).
+
+    A row of the date that could not be told visible or not, or a link in
+    one that could not be read, stops the choosing, and the steps after
+    this one decide. Either used to be passed over as if it were not on
+    the page, so of two rows naming the document the one that could be
+    read would be taken as the only one (found beside CI run 36792330947). The
+    one row's words read through shadow roots are still only logged when
+    they cannot be had, since its own text is read either way."""
+    unread_why = "a row of this date could not be read"
     try:
         rows = page.get_by_role("row").filter(has_text=_date_text_re(iso_date))
-        shown = []
+        shown, unread = [], 0
         for i in range(min(rows.count(), 40)):
             try:
                 if rows.nth(i).is_visible():
                     shown.append(rows.nth(i))
             except Exception:
-                continue
+                unread += 1
         named = []
         if title:
             for row in shown:
-                link = _named_link(row, title, trace)
+                link, missed = _named_link(row, title, trace)
+                if missed:
+                    unread += 1
                 if link is not None:
                     named.append(link)
+        if unread:
+            _refuse(trace, "row link", unread_why, iso_date, len(shown), len(named))
+            return None, ""
         if len(named) == 1:
             return named[0], title
         if len(named) > 1:
@@ -2195,23 +2277,33 @@ def _row_link_for(page, iso_date: str, title: str, trace: Optional[list] = None)
             for j in range(min(links.count(), 8)):
                 try:
                     el = links.nth(j).element_handle(timeout=2000)
+                    if el is None:
+                        unread += 1
+                        continue
+                    if not el.is_visible():
+                        continue
+                    text = (el.inner_text() or "").strip()
+                    aria = (el.get_attribute("aria-label") or "").strip()
                 except Exception:
+                    unread += 1
                     continue
-                if el is None or not el.is_visible():
-                    continue
-                text = (el.inner_text() or "").strip()
-                aria = (el.get_attribute("aria-label") or "").strip()
                 if not (text or aria) or _is_insert_text((text,), title, (aria,)) \
                         or _names_another((text, aria), title, iso_date) \
                         or not _guard_allows((text, aria), title):
                     continue
                 usable.append((el, {"text": text, "aria": aria}))
+            if unread:
+                _refuse(trace, "row link", unread_why, iso_date, 1, 0)
+                return None, ""
             may = _may_press_unnamed([c for _el, c in usable], any(_mentions(w, title) for w in words))
             why = "no row of this date names this document"
             for (el, c), ok in zip(usable, may):
                 if not ok:
                     continue
                 around = _around(el, title)
+                if not around:
+                    _refuse(trace, "row link", unread_why, iso_date, 1, 0)
+                    return None, ""
                 if not around.get("clean"):
                     why = "the control holds something else that could be pressed"
                     continue
@@ -2793,11 +2885,15 @@ def _tick_and_download(page, box, dl_dir, out_path: Path, trace: Optional[list])
     this ticked is cleared again whatever happens, so it cannot do the same
     to the next document. The Download pressed is the page's own, outside
     every document row (_IN_A_ROW_JS), held as the element that was
-    checked. Every refusal is written in fixed words."""
+    checked. Every refusal is written in fixed words.
+
+    A Download button that could not be read stops the press. It was
+    passed over, so of two the one that could be read would be pressed as
+    the only one (found beside CI run 36792330947)."""
     def note(entry: dict) -> None:
         if trace is not None:
             trace.append(entry)
-    shown, in_rows = [], 0
+    shown, in_rows, unread = [], 0, 0
     try:
         buttons = page.get_by_role("button", name=_DOWNLOAD_BUTTON_RE)
         many = min(buttons.count(), 10)
@@ -2806,18 +2902,29 @@ def _tick_and_download(page, box, dl_dir, out_path: Path, trace: Optional[list])
     for i in range(many):
         try:
             button = buttons.nth(i).element_handle(timeout=2000)
-            if button is None or not button.is_visible():
+            if button is None:
+                unread += 1
+                continue
+            if not button.is_visible():
                 continue
         except Exception:
+            unread += 1
             continue
         try:
             inside_a_row = bool(button.evaluate(_IN_A_ROW_JS))
         except Exception:
-            inside_a_row = True                 # could not tell, so it is never pressed
+            # Could not tell. It used to count as one inside a row, which
+            # is never pressed, and that left the other button outside
+            # every row as the only one.
+            unread += 1
+            continue
         if inside_a_row:
             in_rows += 1
         else:
             shown.append(button)
+    if unread:
+        note({"note": "a Download button could not be read, so none was pressed", "unread": unread})
+        return False
     if not shown and in_rows:
         note({"note": "the only Download buttons sit inside rows, so none was pressed", "in_rows": in_rows})
         return False

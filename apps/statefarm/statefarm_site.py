@@ -833,6 +833,14 @@ def _click_failure(e: Exception) -> str:
 _CUT_AT = 60
 
 
+class _Found(list):
+    """What a look for controls found, and how many it could not read. One
+    that could not be read may be one of them, so a count of the rest is
+    not a count of them all, and every count of these refuses then (the
+    census after CI run 36792330947)."""
+    unread = 0
+
+
 def _visible_named(page, text: str, whole: bool = False) -> list:
     """The visible controls named `text`, as nodes, at most five.
 
@@ -845,19 +853,23 @@ def _visible_named(page, text: str, whole: bool = False) -> list:
     pattern = re.compile("^" + re.escape(text) + tail, re.I)
     for loc in (page.get_by_role("link", name=pattern), page.get_by_role("button", name=pattern),
                 page.locator("a, button, [role=button], [role=link]").filter(has_text=pattern)):
-        found = []
+        found = _Found()
         try:
             for h in loc.element_handles()[:5]:
                 try:
                     if h.is_visible():
                         found.append(h)
                 except Exception:
-                    continue
+                    found.unread += 1
         except Exception:
-            found = []
-        if found:
+            # The look itself could not be made, as when a name with a
+            # slash in it reaches a role's pattern, and the next look is
+            # made instead. Only a control it found and could not read
+            # counts as unread.
+            found = _Found()
+        if found or found.unread:
             return found
-    return []
+    return _Found()
 
 
 # Every name a screen reader may give the node, aria-label, the text of the
@@ -906,6 +918,8 @@ def _revealed_document(page, appeared: set, title: str):
     read again whole and the guard is asked about the whole name, and about
     the name it gives a screen reader when it has one. A word the guard
     refuses past the sixtieth character is still refused (#37)."""
+    if not getattr(appeared, "complete", True):
+        return None, "", "the controls on the page could not all be read, so what the row revealed is not known"
     want = _type_key(title)
     candidates = sorted(t for t in appeared if is_revealed_document(t))
     if not candidates:
@@ -919,6 +933,8 @@ def _revealed_document(page, appeared: set, title: str):
         return None, "", ("%d revealed documents are this type, and one is needed" % len(same))
     text = same[0]
     found = _visible_named(page, text)
+    if found.unread:
+        return None, "", "a control carrying that name could not be read"
     if len(found) != 1:
         return None, "", ("%d visible controls carry that name, and one is needed" % len(found))
     el = found[0]
@@ -959,7 +975,10 @@ def _still_the_document(page, el, name: str, row, iso: str, facts: Optional[dict
         return "it left the page"
     if read["name"] != name:
         return "its name changed"
-    n = len(_visible_named(page, name, whole=True))
+    named = _visible_named(page, name, whole=True)
+    if named.unread:
+        return "a control carrying its name could not be read"
+    n = len(named)
     if n != 1:
         return "%d visible controls carry its name now" % n
     return _still_in_its_row(page, row, el, name, iso, facts, row_is)
@@ -1010,6 +1029,13 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
         return "there is no date to tie the document to its row"
     dated = _controls_for(page, iso)
     handles = [h for h, _ in dated]
+    if dated.unread:
+        for h in handles:
+            try:
+                h.dispose()
+            except Exception:
+                pass
+        return "a control on the page could not be read"
     openers = [bool(VIEW_DOCUMENTS_RE.match(" ".join((n or "").split()))) for _, n in dated]
     try:
         got = row.evaluate(_TIE_JS, [doc, handles, openers])
@@ -1065,9 +1091,10 @@ def _still_in_its_row(page, row, doc, name: str, iso: str, facts: Optional[dict]
 
 def _row_found_again(page, iso: str):
     """The one row on the page that carries `iso`, found again by its View
-    Documents after a press drew the row anew, as (node, rows). `node` is
-    None unless exactly one View Documents carries the date, and `rows` is
-    how many do.
+    Documents after a press drew the row anew, as (node, rows, unread).
+    `node` is None unless exactly one View Documents carries the date and
+    every control could be read, `rows` is how many do, and `unread` how
+    many controls could not be read.
 
     A row is known by its View Documents and the date it reads, the same
     way download_bill found it before its press. The documents a row
@@ -1076,18 +1103,19 @@ def _row_found_again(page, iso: str):
     page somewhere else, so neither gives a row to tie a document to (#37).
     """
     if not iso:
-        return None, 0
+        return None, 0, 0
     openers, others = [], []
-    for h, name in _controls_for(page, iso):
+    dated = _controls_for(page, iso)
+    for h, name in dated:
         (openers if VIEW_DOCUMENTS_RE.match(" ".join((name or "").split())) else others).append(h)
-    for h in others + (openers if len(openers) != 1 else []):
+    for h in others + (openers if len(openers) != 1 or dated.unread else []):
         try:
             h.dispose()
         except Exception:
             pass
-    if len(openers) != 1:
-        return None, len(openers)
-    return openers[0], 1
+    if len(openers) != 1 or dated.unread:
+        return None, len(openers), dated.unread
+    return openers[0], 1, 0
 
 
 def _openers_read(page, iso: str) -> dict:
@@ -1188,10 +1216,15 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
             note({"note": "click failed", "control": _label_mask(label), "why": _click_failure(e)})
             return False
         appeared: set = set()
-        for _ in range(8):
+        # Looked at against the clock. Each look used to read every control
+        # one at a time, which on a real page added a second or so, so eight
+        # looks waited well past four seconds. The core reads them in one
+        # call now (the census after CI run 36792330947).
+        until = time.monotonic() + REVEAL_WAIT_S
+        while True:
             page.wait_for_timeout(500)
             appeared = _control_texts(page) - before
-            if any(is_revealed_document(t) for t in appeared):
+            if any(is_revealed_document(t) for t in appeared) or time.monotonic() >= until:
                 break
     finally:
         try:
@@ -1242,7 +1275,7 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
     # the trace says where it sat.
     row, row_is = el, "the row that was pressed"
     if after == "left the page":
-        row, rows = _row_found_again(page, iso)
+        row, rows, unread = _row_found_again(page, iso)
         found = {"note": "the row's control left the page after its press, so its row was "
                          "looked for again by this date", "rows_with_this_date": rows}
         if rows != 1:
@@ -1250,7 +1283,9 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
         note(found)
         if row is None:
             note({"note": "no revealed document was pressed",
-                  "why": ("no row carries this date after the press" if rows == 0 else
+                  "why": ("a control on the page could not be read, so which row carries this "
+                          "date is not known" if unread else
+                          "no row carries this date after the press" if rows == 0 else
                           "%d rows carry this date after the press, so which one is this "
                           "document's is not known" % rows)})
             return False
@@ -1286,6 +1321,8 @@ ROWS_WAIT_MS = 30000
 # pressed. A page that draws its rows and then draws them again a moment
 # later leaves the first press on a node that is no longer there (#37).
 SETTLE_MS = 1500
+# How long a pressed row may take to show its documents.
+REVEAL_WAIT_S = 12
 
 
 def _all_on_page(handles) -> bool:
@@ -2061,15 +2098,22 @@ def _controls_for(page, iso: str) -> list:
     read through that same node. A locator for "the nth control" is looked
     up again every time it is used, so once a row was drawn above the
     wanted one the name read belonged to one row and the link fetched to
-    the next (#37)."""
-    out = []
+    the next (#37).
+
+    A control that could not be read is counted in `unread`, since it may
+    carry the date. It was left out, so of two rows carrying one date the
+    other one would be pressed as the only one."""
+    out = _Found()
     try:
         handles = _bill_controls(page).element_handles()
     except Exception:
+        out.unread = 1
         return out
     for h in handles:
         got = _read_control(h)
-        if got is not None and _date_of(got) == iso:
+        if got is None:
+            out.unread += 1
+        elif _date_of(got) == iso:
             out.append((h, got["name"]))
             continue
         try:
@@ -2099,7 +2143,10 @@ def _recheck(page, el, iso: str, label: str) -> Tuple[str, str, str]:
         return "its name changed", "", ""
     if _date_of(got) != iso:
         return "it no longer carries this date", "", ""
-    n = len(_controls_for(page, iso))
+    dated = _controls_for(page, iso)
+    if dated.unread:
+        return "a control on the page could not be read", "", ""
+    n = len(dated)
     if n != 1:
         return "%d controls carry this date now" % n, "", ""
     return "", got["href"], got["row"]
@@ -2731,6 +2778,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             break
 
     found = _controls_for(page, iso_date)
+    if found.unread:
+        log.info("a control could not be read, so none was pressed for %s", iso_date)
+        if trace is not None:
+            trace.append({"note": "a control on the page could not be read", "unread": found.unread,
+                          "so": "which row is this document's is not known, so none was pressed"})
+        return False
     if not found:
         log.info("no document control found for %s", iso_date)
         if trace is not None:

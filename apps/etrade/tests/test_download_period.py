@@ -208,7 +208,8 @@ def test_a_picker_with_only_narrow_periods_gets_the_widest():
 # A picker page for the cases review raised, set up by the address. Its
 # options are role=option or plain elements, Escape closes its list or
 # does nothing, it starts on any period, and it can open a list that has
-# not drawn its periods yet. Apply is counted.
+# not drawn its periods yet, or draws them a while after it opens.
+# Apply is counted.
 PICKER_PAGE = """<!doctype html><html><body>
 <h1>Statements &amp; Documents</h1>
 <form id="filters">
@@ -232,9 +233,8 @@ function setOpen(open) {
 }
 label();
 if (!plain) list.setAttribute("role", "listbox");
-if (q.get("empty") === "1") {
-  list.innerHTML = "<div>Loading</div>";
-} else {
+function fill() {
+  list.innerHTML = "";
   for (const p of periods) {
     const o = document.createElement("div");
     if (!plain) o.setAttribute("role", "option");
@@ -244,7 +244,17 @@ if (q.get("empty") === "1") {
     list.appendChild(o);
   }
 }
-picker.addEventListener("click", () => setOpen(list.style.display === "none"));
+const late = +(q.get("late") || 0);
+let filled = !late;
+if (q.get("empty") === "1" || late) {
+  list.innerHTML = "<div>Loading</div>";
+} else {
+  fill();
+}
+picker.addEventListener("click", () => {
+  setOpen(list.style.display === "none");
+  if (!filled) { filled = true; setTimeout(fill, late); }
+});
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && q.get("esc") !== "0") setOpen(false);
 });
@@ -338,4 +348,18 @@ def test_the_list_is_closed_even_when_escape_leaves_it_open(picker_site, monkeyp
     assert not _list_open(pg)
     assert pg.evaluate("document.getElementById('picker').getAttribute('aria-expanded')") == "false"
     assert pg.evaluate("window.applies") == 0
+    pg.close()
+
+
+def test_a_list_that_draws_late_is_read_once_it_draws(picker_site, monkeypatch):
+    """The list shows its periods three seconds after it opens. Reading the
+    controls one at a time used to give such a list a second or so more,
+    and the core reads them in one call now, so the list is read again
+    until it shows a period (the review after the census that followed CI
+    run 36792330947)."""
+    monkeypatch.setattr(site, "_OFFERED", [])
+    pg = picker_site(opts="div", late="3000")
+    picker = site._find_picker(pg)[0]
+    periods, _others = site._periods_offered(pg, picker)
+    assert "2025" in periods and "Year To Date" in periods, periods
     pg.close()

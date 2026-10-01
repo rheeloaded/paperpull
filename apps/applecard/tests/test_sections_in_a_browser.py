@@ -164,3 +164,28 @@ def test_a_page_of_tax_forms_alone_is_not_taken_for_the_card_statements(page):
     assert site._looks_like(page, site.TAX)
     assert not site._looks_like(page, site.CARD)
     assert not site._looks_like(page, site.SAVINGS)
+
+
+TWO_MARCHES = ("<main><ul>"
+               "<li><ui-button role='button' tabindex='0' data-guid='march' "
+               "aria-label='Download statement of March 2031 (PDF)'></ui-button></li>"
+               "<li><ui-button role='button' tabindex='0' data-guid='mar' "
+               "aria-label='Download statement of Mar 2031 (PDF)'></ui-button></li>"
+               "</ul></main>")
+
+
+def test_two_buttons_that_name_one_month_two_ways_are_neither_pressed(page):
+    """The twin with nothing stalled, so the test below is about the stall."""
+    page.set_content(TWO_MARCHES)
+    assert site._control_for(page, site.CARD, "2031-03-31") == (None, "")
+
+
+def test_a_button_that_could_not_be_read_keeps_the_other_from_being_the_only_one(page, monkeypatch):
+    """The March button's name did not answer in time. It read as no
+    document at all, so the Mar button was the only one left reading as
+    March 2031, and it was pressed. Found by the census that followed CI
+    run 36792330947, where E*TRADE passed over a control the same way."""
+    from paperpull_core.testkit import stall_reads
+    page.set_content(TWO_MARCHES)
+    stall_reads(monkeypatch, {"march"}, locator=("get_attribute",))
+    assert site._control_for(page, site.CARD, "2031-03-31") == (None, "")

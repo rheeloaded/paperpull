@@ -428,8 +428,8 @@ def test_with_no_row_found_a_row_reached_from_two_of_its_controls_is_one_row(
         'View Bill PDF</a> <a class="dl" data-refused download href="#dl">Download</a>')
         + "</ul>" + HOOKS)
     assert len(page.query_selector_all(site.FALLBACK["download_control"])) == 2
-    rows, crowded = site._bill_rows_page_wide(page, "2031-04-17")
-    assert len(rows) == 1 and crowded == 0
+    rows, crowded, unread = site._bill_rows_page_wide(page, "2031-04-17")
+    assert len(rows) == 1 and crowded == 0 and unread == 0
     ok, results = _take(page, tmp_path, row_index=0)
     assert ok is True
     assert page.evaluate("window.presses") == 1
@@ -617,3 +617,41 @@ def test_a_control_holding_more_than_can_be_judged_is_refused(page, tmp_path):
     assert page.evaluate("window.presses") == 0, "pressed with a Pay control inside it"
     assert ok is False
     assert results[0][1]["row_nearby"] >= 1
+
+
+# -- a bill row that could not be read ----------------------------------------
+#
+# The page wide look counts the bill rows carrying the date and presses only
+# when there is one. A row whose words could not be read, or a control whose
+# row could not be found for the asking, was left out of the count, so of two
+# bill rows the other one would be pressed as the only one (the census after CI
+# run 36792330947).
+
+BILL_A = BILL_LI.replace('<li class="bill">', '<li class="bill" data-guid="bill-a">') \
+    .replace("data-bill>", 'data-bill data-guid="link-a">')
+BILL_B = BILL_LI.replace('<li class="bill">', '<li class="bill" data-guid="bill-b">') \
+    .replace("data-bill>", 'data-bill data-guid="link-b">')
+
+
+def test_two_bill_rows_with_the_date_are_both_counted(page, tmp_path, no_table):
+    """The twin with nothing stalled, so the test below is about the stall."""
+    page.set_content("<ul>" + BILL_A + BILL_B + "</ul>" + HOOKS)
+    ok, results = _take(page, tmp_path, row_index=0)
+    assert ok is False and page.evaluate("window.presses") == 0
+    assert results[0][0] == "refused more than one bill row with the date", results
+
+
+@pytest.mark.parametrize("stalled, handle, scripts", [
+    ("bill-b", ("inner_text",), ()),
+    ("link-b", ("evaluate_handle",), ("_ROW_OF_JS",)),
+])
+def test_a_bill_row_that_could_not_be_read_keeps_the_other_unpressed(page, tmp_path, no_table, monkeypatch,
+                                                                     stalled, handle, scripts):
+    from paperpull_core.testkit import stall_reads
+    page.set_content("<ul>" + BILL_A + BILL_B + "</ul>" + HOOKS)
+    stall_reads(monkeypatch, {stalled}, locator=(), handle=handle,
+                scripts=tuple(getattr(site, s) for s in scripts))
+    ok, results = _take(page, tmp_path, row_index=0)
+    assert page.evaluate("window.presses") == 0, "the other bill row's link was pressed"
+    assert ok is False and not (tmp_path / "bill.pdf").exists()
+    assert results[0][0] == "refused a bill row that could not be read", results

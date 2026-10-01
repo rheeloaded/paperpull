@@ -205,27 +205,63 @@ SETTINGS_CONTROL_RE = re.compile(
 # words finish a download stays with the app, because AT&T's menu says
 # things nobody else's does, and so does the app's own is_safe_control.
 
-def control_texts(page, roles=("button", "link", "menuitem"), limit: int = 120) -> set:
+class Survey(set):
+    """The words control_texts read, and whether it read every control.
+
+    A survey taken before a click is taken from one taken after it, and
+    the difference is what the click revealed. That difference is whole
+    only when both surveys were, so it carries the answer with it, and so
+    does a survey joined with any other set of words."""
+
+    def __init__(self, texts=(), complete: bool = True):
+        super().__init__(texts)
+        self.complete = complete
+
+    def _with(self, texts, other) -> "Survey":
+        return Survey(texts, self.complete and getattr(other, "complete", True))
+
+    def __sub__(self, other):
+        return self._with(set(self) - set(other), other)
+
+    def __rsub__(self, other):
+        return self._with(set(other) - set(self), other)
+
+    def __or__(self, other):
+        return self._with(set(self) | set(other), other)
+
+    __ror__ = __or__
+
+
+def control_texts(page, roles=("button", "link", "menuitem")) -> Survey:
     """The visible words of every control on the page, tidied and cut short.
 
     Used to tell what a click revealed: take this before and after, and the
     difference is what appeared. Anything that will not answer is skipped
     rather than raised, because a page mid-render is normal and a survey
     that stops is worth less than a partial one.
+
+    Each role is read in one call, every control at once. Each control used
+    to be read on its own with a 200 ms wait, and one that did not answer
+    was left out. Left out before a click it looked revealed after it, so
+    the page's own Download PDF could be pressed as the second step. Left
+    out after a click, the plain Regular PDF was missing and Itemized PDF,
+    a different document, could be pressed (the census after CI run
+    36792330947).
+    The first 120 of a role were read, so a click that moved controls
+    across that line made the same false difference. A role that will not
+    answer is still skipped, and the survey says it is not whole.
     """
-    out = set()
+    out = Survey()
     for role in roles:
         try:
-            loc = page.get_by_role(role)
-            for i in range(min(loc.count(), limit)):
-                try:
-                    t = (loc.nth(i).inner_text(timeout=200) or "").strip()
-                except Exception:
-                    continue
-                if t:
-                    out.add(re.sub(r"\s+", " ", t)[:60])
+            texts = page.get_by_role(role).all_inner_texts()
         except Exception:
-            pass
+            out.complete = False
+            continue
+        for t in texts:
+            t = (t or "").strip()
+            if t:
+                out.add(re.sub(r"\s+", " ", t)[:60])
     return out
 
 
@@ -238,7 +274,14 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control):
     plain choice are tried first, because "Regular PDF" is the bill and
     "Itemized PDF" is a different document. Whatever is picked still has to
     pass the app's own guard.
+
+    Nothing is picked from what appeared when a survey behind it could not
+    read every control. A control already on the page could be in it, or
+    the plain choice could be missing from it.
     """
+    if not getattr(appeared, "complete", True):
+        log.info("a survey of the controls was not whole, so no second step is taken")
+        return None, ""
     ranked = sorted(appeared,
                     key=lambda t: (0 if re.search(r"regular|standard|full|^download", t, re.I) else 1, t))
     for text in ranked:

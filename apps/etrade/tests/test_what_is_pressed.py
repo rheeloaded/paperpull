@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import etrade_site as site
+from paperpull_core.testkit import stall_reads
 
 ACCOUNT = "Invented Brokerage - 4242"
 BROKERAGE = "Brokerage Statement"
@@ -554,3 +555,289 @@ def test_the_row_link_step_says_it_saw_no_link_rather_than_refusing(page, presse
     assert hits == ["g-mine"], hits
     assert not [t for t in trace if t.get("note", "").startswith("not sure which")], trace
     assert "Brokerage" not in json.dumps(trace) and "4242" not in json.dumps(trace)
+
+
+# --- a control that could not be read ----------------------------------------
+#
+# CI run 36792330947 failed test_a_cell_that_prints_both_titles_is_never_pressed
+# once, on a runner that had stalled. The control lookup read each control
+# with element_handle(timeout=2000) and passed over one that did not answer in
+# time, as if it were not on the page. When none answered it found nothing and
+# wrote no refusal. When one of two controls naming the document did not
+# answer, the other was the only one left naming it, and it would be pressed.
+# That is the guess the lookup exists to refuse. Below, reading the controls
+# picked raises Playwright's own TimeoutError, the way that runner did.
+
+UNREAD = "a control on the page could not be read"
+
+
+class _Stalled:
+    """One control that does not answer in time."""
+
+    def __init__(self, real):
+        self._real = real
+
+    def element_handle(self, timeout=None):
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+        raise PlaywrightTimeout("Timeout %sms exceeded." % timeout)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class _Controls:
+    """The page's document controls, with the ones whose data-guid is in
+    `stalled` unreadable, or every one of them when it is None."""
+
+    def __init__(self, real, stalled):
+        self._real, self._stalled = real, stalled
+
+    def count(self):
+        return self._real.count()
+
+    def nth(self, i):
+        item = self._real.nth(i)
+        if self._stalled is None or item.get_attribute("data-guid") in self._stalled:
+            return _Stalled(item)
+        return item
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _stall(monkeypatch, stalled=None):
+    real = site._bill_controls
+    monkeypatch.setattr(site, "_bill_controls", lambda pg: _Controls(real(pg), stalled))
+
+
+def _refusals(trace):
+    return [t for t in trace if t.get("note", "").startswith("not sure which")]
+
+
+def test_controls_that_never_answer_still_leave_a_refusal(page, presses, monkeypatch):
+    """CI's failure, made to happen every time. Every control times out on
+    the page of test_a_cell_that_prints_both_titles_is_never_pressed. The
+    lookup refuses in its own words, and the row walk after it still runs
+    and presses nothing."""
+    _listed(monkeypatch, SHARED, [BROKERAGE, RETIREMENT])
+    page.set_content("<table><tbody><tr><td>11/30/25</td><td style='text-align:center'>"
+                     "%s <a href='#' data-guid='g-mine'>PDF</a><br>"
+                     "%s <a href='#' data-guid='g-theirs' style='display:inline-block;padding:20px 60px'>PDF</a>"
+                     "</td></tr></tbody></table>%s" % (BROKERAGE, RETIREMENT, LISTENER))
+    _stall(monkeypatch)
+    trace: list = []
+    assert not site.download_bill(page, Path("."), SHARED, Path("unused.pdf"), BROKERAGE, trace)
+    hits, _brings = presses
+    assert hits == [], hits
+    refused = _refusals(trace)
+    assert [t["way"] for t in refused] == ["row link", "control", "row by date"], trace
+    assert refused[1]["why"] == UNREAD and UNREAD in site._REFUSALS, refused[1]
+
+
+TWO_NAMING = ("<table><tbody>"
+              "<tr><td>11/30/25</td><td><a href='#' data-guid='g-first'>%s PDF</a></td></tr>"
+              "<tr><td>11/30/25</td><td><a href='#' data-guid='g-second'>%s PDF</a></td></tr>"
+              "</tbody></table>%s" % (BROKERAGE, BROKERAGE, LISTENER))
+
+
+@pytest.mark.parametrize("stalled", ["g-first", "g-second"])
+def test_one_of_two_controls_naming_the_document_unread_presses_neither(page, presses, monkeypatch, stalled):
+    """Two controls of the date both name the document, which the lookup
+    refuses as a guess. One of them does not answer in time. It was passed
+    over and the other was pressed as the document's only control."""
+    _listed(monkeypatch, SHARED, [BROKERAGE, BROKERAGE])
+    page.set_content(TWO_NAMING)
+    hits, brings = presses
+    brings.update({"g-first", "g-second"})
+    _stall(monkeypatch, {stalled})
+    trace: list = []
+    saved = site.download_bill(page, Path("."), SHARED, Path("unused.pdf"), BROKERAGE, trace)
+    assert hits == [] and not saved, hits
+    assert [(t["way"], t["why"]) for t in _refusals(trace)] == [
+        ("row link", "more than one row of this date names this document"),
+        ("control", UNREAD),
+        ("row by date", "more than one row of this date names this document")], trace
+
+
+def test_both_controls_read_are_refused_the_same_way(page, presses, monkeypatch):
+    """The twin with nothing stalled, so the test above is about the stall.
+    Both controls are read and the lookup refuses them as a guess."""
+    _listed(monkeypatch, SHARED, [BROKERAGE, BROKERAGE])
+    page.set_content(TWO_NAMING)
+    trace: list = []
+    assert site._control_for(page, SHARED, BROKERAGE, trace) == (None, "")
+    assert [(t["way"], t["why"]) for t in _refusals(trace)] == \
+        [("control", "more than one control of this date names this document")], trace
+
+
+def test_the_row_walk_still_saves_a_document_after_a_control_went_unread(page, presses, monkeypatch):
+    """A refusal is not a lost document. Another date's control does not
+    answer in time, so the lookup refuses, and the row walk after it finds
+    this document's own link in its row and saves it."""
+    _listed(monkeypatch, ALONE, [BROKERAGE])
+    page.set_content("<ul><li><span>10/31/25</span> <a href='#' data-guid='g-mine'>%s PDF</a></li>"
+                     "<li><span>09/30/25</span> <a href='#' data-guid='g-older'>%s PDF</a></li></ul>%s"
+                     % (BROKERAGE, BROKERAGE, LISTENER))
+    _stall(monkeypatch, {"g-older"})
+    hits, brings = presses
+    brings.add("g-mine")
+    trace: list = []
+    assert site.download_bill(page, Path("."), ALONE, Path("unused.pdf"), BROKERAGE, trace)
+    assert hits == ["g-mine"], hits
+    assert [(t["way"], t["why"]) for t in _refusals(trace)] == [("control", UNREAD)], trace
+
+
+# The other lookups in the download read an element through a locator too.
+# Here reading the elements picked raises, through whatever locator reads
+# them, so every step that looks at them meets the stall.
+
+def _stall_reads(monkeypatch, stalled, reads=("element_handle",)):
+    """Reading an element whose data-guid is in `stalled` with any of the
+    locator methods `reads` raises Playwright's TimeoutError."""
+    stall_reads(monkeypatch, stalled, locator=reads)
+
+
+@pytest.mark.parametrize("stalled, reads", [
+    ("g-first", ("element_handle",)),
+    ("g-second", ("element_handle",)),
+    ("r-first", ("is_visible",)),
+    ("r-second", ("is_visible",)),
+])
+def test_a_row_that_could_not_be_read_keeps_the_other_from_being_the_only_one(page, presses, monkeypatch,
+                                                                              stalled, reads):
+    """Two rows of the date both name the document. The row link step
+    passed over a row whose link, or the row itself, could not be read,
+    and pressed the other row's link as the only one naming it."""
+    _listed(monkeypatch, SHARED, [BROKERAGE, BROKERAGE])
+    page.set_content("<table><tbody>"
+                     "<tr data-guid='r-first'><td>11/30/25</td>"
+                     "<td><a href='#' data-guid='g-first'>%s PDF</a></td></tr>"
+                     "<tr data-guid='r-second'><td>11/30/25</td>"
+                     "<td><a href='#' data-guid='g-second'>%s PDF</a></td></tr>"
+                     "</tbody></table>%s" % (BROKERAGE, BROKERAGE, LISTENER))
+    hits, brings = presses
+    brings.update({"g-first", "g-second"})
+    _stall_reads(monkeypatch, {stalled}, reads)
+    trace: list = []
+    saved = site.download_bill(page, Path("."), SHARED, Path("unused.pdf"), BROKERAGE, trace)
+    assert hits == [] and not saved, hits
+    refused = _refusals(trace)
+    assert refused[0]["way"] == "row link" and refused[0]["why"] == "a row of this date could not be read", trace
+    assert all(t["why"] in site._REFUSALS for t in refused), trace
+
+
+@pytest.mark.parametrize("locator, handle, scripts", [
+    (("element_handle",), (), ()),
+    ((), ("evaluate",), ("_IN_A_ROW_JS",)),
+])
+def test_a_download_button_that_could_not_be_read_keeps_the_other_unpressed(page, presses, monkeypatch,
+                                                                            locator, handle, scripts):
+    """The page's Download is pressed only when it is the only one outside
+    every row. Of two, one could not be read, or whether it sits in a row
+    could not be told, which counted it as one in a row, and the other was
+    pressed as the only one."""
+    page.set_content("<ul><li><span>10/31/25</span> <input type='checkbox' data-guid='g-box'> %s</li></ul>"
+                     "<button type='button' data-guid='dl-first'>Download</button>"
+                     "<button type='button' data-guid='dl-second'>Download</button>%s" % (BROKERAGE, LISTENER))
+    hits, brings = presses
+    brings.update({"dl-first", "dl-second"})
+    stall_reads(monkeypatch, {"dl-first"}, locator=locator, handle=handle,
+                scripts=tuple(getattr(site, s) for s in scripts))
+    trace: list = []
+    box = page.locator("[data-guid='g-box']")
+    assert not site._tick_and_download(page, box, Path("."), Path("unused.pdf"), trace)
+    assert hits == [], hits
+    assert {"note": "a Download button could not be read, so none was pressed", "unread": 1} in trace, trace
+    assert page.evaluate("document.querySelector('[data-guid=g-box]').checked") is False
+
+
+def test_a_picker_that_could_not_be_read_is_not_replaced_by_a_year_in_its_list(page, monkeypatch):
+    """The picker's own button is preferred, so a year in its open list is
+    never taken for it. When the picker's button could not be read, the
+    year was taken for the picker and would have been pressed."""
+    page.set_content("<button type='button' data-guid='picker' aria-label='Timeframe , 2025'>2025</button>"
+                     "<ul role='listbox'><li><button type='button' data-guid='year'>2024</button></li></ul>")
+    assert site._find_picker(page)[1] == "2025"
+    _stall_reads(monkeypatch, {"picker"}, ("get_attribute",))
+    assert site._find_picker(page) == (None, "")
+
+
+def test_a_link_of_the_one_row_that_could_not_be_read_hands_the_choice_on(page, presses, monkeypatch):
+    """The one row of a date the lists held this document alone on. Its
+    insert link could not be read. A bare View may be pressed whatever
+    else the row holds, so this was never a wrong press, but the row link
+    step now chooses nothing past what it could not read, and the next
+    step still saves the document."""
+    _listed(monkeypatch, ALONE, [BROKERAGE])
+    page.set_content("<table><tbody><tr><td>10/31/25</td>"
+                     "<td><a href='#' data-guid='g-view'>View</a></td>"
+                     "<td><a href='#' data-guid='g-insert'>Insert</a></td></tr></tbody></table>%s" % LISTENER)
+    hits, brings = presses
+    brings.add("g-view")
+    _stall_reads(monkeypatch, {"g-insert"})
+    trace: list = []
+    assert site.download_bill(page, Path("."), ALONE, Path("unused.pdf"), BROKERAGE, trace)
+    assert hits == ["g-view"], hits
+    assert [(t["way"], t["why"]) for t in _refusals(trace)] == \
+        [("row link", "a row of this date could not be read")], trace
+
+
+def _stall_around(monkeypatch, stalled):
+    """Reading what is around an element whose data-guid is in `stalled`
+    raises, inside _around, which answers {} for it."""
+    stall_reads(monkeypatch, stalled, locator=(), handle=("evaluate",), scripts=(site._AROUND_CONTROL_JS,))
+
+
+def test_a_link_whose_row_could_not_be_read_is_not_counted_as_naming_nothing(page, presses, monkeypatch):
+    """Two rows of the date both name the document. What is around the
+    first row's link could not be read, which _around answers as nothing
+    clean, so the link was passed over as one holding something else, and
+    the other row's link was pressed as the only one naming it."""
+    _listed(monkeypatch, SHARED, [BROKERAGE, BROKERAGE])
+    page.set_content(TWO_NAMING)
+    hits, brings = presses
+    brings.update({"g-first", "g-second"})
+    _stall_around(monkeypatch, {"g-first"})
+    trace: list = []
+    saved = site.download_bill(page, Path("."), SHARED, Path("unused.pdf"), BROKERAGE, trace)
+    assert hits == [] and not saved, hits
+    assert [(t["way"], t["why"]) for t in _refusals(trace)][0] == \
+        ("row link", "a row of this date could not be read"), trace
+
+
+@pytest.mark.parametrize("step, way, body", [
+    ("_control_for", "control",
+     "<ul><li><span>10/31/25</span> <a href='#' data-guid='g-mine'>%s PDF</a></li></ul>" % BROKERAGE),
+    ("_control_for", "control",
+     "<ul><li><span>10/31/25</span> <a href='#' data-guid='g-mine'>View</a></li></ul>"),
+    ("_row_link_for", "row link",
+     "<table><tbody><tr><td>10/31/25</td><td><a href='#' data-guid='g-mine'>View</a></td></tr></tbody></table>"),
+])
+def test_a_chosen_control_whose_row_could_not_be_read_is_refused_in_those_words(page, monkeypatch,
+                                                                                step, way, body):
+    """What is around the one control a step chose could not be read. It
+    was refused as a control holding something else that could be
+    pressed, which is not what happened, and the row link step went on to
+    the row's next link."""
+    _listed(monkeypatch, ALONE, [BROKERAGE])
+    page.set_content(body)
+    _stall_around(monkeypatch, {"g-mine"})
+    trace: list = []
+    assert getattr(site, step)(page, ALONE, BROKERAGE, trace) == (None, "")
+    why = UNREAD if way == "control" else "a row of this date could not be read"
+    assert [(t["way"], t["why"]) for t in _refusals(trace)] == [(way, why)], trace
+
+
+def test_a_title_with_a_slash_is_still_found_by_its_links_own_words(page, presses, monkeypatch):
+    """A role's name pattern cannot be made from a title with a slash in it,
+    so the first look raises and the link is found by its own words. A look
+    that cannot be made is not a link that could not be read, and the row
+    is not refused as unread."""
+    title = "Statement/Report"
+    _listed(monkeypatch, ALONE, [title])
+    page.set_content("<table><tbody><tr><td>10/31/25</td><td><a href='#' data-guid='g-mine'>%s</a></td></tr>"
+                     "</tbody></table>%s" % (title, LISTENER))
+    trace: list = []
+    el, label = site._row_link_for(page, ALONE, title, trace)
+    assert el is not None and label == title, trace
+    assert not _refusals(trace), trace
