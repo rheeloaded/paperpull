@@ -178,11 +178,15 @@ def server():
 
 def _start_browser(exe, profile):
     """The browser as a program of its own with a debugging port, and its
-    address, or None for the address when it opened no port."""
+    address, or None for the address when it opened no port.
+
+    It starts with no window of its own, so its only tabs are the ones
+    opened here. The blank tab a browser starts with sometimes never closed,
+    2 fresh starts in 40, and was left where the app reads it, on CI too."""
     proc = subprocess.Popen(
         [exe, "--headless=new", "--remote-debugging-port=0",
          "--user-data-dir=%s" % profile, "--disable-extensions", "--disable-sync",
-         "--no-first-run", "--no-default-browser-check", NO_HOSTS, "about:blank"],
+         "--no-first-run", "--no-default-browser-check", "--no-startup-window", NO_HOSTS],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port, deadline = "", time.monotonic() + 30
     while not port and time.monotonic() < deadline and proc.poll() is None:
@@ -195,51 +199,36 @@ def _start_browser(exe, profile):
     return proc, "http://127.0.0.1:%s" % port
 
 
-def _browser_ready(url, server) -> bool:
-    """Whether the browser draws a page and closes the tab it started with.
-
-    A fresh browser sometimes does not. Measured on 40 fresh starts, 2 began
-    with a tab that never closed and 1 never drew the first page it was sent
-    to, each for a minute or more, which is what failed this file on CI. A
-    fresh start after one of those was fine."""
-    others = _page_targets(url)
-    earlier = SITE.loads("ready")
-    request = urllib.request.Request(url + "/json/new?" + server + "/ready", method="PUT")
-    with urllib.request.urlopen(request, timeout=10) as r:
-        tab = json.loads(r.read().decode("utf-8"))
-    if not _drawn_since(earlier, 10, page="ready"):
-        return False
-    for target in others:
-        _close_tab(url, target["id"])
-    return _only_tab_left(url, tab["id"], 10)
-
-
 @pytest.fixture(scope="module")
 def attached(tmp_path_factory, server):
     """Playwright's own Chromium, never the person's everyday browser,
     started as a program of its own with a debugging port, which is what the
     app attaches to at home. Its address, for cdp_url.
 
-    It starts on a blank page. Started straight on a page from this server,
-    headless Chromium would not let Playwright attach to it at all. A browser
-    that fails _browser_ready is closed and another started, three at most,
-    and the one handed over has one tab, on a page of this server's."""
+    It is handed over with one tab, on a page of this server's that has
+    drawn. A browser that cannot get there is closed and another started,
+    three at most, and a failure says what each one did."""
     pytest.importorskip("playwright.sync_api")
     found = browser_launcher.browser_candidates(mode=browser_launcher.BUNDLED)
     if not found:
         pytest.skip("no browser to drive")
+    tried = []
     for _start in range(3):
         proc, url = _start_browser(found[0][1], tmp_path_factory.mktemp("attached-profile"))
         if url is None:
             proc.kill()
             proc.wait(timeout=15)
             pytest.skip("the browser opened no debugging port")
-        if _browser_ready(url, server):
+        ready = _open_drawn(url, server + "/ready", "ready")
+        if ready is not None and _only_tab_left(url, ready["id"], 10):
             break
+        tried.append("%s, tabs %r" % ("never drew a page" if ready is None else
+                                      "a tab never closed",
+                                      [t.get("url") for t in _page_targets(url)]))
         proc.kill()
         proc.wait(timeout=15)
     else:
-        pytest.fail("three fresh browsers in a row could not draw a page and close a tab")
+        pytest.fail("three fresh browsers in a row were not ready, %s" % "; ".join(tried))
     yield url
     try:
         from playwright.sync_api import sync_playwright
@@ -296,25 +285,33 @@ def _only_tab_left(cdp_url, target_id, seconds) -> bool:
     return False
 
 
-def open_as_login_does(cdp_url, address):
-    """A tab on the address and no other, opened by the browser itself, the
-    way Login's window is. Returns once the page has drawn its list.
+def _open_drawn(cdp_url, address, page):
+    """A tab the browser itself opens on the address, once its page has
+    drawn, or None.
 
-    The browser is checked when it starts (see _browser_ready). A tab that
-    has still not drawn in 10 seconds is closed and opened again, and the
-    other tabs are closed only once the page has drawn."""
-    others = _page_targets(cdp_url)
-    drawn = None
+    The first tab a fresh browser opens sometimes never sends a single
+    request, for a minute and more, about two in five when it started with
+    no window. A second tab always drew, 40 fresh starts in 40. So a tab that
+    has not drawn in 10 seconds is closed, and another opened once it is
+    gone, three at most."""
     for _attempt in range(3):
-        earlier = SITE.loads()
+        earlier = SITE.loads(page)
         request = urllib.request.Request(cdp_url + "/json/new?" + address, method="PUT")
         with urllib.request.urlopen(request, timeout=10) as r:
             tab = json.loads(r.read().decode("utf-8"))
-        if _drawn_since(earlier, 10):
-            drawn = tab
-            break
+        if _drawn_since(earlier, 10, page=page):
+            return tab
         _close_tab(cdp_url, tab["id"])
         _gone(cdp_url, tab["id"])
+    return None
+
+
+def open_as_login_does(cdp_url, address):
+    """A tab on the address and no other, opened by the browser itself, the
+    way Login's window is. Returns once the page has drawn its list, and
+    only then closes the other tabs."""
+    others = _page_targets(cdp_url)
+    drawn = _open_drawn(cdp_url, address, "orders")
     if drawn is None:
         pytest.fail("the orders page never drew its list, tabs %r, server saw %r"
                     % ([t.get("url") for t in _page_targets(cdp_url)], SITE.seen[-5:]))
