@@ -145,13 +145,11 @@ def browser_exe():
     return found[0][1]
 
 
-@pytest.fixture(scope="module")
-def attached(browser_exe, tmp_path_factory):
-    """A browser started as a program of its own with a debugging port,
-    which is what the app attaches to at home. Its address, for cdp_url."""
-    profile = tmp_path_factory.mktemp("attached-profile")
+def _start_browser(exe, profile):
+    """The browser as a program of its own with a debugging port, and its
+    address, or None for the address when it opened no port."""
     proc = subprocess.Popen(
-        [browser_exe, "--headless=new", "--remote-debugging-port=0",
+        [exe, "--headless=new", "--remote-debugging-port=0",
          "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check",
          NO_HOSTS, "about:blank"],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -162,9 +160,71 @@ def attached(browser_exe, tmp_path_factory):
         except (OSError, IndexError):
             time.sleep(0.1)
     if not port or not browser_launcher.wait_for_debug_port(port):
+        return proc, None
+    return proc, "http://127.0.0.1:%s" % port
+
+
+def _draws_the_home_page(url, address):
+    """Whether a tab opened the way the app opens one, over CDP in the
+    browser's own context, draws the home page, and what each try did. A
+    tab that has not drawn it is left where it is, since closing a fresh
+    browser's tab has hung before, and another is opened, three at most.
+    The one that drew stays open on it."""
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+    did = []
+    with sync_playwright() as p:
+        try:
+            context = p.chromium.connect_over_cdp(url).contexts[0]
+        except (PlaywrightError, IndexError) as e:
+            return False, ["could not attach, %s" % str(e).splitlines()[0]]
+        for _try in range(3):
+            try:
+                page = context.new_page()
+                page.goto(address, wait_until="domcontentloaded", timeout=15000)
+                if page.title() == "Walmart.com":
+                    return True, did
+                did.append("drew %r instead" % page.title())
+            except PlaywrightError as e:
+                did.append(str(e).splitlines()[0])
+    return False, did
+
+
+@pytest.fixture(scope="module")
+def attached(browser_exe, server, tmp_path_factory):
+    """A browser started as a program of its own with a debugging port,
+    which is what the app attaches to at home. Its address, for cdp_url.
+
+    At home login.bat opened it and the person signed in there, well before
+    the app attached. A browser that has only just started is not that. On
+    CI the GitHub app's very first goto in a fresh browser twice came back
+    net::ERR_ABORTED after about five seconds, which is how a browser
+    answers a navigation when its network service is restarted under it.
+    This app's first goto is the same unguarded goto, and that fault fails
+    this file the same way.
+
+    So it is handed over once a tab opened the way the app opens one has
+    drawn the home page, tried again in a new tab when it has not. Not the
+    order list, which here is a page a bot check decides on. A tab left
+    there would ask for /decision all through the module and follow the
+    check to /blocked, which the tests take as the app's own tab turning
+    into the check. A browser that never draws the home page is closed and
+    another started, three at most, and a failure says what each one did."""
+    tried = []
+    for _start in range(3):
+        proc, url = _start_browser(browser_exe, tmp_path_factory.mktemp("attached-profile"))
+        if url is None:
+            proc.kill()
+            proc.wait(timeout=15)
+            pytest.skip("the browser opened no debugging port")
+        ready, did = _draws_the_home_page(url, server + "/")
+        if ready:
+            break
+        tried.append(", then ".join(did))
         proc.kill()
-        pytest.skip("the browser opened no debugging port")
-    url = "http://127.0.0.1:%s" % port
+        proc.wait(timeout=15)
+    else:
+        pytest.fail("three fresh browsers in a row never drew the home page. %s"
+                    % " / ".join(tried))
     yield url
     try:
         from playwright.sync_api import sync_playwright
