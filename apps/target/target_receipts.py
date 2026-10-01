@@ -708,6 +708,12 @@ class App:
         controls = site.find_print_receipt_controls(page)
         popup = None
 
+        if opened is None or controls.unread:
+            # A control naming the receipt could not be read or pressed, so
+            # nothing is pressed and nothing is concluded (_left_unread).
+            if not self._left_for_next_run(page, purchase, "the receipt"):
+                self._left_unread(purchase, "the receipt")
+            return False
         if not controls and not opened:
             return self._handle_no_receipt(page, purchase)
         if opened and not controls and not content_kind:
@@ -875,12 +881,35 @@ class App:
         self.stats["failed"] += 1
         return True
 
+    def _left_unread(self, purchase: Purchase, what: str) -> bool:
+        """A control naming the receipt or an invoice was on the page and
+        could not be read, so the purchase is left as it was, to be tried
+        again on the next run. Always False, nothing was saved.
+
+        Its words are all that keep a gift receipt or a return from being
+        pressed, so it is never pressed, and nothing past it is either,
+        since it may have been the one to press. And a page where it could
+        not be read says nothing about whether the purchase has a receipt.
+        Each read is given a second and a half, so a slow page is enough.
+        The purchase used to be concluded anyway, marked No Receipt
+        Available, or with include_invoices on its invoice filed in the
+        receipt's place, and either is final, so the receipt was never
+        asked for again."""
+        self._record_state(purchase, State.FAILED,
+                           notes="A control naming %s could not be read, tried again next run"
+                           % what)
+        self.stats["failed"] += 1
+        print("  !! A control naming %s could not be read. It is tried again next run." % what)
+        return False
+
     def _handle_no_receipt(self, page, purchase: Purchase) -> bool:
         """No Print receipts control found. Optionally save the order's
         invoices, and record."""
         if self._left_for_next_run(page, purchase, "the receipt"):
             return False
         invoices = site.find_invoice_controls(page)
+        if invoices.unread:
+            return self._left_unread(purchase, "an invoice")
         if invoices and self.config.get("include_invoices"):
             return self._save_invoices(page, purchase, invoices)
 
@@ -950,7 +979,16 @@ class App:
             if self._left_for_next_run(landing[2], purchase, "the order's invoices"):
                 return False
             shown = landing[2]
-            deeper = [] if landing[0] == "download" else site.find_invoice_controls(shown)
+            deeper = (site.Controls() if landing[0] == "download"
+                      else site.find_invoice_controls(shown))
+            if deeper.unread:
+                # Whether this page lists the order's invoices or is one of
+                # them turns on a control that could not be read, so nothing
+                # on it is taken or pressed. A tab of its own is closed with
+                # the walk.
+                walk["list_page"] = shown
+                walk["missed"].append("an invoice control could not be read")
+                return True
             if deeper and site.find_printing_frame(shown, wait_ms=1000) is None:
                 # What was pressed opened the order's list of invoices, and
                 # each on it is pressed from it in turn.
@@ -971,6 +1009,9 @@ class App:
                                                    "invoice %d" % (k + 1)):
                             return False
                         controls = site.find_invoice_controls(list_page)
+                        if controls.unread:
+                            walk["missed"].append("an invoice control could not be read")
+                            break
                         if len(controls) != count:
                             walk["missed"].append("the list of invoices changed")
                             break
@@ -1636,10 +1677,14 @@ class App:
                     except Exception:
                         continue
                 info["controls"] = buttons
-                info["receipt_section_found"] = site.open_receipt_section(page)
+                opened = site.open_receipt_section(page)
+                info["receipt_section_found"] = ("a control could not be read"
+                                                 if opened is None else opened)
                 controls = site.find_print_receipt_controls(page)
+                invoices = site.find_invoice_controls(page)
                 info["print_receipt_controls"] = len(controls)
-                info["invoice_controls"] = len(site.find_invoice_controls(page))
+                info["invoice_controls"] = len(invoices)
+                info["a_control_could_not_be_read"] = bool(controls.unread or invoices.unread)
                 info["iframe_receipt"] = site.find_receipt_iframe(page) is not None
                 info["items_extracted"] = [i.name for i in site.extract_items(page)][:20]
                 shot = self.paths.diagnostics / f"diagnose-{ptype}-{p.order_number}.png"

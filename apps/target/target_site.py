@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
@@ -893,9 +894,19 @@ def extract_items(page) -> List[Item]:
 # Receipt access
 # ---------------------------------------------------------------------------
 
-def open_receipt_section(page) -> bool:
+def open_receipt_section(page) -> Optional[bool]:
     """Open 'Receipts & invoices' / 'View receipt' on the details page.
-    Returns True if something receipt-related was opened or is present."""
+    Returns True if something receipt-related was opened or is present,
+    False when the page shows nothing of the kind.
+
+    None when a control naming the receipt could not be read or pressed,
+    or the page could not be asked for one. Nothing past it is pressed,
+    since it may be the one to press, and the caller concludes nothing,
+    since such a page says nothing about whether the purchase has a
+    receipt. A kind of control used to be passed over at the first of it
+    that did not answer in time, and when nothing else opened, the
+    purchase was marked No Receipt Available, which is never asked about
+    again, or with include_invoices on its invoice was filed instead."""
     for role in ("button", "link", "tab"):
         try:
             loc = page.get_by_role(role, name=RECEIPT_SECTION_RE)
@@ -909,59 +920,67 @@ def open_receipt_section(page) -> bool:
                     page.wait_for_timeout(2500)
                     return True
         except Exception:
-            continue
+            return None
     # already-visible receipt content?
     try:
         if page.get_by_text(re.compile(r"store receipt|ereceipt|e-receipt", re.I)).count() > 0:
             return True
     except Exception:
-        pass
+        return None
     return False
 
 
-def find_print_receipt_controls(page) -> list:
-    """All 'Print receipts' controls on the page/popup, excluding gift
-    receipts and any forbidden control."""
-    controls = []
+class Controls(list):
+    """The controls a look found, each one read in full, and none of them a
+    gift receipt or a control that must never be pressed.
+
+    `unread` is True when the look met a control whose words could not be
+    read, or a kind of control the page could not be asked for. Such a
+    control is left out, so it is never pressed, since its words are all
+    that keep a gift receipt or a return from being pressed. It used to be
+    kept as if they had passed. And a look that left one out says nothing
+    about what the page has, so the caller presses nothing and concludes
+    nothing from it."""
+    unread = False
+
+
+def _controls_named(page, pattern) -> Controls:
+    controls = Controls()
     for role in ("button", "link"):
         try:
-            loc = page.get_by_role(role, name=PRINT_RECEIPT_RE)
-            for i in range(loc.count()):
-                el = loc.nth(i)
-                try:
-                    name = el.inner_text(timeout=1500) or ""
-                except Exception:
-                    name = ""
-                if GIFT_RECEIPT_RE.search(name) or FORBIDDEN_CONTROL_RE.search(name):
-                    continue
-                controls.append(el)
+            loc = page.get_by_role(role, name=pattern)
+            count = loc.count()
         except Exception:
+            controls.unread = True
             continue
+        for i in range(count):
+            el = loc.nth(i)
+            try:
+                name = el.inner_text(timeout=1500) or ""
+            except Exception:
+                controls.unread = True
+                continue
+            if GIFT_RECEIPT_RE.search(name) or FORBIDDEN_CONTROL_RE.search(name):
+                continue
+            controls.append(el)
     return controls
 
 
-def find_invoice_controls(page) -> list:
+def find_print_receipt_controls(page) -> Controls:
+    """All 'Print receipts' controls on the page/popup, excluding gift
+    receipts and any forbidden control, and whether one could not be read
+    (see Controls)."""
+    return _controls_named(page, PRINT_RECEIPT_RE)
+
+
+def find_invoice_controls(page) -> Controls:
     """The controls that open an order's invoices. On the receipts page that
     is "View detailed invoices", which opens the order's list of them, and
     on that list it is one control for each invoice. The app presses every
     one of those now, not only the first, so each passes the same guard the
-    Print receipts controls do."""
-    controls = []
-    for role in ("button", "link"):
-        try:
-            loc = page.get_by_role(role, name=INVOICE_RE)
-            for i in range(loc.count()):
-                el = loc.nth(i)
-                try:
-                    name = el.inner_text(timeout=1500) or ""
-                except Exception:
-                    name = ""
-                if GIFT_RECEIPT_RE.search(name) or FORBIDDEN_CONTROL_RE.search(name):
-                    continue
-                controls.append(el)
-        except Exception:
-            continue
-    return controls
+    Print receipts controls do, and one that could not be read is left out
+    the same way (see Controls)."""
+    return _controls_named(page, INVOICE_RE)
 
 
 # Each invoice page says which of the order's invoices it is, "Invoice 2 of
@@ -1143,9 +1162,14 @@ def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, 
 
 def wait_for_receipt_content(page, timeout_ms: int = 15000) -> str:
     """After opening the receipt view, wait until real receipt content is
-    present. Returns 'store-receipt', 'print-controls', or '' (unknown)."""
-    deadline_rounds = max(1, timeout_ms // 500)
-    for _ in range(deadline_rounds):
+    present. Returns 'store-receipt', 'print-controls', or '' (unknown).
+
+    A Print receipts control whose words could not be read is not taken
+    for receipt content, and it is read again on the next look. A read that
+    fails waits out its own second and a half first, so the time is kept by
+    the clock, since counted in looks the wait would run four times as long."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
         try:
             if page.locator(FALLBACK["store_receipt_container"]).count() > 0:
                 return "store-receipt"
@@ -1156,8 +1180,9 @@ def wait_for_receipt_content(page, timeout_ms: int = 15000) -> str:
                 return "print-controls"
         except Exception:
             pass
+        if time.monotonic() >= deadline:
+            return ""
         page.wait_for_timeout(500)
-    return ""
 
 
 def count_store_receipts(page) -> int:

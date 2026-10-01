@@ -166,6 +166,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   date in what a page says and works out, by running the app's own code
   on sample dates, whether one date can be found inside another's. It
   found these three and no others.
+- **Target no longer takes a control it could not read to mean there is
+  no receipt.** Target reads the words of the control that opens an
+  order's receipts, "Receipts & invoices", and gives the read a second
+  and a half. One that did not answer in time was passed over, and when
+  nothing else opened, the order was marked No Receipt Available, which
+  is final. With include_invoices on, which is how a new install comes,
+  the "View invoice" beside it was pressed instead, and the invoice was
+  filed in the receipt's place with the order marked done. Either way the
+  receipt was never asked for again, and a slow page was enough. Now
+  nothing on such a page is pressed or concluded, and the order is tried
+  again on the next run, with a note saying a control could not be read.
+  The Print receipts and invoice controls had the opposite flaw. One
+  whose words could not be read was kept as though they had passed the
+  check that keeps a gift receipt or a return from being pressed. Now it
+  is left out, nothing after it is pressed, and the order waits for the
+  next run the same way. Target names its own gift receipt control "Print
+  gift receipt", which the Print receipts name never matches, so no real
+  run is known to have pressed one.
 
 ## [0.41.1] - 2026-09-30
 
