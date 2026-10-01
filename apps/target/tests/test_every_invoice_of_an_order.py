@@ -25,11 +25,13 @@ no word of Target's own, so the check a saved PDF passes sees only what
 names the order, whichever version of that check is installed. Every
 order number, invoice number, item and amount is invented.
 """
+import itertools
 import json
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -113,6 +115,16 @@ SIGN_IN = """<!doctype html><html><head><title>Sign in</title></head><body>
 
 BROKEN = PAGE % ("Invoice Details", "<h1>Something went wrong</h1>"
                  "<p>This invoice could not be shown.</p>")
+
+# The page a tab of the attached browser is first opened on. Once it has
+# drawn it tells the server so, by the name its tab was opened with, never
+# through the debugging port.
+DRAWN = """<!doctype html><html><head><title>Ready</title></head><body><script>
+fetch('/beacon/%(tab)s', {cache: 'no-store'}).catch(() => {});
+</script></body></html>"""
+
+# The names of the tabs whose page has drawn.
+DRAWN_TABS = set()
 
 
 def orders_page():
@@ -209,6 +221,13 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        # The fixture's own page, answered signed in or not, and never
+        # counted as anything the app opened.
+        if path.startswith("/beacon/"):
+            DRAWN_TABS.add(path[len("/beacon/"):])
+            return self._answer("ok")
+        if path.startswith("/drawn/"):
+            return self._answer(DRAWN % {"tab": path[len("/drawn/"):]})
         SITE.seen.append(path)
         if path == "/login":
             return self._answer(SIGN_IN)
@@ -261,15 +280,18 @@ def browser_exe():
     return found[0][1]
 
 
-@pytest.fixture(scope="module")
-def attached(browser_exe, tmp_path_factory):
-    """A browser started as a program of its own with a debugging port,
-    which is what the app attaches to at home. Its address, for cdp_url."""
-    profile = tmp_path_factory.mktemp("attached-profile")
+def _start_browser(exe, profile):
+    """The browser as a program of its own with a debugging port, and its
+    address, or None for the address when it opened no port.
+
+    It starts with no window of its own, so its only tabs are the ones
+    opened here. The app used to work in the blank tab a browser starts
+    with, and a fresh browser sometimes never listed that tab at all, or
+    never closed it."""
     proc = subprocess.Popen(
-        [browser_exe, "--headless=new", "--remote-debugging-port=0",
-         "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check",
-         NO_HOSTS, "about:blank"],
+        [exe, "--headless=new", "--remote-debugging-port=0",
+         "--user-data-dir=%s" % profile, "--disable-extensions", "--disable-sync",
+         "--no-first-run", "--no-default-browser-check", "--no-startup-window", NO_HOSTS],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port, deadline = "", time.monotonic() + 30
     while not port and time.monotonic() < deadline and proc.poll() is None:
@@ -278,9 +300,99 @@ def attached(browser_exe, tmp_path_factory):
         except (OSError, IndexError):
             time.sleep(0.1)
     if not port or not browser_launcher.wait_for_debug_port(port):
+        return proc, None
+    return proc, "http://127.0.0.1:%s" % port
+
+
+def _page_targets(cdp_url):
+    with urllib.request.urlopen(cdp_url + "/json/list", timeout=10) as r:
+        return [t for t in json.loads(r.read().decode("utf-8")) if t.get("type") == "page"]
+
+
+def _addresses(cdp_url):
+    return [t.get("url") for t in _page_targets(cdp_url)]
+
+
+def _close_tab(cdp_url, target_id):
+    urllib.request.urlopen(cdp_url + "/json/close/" + target_id, timeout=10).read()
+
+
+def _gone(cdp_url, target_id, seconds=10):
+    """Until the tab is off the browser's list."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if all(t["id"] != target_id for t in _page_targets(cdp_url)):
+            return
+        time.sleep(0.1)
+
+
+def _drawn(name, seconds) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if name in DRAWN_TABS:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _only_tab_left(cdp_url, target_id, seconds) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if [t["id"] for t in _page_targets(cdp_url)] == [target_id]:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+_TAB_NAMES = itertools.count(1)
+
+
+def _open_drawn(cdp_url, server):
+    """A tab the browser itself opens on a page of this file's server, once
+    that page has drawn, as its id and address, or None.
+
+    The first tab a fresh browser opens sometimes never sends a single
+    request, for a minute and more, and a second tab always drew. So a tab
+    that has not drawn in 10 seconds is closed, and another opened once it
+    is gone, three at most."""
+    for _attempt in range(3):
+        name = "tab%d" % next(_TAB_NAMES)
+        address = "%s/drawn/%s" % (server, name)
+        request = urllib.request.Request(cdp_url + "/json/new?" + address, method="PUT")
+        with urllib.request.urlopen(request, timeout=10) as r:
+            tab = json.loads(r.read().decode("utf-8"))
+        if _drawn(name, 10):
+            return {"id": tab["id"], "address": address}
+        _close_tab(cdp_url, tab["id"])
+        _gone(cdp_url, tab["id"])
+    return None
+
+
+@pytest.fixture(scope="module")
+def attached(browser_exe, server, tmp_path_factory):
+    """A browser started as a program of its own with a debugging port,
+    which is what the app attaches to at home. Its address, for cdp_url.
+
+    It is handed over with one tab, on a page of this server's that has
+    drawn, and the app works in that tab, as it works in the person's own
+    at home. A browser that cannot get there is closed and another started,
+    three at most, and a failure says what each one did."""
+    tried = []
+    for _start in range(3):
+        proc, url = _start_browser(browser_exe, tmp_path_factory.mktemp("attached-profile"))
+        if url is None:
+            proc.kill()
+            proc.wait(timeout=15)
+            pytest.skip("the browser opened no debugging port")
+        ready = _open_drawn(url, server)
+        if ready is not None and _only_tab_left(url, ready["id"], 10):
+            break
+        tried.append("%s, tabs %r" % ("no tab drew its page" if ready is None else
+                                      "a tab never closed", _addresses(url)))
         proc.kill()
-        pytest.skip("the browser opened no debugging port")
-    url = "http://127.0.0.1:%s" % port
+        proc.wait(timeout=15)
+    else:
+        pytest.fail("three fresh browsers in a row were not ready, %s" % "; ".join(tried))
     yield url
     try:
         from playwright.sync_api import sync_playwright
