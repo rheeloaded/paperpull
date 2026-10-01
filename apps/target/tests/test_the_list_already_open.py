@@ -220,21 +220,63 @@ def _page_targets(cdp_url):
         return [t for t in json.loads(r.read().decode("utf-8")) if t.get("type") == "page"]
 
 
-def open_as_login_does(cdp_url, address):
-    """A tab on the address and no other, opened by the browser itself, the
-    way Login's window is. Returns once the page has drawn its list."""
-    earlier = SITE.loads()
-    others = _page_targets(cdp_url)
-    request = urllib.request.Request(cdp_url + "/json/new?" + address, method="PUT")
-    urllib.request.urlopen(request, timeout=10).read()
-    for target in others:
-        urllib.request.urlopen(cdp_url + "/json/close/" + target["id"], timeout=10).read()
-    deadline = time.monotonic() + 15
+def _close_tab(cdp_url, target_id):
+    urllib.request.urlopen(cdp_url + "/json/close/" + target_id, timeout=10).read()
+
+
+def _gone(cdp_url, target_id, seconds=10):
+    """Until the tab is off the browser's list, so nothing it still sends is
+    taken for the next tab's."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if all(t["id"] != target_id for t in _page_targets(cdp_url)):
+            return
+        time.sleep(0.1)
+
+
+def _drawn_since(earlier, seconds) -> bool:
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if SITE.loads() - earlier:
-            return
+            return True
         time.sleep(0.05)
-    pytest.fail("the orders page never drew its list")
+    return False
+
+
+def open_as_login_does(cdp_url, address):
+    """A tab on the address and no other, opened by the browser itself, the
+    way Login's window is. Returns once the page has drawn its list.
+
+    In full runs of the suite, here and on CI, the first tab opened this way
+    sometimes never sent a single request, in 60 seconds. Measured on fresh
+    browsers, 5 first tabs in 30 never loaded whether or not the blank tab
+    was closed first, and in 40 more every second tab loaded at once. So a
+    tab that has not drawn in 10 seconds is closed and opened again, and the
+    other tabs are closed once the page has drawn."""
+    others = _page_targets(cdp_url)
+    drawn = None
+    for _attempt in range(3):
+        earlier = SITE.loads()
+        request = urllib.request.Request(cdp_url + "/json/new?" + address, method="PUT")
+        with urllib.request.urlopen(request, timeout=10) as r:
+            tab = json.loads(r.read().decode("utf-8"))
+        if _drawn_since(earlier, 10):
+            drawn = tab
+            break
+        _close_tab(cdp_url, tab["id"])
+        _gone(cdp_url, tab["id"])
+    if drawn is None:
+        pytest.fail("the orders page never drew its list, tabs %r, server saw %r"
+                    % ([t.get("url") for t in _page_targets(cdp_url)], SITE.seen[-5:]))
+    for target in others:
+        _close_tab(cdp_url, target["id"])
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        left = _page_targets(cdp_url)
+        if [t["id"] for t in left] == [drawn["id"]]:
+            return
+        time.sleep(0.1)
+    pytest.fail("the other tabs never closed, tabs %r" % [t.get("url") for t in left])
 
 
 def press(cdp_url, name):

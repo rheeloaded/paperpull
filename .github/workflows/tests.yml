@@ -25,8 +25,9 @@ jobs:
     # A guard against a run that hangs, not a budget. The suite grew to
     # about 37 minutes, and on 2026-09-27 the same commit took 37 minutes
     # on one runner and ran past 40 on another, where the limit cut it off
-    # with no test failing.
-    timeout-minutes: 60
+    # with no test failing. By 0.41.1 the suite itself took 56 minutes, and
+    # the tag's run passed every test and was then cut off in its cleanup.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
