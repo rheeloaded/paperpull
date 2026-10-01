@@ -9,6 +9,7 @@ The endpoints are called directly rather than through a test client, so the
 GUI's test suite needs nothing beyond what the GUI itself already needs.
 """
 import asyncio
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -82,13 +83,64 @@ def test_a_corrupt_settings_file_falls_back_rather_than_crashing(settings):
     assert app_module.apps_root() == app_module._DEFAULT_ROOT
 
 
-def test_settings_live_outside_the_install_folder(monkeypatch):
-    """So an upgrade that replaces the program keeps the choice."""
+def test_settings_live_outside_the_install_folder(tmp_path, monkeypatch):
+    """So an upgrade that replaces the program keeps the choice.
+
+    This asks the real _settings_path, which on Windows looks for the file
+    in Roaming AppData and moves one across from Local AppData. So every
+    folder it reads is pointed inside this test's temp folder first. Left
+    with the real folders it looked at the developer's own Roaming AppData
+    on every run, and on a machine that still had only the old Local AppData
+    file it moved that file."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    # Path.home() reads USERPROFILE on Windows and HOME everywhere else
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     for platform in ("win32", "darwin", "linux"):
         monkeypatch.setattr(app_module.sys, "platform", platform)
         p = app_module._settings_path()
         assert app_module.HERE not in p.parents, (platform, p)
         assert p.name == "settings.json"
+
+
+def test_the_install_folder_check_leaves_the_machines_settings_alone(tmp_path, monkeypatch):
+    """test_settings_live_outside_the_install_folder asks the real
+    _settings_path. Here it runs on a stand-in machine that still has only
+    the old Local AppData file. It must leave that file where it is and take
+    every answer from folders of its own. Before its folders were pointed at
+    its own temp folder it moved this file into Roaming AppData, and passed."""
+    machine = tmp_path / "machine"
+    for name, folder in (("APPDATA", "Roaming"), ("LOCALAPPDATA", "Local"),
+                         ("XDG_CONFIG_HOME", "config"), ("HOME", "home"),
+                         ("USERPROFILE", "home")):
+        monkeypatch.setenv(name, str(machine / folder))
+    old = machine / "Local" / "PaperPull" / "settings.json"
+    old.parent.mkdir(parents=True)
+    old.write_text('{"apps_root": "D:/mine"}', encoding="utf-8")
+    real, answers = app_module._settings_path, []
+
+    def answer():
+        answers.append(real())
+        return answers[-1]
+
+    monkeypatch.setattr(app_module, "_settings_path", answer)
+    own = tmp_path / "own"
+    own.mkdir()
+    check = test_settings_live_outside_the_install_folder
+    with monkeypatch.context() as inner:
+        # Only the fixtures it asks for, so a version that takes no tmp_path
+        # still runs here and shows what it does.
+        given = {"tmp_path": own, "monkeypatch": inner}
+        check(**{k: given[k] for k in inspect.signature(check).parameters})
+
+    left = sorted(p.relative_to(machine).as_posix() for p in machine.rglob("*"))
+    assert left == ["Local", "Local/PaperPull", "Local/PaperPull/settings.json"], left
+    assert old.read_text(encoding="utf-8") == '{"apps_root": "D:/mine"}'
+    assert answers, "the check never asked where the settings live"
+    assert not [p for p in answers if machine in p.parents], answers
 
 
 # -- the page setting it ---------------------------------------------------
