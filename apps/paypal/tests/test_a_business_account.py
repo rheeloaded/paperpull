@@ -364,3 +364,30 @@ def test_at_a_console_a_sign_in_is_waited_for_and_the_list_read_after(paypal, tm
     app.cmd_discover(quiet=True)
     assert len(app.discovery.data) == 3
     assert fake.nothing_got_past_the_router()
+
+
+# -- from the safety review of this change ---------------------------------------------
+
+def test_a_name_in_the_address_is_never_repeated():
+    """Any plain word was said, so a vanity path printed its name."""
+    named = site.page_named
+    assert named("https://www.paypal.com/paypalme/SomeoneInvented") == "/.../..."
+    assert "Invented" not in named("https://www.paypal.com/us/business/Invented")
+    assert named("https://www.paypal.com" + BUSINESS) == BUSINESS
+
+
+def test_a_download_refused_partway_is_a_stopped_run(paypal, tmp_path, monkeypatch, capsys):
+    """It printed Stopped and returned, and the run was reported clean."""
+    fake, context, _ = paypal
+    app = _app(tmp_path, monkeypatch, context, "--pilot")
+    doc = paypal_docs.Document(title="Invented statement", category="Statement",
+                               date="2026-01-31", summary="Invented")
+    monkeypatch.setattr(app, "_already_done", lambda d: False)
+
+    def refused(page, d, filename):
+        raise site.SessionExpired("PayPal refused the download")
+    monkeypatch.setattr(app, "download_one", refused)
+    with pytest.raises(SystemExit) as stopped:
+        app.process([doc])
+    assert stopped.value.code == 0
+    assert "Stopped." in _said(capsys)

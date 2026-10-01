@@ -295,12 +295,22 @@ class SentElsewhere(RuntimeError):
 # One part of an address that is a plain word, "businessmanage" or
 # "accountAccess". Anything else, a part with a digit in it above all, is
 # where a site puts an account or a transaction, and is not repeated.
-_PLAIN_PART_RE = re.compile(r"[A-Za-z][A-Za-z_-]{0,39}")
+# The words of PayPal's own addresses a message may repeat. A check of each
+# part's shape let any word through, a name in a vanity path among them, so
+# only these are said and every other part is "..." (review of #61).
+_SAYABLE_PARTS = frozenset({
+    "myaccount", "businessmanage", "account", "accountaccess", "summary", "settings",
+    "statements", "monthly", "custom", "reports", "accountstatements", "activity",
+    "transactions", "details", "signin", "authflow", "checkpoint", "stepup",
+    "challenge", "home", "business", "money", "wallet", "profile", "security",
+    "notifications", "dashboard", "taxes", "tax", "webapps", "mep", "smarthelp", "help",
+})
 
 
 def page_named(url: str) -> str:
     """A page's address as a message may say it. The path only, and of that
-    only the parts that are plain words, each other part as "...". The
+    only the parts that are words of PayPal's own addresses, each other part
+    as "...". The
     query is left off. A person may paste the message into a public issue,
     so it is built from what may be said rather than cleaned afterwards.
     The host is named only when it is not www.paypal.com."""
@@ -309,7 +319,7 @@ def page_named(url: str) -> str:
         host = u.hostname or ""
     except ValueError:
         return "..."
-    parts = [p if _PLAIN_PART_RE.fullmatch(p) else "..." for p in u.path.split("/") if p]
+    parts = [p if p.lower() in _SAYABLE_PARTS else "..." for p in u.path.split("/") if p]
     path = "/" + "/".join(parts)
     return path if host == "www.paypal.com" else "%s%s" % (host if is_safe_url(url) else "...", path)
 

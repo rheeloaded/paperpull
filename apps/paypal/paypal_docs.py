@@ -528,9 +528,11 @@ class App:
                 raise
             except site.SessionExpired:
                 # Already explained by download_one. Stop rather than grind
-                # through the rest producing empty "manual review" entries.
+                # through the rest producing empty "manual review" entries,
+                # and stop as a stop. Returning here was read as a run that
+                # finished clean, with nothing to look at (review of #61).
                 print("Stopped. Everything downloaded so far is saved.")
-                return
+                raise SystemExit(0)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
