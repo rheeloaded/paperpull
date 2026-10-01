@@ -29,9 +29,10 @@ import html as _html
 import logging
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from paperpull_core import page_check as _page_check
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
@@ -850,6 +851,107 @@ def find_receipt_iframe(page):
 
 
 # ---------------------------------------------------------------------------
+# Walmart's own printable invoice
+# ---------------------------------------------------------------------------
+
+# By the end of September 2026 the order page had changed. Its item list is
+# folded away behind a "Show items" button, and its print style hides the
+# list even when it is open, so a print of the page carried the date, the
+# totals and the barcode and none of the items. A store receipt saved in July
+# lists two items, the same purchase saved on 2026-10-01 lists none. The
+# invoice Walmart's own "Print invoice" button prints, the items included, is
+# a block of its own at the end of the page, hidden until that button shows
+# it. The button is never pressed, since it opens a print dialog that freezes
+# the browser. The block is shown for the print instead, and everything
+# beside it is hidden for the print, so the paper holds Walmart's invoice and
+# nothing else, not even a bot check that comes up over the page.
+PRINTED_INVOICE = ".print-portal-root"
+PRINTED_INVOICE_BODY = "[data-testid='print-invoice-layout']"
+
+_SHOW_PRINTED_INVOICE_JS = r"""
+([block, body]) => {
+  const root = document.querySelector(block);
+  const invoice = root && root.querySelector(body);
+  if (!invoice || !(invoice.textContent || '').trim()) return false;
+  root.setAttribute('data-paperpull-print', 'invoice');
+  for (let node = root; node.parentElement && node !== document.body; node = node.parentElement) {
+    for (const other of node.parentElement.children) {
+      if (other !== node) other.setAttribute('data-paperpull-print', 'beside');
+    }
+  }
+  const style = document.createElement('style');
+  style.id = 'paperpull-printed-invoice';
+  style.textContent = '@media print {'
+    + ' html body [data-paperpull-print="beside"] { display: none !important; }'
+    + ' html body > :not([data-paperpull-print="invoice"]):not(:has([data-paperpull-print="invoice"]))'
+    + ' { display: none !important; }'
+    + ' html body [data-paperpull-print="invoice"] { display: block !important; } }';
+  document.head.appendChild(style);
+  for (const img of root.querySelectorAll('img')) img.loading = 'eager';
+  return true;
+}
+"""
+
+_PRINTED_INVOICE_DRAWN_JS = r"""
+(block) => Array.from(document.querySelectorAll(block + ' img')).every(img => img.complete)
+"""
+
+_HIDE_PRINTED_INVOICE_JS = r"""
+() => {
+  for (const el of document.querySelectorAll('[data-paperpull-print]')) {
+    el.removeAttribute('data-paperpull-print');
+  }
+  const style = document.getElementById('paperpull-printed-invoice');
+  if (style) style.remove();
+}
+"""
+
+
+def show_printed_invoice(page, wait_ms: int = 5000) -> bool:
+    """Make the next print of this page Walmart's own invoice, and only it.
+
+    True when the page has the invoice block with something in it. Nothing
+    is pressed, and nothing changes on screen. The block's images, the logo
+    and the barcode, are asked for at once and given `wait_ms` to arrive. A
+    logo still on its way is not worth losing the receipt over, so the wait
+    running out is not a failure. hide_printed_invoice puts the page back."""
+    try:
+        shown = bool(page.evaluate(_SHOW_PRINTED_INVOICE_JS,
+                                   [PRINTED_INVOICE, PRINTED_INVOICE_BODY]))
+    except Exception:
+        return False
+    if shown:
+        try:
+            page.wait_for_function(_PRINTED_INVOICE_DRAWN_JS, arg=PRINTED_INVOICE,
+                                   timeout=wait_ms)
+        except Exception:
+            pass
+    return shown
+
+
+def hide_printed_invoice(page) -> None:
+    """Undo show_printed_invoice, so a later print is of the page again."""
+    try:
+        page.evaluate(_HIDE_PRINTED_INVOICE_JS)
+    except Exception:
+        pass
+
+
+@contextmanager
+def printing_its_invoice(page):
+    """Walmart's own invoice shown for the prints made inside the block, and
+    the page put back after them however they end. Yields whether the page
+    had the invoice block. The print itself stays with the caller, where the
+    page was read before it was handed on to be printed."""
+    shown = show_printed_invoice(page)
+    try:
+        yield shown
+    finally:
+        if shown:
+            hide_printed_invoice(page)
+
+
+# ---------------------------------------------------------------------------
 # What a saved document is checked for
 # ---------------------------------------------------------------------------
 
@@ -902,6 +1004,38 @@ def order_number_as_printed(text: str, order_number: str, total: str = "") -> Li
     return _printed_forms(text, order_number)[:1]
 
 
+# How much of an item's name has to come out on a saved document for the
+# item to count as printed, in letters and digits, so that a line break, a
+# hyphen or a mark the PDF's text reads back differently does not hide it.
+ITEM_NAME_PRINTED = 12
+# Less text than this is a scan or a blank, with nothing to look for items in.
+ITEM_TEXT_MIN = 40
+
+
+def _folded(text: str) -> str:
+    return re.sub(r"[^0-9a-z]", "", (text or "").lower())
+
+
+def _item_names(items) -> List[str]:
+    """The starts of the first five item names, the way they are looked
+    for. A name with fewer than six letters and digits is left out, since
+    it would be found anywhere."""
+    names = [_folded(getattr(i, "name", "") or "") for i in (items or [])[:5]]
+    return [n[:ITEM_NAME_PRINTED] for n in names if len(n) >= 6]
+
+
+def items_printed(text: str, items) -> Tuple[int, int]:
+    """How many of an order's items a saved document prints, of how many
+    could be looked for, each by the start of its name as read from the
+    order's page. A document with almost no text is not looked in, and
+    looked for is then 0, the way the check treats a scan."""
+    if len((text or "").strip()) < ITEM_TEXT_MIN:
+        return 0, 0
+    names = _item_names(items)
+    whole = _folded(text)
+    return sum(1 for n in names if n in whole), len(names)
+
+
 # Words a Walmart document or a page in its place may carry, from a fixed
 # list. What pdf_facts says of a saved file is only which of these it holds,
 # so the failure file it goes into never carries anything of the person's.
@@ -928,8 +1062,7 @@ def pdf_facts(path, purchase: Purchase, page_url: str = "") -> dict:
         low = text.lower()
         squashed = re.sub(r"\s+", "", low)
         number = re.sub(r"\D", "", purchase.order_number or "")
-        names = [(i.name or "").strip() for i in purchase.items[:5]]
-        names = [n[:24] for n in names if len(n) >= 6]
+        printed, _looked_for = items_printed(text, purchase.items)
         facts.update({
             "text_characters": len(text),
             "says_walmart": "walmart" in squashed,
@@ -940,10 +1073,9 @@ def pdf_facts(path, purchase: Purchase, page_url: str = "") -> dict:
             "prints_an_amount": bool(MONEY_RE.search(text)),
             "total_known": bool(MONEY_RE.search(purchase.total or "")),
             "prints_its_total": prints_total(text, purchase.total),
-            "item_names_read": len(names),
-            # The way the check itself looks for them, spaces aside.
-            "item_names_printed": sum(
-                1 for n in names if re.sub(r"\s+", "", n.lower()) in squashed),
+            # The way the check itself looks for them (items_printed).
+            "item_names_read": len(_item_names(purchase.items)),
+            "item_names_printed": printed,
             "words": [w for w in DOCUMENT_WORDS if re.search(
                 r"\b" + r"\s+".join(map(re.escape, w.split())) + r"\b", low)],
         })

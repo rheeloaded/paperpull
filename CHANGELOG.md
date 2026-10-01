@@ -347,6 +347,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its purchase, and every Amazon, Gap and Walmart one names its purchase
   the way the check reads it. Costco, eBay and Kroger do not read their
   page yet.
+- **Walmart receipts and invoices print their items again.** By the end
+  of September Walmart's order page folded its item list away, and its
+  print style hid the list even when it was open, so the app's print of
+  the page carried the date, the totals and the barcode and none of the
+  items. The check passed such a document on the order's number and total
+  (#63), so a run saved receipts with no items on them and called them
+  done. A store receipt saved in July and the same purchase saved on
+  October 1 differed by exactly that. The app now prints the invoice
+  Walmart's own Print invoice button prints, which lists the items,
+  without pressing that button, and a document that prints none of the
+  order's items goes to Manual Review instead of being kept.
+- **Walmart's bot check is looked for again just before a print.** It came
+  up over an order page that had opened clean, and the print carried
+  "Robot or human?" under the totals. Now the person is asked to answer it
+  first, or under the panel the run stops with its progress saved, and the
+  order's page is opened again before it is printed.
 
 ## [0.41.1] - 2026-09-30
 

@@ -27,7 +27,11 @@ cookies).
 
 Receipts are captured with Chromium's `printToPDF` (print media) directly on
 the order-details page, the tool never clicks "View receipt details" /
-"Print invoice" (those fire the native print dialog). In-store trips are saved
+"Print invoice" (those fire the native print dialog). Since late September
+2026 Walmart keeps the invoice its Print invoice button prints, items
+included, in a hidden block of that page, and the tool prints that block
+with the rest of the page hidden. A saved document that prints none of the
+order's items goes to Manual Review. In-store trips are saved
 as **Receipts**, online orders as **Invoices** (Walmart exposes only an
 invoice for online orders).
 

@@ -42,7 +42,8 @@ from typing import List, Optional
 from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import walmart_site as site
-from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
+from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State,
+                                   ValidationResult)
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -774,6 +775,17 @@ class App:
 
         site.scroll_full_page(page)  # force lazy content (items, totals) to render
 
+        # Walmart's bot check can come up over an order page that opened
+        # clean, and a print taken then carried "Robot or human?" under the
+        # totals while the check passed it on the order's number and total.
+        # So the page is looked at again here, and opened again once the
+        # person has answered the check, before the page check below reads
+        # it. Under the panel the run stops instead, with its progress saved.
+        while site.detect_security_challenge(page):
+            self.check_session(page)
+            site.goto_details(page, purchase)
+            site.scroll_full_page(page)
+
         # The page has to be this purchase's before it is printed. The order
         # list names its purchases' dates, totals and items, and the check
         # on the saved file would find this purchase's facts there. The
@@ -827,18 +839,23 @@ class App:
                           out_path: Path, content_kind: str = "") -> None:
         """Render the receipt/invoice Walmart presents, to PDF.
 
-        Walmart renders the receipt with PRINT-ONLY CSS on the live details
-        page: on screen it is hidden, but print media reveals a clean receipt
-        (Walmart logo, items, barcode) and hides the site chrome. CDP
-        Page.printToPDF emulates print media, so rendering the LIVE page
-        reproduces exactly what Walmart's own print output would be. This is
-        the primary path. (Re-rendering a saved HTML snapshot loses the print
-        stylesheet, so it is only a last resort.)
+        Walmart keeps the invoice its Print invoice button prints, logo,
+        items, totals and barcode, in a hidden block of the live details
+        page, and the primary path prints that block in print media with
+        everything else hidden (site.printing_its_invoice), a bot check that
+        comes up over the page in the meantime among it. Until late
+        September 2026 the page's own print style showed the items, and a
+        page without the block is still printed that way. Re-rendering a
+        saved HTML snapshot loses the print stylesheet, so it is only a last
+        resort.
         """
         # Primary: print the live page (print media -> receipt only).
         try:
             log.info("Capture path: live page printToPDF (print media)")
-            receipt_pdf.print_page_to_pdf(target_page, out_path)
+            with site.printing_its_invoice(target_page) as shown:
+                if shown:
+                    log.info("Printing Walmart's own invoice from the order page")
+                receipt_pdf.print_page_to_pdf(target_page, out_path)
             return
         except Exception as e:
             log.warning("Live printToPDF failed (%s); trying fallbacks", e)
@@ -870,12 +887,27 @@ class App:
         and an invoice that never says Walmart otherwise passed only when an
         item name came out on the paper the way it was read from the page
         (#63). A page that is not this order's, a list of orders among them,
-        gets nothing from this."""
+        gets nothing from this.
+
+        A document that passes has to print the order's items as well, at
+        least one of those read from its page, when any were. #63's invoices
+        were the order's own and printed none, because Walmart's print style
+        had come to hide the item list, and the order's number and total
+        passed them. That is how a run saved receipts with no items on them
+        and called them done."""
+        text = receipt_pdf.pdf_text(path)
         tokens = receipt_pdf.expected_tokens_for(purchase)
         if purchase.order_number and purchase.order_number in (printed_from or ""):
-            tokens += site.order_number_as_printed(receipt_pdf.pdf_text(path),
-                                                   purchase.order_number, purchase.total)
-        return receipt_pdf.validate_pdf(path, self.config["min_pdf_bytes"], tokens)
+            tokens += site.order_number_as_printed(text, purchase.order_number,
+                                                   purchase.total)
+        result = receipt_pdf.validate_pdf(path, self.config["min_pdf_bytes"], tokens)
+        if result.ok:
+            printed, looked_for = site.items_printed(text, purchase.items)
+            if looked_for and not printed:
+                return ValidationResult(False, "Prints none of the order's items",
+                                        size_bytes=result.size_bytes,
+                                        page_count=result.page_count)
+        return result
 
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
                     popup=None, source_page=None) -> bool:
@@ -890,7 +922,8 @@ class App:
             self.stats["validation_failures"] += 1
             try:
                 retry_page = source_page or page
-                receipt_pdf.print_page_to_pdf(retry_page, out_path)
+                with site.printing_its_invoice(retry_page):
+                    receipt_pdf.print_page_to_pdf(retry_page, out_path)
                 printed_from = self._address_of(retry_page)
                 result = self._check(out_path, purchase, printed_from)
             except Exception as e:

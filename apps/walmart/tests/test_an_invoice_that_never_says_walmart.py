@@ -18,6 +18,12 @@ Here each name is cut short by the invoice's layout, one way a name read
 on screen can be missing from the paper, and the invoice is known by the
 order number it prints instead.
 
+How they differed was found later. Walmart's print style had come to hide
+the item list, so the invoices printed no items at all, and a document
+that prints none of the order's items is put aside now (see
+test_a_receipt_prints_its_items.py). A name cut short still counts as
+printed when its first twelve letters and digits come out.
+
 Nothing that is not this order's document may pass for it because of
 that. A page printing another order's number, or a longer number holding
 this one, and a page other than the order's own are turned away before
@@ -286,7 +292,10 @@ def test_a_file_put_aside_leaves_a_failure_file_with_none_of_its_words(tmp_path,
     assert facts["says_walmart"] is False, facts
     assert facts["prints_this_order_number"] is True, facts
     assert facts["prints_an_amount"] is True and facts["prints_a_date"] is True, facts
-    assert facts["item_names_read"] == 1 and facts["item_names_printed"] == 0, facts
+    # Its one item is printed, cut short, and counts the way the check that
+    # wants an item counts it (site.items_printed). It was put aside for the
+    # other order's number.
+    assert facts["item_names_read"] == 1 and facts["item_names_printed"] == 1, facts
     assert {"invoice", "subtotal", "total", "tax", "qty", "payment"} <= set(facts["words"]), facts
     assert facts["printed_from_this_order"] is True, facts
     for value in VALUES:
