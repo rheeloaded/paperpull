@@ -7,7 +7,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.41.1] - 2026-09-30
+
+Repairs from testers' reports on 0.41.0. American Family finds its
+statements by the site's own mark, Meijer waits for its list, Target
+reads the order list without loading it again, Walmart keeps an invoice
+that prints its order number its own way, PayPal says where a business
+account landed, and Robinhood dates a tax form by its tax year and reads
+crypto statements. Golden 1 and State Farm get repairs too. Across the
+receipt apps, a run that signs in again reads the page it had opened, a
+printed page goes back to the screen, and a saved receipt has to name its
+purchase rather than the provider.
 
 ### Fixed
 - **A run that signs in again at a console reads the page it had opened.**
