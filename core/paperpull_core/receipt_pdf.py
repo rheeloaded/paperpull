@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Optional
 
-from .identity import MIN_TEXT, amount_variants, date_variants
+from .identity import MIN_TEXT, amount_variants, date_variants, on_its_own
 from .models import ValidationResult
 
 log = logging.getLogger("paperpull.pdf")
@@ -472,34 +472,22 @@ def pdf_text(path: Path) -> str:
         return ""
 
 
+class OnItsOwn(tuple):
+    """The ways one date or amount might print, any one of which names a
+    purchase, found only as a number of its own (see identity.on_its_own).
+
+    A plain token is found inside a longer number, so a purchase's
+    "1/19/27" is found on a receipt printed "11/19/27". Uber hands its
+    total and its printed dates this way (uber_site.receipt_tokens)."""
+
+
 class Together(tuple):
     """Facts that name a purchase only together.
 
     Each member is the list of ways one fact might print, and every member
     has to be found somewhere in the text, each as a number of its own (see
-    _on_its_own). See expected_tokens_for for the one pair asked for this
-    way, a date and a total."""
-
-
-def _on_its_own(variant, text_lower: str) -> bool:
-    """Whether a way of printing a date or an amount is in the text as that
-    number, and not as the end of a longer one.
-
-    A plain search found "1/19/26" inside "11/19/26" and "1.23" inside
-    "31.23", so a January 19 purchase of $1.23 took a November 19 receipt
-    for $31.23 as its own (2026-09-30). So a digit may not touch the front of
-    one that starts with a digit, nor a point or a comma joining it to one,
-    and a digit may not touch the end of one that ends with a digit.
-    Whitespace may fall between its characters, since a till can print a
-    receipt a letter at a time, and a date followed by a time is still that
-    date."""
-    v = re.sub(r"\s+", "", str(variant or "").lower())
-    if not v:
-        return False
-    body = r"\s*".join(re.escape(ch) for ch in v)
-    before = r"(?<![0-9.,])" if v[0].isdigit() else ""
-    after = r"(?![0-9])" if v[-1].isdigit() else ""
-    return re.search(before + body + after, text_lower) is not None
+    identity.on_its_own). See expected_tokens_for for the one pair asked for
+    this way, a date and a total."""
 
 
 def validate_pdf(path: Path, min_bytes: int = 3000,
@@ -557,14 +545,16 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
                 return t in text_lower or re.sub(r"\s+", "", t) in squashed
 
             def _found(tok) -> bool:
+                if isinstance(tok, OnItsOwn):
+                    return any(on_its_own(v, text_lower) for v in tok if v)
                 if isinstance(tok, Together):
-                    return all(any(_on_its_own(v, text_lower) for v in fact if v)
+                    return all(any(on_its_own(v, text_lower) for v in fact if v)
                                for fact in tok)
                 return _has(tok)
 
             provider = _provider_words()
             own = [t for t in tokens
-                   if isinstance(t, Together) or _plain(t) not in provider]
+                   if isinstance(t, (OnItsOwn, Together)) or _plain(t) not in provider]
             if own:
                 token_found = any(_found(t) for t in own)
                 missing = "this purchase's order number, date or items"

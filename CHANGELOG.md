@@ -19,6 +19,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its own, with no digit touching either end, while a till's spaced out
   print and a date followed by a time still match. Measured on real saved
   receipts, no receipt's own date and total stopped matching.
+- **A date or a total counts only as a number of its own.** The check
+  that a saved document is the one asked for looked for a row's date and
+  total anywhere in the document's text. So a January 19 purchase's
+  1/19/27 was found inside a November 19 receipt's 11/19/27, its total of
+  1.23 inside 31.23, and a 2020 date at the front of a later one, and the
+  document beside the one being saved could pass for it. That check runs
+  in Costco, Uber, Navy Federal, Fairfax Water, Target RedCard, T-Mobile,
+  TSP and Golden 1. Now no digit may touch the front or the end of a date
+  or an amount, and no point or comma may join it to a number in front.
+  Uber's last check before filing a receipt holds its total and dates to
+  the same rule. A document number is matched as before. Measured first,
+  read only, on every saved document of every install, no document lost
+  its own date or total, what the check stopped finding was only a
+  neighbor's date or total inside a longer number, and no verdict on an
+  already saved document changed. That took a day before its month's name
+  asked for with its zero, 05 Jan 2027, since some statements print it
+  that way and the old search found them only by finding 5 Jan 2027 inside
+  it. A zero-padded month before a day without one, 01/5/2027, was found
+  the same way and is asked for too, though nothing saved prints it. The
+  receipt check's date and total pair, which Costco, GitHub, Kroger and
+  Meijer hand over, finds a date by the same rule and is given both forms
+  as well.
 
 ## [0.41.1] - 2026-09-30
 

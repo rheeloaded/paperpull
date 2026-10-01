@@ -75,6 +75,12 @@ MIN_TEXT = 40
 # number or a count, and looking for it would match anything.
 MIN_NUMBER = 4
 
+# The facts found only as a number of their own (see on_its_own). A
+# document number is left as it was, since MIN_NUMBER already keeps a
+# short one out, and so is a period, which no app passes and nothing has
+# measured.
+ON_ITS_OWN = ("date", "total")
+
 
 def _squash(text: str) -> str:
     """Whitespace removed.
@@ -84,12 +90,45 @@ def _squash(text: str) -> str:
     return _SPACE.sub("", text or "")
 
 
+def on_its_own(variant, text_lower: str) -> bool:
+    """Whether a way of printing a date or an amount is in the text as that
+    number, and not as part of a longer one.
+
+    A plain search finds "1/19/27" inside "11/19/27" and "1.23" inside
+    "31.23", so a January 19 purchase of $1.23 would take a November 19
+    receipt for $31.23 as its own, and it finds a 2020 date at the front
+    of a later one, "08/23/20" in "08/23/2027". So a digit may not touch
+    the front of one that starts with a digit, nor a point or a comma
+    joining it to one, and a digit may not touch the end of one that ends
+    with a digit. Whitespace may fall between its characters, since a till
+    can print a receipt a letter at a time, and a date followed by a time
+    is still that date.
+
+    `text_lower` is the text already lowercased. receipt_pdf holds its
+    date and total pair (Together) and an OnItsOwn token to the same rule,
+    and this is the one place the rule is written."""
+    v = _SPACE.sub("", str(variant or "").lower())
+    if not v:
+        return False
+    body = r"\s*".join(re.escape(ch) for ch in v)
+    before = r"(?<![0-9.,])" if v[0].isdigit() else ""
+    after = r"(?![0-9])" if v[-1].isdigit() else ""
+    return re.search(before + body + after, text_lower or "") is not None
+
+
 def date_variants(iso: str) -> list:
     """The ways a provider might print one date.
 
     American orderings only. Adding day-first would make 01/02/2026 match
     both January 2nd and February 1st, and a check that matches the wrong
-    document is worse than no check."""
+    document is worse than no check.
+
+    Two forms are asked for with a zero as well, because a plain search
+    found them only by finding the form without it at their end, which a
+    date found as a number of its own does not do (see on_its_own). They
+    are a day written before its month's name, 05 Jan 2027 beside 5 Jan
+    2027, which some statements print, and a month written with its zero
+    before a day written without one, 01/5/2027 beside 1/5/2027."""
     m = _ISO_DATE.match((iso or "").strip())
     if not m:
         return []
@@ -104,8 +143,10 @@ def date_variants(iso: str) -> list:
         "%04d/%02d/%02d" % (year, month, day),
         "%02d/%02d/%04d" % (month, day, year),
         "%d/%d/%04d" % (month, day, year),
+        "%02d/%d/%04d" % (month, day, year),
         "%02d/%02d/%02d" % (month, day, yy),
         "%d/%d/%02d" % (month, day, yy),
+        "%02d/%d/%02d" % (month, day, yy),
         "%02d-%02d-%04d" % (month, day, year),
         "%02d.%02d.%04d" % (month, day, year),
         "%s %d, %04d" % (name, day, year),
@@ -113,7 +154,9 @@ def date_variants(iso: str) -> list:
         "%s %d, %04d" % (short, day, year),
         "%s. %d, %04d" % (short, day, year),
         "%d %s %04d" % (day, name, year),
+        "%02d %s %04d" % (day, name, year),
         "%d %s %04d" % (day, short, year),
+        "%02d %s %04d" % (day, short, year),
     ]
     return list(dict.fromkeys(out))
 
@@ -266,11 +309,16 @@ class Verdict:
         return "nothing was known about this document to check against"
 
 
-def contains(text: str, variants: Iterable[str]) -> bool:
-    """Whether any way of printing a fact appears in the text."""
+def contains(text: str, variants: Iterable[str], fact: str = "") -> bool:
+    """Whether any way of printing a fact appears in the text.
+
+    `fact` is the fact's name. A date or a total counts only as a number
+    of its own (see on_its_own), anything else wherever it appears."""
     if not text:
         return False
     low = text.lower()
+    if fact in ON_ITS_OWN:
+        return any(on_its_own(v, low) for v in variants)
     squashed = _squash(low)
     for variant in variants:
         needle = str(variant).lower()
@@ -300,7 +348,7 @@ def verify(path, expect: Optional[Identity], *, text: Optional[str] = None,
         return Verdict(UNREADABLE, tuple(strong), (), chars)
 
     matched = tuple(name for name, variants in strong.items()
-                    if contains(text, variants))
+                    if contains(text, variants, fact=name))
     outcome = VERIFIED if matched else REFUSED
     return Verdict(outcome, tuple(strong), matched, chars)
 
@@ -409,7 +457,7 @@ def distinguish(path, expect: Optional[Identity], others=(), *,
 
     def score(kept) -> tuple:
         hit = tuple(name for name, variants in kept.items()
-                    if contains(text, variants))
+                    if contains(text, variants, fact=name))
         return len(hit), hit
 
     my_count, matched = score(mine)

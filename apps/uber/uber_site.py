@@ -1109,7 +1109,7 @@ def _fetch_pdf_once(page, path: str) -> dict:
     return out
 
 
-def receipt_tokens(purchase) -> List[str]:
+def receipt_tokens(purchase) -> list:
     """What an Uber receipt prints of its purchase, for the last check
     before a PDF is filed.
 
@@ -1118,10 +1118,18 @@ def receipt_tokens(purchase) -> List[str]:
     those, RECORDED on the account this was built on, only the store, the
     date written out, short item names such as Plate and Bowl, and the
     total, so the total, the store and the date as a receipt writes it are
-    asked for too."""
+    asked for too.
+
+    The total and the dates count only as numbers of their own. Found
+    anywhere, a January 19 purchase's 1/19/27 is found in a November 19
+    receipt's 11/19/27, and that receipt would be filed as the January
+    purchase's."""
     from paperpull_core.identity import date_variants
-    out = [getattr(purchase, "total", "") or "", getattr(purchase, "store_info", "") or ""]
-    out += date_variants(getattr(purchase, "purchase_date", "") or "")
+    from paperpull_core.receipt_pdf import OnItsOwn
+    total = str(getattr(purchase, "total", "") or "")
+    out = [OnItsOwn((total,) if total else ()),
+           getattr(purchase, "store_info", "") or "",
+           OnItsOwn(date_variants(getattr(purchase, "purchase_date", "") or ""))]
     return [t for t in out if t]
 
 

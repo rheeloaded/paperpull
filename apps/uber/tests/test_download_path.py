@@ -20,7 +20,7 @@ import uber_site as site
 from paperpull_core import classification, delivery
 from paperpull_core.journal import Journal
 from paperpull_core.models import Item, Purchase, State
-from paperpull_core.testkit import StrictDelivery, sample_pdf
+from paperpull_core.testkit import StrictDelivery, sample_pdf, text_pdf
 
 TRIP_A = "0a1b2c3d-1111-4222-8333-444455556666"
 TRIP_B = "0a1b2c3d-7777-4888-9999-aaaabbbbcccc"
@@ -294,6 +294,45 @@ def test_a_wrong_receipt_is_counted_for_review_and_not_saved(tmp_path, monkeypat
 def test_strict_follows_refuse_wrong_documents(tmp_path, monkeypatch):
     _app_, spy, _f, _a, _p = _run(tmp_path, monkeypatch, [ride()], strict=False)
     assert spy.calls[0].arguments["strict"] is False
+
+
+def _placed_for_real(tmp_path, monkeypatch, lines):
+    """An older Uber Eats order, no Receipt ID, whose PDF reads `lines`,
+    put through the core's own place() and its check, no stand-in."""
+    rows = [eats(ORDER_OLD, store="Invented Noodle House", date="2027-01-19", total="$4.56")]
+    receipts = {ORDER_OLD: answered("2027-01-19T23:05:41.117Z", receipt_id="")}
+    pdfs = {ORDER_OLD: {"kind": site.ANSWERED, "status": 200, "data": text_pdf(lines)}}
+    discovery = {p.key: rec for p, rec in rows}
+    app, failures, _asked, _fetched = _app(tmp_path, monkeypatch, discovery=discovery,
+                                           receipts=receipts, pdfs=pdfs)
+    app.process_purchases([Purchase.from_dict(rows[0][1])])
+    return app, failures
+
+
+def test_an_older_receipt_for_another_day_is_refused_by_its_own_date_and_total(
+        tmp_path, monkeypatch):
+    """The check looks for the order's date and total. Found anywhere, the
+    January order's 1/19/27 was inside the November receipt's 11/19/27 and
+    its 4.56 inside 34.56, so the November receipt was filed as the
+    January order's. Found only as numbers of their own, neither is there,
+    and the receipt is destroyed rather than filed."""
+    november = ["Invented Taco Stand", "November 19, 2027", "2  Taco  $31.00",
+                "Service Fee $3.56", "Total $34.56", "Paid 11/19/27 7:42 PM  $34.56"]
+    app, failures = _placed_for_real(tmp_path, monkeypatch, november)
+    assert app.stats["wrong_document"] == 1 and failures
+    assert not app.stats["new_files"] and app.stats["receipts_downloaded"] == 0
+    assert not list((tmp_path / "Uber Eats").glob("*.pdf"))
+
+
+def test_the_older_receipt_itself_is_still_filed(tmp_path, monkeypatch):
+    january = ["Invented Noodle House", "January 19, 2027", "1  Plate  $2.50",
+               "1  Bowl  $1.00", "Service Fee $1.06", "Total $4.56",
+               "Paid 1/19/27 6:05 PM  $4.56"]
+    app, failures = _placed_for_real(tmp_path, monkeypatch, january)
+    assert app.stats["receipts_downloaded"] == 1 and not failures
+    assert not app.stats.get("wrong_document")
+    assert [Path(p).name for p in app.stats["new_files"]] == [
+        "2027-01-19 Uber Eats Invented Noodle House Receipt.pdf"]
 
 
 def test_a_dry_run_asks_uber_for_nothing(tmp_path, monkeypatch, capsys):

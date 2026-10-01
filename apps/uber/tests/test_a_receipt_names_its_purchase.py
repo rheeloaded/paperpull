@@ -66,3 +66,35 @@ def test_a_page_naming_only_uber_is_put_aside(tmp_path):
     filed = file_a_receipt(receipt_app(app_mod, tmp_path), ride(), UBER_PAGE)
     assert not filed.kept and not filed.record.get("downloaded_ok")
     assert filed.path.parent.name == "Manual Review" and filed.path.exists()
+
+
+def january_order():
+    return Purchase(purchase_type=EATS, order_number="00000000-0000-4000-8000-000000000003",
+                    purchase_date="2027-01-19", total="$4.56",
+                    store_info="Invented Noodle House",
+                    items=[Item(name="Plate"), Item(name="Bowl")])
+
+
+# Another store's receipt from November 19, which holds the January order's
+# 1/19/27 inside its own 11/19/27.
+NOVEMBER_RECEIPT = ["Invented Taco Stand", "November 19, 2027", "2  Taco  $31.00",
+                    "Service Fee $3.56", "Total $34.56", "Paid 11/19/27 7:42 PM  $34.56"]
+
+
+def test_another_days_receipt_holding_this_ones_date_is_put_aside(tmp_path):
+    """The total and the dates count only as numbers of their own. Found
+    anywhere, the January order's date was found inside the November
+    receipt's and that receipt was kept as the January order's."""
+    filed = file_a_receipt(receipt_app(app_mod, tmp_path), january_order(), NOVEMBER_RECEIPT)
+    assert not filed.kept and not filed.record.get("downloaded_ok")
+    assert filed.path.parent.name == "Manual Review" and filed.path.exists()
+
+
+def test_the_tokens_for_the_total_and_the_dates_are_numbers_of_their_own():
+    from paperpull_core.receipt_pdf import OnItsOwn
+    from uber_site import receipt_tokens
+    tokens = receipt_tokens(january_order())
+    assert OnItsOwn(("$4.56",)) in tokens and "Invented Noodle House" in tokens
+    dates = [t for t in tokens if isinstance(t, OnItsOwn) and "1/19/27" in t]
+    assert len(dates) == 1 and "January 19, 2027" in dates[0]
+    assert all(isinstance(t, (OnItsOwn, str)) and t for t in tokens)
