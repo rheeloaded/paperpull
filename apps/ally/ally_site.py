@@ -61,6 +61,11 @@ trustName, uploadDate}]}. Notes that cost real debugging:
   * The tax year picker starts at 2020, but the API returns a 2019 form. That
     document cannot be reached from the page at all; the app says so and stops
     rather than downloading a different year.
+  * Nothing in a tax row says which year it is for, so the year the list
+    shows decides which year's form is pressed. The list follows its year
+    picker, so a form is pressed only after the picker was found, set, and
+    read again as the form's year, and read so once more just before the
+    press (found by an audit on 2026-10-01, see _show_year).
 """
 # Site layer verified working against the live site: 2026-08-18 (discovery,
 # download, per-document verification, tax forms, content-based naming).
@@ -619,9 +624,10 @@ def is_money_control(identity: str) -> bool:
     return is_forbidden_control_context(identity)
 
 
-def _safe_selects(page, limit: int = 12):
+def _safe_selects(page, limit: int = 12, unread=None):
     return _controls.safe_selects(page, FORBIDDEN_CONTROL_RE,
-                                  signed_out=looks_signed_out, limit=limit)
+                                  signed_out=looks_signed_out, limit=limit,
+                                  unread=unread)
 
 
 def describe_selects(page, limit: int = 12):
@@ -646,15 +652,31 @@ def account_select(page):
 def year_select(page):
     """A <select> whose options are years (statement archives are usually
     split by year). Returns (locator, [years]) or (None, [])."""
-    for s, _identity in _safe_selects(page):
+    return _year_picker(page)[:2]
+
+
+def _year_picker(page):
+    """year_select's answer, and whether a dropdown before the one it
+    found could not be read, as (locator, years, unread).
+
+    A dropdown whose options, or whose identity, could not be read is
+    passed over, and that made a page whose year picker did not answer
+    read as a page with no year picker. The one passed over may be the
+    picker the list follows, so finding none after it does not mean there
+    is none, and the one found after it may not be the one that counts.
+    A dropdown refused for what it is called, as a transfer widget's
+    account list, is not one that could not be read."""
+    unread, missed = False, []
+    for s, _identity in _safe_selects(page, unread=missed):
         try:
             opts = [o.strip() for o in s.locator("option").all_inner_texts()]
         except Exception:
+            unread = True
             continue
         years = [o for o in opts if re.fullmatch(r"20\d{2}", o)]
         if years:
-            return s, years
-    return None, []
+            return s, years, unread or bool(missed)
+    return None, [], unread or bool(missed)
 
 
 def _select_option(page, sel, label: str) -> bool:
@@ -679,6 +701,55 @@ def _select_option(page, sel, label: str) -> bool:
     except Exception as e:
         log.info("could not select %r: %s", label, str(e).split("\n")[0])
         return False
+
+
+# The option a year picker shows, read again after it is set.
+_SHOWN_JS = "s => s.selectedIndex < 0 ? '' : s.options[s.selectedIndex].text"
+
+
+def _year_shown(sel) -> str:
+    """The option the picker shows now, or "" when it could not be read."""
+    try:
+        return (sel.evaluate(_SHOWN_JS, timeout=5000) or "").strip()
+    except Exception:
+        return ""
+
+
+def _year_not_shown(sel, year: str, unread: bool = False) -> str:
+    """Why the year picker `sel`, as _year_picker found it, is not known to
+    show `year`, or "" when it shows it. It only reads.
+
+    What the list shows is not read, since nothing in a tax row says its
+    year. The list follows its picker, so the picker is what is read. What
+    is said is fixed words and a year, never the page's own words, because
+    a log is sent in with a report."""
+    if sel is None:
+        return "a dropdown could not be read" if unread else "no year picker was found"
+    if unread:
+        return "a dropdown before the year picker could not be read"
+    shown = _year_shown(sel)
+    if shown == year:
+        return ""
+    if not shown:
+        return "the year picker could not be read"
+    return "the year picker shows %s" % (shown if re.fullmatch(r"20\d{2}", shown) else "another option")
+
+
+def _show_year(page, sel, year: str, unread: bool = False) -> str:
+    """Set the year picker `sel` to `year`, and say why it is not known to
+    show that year afterwards, or "" when it shows it.
+
+    Setting it is not taken as proof that it moved. Setting it can fail,
+    and a picker the page holds in its own state puts its old year back
+    when the change does not reach that state, which raises nothing. So
+    the picker is read again. A set that failed while the picker already
+    shows the year still counts, because what the picker shows is what is
+    asked."""
+    moved = sel is not None and _select_option(page, sel, year)
+    why = _year_not_shown(sel, year, unread)
+    if why and sel is not None and not unread and not moved:
+        return "the year picker would not move"
+    return why
 
 
 # ---------------------------------------------------------------------------
@@ -1062,19 +1133,28 @@ def ally_download(page, ctx, account: str, date: str, out_path,
             return False
 
     # Put the list in the state that shows this row: the statement's own year.
-    sel, years = year_select(page)
-    if sel is not None and years:
-        if date[:4] in years:
-            _select_option(page, sel, date[:4])
-        else:
-            # Ally lists documents in its API that its own year picker cannot
-            # reach (the tax picker starts at 2020, but the API returns a 2019
-            # form). Clicking whatever row is on screen would download some
-            # other year's document, so stop here and say why.
-            log.warning("%s is not in Ally's year picker (%s..%s) - this "
-                        "document cannot be reached from the page",
-                        date[:4], min(years), max(years))
-            return False
+    year = date[:4]
+    sel, years, unread = _year_picker(page)
+    if sel is not None and year not in years:
+        # Ally lists documents in its API that its own year picker cannot
+        # reach (the tax picker starts at 2020, but the API returns a 2019
+        # form). Clicking whatever row is on screen would download some
+        # other year's document, so stop here and say why.
+        log.warning("%s is not in Ally's year picker (%s..%s) - this "
+                    "document cannot be reached from the page",
+                    year, min(years), max(years))
+        return False
+    not_shown = _show_year(page, sel, year, unread)
+    # A tax row is found by its form's code, and every year has its own
+    # 1099-INT, so the year the list shows is what decides which year's form
+    # is pressed. When the year picker is not known to show this year, the
+    # form on screen may be another year's and would be saved under this
+    # one's name, so nothing is pressed. Statements go on either way,
+    # because their rows are found by a date that carries the year.
+    if kind == "tax" and not_shown:
+        log.warning("%s tax form not pressed, the year picker is not known "
+                    "to show %s (%s)", year, year, not_shown)
+        return False
     expand_all(page)
 
     # Watch which statement the SITE actually serves while we click, so the
@@ -1131,6 +1211,16 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
     if ctrl is None:
         log.info("statement row not found for %r %s", account, date)
         return False
+    if kind == "tax":
+        # The picker showed this year when it was set, and the page has gone
+        # on since, as a view that finishes loading late does. So it is read
+        # again, only read, just before the press.
+        sel, _years, unread = _year_picker(page)
+        not_shown = _year_not_shown(sel, date[:4], unread)
+        if not_shown:
+            log.warning("%s tax form not pressed, the year picker no longer "
+                        "shows %s (%s)", date[:4], date[:4], not_shown)
+            return False
 
     # 1. A direct PDF href needs no click at all - fetch it in the page
     #    context so the session cookies come along.

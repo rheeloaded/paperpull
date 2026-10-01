@@ -137,10 +137,13 @@ def stall_reads(monkeypatch, stalled, locator=("element_handle",), handle=(), sc
     ElementHandle methods. When `scripts` is given, an evaluate of an
     element stalls only for those scripts, so the page's other questions
     about it still answer. The element is known by its own data-guid,
-    read the way the page would give it, before the stalled read runs."""
+    read the way the page would give it, before the stalled read runs.
+    A read of several elements at once, as all_inner_texts is, stalls
+    when any one of them is stalled."""
     from playwright.sync_api import ElementHandle, Locator, TimeoutError as PlaywrightTimeout
     stalled = set(stalled)
     guid_of_locator = Locator.get_attribute
+    guids_of_locator = Locator.evaluate_all
     guid_of_handle = ElementHandle.get_attribute
 
     def stalling(name, real, guid_of, is_locator):
@@ -149,10 +152,15 @@ def stall_reads(monkeypatch, stalled, locator=("element_handle",), handle=(), sc
                     and (args[0] if args else kwargs.get("expression")) not in scripts:
                 return real(self, *args, **kwargs)
             try:
-                guid = guid_of(self, "data-guid", timeout=2000) if is_locator else guid_of(self, "data-guid")
+                guids = {guid_of(self, "data-guid", timeout=2000) if is_locator else guid_of(self, "data-guid")}
             except Exception:
-                guid = None
-            if guid in stalled:
+                # A locator of several elements, which a read of one refuses.
+                try:
+                    guids = set(guids_of_locator(self, "els => els.map(e => e.getAttribute('data-guid'))")) \
+                        if is_locator else set()
+                except Exception:
+                    guids = set()
+            if guids & stalled:
                 raise PlaywrightTimeout("Timeout exceeded, a stalled read (testkit.stall_reads).")
             return real(self, *args, **kwargs)
         return read

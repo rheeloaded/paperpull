@@ -121,6 +121,25 @@ All notable changes to PaperPull are recorded here. Versioning follows
   everything it chooses from, and the steps after it still look. A check
   across every app keeps it that way. Found when one E*TRADE test failed
   on a stalled CI machine, and nothing shows it happened on a real run.
+- **Ally presses a tax form only when its year picker shows that form's
+  year.** A tax row names its form, 1099-INT, and nothing that says which
+  year it is for, so the year the list shows decides which year's form is
+  pressed, and the list follows its year picker. Ally set the picker to
+  the form's year and went on whether or not that worked, and it took a
+  picker it could not read for a page with no picker, which skipped
+  setting it and the check that the year can be reached at all. Either
+  way another year's form could be saved under this one's name, and the
+  check of which document Ally served caught that only when the form had
+  an id and the page was seen fetching it by that id. Now the picker is
+  read again after it is set and once more just before the press, and a
+  tax form is pressed only when it shows the form's year and no dropdown
+  before it went unread. Otherwise nothing is pressed, the form goes to
+  manual review with the reason in the log, and the next run tries it
+  again. Statements were never affected, because their rows are found by
+  a date that carries the year. In the core, safe_selects can now say
+  which dropdowns it could not name, which is how a picker that did not
+  answer is told from no picker. Found by reading the code after the
+  stalled CI run, and nothing shows it happened on a real run.
 
 ## [0.41.1] - 2026-09-30
 

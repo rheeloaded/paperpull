@@ -82,10 +82,15 @@ IDENTITY_JS = r"""el => {
 def control_identity(loc) -> str:
     """Every name this control answers to, or an empty string if it could not
     be read. An empty string is treated as unsafe by the checks below."""
+    return _identity_read(loc) or ""
+
+
+def _identity_read(loc) -> Optional[str]:
+    """control_identity's answer, or None when it could not be read."""
     try:
         return loc.evaluate(IDENTITY_JS) or ""
     except Exception:
-        return ""
+        return None
 
 
 def is_forbidden_context(identity: str,
@@ -118,7 +123,7 @@ def is_forbidden_context(identity: str,
 
 def safe_selects(page, forbidden_re: Optional[Pattern] = None,
                  signed_out=None, extra_res: Iterable[Pattern] = (),
-                 limit: int = 12):
+                 limit: int = 12, unread: Optional[list] = None):
     """Yield (locator, identity) for the <select> elements safe to touch.
 
     `signed_out` is the app's own check. If it says this is not an application
@@ -126,6 +131,12 @@ def safe_selects(page, forbidden_re: Optional[Pattern] = None,
     call themselves. A wrong URL guess is an ordinary thing to happen on a
     first probe. Treating whatever it lands on as though it were the app is
     what turns that into a safety problem.
+
+    `unread`, when a caller hands in a list, gets each dropdown whose
+    identity could not be read. It is refused like any control that cannot
+    be named, and the list says it was there, which a caller looking for
+    one dropdown among several needs to know. A dropdown that answered
+    with no name at all is refused too, and is not in the list.
     """
     try:
         if signed_out is not None and signed_out(page):
@@ -140,7 +151,11 @@ def safe_selects(page, forbidden_re: Optional[Pattern] = None,
         return
     for i in range(n):
         s = loc.nth(i)
-        identity = control_identity(s)
+        identity = _identity_read(s)
+        if identity is None:
+            identity = ""
+            if unread is not None:
+                unread.append(s)
         if is_forbidden_context(identity, forbidden_re, extra_res):
             log.info("refusing dropdown: %s", identity[:120])
             continue
