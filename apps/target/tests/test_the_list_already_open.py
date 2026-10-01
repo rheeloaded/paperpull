@@ -103,6 +103,12 @@ if (DRAWN_AT_ONCE) show('online');
 DETAILS = ("<!doctype html><html><head><title>Order</title></head><body>"
            "<h1>Order details</h1>" + REPORT.replace("PAGE", "details") + "</body></html>")
 
+# The first page a fresh browser is sent to, by the fixture's check, before
+# any test relies on the browser drawing a page or closing a tab.
+READY = ("<!doctype html><html><head><title>Ready</title></head><body><script>"
+         "fetch('/beacon?page=ready&load=' + Math.random().toString(36).slice(2, 10),"
+         " {cache: 'no-store'}).catch(() => {});</script></body></html>")
+
 
 class FakeTarget:
     """What the made-up site shows, set by each test, and what it saw."""
@@ -138,6 +144,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "DRAWN_AT_ONCE", "true" if SITE.drawn_at_once else "false")
         elif parts.path == "/details":
             body = DETAILS
+        elif parts.path == "/ready":
+            body = READY
         elif parts.path == "/beacon":
             q = parse_qs(parts.query)
             SITE.beacons.append({k: q.get(k, [""])[0]
@@ -168,21 +176,11 @@ def server():
     httpd.server_close()
 
 
-@pytest.fixture(scope="module")
-def attached(tmp_path_factory):
-    """Playwright's own Chromium, never the person's everyday browser,
-    started as a program of its own with a debugging port, which is what the
-    app attaches to at home. Its address, for cdp_url.
-
-    It starts on a blank page. Started straight on a page from this server,
-    headless Chromium would not let Playwright attach to it at all."""
-    pytest.importorskip("playwright.sync_api")
-    found = browser_launcher.browser_candidates(mode=browser_launcher.BUNDLED)
-    if not found:
-        pytest.skip("no browser to drive")
-    profile = tmp_path_factory.mktemp("attached-profile")
+def _start_browser(exe, profile):
+    """The browser as a program of its own with a debugging port, and its
+    address, or None for the address when it opened no port."""
     proc = subprocess.Popen(
-        [found[0][1], "--headless=new", "--remote-debugging-port=0",
+        [exe, "--headless=new", "--remote-debugging-port=0",
          "--user-data-dir=%s" % profile, "--disable-extensions", "--disable-sync",
          "--no-first-run", "--no-default-browser-check", NO_HOSTS, "about:blank"],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -193,9 +191,55 @@ def attached(tmp_path_factory):
         except (OSError, IndexError):
             time.sleep(0.1)
     if not port or not browser_launcher.wait_for_debug_port(port):
+        return proc, None
+    return proc, "http://127.0.0.1:%s" % port
+
+
+def _browser_ready(url, server) -> bool:
+    """Whether the browser draws a page and closes the tab it started with.
+
+    A fresh browser sometimes does not. Measured on 40 fresh starts, 2 began
+    with a tab that never closed and 1 never drew the first page it was sent
+    to, each for a minute or more, which is what failed this file on CI. A
+    fresh start after one of those was fine."""
+    others = _page_targets(url)
+    earlier = SITE.loads("ready")
+    request = urllib.request.Request(url + "/json/new?" + server + "/ready", method="PUT")
+    with urllib.request.urlopen(request, timeout=10) as r:
+        tab = json.loads(r.read().decode("utf-8"))
+    if not _drawn_since(earlier, 10, page="ready"):
+        return False
+    for target in others:
+        _close_tab(url, target["id"])
+    return _only_tab_left(url, tab["id"], 10)
+
+
+@pytest.fixture(scope="module")
+def attached(tmp_path_factory, server):
+    """Playwright's own Chromium, never the person's everyday browser,
+    started as a program of its own with a debugging port, which is what the
+    app attaches to at home. Its address, for cdp_url.
+
+    It starts on a blank page. Started straight on a page from this server,
+    headless Chromium would not let Playwright attach to it at all. A browser
+    that fails _browser_ready is closed and another started, three at most,
+    and the one handed over has one tab, on a page of this server's."""
+    pytest.importorskip("playwright.sync_api")
+    found = browser_launcher.browser_candidates(mode=browser_launcher.BUNDLED)
+    if not found:
+        pytest.skip("no browser to drive")
+    for _start in range(3):
+        proc, url = _start_browser(found[0][1], tmp_path_factory.mktemp("attached-profile"))
+        if url is None:
+            proc.kill()
+            proc.wait(timeout=15)
+            pytest.skip("the browser opened no debugging port")
+        if _browser_ready(url, server):
+            break
         proc.kill()
-        pytest.skip("the browser opened no debugging port")
-    url = "http://127.0.0.1:%s" % port
+        proc.wait(timeout=15)
+    else:
+        pytest.fail("three fresh browsers in a row could not draw a page and close a tab")
     yield url
     try:
         from playwright.sync_api import sync_playwright
@@ -234,12 +278,21 @@ def _gone(cdp_url, target_id, seconds=10):
         time.sleep(0.1)
 
 
-def _drawn_since(earlier, seconds) -> bool:
+def _drawn_since(earlier, seconds, page="orders") -> bool:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if SITE.loads() - earlier:
+        if SITE.loads(page) - earlier:
             return True
         time.sleep(0.05)
+    return False
+
+
+def _only_tab_left(cdp_url, target_id, seconds) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if [t["id"] for t in _page_targets(cdp_url)] == [target_id]:
+            return True
+        time.sleep(0.1)
     return False
 
 
@@ -247,12 +300,9 @@ def open_as_login_does(cdp_url, address):
     """A tab on the address and no other, opened by the browser itself, the
     way Login's window is. Returns once the page has drawn its list.
 
-    In full runs of the suite, here and on CI, the first tab opened this way
-    sometimes never sent a single request, in 60 seconds. Measured on fresh
-    browsers, 5 first tabs in 30 never loaded whether or not the blank tab
-    was closed first, and in 40 more every second tab loaded at once. So a
-    tab that has not drawn in 10 seconds is closed and opened again, and the
-    other tabs are closed once the page has drawn."""
+    The browser is checked when it starts (see _browser_ready). A tab that
+    has still not drawn in 10 seconds is closed and opened again, and the
+    other tabs are closed only once the page has drawn."""
     others = _page_targets(cdp_url)
     drawn = None
     for _attempt in range(3):
@@ -270,13 +320,9 @@ def open_as_login_does(cdp_url, address):
                     % ([t.get("url") for t in _page_targets(cdp_url)], SITE.seen[-5:]))
     for target in others:
         _close_tab(cdp_url, target["id"])
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        left = _page_targets(cdp_url)
-        if [t["id"] for t in left] == [drawn["id"]]:
-            return
-        time.sleep(0.1)
-    pytest.fail("the other tabs never closed, tabs %r" % [t.get("url") for t in left])
+    if not _only_tab_left(cdp_url, drawn["id"], 15):
+        pytest.fail("the other tabs never closed, tabs %r"
+                    % [t.get("url") for t in _page_targets(cdp_url)])
 
 
 def press(cdp_url, name):
