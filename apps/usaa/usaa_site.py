@@ -35,6 +35,7 @@ from typing import List, Optional, Tuple
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.controls import click_next_page as _click_next_page
+from paperpull_core.identity import on_its_own as _on_its_own
 
 log = logging.getLogger("usaa_docs.site")
 
@@ -510,7 +511,12 @@ def download_by_id(page, document_id: str, document_date: str, out_path) -> bool
 
 def _find_doc_row(page, title: str, date_text: str, account: str):
     """Return the readDocument (title) button for the row matching this
-    document, or None. Matched by content because row indexes are unstable."""
+    document, or None. Matched by content because row indexes are unstable.
+
+    The date counts only as a number of its own. Found anywhere in the
+    row's words, a date written 1/5/2025 was inside 11/5/2025, and the
+    same statement for the same account comes every month, newest first,
+    so January's took November's row above it."""
     try:
         rows = page.locator("table tr")
         for i in range(rows.count()):
@@ -521,7 +527,7 @@ def _find_doc_row(page, title: str, date_text: str, account: str):
                 continue
             if title and title[:40] not in text:
                 continue
-            if date_text and date_text not in text:
+            if date_text and not _on_its_own(date_text, text.lower()):
                 continue
             if account and account[:18] and account[:18] not in text:
                 continue

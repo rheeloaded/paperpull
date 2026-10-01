@@ -106,14 +106,54 @@ def on_its_own(variant, text_lower: str) -> bool:
 
     `text_lower` is the text already lowercased. receipt_pdf holds its
     date and total pair (Together) and an OnItsOwn token to the same rule,
-    and this is the one place the rule is written."""
+    and on_its_own_pattern hands it to a locator, and this is the one place
+    the rule is written."""
+    source = _on_its_own_source(variant)
+    return bool(source) and re.search(source, text_lower or "") is not None
+
+
+def _on_its_own_source(variant, between=r"\s*") -> str:
+    """The pattern on_its_own looks for, as text, or "" for nothing.
+    `between` is what may fall between its characters."""
     v = _SPACE.sub("", str(variant or "").lower())
     if not v:
-        return False
-    body = r"\s*".join(re.escape(ch) for ch in v)
+        return ""
+    body = between.join(re.escape(ch) for ch in v)
     before = r"(?<![0-9.,])" if v[0].isdigit() else ""
     after = r"(?![0-9])" if v[-1].isdigit() else ""
-    return re.search(before + body + after, text_lower or "") is not None
+    return before + body + after
+
+
+# What a locator's own string matching takes out of the page's words before
+# it compares, a zero-width space and a soft hyphen, may sit between a
+# pattern's characters as whitespace may.
+_LOCATOR_BETWEEN = "[\\s\u200b\u00ad]*"
+
+
+def on_its_own_pattern(variant):
+    """The rule on_its_own holds a document's text to, as a pattern for a
+    locator.
+
+    A string handed to has_text or get_by_text is found anywhere in an
+    element's words, so "1/5/2025" picks out a row that reads "11/5/2025".
+    This finds it only as a number of its own, in any capitals, with
+    whitespace, a zero-width space or a soft hyphen anywhere between its
+    characters, since a pattern is tested against the words as they stand
+    and a string after those are taken out.
+
+    A pattern is tested against an element's words joined with nothing
+    between one element and the next, so a row whose date sits in the cell
+    before "2" reads "September 06, 20262". Look for it in the element that
+    holds the date as well as in the row, as Ally's _rows_for_date does.
+
+    A slash is escaped, because some locators read the pattern as a
+    script's own pattern, where a bare one ends it. Nothing to look for
+    gives a pattern that matches nothing, since a has_text of None would
+    filter nothing out and the first row would be taken."""
+    source = _on_its_own_source(variant, _LOCATOR_BETWEEN)
+    if not source:
+        return re.compile(r"(?!)")
+    return re.compile(source.replace("/", r"\/"), re.I)
 
 
 def date_variants(iso: str) -> list:

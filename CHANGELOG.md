@@ -140,6 +140,32 @@ All notable changes to PaperPull are recorded here. Versioning follows
   which dropdowns it could not name, which is how a picker that did not
   answer is told from no picker. Found by reading the code after the
   stalled CI run, and nothing shows it happened on a real run.
+- **Dominion opens the bill it was asked for.** Each bill is listed by the
+  date in its panel header, and the download then looked for the panel
+  whose header held that date spelled 1/5/2025. That spelling is inside
+  11/5/2025, and bills are listed newest first, so a January bill opened
+  the November panel above it and saved November's bill under January's
+  date, where it counted as downloaded for good. A header that pads its
+  month, 01/15/2025, did the same beside 11/15/2025, and one that pads its
+  day, 01/05/2025, was never found at all. A panel is now chosen by the
+  first date in its header read whole, the same reading that listed the
+  bill. A January or February bill whose day matches a November or
+  December bill of the same year may hold the later bill. Move that file
+  out of the folder first, since a file already there keeps its name, then
+  `--redownload` with `--start-date` and `--end-date` on its date fetches
+  the right one.
+- **Ally and USAA find a statement's row by its own date.** Ally looked
+  for a statement's row by several spellings of its date, anywhere in the
+  row, and the first is 1/6/2026, which is inside 11/6/2026. Ally writes
+  dates with the month's name today, so only a page that wrote them as
+  numbers would have sent a January statement to the November row above
+  it. USAA did the same for a document discovered without its id. A date
+  there now counts only as a number of its own, the rule the check on a
+  saved document's text already follows, and a locator can now be handed
+  that rule. A check over every app now finds each place that looks for a
+  date in what a page says and works out, by running the app's own code
+  on sample dates, whether one date can be found inside another's. It
+  found these three and no others.
 
 ## [0.41.1] - 2026-09-30
 

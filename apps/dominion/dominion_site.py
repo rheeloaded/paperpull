@@ -264,6 +264,18 @@ def goto_documents(page) -> bool:
         return page.locator(PANEL_HEADER).count() > 0
 
 
+def _header_date(text: str) -> Optional[str]:
+    """The date a panel header gives its bill, as YYYY-MM-DD, or None.
+
+    The first M/D/YYYY in the header, read whole. Discovery lists each bill
+    by this and the download finds the bill's panel by it again, so the
+    two always agree about which panel is which bill."""
+    m = _DATE_RE.search(text or "")
+    if not m:
+        return None
+    return f"{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+
+
 def _panel_dates(page) -> List[str]:
     """ISO dates of the bills on the current page (from panel headers)."""
     out = []
@@ -273,9 +285,9 @@ def _panel_dates(page) -> List[str]:
             t = loc.nth(i).inner_text(timeout=800) or ""
         except Exception:
             continue
-        m = _DATE_RE.search(t)
-        if m:
-            out.append(f"{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}")
+        iso = _header_date(t)
+        if iso:
+            out.append(iso)
     return out
 
 
@@ -476,17 +488,18 @@ def collect_download_docs(page) -> List[RawDoc]:
 
 def _find_panel_for(page, iso: str):
     """Return the accordion header for the bill dated `iso` on the current
-    page, or None."""
-    try:
-        y, m, d = iso.split("-")
-    except Exception:
-        return None
-    mmddyyyy = f"{int(m)}/{int(d)}/{y}"
+    page, or None.
+
+    A header is this bill's when the date it gives its bill is this date,
+    compared whole. Looking for "1/5/2025" in the header's text found it
+    inside "11/5/2025", and bills are listed newest first, so a January
+    bill opened the November panel above it and saved November's PDF under
+    January's date, where it was remembered as done for good."""
     loc = page.locator(PANEL_HEADER)
     for i in range(loc.count()):
         h = loc.nth(i)
         try:
-            if mmddyyyy in (h.inner_text(timeout=800) or ""):
+            if _header_date(h.inner_text(timeout=800) or "") == iso:
                 return h
         except Exception:
             continue

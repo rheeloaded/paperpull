@@ -86,6 +86,7 @@ from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.identity import on_its_own_pattern as _on_its_own_pattern
 
 log = logging.getLogger("ally_docs.site")
 
@@ -976,14 +977,18 @@ def _date_needles(date: str) -> List[str]:
     """The ways this ISO date can appear in a row.
 
     A day below ten is looked for both ways, "September 6, 2026" and
-    "September 06, 2026". Rows are matched by substring and neither
-    spelling contains the other. Ally writes the zero (#56), and every
-    date the tests used was the 16th, where the two spellings agree.
+    "September 06, 2026". A row is matched by a needle only as a number
+    of its own (see _rows_for_date), so neither spelling finds the other.
+    Ally writes the zero (#56), and every date the tests used was the
+    16th, where the two spellings agree.
     """
     y, m, d = date[:4], date[5:7], date[8:10]
     month = ["January", "February", "March", "April", "May", "June", "July",
              "August", "September", "October", "November", "December"][int(m) - 1]
-    needles = [f"{int(m)}/{int(d)}/{y}", f"{m}/{d}/{y}"]
+    # The month with its zero and the day without, 09/6/2026, was found as
+    # long as 9/6/2026 was found anywhere in a row, and is asked for itself
+    # now that a needle counts only as a number of its own.
+    needles = [f"{int(m)}/{int(d)}/{y}", f"{m}/{d}/{y}", f"{m}/{int(d)}/{y}"]
     for name in (month, month[:3]):
         for day in (str(int(d)), d):
             needles.append(f"{name} {day}, {y}")
@@ -1036,10 +1041,21 @@ def _rows_for_date(page, date: str):
     A row whose words or control could not be read used to be left out,
     which moved every row after it up one place, and the statements of a
     date are told apart only by their place. So the next statement's row
-    would be taken (the census after CI run 36792330947)."""
+    would be taken (the census after CI run 36792330947).
+
+    A needle counts only as a number of its own. As a plain has_text it
+    was found anywhere in a row, and the first needle for January 6 is
+    1/6/2026, which is inside 11/6/2026, so on a page that writes dates
+    that way a January statement took the November row above it. A
+    pattern is tested against a row's words with nothing between one cell
+    and the next, so a date beside a cell of numbers is looked for in the
+    element that holds it as well as in the row."""
     for needle in _date_needles(date):
         try:
-            rows = page.locator("tr, [role='row'], li").filter(has_text=needle)
+            pattern = _on_its_own_pattern(needle)
+            every = page.locator("tr, [role='row'], li")
+            rows = every.filter(has_text=pattern).or_(
+                every.filter(has=page.locator("*", has_text=pattern)))
             n = min(rows.count(), 40)
         except Exception:
             return [], True
