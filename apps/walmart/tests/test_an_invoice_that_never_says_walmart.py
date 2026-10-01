@@ -104,7 +104,8 @@ VALUES = (ORDER, PRINTED, ANOTHER, "Dana Example", "Example Street",
 def browser():
     with sync_playwright() as p:
         b = p.chromium.launch(headless=True, args=[
-            "--disable-extensions", "--disable-sync", "--no-first-run"])
+            "--disable-extensions", "--disable-sync", "--no-first-run",
+            "--host-resolver-rules=MAP * ~NOTFOUND"])
         try:
             yield b
         finally:
@@ -277,18 +278,49 @@ def test_a_file_put_aside_leaves_a_failure_file_with_none_of_its_words(tmp_path,
 
 # -- the number itself ------------------------------------------------------------------
 
-@pytest.mark.parametrize("text, order, found", [
-    ("Order# 1000000-00000011\nTotal $13.34", ORDER, ["1000000-00000011"]),
-    ("Order# 1000000 - 00000011\nTotal $13.34", ORDER, ["1000000-00000011"]),
-    ("Order# 1000000-\n00000011\nTotal $13.34", ORDER, ["1000000-00000011"]),
+@pytest.mark.parametrize("text, order, total, found", [
+    ("Order# 1000000-00000011\nTotal $13.34", ORDER, "$13.34", ["1000000-00000011"]),
+    ("Order# 1000000 - 00000011\nTotal $13.34", ORDER, "$13.34", ["1000000-00000011"]),
+    ("Order# 1000000-\n00000011\nTotal $13.34", ORDER, "$13.34", ["1000000-00000011"]),
+    ("Order# 1000000-00000011\nTotal $1,013.34", ORDER, "$1013.34", ["1000000-00000011"]),
     # A store receipt's twenty digits, in groups of four.
-    ("1000-0000-0000-0000-0022\nTOTAL $4.10", "10000000000000000022",
+    ("1000-0000-0000-0000-0022\nTOTAL $4.10", "10000000000000000022", "$4.10",
      ["1000-0000-0000-0000-0022"]),
-    ("Order# 1000000-00000099\nTotal $13.34", ORDER, []),
-    ("Order# 91000000-00000011\nTotal $13.34", ORDER, []),
-    ("Order# 1000000-000000111\nTotal $13.34", ORDER, []),
-    ("Order# 1000000-00000011", ORDER, []),
-    ("Order# 1000-0011\nTotal $13.34", "10000011", []),
+    ("Order# 1000000-00000099\nTotal $13.34", ORDER, "$13.34", []),
+    ("Order# 91000000-00000011\nTotal $13.34", ORDER, "$13.34", []),
+    ("Order# 1000000-000000111\nTotal $13.34", ORDER, "$13.34", []),
+    ("Order# 1000000-00000011", ORDER, "$13.34", []),
+    ("Order# 1000-0011\nTotal $13.34", "10000011", "$13.34", []),
+    # An amount, but not the order's own total, and no total known at all.
+    ("Order# 1000000-00000011\nMembers save $35.00", ORDER, "$13.34", []),
+    ("Order# 1000000-00000011\nTotal $13.34", ORDER, "", []),
 ])
-def test_the_order_number_as_walmart_prints_it(text, order, found):
-    assert site.order_number_as_printed(text, order) == found
+def test_the_order_number_as_walmart_prints_it(text, order, total, found):
+    assert site.order_number_as_printed(text, order, total) == found
+
+
+# The review's page. The heading over an invoice that never came, with a
+# promotion's amount beside it and not the order's total.
+NEVER_CAME = PAGE % """
+  <h2>Invoice</h2>
+  <p>Jun 3, 2026 order</p>
+  <p>Order# 1000000-00000011</p>
+  <p>We could not load the rest of this invoice</p>
+  <p>Members save $35.00</p>"""
+
+
+def test_an_amount_that_is_not_the_orders_total_is_not_enough(tmp_path, shown):
+    app, purchase, rec = run_one(tmp_path, shown, NEVER_CAME)
+
+    assert put_aside(tmp_path, rec), rec
+
+
+def test_an_order_whose_total_nobody_knows_gets_nothing_from_its_number(tmp_path, shown):
+    """No amount on the order's page, so no total was read, and the invoice
+    is checked the way it always was."""
+    html = invoice().replace("<p>Subtotal $12.47</p><p>Tax $0.87</p><p>Total $13.34</p>", "")
+    html = html.replace('<span data-testid="line-price">$12.47</span>', "")
+    app, purchase, rec = run_one(tmp_path, shown, html)
+
+    assert rec["total"] == "", rec
+    assert put_aside(tmp_path, rec), rec

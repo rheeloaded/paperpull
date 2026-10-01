@@ -68,9 +68,23 @@ PAGE = """<!doctype html><html><head><title>Order details</title><style>
 </div>
 </body></html>"""
 
+# Five orders from 2026 ahead of two from 2025, none dated on its card, for
+# how many pages a run opens only to learn a date.
+NEWER = ["1000000000000%d" % n for n in range(41, 46)]
+OLDER = ["100000000000046", "100000000000047"]
+LATER_FIRST = ([(n, "Mar %d, 2026" % (i + 1), "Invented Storage Bin No. %d" % i)
+                for i, n in enumerate(NEWER)]
+               + [(OLDER[0], "Apr 4, 2025", "Invented Wall Clock, Round"),
+                  (OLDER[1], "Mar 3, 2025", "Invented Bath Mat, Blue")])
+
+# Its card showed a later day, and an earlier run that could not open its
+# page recorded that day. Its page says when it was ordered.
+CARD_LATER = "100000000000051"
+CARD_LATER_ORDER = [(CARD_LATER, "Dec 30, 2025", "Invented Space Heater, Small")]
+
 PAGES = {number: PAGE % {"heading": "<h1>%s order</h1>" % date if date else "",
                          "printed": number[:7] + "-" + number[7:], "item": item}
-         for number, date, item in ORDERS}
+         for number, date, item in ORDERS + LATER_FIRST + CARD_LATER_ORDER}
 
 
 # -- which purchases a run limited to some dates starts from ----------------------------
@@ -124,7 +138,8 @@ sync_playwright = pytest.importorskip(
 def browser():
     with sync_playwright() as p:
         b = p.chromium.launch(headless=True, args=[
-            "--disable-extensions", "--disable-sync", "--no-first-run"])
+            "--disable-extensions", "--disable-sync", "--no-first-run",
+            "--host-resolver-rules=MAP * ~NOTFOUND"])
         try:
             yield b
         finally:
@@ -166,17 +181,18 @@ def the_invented_site(monkeypatch):
     monkeypatch.setattr(app_mod.App, "cmd_discover", lambda self, types=None, quiet=False: {})
 
 
-def discovered(tmp_path):
-    """The five orders as discovery records them from cards with no date."""
+def discovered(tmp_path, orders=ORDERS, card_text="Delivered\n$19.69"):
+    """The orders as discovery records them from their cards, by default
+    cards with no date."""
     out = tmp_path / "out"
     out.mkdir(exist_ok=True)
     records = {}
-    for number, _date, _item in ORDERS:
-        card = site.RawCard(href="", text="Delivered\n$19.69", order_id=number, kind=ONLINE)
+    for number, _date, _item in orders:
+        card = site.RawCard(href="", text=card_text, order_id=number, kind=ONLINE)
         purchase = site.card_to_purchase(card, ONLINE, base_url=HOST)
-        assert purchase.purchase_date == "", "the card shows no date"
         records[purchase.key] = dict(purchase.to_dict(), state="Discovered")
     (out / "discovery.json").write_text(json.dumps(records), encoding="utf-8")
+    return records
 
 
 def run(tmp_path, site_pages, *flags, setting="", pilot=True):
@@ -303,3 +319,68 @@ def test_a_store_purchase_is_left_as_it_was():
     inst.config = {"default_start_date": ""}
     inst.discovery = SimpleNamespace(data={store.key: store.to_dict()})
     assert inst._select_purchases(IN_STORE) == []
+
+
+# -- from the review of the change above ---------------------------------------------
+
+def test_a_run_opens_only_so_many_pages_to_learn_dates(tmp_path, site_pages, capsys,
+                                                      monkeypatch):
+    """A pilot for 2025, its limit two, behind five 2026 orders with no
+    date on their cards. It opened every one of them to take two. Now it
+    stops after so many pages opened for nothing, says how many it left,
+    and the next run carries on from the dates it learned."""
+    monkeypatch.setattr(app_mod, "DATES_LEARNED_PER_RUN", 3, raising=False)
+    discovered(tmp_path, LATER_FIRST)
+    app = run(tmp_path, site_pages, "--year", "2025")
+    out = printed(capsys)
+
+    assert site_pages.opened == NEWER[:3], site_pages.opened
+    assert "4 order(s) with no date yet were not opened" in out, out
+    app.write_run_summary()
+    summary = (tmp_path / "out" / "run-summary.txt").read_text(encoding="utf-8")
+    assert "Undated, left for later:   4" in summary, summary
+
+    site_pages.opened.clear()
+    run(tmp_path, site_pages, "--year", "2025")
+    assert site_pages.opened == NEWER[3:] + OLDER, site_pages.opened
+    progress = records(tmp_path, "progress.json")
+    assert all(progress[key(n)]["downloaded_ok"] is True for n in OLDER), progress
+
+
+def test_a_date_learned_over_an_earlier_record_is_the_one_used(tmp_path, site_pages):
+    """The run for 2026 opened it, found it ordered in 2025 and left it, and
+    the earlier run's record still said 2026, which the selection reads
+    first, so the run for 2025 left it out too."""
+    found = discovered(tmp_path, CARD_LATER_ORDER, card_text="Delivered on Jan 3, 2026\n$19.69")
+    assert found[key(CARD_LATER)]["purchase_date"] == "2026-01-03"
+    earlier = Purchase(purchase_type=ONLINE, order_number=CARD_LATER,
+                       purchase_date="2026-01-03", state="Needs Manual Review",
+                       notes="Details page failed to load twice")
+    (tmp_path / "out" / "progress.json").write_text(
+        json.dumps({earlier.key: earlier.to_dict()}), encoding="utf-8")
+
+    run(tmp_path, site_pages, "--year", "2026", pilot=False)
+    rec = records(tmp_path, "progress.json")[key(CARD_LATER)]
+    assert site_pages.opened == [CARD_LATER], site_pages.opened
+    assert rec["purchase_date"] == "2025-12-30", rec
+    assert rec["state"] == "Needs Manual Review" and not rec.get("downloaded_ok"), rec
+
+    run(tmp_path, site_pages, "--year", "2025", pilot=False)
+    rec = records(tmp_path, "progress.json")[key(CARD_LATER)]
+    assert rec.get("downloaded_ok") is True, rec
+
+
+def test_an_order_whose_page_showed_no_date_is_not_opened_again(tmp_path, site_pages, capsys):
+    discovered(tmp_path, [ORDERS[2]])
+    run(tmp_path, site_pages, "--year", "2026", pilot=False)
+    assert site_pages.opened == [NO_DATE_AT_ALL], site_pages.opened
+    capsys.readouterr()
+
+    site_pages.opened.clear()
+    run(tmp_path, site_pages, "--year", "2026", pilot=False)
+    assert site_pages.opened == [], site_pages.opened
+    assert "1 order(s) were not opened, since their order page showed no date" in printed(capsys)
+
+    # A run without dates takes it, as it always did.
+    run(tmp_path, site_pages, pilot=False)
+    assert records(tmp_path, "progress.json")[key(NO_DATE_AT_ALL)]["downloaded_ok"] is True

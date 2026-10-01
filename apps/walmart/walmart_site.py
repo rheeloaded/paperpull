@@ -853,15 +853,27 @@ def _printed_forms(text: str, order_number: str) -> List[str]:
             if re.sub(r"\D", "", m.group()) == digits]
 
 
-def order_number_as_printed(text: str, order_number: str) -> List[str]:
+def prints_total(text: str, total: str) -> bool:
+    """Whether `text` prints this amount, "$1,234.56" read the same with its
+    comma or without. False when there is no amount to look for."""
+    wanted = MONEY_RE.search(total or "")
+    if not wanted:
+        return False
+    return wanted.group(1).replace(",", "") in {
+        a.replace(",", "") for a in MONEY_RE.findall(text or "")}
+
+
+def order_number_as_printed(text: str, order_number: str, total: str = "") -> List[str]:
     """This order's own number the way a Walmart document prints it, found
     in `text`, to add to the words a saved document is checked for.
     Nothing when it is not there.
 
-    Only on a document that prints an amount as well. An invoice and a
-    receipt always do, and a page that merely names the order, a heading
-    over an invoice that never came, need not."""
-    if not MONEY_RE.search(text or ""):
+    Only on a document that also prints the order's own total, read from
+    its card or its page. Any amount used to do, and a heading over an
+    invoice that never came passed on "Members save $35.00" beside it. An
+    order whose total nobody knows gets nothing from its number, and its
+    document is checked the way it always was (review of #63)."""
+    if not prints_total(text, total):
         return []
     return _printed_forms(text, order_number)[:1]
 
@@ -878,10 +890,10 @@ DOCUMENT_WORDS = ("invoice", "receipt", "order", "subtotal", "total", "tax",
 def pdf_facts(path, purchase: Purchase, page_url: str = "") -> dict:
     """What a saved document that failed its check holds, for the failure
     file a tester attaches. Its size, its pages, how much text it has,
-    whether it says Walmart, prints this order's number, a date or an
-    amount, how many of the item names read from the order's page it
-    prints, which DOCUMENT_WORDS appear, and whether the page it was
-    printed from was still this order's. Never its words."""
+    whether it says Walmart, prints this order's number, a date, an amount
+    or the order's own total, how many of the item names read from the
+    order's page it prints, which DOCUMENT_WORDS appear, and whether the
+    page it was printed from was still this order's. Never its words."""
     facts: dict = {}
     try:
         from pypdf import PdfReader
@@ -902,6 +914,8 @@ def pdf_facts(path, purchase: Purchase, page_url: str = "") -> dict:
                 or re.search(r"(?<!\d)%s(?!\d)" % number, text)),
             "prints_a_date": bool(parse_date(text)),
             "prints_an_amount": bool(MONEY_RE.search(text)),
+            "total_known": bool(MONEY_RE.search(purchase.total or "")),
+            "prints_its_total": prints_total(text, purchase.total),
             "item_names_read": len(names),
             # The way the check itself looks for them, spaces aside.
             "item_names_printed": sum(

@@ -57,6 +57,16 @@ log = logging.getLogger("walmart_receipts")
 OUTSIDE_DATES = "outside the dates"
 NO_DATE = "no date"
 
+# How many order pages a run limited to some dates opens only to learn a
+# date, pages it then leaves because they are outside the dates or show
+# none. Walmart's bot check is what every run has to get past, and a run
+# for one year could open every order in a long history to take two. One
+# number for every run, since the risk is in pages opened for nothing, so a
+# run with a limit opens at most that limit and this many more. The rest
+# wait, and the next run places the ones this one learned without opening
+# them and carries on from there (review of #63).
+DATES_LEARNED_PER_RUN = 10
+
 
 def ask(prompt: str) -> str:
     """input() that stops cleanly (progress already saved by callers) when
@@ -117,7 +127,7 @@ class App:
             "skipped_completed": 0, "canceled": 0, "no_receipt": 0,
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
             "validation_failures": 0, "dates_processed": [], "new_files": [],
-            "outside_dates": 0,
+            "outside_dates": 0, "undated_left": 0, "no_date_again": 0,
         }
 
     # -- infrastructure -----------------------------------------------------
@@ -550,11 +560,14 @@ class App:
         the dates the run is limited to or shows no date at all, so one
         opened only to learn its date does not use up a place (#63).
         `by_dates` is whether the run is limited to some dates, and only
-        then is a purchase placed by the date its order page shows."""
+        then is a purchase placed by the date its order page shows. Pages
+        opened only to learn a date stop at DATES_LEARNED_PER_RUN, and an
+        order whose page showed no date before is not opened again."""
         page = self.page()
         counted: dict = {}
         left: dict = {}
         reached: List[Purchase] = []
+        learned = 0
         # The purchases the run looks at, numbered as it reaches them. One
         # past its kind's limit is not looked at and takes no number.
         i = 0
@@ -564,11 +577,22 @@ class App:
             if cap and counted.get(kind, 0) >= cap:
                 left[kind] = left.get(kind, 0) + 1
                 continue
+            done = self._already_done(purchase)
+            if by_dates and not purchase.purchase_date and not done:
+                # Only its page can place it, and opening it may be for
+                # nothing, so it waits when its page had no date last time
+                # or this run has opened enough pages for nothing already.
+                if self._page_had_no_date(purchase):
+                    self.stats["no_date_again"] += 1
+                    continue
+                if learned >= DATES_LEARNED_PER_RUN:
+                    self.stats["undated_left"] += 1
+                    continue
             i += 1
             print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
-            if self._already_done(purchase):
+            if done:
                 print("  Already completed and PDF verified - skipping.")
                 self.stats["skipped_completed"] += 1
                 # Inside the dates when it has one, since the selection
@@ -597,7 +621,9 @@ class App:
                 self.stats["failed"] += 1
             if outcome != OUTSIDE_DATES:
                 reached.append(purchase)
-            if outcome not in (OUTSIDE_DATES, NO_DATE):
+            if outcome in (OUTSIDE_DATES, NO_DATE):
+                learned += 1
+            else:
                 counted[kind] = counted.get(kind, 0) + 1
             self._delay()
         for kind, more in left.items():
@@ -605,6 +631,12 @@ class App:
                   f"{more} purchase{'' if more == 1 else 's'} not looked at "
                   f"{'is' if more == 1 else 'are'} left for another run.")
         return reached
+
+    def _page_had_no_date(self, purchase: Purchase) -> bool:
+        """Whether a run limited to dates already opened this order and found
+        no date on its page, and nothing has dated it since."""
+        rec = self.progress.get(purchase.key) or {}
+        return bool(rec.get("no_date_on_page")) and not rec.get("purchase_date")
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False,
                     by_dates: bool = False):
@@ -639,19 +671,26 @@ class App:
         # for an online order is the only date there is (#63).
         if by_dates:
             if not purchase.purchase_date:
+                # Remembered, so a later run limited to dates does not open
+                # it again only to find no date there (review of #63).
                 self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
                                    notes="No date on its order page, so it could not be "
-                                         "placed in the dates this run is limited to")
+                                         "placed in the dates this run is limited to",
+                                   extra={"no_date_on_page": True})
                 self.stats["manual_review"] += 1
                 print("  Its order page shows no date, so I cannot tell whether it is")
                 print("  inside the dates asked for. Nothing was saved, and it is left for")
                 print("  manual review. A run without dates takes it as before.")
                 return NO_DATE
             if not self._within_dates(purchase.purchase_date):
-                # Not saved and not recorded, so it stays as discovered and
-                # a run that includes its date takes it. Only the date is
-                # kept, so that run and every other places it unopened.
-                self.discovery.update(purchase.key, {"purchase_date": purchase.purchase_date})
+                # Not saved and not recorded as done, so a run that includes
+                # its date takes it. Only the date is kept, in discovery and
+                # in a record an earlier run left, which the selection reads
+                # first, so that run and every other places it unopened.
+                read = {"purchase_date": purchase.purchase_date}
+                self.discovery.update(purchase.key, read)
+                if self.progress.get(purchase.key):
+                    self.progress.update(purchase.key, read)
                 self.stats["outside_dates"] += 1
                 print(f"  Its order page dates it {purchase.purchase_date}, outside the dates")
                 print("  asked for, so it is left for a run that includes them.")
@@ -803,15 +842,16 @@ class App:
 
         The words it looks for include this order's number the way Walmart
         prints it, in hyphenated groups, when the page it was printed from
-        is this order's own. The unbroken number was on none of the Walmart
-        documents measured, and an invoice that never says Walmart otherwise
-        passed only when an item name came out on the paper the way it was
-        read from the page (#63). A page that is not this order's, a list of
-        orders among them, gets nothing from this."""
+        is this order's own and the document prints the order's own total.
+        The unbroken number was on none of the Walmart documents measured,
+        and an invoice that never says Walmart otherwise passed only when an
+        item name came out on the paper the way it was read from the page
+        (#63). A page that is not this order's, a list of orders among them,
+        gets nothing from this."""
         tokens = receipt_pdf.expected_tokens_for(purchase)
         if purchase.order_number and purchase.order_number in (printed_from or ""):
             tokens += site.order_number_as_printed(receipt_pdf.pdf_text(path),
-                                                   purchase.order_number)
+                                                   purchase.order_number, purchase.total)
         return receipt_pdf.validate_pdf(path, self.config["min_pdf_bytes"], tokens)
 
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
@@ -1020,14 +1060,27 @@ class App:
                   "until {} order page is open. Any that".format(
                       "its" if unplaced == 1 else "their"))
             print("turns out to be outside the dates asked for is left alone, and is")
-            print("not counted as taken.")
+            print(f"not counted as taken. At most {DATES_LEARNED_PER_RUN} pages are opened "
+                  "for that in one run.")
 
-    def _say_outside(self) -> None:
+    def _say_left_alone(self) -> None:
+        """What a run limited to dates left alone, none of it a failure."""
         outside = self.stats.get("outside_dates", 0)
         if outside:
             print(f"\n{outside} purchase(s) turned out to be outside the dates asked for.")
             print("They were not saved and not marked done, so a run that includes")
             print("their dates takes them.")
+        waiting = self.stats.get("undated_left", 0)
+        if waiting:
+            print(f"\n{waiting} order(s) with no date yet were not opened, since this run")
+            print(f"had opened {DATES_LEARNED_PER_RUN} order pages only to learn their dates, "
+                  "as many as one")
+            print("run does. The dates it learned are kept, so the next run carries on")
+            print("from there.")
+        again = self.stats.get("no_date_again", 0)
+        if again:
+            print(f"\n{again} order(s) were not opened, since their order page showed no")
+            print("date last time. A run without dates takes them.")
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -1059,7 +1112,7 @@ class App:
                          State.NO_RECEIPT_AVAILABLE.value):
                 problems.append(f"{p.key}: {state} - {rec.get('notes','')}")
         # Not a problem. They are simply not this run's (#63).
-        self._say_outside()
+        self._say_left_alone()
         print("\n" + "-" * 70)
         if problems:
             print("Needs attention:")
@@ -1102,7 +1155,7 @@ class App:
         self.process_purchases(selected, dry_run=self.args.dry_run,
                                limits={t: cap for t in types} if cap else None,
                                by_dates=by_dates)
-        self._say_outside()
+        self._say_left_alone()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
@@ -1411,6 +1464,7 @@ class App:
             f"Duplicate filenames (#'d): {s['duplicate_filenames']}",
             f"PDF validation failures:   {s['validation_failures']}",
             f"Outside the dates asked:   {s.get('outside_dates', 0)}",
+            f"Undated, left for later:   {s.get('undated_left', 0)}",
             f"Earliest date processed:   {dates[0] if dates else '-'}",
             f"Latest date processed:     {dates[-1] if dates else '-'}",
             "",
