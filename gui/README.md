@@ -49,8 +49,16 @@ To change it later, click **change** next to the folder name at the top of
 the page.
 
 The choice is saved outside the program folder, so upgrading the panel does
-not lose it. On Windows that is `%LOCALAPPDATA%\PaperPull\settings.json`, on
-macOS `~/Library/Application Support/PaperPull/settings.json`.
+not lose it. On Windows that is `%APPDATA%\PaperPull\settings.json`, in
+Roaming AppData. On macOS it is
+`~/Library/Application Support/PaperPull/settings.json`, and on Linux
+`$XDG_CONFIG_HOME/paperpull/settings.json`, or
+`~/.config/paperpull/settings.json` when `XDG_CONFIG_HOME` is unset or empty.
+
+Versions before 0.19.1 kept the Windows file at
+`%LOCALAPPDATA%\PaperPull\settings.json`. When the panel finds a file there
+and none in Roaming AppData, it moves it across. If the move fails, the panel
+goes on using the file where it is.
 
 Running from a checkout of the repo, it uses `../apps` unless told otherwise.
 The `APPS_ROOT` environment variable overrides both of the above, which is
