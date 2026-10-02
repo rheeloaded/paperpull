@@ -837,53 +837,75 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
 
     before = {id(p) for p in ctx.pages}
     try:
-        with page.expect_download(timeout=25000) as dl:
-            link.click()
-        dl.value.save_as(str(out_path))
-        if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-            log.info("captured via download event")
-            return True
-    except Exception as e:
-        log.info("no download event for %s %s (%s); trying tab capture",
-                 account[:30], date, str(e).splitlines()[0][:60])
+        try:
+            with page.expect_download(timeout=25000) as dl:
+                link.click()
+            dl.value.save_as(str(out_path))
+            if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
+                log.info("captured via download event")
+                return True
+        except Exception as e:
+            log.info("no download event for %s %s (%s); trying tab capture",
+                     account[:30], date, str(e).splitlines()[0][:60])
 
-    new_page = None
-    for _ in range(30):
-        page.wait_for_timeout(500)
-        dismiss_timeout(page)
-        for p in ctx.pages:
-            if id(p) not in before and not p.is_closed():
-                new_page = p
+        new_page = None
+        for _ in range(30):
+            page.wait_for_timeout(500)
+            dismiss_timeout(page)
+            for p in ctx.pages:
+                if id(p) not in before and not p.is_closed():
+                    new_page = p
+                    break
+            if new_page:
                 break
-        if new_page:
-            break
-    if new_page is None:
-        log.info("nothing opened for %s %s", account[:30], date)
-        return False
-
-    ok = False
-    try:
-        new_page.wait_for_load_state("domcontentloaded", timeout=20000)
-        url = new_page.url or ""
-        # The tab a click opened could be anywhere. This fetch carries the
-        # signed-in session, so the address is host-checked first. A blob: URL
-        # is minted by the page itself and has no host to check.
-        if not url.startswith("blob:") and not is_safe_url(url):
-            log.error("refusing to fetch a document from outside Chase")
+        if new_page is None:
+            log.info("nothing opened for %s %s", account[:30], date)
             return False
-        b64 = _fetch_as_b64(page, url) if url.startswith("blob:") \
-            else _fetch_as_b64(new_page, url)
-        if b64:
-            ok = _write_if_pdf(base64.b64decode(b64), out_path)
-            if ok:
-                log.info("captured via new tab (%s)", url[:70])
-    except Exception as e:
-        log.info("tab capture failed for %s %s: %s", account[:30], date, e)
+
+        ok = False
+        try:
+            new_page.wait_for_load_state("domcontentloaded", timeout=20000)
+            url = new_page.url or ""
+            # The tab a click opened could be anywhere. This fetch carries the
+            # signed-in session, so the address is host-checked first. A blob: URL
+            # is minted by the page itself and has no host to check.
+            if not url.startswith("blob:") and not is_safe_url(url):
+                log.error("refusing to fetch a document from outside Chase")
+                return False
+            b64 = _fetch_as_b64(page, url) if url.startswith("blob:") \
+                else _fetch_as_b64(new_page, url)
+            if b64:
+                ok = _write_if_pdf(base64.b64decode(b64), out_path)
+                if ok:
+                    log.info("captured via new tab (%s)", url[:70])
+        except Exception as e:
+            log.info("tab capture failed for %s %s: %s", account[:30], date, e)
+        return ok
+    finally:
+        # However the press ended. The refusal above returned before the tab
+        # was closed, so a tab off Chase stayed open in the person's browser,
+        # and only the one tab read was ever closed, so a second tab from the
+        # same press stayed open too.
+        _close_tabs_opened_since(ctx, before)
+
+
+def _close_tabs_opened_since(ctx, before) -> None:
+    """Close every tab that was not open before the press, `before` holding
+    the ids of those that were. The tab read, a tab refused for its address
+    and a tab never looked at are closed alike, and nothing on any of them
+    is read. Nothing here raises."""
     try:
-        new_page.close()
+        tabs = list(ctx.pages)
     except Exception:
-        pass
-    return ok
+        return
+    for tab in tabs:
+        if id(tab) in before:
+            continue
+        try:
+            if not tab.is_closed():
+                tab.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

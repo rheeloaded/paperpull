@@ -50,7 +50,8 @@ paperpull chase all               # download everything available
   card, action) and clicks its "Saves document" link, keeping the browser's
   download event; if Chase opens the PDF in a tab instead, its bytes are
   fetched from there. The bytes must start with `%PDF-` before a file is
-  written.
+  written. Every tab the click opened is closed afterward, whatever came of
+  it, and a tab at an address off Chase is never read.
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays, transfers,
   redeems rewards, takes a cash advance or My Chase Loan, requests a credit
   line increase, disputes, locks or replaces a card, or changes a setting; a

@@ -1166,50 +1166,72 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
 
     before = {id(p) for p in ctx.pages}
     try:
-        with page.expect_download(timeout=30000) as dl:
-            link.click()
-        dl.value.save_as(str(out_path))
-        if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-            log.info("captured via download event (%s)", label[:60])
-            return True
-    except Exception as e:
-        log.info("no download event for %s (%s); trying the View window",
-                 date, str(e).splitlines()[0][:60])
+        try:
+            with page.expect_download(timeout=30000) as dl:
+                link.click()
+            dl.value.save_as(str(out_path))
+            if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
+                log.info("captured via download event (%s)", label[:60])
+                return True
+        except Exception as e:
+            log.info("no download event for %s (%s); trying the View window",
+                     date, str(e).splitlines()[0][:60])
 
 
-    new_page = None
-    for _ in range(30):
-        page.wait_for_timeout(500)
-        dismiss_timeout(page)
-        for p in ctx.pages:
-            candidate = p.url or ""
-            safe = is_safe_url(candidate[5:] if candidate.startswith("blob:") else candidate)
-            if id(p) not in before and not p.is_closed() and safe:
-                new_page = p
+        new_page = None
+        for _ in range(30):
+            page.wait_for_timeout(500)
+            dismiss_timeout(page)
+            for p in ctx.pages:
+                candidate = p.url or ""
+                safe = is_safe_url(candidate[5:] if candidate.startswith("blob:") else candidate)
+                if id(p) not in before and not p.is_closed() and safe:
+                    new_page = p
+                    break
+            if new_page:
                 break
-        if new_page:
-            break
-    if new_page is None:
-        log.info("nothing opened for %s", date)
-        return False
+        if new_page is None:
+            log.info("nothing opened for %s", date)
+            return False
 
-    ok = False
+        ok = False
+        try:
+            new_page.wait_for_load_state("domcontentloaded", timeout=20000)
+            url = new_page.url or ""
+            b64 = page.evaluate(_FETCH_AS_B64, url) if url.startswith("blob:") \
+                else new_page.evaluate(_FETCH_AS_B64, url)
+            if b64:
+                ok = _write_if_pdf(base64.b64decode(b64), out_path)
+                if ok:
+                    log.info("captured via new window (%s)", url[:70])
+        except Exception as e:
+            log.info("window capture failed for %s: %s", date, e)
+        return ok
+    finally:
+        # However the press ended. A window the look above never took, one
+        # off U.S. Bank's hosts, was never closed and stayed open in the
+        # person's browser, and only the one window read was ever closed, so
+        # a second window from the same press stayed open too.
+        _close_tabs_opened_since(ctx, before)
+
+
+def _close_tabs_opened_since(ctx, before) -> None:
+    """Close every tab that was not open before the press, `before` holding
+    the ids of those that were. The window read, a window never taken for
+    its address and a window never looked at are closed alike, and nothing
+    on any of them is read. Nothing here raises."""
     try:
-        new_page.wait_for_load_state("domcontentloaded", timeout=20000)
-        url = new_page.url or ""
-        b64 = page.evaluate(_FETCH_AS_B64, url) if url.startswith("blob:") \
-            else new_page.evaluate(_FETCH_AS_B64, url)
-        if b64:
-            ok = _write_if_pdf(base64.b64decode(b64), out_path)
-            if ok:
-                log.info("captured via new window (%s)", url[:70])
-    except Exception as e:
-        log.info("window capture failed for %s: %s", date, e)
-    try:
-        new_page.close()
+        tabs = list(ctx.pages)
     except Exception:
-        pass
-    return ok
+        return
+    for tab in tabs:
+        if id(tab) in before:
+            continue
+        try:
+            if not tab.is_closed():
+                tab.close()
+        except Exception:
+            pass
 
 
 _DIGITS_RE = re.compile(r"\d{4,}")

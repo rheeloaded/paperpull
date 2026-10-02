@@ -75,6 +75,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the page made, or a tab on Ally, is read as before. Ally is not known
   to open such a tab, and a made-up page in a real browser shows the
   case.
+- **Chase and U.S. Bank close every tab a statement's press opens.** When
+  a statement's control fires no download, both look for a tab the press
+  opened and read the statement there, only at the bank's own address,
+  since that read carries the signed-in session. Chase turned a tab
+  anywhere else away and returned before closing it, and U.S. Bank never
+  took such a tab and never closed it, so it stayed open in the person's
+  browser, one per statement. Each closed only the tab it read, so a
+  press that opened two left one open, and a press whose download came
+  through closed none. Now every tab the press opened is closed however
+  it ends, and a tab turned away is still never read. Neither bank is
+  known to open such a tab, and made-up pages in a real browser show each
+  case.
 
 ## [0.41.1] - 2026-09-30
 
