@@ -24,6 +24,7 @@ from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.capture import is_document as _is_document
 
 ALLOWED_HOSTS = {'www.usbank.com', 'onlinebanking.usbank.com'}
 
@@ -1171,7 +1172,9 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
             with page.expect_download(timeout=30000) as dl:
                 link.click()
             dl.value.save_as(str(out_path))
-            if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
+            # A tax form that comes as a ZIP holding its PDF is kept for the
+            # docs module, which opens it.
+            if out_path.exists() and _is_document(out_path.read_bytes()[:5], zip_ok=True):
                 log.info("captured via download event (%s)", label[:60])
                 return True
         except Exception as e:

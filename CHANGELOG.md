@@ -278,6 +278,31 @@ All notable changes to PaperPull are recorded here. Versioning follows
   under the wrong name. Vanguard takes its statement the same way now,
   so the last press's late download raising the first event is no
   longer saved as this statement when this statement's own lands too.
+- **A tax form that came as a ZIP was never saved, in sixteen apps.**
+  All but one of the documents apps have a step that opens a ZIP holding
+  a tax form's PDF, and in the apps that take a download from the
+  browser it never ran. American Family, Apple Card, AT&T, E*TRADE,
+  Golden 1, Newrez, SBA, SMUD, State Farm, Verizon Mobile and Wells Fargo
+  kept a download only
+  when it began like a PDF, and then deleted anything else before that
+  step was reached. AAFMAA, Ally, Chase and U.S. Bank kept only a PDF
+  from a download event, and Verizon Fios only a PDF from its folder. A
+  provider that handed over a ZIP got "Could not capture the document
+  PDF" and a manual review on every run. The ZIP is now taken, driven in
+  a real browser for every app that takes a download but Vanguard, whose
+  own capture still keeps a PDF only.
+- **A ZIP is opened only when it holds one PDF and nothing else.** That
+  PDF is filed and checked like any other. Before, the first of several
+  PDFs was filed under the document's name before anything checked it,
+  the others were put beside it unchecked, and any other files in the
+  archive were destroyed. A ZIP holding anything more is now kept whole
+  in Manual Review, and the record says what it held, since which file
+  is the document cannot be told. The same archive arriving again on a
+  later run is kept once. This changes what Amex, Dominion, Robinhood
+  and Wealthfront did with an archive of several files. Opening one is
+  safe as well. A failure part way used to leave part of a PDF under the
+  document's name and the archive out of sight, and now leaves the
+  archive kept and nothing half written.
 
 ## [0.41.1] - 2026-09-30
 

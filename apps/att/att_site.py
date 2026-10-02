@@ -1783,7 +1783,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             if not is_safe_url(url):
                 return
             ct = (res.headers.get("content-type") or "").lower()
-            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
+            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct or "zip" in ct):
                 trace.append({"status": res.status, "type": ct[:40], "url": redact(url)[:160]})
             if got:
                 return
@@ -1804,12 +1804,12 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         # Pointed at a folder, the browser can save the only copy there and
         # leave the event's own file empty, so that file is taken rather than
         # the document asked for a second time (capture.take_download).
-        if downloads and _take_download(downloads[0], dl_dir, seen, out_path):
+        if downloads and _take_download(downloads[0], dl_dir, seen, out_path, zip_ok=True):
             return True
         if got:
             out_path.write_bytes(got["body"])
             return True
-        return _take_new_pdf(dl_dir, seen, out_path)
+        return _take_new_pdf(dl_dir, seen, out_path, zip_ok=True)
 
     def wait_for_pdf(seconds: int) -> bool:
         for _ in range(seconds):

@@ -456,7 +456,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path) -> bool:
         return False
     for _ in range(40):                        # up to ~20s
         page.wait_for_timeout(500)
-        if _take_new_pdf(dl_dir, before, out_path):
+        # A ZIP holding the PDF is taken too, since the docs module opens one.
+        if _take_new_pdf(dl_dir, before, out_path, zip_ok=True):
             return True
     log.info("no PDF appeared for %s", iso_date)
     return False

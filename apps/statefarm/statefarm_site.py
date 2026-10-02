@@ -59,6 +59,7 @@ from paperpull_core.dates import human_date as _human_date
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
 from paperpull_core.capture import take_download as _take_download
+from paperpull_core.capture import is_document as _is_document
 from paperpull_core.capture import clear_copies as _clear_copies
 from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
@@ -2213,10 +2214,10 @@ def _unfinished_downloads(dl_dir) -> int:
     return n
 
 
-def _fetch_pdf(page, href: str) -> Optional[bytes]:
+def _fetch_pdf(page, href: str, zip_ok: bool = False) -> Optional[bytes]:
     """A PDF link fetched from inside the signed-in page, cookies and all.
     The fetching is the core's, the hosts are this app's."""
-    return _core_fetch_pdf(page, href, is_safe_url)
+    return _core_fetch_pdf(page, href, is_safe_url, zip_ok=zip_ok)
 
 
 def _take_same_tab(page, start_url: str, out_path: Path, trace) -> bool:
@@ -2277,7 +2278,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             ct = (res.headers.get("content-type") or "").lower()
             # Pressing a revealed document is what first reaches these, and
             # their addresses are the document's own, so facts only (#37).
-            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
+            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct or "zip" in ct):
                 trace.append({"status": _status_of(res.status), "type": _kind_of(ct),
                               "address": url_mask(url, start_url)})
             if got:
@@ -2327,7 +2328,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         # Not while an earlier press's download is still arriving, when
         # the folder is not read at all.
         if downloads and _take_download(downloads[0], None if unfinished else dl_dir,
-                                        seen, out_path):
+                                        seen, out_path, zip_ok=True):
             return True
         if got.get("body"):
             out_path.write_bytes(got["body"])
@@ -2336,14 +2337,14 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             try:
                 resp = page.context.request.get(got.pop("refetch"), timeout=60000)
                 body = resp.body() if resp.ok else b""
-                if body[:5] == b"%PDF-":
+                if _is_document(body, zip_ok=True):
                     out_path.write_bytes(body)
                     return True
             except Exception:
                 pass
         if unfinished:
             return False
-        return _take_new_pdf(dl_dir, seen, out_path)
+        return _take_new_pdf(dl_dir, seen, out_path, zip_ok=True)
 
     def wait_for_pdf(seconds: int) -> bool:
         for _ in range(seconds):
@@ -2699,7 +2700,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         log.info("could not open the documents page for %s", iso_date)
         return False
     # The document's own address from the API, fetched from inside the
-    # page. Only on statefarm.com, and only a PDF counts.
+    # page. Only on statefarm.com, and only a PDF counts, or a ZIP the docs
+    # module opens.
     #
     # A run that had no address and then found no control on the page
     # wrote a trace with nothing in it at all, which is what a tester
@@ -2724,7 +2726,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                     got = _fetch_with_status(page, target, tuple(ALLOWED_HOSTS))
                 b64 = got.get("b64") or ""
                 data = base64.b64decode(b64) if b64 else b""
-                if data[:5] == b"%PDF-":
+                if _is_document(data, zip_ok=True):
                     out_path.write_bytes(data)
                     return True
                 if trace is not None:
@@ -2895,7 +2897,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             # means the link is a page or a handoff, and the click below
             # follows it.
             if is_safe_url(target):
-                body = _fetch_pdf(page, target)
+                body = _fetch_pdf(page, target, zip_ok=True)
                 if body:
                     out_path.write_bytes(body)
                     return True

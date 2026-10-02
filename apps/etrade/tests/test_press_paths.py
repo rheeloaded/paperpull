@@ -404,9 +404,9 @@ def test_a_redirect_of_an_earlier_request_is_not_this_documents_pdf(browser, mon
     monkeypatch.setattr(site, "is_safe_url", lambda u: (u or "").startswith(srv.base))
     real_take = site._take_new_pdf
 
-    def late(dl_dir, seen, out_path):
+    def late(dl_dir, seen, out_path, **how):
         srv.release.set()                        # the earlier redirect arrives during the attempt
-        return real_take(dl_dir, seen, out_path)
+        return real_take(dl_dir, seen, out_path, **how)
     monkeypatch.setattr(site, "_take_new_pdf", late)
     _listed(monkeypatch, {ALONE: [BROKERAGE]})
     pg = browser.new_page()

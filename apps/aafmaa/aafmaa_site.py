@@ -81,6 +81,7 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.capture import is_document as _is_document
 
 log = logging.getLogger("aafmaa_docs.site")
 
@@ -860,7 +861,8 @@ def download_document_row(page, title: str, date_text: str, account: str,
     How the PDF arrives after the postback is not knowable in advance, so
     three channels are watched at once: a download event, a popup whose
     response is a PDF, and a PDF response in the page itself. Whichever
-    happens first wins. Bytes are written only if they begin %PDF.
+    happens first wins. Bytes are kept only if they begin %PDF, or if a
+    download event brought a ZIP, which the docs module opens.
     """
     _clear_leftover_dialog(page)
     target = _fresh_view_target(page, title, date_text, account)
@@ -923,7 +925,9 @@ def download_document_row(page, title: str, date_text: str, account: str,
                 try:
                     state["download"].save_as(str(out_path))
                     data = Path(out_path).read_bytes()
-                    if data.startswith(b"%PDF"):
+                    # A tax form that comes as a ZIP holding its PDF is
+                    # kept for the docs module, which opens it.
+                    if data.startswith(b"%PDF") or _is_document(data, zip_ok=True):
                         saved = True
                     else:
                         Path(out_path).unlink(missing_ok=True)

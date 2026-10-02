@@ -498,13 +498,13 @@ def test_a_late_pdf_answering_an_earlier_request_is_not_this_documents(browser, 
     ctx.route("https://us.etrade.com/**", answer)
     real_take = site._take_new_pdf
 
-    def late(dl_dir, seen, out_path):
+    def late(dl_dir, seen, out_path, **how):
         """The first look for a PDF after the press is when the earlier
         answer arrives, well before this document's own, 1.5 s later."""
         while held:
             held.pop().fulfill(status=200, content_type="application/pdf",
                                body=b"%PDF-1.4\n% invented earlier\n%%EOF\n")
-        return real_take(dl_dir, seen, out_path)
+        return real_take(dl_dir, seen, out_path, **how)
     try:
         pg = ctx.new_page()
         pg.goto("https://us.etrade.com/etx/pxy/accountdocs")

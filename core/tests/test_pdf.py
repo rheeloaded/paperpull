@@ -63,10 +63,10 @@ def test_corrupt_pdf_body(tmp_path):
 
 
 def test_zip_detection_and_extraction(tmp_path):
-    """T-Mobile delivers some tax forms (e.g. 1099-R) as a ZIP holding the
-    PDF; it must be detected and unpacked, not saved as a broken 'PDF'."""
+    """Some tax forms (a 1099-R, say) arrive as a ZIP holding the PDF. It
+    must be detected and unpacked, not saved as a broken 'PDF'."""
     import zipfile
-    from paperpull_core.receipt_pdf import extract_pdfs_from_zip, is_zip
+    from paperpull_core.receipt_pdf import is_zip, open_zip
 
     inner = tmp_path / "inner.pdf"
     make_pdf(inner)
@@ -78,15 +78,17 @@ def test_zip_detection_and_extraction(tmp_path):
     assert is_zip(zpath)
     out = tmp_path / "2025-12-31 T-Mobile 1099-R Tax Form.pdf"
     zpath.replace(out)
-    saved = extract_pdfs_from_zip(out, out)
-    assert len(saved) == 1 and saved[0] == out
+    opened = open_zip(out, tmp_path / "Manual Review")
+    assert opened.pdf == out and opened.kept is None
     assert not is_zip(out)
     assert validate_pdf(out, min_bytes=1000).ok
 
 
-def test_zip_with_multiple_pdfs_numbers_extras(tmp_path):
+def test_zip_with_several_pdfs_is_kept_for_a_person(tmp_path):
+    """Which of two PDFs is the document cannot be told, so neither is
+    filed under its name."""
     import zipfile
-    from paperpull_core.receipt_pdf import extract_pdfs_from_zip
+    from paperpull_core.receipt_pdf import open_zip
 
     a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
     make_pdf(a); make_pdf(b)
@@ -95,20 +97,23 @@ def test_zip_with_multiple_pdfs_numbers_extras(tmp_path):
         z.write(a, "first.pdf")
         z.write(b, "second.pdf")
     a.unlink(); b.unlink()
-    saved = extract_pdfs_from_zip(out, out)
-    assert len(saved) == 2
-    assert saved[0].name == "Form.pdf"
-    assert saved[1].name == "Form (2 of 2).pdf"
+    opened = open_zip(out, tmp_path / "Manual Review")
+    assert opened.pdf is None
+    assert opened.kept == tmp_path / "Manual Review" / "Form.zip"
+    assert "2 PDFs" in opened.reason
+    assert not list(tmp_path.glob("*.pdf"))
 
 
-def test_zip_without_pdfs_returns_empty(tmp_path):
+def test_zip_without_pdfs_is_kept_for_a_person(tmp_path):
     import zipfile
-    from paperpull_core.receipt_pdf import extract_pdfs_from_zip
+    from paperpull_core.receipt_pdf import open_zip
 
     out = tmp_path / "Form.pdf"
     with zipfile.ZipFile(out, "w") as z:
         z.writestr("readme.txt", "no pdfs here")
-    assert extract_pdfs_from_zip(out, out) == []
+    opened = open_zip(out, tmp_path / "Manual Review")
+    assert opened.pdf is None and opened.failure == "the archive held no pdf"
+    assert (tmp_path / "Manual Review" / "Form.zip").exists() and not out.exists()
 
 
 def test_image_based_pdf_not_rejected_for_no_text(tmp_path):

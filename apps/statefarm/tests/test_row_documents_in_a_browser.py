@@ -319,6 +319,35 @@ def test_a_refused_file_address_says_its_status(tmp_path):
         driver.stop()
 
 
+def test_a_file_address_that_answers_with_a_zip_is_taken_on_the_first_ask(tmp_path):
+    """A tax form can come as a ZIP holding its PDF, which the docs module
+    opens. Refused here, the row was pressed after it and State Farm was
+    asked a second time for the same file."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("Declarations.pdf", b"%PDF-1.4\n% an invented declarations page\n%%EOF\n")
+    archive = buf.getvalue()
+    asked = []
+
+    def answer(route):
+        asked.append(route.request.url)
+        route.fulfill(status=200, content_type="application/zip", body=archive)
+
+    driver, browser, pg = _drive(_rows, [("**/DocumentCenterProxyV1/document/**", answer)])
+    try:
+        out = tmp_path / "doc.pdf"
+        trace = []
+        assert site.download_bill(pg, None, D_DECL, out, title="Declarations Page - Homeowners",
+                                  trace=trace, hint=NAMED), trace
+        assert out.read_bytes() == archive, "the row was pressed instead"
+        assert len(asked) == 1, asked
+    finally:
+        browser.close()
+        driver.stop()
+
+
 def test_the_request_census_does_not_hear_the_file_address(page, tmp_path):
     """The census writes each path into the failure file with only
     number-shaped parts masked, so a name in a file address would reach a
@@ -849,7 +878,7 @@ def _linked_page(monkeypatch, html=LINKED):
     driver, browser, pg = _drive(lambda: html)
     fetched = []
 
-    def fake_fetch(page, target):
+    def fake_fetch(page, target, **how):
         fetched.append(target.split("statefarm.com", 1)[-1])
         return LINKED_PDFS.get(fetched[-1])
     monkeypatch.setattr(site, "_fetch_pdf", fake_fetch)

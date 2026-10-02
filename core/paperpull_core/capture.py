@@ -22,6 +22,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+from .receipt_pdf import ZIP_MAGIC
 from .redact import redact
 
 log = logging.getLogger("paperpull.capture")
@@ -29,6 +30,35 @@ log = logging.getLogger("paperpull.capture")
 # A browser writes a download under a temporary name and renames it when it
 # finishes, so a file still carrying one of these is not ours yet.
 UNFINISHED = (".crdownload", ".part", ".partial", ".tmp", ".download")
+
+
+# -- what a document looks like -------------------------------------------------
+#
+# A PDF begins with this, and so does every document an app files.
+#
+# Some providers hand a tax form over as a ZIP holding its PDF, and every
+# docs module has a branch that opens one with receipt_pdf.open_zip.
+# MEASURED 2026-09-29 on Chromium 153, a
+# ZIP a page hands over is always a download, sent as application/zip or as
+# application/octet-stream, with an attachment header or without, and from
+# a link that opens a new tab as well. Its answer cannot be read off the
+# response, as no download's can, so its bytes are only ever in the event's
+# own file or in the folder the browser was pointed at, and take_download
+# and take_new_pdf are the only readers of either. Until then both took a
+# PDF alone, and that branch never ran in any app that takes a download
+# through them (core/tests/test_every_app_opens_a_zipped_download.py).
+#
+# A ZIP is taken only when the caller says it can open one, zip_ok. Delivery
+# reads the folder through take_new_pdf as well, and it checks a document's
+# identity from its text, which a ZIP does not have.
+PDF_MAGIC = b"%PDF-"
+
+
+def is_document(data, zip_ok: bool = False) -> bool:
+    """Whether bytes that begin with `data` are a document an app can take.
+    A PDF, and with `zip_ok` a ZIP as well, which the app then opens."""
+    head = bytes(data[:5]) if data else b""
+    return head == PDF_MAGIC or (bool(zip_ok) and head[:4] == ZIP_MAGIC)
 
 
 # -- a browser pointed at a folder ---------------------------------------------
@@ -165,12 +195,27 @@ def earlier_finished(dl_dir, before) -> int:
     return len({n for n in before if n.lower().endswith(UNFINISHED)} - now)
 
 
-def _starts_like_pdf(path) -> bool:
+def _starts_like(path, zip_ok: bool = False) -> bool:
+    """Whether the file at `path` begins like a document (is_document)."""
     try:
         with open(path, "rb") as f:
-            return f.read(5) == b"%PDF-"
+            return is_document(f.read(5), zip_ok)
     except OSError:
         return False
+
+
+def _documents(dl_dir, names, zip_ok: bool) -> list:
+    """Those of `names` in `dl_dir` that are finished, not empty, and begin
+    like a document."""
+    out = []
+    for name in names:
+        path = Path(dl_dir) / name
+        try:
+            if path.stat().st_size and _starts_like(path, zip_ok):
+                out.append(path)
+        except OSError:
+            continue
+    return out
 
 
 def _all_same(paths) -> bool:
@@ -185,7 +230,7 @@ def _all_same(paths) -> bool:
         return False
 
 
-def take_new_pdf(dl_dir, before: set, out_path: Path) -> bool:
+def take_new_pdf(dl_dir, before: set, out_path: Path, *, zip_ok: bool = False) -> bool:
     """Move a finished PDF that appeared in `dl_dir` since `before` to
     `out_path`.
 
@@ -199,6 +244,10 @@ def take_new_pdf(dl_dir, before: set, out_path: Path) -> bool:
     have finished as the very file that looks new, and nothing is taken
     when two PDFs that differ arrived, since the folder cannot say which
     is this document. Newrez learned both on a tester's account (#38).
+
+    With `zip_ok` a ZIP is taken as well, for an app that opens one, and
+    it is a document in every rule above. A ZIP and a PDF that arrived
+    together are two documents, and neither is taken.
     """
     if not dl_dir:
         return False
@@ -210,19 +259,12 @@ def take_new_pdf(dl_dir, before: set, out_path: Path) -> bool:
         log.info("an earlier download finished during this one, so the download "
                  "folder cannot say which file is this document")
         return False
-    pdfs = []
-    for name in names:
-        src = Path(dl_dir) / name
-        try:
-            if src.stat().st_size and _starts_like_pdf(src):
-                pdfs.append(src)
-        except OSError:
-            continue
-    if len(pdfs) > 1 and not _all_same(pdfs):
-        log.info("%d different PDFs arrived in the download folder, so none was "
-                 "taken as this document", len(pdfs))
+    docs = _documents(dl_dir, names, zip_ok)
+    if len(docs) > 1 and not _all_same(docs):
+        log.info("%d different documents arrived in the download folder, so none "
+                 "was taken as this one", len(docs))
         return False
-    for src in pdfs:
+    for src in docs:
         try:
             if out_path.exists():
                 out_path.unlink()
@@ -243,10 +285,11 @@ def _named(names, name: str) -> list:
     return [n for n in names if n.casefold() == name.casefold() or again.match(n)]
 
 
-def take_download(download, dl_dir, before, out_path) -> str:
+def take_download(download, dl_dir, before, out_path, *, zip_ok: bool = False) -> str:
     """Save a download the page raised, from wherever its bytes really are.
     Says "event" or "folder" for where they came from, or "" when neither
-    held a PDF.
+    held a PDF. With `zip_ok` a ZIP is taken as well, for an app that opens
+    one, and counts as a document in everything below.
 
     The event's own file is used when it is a PDF, which is what a browser
     that was never pointed at a folder gives. Otherwise the file the
@@ -275,12 +318,12 @@ def take_download(download, dl_dir, before, out_path) -> str:
         saved = True
     except Exception as e:
         log.info("saving the download event failed: %s", e)
-    if saved and _starts_like_pdf(out_path):
+    if saved and _starts_like(out_path, zip_ok):
         return "event"
     # An empty file under a document's name is the one thing a failed
     # capture must never leave, and here it would be the event's.
     try:
-        if out_path.exists() and not _starts_like_pdf(out_path):
+        if out_path.exists() and not _starts_like(out_path, zip_ok):
             out_path.unlink()
     except OSError:
         pass
@@ -299,19 +342,12 @@ def take_download(download, dl_dir, before, out_path) -> str:
                  "folder cannot say which file is this document")
         return ""
     src = Path(dl_dir) / mine[0]
-    pdfs = []
-    for n in names:
-        path = Path(dl_dir) / n
-        try:
-            if path.stat().st_size and _starts_like_pdf(path):
-                pdfs.append(path)
-        except OSError:
-            continue
-    if src not in pdfs:
+    docs = _documents(dl_dir, names, zip_ok)
+    if src not in docs:
         return ""
-    if len(pdfs) > 1 and not _all_same(pdfs):
-        log.info("%d different PDFs arrived in the download folder, so none was "
-                 "taken as this download", len(pdfs))
+    if len(docs) > 1 and not _all_same(docs):
+        log.info("%d different documents arrived in the download folder, so none "
+                 "was taken as this download", len(docs))
         return ""
     try:
         if out_path.exists():
@@ -533,10 +569,10 @@ def fetch_as_b64(page, url: str, hosts=(), *, subdomains: bool = True,
 # take the app's own is_safe_url rather than closing over one, because the
 # hosts are the part that is really per-provider and the rest is not.
 
-def fetch_pdf(page, href: str, is_safe_url) -> Optional[bytes]:
+def fetch_pdf(page, href: str, is_safe_url, *, zip_ok: bool = False) -> Optional[bytes]:
     """A PDF link fetched from inside the signed-in page, cookies and all.
     None unless the address passes the app's guard and the answer really is
-    a PDF."""
+    a PDF, or with `zip_ok` a ZIP for the app to open."""
     if not is_safe_url(href):
         return None
     try:
@@ -545,7 +581,7 @@ def fetch_pdf(page, href: str, is_safe_url) -> Optional[bytes]:
     except Exception as e:
         log.info("fetch %s failed: %s", redact(href)[:80], e)
         return None
-    return body if body[:5] == b"%PDF-" else None
+    return body if is_document(body, zip_ok) else None
 
 
 def take_new_tab(page, new_pages, out_path: Path, is_safe_url) -> bool:

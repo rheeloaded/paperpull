@@ -64,6 +64,7 @@ from paperpull_core.capture import take_download as _take_download
 from paperpull_core.capture import clear_copies as _clear_copies
 from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
+from paperpull_core.capture import is_document as _is_document
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import take_same_tab as _core_take_same_tab
 from paperpull_core import blob_capture
@@ -884,10 +885,10 @@ def _control_for(page, iso: str):
     return None, ""
 
 
-def _fetch_pdf(page, href: str) -> Optional[bytes]:
+def _fetch_pdf(page, href: str, zip_ok: bool = False) -> Optional[bytes]:
     """A PDF link fetched from inside the signed-in page, cookies and all.
     The fetching is the core's, the hosts are this app's."""
-    return _core_fetch_pdf(page, href, is_safe_url)
+    return _core_fetch_pdf(page, href, is_safe_url, zip_ok=zip_ok)
 
 
 def _take_same_tab(page, start_url: str, out_path: Path, trace) -> bool:
@@ -928,7 +929,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             if not is_safe_url(url):
                 return
             ct = (res.headers.get("content-type") or "").lower()
-            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
+            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct or "zip" in ct):
                 trace.append({"status": res.status, "type": ct[:40], "url": redact(url)[:160]})
             if got:
                 return
@@ -959,7 +960,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         # Pointed at a folder, the browser can save the only copy there and
         # leave the event's own file empty, so that file is taken rather than
         # the document asked for a second time (capture.take_download).
-        if downloads and _take_download(downloads[0], dl_dir, seen, out_path):
+        if downloads and _take_download(downloads[0], dl_dir, seen, out_path, zip_ok=True):
             return True
         if got.get("body"):
             out_path.write_bytes(got["body"])
@@ -968,12 +969,12 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             try:
                 resp = page.context.request.get(got.pop("refetch"), timeout=60000)
                 body = resp.body() if resp.ok else b""
-                if body[:5] == b"%PDF-":
+                if _is_document(body, zip_ok=True):
                     out_path.write_bytes(body)
                     return True
             except Exception:
                 pass
-        if _take_new_pdf(dl_dir, seen, out_path):
+        if _take_new_pdf(dl_dir, seen, out_path, zip_ok=True):
             return True
         # Only the one PDF blob this press opened in a new tab, by the tab's
         # address or by the page's own asking to open it. The newest PDF the
@@ -1114,7 +1115,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         # first. A PDF answer is the document. Anything else means the link
         # is a page or a handoff, and the click below follows it.
         if is_safe_url(target):
-            body = _fetch_pdf(page, target)
+            body = _fetch_pdf(page, target, zip_ok=True)
             if body:
                 out_path.write_bytes(body)
                 return True

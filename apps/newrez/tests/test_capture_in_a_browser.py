@@ -374,7 +374,7 @@ def test_a_row_that_moves_before_it_is_held_is_not_fetched(browser_any_host, tmp
                      + "</tbody></table></body></html>")
     fetched = []
 
-    def fetch(p, href):
+    def fetch(p, href, **how):
         # Never sent. Which link would have been fetched is the question.
         fetched.append(href.rsplit("/", 1)[-1])
         return PDF_BODY

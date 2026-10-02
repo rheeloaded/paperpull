@@ -946,7 +946,7 @@ def _downloads_never_arrive(monkeypatch):
     event is taken through capture.take_download, which reads both, so that
     is where the loss is made."""
 
-    def lost(download, dl_dir, before, out_path):
+    def lost(download, dl_dir, before, out_path, **how):
         return ""
 
     monkeypatch.setattr(site, "_take_download", lost)

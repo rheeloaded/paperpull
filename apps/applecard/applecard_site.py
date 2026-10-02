@@ -94,6 +94,7 @@ from paperpull_core.dates import last_day as _last_day
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
 from paperpull_core.capture import take_download as _take_download
+from paperpull_core.capture import is_document as _is_document
 from paperpull_core.capture import clear_copies as _clear_copies
 from paperpull_core.capture import arrived as _folder_arrived
 from paperpull_core.capture import take_new_pdf as _take_new_pdf
@@ -1211,10 +1212,10 @@ def _control_for(page, kind: str, iso: str):
     return _exactly_named(page, names[0]), names[0]
 
 
-def _fetch_pdf(page, href: str) -> Optional[bytes]:
+def _fetch_pdf(page, href: str, zip_ok: bool = False) -> Optional[bytes]:
     """A PDF link fetched from inside the signed-in page, cookies and all.
     The fetching is the core's, the hosts are this app's."""
-    return _core_fetch_pdf(page, href, is_safe_url)
+    return _core_fetch_pdf(page, href, is_safe_url, zip_ok=zip_ok)
 
 
 def _take_same_tab(page, start_url: str, out_path: Path, trace) -> bool:
@@ -1586,7 +1587,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             if not ours and not _is_apple_file_host(url):
                 return
             ct = (res.headers.get("content-type") or "").lower()
-            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
+            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct or "zip" in ct):
                 entry = {"status": res.status, "type": _type_word(ct), "url": mask_href(url)}
                 if not ours:
                     entry["from"] = "another apple host"
@@ -1626,7 +1627,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             # Pointed at a folder, the browser can save the only copy there
             # and leave the event's own file empty, so that file is taken
             # rather than the document asked for a second time.
-            if _take_download(downloads[0], dl_dir, seen, out_path):
+            if _take_download(downloads[0], dl_dir, seen, out_path, zip_ok=True):
                 return True
         if got.get("body"):
             out_path.write_bytes(got["body"])
@@ -1635,7 +1636,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             try:
                 resp = page.context.request.get(got.pop("refetch"), timeout=60000)
                 body = resp.body() if resp.ok else b""
-                if body[:5] == b"%PDF-":
+                if _is_document(body, zip_ok=True):
                     out_path.write_bytes(body)
                     return True
             except Exception:
@@ -1656,7 +1657,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         for name in _new_names(dl_dir, seen):
             if not named_right(name):
                 return False
-        return _take_new_pdf(dl_dir, seen, out_path)
+        return _take_new_pdf(dl_dir, seen, out_path, zip_ok=True)
 
     def wait_for_pdf(seconds: int) -> bool:
         for _ in range(seconds):
@@ -1803,7 +1804,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         # first. A PDF answer is the document. Anything else means the link
         # is a page or a handoff, and the click below follows it.
         if is_safe_url(target):
-            body = _fetch_pdf(page, target)
+            body = _fetch_pdf(page, target, zip_ok=True)
             if body:
                 out_path.write_bytes(body)
                 return True

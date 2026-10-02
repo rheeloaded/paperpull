@@ -15,7 +15,7 @@ import base64
 import logging
 import re
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, NamedTuple, Optional
 
 from .identity import MIN_TEXT, amount_variants, date_variants, on_its_own
 from .models import ValidationResult
@@ -397,8 +397,8 @@ ZIP_MAGIC = b"PK\x03\x04"
 
 
 def is_zip(path: Path) -> bool:
-    """Some the provider tax forms (e.g. 1099-R) download as a ZIP holding the
-    PDF(s) rather than a bare PDF."""
+    """Some providers hand a tax form over (a 1099-R, say) as a ZIP holding
+    its PDF, or several, rather than a bare PDF."""
     try:
         with open(path, "rb") as f:
             return f.read(4) == ZIP_MAGIC
@@ -406,47 +406,164 @@ def is_zip(path: Path) -> bool:
         return False
 
 
-def extract_pdfs_from_zip(zip_path: Path, primary_out: Path) -> list:
-    """Extract every PDF from a downloaded ZIP.
+class OpenedZip(NamedTuple):
+    """What open_zip made of an archive.
 
-    The first PDF is written to *primary_out*; any others get a
-    ' (n of N)' suffix. The ZIP itself is removed. Returns the saved paths.
+    `pdf` is the document, now at the archive's own path, or None when the
+    archive was not opened. `kept` is where the archive went then. `reason`
+    says why in words for the record, and `failure` in the fixed words a
+    failure file takes."""
+    pdf: Optional[Path] = None
+    kept: Optional[Path] = None
+    reason: str = ""
+    failure: str = ""
+
+
+def _pdf_member(name: str, head: bytes) -> bool:
+    """A file in an archive that is a PDF, by its name or by the PDF marker
+    in its first kilobyte, the leeway the apps give any PDF answer."""
+    return name.lower().endswith(".pdf") or b"%PDF-" in head
+
+
+def open_zip(zip_path, set_aside=None) -> OpenedZip:
+    """A ZIP a provider handed over for one document, opened only when
+    which file is the document cannot be in doubt.
+
+    Holding one PDF and nothing else, that PDF takes the archive's place,
+    under the document's name, and is checked like any other. Folders,
+    and the __MACOSX folder a Mac adds, are not files here.
+
+    Holding anything else, nothing is filed. Of two PDFs either could be
+    this document, and a PDF beside other files might not be it either.
+    Filing the first PDF put a document under another's name before
+    anything had checked it, the other PDFs went beside it unchecked, and
+    the other files were lost. So the archive is kept whole in
+    `set_aside`, Manual Review, under its own .zip name for a person to
+    open. The same files arriving again on a later run are kept once.
+
+    The PDF is written to a temporary file and put in place only once it
+    is whole. Any failure leaves the archive kept, never half a PDF under
+    a document's name, and never the only copy of the answer gone.
     """
+    import os
     import shutil
+    import tempfile
     import zipfile
 
     zip_path = Path(zip_path)
-    primary_out = Path(primary_out)
-    saved = []
+    tmp = None
+    pdfs = others = 0
     try:
-        # Read the listing and CLOSE the archive before renaming it: on
-        # Windows an open file cannot be moved (WinError 32).
+        # Written out and the archive CLOSED before anything is moved,
+        # because on Windows an open file cannot be replaced (WinError 32).
         with zipfile.ZipFile(zip_path) as z:
-            names = [n for n in z.namelist() if n.lower().endswith(".pdf")]
-        if not names:
-            return []
-        tmp = zip_path.with_suffix(".zip.tmp")
-        zip_path.replace(tmp)
-        with zipfile.ZipFile(tmp) as z2:
-            for i, name in enumerate(names):
-                if i == 0:
-                    target = primary_out
-                else:
-                    target = primary_out.with_name(
-                        f"{primary_out.stem} ({i + 1} of {len(names)}).pdf")
-                    n = 1
-                    while target.exists():
-                        n += 1
-                        target = primary_out.with_name(
-                            f"{primary_out.stem} ({i + 1} of {len(names)}) ({n}).pdf")
-                with z2.open(name) as src, open(target, "wb") as dst:
+            files = [i for i in z.infolist()
+                     if not i.is_dir() and not i.filename.startswith("__MACOSX/")]
+            found = []
+            for info in files:
+                with z.open(info) as src:
+                    if _pdf_member(info.filename, src.read(1024)):
+                        found.append(info)
+            pdfs, others = len(found), len(files) - len(found)
+            if pdfs == 1 and not others:
+                fd, name = tempfile.mkstemp(prefix=".opening-", suffix=".tmp",
+                                            dir=str(zip_path.parent))
+                tmp = Path(name)
+                with os.fdopen(fd, "wb") as dst, z.open(found[0]) as src:
                     shutil.copyfileobj(src, dst)
-                saved.append(target)
-        tmp.unlink(missing_ok=True)
     except Exception as e:
-        log.warning("ZIP extraction failed for %s: %s", zip_path, e)
-        return []
-    return saved
+        log.warning("could not open the archive %s: %s", zip_path.name, e)
+        _discard(tmp)
+        return _kept(zip_path, set_aside, "The downloaded archive could not be opened",
+                     "the archive could not be opened")
+    if tmp is None:
+        if not pdfs:
+            what, failure = "The downloaded archive held no PDF", "the archive held no pdf"
+        elif pdfs > 1:
+            what = ("The downloaded archive held %d PDFs, and which one is this "
+                    "document cannot be told" % pdfs)
+            failure = "the archive held more than one pdf"
+        else:
+            what = "The downloaded archive held a PDF and %d other %s" % (
+                others, "file" if others == 1 else "files")
+            failure = "the archive held more than one file"
+        return _kept(zip_path, set_aside, what, failure)
+    try:
+        os.replace(tmp, zip_path)
+    except OSError as e:
+        log.warning("could not put the PDF from %s in place: %s", zip_path.name, e)
+        _discard(tmp)
+        return _kept(zip_path, set_aside,
+                     "The PDF in the downloaded archive could not be put in place",
+                     "the archive could not be opened")
+    return OpenedZip(pdf=zip_path)
+
+
+def _discard(path) -> None:
+    if path is not None:
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass
+
+
+def _kept(path: Path, folder, what: str, failure: str) -> OpenedZip:
+    kept = _set_aside(path, folder)
+    if kept is not None and kept != path:
+        what = "%s, so it was kept in %s as %s" % (what, kept.parent.name, kept.name)
+    return OpenedZip(kept=kept, reason=what, failure=failure)
+
+
+def _set_aside(path: Path, folder=None) -> Optional[Path]:
+    """An archive that was not opened, kept whole. Moved into `folder`
+    under its own .zip name, or without one left where it landed, renamed
+    to .zip when it wears a PDF's name, since a file that is not a PDF
+    must not. An archive already kept under that name that holds the same
+    files is the same answer again, and this one goes, so a document tried
+    on every run does not pile up copies. None only when it is gone."""
+    import shutil
+
+    path = Path(path)
+    if not path.exists():
+        return None
+    if folder is None and path.suffix.lower() != ".pdf":
+        return path
+    where = Path(folder) if folder is not None else path.parent
+    try:
+        where.mkdir(parents=True, exist_ok=True)
+        target = where / (path.stem + ".zip")
+        n = 1
+        while target.exists():
+            if _same_archive(target, path):
+                path.unlink()
+                return target
+            n += 1
+            target = where / ("%s (%d).zip" % (path.stem, n))
+        shutil.move(str(path), str(target))
+        return target
+    except OSError as e:
+        log.warning("could not keep the archive %s: %s", path.name, e)
+        return path if path.exists() else None
+
+
+def _same_archive(a: Path, b: Path) -> bool:
+    """Whether two archives hold the same files. A ZIP built on request
+    stamps each file with the moment it was built, so two answers holding
+    the same documents differ in their bytes."""
+    import filecmp
+    import zipfile
+
+    def listing(z):
+        return sorted((i.filename, i.file_size, i.CRC) for i in z.infolist() if not i.is_dir())
+
+    try:
+        with zipfile.ZipFile(a) as za, zipfile.ZipFile(b) as zb:
+            return listing(za) == listing(zb)
+    except Exception:
+        try:
+            return filecmp.cmp(str(a), str(b), shallow=False)
+        except OSError:
+            return False
 
 
 def save_download(download, out_path: Path) -> None:
