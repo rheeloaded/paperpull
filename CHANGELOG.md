@@ -51,6 +51,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   sign-in, and the question is asked again if the person pressed Enter
   before they had signed in. A run from the control panel stops there as
   before.
+- **A tab a statement opens is closed even when it comes late.**
+  American Family and Robinhood each open a statement in a new tab, and
+  PaperPull takes the PDF without reading that tab, American Family's
+  from the page that made it and Robinhood's from the link its site
+  answers with. The press then closed the tabs it had seen open, and a
+  tab the browser announced only after that stayed open in the person's
+  browser, one per statement. Robinhood's site opens its tab only once it
+  has answered, and on a made-up page doing the same, 3 presses in 40
+  left the tab open. American Family's was left open once in a test run,
+  with three other test runs on the same machine. Now American Family
+  waits for a tab its page asked for, and Robinhood for the tab its site
+  opens after the answer, five seconds at most, and closes it.
 
 ## [0.41.1] - 2026-09-30
 

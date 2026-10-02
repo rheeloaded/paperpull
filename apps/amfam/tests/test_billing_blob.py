@@ -795,3 +795,46 @@ def test_a_hidden_copy_ahead_of_the_shown_link_is_never_the_one_pressed(billing,
     out = tmp_path / "Statements" / "2026-09-12 American Family Account Statement.pdf"
     assert site.download_bill(page, tmp_path / ".amfam-downloads", "2026-09-12", out) is True
     assert b"statement 09/12/2026" in out.read_bytes()
+
+
+# -- a tab that reaches Playwright after its statement was taken (2026-10-01) -------------
+
+@pytest.mark.parametrize("seconds", [0, 1.5], ids=["at the next turn", "a moment later"])
+def test_a_tab_that_reaches_playwright_after_its_statement_was_taken_is_closed(
+        drive, tmp_path, monkeypatch, seconds):
+    """A full run on a busy machine failed the blob tab test above with the
+    tab still open. The page records asking for the tab the moment it asks,
+    and the statement was taken from that record before Playwright knew of
+    the tab, so the press closed the tabs it had seen open and this one was
+    not among them. Here the tab reaches Playwright only once the app has
+    taken the statement, the same order every time."""
+    import time
+
+    from paperpull_core.testkit import TabsHeardLate
+
+    page = drive("<button data-cy='view-statement' onclick='openStatement()'>View bill</button>")
+    heard: list = []
+    page.context.on("page", lambda p: heard.append(p))
+    late = TabsHeardLate(monkeypatch)
+    real_take = site.blob_capture.take
+
+    def take(pg, *args, **kwargs):
+        got = real_take(pg, *args, **kwargs)
+        if got:
+            late.let_through_soon(pg, seconds)
+        return got
+
+    monkeypatch.setattr(site.blob_capture, "take", take)
+    out = tmp_path / "Statements" / "2026-09-12 American Family Account Statement.pdf"
+    trace: list = []
+    assert site.download_bill(page, tmp_path / ".amfam-downloads", "2026-09-12", out,
+                              trace=trace) is True, trace
+    assert {"note": "the page made the PDF itself, a blob it opened"} in trace
+    # The tab has to have reached Playwright before whether it was closed
+    # means anything.
+    deadline = time.monotonic() + 20
+    while not heard and time.monotonic() < deadline:
+        page.wait_for_timeout(100)
+    assert late.announced == 1 and heard, "the page opened its one tab"
+    assert all(p.is_closed() for p in heard), "the tab it opened is closed, though it came late"
+    assert len(page.context.pages) == 1

@@ -956,13 +956,18 @@ def _click_and_capture(page, control, title: str, out_path) -> bool:
 
     got = {"download": None, "response": None}
     popups = []
+    # Answers are taken until the press has one, and not while its tab is
+    # waited for after it, so a second answer then cannot replace the one
+    # the press heard.
+    hearing = {"answers": True}
 
     def on_download(d):
-        got["download"] = d
+        if hearing["answers"]:
+            got["download"] = d
 
     def on_response(r):
         try:
-            if r.status == 200 and _DOWNLOAD_API_RE.match(r.url):
+            if hearing["answers"] and r.status == 200 and _DOWNLOAD_API_RE.match(r.url):
                 got["response"] = r
         except Exception:
             pass
@@ -981,6 +986,20 @@ def _click_and_capture(page, control, title: str, out_path) -> bool:
         deadline = _time.time() + 45
         while _time.time() < deadline and not (got["download"] or got["response"]):
             page.wait_for_timeout(250)
+        hearing["answers"] = False
+        if got["response"] is not None and not popups:
+            # The page opens the link in a new tab only once it has the
+            # answer, so that tab reaches Playwright after this press heard
+            # the answer. In 3 presses of 40 on a made-up page doing what
+            # the recording showed, it came after the closing below had run
+            # and stayed open. It is waited for, five seconds at most, by
+            # looking at what on_page heard, which a tab announced before
+            # the wait began is in as well.
+            until = _time.time() + 5
+            while not popups and _time.time() < until:
+                page.wait_for_timeout(100)
+            if not popups:
+                log.info("no tab opened for %r after its answer", title)
     except Exception as e:
         log.info("download click failed for %r: %s", title, e)
         return False

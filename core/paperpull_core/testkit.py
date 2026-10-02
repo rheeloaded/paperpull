@@ -167,3 +167,59 @@ class StrictDelivery:
             return _delivery.Delivery(self.outcome, "stand-in")
         fake.__name__ = name
         return fake
+
+
+class TabsHeardLate:
+    """Playwright told of a new tab late, the way a busy machine tells it.
+
+    A page knows it opened a tab the moment it asks for one, and Playwright
+    hears of the tab some time after, once the browser has made it and
+    Playwright has set it up. On a machine running three other full suites,
+    the tab came only after an app had taken its document and closed the
+    tabs its press opened, so it was never closed (2026-10-01). This holds
+    back the message that tells Playwright of a new tab until let_through,
+    so a test can put the tab's arrival after whichever step of the app it
+    likes, the same way every time, however busy the machine is.
+
+    It replaces Playwright's own message dispatch, a private part of it,
+    for the test that installs it. `announced` counts the tabs it saw, so a
+    test that finds none knows the hold no longer works, rather than
+    passing without it."""
+
+    def __init__(self, monkeypatch):
+        from playwright._impl._connection import Connection
+
+        self.announced = 0
+        self.released = False
+        self._held: list = []
+        self._scheduled = False
+        self._real = Connection.dispatch
+
+        def dispatch(conn, msg):
+            if msg.get("method") == "page" and str(msg.get("guid", "")).startswith("browser-context"):
+                self.announced += 1
+                if not self.released:
+                    self._held.append((conn, msg))
+                    return None
+            return self._real(conn, msg)
+
+        monkeypatch.setattr(Connection, "dispatch", dispatch)
+
+    def let_through(self) -> None:
+        """Every tab held so far reaches Playwright now, and a later one as
+        it comes."""
+        self.released = True
+        while self._held:
+            conn, msg = self._held.pop(0)
+            self._real(conn, msg)
+
+    def let_through_soon(self, page, seconds: float = 0.0) -> None:
+        """At Playwright's next turn, the next time anything asks Playwright
+        for anything, or `seconds` after. Only the first call counts."""
+        if self._scheduled:
+            return
+        self._scheduled = True
+        if seconds:
+            page._loop.call_later(seconds, self.let_through)
+        else:
+            page._loop.call_soon(self.let_through)

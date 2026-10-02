@@ -102,6 +102,8 @@ paperpull amfam pilot             REM once the site layer is confirmed
   `Statements\` or `Insurance Documents\`. American Family opens a
   statement in a new tab at a `blob:` address the page made itself, so
   the PDF is kept as the page makes it, and the one that tab shows is read.
+  The tab is closed afterwards, even one the browser shows only after the
+  statement was taken.
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays, sets up
   autopay, files or reports a claim, changes coverage, adds a vehicle or a
   driver, starts a quote, cancels or renews, or edits a setting. A control

@@ -14,11 +14,18 @@ The wrapper passes everything through unchanged, so the page and the
 browser do exactly what they would have done. Nothing is pressed, blocked
 or suppressed. Arming it again forgets what was kept, so a document is only
 ever taken from a blob made after its own press began.
+
+The same wrapper counts the tabs the page asks for. The page knows it asked
+the moment it asks, and Playwright hears of the tab some time later, after
+the press has taken its document from the page on a busy machine. A press
+that closed only the tabs Playwright had heard of left that one open in the
+person's browser, so close_new_tabs waits for it first.
 """
 from __future__ import annotations
 
 import base64
 import logging
+import time
 from typing import Optional, Tuple
 
 log = logging.getLogger(__name__)
@@ -27,14 +34,34 @@ HOOK_JS = r"""() => {
   window.__paperpullBlobs = [];
   window.__paperpullNames = [];
   window.__paperpullOpened = [];
+  window.__paperpullTabs = [];
   if (window.__paperpullBlobHook) return true;
   window.__paperpullBlobHook = true;
   // The addresses the page asks to open in a new tab, so a caller can tell
-  // the PDF it opened from any other the page makes.
+  // the PDF it opened from any other the page makes, and the new tabs that
+  // makes, each window that came back, or true for one that cannot be
+  // followed. A window comes back unless the browser refused one, or the
+  // page asked for none to come back. A window the page had opened before,
+  // which a name sends it back to, a frame of this page or the page itself
+  // is no new tab.
   const opener = window.open;
-  window.open = function (url) {
+  const known = new WeakSet();
+  window.open = function (url, target, features) {
     try { window.__paperpullOpened.push(String(url || '')); } catch (e) {}
-    return opener.apply(this, arguments);
+    const opened = opener.apply(this, arguments);
+    try {
+      const where = String(target || '_blank').toLowerCase();
+      const apart = /noopener|noreferrer/.test(String(features || '').toLowerCase());
+      const away = !['_self', '_parent', '_top'].includes(where);
+      if (away && opened) {
+        const fresh = !known.has(opened) && opened.top === opened && opened !== window.top;
+        known.add(opened);
+        if (fresh) window.__paperpullTabs.push(opened);
+      } else if (away && apart) {
+        window.__paperpullTabs.push(true);
+      }
+    } catch (e) {}
+    return opened;
   };
   const made = URL.createObjectURL.bind(URL);
   URL.createObjectURL = function (obj) {
@@ -50,12 +77,27 @@ HOOK_JS = r"""() => {
   HTMLAnchorElement.prototype.click = function () {
     try {
       if (this.download) window.__paperpullNames.push({href: this.href, name: String(this.download)});
-      if (this.target === '_blank') window.__paperpullOpened.push(String(this.href || ''));
+      if (this.target === '_blank') {
+        window.__paperpullOpened.push(String(this.href || ''));
+        // A link that saves what it points at opens no tab, a bare download
+        // mark with no name included.
+        if (!this.hasAttribute('download')) window.__paperpullTabs.push(true);
+      }
     } catch (e) {}
     return clicked.apply(this, arguments);
   };
   return true;
 }"""
+
+# How many of the new tabs the page asked for since it was last armed are
+# still open, or -1 when this window was never armed, a page that has moved
+# on since. One that closed itself, as a tab does when what it was sent to
+# turns into a download, is no longer waited for. One asked for with no
+# window back, or by a link, cannot be followed, so if it never comes, or
+# turns into a download, it costs the whole wait.
+TABS_JS = r"""() => Array.isArray(window.__paperpullTabs)
+  ? window.__paperpullTabs.filter((w) => { try { return w === true || !w.closed; } catch (e) { return true; } }).length
+  : -1"""
 
 # A PDF blob the page made since the hook was armed, as base64, with the name
 # its anchor gave it, or empty. Without `want` the newest. With it, only one
@@ -126,3 +168,48 @@ def take(page, urls: Optional[list] = None, opened: bool = False) -> Optional[Tu
     if data[:5] != b"%PDF-":
         return None
     return data, str(got.get("name") or "")
+
+
+def tabs_asked(page) -> Optional[int]:
+    """How many of the new tabs the page asked for since it was last armed
+    are still open, or None when it cannot say, a page that has moved on
+    since or was never armed."""
+    try:
+        n = page.evaluate(TABS_JS)
+    except Exception:
+        return None
+    return n if isinstance(n, int) and n >= 0 else None
+
+
+def close_new_tabs(page, before, armed_at=None, wait_ms: int = 5000) -> None:
+    """Close every tab that opened since `before`, which holds the tabs that
+    were open before the press.
+
+    A tab the page asked for since it was last armed, when `armed_at` held
+    the open tabs, that Playwright has not heard of yet is waited for first,
+    `wait_ms` at most, since closing only the tabs already heard of left it
+    open (a full run on a busy machine, 2026-10-01). A page that cannot say
+    what it asked for is not waited on. Nothing here raises."""
+    try:
+        ctx = page.context
+        since = before if armed_at is None else armed_at
+        deadline = time.monotonic() + wait_ms / 1000.0
+        while len([p for p in ctx.pages if p not in since]) < (tabs_asked(page) or 0):
+            if time.monotonic() >= deadline:
+                log.info("a tab the page asked for never came in %d ms", wait_ms)
+                break
+            try:
+                ctx.wait_for_event("page", timeout=200)
+            except Exception as e:
+                if type(e).__name__ != "TimeoutError":
+                    log.info("could not wait for a tab: %s", e)
+                    break
+        opened = [p for p in ctx.pages if p not in before]
+    except Exception as e:
+        log.info("could not tell which tabs a press opened: %s", e)
+        return
+    for extra in opened:
+        try:
+            extra.close()
+        except Exception:
+            pass

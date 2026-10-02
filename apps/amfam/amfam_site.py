@@ -950,6 +950,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     # it, after which it cannot be read back. So every PDF blob the page
     # makes from here on is kept as it is made.
     blob_capture.arm(page)
+    armed_at = set(ctx.pages)
 
     def landed() -> bool:
         if downloads:
@@ -1035,6 +1036,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         step, step_label = _second_step(page, appeared)
         if step is not None:
             blob_capture.arm(page)
+            armed_at = set(ctx.pages)
             try:
                 step.click(timeout=8000)
                 if trace is not None:
@@ -1063,11 +1065,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             page.remove_listener("download", on_download)
         except Exception:
             pass
-        for extra in [p for p in ctx.pages if p not in before]:
-            try:
-                extra.close()
-            except Exception:
-                pass
+        # The statement is taken from the page the moment the page asks for
+        # its tab, and on a busy machine Playwright heard of that tab only
+        # after this press had closed the ones it knew of, so it stayed
+        # open. A tab the page asked for is waited for before closing.
+        blob_capture.close_new_tabs(page, before, armed_at)
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",

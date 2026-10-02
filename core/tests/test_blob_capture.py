@@ -149,3 +149,192 @@ def test_two_pdfs_opened_by_one_press_are_a_guess_and_neither_is_taken(page):
     page.click("#twoopen")
     page.wait_for_timeout(300)
     assert blob_capture.take(page, opened=True) is None
+
+
+# -- the tabs a press asked for (2026-10-01) -------------------------------------------
+
+PAGE_TABS = """<!doctype html><html><body>
+<button id="tab">Open</button>
+<button id="apart">Open apart</button>
+<button id="here">Open here</button>
+<button id="link">Link</button>
+<button id="save">Save</button>
+<button id="bare">Save unnamed</button>
+<button id="named">Named</button>
+<button id="framed">Framed</button>
+<button id="gone">Gone</button>
+<button id="nothing">Nothing</button>
+<iframe name="inside" src="about:blank"></iframe>
+<script>
+document.getElementById('tab').onclick = () => window.open('about:blank', '_blank');
+document.getElementById('apart').onclick = () => window.open('about:blank', '_blank', 'noopener');
+document.getElementById('here').onclick = () => window.open('#here', '_self');
+document.getElementById('named').onclick = () => window.open('about:blank', 'statement');
+document.getElementById('framed').onclick = () => window.open('about:blank', 'inside');
+// A link to a new tab, or one that saves, named or not.
+const anchor = (download) => {
+  const a = document.createElement('a');
+  a.href = download === null ? 'about:blank'
+                             : URL.createObjectURL(new Blob(['words'], {type: 'text/plain'}));
+  a.target = '_blank';
+  if (download !== null) a.setAttribute('download', download);
+  document.body.appendChild(a);
+  a.click();
+};
+document.getElementById('link').onclick = () => anchor(null);
+document.getElementById('save').onclick = () => anchor('words.txt');
+document.getElementById('bare').onclick = () => anchor('');
+// A tab that closes itself, the way one does when what it was sent to
+// turns into a download.
+document.getElementById('gone').onclick = () => window.open('about:blank', '_blank').close();
+document.getElementById('nothing').onclick = () => {};
+</script></body></html>"""
+
+
+def _tabs_page(page):
+    page.context.route("%s/tabs" % HOST, lambda route: route.fulfill(
+        status=200, content_type="text/html", body=PAGE_TABS))
+    page.goto("%s/tabs" % HOST)
+
+
+def test_the_new_tabs_a_page_asks_for_are_counted(page):
+    _tabs_page(page)
+    assert blob_capture.tabs_asked(page) is None, "a page never armed cannot say"
+    assert blob_capture.arm(page)
+    assert blob_capture.tabs_asked(page) == 0
+    with page.context.expect_page():
+        page.click("#tab")
+    assert blob_capture.tabs_asked(page) == 1
+    with page.context.expect_page():
+        page.click("#apart")
+    assert blob_capture.tabs_asked(page) == 2, "a tab asked for with no window back still opens"
+    with page.context.expect_page():
+        page.click("#link")
+    assert blob_capture.tabs_asked(page) == 3
+    page.click("#here")
+    with page.expect_download():
+        page.click("#save")
+    with page.expect_download():
+        page.click("#bare")
+    assert blob_capture.tabs_asked(page) == 3, "this tab and a link that saves open no tab"
+    assert blob_capture.arm(page)
+    assert blob_capture.tabs_asked(page) == 0, "arming again counts afresh"
+
+
+def test_a_window_the_page_already_had_is_no_new_tab(page):
+    """A name sends window.open back to a window the page opened before, or
+    to a frame of the page, and neither is a new tab to wait for."""
+    _tabs_page(page)
+    assert blob_capture.arm(page)
+    with page.context.expect_page():
+        page.click("#named")
+    assert blob_capture.tabs_asked(page) == 1
+    page.click("#named")
+    page.click("#framed")
+    page.wait_for_timeout(300)
+    assert blob_capture.tabs_asked(page) == 1
+    assert len(page.context.pages) == 2
+
+
+def test_a_tab_the_browser_refuses_is_not_counted(page):
+    """A window.open that hands back no window though it asked for one, as
+    a browser that refuses the tab answers."""
+    page.context.route("%s/refusing" % HOST, lambda route: route.fulfill(
+        status=200, content_type="text/html",
+        body="<button onclick=\"window.open('about:blank', '_blank')\">Open</button>"
+             "<script>window.open = function () { return null; };</script>"))
+    page.goto("%s/refusing" % HOST)
+    assert blob_capture.arm(page)
+    page.click("button")
+    assert blob_capture.tabs_asked(page) == 0
+    assert len(page.context.pages) == 1
+
+
+def _late(page, monkeypatch):
+    from paperpull_core.testkit import TabsHeardLate
+    heard: list = []
+    page.context.on("page", lambda p: heard.append(p))
+    return TabsHeardLate(monkeypatch), heard
+
+
+def _heard(page, heard, seconds=10):
+    import time
+    deadline = time.monotonic() + seconds
+    while not heard and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    return heard
+
+
+def test_a_tab_playwright_hears_of_late_is_waited_for_and_closed(page, monkeypatch):
+    """The page asked for it before the press was over, and Playwright heard
+    of it a second after. Closing only the tabs already heard of left it
+    open in a full run on a busy machine (2026-10-01)."""
+    _tabs_page(page)
+    before = set(page.context.pages)
+    late, heard = _late(page, monkeypatch)
+    assert blob_capture.arm(page)
+    page.click("#tab")
+    late.let_through_soon(page, 1.0)
+    blob_capture.close_new_tabs(page, before)
+    assert late.announced == 1 and _heard(page, heard)
+    assert all(p.is_closed() for p in heard)
+    assert page.context.pages == [page]
+
+
+def test_a_tab_asked_for_after_arming_again_is_waited_for(page, monkeypatch):
+    """The first tab of a press is open when the page is armed for its second
+    step, which asks for another. Counted from the first arming, the open
+    one would stand for the late one and nothing would be waited for."""
+    _tabs_page(page)
+    before = set(page.context.pages)
+    assert blob_capture.arm(page)
+    with page.context.expect_page():
+        page.click("#tab")
+    late, heard = _late(page, monkeypatch)
+    assert blob_capture.arm(page)
+    armed_at = set(page.context.pages)
+    page.click("#tab")
+    late.let_through_soon(page, 1.0)
+    blob_capture.close_new_tabs(page, before, armed_at)
+    assert late.announced == 1 and _heard(page, heard)
+    assert all(p.is_closed() for p in heard)
+    assert page.context.pages == [page]
+
+
+@pytest.mark.parametrize("button", ["#nothing", "#gone"], ids=["no tab", "a tab that closed itself"])
+def test_a_press_with_no_tab_still_open_is_not_held_up(page, button):
+    import time
+    _tabs_page(page)
+    before = set(page.context.pages)
+    assert blob_capture.arm(page)
+    page.click(button)
+    t0 = time.monotonic()
+    blob_capture.close_new_tabs(page, before, wait_ms=5000)
+    assert time.monotonic() - t0 < 4, "waited for a tab that was never coming"
+
+
+def test_a_tab_that_never_comes_is_waited_for_no_longer_than_asked(page, monkeypatch):
+    import time
+    _tabs_page(page)
+    before = set(page.context.pages)
+    late, heard = _late(page, monkeypatch)
+    assert blob_capture.arm(page)
+    page.click("#tab")
+    t0 = time.monotonic()
+    blob_capture.close_new_tabs(page, before, wait_ms=700)
+    took = time.monotonic() - t0
+    assert 0.6 < took < 4, took
+    late.let_through()
+    for p in _heard(page, heard):
+        p.close()
+
+
+def test_closing_tabs_on_a_page_that_cannot_be_asked_raises_nothing():
+    class _Gone:
+        def evaluate(self, *a, **k):
+            raise RuntimeError("target closed")
+
+        @property
+        def context(self):
+            raise RuntimeError("target closed")
+    blob_capture.close_new_tabs(_Gone(), set())
