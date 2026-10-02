@@ -493,8 +493,14 @@ def statement_request(page, iso_date: str) -> Optional[DocumentRequest]:
         pass
     # A statement row carries its date and nothing else this app reads,
     # so that is the one fact a saved file can be checked against.
+    #
+    # Delivery closes the tabs the press opened only when asked. A tab it
+    # turned away for its address, and a tab it read the statement from,
+    # each stayed open in the person's browser otherwise. The run never
+    # works in a new tab.
     return DocumentRequest(trigger=link.click,
                            expect=Identity(date=iso_date),
+                           close_new_tabs=True,
                            hints=(DOWNLOAD,))
 
 

@@ -47,7 +47,8 @@ column).
 - **Download** clicks the row's control and captures the PDF that opens in a
   new tab. (Fetching Ally's own `/acs/v1/bank-statements/<documentId>` endpoint
   directly does **not** work: it needs the `Authorization` header the SPA adds
-  in JavaScript, and a cookie-only request comes back empty.) A tab at an
+  in JavaScript, and a cookie-only request comes back empty.) Every tab the
+  click opened is closed afterward, whatever came of it, and a tab at an
   address off Ally is never read.
 - **Every download is verified.** Because several rows look identical, the row
   clicked is an inference, so the app watches which `documentId` Ally actually

@@ -669,37 +669,57 @@ def _adopt_new_tab(page, tabs_before: set):
     says it stayed at the bank (#35).
 
     A tab that closes before it is looked at leaves nothing to adopt, and
-    the trace says so rather than keeping the reason an earlier try gave."""
+    the trace says so rather than keeping the reason an earlier try gave.
+
+    Only one tab is adopted. Any other the press opened is closed unread.
+    The look stopped at the tab it adopted, so another tab from the same
+    press was never looked at and stayed open in the member's browser."""
     _said(TAB_GONE)
-    for extra in [p for p in page.context.pages if p not in tabs_before]:
-        try:
-            extra.wait_for_load_state("domcontentloaded", timeout=20000)
-        except Exception:
-            pass
-        for _ in range(ADOPT_WAIT_POLLS):
+    adopted = None
+    try:
+        for extra in [p for p in page.context.pages if p not in tabs_before]:
+            try:
+                extra.wait_for_load_state("domcontentloaded", timeout=20000)
+            except Exception:
+                pass
+            for _ in range(ADOPT_WAIT_POLLS):
+                u = extra.url or ""
+                if u and u != "about:blank" and not on_bank_host(u):
+                    break
+                extra.wait_for_timeout(500)
             u = extra.url or ""
-            if u and u != "about:blank" and not on_bank_host(u):
+            host = (urlsplit(u).hostname or "").lower()
+            if on_bank_host(u):
+                log.info("a tab opened and stayed on the bank's own site, so it is not the vendor's")
+                _said(STAYED_AT_THE_BANK)
+            elif u.startswith("https://") and host:
+                _VENDOR_HOSTS_SEEN.add(host)
+                ALLOWED_HOSTS.add(host)
+                _ADOPTED_TABS.append(extra)
+                log.info("the vendor's tab is on %s", redact(host))
+                _said(OPENED)
+                adopted = extra
                 break
-            extra.wait_for_timeout(500)
-        u = extra.url or ""
-        host = (urlsplit(u).hostname or "").lower()
-        if on_bank_host(u):
-            log.info("a tab opened and stayed on the bank's own site, so it is not the vendor's")
-            _said(STAYED_AT_THE_BANK)
-        elif u.startswith("https://") and host:
-            _VENDOR_HOSTS_SEEN.add(host)
-            ALLOWED_HOSTS.add(host)
-            _ADOPTED_TABS.append(extra)
-            log.info("the vendor's tab is on %s", redact(host))
-            _said(OPENED)
-            return extra
-        else:
-            _said(NOT_HTTPS)
+            else:
+                _said(NOT_HTTPS)
+            try:
+                extra.close()
+            except Exception:
+                pass
+    finally:
+        # However the look ended, also when a tab that closed itself while
+        # it was waited for made the look raise.
         try:
-            extra.close()
+            others = [p for p in page.context.pages
+                      if p not in tabs_before and p is not adopted]
         except Exception:
-            pass
-    return None
+            others = []
+        for extra in others:
+            try:
+                extra.close()
+            except Exception:
+                pass
+    return adopted
 
 
 def _close_old_vendor_tabs(page) -> int:
@@ -2480,6 +2500,8 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
 def _survey_vendor_button(page, report: dict, dwell_ms: int) -> None:
     """Press "View Documents" on the documents page and describe the tab
     it opens, or the page it changes, for the report."""
+    # The tabs that were open before the press, set just before it.
+    tabs_before = None
     try:
         if not goto_documents(page):
             report.setdefault("notes", []).append("documents page not reached, vendor button not tried")
@@ -2552,6 +2574,21 @@ def _survey_vendor_button(page, report: dict, dwell_ms: int) -> None:
                 pass
     except Exception as e:
         report.setdefault("notes", []).append("vendor button survey failed: %s" % str(e)[:120])
+    finally:
+        # Every tab the press opened is closed however the survey ended. It
+        # took the new tabs as they stood when the first one came, so a tab
+        # the same press opened a moment later stayed open, and so did the
+        # ones after a tab whose reading raised.
+        if tabs_before is not None:
+            try:
+                opened = [p for p in page.context.pages if p not in tabs_before]
+            except Exception:
+                opened = []
+            for extra in opened:
+                try:
+                    extra.close()
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------

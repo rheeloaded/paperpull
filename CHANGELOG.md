@@ -87,6 +87,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   it ends, and a tab turned away is still never read. Neither bank is
   known to open such a tab, and made-up pages in a real browser show each
   case.
+- **Six more apps close every tab a document's press opens.** The leak
+  Chase and U.S. Bank had was looked for in every app, and six more had
+  it. Ally closed only the one tab it looked at, so a second tab from the
+  same press stayed open in the person's browser, and so did a tab opened
+  by a press whose download came through. Target RedCard and T-Mobile left
+  open any tab their press opened, read or turned away for its address.
+  AAFMAA and Target's Print receipts kept only the newest tab a press
+  opened, so the first of two stayed open, and Target left a tab opened
+  beside a download. Golden 1 stopped looking once it had taken a tab for
+  the vendor's, so another tab from the same press stayed open, and its
+  Diagnose left open a tab the same press opened a moment after the
+  vendor's. Now each closes every tab its press opened and reads none it
+  turned away. Golden 1 keeps the vendor's tab it works in, and Target
+  still hands back the tab a receipt is printed from. None of these sites
+  is known to open such a tab, and made-up pages in a real browser show
+  each case.
 
 ## [0.41.1] - 2026-09-30
 

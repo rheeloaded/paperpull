@@ -436,8 +436,14 @@ def bill_request(page, iso_date: str) -> Optional[DocumentRequest]:
     # A bill carries its date and nothing else this app knows about, so
     # that is the one fact there is to check a saved file against. There
     # is no amount and no document number on the history row.
+    #
+    # Delivery closes the tabs the press opened only when asked. A tab it
+    # turned away for its address, and a tab it read the bill from, each
+    # stayed open in the person's browser otherwise. The run never works
+    # in a new tab.
     return DocumentRequest(trigger=lambda: btn.first.click(),
                            expect=Identity(date=iso_date),
+                           close_new_tabs=True,
                            hints=(DOWNLOAD,))
 
 

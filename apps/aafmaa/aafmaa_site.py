@@ -882,7 +882,10 @@ def download_document_row(page, title: str, date_text: str, account: str,
         log.warning("refusing control %r", label[:60])
         return False
 
-    state = {"download": None, "popup": None, "pdf": None}
+    state = {"download": None, "pdf": None}
+    # Every window the press opens, not only the newest. Keeping one let a
+    # press that opened two close the second and leave the first open.
+    popups: list = []
 
     def on_download(d):
         state["download"] = d
@@ -895,7 +898,7 @@ def download_document_row(page, title: str, date_text: str, account: str,
             pass
 
     def on_popup(pop):
-        state["popup"] = pop
+        popups.append(pop)
         try:
             pop.on("response", on_response)
         except Exception:
@@ -960,9 +963,9 @@ def download_document_row(page, title: str, date_text: str, account: str,
             except Exception:
                 pass
         # a popup is the app's own doing, never the user's tab
-        if state["popup"] is not None:
+        for pop in popups:
             try:
-                state["popup"].close()
+                pop.close()
             except Exception:
                 pass
         # a full postback can leave the main frame on the rendered document,

@@ -1134,56 +1134,78 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
     # 2. A real download event (the most common mechanism).
     before = {id(p) for p in ctx.pages}
     try:
-        with page.expect_download(timeout=20000) as dl:
-            ctrl.click()
-        dl.value.save_as(str(out_path))
-        if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-            log.info("captured via download event")
-            return True
-    except Exception as e:
-        log.info("no download event for %r %s (%s); trying tab capture",
-                 account, date, str(e).split("\n")[0])
+        try:
+            with page.expect_download(timeout=20000) as dl:
+                ctrl.click()
+            dl.value.save_as(str(out_path))
+            if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
+                log.info("captured via download event")
+                return True
+        except Exception as e:
+            log.info("no download event for %r %s (%s); trying tab capture",
+                     account, date, str(e).split("\n")[0])
 
-    # 3. The PDF opened in a new tab (blob: or a URL) - fetch its bytes.
-    new_page = None
-    for _ in range(24):                                   # up to ~12s
-        page.wait_for_timeout(500)
-        dismiss_timeout(page)
-        for p in ctx.pages:
-            if id(p) not in before and not p.is_closed():
-                new_page = p
+        # 3. The PDF opened in a new tab (blob: or a URL) - fetch its bytes.
+        new_page = None
+        for _ in range(24):                                   # up to ~12s
+            page.wait_for_timeout(500)
+            dismiss_timeout(page)
+            for p in ctx.pages:
+                if id(p) not in before and not p.is_closed():
+                    new_page = p
+                    break
+            if new_page:
                 break
-        if new_page:
-            break
-    if new_page is None:
-        log.info("nothing opened for %r %s", account, date)
-        return False
+        if new_page is None:
+            log.info("nothing opened for %r %s", account, date)
+            return False
 
-    ok = False
+        ok = False
+        try:
+            new_page.wait_for_load_state("domcontentloaded", timeout=15000)
+            url = new_page.url or ""
+            # The tab a press opened could be anywhere. This fetch carries the
+            # signed-in session, so the address is host-checked first. A blob: URL
+            # is minted by the page itself and has no host to check. A tab turned
+            # away is never read, and is closed below like any other.
+            if not url.startswith("blob:") and not is_safe_url(url):
+                log.error("refusing to fetch a document from outside Ally")
+                b64 = None
+            else:
+                b64 = _fetch_as_b64(page, url) if url.startswith("blob:") else \
+                    _fetch_as_b64(new_page, url)
+            if b64:
+                ok = _write_if_pdf(base64.b64decode(b64), out_path)
+                if ok:
+                    log.info("captured via new tab (%s)", url[:80])
+        except Exception as e:
+            log.info("tab capture failed for %r %s: %s", account, date, e)
+        return ok
+    finally:
+        # However the press ended. Only the one tab looked at was ever
+        # closed, so a second tab from the same press stayed open in the
+        # person's browser, and so did a tab opened by a press whose
+        # download came through.
+        _close_tabs_opened_since(ctx, before)
+
+
+def _close_tabs_opened_since(ctx, before) -> None:
+    """Close every tab that was not open before the press, `before` holding
+    the ids of those that were. The tab read, a tab turned away for its
+    address and a tab never looked at are closed alike, and nothing on any
+    of them is read. Nothing here raises."""
     try:
-        new_page.wait_for_load_state("domcontentloaded", timeout=15000)
-        url = new_page.url or ""
-        # The tab a press opened could be anywhere. This fetch carries the
-        # signed-in session, so the address is host-checked first. A blob: URL
-        # is minted by the page itself and has no host to check. A tab turned
-        # away is never read, and is closed below like any other.
-        if not url.startswith("blob:") and not is_safe_url(url):
-            log.error("refusing to fetch a document from outside Ally")
-            b64 = None
-        else:
-            b64 = _fetch_as_b64(page, url) if url.startswith("blob:") else \
-                _fetch_as_b64(new_page, url)
-        if b64:
-            ok = _write_if_pdf(base64.b64decode(b64), out_path)
-            if ok:
-                log.info("captured via new tab (%s)", url[:80])
-    except Exception as e:
-        log.info("tab capture failed for %r %s: %s", account, date, e)
-    try:
-        new_page.close()
+        tabs = list(ctx.pages)
     except Exception:
-        pass
-    return ok
+        return
+    for tab in tabs:
+        if id(tab) in before:
+            continue
+        try:
+            if not tab.is_closed():
+                tab.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

@@ -1081,13 +1081,18 @@ def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, 
     """
     old_url = page.url
     download_info = {}
-    popup_info = {}
+    # The tabs the press opens, and the one of them handed back, which the
+    # caller closes. The rest are closed here. Keeping only the newest left
+    # the first of two open in the person's browser, and a tab opened
+    # beside a download as well.
+    popups = []
+    handed = []
 
     def on_download(d):
         download_info["download"] = d
 
     def on_popup(p):
-        popup_info["page"] = p
+        popups.append(p)
 
     page.on("download", on_download)
     page.context.on("page", on_popup)
@@ -1104,8 +1109,9 @@ def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, 
         for _ in range(deadline_rounds):
             if download_info.get("download"):
                 return "download", download_info["download"]
-            if popup_info.get("page"):
-                popup = popup_info["page"]
+            if popups:
+                popup = popups[-1]
+                handed.append(popup)
                 try:
                     popup.wait_for_load_state("domcontentloaded", timeout=15000)
                 except Exception:
@@ -1126,6 +1132,13 @@ def trigger_print_receipt(page, control, timeout_ms: int = 15000) -> Tuple[str, 
             page.context.remove_listener("page", on_popup)
         except Exception:
             pass
+        for p in popups:
+            if any(p is h for h in handed):
+                continue
+            try:
+                p.close()
+            except Exception:
+                pass
 
 
 def wait_for_receipt_content(page, timeout_ms: int = 15000) -> str:
