@@ -1163,8 +1163,16 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
     try:
         new_page.wait_for_load_state("domcontentloaded", timeout=15000)
         url = new_page.url or ""
-        b64 = _fetch_as_b64(page, url) if url.startswith("blob:") else \
-            _fetch_as_b64(new_page, url)
+        # The tab a press opened could be anywhere. This fetch carries the
+        # signed-in session, so the address is host-checked first. A blob: URL
+        # is minted by the page itself and has no host to check. A tab turned
+        # away is never read, and is closed below like any other.
+        if not url.startswith("blob:") and not is_safe_url(url):
+            log.error("refusing to fetch a document from outside Ally")
+            b64 = None
+        else:
+            b64 = _fetch_as_b64(page, url) if url.startswith("blob:") else \
+                _fetch_as_b64(new_page, url)
         if b64:
             ok = _write_if_pdf(base64.b64decode(b64), out_path)
             if ok:

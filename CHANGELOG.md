@@ -63,6 +63,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   with three other test runs on the same machine. Now American Family
   waits for a tab its page asked for, and Robinhood for the tab its site
   opens after the answer, five seconds at most, and closes it.
+- **Ally reads a statement's tab only at Ally's own address.** When a
+  statement's press brings no download, Ally takes the tab the press
+  opened and fetches that tab's address with the signed-in session.
+  Nothing looked at the address first, so a PDF in a tab anywhere else
+  would have been saved as the statement. The check of which statement
+  Ally served kept it too, since that check hears only Ally's own page,
+  and it called the file verified when that page had been answered with
+  the statement asked for. Now a tab off Ally's hosts is turned away
+  unread, the way Chase turns one away, and it is still closed. A blob
+  the page made, or a tab on Ally, is read as before. Ally is not known
+  to open such a tab, and a made-up page in a real browser shows the
+  case.
 
 ## [0.41.1] - 2026-09-30
 
