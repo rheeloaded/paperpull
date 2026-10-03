@@ -7,10 +7,18 @@ these build a small repository with an origin, environments and a marker
 file in each, and check that a removed or landed worktree leaves every
 marker where it was, and that landing pushes only a tree whose suite
 passed, never while a release is in progress.
+
+On Windows a folder a program is in cannot be deleted, and the shell that
+ran land is usually in its worktree. The first real landing went to main
+and then exited 1, with the worktree's files deleted around an empty
+folder. Those tests start a process working in the worktree, as that
+shell was.
 """
 import os
+import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -46,6 +54,10 @@ def world(tmp_path, monkeypatch):
         (venv / "keep.txt").write_text("the main checkout's environment\n", encoding="utf-8")
     (main / "apps" / "alpha" / "alpha.py").write_text("y = 2\n", encoding="utf-8")
     (main / "gui" / "app.py").write_text("z = 3\n", encoding="utf-8")
+    # Every worktree of the real repository carries the tool, and the
+    # command land prints to finish a removal runs the worktree's own copy.
+    (main / "tools").mkdir()
+    shutil.copy(REPO / "tools" / "worktree.py", main / "tools" / "worktree.py")
     git(main, "add", ".")
     git(main, "commit", "-q", "-m", "base")
     git(main, "branch", "-M", "main")
@@ -56,6 +68,38 @@ def world(tmp_path, monkeypatch):
 
 def markers(main):
     return [main / "gui" / ".venv" / "keep.txt", main / "apps" / "alpha" / ".venv" / "keep.txt"]
+
+
+def whole(tree):
+    """Nothing deleted, nothing changed, both links still in place."""
+    return (git(tree, "status", "--porcelain") == ""
+            and all(wt.is_link(tree / rel) for rel in ("gui/.venv", "apps/alpha/.venv")))
+
+
+def committed_change(world):
+    tree = wt.new(world, "feature")
+    (tree / "app.py").write_text("x = 2\n", encoding="utf-8")
+    git(tree, "commit", "-q", "-am", "change x")
+    return tree
+
+
+@contextmanager
+def held(folder, how="shell"):
+    """A shell working in the folder, as the one that ran land is, or a
+    program with one of its files open."""
+    if how == "shell":
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=str(folder))
+        try:
+            yield
+        finally:
+            proc.kill()
+            proc.wait()
+    else:
+        with open(folder / "app.py", encoding="utf-8"):
+            yield
+
+
+WINDOWS_ONLY = pytest.mark.skipif(os.name != "nt", reason="only Windows refuses to delete a folder in use")
 
 
 def test_new_links_each_environment_of_the_main_checkout(world):
@@ -116,6 +160,77 @@ def test_land_pushes_nothing_when_the_suite_fails(world):
     assert wt.land(tree, suite_cmd=FAIL, ruff_cmd=PASS) == 1
     assert git(world, "ls-remote", "origin", "refs/heads/main").split()[0] == before
     assert tree.exists()
+
+
+@WINDOWS_ONLY
+def test_land_from_a_shell_inside_lands_and_keeps_the_worktree_whole(world, capsys):
+    tree = committed_change(world)
+    head = git(tree, "rev-parse", "HEAD")
+    os.chdir(tree)
+    with held(tree):
+        assert wt.land(tree, suite_cmd=PASS, ruff_cmd=PASS) == 0, "a landing read as a failure"
+        out = capsys.readouterr().out
+        assert git(world, "ls-remote", "origin", "refs/heads/main").split()[0] == head
+        assert "landed" in out and "in use" in out and "went through" in out
+        assert whole(tree), "the worktree was half deleted around the shell"
+        assert all(m.exists() for m in markers(world))
+    # Once the shell has gone, the command land printed finishes the job
+    # from a folder outside the repository.
+    command = out.strip().splitlines()[-1].strip()
+    assert command.endswith('remove "%s"' % tree)
+    r = subprocess.run(command, cwd=str(world.parent), capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not tree.exists()
+    assert all(m.exists() for m in markers(world))
+    assert git(world, "branch", "--list", "feature") == "", "a landed branch was kept"
+
+
+@WINDOWS_ONLY
+@pytest.mark.parametrize("how", ["shell", "open file"])
+def test_remove_leaves_a_worktree_in_use_whole(world, how):
+    tree = wt.new(world, "feature")
+    with held(tree / "apps" / "alpha" if how == "shell" else tree, how):
+        with pytest.raises(SystemExit, match="in use"):
+            wt.remove(world, "feature")
+        assert whole(tree)
+    wt.remove(world, "feature")
+    assert not tree.exists()
+    assert all(m.exists() for m in markers(world))
+
+
+def test_a_landing_reads_as_landed_whatever_the_removal_does(world, capsys, monkeypatch):
+    tree = committed_change(world)
+    head = git(tree, "rev-parse", "HEAD")
+
+    def refuses(where, name_or_path, quiet=False):
+        raise SystemExit("git would not remove %s" % name_or_path)
+
+    monkeypatch.setattr(wt, "remove", refuses)
+    os.chdir(tree)
+    assert wt.land(tree, suite_cmd=PASS, ruff_cmd=PASS) == 0
+    out = capsys.readouterr().out
+    assert git(world, "ls-remote", "origin", "refs/heads/main").split()[0] == head
+    assert "landed" in out and "went through" in out and 'remove "%s"' % tree in out
+
+
+def test_remove_drops_a_landed_branch_though_the_main_checkout_is_behind(world, capsys):
+    tree = committed_change(world)
+    os.chdir(tree)
+    assert wt.land(tree, suite_cmd=PASS, ruff_cmd=PASS, keep=True) == 0
+    # Nobody pulls into the main checkout, so git branch -d alone refuses.
+    assert git(world, "rev-parse", "HEAD") != git(tree, "rev-parse", "HEAD")
+    os.chdir(world.parent)
+    wt.remove(world.parent, str(tree))
+    assert not tree.exists()
+    assert git(world, "branch", "--list", "feature") == ""
+    assert "which main holds" in capsys.readouterr().out
+
+
+def test_remove_keeps_a_branch_that_is_not_on_main(world, capsys):
+    committed_change(world)
+    wt.remove(world, "feature")
+    assert "feature" in git(world, "branch", "--list", "feature")
+    assert "not on main" in capsys.readouterr().out
 
 
 def test_land_waits_for_a_release(world, capsys):

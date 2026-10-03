@@ -3,6 +3,7 @@
     python tools/worktree.py new <name>       a worktree beside this checkout
     python tools/worktree.py land             rebase, full suite, push to main, remove
     python tools/worktree.py remove <name>    unlink its venvs, remove it, drop its branch
+                                              (or the worktree's path, from any folder)
     python tools/worktree.py list             every worktree and what is left in it
     python tools/worktree.py release take <who> | drop | show
 
@@ -22,6 +23,18 @@ main checkout's environments, so remove unlinks every junction first and
 only then removes the worktree. Landed worktrees used to be left behind,
 sixteen of them by October 2026, three on the history from before the
 rewrite of 2026-09-30, so land removes its own when it is done.
+
+Windows will not delete a folder while a program works in it or holds one
+of its files open, and the shell that ran land is usually working in its
+worktree. The first real landing (2026-10-03) went to main, then git
+worktree remove deleted every file, failed on the folder and kept the
+branch, and land exited 1 as though nothing had landed. So remove first
+renames the worktree away and back, which fails in exactly the cases where
+deleting would and changes nothing, and leaves a folder in use whole. A
+landing that went through is reported as landed whatever happens after
+it, with the command that removes the worktree from outside. A branch
+whose commits are all on origin/main is dropped even when the main
+checkout is behind, which git branch -d alone would refuse.
 
 LANDING
 
@@ -126,19 +139,74 @@ def new(where, name: str) -> Path:
     return tree
 
 
+def in_use(tree: Path) -> bool:
+    """Whether a program works in the folder or holds one of its files open.
+
+    Windows will not delete such a folder, and git worktree remove then
+    deletes what it can and stops, after the links are already gone.
+    Renaming the folder fails in exactly those cases, so it is renamed away
+    and back, which changes nothing. A link inside it that points at a
+    folder in use elsewhere does not count. Other systems delete a folder
+    in use, so there it never is. A scanner that holds a file for a moment
+    is waited out, a shell working in the folder is not.
+    """
+    if os.name != "nt":
+        return False
+    away = tree.with_name("%s.in-use-check-%d" % (tree.name, os.getpid()))
+    for attempt in range(5):
+        try:
+            os.rename(tree, away)
+            break
+        except PermissionError:
+            if attempt == 4:
+                return True
+            time.sleep(0.5)
+        except OSError as e:
+            raise SystemExit("could not tell whether %s is in use (%s), so it was left whole" % (tree, e))
+    try:
+        os.rename(away, tree)
+    except OSError as e:
+        raise SystemExit("%s was renamed to %s to see whether it was in use and could not be "
+                         "renamed back (%s). Rename it back by hand." % (tree, away, e))
+    return False
+
+
+def drop_branch(main: Path, branch: str) -> bool:
+    """Delete a branch whose commits are all on main. git branch -d judges
+    by the main checkout's own branch, which falls behind origin/main when
+    the main checkout is left alone, so a landed branch is judged by
+    origin/main as well."""
+    if git(main, "branch", "-d", branch).returncode == 0:
+        return True
+    if git(main, "merge-base", "--is-ancestor", branch, "origin/main").returncode == 0:
+        return git(main, "branch", "-D", branch).returncode == 0
+    return False
+
+
+def remove_command(tree: Path) -> str:
+    """The command that removes the worktree, run from any folder outside it."""
+    return '"%s" "%s" remove "%s"' % (Path(sys.executable).resolve(), tree / "tools" / "worktree.py", tree)
+
+
 def remove(where, name_or_path: str, quiet=False) -> None:
     tree = Path(name_or_path)
     if not tree.is_absolute():
         tree = path_for(where, name_or_path)
-    main = main_checkout(where)
     if not tree.exists():
         raise SystemExit("no worktree at %s" % tree)
+    if not (tree / ".git").exists():
+        raise SystemExit("%s is not a worktree, it has no .git" % tree)
+    # Found from the worktree itself, so remove works from any folder.
+    main = main_checkout(tree)
     if os.path.normcase(str(tree.resolve())) == os.path.normcase(str(main.resolve())):
         raise SystemExit("that is the main checkout, which is never removed")
     branch = git(tree, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     dirty = git(tree, "status", "--porcelain", "--untracked-files=normal").stdout.strip()
     if dirty:
         raise SystemExit("%s has uncommitted changes, so it was left alone\n%s" % (tree, dirty[:800]))
+    if in_use(tree):
+        raise SystemExit("%s is in use, by a shell working in it or a program with one of its "
+                         "files open, so it was left whole" % tree)
     for p in links_in(tree):
         unlink(p)
     r = git(main, "worktree", "remove", str(tree))
@@ -146,7 +214,7 @@ def remove(where, name_or_path: str, quiet=False) -> None:
         raise SystemExit("git would not remove %s\n%s" % (tree, (r.stderr or r.stdout).strip()))
     said = "removed %s" % tree
     if branch and branch != "HEAD":
-        if git(main, "branch", "-d", branch).returncode == 0:
+        if drop_branch(main, branch):
             said += ", and its branch %s, which main holds" % branch
         else:
             said += ", and kept its branch %s, which is not on main" % branch
@@ -285,10 +353,16 @@ def land(where, suite_cmd=None, ruff_cmd=None, keep=False) -> int:
         print("the push was refused. If main moved during the suite, run land again, "
               "and if the pre-push check stopped it, look at each line it named.")
         return 1
-    print("landed %s on main. Watch its CI run with gh run watch." % tested[:9])
+    print("landed %s on main. Watch its CI run with gh run watch." % tested[:9], flush=True)
     if not keep:
         os.chdir(main)
-        remove(main, str(tree))
+        try:
+            remove(main, str(tree))
+        except (SystemExit, OSError) as e:
+            # What is on main is on main. A worktree left behind is tidying,
+            # and must never make a landing read as a failure.
+            print("%s\nThe landing itself went through. To remove the worktree once nothing is "
+                  "in it, run this from any folder outside it\n  %s" % (e, remove_command(tree)))
     return 0
 
 
