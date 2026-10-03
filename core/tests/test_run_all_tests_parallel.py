@@ -169,15 +169,18 @@ def test_a_bad_part_is_refused():
             rat.parse_shard(bad)
 
 
-# The suite's one test says which process is running it, then sleeps for ten
-# minutes, longer than anything here waits for it, so only the runner can end
-# it. The number is written under another name and moved into place, so it is
-# there whole or not at all, wherever the runner stops the suite.
+# The suite's one test starts a process of its own, as a test that opens a
+# browser does, says which processes are its pytest and that one, then sleeps
+# for ten minutes, longer than anything here waits for it, so only the runner
+# can end them. The numbers are written under another name and moved into
+# place, so they are there whole or not at all, wherever the runner stops the
+# suite.
 SLEEPY = """
-    import os, time
+    import os, subprocess, sys, time
     def test_forever():
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
         with open(%(part)r, "w") as f:
-            f.write(str(os.getpid()))
+            f.write(" ".join(map(str, (os.getpid(), child.pid))))
         os.replace(%(part)r, %(pid)r)
         time.sleep(600)
     """
@@ -198,6 +201,11 @@ def end_tree(pid: int) -> None:
             pass
 
 
+def started(pid_file: Path) -> tuple:
+    """The suite's pytest and the process its test started, once it has."""
+    return tuple(int(p) for p in pid_file.read_text().split()) if pid_file.exists() else ()
+
+
 def run_watched(d: Path, limit: int, pid_file: Path):
     """rat.run_suite, failing the test when it has not come back ENDS_WITHIN
     seconds after the suite's limit, and ending what it left. Without the
@@ -207,13 +215,13 @@ def run_watched(d: Path, limit: int, pid_file: Path):
     late = []
 
     def end_what_is_left():
-        pid = int(pid_file.read_text()) if pid_file.exists() else None
-        still = bool(pid and alive(pid))
+        pid, child = started(pid_file) or (None, None)
+        still = [p for p in (pid, child) if p and alive(p)]
         late.append("run_suite had not come back %ds after the suite's %ds limit%s"
-                    % (ENDS_WITHIN, limit, ", and the suite's pytest was still running" if still else ""))
+                    % (ENDS_WITHIN, limit, ", and the suite's pytest was still running" if pid in still else ""))
         with rat._RUNNING_LOCK:
             running = [proc.pid for proc in rat._RUNNING]
-        for p in running + ([pid] if still else []):
+        for p in running + still:
             end_tree(p)
     watch = threading.Timer(limit + ENDS_WITHIN, end_what_is_left)
     watch.daemon = True
@@ -242,10 +250,13 @@ def test_a_suite_out_of_time_fails_and_ends_what_it_started(tmp_path):
             break
     else:
         pytest.fail("the suite's test never started, even in %ds, so this proves nothing" % limit)
-    pid = int(pid_file.read_text())
-    if not gone(pid):
-        end_tree(pid)
-        pytest.fail("the stopped suite's pytest is still running")
+    pid, child = started(pid_file)
+    pytest_ended, child_ended = gone(pid), gone(child)
+    for p, ended in ((pid, pytest_ended), (child, child_ended)):
+        if not ended:
+            end_tree(p)
+    assert pytest_ended, "the stopped suite's pytest is still running"
+    assert child_ended, "the process the stopped suite's test started is still running"
 
 
 def test_a_second_run_waits_for_the_first_ones_lock(tmp_path):
