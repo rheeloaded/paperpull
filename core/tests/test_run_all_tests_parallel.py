@@ -70,28 +70,59 @@ def fake_run(tmp_path, monkeypatch):
     return make
 
 
-SLOW = """
+# Each suite's one test says it has started, then waits for the other two to
+# say so before it ends. All three pass only when all three were running at
+# once, however long each one's pytest took to start. They used to sleep four
+# seconds and compare times instead, and on 2026-10-03 that failed under load,
+# when one suite's pytest started more than four seconds after another's. Each
+# says so in a file of its own, since lines that several processes append to
+# one file can overwrite each other on Windows, which failed the old way too.
+MEET = """
     import os, time
-    def test_slow():
-        start = time.time()
-        time.sleep(4)
-        with open(os.environ["OVERLAP_LOG"], "a") as f:
-            f.write("%s %f %f\\n" % (os.path.basename(os.getcwd()), start, time.time()))
+    def test_meet():
+        folder, me = os.environ["STARTED_IN"], os.path.basename(os.getcwd())
+        open(os.path.join(folder, me), "w").close()
+        limit = float(os.environ["WAIT_SECONDS"])
+        end = time.monotonic() + limit
+        while True:
+            missing = [n for n in os.environ["WAIT_FOR"].split()
+                       if not os.path.exists(os.path.join(folder, n))]
+            if not missing or time.monotonic() > end:
+                break
+            time.sleep(0.05)
+        assert not missing, "%s waited %gs for %s, which never started" % (me, limit, " and ".join(missing))
     """
 
 
+def suites_that_meet(fake_run, tmp_path, monkeypatch, seconds):
+    names = ("alpha", "beta", "gamma")
+    (tmp_path / "started").mkdir()
+    monkeypatch.setenv("STARTED_IN", str(tmp_path / "started"))
+    monkeypatch.setenv("WAIT_FOR", " ".join(names))
+    monkeypatch.setenv("WAIT_SECONDS", str(seconds))
+    fake_run({n: suite_with(tmp_path / "s", n, MEET) for n in names})
+
+
 def test_suites_run_side_by_side_and_each_is_reported_once(fake_run, tmp_path, monkeypatch, capsys):
-    log = tmp_path / "overlap.log"
-    monkeypatch.setenv("OVERLAP_LOG", str(log))
-    fake_run({n: suite_with(tmp_path / "s", n, SLOW) for n in ("alpha", "beta", "gamma")})
-    assert rat.main(["--jobs", "3"]) == 0
+    suites_that_meet(fake_run, tmp_path, monkeypatch, seconds=60)
+    code = rat.main(["--jobs", "3"])
     out = capsys.readouterr().out
+    assert code == 0, "the three suites were never all running at once\n" + out
     for n in ("alpha", "beta", "gamma"):
-        assert sum(1 for ln in out.splitlines() if ln.startswith("ok") and " %s " % n in ln + " ") == 1
-    spans = [tuple(map(float, ln.split()[1:])) for ln in log.read_text().splitlines()]
-    assert len(spans) == 3
-    assert max(s for s, _ in spans) < min(e for _, e in spans), "the three suites never overlapped"
+        said = [ln for ln in out.splitlines() if ln.split()[:2] == ["ok", n]]
+        assert len(said) == 1 and "1 passed" in said[0], out
     assert "3 suites, 3 at a time, longest first" in out
+
+
+def test_one_at_a_time_the_same_suites_fail(fake_run, tmp_path, monkeypatch, capsys):
+    # What keeps the test above honest. One at a time, the first suite waits
+    # for two that cannot start until it ends, and the second for the third.
+    suites_that_meet(fake_run, tmp_path, monkeypatch, seconds=1)
+    assert rat.main(["--jobs", "1"]) == 1
+    out = capsys.readouterr().out
+    assert "alpha waited 1s for beta and gamma, which never started" in out, out
+    assert "beta waited 1s for gamma, which never started" in out, out
+    assert sum(1 for ln in out.splitlines() if ln.split()[:2] == ["ok", "gamma"]) == 1, out
 
 
 def test_one_at_a_time_keeps_the_old_order(fake_run, tmp_path, monkeypatch):
