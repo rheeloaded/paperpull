@@ -398,8 +398,10 @@ class App:
             print("Success: connected and a statements page is visible.")
             print("Keep that browser window OPEN, then run run_pilot.bat.")
         else:
-            print("Connected and signed in, but I could not find a statements list.")
-            print("Open your statements in that browser, then press Record.")
+            print("Connected, but the statements list did not load, so this cannot say")
+            print("whether you are signed in. Look at the browser window and answer")
+            print("anything Apple asks there yourself. If it shows your account, open")
+            print("your statements in it, then press Record.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:

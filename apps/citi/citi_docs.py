@@ -318,8 +318,10 @@ class App:
             print("Success: connected and the Account Statements page is open.")
             print("Keep that browser window OPEN, then run:  paperpull citi pilot")
         else:
-            print("Connected and signed in, but I could not open the Account Statements page.")
-            print("Open Statements in that browser yourself, then run --diagnose.")
+            print("Connected, but the Account Statements page did not load, so this")
+            print("cannot say whether you are signed in. Look at the browser window and")
+            print("answer anything Citi asks there yourself. If it shows your account,")
+            print("open Statements in it yourself, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:

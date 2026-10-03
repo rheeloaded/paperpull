@@ -313,8 +313,10 @@ class App:
             print("Success: connected and signed in to Paylocity.")
             print("Keep that browser window OPEN, then run run_pilot.bat.")
         else:
-            print("Connected and signed in. Open Pay > Pay History (Current Check)")
-            print("in that browser if the pilot finds nothing, then re-run.")
+            print("Connected, but Pay History did not load, so this cannot say whether")
+            print("you are signed in. Look at the browser window and answer anything")
+            print("Paylocity asks there yourself. If it shows your account, open Pay >")
+            print("Pay History (Current Check) in it, then run --login again.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:

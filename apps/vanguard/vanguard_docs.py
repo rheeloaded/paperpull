@@ -295,8 +295,10 @@ class App:
             print("Success: connected and the Statements & Tax Forms page is visible.")
             print("Keep that browser window OPEN, then run run_pilot.")
         else:
-            print("Connected and signed in, but the documents page did not render.")
-            print("Open Accounts > Statements & Tax Forms in that browser, then run --diagnose.")
+            print("Connected, but the documents page did not load, so this cannot say")
+            print("whether you are signed in. Look at the browser window and answer")
+            print("anything Vanguard asks there yourself. If it shows your account, open")
+            print("Accounts > Statements & Tax Forms in it, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:

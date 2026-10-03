@@ -24,6 +24,7 @@ from __future__ import annotations
 import html as _html
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -211,7 +212,13 @@ FALLBACK = {
                 "[data-component='purchasedItems'] .a-fixed-left-grid",
     "item_title": ".yohtmlc-product-title, a[href*='/dp/'], a[href*='/gp/product/']",
     "next_page": ".a-pagination .a-last a, a.s-pagination-next",
+    # Amazon's own count of the orders a period holds, "0 orders" for a
+    # year with none. It is in span.num-orders, or on some pages in bold in
+    # the period menu's label. It is what tells a year with no orders apart
+    # from a page that never drew its list.
+    "order_count": "span.num-orders, label.time-filter__label b",
     "page_ready": ".order-card, .js-order-card, [data-component='orderCard'], "
+                  "span.num-orders, label.time-filter__label b, "
                   "#ordersContainer, .your-orders-content",
     # printable summary page
     "print_page_body": "body",
@@ -428,23 +435,101 @@ def detect_security_challenge(page) -> Optional[str]:
 # Order history navigation
 # ---------------------------------------------------------------------------
 
-def goto_orders(page) -> None:
+# How long the order list gets to appear, and one year's page of it, how
+# long each is left to settle after that, and how long a page the list
+# never came to is watched for a check. A bot check can hold a page blank
+# while it decides and only then show itself, so a list running late is not
+# the same as a year with no orders.
+ORDERS_WAIT_MS = 30000
+YEAR_WAIT_MS = 20000
+SETTLE_MS = 2000
+YEAR_SETTLE_MS = 1500
+CHALLENGE_WAIT_MS = 15000
+
+
+def goto_orders(page) -> bool:
+    """Open the order list. True when it appeared, its orders or Amazon's
+    own count saying the period has none.
+
+    False is not an empty history and not a signed-in session. A page can
+    sit blank while a bot check decides and only then turn into the check,
+    so one look at it finds nothing to name."""
     page.goto(URLS["orders"], wait_until="domcontentloaded", timeout=60000)
-    try:
-        page.wait_for_selector(FALLBACK["page_ready"], timeout=30000)
-    except Exception:
-        log.warning("Order-history content did not appear within 30s")
-    page.wait_for_timeout(2000)
+    return _wait_for_list(page, ORDERS_WAIT_MS, SETTLE_MS)
 
 
 def goto_year_page(page, year: int, start_index: int = 0) -> bool:
+    """One year's page of the order list. True when it appeared, the same
+    way, with the count read against where this page starts."""
     page.goto(orders_url(year, start_index), wait_until="domcontentloaded", timeout=60000)
+    return _wait_for_list(page, YEAR_WAIT_MS, YEAR_SETTLE_MS, start_index)
+
+
+def _wait_for_list(page, wait_ms: int, settle_ms: int, start_index: int = 0) -> bool:
     try:
-        page.wait_for_selector(FALLBACK["page_ready"], timeout=20000)
+        page.wait_for_selector(FALLBACK["page_ready"], timeout=wait_ms)
+    except Exception:
+        log.warning("Order-history content did not appear within %gs", wait_ms / 1000)
+    page.wait_for_timeout(settle_ms)
+    return orders_listed(page, start_index)
+
+
+def order_count(page) -> Optional[int]:
+    """Amazon's own count of the orders the period holds, or None when the
+    page shows no count."""
+    try:
+        loc = page.locator(FALLBACK["order_count"])
+        if loc.count() == 0:
+            return None
+        text = loc.first.text_content(timeout=2000) or ""
+    except Exception:
+        return None
+    m = re.match(r"\s*(\d[\d,.\u00a0 ]*)", text)
+    digits = re.sub(r"\D", "", m.group(1)) if m else ""
+    return int(digits) if digits else None
+
+
+def orders_listed(page, start_index: int = 0) -> bool:
+    """Whether the order list is on the page now. Nothing is waited for.
+
+    Its orders are there, or Amazon's own count says the period holds no
+    more orders than come before this page, the way a year with none reads
+    "0 orders". A page with neither never drew its list, however signed in
+    it looks."""
+    try:
+        if page.locator(FALLBACK["order_card"]).count() > 0:
+            return True
     except Exception:
         pass
-    page.wait_for_timeout(1500)
-    return True
+    count = order_count(page)
+    if count is not None and count <= start_index:
+        return True
+    # The orders read off the page's text, the way collect_cards falls back
+    # to doing when the cards are drawn some other way.
+    try:
+        body = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+        body = ""
+    return bool(ORDER_ID_RE.search(body or ""))
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None,
+                             start_index: int = 0) -> Optional[str]:
+    """A security challenge on a page the order list never came to, looked
+    for several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    list turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page, start_index) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 def has_next_page(page) -> bool:

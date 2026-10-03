@@ -293,8 +293,10 @@ class App:
             print("Success: connected and the bill history is visible.")
             print("Keep that browser window OPEN, then run run_pilot.bat.")
         else:
-            print("Connected and signed in, but the bill history did not open.")
-            print("In that browser go to Billing and payments, then run --diagnose.")
+            print("Connected, but the bill history did not load, so this cannot say")
+            print("whether you are signed in. Look at the browser window and answer")
+            print("anything PG&E asks there yourself. If it shows your account, go to")
+            print("Billing and payments in it, then run --diagnose.")
 
     def _in_scope(self, doc: Document) -> bool:
         a = self.args

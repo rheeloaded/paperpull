@@ -273,23 +273,86 @@ class App:
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
 
+    def _look_at_orders(self, page, year: Optional[int] = None, start_index: int = 0):
+        """Open the order list, or one year's page of it, and say what is
+        there, as (listed, challenge).
+
+        Only the list shows a signed-in session, its orders or Amazon's own
+        count saying there are none. When it does not come the page is
+        looked at again for a little while, because a bot check can leave a
+        page blank and a moment later turn it into the check, and one look
+        at the blank page finds nothing to name. That one look is how
+        --login said Success on a page with no list on it."""
+        if year is None:
+            listed = site.goto_orders(page)
+        else:
+            listed = site.goto_year_page(page, year, start_index)
+        if listed:
+            return True, site.detect_security_challenge(page)
+        challenge = site.challenge_after_a_moment(page, start_index=start_index)
+        return site.orders_listed(page, start_index), challenge
+
+    def _open_orders(self, page, year: int, start_index: int = 0) -> None:
+        """Open one year's page of the order list and go on only once it is
+        there.
+
+        Discovery used to go on from a page the list never came to, find no
+        orders on it and take the year as empty. On the first year that
+        meant no orders at all, and on a later one the scan stopped there as
+        though the history had ended, so a run read as clean with purchases
+        missed."""
+        while True:
+            listed, challenge = self._look_at_orders(page, year, start_index)
+            if listed:
+                # Checked once more, as it always was. A sign-in at a console
+                # leaves the page on the order list's first page, which would
+                # be read as this page of this year and its orders never
+                # found, so this year's page is opened and looked at again
+                # for as long as the check had to ask.
+                while self.check_session(page):
+                    listed, challenge = self._look_at_orders(page, year, start_index)
+                if listed:
+                    break
+            if challenge or site.looks_signed_out(page):
+                # Asked about, or under the panel the run stops there. A
+                # sign-in at the console moves the page, so it is opened again
+                # before anything on it is read.
+                while self.check_session(page):
+                    listed, challenge = self._look_at_orders(page, year, start_index)
+                continue
+            self.progress.save(backup=True)
+            print("\n!! Your Amazon orders did not load, so this cannot find any of")
+            print("them. Look at the browser window. If Amazon is asking you to type")
+            print("characters or solve a puzzle, or asking you to sign in, answer it")
+            print("there yourself. I will NOT attempt to bypass it.")
+            self.write_failure("open the order list", "the order list did not appear")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page shows your orders (or Ctrl+C to quit)... ") is None:
+                print("Once it shows your orders, run this again.")
+                raise SystemExit(0)
+
     def cmd_login(self):
         if self.config.get("cdp_url"):
             # CDP mode: the browser is launched by login.bat (not here). This
             # just verifies we can connect and that you are signed in.
             print("Checking the connection to your signed-in Amazon browser...\n")
             page = self.page()
-            site.goto_orders(page)
-            challenge = site.detect_security_challenge(page)
+            listed, challenge = self._look_at_orders(page)
             if challenge:
                 print(f"!! {challenge}")
                 print("Resolve it yourself in the browser window, then re-run --login.")
             elif site.looks_signed_out(page):
                 print("Connected, but Amazon shows the signed-out page.")
                 print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-            else:
+            elif listed:
                 print("Success: connected to your signed-in Amazon session.")
                 print("Keep that browser window OPEN, then run the diagnostics or pilot.")
+            else:
+                print("Connected, but your Amazon orders did not load, so this cannot")
+                print("say whether you are signed in. Look at the browser window. If")
+                print("Amazon asks you to type characters or solve a puzzle, or asks you")
+                print("to sign in, answer it there yourself, keep the window OPEN, then")
+                print("re-run --login.")
             self.close()
             return
         print("Opening Amazon.com in a dedicated supervised browser profile.")
@@ -304,12 +367,19 @@ class App:
         # the browser is deliberately left open.
         if not browser_launcher.pause_for_sign_in():
             return
-        site.goto_orders(page)
-        if site.looks_signed_out(page):
+        listed, challenge = self._look_at_orders(page)
+        if challenge:
+            print(f"!! {challenge}")
+            print("Resolve it yourself in the browser window, then run --login again.")
+        elif site.looks_signed_out(page):
             print("It still looks like you are signed out; the orders page bounced to login.")
             print("Sign in in the browser, then run:  python amazon_receipts.py --login")
-        else:
+        elif listed:
             print("Signed-in session detected.")
+        else:
+            print("Your Amazon orders did not load, so this cannot say whether you")
+            print("are signed in. Look at the browser window, answer anything Amazon")
+            print("asks there yourself, then run --login again.")
         self.close()
 
     def _discover_years(self) -> List[int]:
@@ -341,13 +411,7 @@ class App:
             seen_ids_this_year = set()
             year_cards = 0
             for _ in range(60):  # generous page cap per year
-                site.goto_year_page(page, year, start_index)
-                # Signing in again at a console leaves the page on the order
-                # list's first page, which would be read as this page of
-                # this year and this page's orders never found. So it is
-                # opened again for as long as the check had to ask.
-                while self.check_session(page):
-                    site.goto_year_page(page, year, start_index)
+                self._open_orders(page, year, start_index)
                 cards = site.collect_cards(page, ONLINE)
                 log.info("Year %s startIndex=%s: %d order cards",
                          year, start_index, len(cards))

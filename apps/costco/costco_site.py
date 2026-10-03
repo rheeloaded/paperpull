@@ -86,6 +86,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -469,8 +470,24 @@ def is_safe_control(name: str) -> bool:
 # The purchase history, read through the page's own API
 # ---------------------------------------------------------------------------
 
-def goto_orders(page, page_no: int = 1, fresh: bool = False) -> None:
-    """Open Orders & Purchases and wait for the tabs to exist.
+# How long each try at Orders & Purchases gets to draw its tabs, how long
+# the page is given to go quiet after that, and how long a page the tabs
+# never came to is watched for a bot check. A check can hold the page blank
+# while it decides and only then show itself, so tabs running late are not
+# the same as a page that is fine.
+ORDERS_WAIT_MS = 25000
+SETTLE_MS = 12000
+CHALLENGE_WAIT_MS = 15000
+
+
+def goto_orders(page, page_no: int = 1, fresh: bool = False) -> bool:
+    """Open Orders & Purchases and wait for the tabs to exist. True when
+    they are there.
+
+    False is not an empty history and not a signed-in session. The tabs
+    are drawn whether or not there is anything under them, so a page
+    without them never drew its history, and a page can sit blank while a
+    bot check decides and only then turn into the check.
 
     Both routes under /myaccount/ differ only after the "#", so going
     from one order's details back to the list is a same document
@@ -484,7 +501,7 @@ def goto_orders(page, page_no: int = 1, fresh: bool = False) -> None:
     if the tabs do not turn up, which is the one thing a hash cannot
     do on its own."""
     if on_orders_page(page) and has_tabs(page) and not fresh:
-        return
+        return True
     # Going from this page to this page is a hash change and loads
     # nothing at all, so when a fresh one is wanted it is asked for
     # outright. Trying goto first cost twenty five seconds a receipt
@@ -498,13 +515,14 @@ def goto_orders(page, page_no: int = 1, fresh: bool = False) -> None:
         except Exception as e:
             log.warning("Could not open Orders & Purchases: %s", e)
         try:
-            page.wait_for_selector(FALLBACK["tab"], timeout=25000)
+            page.wait_for_selector(FALLBACK["tab"], timeout=ORDERS_WAIT_MS)
             settle(page)
-            return
+            return True
         except Exception:
             if attempt == 2:
                 log.warning("The Orders & Purchases tabs did not appear")
     settle(page)
+    return has_tabs(page)
 
 
 def has_tabs(page) -> bool:
@@ -514,17 +532,43 @@ def has_tabs(page) -> bool:
         return False
 
 
+def orders_listed(page) -> bool:
+    """Whether Orders & Purchases has drawn its tabs now. Nothing is waited
+    for."""
+    return has_tabs(page)
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the tabs never came to, looked for
+    several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    tabs turn up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
+
+
 def on_orders_page(page) -> bool:
     return "ordersandpurchases" in (page.url or "").lower()
 
 
-def settle(page, ms: int = 12000) -> None:
+def settle(page, ms: Optional[int] = None) -> None:
     """Wait for the page to stop talking. Every tab and every date range
     is an API call and a redraw, with no navigation to wait on."""
+    ms = SETTLE_MS if ms is None else ms
     try:
-        page.wait_for_load_state("networkidle", timeout=ms)
+        # Never 0, which Playwright reads as no limit at all.
+        page.wait_for_load_state("networkidle", timeout=max(1, ms))
     except Exception:
-        page.wait_for_timeout(2500)
+        page.wait_for_timeout(min(2500, ms))
 
 
 def goto_orders_route(page, url: str) -> None:

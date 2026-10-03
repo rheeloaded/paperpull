@@ -29,6 +29,10 @@ file_a_receipt hand one to a receipt app's own check.
 stall_reads makes chosen elements of a real page fail to answer, for a
 test of what an app does with an element it could not read.
 
+drawn_browser starts a browser with a debugging port for an app to attach
+to, and hands it over only once a tab has drawn a page, since a browser
+that has only just started can abort its first navigation.
+
 Nothing here is used by a run. It is in the package so every app's tests
 can import it the same way they import everything else.
 """
@@ -37,6 +41,7 @@ from __future__ import annotations
 import inspect
 import io
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -268,3 +273,158 @@ class TabsHeardLate:
             page._loop.call_later(seconds, self.let_through)
         else:
             page._loop.call_soon(self.let_through)
+
+
+# -- a browser to attach to, ready before the app attaches ---------------------
+
+class FreshBrowserError(RuntimeError):
+    """A fresh browser that never became ready, and what each start did."""
+
+
+class NoDebugPort(FreshBrowserError):
+    """The browser opened no debugging port at all."""
+
+
+_READY_TITLE = "drawn before the app attaches"
+
+
+class _ReadyPage:
+    """One small page on a port of its own, for a fresh browser to draw."""
+
+    def __init__(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        body = ("<!doctype html><html><head><title>%s</title></head><body>ready</body></html>"
+                % _READY_TITLE).encode("utf-8")
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.address = "http://127.0.0.1:%d/" % self.httpd.server_address[1]
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def _start_fresh_browser(exe, profile, args):
+    """The browser as a program of its own with a debugging port, and its
+    address, or None for the address when it opened no port."""
+    import subprocess
+    import time
+
+    from .browser import wait_for_debug_port
+
+    proc = subprocess.Popen(
+        [str(exe), "--headless=new", "--remote-debugging-port=0",
+         "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check",
+         *args, "about:blank"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    port, deadline = "", time.monotonic() + 30
+    while not port and time.monotonic() < deadline and proc.poll() is None:
+        try:
+            port = (Path(profile) / "DevToolsActivePort").read_text().split()[0]
+        except (OSError, IndexError):
+            time.sleep(0.1)
+    if not port or not wait_for_debug_port(port):
+        return proc, None
+    return proc, "http://127.0.0.1:%s" % port
+
+
+def _draws(url, address, tries):
+    """Whether a tab opened the way an attaching app opens one, over CDP in
+    the browser's own first context, draws the ready page, and what each try
+    did. A tab that did not draw is left where it is, since closing a fresh
+    browser's tab has hung before. The one that drew stays open on it."""
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+
+    did = []
+    with sync_playwright() as p:
+        try:
+            context = p.chromium.connect_over_cdp(url).contexts[0]
+        except (PlaywrightError, IndexError) as e:
+            return False, ["could not attach, %s" % str(e).splitlines()[0]]
+        for _try in range(tries):
+            try:
+                page = context.new_page()
+                page.goto(address, wait_until="domcontentloaded", timeout=15000)
+                if page.title() == _READY_TITLE:
+                    return True, did
+                did.append("drew %r instead" % page.title())
+            except PlaywrightError as e:
+                did.append(str(e).splitlines()[0])
+    return False, did
+
+
+def _close_browser(proc, url) -> None:
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            p.chromium.connect_over_cdp(url).new_browser_cdp_session().send("Browser.close")
+        proc.wait(timeout=15)
+    except Exception:
+        proc.kill()
+        proc.wait(timeout=15)
+
+
+@contextmanager
+def drawn_browser(exe, make_profile, args=(), starts=3, tries=3):
+    """A browser started as a program of its own with a debugging port, the
+    way login.bat starts one, and its address, handed over only once a tab
+    has drawn a page. Closed when the block ends.
+
+    At home login.bat opened the browser and the person signed in there,
+    well before the app attached. A browser that has only just started is
+    not that. On CI a fresh Chrome's first navigation came back
+    net::ERR_ABORTED after about five seconds, which is how a browser
+    answers when its network service restarts under it, and about one
+    fresh start in thirteen loses its first tab. The GitHub, Walmart and
+    Best Buy fixtures guard against it one by one (2026-10-01), and this is
+    that guard in one place.
+
+    A page of this helper's own, served on a port of its own, is opened in
+    a new tab of the browser's first context, which is how an attaching
+    app opens its tab, and again in another tab when it does not draw. A
+    browser that never draws it is closed and another started. The tab that
+    drew stays open on a page that asks for nothing more. make_profile is
+    called once per start for an empty profile folder. NoDebugPort means
+    the browser opened no port at all, FreshBrowserError that no start drew
+    the page, naming what each one did."""
+    ready = _ReadyPage()
+    proc, url, tried = None, None, []
+    try:
+        for _start in range(starts):
+            proc, url = _start_fresh_browser(exe, make_profile(), args)
+            if url is None:
+                proc.kill()
+                proc.wait(timeout=15)
+                proc = None
+                raise NoDebugPort("the browser opened no debugging port")
+            drew, did = _draws(url, ready.address, tries)
+            if drew:
+                break
+            tried.append(", then ".join(did) or "nothing drew")
+            proc.kill()
+            proc.wait(timeout=15)
+            proc = None
+        else:
+            raise FreshBrowserError("%d fresh browsers in a row never drew a page. %s"
+                                    % (starts, " / ".join(tried)))
+        yield url
+    finally:
+        if proc is not None:
+            _close_browser(proc, url)
+        ready.close()

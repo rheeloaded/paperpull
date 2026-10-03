@@ -59,6 +59,7 @@ from __future__ import annotations
 import html as _html
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import date as _date
 from typing import List, Optional
@@ -363,10 +364,11 @@ def _order_count(page) -> int:
         return _order_link_count(page)
 
 
-def scroll_all_orders(page, max_rounds: int = 25, delay_ms: int = 2000,
+def scroll_all_orders(page, max_rounds: int = 25, delay_ms: Optional[int] = None,
                       stable_rounds: int = 3) -> int:
     """Scroll until the list stops growing, in orders and in page height,
     pressing any "Show more" it offers. Returns the order count."""
+    delay_ms = SCROLL_DELAY_MS if delay_ms is None else delay_ms
     last = _order_count(page)
     last_height = 0
     stable = 0
@@ -400,19 +402,82 @@ def scroll_all_orders(page, max_rounds: int = 25, delay_ms: int = 2000,
     return last
 
 
-def goto_orders(page, year: Optional[int] = None) -> None:
+# How long the history gets to show an order, how long it is left to settle
+# after that, how long a page with none is watched for a bot check, and the
+# pause between one scroll and the next. A check can hold the page blank
+# while it decides and only then show itself, so orders running late are
+# not the same as none.
+ORDERS_WAIT_MS = 20000
+SETTLE_MS = 2500
+CHALLENGE_WAIT_MS = 15000
+SCROLL_DELAY_MS = 2000
+
+# eBay's words for a history with nothing in it. They have not been seen on
+# a real account, so this is the usual phrasing rather than eBay's own
+# sentence. A page that says something else and shows no orders is taken
+# as one that did not load, which sends the person to look at it and
+# claims nothing.
+EMPTY_RE = re.compile(
+    r"\b(?:no|haven.t\s+(?:bought|purchased|made)\s+any|don.t\s+have\s+any|"
+    r"(?:didn|couldn).t\s+find\s+any)\s+(?:recent\s+)?(?:orders|purchases)\b|"
+    r"haven.t\s+bought\s+anything", re.I)
+
+
+def goto_orders(page, year: Optional[int] = None) -> bool:
     """Open the purchase history, for one calendar year when given, and
-    scroll it until the list settles."""
+    scroll it until the list settles. True when it holds orders, or says
+    it has none.
+
+    False is not an empty history and not a signed-in session. A page can
+    sit blank while a bot check decides and only then turn into the check,
+    so one look at it finds nothing to name."""
     page.goto(orders_url(year), wait_until="domcontentloaded", timeout=60000)
     # The list renders a moment after the shell. Wait for an order link
     # itself, since "main" is there at once, and give an empty year the
     # full wait before believing it is empty.
     try:
-        page.wait_for_selector(FALLBACK["order_link"], timeout=20000)
+        page.wait_for_selector(FALLBACK["order_link"], timeout=ORDERS_WAIT_MS)
     except Exception:
         pass
-    page.wait_for_timeout(2500)
+    page.wait_for_timeout(SETTLE_MS)
     scroll_all_orders(page)
+    return orders_listed(page)
+
+
+def history_state(page) -> str:
+    """"empty" when the page says there are no purchases, else ""."""
+    try:
+        text = page.locator("body").inner_text(timeout=5000)
+    except Exception:
+        return ""
+    return "empty" if EMPTY_RE.search(text or "") else ""
+
+
+def orders_listed(page) -> bool:
+    """Whether the history is on the page now, an order by its link or by
+    its number, or its own word that there are none. Nothing is waited
+    for."""
+    if _order_count(page) > 0:
+        return True
+    return history_state(page) == "empty"
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the history never came to, looked for
+    several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    history turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 @dataclass

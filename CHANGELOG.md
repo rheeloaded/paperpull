@@ -7,6 +7,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Seven more receipt apps no longer call a page with no order list
+  signed in.** Amazon, Costco, eBay, Gap, GitHub, Home Depot and Lowe's
+  asked the way Walmart and Best Buy did before 0.41.0. Login said Success
+  whenever one look at the orders page found neither a check nor a sign-in
+  page, and a page still blank while a bot check decides has neither. Now
+  it says Success only once the list is there, or the site's own word
+  that there is nothing in it, and otherwise looks for a check for a
+  little while and names it, or says the list did not load and to look at
+  the browser window. Discovery stops there too, rather than finding
+  nothing and finishing clean. Amazon tells a year with no orders from a
+  page that never drew by Amazon's own count, "0 orders", so the walk
+  back through the years still ends where the history starts, and a year
+  whose page never drew now stops the run instead of ending the walk.
+- **Document apps no longer say signed in when their documents page did
+  not come.** Forty-one of them said "Connected and signed in" when the
+  page they look for never appeared. They now say it did not load, so
+  they cannot tell, and to look at the browser window and answer anything
+  the site asks there.
+
 ## [0.42.0] - 2026-10-03
 
 Repairs from testers' reports and from checks run across every app.

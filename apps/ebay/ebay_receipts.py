@@ -274,23 +274,76 @@ class App:
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
 
+    def _look_at_orders(self, page):
+        """Open the purchase history and say what is there, as (listed,
+        challenge).
+
+        Only the history shows a signed-in session, its orders or its own
+        word that there are none. When it does not come the page is looked
+        at again for a little while, because a bot check can leave the page
+        blank and a moment later turn it into the check, and one look at
+        the blank page finds nothing to name. That one look is how --login
+        said Success on a page with no orders on it."""
+        if site.goto_orders(page):
+            return True, site.detect_security_challenge(page)
+        challenge = site.challenge_after_a_moment(page)
+        return site.orders_listed(page), challenge
+
+    def _open_orders(self, page) -> None:
+        """Open the purchase history, unfiltered, and go on only once it is
+        there.
+
+        Discovery used to go on from a history that never came, find no
+        orders on the blank page and walk the years from there, so a run
+        could finish as though there were none. The walk itself still takes
+        a year with no orders on it as an empty year, as it always has,
+        since eBay's words for one have not been seen and every walk ends
+        on two of them."""
+        while True:
+            listed, challenge = self._look_at_orders(page)
+            if listed:
+                # Checked once below, as it always was. Going round again
+                # here would ask forever about a word on a page that is fine.
+                break
+            if challenge or site.looks_signed_out(page):
+                # Asked about, or under the panel the run stops there.
+                self.check_session(page)
+                continue
+            self.progress.save(backup=True)
+            print("\n!! Your eBay purchase history did not load, so this cannot find")
+            print("any purchases. Look at the browser window. If eBay is asking you")
+            print("to prove you are a person, or asking you to sign in, answer it")
+            print("there yourself. I will NOT attempt to bypass it.")
+            self.write_failure("open the purchase history",
+                               "the purchase history did not appear")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page shows your purchases (or Ctrl+C to quit)... ") is None:
+                print("Once it shows your purchases, run this again.")
+                raise SystemExit(0)
+        self.check_session(page)
+
     def cmd_login(self):
         if self.config.get("cdp_url"):
             # CDP mode: the browser is launched by login.bat (not here). This
             # just verifies we can connect and that you are signed in.
             print("Checking the connection to your signed-in eBay browser...\n")
             page = self.page()
-            site.goto_orders(page)
-            challenge = site.detect_security_challenge(page)
+            listed, challenge = self._look_at_orders(page)
             if challenge:
                 print(f"!! {challenge}")
                 print("Resolve it yourself in the browser window, then re-run --login.")
             elif site.looks_signed_out(page):
                 print("Connected, but eBay shows the signed-out page.")
                 print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-            else:
+            elif listed:
                 print("Success: connected to your signed-in eBay session.")
                 print("Keep that browser window OPEN, then run the diagnostics or pilot.")
+            else:
+                print("Connected, but your eBay purchase history did not load, so this")
+                print("cannot say whether you are signed in. Look at the browser window.")
+                print("If eBay asks you to prove you are a person, or asks you to sign")
+                print("in, answer it there yourself, keep the window OPEN, then re-run")
+                print("--login.")
             self.close()
             return
         print("Opening eBay.com in a dedicated supervised browser profile.")
@@ -305,12 +358,19 @@ class App:
         # the browser is deliberately left open.
         if not browser_launcher.pause_for_sign_in():
             return
-        site.goto_orders(page)
-        if site.looks_signed_out(page):
+        listed, challenge = self._look_at_orders(page)
+        if challenge:
+            print(f"!! {challenge}")
+            print("Resolve it yourself in the browser window, then run --login again.")
+        elif site.looks_signed_out(page):
             print("It still looks like you are signed out; the orders page bounced to login.")
             print("Sign in in the browser, then run:  python ebay_receipts.py --login")
-        else:
+        elif listed:
             print("Signed-in session detected.")
+        else:
+            print("Your eBay purchase history did not load, so this cannot say whether")
+            print("you are signed in. Look at the browser window, answer anything eBay")
+            print("asks there yourself, then run --login again.")
         self.close()
 
     # eBay's history is filtered by year, and "All" is only this year and
@@ -346,8 +406,7 @@ class App:
         # The filter is still walked afterwards, because it is how the
         # history reaches back past what the unfiltered page will show,
         # and a card already seen is dropped by its order id.
-        site.goto_orders(page, None)
-        self.check_session(page)
+        self._open_orders(page)
         site.scroll_all_orders(page)
         unfiltered = site.collect_cards(page)
         log.info("Purchase history, unfiltered: %d order(s)", len(unfiltered))

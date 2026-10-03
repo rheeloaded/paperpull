@@ -316,8 +316,10 @@ class App:
             print("Success: connected and the Documents page is visible.")
             print("Keep that browser window OPEN, then run run_pilot.bat.")
         else:
-            print("Connected and signed in, but I could not find the Documents list.")
-            print("Open your Documents/Statements page in that browser, then run --diagnose.")
+            print("Connected, but the Documents list did not load, so this cannot say")
+            print("whether you are signed in. Look at the browser window and answer")
+            print("anything Discover asks there yourself. If it shows your account, open")
+            print("your Documents/Statements page in it, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:

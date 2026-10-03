@@ -286,8 +286,10 @@ class App:
             print("Success: connected and the signed-in portal is visible.")
             print("Keep that browser window OPEN, then run run_pilot.")
         else:
-            print("Connected and signed in, but the document center did not render.")
-            print("Open your account in that browser, then run --diagnose.")
+            print("Connected, but the document center did not load, so this cannot say")
+            print("whether you are signed in. Look at the browser window and answer")
+            print("anything Capital One asks there yourself. If it shows your account,")
+            print("open the document center in it, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:

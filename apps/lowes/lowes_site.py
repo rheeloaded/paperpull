@@ -45,6 +45,7 @@ import base64
 import html as _html
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 from urllib.parse import parse_qs, urlsplit
@@ -233,26 +234,68 @@ def is_safe_control(name: str) -> bool:
 EMPTY_RE = re.compile(r"(no|don.t\s+have\s+any|haven.t\s+(placed|made)\s+any)\s+(orders|purchases)", re.I)
 
 
-def goto_orders(page, page_no: int = 1, wait_ms: int = 15000) -> int:
+# How long a page of the history gets to draw its cards, and how long a
+# first page that drew none, and did not say it has none, is watched for a
+# bot check. A check can hold the page blank while it decides and only then
+# show itself, so cards running late are not the same as no purchases.
+ORDERS_WAIT_MS = 15000
+CHALLENGE_WAIT_MS = 15000
+
+
+def goto_orders(page, page_no: int = 1, wait_ms: Optional[int] = None) -> int:
     """Open one page of the whole history and wait until its cards are
     drawn. The page arrives before its list does, and read too soon it
     looks empty, which once made a nine-page history look like five.
-    Returns how many cards are showing."""
+    Returns how many cards are showing.
+
+    Nought is a page that says it has no purchases, which history_state
+    answers, or one that never drew its list, which is not an empty
+    history and not a signed-in session."""
+    wait_ms = ORDERS_WAIT_MS if wait_ms is None else wait_ms
     page.goto(orders_url(page_no), wait_until="domcontentloaded", timeout=60000)
     waited = 0
     while waited < wait_ms:
         page.wait_for_timeout(500)
         waited += 500
-        try:
-            n = page.locator(FALLBACK["details_link"]).count()
-        except Exception:
-            n = 0
+        n = cards_showing(page)
         if n:
             page.wait_for_timeout(800)   # the rest of the five arrive together
-            return page.locator(FALLBACK["details_link"]).count()
+            return cards_showing(page)
         if waited >= 4000 and history_state(page) == "empty":
             return 0
     return 0
+
+
+def cards_showing(page) -> int:
+    """How many purchase cards the page is showing now."""
+    try:
+        return page.locator(FALLBACK["details_link"]).count()
+    except Exception:
+        return 0
+
+
+def orders_listed(page) -> bool:
+    """Whether the history is on the page now, its cards or its own word
+    that there are none. Nothing is waited for."""
+    return cards_showing(page) > 0 or history_state(page) == "empty"
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the history never came to, looked for
+    several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    history turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 def history_state(page) -> str:

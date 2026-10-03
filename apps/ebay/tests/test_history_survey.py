@@ -112,13 +112,17 @@ def test_discovery_reads_the_unfiltered_history_before_any_year():
     """His survey showed twenty-five orders on the unfiltered page, every
     count agreeing at every step, and two on the same page filtered to
     this year. He had made nine. So the filter lost them, and two repairs
-    aimed at the card reading changed nothing for him."""
+    aimed at the card reading changed nothing for him. Since 2026-10-03
+    discovery opens it through _open_orders, which goes on only once the
+    history is there."""
     src = (Path(site.__file__).parent / "ebay_receipts.py").read_text(encoding="utf-8")
     block = src.split("def cmd_discover")[1][:2600]
-    unfiltered = block.index("goto_orders(page, None)")
+    unfiltered = block.index("self._open_orders(page)")
     by_year = block.index("for year in self._years_to_walk()")
     assert unfiltered < by_year, "the unfiltered page is read first"
     assert "not already seen" in block, "a year adds only what the unfiltered page missed"
+    opener = src.split("def _look_at_orders")[1].split("\n    def ")[0]
+    assert "site.goto_orders(page)" in opener, "the history it opens has no year filter"
 
 
 def test_a_year_still_reaches_back_past_what_one_page_shows():

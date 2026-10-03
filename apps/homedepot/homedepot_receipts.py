@@ -267,23 +267,75 @@ class App:
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
 
+    def _look_at_orders(self, page):
+        """Open the purchase history and say what is there, as (request,
+        challenge).
+
+        The request is the page's own ask for its orders, which it makes
+        whether or not there are any, and only that shows a signed-in
+        history. When the page makes none it is looked at again for a
+        little while, because a bot check can leave the page blank and a
+        moment later turn it into the check, and one look at the blank page
+        finds nothing to name. That one look is how --login said Success on
+        a page that never asked for its orders."""
+        request = site.goto_orders(page)
+        if request:
+            return request, site.detect_security_challenge(page)
+        return None, site.challenge_after_a_moment(page)
+
+    def _open_orders(self, page) -> dict:
+        """Open the purchase history and go on only once the page has asked
+        for its orders. Returns that request.
+
+        Discovery used to go on from a page that never asked, write a
+        failure file and finish as though there were nothing new, so a run
+        read as clean with its new purchases missed."""
+        while True:
+            request, challenge = self._look_at_orders(page)
+            if request:
+                # Checked once below, as it always was. Going round again
+                # here would ask forever about a word on a page that is fine.
+                break
+            if challenge or site.looks_signed_out(page):
+                # Asked about, or under the panel the run stops there.
+                self.check_session(page)
+                continue
+            self.progress.save(backup=True)
+            print("\n!! Your Home Depot purchase history did not load, so this cannot")
+            print("find any purchases. Look at the browser window. If Home Depot is")
+            print("asking you to press and hold or prove you are a person, or asking")
+            print("you to sign in, answer it there yourself. I will NOT attempt to")
+            print("bypass it.")
+            self.write_failure("read the purchase history", "the page made no order request")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page shows your purchases (or Ctrl+C to quit)... ") is None:
+                print("Once it shows your purchases, run this again.")
+                raise SystemExit(0)
+        self.check_session(page)
+        return request
+
     def cmd_login(self):
         if self.config.get("cdp_url"):
             # CDP mode: the browser is launched by login.bat (not here). This
             # just verifies we can connect and that you are signed in.
             print("Checking the connection to your signed-in Home Depot browser...\n")
             page = self.page()
-            site.goto_orders(page)
-            challenge = site.detect_security_challenge(page)
+            request, challenge = self._look_at_orders(page)
             if challenge:
                 print(f"!! {challenge}")
                 print("Resolve it yourself in the browser window, then re-run --login.")
             elif site.looks_signed_out(page):
                 print("Connected, but Home Depot shows the signed-out page.")
                 print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-            else:
+            elif request:
                 print("Success: connected to your signed-in Home Depot session.")
                 print("Keep that browser window OPEN, then run the diagnostics or pilot.")
+            else:
+                print("Connected, but your Home Depot purchase history did not load, so")
+                print("this cannot say whether you are signed in. Look at the browser")
+                print("window. If Home Depot asks you to press and hold or prove you are")
+                print("a person, or asks you to sign in, answer it there yourself, keep")
+                print("the window OPEN, then re-run --login.")
             self.close()
             return
         print("Opening homedepot.com in a dedicated supervised browser profile.")
@@ -298,12 +350,19 @@ class App:
         # the browser is deliberately left open.
         if not browser_launcher.pause_for_sign_in():
             return
-        site.goto_orders(page)
-        if site.looks_signed_out(page):
+        request, challenge = self._look_at_orders(page)
+        if challenge:
+            print(f"!! {challenge}")
+            print("Resolve it yourself in the browser window, then run --login again.")
+        elif site.looks_signed_out(page):
             print("It still looks like you are signed out; the orders page bounced to login.")
             print("Sign in in the browser, then run:  python homedepot_receipts.py --login")
-        else:
+        elif request:
             print("Signed-in session detected.")
+        else:
+            print("Your Home Depot purchase history did not load, so this cannot say")
+            print("whether you are signed in. Look at the browser window, answer")
+            print("anything Home Depot asks there yourself, then run --login again.")
         self.close()
 
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
@@ -319,20 +378,13 @@ class App:
         n_new = {ONLINE: 0, IN_STORE: 0}
         floor = self.args.start_date or self.config.get("default_start_date")
 
-        request = site.goto_orders(page)
-        self.check_session(page)
-        if not request:
-            log.warning("The purchase history made no order request. If you are "
-                        "signed in and do have orders, run --diagnose.")
-            self.write_failure("read the purchase history", "the page made no order request")
-            got = {"orders": [], "count": 0, "status": "none"}
-        else:
-            got = site.fetch_orders(page, request)
-            log.info("Order history: %d of %d order(s), answer %s",
-                     len(got["orders"]), got["count"], got["status"])
-            if got["status"] != 200:
-                self.write_failure("read the purchase history",
-                                   "the order request answered %s" % got["status"])
+        request = self._open_orders(page)
+        got = site.fetch_orders(page, request)
+        log.info("Order history: %d of %d order(s), answer %s",
+                 len(got["orders"]), got["count"], got["status"])
+        if got["status"] != 200:
+            self.write_failure("read the purchase history",
+                               "the order request answered %s" % got["status"])
         dropped_by_scope = 0
         for order in got["orders"]:
             purchase = site.order_to_purchase(order)

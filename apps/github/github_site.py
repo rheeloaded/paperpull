@@ -46,6 +46,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 from urllib.parse import urljoin, urlsplit
@@ -226,13 +227,56 @@ def orders_url(page_no: int = 1) -> str:
     return f"{ORDERS_URL}?page={page_no}" if page_no > 1 else ORDERS_URL
 
 
-def goto_orders(page, page_no: int = 1) -> None:
+# How long the payment history gets to draw its frame, how long it is left
+# to settle after that, and how long a page the frame never came to is
+# watched for a check. A check can hold a page blank while it decides and
+# only then show itself, so a frame running late is not a page that is fine.
+ORDERS_WAIT_MS = 20000
+SETTLE_MS = 1500
+CHALLENGE_WAIT_MS = 15000
+
+
+def goto_orders(page, page_no: int = 1) -> bool:
+    """Open a page of the payment history. True when its frame is there,
+    which GitHub draws with the page, payments or none.
+
+    False is not an empty history and not a signed-in session. A page can
+    sit blank while a check decides and only then turn into the check, so
+    one look at it finds nothing to name."""
     page.goto(orders_url(page_no), wait_until="domcontentloaded", timeout=60000)
     try:
-        page.wait_for_selector(FRAME, timeout=20000)
+        page.wait_for_selector(FRAME, timeout=ORDERS_WAIT_MS)
     except Exception:
         pass
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(SETTLE_MS)
+    return orders_listed(page)
+
+
+def orders_listed(page) -> bool:
+    """Whether the payment history's frame is on the page now. Nothing is
+    waited for."""
+    try:
+        return page.locator(FRAME).count() > 0
+    except Exception:
+        return False
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the payment history never came to,
+    looked for several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    history turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 def history_state(page) -> str:

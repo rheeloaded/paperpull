@@ -34,6 +34,7 @@ from __future__ import annotations
 import html as _html
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -348,14 +349,76 @@ def scroll_all_orders(page, max_rounds: int = 20, delay_ms: int = 1200,
     return last
 
 
-def goto_orders(page) -> None:
+# How long the order history gets to show its orders, how long it is left
+# to settle after that, and how long a page they never came to is watched
+# for a bot check. A check can hold the page blank while it decides and
+# only then show itself, so orders running late are not the same as none.
+ORDERS_WAIT_MS = 30000
+SETTLE_MS = 1500
+CHALLENGE_WAIT_MS = 15000
+
+# Gap's words for a history with nothing in it. They have not been seen on
+# a real account, so this is the usual phrasing rather than Gap's own
+# sentence. A page that says something else and shows no orders is taken
+# as one that did not load, which sends the person to look at it and
+# claims nothing.
+EMPTY_RE = re.compile(r"\b(?:no|haven.t\s+(?:placed|made)\s+any|don.t\s+have\s+any)\s+"
+                      r"(?:recent\s+)?(?:orders|purchases)\b", re.I)
+
+
+def goto_orders(page) -> bool:
+    """Open the order history. True when it appeared, its orders or its own
+    word that there are none. Scrolling it for the rest of the orders is
+    scroll_all_orders, which discovery asks for.
+
+    False is not an empty history and not a signed-in session. A page can
+    sit blank while a bot check decides and only then turn into the check,
+    so one look at it finds nothing to name. The orders are waited for in
+    full before the page is read as empty, so a list that is only slow is
+    never taken for none."""
     page.goto(URLS["orders"], wait_until="domcontentloaded", timeout=60000)
     try:
-        page.wait_for_selector(FALLBACK["order_link"], timeout=30000)
+        page.wait_for_selector(FALLBACK["order_link"], timeout=ORDERS_WAIT_MS)
     except Exception:
-        log.warning("No order links appeared on the order-history page within 30s")
-    page.wait_for_timeout(1500)
-    scroll_all_orders(page)
+        log.warning("No order links appeared on the order-history page within %gs",
+                    ORDERS_WAIT_MS / 1000)
+    page.wait_for_timeout(SETTLE_MS)
+    return orders_listed(page)
+
+
+def history_state(page) -> str:
+    """"empty" when the page says there are no orders, else ""."""
+    try:
+        text = page.locator("body").inner_text(timeout=5000)
+    except Exception:
+        return ""
+    return "empty" if EMPTY_RE.search(text or "") else ""
+
+
+def orders_listed(page) -> bool:
+    """Whether the order history is on the page now, its orders or its own
+    word that there are none. Nothing is waited for."""
+    if _order_link_count(page) > 0:
+        return True
+    return history_state(page) == "empty"
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the order history never came to,
+    looked for several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    history turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 # An in-store purchase card reads "Purchased In Store - 5 Items" followed by
