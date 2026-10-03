@@ -31,7 +31,9 @@ test of what an app does with an element it could not read.
 
 drawn_browser starts a browser with a debugging port for an app to attach
 to, and hands it over only once a tab has drawn a page, since a browser
-that has only just started can abort its first navigation.
+that has only just started can abort its first navigation. With only_tab
+that tab is the browser's only one, for an app that works in the first tab
+it finds.
 
 Nothing here is used by a run. It is in the package so every app's tests
 can import it the same way they import everything else.
@@ -40,6 +42,7 @@ from __future__ import annotations
 
 import inspect
 import io
+import itertools
 import json
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -289,24 +292,35 @@ _READY_TITLE = "drawn before the app attaches"
 
 
 class _ReadyPage:
-    """One small page on a port of its own, for a fresh browser to draw."""
+    """One small page on a port of its own, for a fresh browser to draw. A
+    copy asked for at /drawn/<name> asks for /beacon/<name> once it has
+    drawn, so a tab nothing is attached to can be seen to have drawn."""
 
     def __init__(self):
         import threading
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-        body = ("<!doctype html><html><head><title>%s</title></head><body>ready</body></html>"
-                % _READY_TITLE).encode("utf-8")
+        page = "<!doctype html><html><head><title>%s</title></head><body>ready%s</body></html>"
+        body = (page % (_READY_TITLE, "")).encode("utf-8")
+        named = (page % (_READY_TITLE, "<script>fetch('/beacon/' + location.pathname.slice(7), "
+                         "{cache: 'no-store'}).catch(() => {});</script>")).encode("utf-8")
+        drawn = self.drawn = set()
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
 
             def do_GET(self):
+                data, kind = body, "text/html; charset=utf-8"
+                if self.path.startswith("/drawn/"):
+                    data = named
+                elif self.path.startswith("/beacon/"):
+                    drawn.add(self.path[len("/beacon/"):])
+                    data, kind = b"ok", "text/plain"
                 self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
-                self.wfile.write(body)
+                self.wfile.write(data)
 
             def log_message(self, *args):
                 pass
@@ -320,9 +334,10 @@ class _ReadyPage:
         self.httpd.server_close()
 
 
-def _start_fresh_browser(exe, profile, args):
+def _start_fresh_browser(exe, profile, args, window=True):
     """The browser as a program of its own with a debugging port, and its
-    address, or None for the address when it opened no port."""
+    address, or None for the address when it opened no port. Started with
+    no window, it has no tab until one is opened."""
     import subprocess
     import time
 
@@ -331,7 +346,7 @@ def _start_fresh_browser(exe, profile, args):
     proc = subprocess.Popen(
         [str(exe), "--headless=new", "--remote-debugging-port=0",
          "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check",
-         *args, "about:blank"],
+         *args, "about:blank" if window else "--no-startup-window"],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port, deadline = "", time.monotonic() + 30
     while not port and time.monotonic() < deadline and proc.poll() is None:
@@ -369,6 +384,61 @@ def _draws(url, address, tries):
     return False, did
 
 
+def _page_tabs(url) -> list:
+    import urllib.request
+
+    with urllib.request.urlopen(url + "/json/list", timeout=10) as r:
+        return [t for t in json.loads(r.read().decode("utf-8")) if t.get("type") == "page"]
+
+
+def _within(seconds, done) -> bool:
+    import time
+
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if done():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+_TAB_NAMES = itertools.count(1)
+
+
+def _draws_alone(url, ready, tries):
+    """Whether a tab the browser opens itself, through its debugging address
+    as the person's own tab is opened, draws the ready page and is then the
+    browser's only tab, and what each try did. Nothing is attached to it, so
+    the page says it drew by asking the ready page's server for a beacon.
+    The first tab of a browser started with no window sometimes never sends
+    a request at all, 11 fresh starts in 60 on 2026-10-03, and the second
+    tab drew in every one of them, so a tab that has not drawn in ten
+    seconds is closed and the next one opened once it is gone."""
+    import urllib.request
+
+    did = []
+    for _try in range(tries):
+        name = "tab%d" % next(_TAB_NAMES)
+        try:
+            opened = urllib.request.Request("%s/json/new?%sdrawn/%s" % (url, ready.address, name),
+                                            method="PUT")
+            with urllib.request.urlopen(opened, timeout=10) as r:
+                tab = json.loads(r.read().decode("utf-8"))["id"]
+            if _within(10, lambda: name in ready.drawn):
+                if _within(10, lambda: [t["id"] for t in _page_tabs(url)] == [tab]):
+                    return True, did
+                did.append("drew, and other tabs stayed open %r"
+                           % [t.get("url") for t in _page_tabs(url)])
+                return False, did
+            did.append("a tab never drew")
+            urllib.request.urlopen("%s/json/close/%s" % (url, tab), timeout=10).read()
+            _within(10, lambda: all(t["id"] != tab for t in _page_tabs(url)))
+        except (OSError, ValueError, KeyError) as e:
+            did.append("the debugging address failed, %s" % e)
+            return False, did
+    return False, did
+
+
 def _close_browser(proc, url) -> None:
     try:
         from playwright.sync_api import sync_playwright
@@ -381,7 +451,7 @@ def _close_browser(proc, url) -> None:
 
 
 @contextmanager
-def drawn_browser(exe, make_profile, args=(), starts=3, tries=3):
+def drawn_browser(exe, make_profile, args=(), starts=3, tries=3, only_tab=False):
     """A browser started as a program of its own with a debugging port, the
     way login.bat starts one, and its address, handed over only once a tab
     has drawn a page. Closed when the block ends.
@@ -401,19 +471,31 @@ def drawn_browser(exe, make_profile, args=(), starts=3, tries=3):
     browser that never draws it is closed and another started. The tab that
     drew stays open on a page that asks for nothing more. make_profile is
     called once per start for an empty profile folder. NoDebugPort means
-    the browser opened no port at all, FreshBrowserError that no start drew
-    the page, naming what each one did."""
+    the browser opened no port at all, FreshBrowserError that no start got
+    there, naming what each one did.
+
+    An app that works in the first tab it finds, as Target does, rather
+    than in a tab it opens for itself, needs only_tab. Without it the
+    browser's own blank tab stays beside the one that drew, Playwright
+    lists the two in no fixed order, and such an app works in the tab that
+    drew in some runs and in the blank one in others. With only_tab the
+    browser starts with no window and so with no tab of its own, the tab is
+    opened by the browser itself, as the person's own tab is, and it is
+    handed over as the browser's only tab."""
     ready = _ReadyPage()
     proc, url, tried = None, None, []
     try:
         for _start in range(starts):
-            proc, url = _start_fresh_browser(exe, make_profile(), args)
+            proc, url = _start_fresh_browser(exe, make_profile(), args, window=not only_tab)
             if url is None:
                 proc.kill()
                 proc.wait(timeout=15)
                 proc = None
                 raise NoDebugPort("the browser opened no debugging port")
-            drew, did = _draws(url, ready.address, tries)
+            if only_tab:
+                drew, did = _draws_alone(url, ready, tries)
+            else:
+                drew, did = _draws(url, ready.address, tries)
             if drew:
                 break
             tried.append(", then ".join(did) or "nothing drew")
@@ -421,7 +503,7 @@ def drawn_browser(exe, make_profile, args=(), starts=3, tries=3):
             proc.wait(timeout=15)
             proc = None
         else:
-            raise FreshBrowserError("%d fresh browsers in a row never drew a page. %s"
+            raise FreshBrowserError("%d fresh browsers in a row were not ready. %s"
                                     % (starts, " / ".join(tried)))
         yield url
     finally:

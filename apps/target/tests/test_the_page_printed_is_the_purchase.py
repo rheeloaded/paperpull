@@ -19,10 +19,8 @@ browser resolves no host name, so nothing reaches Target. Every number,
 store, item and amount is invented.
 """
 import json
-import subprocess
 import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -35,6 +33,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import target_receipts as app_mod
 import target_site as site
 from paperpull_core import browser as browser_launcher
+from paperpull_core import testkit
 
 PILLOW = "102000000000031"
 BLANKET = "102000000000047"
@@ -193,32 +192,19 @@ def browser_exe():
 @pytest.fixture(scope="module")
 def attached(browser_exe, tmp_path_factory):
     """A browser started as a program of its own with a debugging port,
-    which is what the app attaches to at home. Its address, for cdp_url."""
-    profile = tmp_path_factory.mktemp("attached-profile")
-    proc = subprocess.Popen(
-        [browser_exe, "--headless=new", "--remote-debugging-port=0",
-         "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check",
-         NO_HOSTS, "about:blank"],
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    port, deadline = "", time.monotonic() + 30
-    while not port and time.monotonic() < deadline and proc.poll() is None:
-        try:
-            port = (profile / "DevToolsActivePort").read_text().split()[0]
-        except (OSError, IndexError):
-            time.sleep(0.1)
-    if not port or not browser_launcher.wait_for_debug_port(port):
-        proc.kill()
-        pytest.skip("the browser opened no debugging port")
-    url = "http://127.0.0.1:%s" % port
-    yield url
+    which is what the app attaches to at home. Its address, for cdp_url.
+    testkit.drawn_browser hands it over only once a tab has drawn a page,
+    since a browser that has only just started can abort its first
+    navigation, and this test's first goto came back net::ERR_ABORTED on
+    CI that way (run 37123796050). Target works in the first tab it finds,
+    the one the person signed in with at home, so the tab that drew is the
+    browser's only tab."""
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            p.chromium.connect_over_cdp(url).new_browser_cdp_session().send("Browser.close")
-        proc.wait(timeout=15)
-    except Exception:
-        proc.kill()
-        proc.wait(timeout=15)
+        with testkit.drawn_browser(browser_exe, lambda: tmp_path_factory.mktemp("attached-profile"),
+                                   args=(NO_HOSTS,), only_tab=True) as url:
+            yield url
+    except testkit.NoDebugPort:
+        pytest.skip("the browser opened no debugging port")
 
 
 @pytest.fixture(autouse=True)
