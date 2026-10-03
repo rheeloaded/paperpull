@@ -7,9 +7,10 @@
     python tools/run_all_tests.py --stop      stop this checkout's run
     python tools/run_all_tests.py --replace   stop it, then run again
 
-Fifty suites live here: the shared core, the control panel, and one per
-app. Nothing gathered them, so "the tests pass" meant whichever ones the
-person happened to run, with whichever interpreter they happened to use.
+Sixty-odd suites live here: the shared core, the control panel, the server
+image's own checks, and one per app. Nothing gathered them, so "the tests
+pass" meant whichever ones the person happened to run, with whichever
+interpreter they happened to use.
 
 A SKIPPED TEST IS THE POINT OF THIS SCRIPT
 
@@ -173,6 +174,7 @@ def with_this_core(*after) -> dict:
 NEEDS = {
     "core": ("pypdf", "playwright", "openpyxl", "pdfplumber"),
     "gui": ("fastapi",),
+    "server": (),
     "app": ("paperpull_core", "pypdf", "playwright"),
 }
 WHY = {
@@ -223,7 +225,8 @@ def candidates() -> list:
 
 
 def suites(quick: bool) -> list:
-    out = [("core", REPO / "core", "core"), ("gui", REPO / "gui", "gui")]
+    out = [("core", REPO / "core", "core"), ("gui", REPO / "gui", "gui"),
+           ("server", REPO / "server", "server")]
     if not quick:
         out += [(d.name, d, "app") for d in sorted((REPO / "apps").iterdir())
                 if d.is_dir() and not d.name.startswith(".") and (d / "tests").is_dir()]

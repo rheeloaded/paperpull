@@ -20,6 +20,15 @@ this program must not be called PaperPull, or a name so similar that people
 would take it for PaperPull, and must not be presented as an official
 release. See [TRADEMARK.md](TRADEMARK.md) for what is and is not allowed.
 
+## Third-party material
+
+PaperPull Server's container security profile, `server/seccomp-chrome.json`,
+is a modified version of Docker's default seccomp profile from the
+[moby/profiles](https://github.com/moby/profiles) project, licensed under the
+Apache License 2.0. The unmodified profile and that license are in
+`server/seccomp/`, and `server/seccomp.py` makes the modified one and says
+what it changes.
+
 ## Earlier contributions
 
 PaperPull was published under the MIT License from its first release on

@@ -1,0 +1,44 @@
+# PaperPull Server, as a Docker Compose project. EXPERIMENTAL.
+#
+# Step one of the server plan. The container starts the virtual screen,
+# downloads Chrome, and runs the panel, all inside the container. Nothing is
+# published yet. Step two puts the panel on your home network behind a
+# password, on one port, with the sign-in browsers shown through it.
+#
+#   docker compose -f server/compose.yaml up -d
+#   docker exec paperpull python /opt/paperpull/server/selftest.py
+name: paperpull
+services:
+  paperpull:
+    image: paperpull-server:dev
+    container_name: paperpull
+    init: true
+    # Time for the sign-in browsers to close properly and keep their sessions.
+    stop_grace_period: 30s
+    # Chrome draws pages in shared memory, and Docker's default is too small.
+    shm_size: "2gb"
+    # Chrome's own sandbox needs the container to allow user namespaces,
+    # which Docker's default security profile forbids. This profile is
+    # Docker's default with that one thing allowed, see seccomp-chrome.json.
+    security_opt:
+      - seccomp=./seccomp-chrome.json
+    environment:
+      TZ: America/New_York
+      # The NAS user and group the saved documents should belong to.
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      # Each provider's folder, its documents, records and logs. A shared
+      # folder on a NAS, so the documents can be opened and imported.
+      - ./data:/data
+      # The signed-in browser profiles. Kept out of the shared folder.
+      - profiles:/profiles
+      # The server's own settings.
+      - settings:/config
+      # Chrome, downloaded from Google at the first start.
+      - browser:/browser
+    restart: unless-stopped
+volumes:
+  profiles:
+  settings:
+  browser:

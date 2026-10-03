@@ -1,0 +1,9 @@
+# What the server image runs, pinned so an image built today and one built
+# next month hold the same thing. The versions are the ones the panel's and
+# the apps' test suites pass on. Raise them here on purpose, with a test run.
+fastapi==0.141.1
+uvicorn==0.52.3
+openpyxl==3.1.5
+pdfplumber==0.11.10
+pypdf[crypto]==6.19.0
+playwright==1.63.0

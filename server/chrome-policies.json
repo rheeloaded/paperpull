@@ -1,0 +1,16 @@
+{
+  "MetricsReportingEnabled": false,
+  "UserFeedbackAllowed": false,
+  "UrlKeyedAnonymizedDataCollectionEnabled": false,
+  "SyncDisabled": true,
+  "BrowserSignin": 0,
+  "BackgroundModeEnabled": false,
+  "DefaultBrowserSettingEnabled": false,
+  "PromotionalTabsEnabled": false,
+  "SearchSuggestEnabled": false,
+  "SpellCheckServiceEnabled": false,
+  "TranslateEnabled": false,
+  "PasswordManagerEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "RestoreOnStartup": 1
+}

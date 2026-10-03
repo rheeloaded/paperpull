@@ -26,3 +26,6 @@
 *.whl       binary
 *.zip       binary
 *.ico       binary
+
+# Vendored exactly as released, its hash is checked (server/seccomp/README.md).
+server/seccomp/moby-default.json -text
