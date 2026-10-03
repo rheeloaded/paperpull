@@ -413,7 +413,11 @@ def _draws_alone(url, ready, tries):
     The first tab of a browser started with no window sometimes never sends
     a request at all, 11 fresh starts in 60 on 2026-10-03, and the second
     tab drew in every one of them, so a tab that has not drawn in ten
-    seconds is closed and the next one opened once it is gone."""
+    seconds is closed, and the next one is opened once it is gone or ten
+    seconds on. One that never goes leaves the browser with a second tab,
+    and that browser is not handed over. A debugging address that answers
+    oddly is a browser not worth trying again either."""
+    import http.client
     import urllib.request
 
     did = []
@@ -433,7 +437,7 @@ def _draws_alone(url, ready, tries):
             did.append("a tab never drew")
             urllib.request.urlopen("%s/json/close/%s" % (url, tab), timeout=10).read()
             _within(10, lambda: all(t["id"] != tab for t in _page_tabs(url)))
-        except (OSError, ValueError, KeyError) as e:
+        except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException) as e:
             did.append("the debugging address failed, %s" % e)
             return False, did
     return False, did
