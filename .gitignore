@@ -108,3 +108,7 @@ dist/
 
 # Release working area: downloaded artifacts and the notes for a pending release
 .release/
+
+# A failing suite's whole pytest output, kept by tools/run_all_tests.py. It
+# holds whatever a test printed, so it stays on the machine that ran it.
+test-output/

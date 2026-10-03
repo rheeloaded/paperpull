@@ -50,4 +50,9 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: Run every suite
+        # A failing suite prints each failure with every frame of its
+        # traceback, then its whole pytest output in a group below that
+        # opens with a click. The log is all there is of a CI run, and a
+        # failure that does not come back on a rerun has to be explained
+        # from it.
         run: python tools/run_all_tests.py
