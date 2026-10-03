@@ -38,7 +38,7 @@ import run_result
 
 from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 
 # PaperPull targets Python 3.11+ (README, and core/pyproject.toml's
 # requires-python). Nothing here declared that, so a reader - or a scanner -
@@ -1863,11 +1863,35 @@ def index():
     return HTML.replace("__VERSION__", VERSION)
 
 
+# The PaperPull icon, for the browser tab the panel opens in. There is one
+# icon file, and each kind of copy keeps it in its own place, the repo and
+# the server image in packaging/ beside this folder, the Windows package and
+# the Mac bundle's Resources right beside it.
+_ICON_PLACES = (HERE.parent / "packaging" / "paperpull.ico",
+                HERE.parent / "paperpull.ico")
+
+
+def _icon_file() -> Optional[Path]:
+    return next((p for p in _ICON_PLACES if p.is_file()), None)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """The icon itself. It is the same for everyone and says nothing about
+    the person, so it is served to any request, the way a page's icon is."""
+    icon = _icon_file()
+    if icon is None:
+        raise HTTPException(404, "no icon")
+    return Response(content=icon.read_bytes(), media_type="image/x-icon",
+                    headers={"Cache-Control": "max-age=86400"})
+
+
 HTML = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PaperPull</title>
+<link rel="icon" href="/favicon.ico">
 <style>
   :root { color-scheme: light dark; --bg:#0f1115; --panel:#171a21; --fg:#e6e6e6;
           --muted:#98a0ad; --accent:#4c8dff; --line:#262b36; --ok:#3ecf8e; }

@@ -176,6 +176,9 @@ def write_icon() -> str | None:
                          iconset / ("icon_%dx%d@2x.png" % (size // 2, size // 2)))
     subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o",
                     str(RES / "PaperPull.icns")], check=True)
+    # The panel shows the same icon on its browser tab, and reads the .ico
+    # from beside its own folder, which is Resources here (gui/app.py).
+    shutil.copy2(ico, RES / "paperpull.ico")
     return "PaperPull.icns"
 
 
