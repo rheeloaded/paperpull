@@ -11,9 +11,11 @@ lock, a run of the same checkout is named rather than waited for, and
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 
@@ -167,18 +169,83 @@ def test_a_bad_part_is_refused():
             rat.parse_shard(bad)
 
 
+# The suite's one test says which process is running it, then sleeps for ten
+# minutes, longer than anything here waits for it, so only the runner can end
+# it. The number is written under another name and moved into place, so it is
+# there whole or not at all, wherever the runner stops the suite.
+SLEEPY = """
+    import os, time
+    def test_forever():
+        with open(%(part)r, "w") as f:
+            f.write(str(os.getpid()))
+        os.replace(%(part)r, %(pid)r)
+        time.sleep(600)
+    """
+
+# How long a runner gets, once a suite is out of time, to end it and come back.
+ENDS_WITHIN = 60
+
+
+def end_tree(pid: int) -> None:
+    """End a process and what it started, when the runner left them running.
+    Not with rat.stop_tree, which is what is being checked."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+    else:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def run_watched(d: Path, limit: int, pid_file: Path):
+    """rat.run_suite, failing the test when it has not come back ENDS_WITHIN
+    seconds after the suite's limit, and ending what it left. Without the
+    watch a runner that never ends the suite waits for the suite to end by
+    itself and then looks like one that did. With a stop_tree that did
+    nothing, this test used to pass that way, two minutes late."""
+    late = []
+
+    def end_what_is_left():
+        pid = int(pid_file.read_text()) if pid_file.exists() else None
+        still = bool(pid and alive(pid))
+        late.append("run_suite had not come back %ds after the suite's %ds limit%s"
+                    % (ENDS_WITHIN, limit, ", and the suite's pytest was still running" if still else ""))
+        with rat._RUNNING_LOCK:
+            running = [proc.pid for proc in rat._RUNNING]
+        for p in running + ([pid] if still else []):
+            end_tree(p)
+    watch = threading.Timer(limit + ENDS_WITHIN, end_what_is_left)
+    watch.daemon = True
+    watch.start()
+    try:
+        came = rat.run_suite(d, Path(sys.executable), timeout=limit)
+    finally:
+        watch.cancel()
+        watch.join()
+    assert not late, late[0]
+    return came
+
+
 def test_a_suite_out_of_time_fails_and_ends_what_it_started(tmp_path):
+    # A limit that ran out before the suite's test started proves nothing, so
+    # it is tried again with a longer one, and the first run where the test
+    # did start is the one judged. Beside a full run on 2026-10-03 a suite's
+    # pytest took up to 11.6s to reach its first test, past the 10s this used
+    # to allow.
     pid_file = tmp_path / "pid.txt"
-    d = suite_with(tmp_path, "sleepy", """
-        import os, time
-        def test_forever():
-            open(%r, "w").write(str(os.getpid()))
-            time.sleep(120)
-        """ % str(pid_file))
-    out, code, _ = rat.run_suite(d, Path(sys.executable), timeout=10)
-    assert code == -1 and "timed out after 10s" in out
-    assert pid_file.exists(), "the suite never started, so this proves nothing"
-    assert gone(int(pid_file.read_text())), "the stopped suite's pytest is still running"
+    d = suite_with(tmp_path, "sleepy", SLEEPY % {"part": str(tmp_path / "pid.part"), "pid": str(pid_file)})
+    for limit in (10, 30, 90):
+        out, code, _ = run_watched(d, limit, pid_file)
+        assert code == -1 and "timed out after %ds" % limit in out, out
+        if pid_file.exists():
+            break
+    else:
+        pytest.fail("the suite's test never started, even in %ds, so this proves nothing" % limit)
+    pid = int(pid_file.read_text())
+    if not gone(pid):
+        end_tree(pid)
+        pytest.fail("the stopped suite's pytest is still running")
 
 
 def test_a_second_run_waits_for_the_first_ones_lock(tmp_path):
