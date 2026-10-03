@@ -16,15 +16,26 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-# The virtual screen, its window manager, the screen sharing server and the
-# web page that shows it, the fonts receipts are printed in, and gpg for
-# checking Google's signing key.
+# The virtual screen, its window manager and the screen sharing server, the
+# fonts receipts are printed in, and gpg for checking Google's signing key.
+#
+# noVNC, the page that shows the screen, is only web files, so they are
+# taken out of Debian's package without installing it. Installed, it would
+# bring Node.js and NumPy, about 90 MB the image never uses. The panel
+# carries noVNC's connection itself (gui/server_mode.py), so websockify is
+# not needed either.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg tzdata procps \
-      xvfb fluxbox x11vnc novnc websockify \
+      xvfb fluxbox x11vnc \
       fonts-liberation fonts-dejavu-core fonts-noto-core fonts-noto-color-emoji \
- && rm -rf /var/lib/apt/lists/*
+ && cd /tmp && apt-get download novnc \
+ && dpkg-deb -x novnc_*.deb /tmp/novnc \
+ && mv /tmp/novnc/usr/share/novnc /usr/share/novnc \
+ && mkdir -p /usr/share/doc/novnc \
+ && cp /tmp/novnc/usr/share/doc/novnc/copyright /usr/share/doc/novnc/ \
+ && rm -rf /tmp/novnc /tmp/novnc_*.deb /var/lib/apt/lists/* \
+ && test -f /usr/share/novnc/vnc.html
 
 # Google's package list and signing key, checked against the fingerprint
 # Google publishes at google.com/linuxrepositories, so apt verifies every
@@ -79,7 +90,11 @@ ENV DISPLAY=:99 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PAPERPULL_SERVER=1 \
+    PAPERPULL_CONFIG=/config \
+    XDG_CONFIG_HOME=/config \
     APPS_ROOT=/data
 
+# The panel, behind its password, with the browser screen on the same port.
+EXPOSE 8765
 VOLUME ["/data", "/profiles", "/config", "/browser"]
 ENTRYPOINT ["/opt/paperpull/server/entrypoint.sh"]

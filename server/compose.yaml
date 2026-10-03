@@ -1,11 +1,16 @@
 # PaperPull Server, as a Docker Compose project. EXPERIMENTAL.
 #
-# Step one of the server plan. The container starts the virtual screen,
-# downloads Chrome, and runs the panel, all inside the container. Nothing is
-# published yet. Step two puts the panel on your home network behind a
-# password, on one port, with the sign-in browsers shown through it.
-#
 #   docker compose -f server/compose.yaml up -d
+#
+# Then open http://<this machine's address>:8765 from a browser on your home
+# network. The first visit asks you to choose a password, with the setup
+# code the container prints in its log (docker logs paperpull). The panel
+# and the browser screen the sign-in windows open on are both behind that
+# password, on that one port.
+#
+# Keep the port to your home network. Reach it from outside through your
+# own VPN, never by forwarding the port on your router.
+#
 #   docker exec paperpull python /opt/paperpull/server/selftest.py
 name: paperpull
 services:
@@ -22,18 +27,24 @@ services:
     # Docker's default with that one thing allowed, see seccomp-chrome.json.
     security_opt:
       - seccomp=./seccomp-chrome.json
+    ports:
+      - "8765:8765"
     environment:
       TZ: America/New_York
       # The NAS user and group the saved documents should belong to.
       PUID: "1000"
       PGID: "1000"
+      # To choose the password here instead of on the first visit, at least
+      # ten characters. Only its hash is kept, so it can come out of this
+      # file once the container has started with it.
+      # PAPERPULL_PASSWORD: "choose one"
     volumes:
       # Each provider's folder, its documents, records and logs. A shared
       # folder on a NAS, so the documents can be opened and imported.
       - ./data:/data
       # The signed-in browser profiles. Kept out of the shared folder.
       - profiles:/profiles
-      # The server's own settings.
+      # The server's own settings and its password's hash.
       - settings:/config
       # Chrome, downloaded from Google at the first start.
       - browser:/browser

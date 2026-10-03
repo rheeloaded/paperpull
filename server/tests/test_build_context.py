@@ -184,9 +184,25 @@ def test_everything_runs_as_pp_after_the_root_step():
     assert text.rstrip().splitlines()[-2].startswith("exec setpriv --reuid=pp --regid=pp")
 
 
-def test_until_step_two_nothing_listens_beyond_the_container():
-    """The panel and the screen page answer inside the container only, until
-    the panel is put on the network behind a password."""
+def test_only_the_panel_listens_beyond_the_container_and_only_as_the_server():
+    """The panel is on the network, and it is there only as PaperPull Server,
+    which never answers without a password. Screen sharing listens inside
+    the container, and nothing else is started that listens at all."""
     text = (SERVER / "start.sh").read_text(encoding="utf-8")
-    assert "0.0.0.0" not in text
-    assert "--host 127.0.0.1" in text and "127.0.0.1:6080" in text and "-localhost" in text
+    assert text.count("0.0.0.0") == 1
+    assert "--host 0.0.0.0 --port 8765" in text
+    assert text.index("export PAPERPULL_SERVER=1") < text.index("--host 0.0.0.0")
+    assert "-localhost -rfbport 5900" in text
+    assert "websockify" not in text
+    dockerfile = (SERVER / "Dockerfile").read_text(encoding="utf-8")
+    assert [line for line in dockerfile.splitlines() if line.startswith("EXPOSE")] == ["EXPOSE 8765"]
+
+
+def test_novnc_is_its_web_files_and_not_its_dependencies():
+    """Installed, Debian's novnc package brings Node.js and NumPy, about 90
+    MB the image never uses, and the panel carries the connection itself."""
+    dockerfile = (SERVER / "Dockerfile").read_text(encoding="utf-8")
+    install = dockerfile[dockerfile.index("apt-get install -y --no-install-recommends \\"):]
+    install = install[:install.index("&& cd /tmp")]
+    assert "novnc" not in install and "websockify" not in install
+    assert "apt-get download novnc" in dockerfile and "dpkg-deb -x novnc_" in dockerfile

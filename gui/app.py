@@ -286,6 +286,12 @@ def _scope_flags(year: str = "", start: str = "", end: str = "") -> list:
 
 app = FastAPI(title="PaperPull")
 
+# PaperPull Server's sign-in, its gate and its browser screen. They do
+# nothing unless PAPERPULL_SERVER=1, which only the server image sets.
+import server_mode  # noqa: E402
+
+server_mode.install(app)
+
 # The panel runs the apps' commands, so its API must only answer requests that
 # originate from the panel page itself (served on localhost). A CSRF attempt
 # driven by another website carries an Origin/Referer whose host is that site;
@@ -311,7 +317,15 @@ def _same_origin_only(request: Request) -> None:
     absent from curl and from browsers old enough not to know it, and
     those are allowed through, because the header being missing is not
     the same as it saying cross-site.
+
+    On PaperPull Server the panel is reached by the NAS's own address, so
+    there Origin and Referer have to name the address the request was
+    made to, rather than this computer (server_mode.same_origin).
     """
+    if server_mode.enabled():
+        if not server_mode.same_origin({k.lower(): v for k, v in request.headers.items()}):
+            raise HTTPException(403, "cross-origin request refused")
+        return
     site = (request.headers.get("sec-fetch-site") or "").lower()
     if site and site not in ("same-origin", "none"):
         raise HTTPException(403, "cross-origin request refused")
@@ -322,6 +336,14 @@ def _same_origin_only(request: Request) -> None:
         host = (urlsplit(value).hostname or "").lower()
         if host not in _LOCAL_HOSTS:
             raise HTTPException(403, "cross-origin request refused")
+
+
+def _desktop_only() -> None:
+    """Showing a file in this computer's file manager, or choosing the
+    folder the downloaders are in, means nothing on PaperPull Server, whose
+    documents are in the shared folder it was given."""
+    if server_mode.enabled():
+        raise HTTPException(404, "not on PaperPull Server")
 
 
 def _not_in_sample() -> None:
@@ -648,7 +670,7 @@ def api_export_transactions(provider: str = "", csv: str = ""):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
 def api_export_reveal():
     """Show the last spreadsheet this panel wrote in the file manager. Takes no
     path from the page on purpose, only the one the server itself wrote."""
@@ -747,7 +769,8 @@ def api_root_get():
             "settings_file": str(_settings_path())}
 
 
-@app.post("/api/root", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/root", dependencies=[Depends(_same_origin_only), Depends(_desktop_only),
+                                     Depends(_not_in_sample)])
 async def api_root_set(request: Request):
     """Remember where the downloaders live.
 
@@ -1396,7 +1419,7 @@ def api_failure_latest(app: str = ""):
     return {"found": True, "name": found.name}
 
 
-@app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
 async def api_failure_reveal(request: Request):
     """Show that file in the file manager. Takes no path from the page,
     only the app name, and finds the file here the same way."""
@@ -1860,7 +1883,8 @@ async def api_naming_save(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTML.replace("__VERSION__", VERSION)
+    bar = server_mode.server_bar() if server_mode.enabled() else ""
+    return HTML.replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
 
 
 # The PaperPull icon, for the browser tab the panel opens in. There is one
@@ -1902,6 +1926,11 @@ HTML = r"""<!doctype html>
   header h1 { margin:0; font-size:18px; }
   header h1 .tag { color:var(--muted); font-weight:400; }
   header h1 .ver { color:var(--accent); font-weight:400; font-size:13px; vertical-align:middle; }
+  header .serverbar { margin:6px 0 0; font-size:13px; color:var(--muted); }
+  header .serverbar a { color:var(--accent); text-decoration:none; }
+  header .serverbar form { display:inline; }
+  header .serverbar button { background:none; border:0; padding:0; color:var(--accent);
+                             font:inherit; cursor:pointer; }
   header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
   main { display:grid; grid-template-columns: 320px 1fr; grid-template-rows: minmax(0, 1fr); gap:0; flex:1; min-height:0; }
   footer { padding:8px 22px; border-top:1px solid var(--line); font-size:12px;
@@ -2001,6 +2030,7 @@ HTML = r"""<!doctype html>
 <header>
   <h1>PaperPull <span class="ver">v__VERSION__</span><span class="tag"> &middot; Receipt &amp; Statement Downloader</span></h1>
   <p id="root">control panel</p>
+  __SERVER_BAR__
 </header>
 <div id="samplebar" class="samplebar">
   <span><b>Sample archive.</b> Every document here is invented. Nothing signs

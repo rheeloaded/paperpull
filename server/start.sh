@@ -1,14 +1,18 @@
 #!/bin/sh
 # Runs as pp. The virtual screen the providers' sign-in browsers open on,
-# its window manager, the screen sharing server and the web page that shows
-# it, then the panel.
+# its window manager and the screen sharing server, then the panel.
 #
-# Everything here listens inside the container only. Step two of the server
-# plan puts the panel on the network behind a password and shows the screen
-# through it. Until then nothing is published.
+# Only the panel listens beyond the container, behind its password. The
+# screen sharing server listens inside the container only, and the browser
+# screen reaches it through the panel, on the panel's port and behind the
+# same password (gui/server_mode.py).
 set -u
 LOGS=/config/logs
 mkdir -p "$LOGS"
+
+# The panel listens on the network only as PaperPull Server, which never
+# answers without a password, whatever the environment was given.
+export PAPERPULL_SERVER=1
 
 # A container started again keeps its /tmp, so the last start's screen lock
 # is still there and would stop the screen from starting. Nothing is running
@@ -25,8 +29,6 @@ fi
 fluxbox >"$LOGS/fluxbox.log" 2>&1 &
 x11vnc -display :99 -forever -shared -localhost -rfbport 5900 -nopw -quiet \
   >"$LOGS/x11vnc.log" 2>&1 &
-websockify --web /usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 \
-  >"$LOGS/websockify.log" 2>&1 &
 
 cd /opt/paperpull/gui
-exec python -m uvicorn app:app --host 127.0.0.1 --port 8765
+exec python -m uvicorn app:app --host 0.0.0.0 --port 8765 --ws websockets-sansio

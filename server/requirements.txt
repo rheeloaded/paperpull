@@ -3,6 +3,8 @@
 # the apps' test suites pass on. Raise them here on purpose, with a test run.
 fastapi==0.141.1
 uvicorn==0.52.3
+# The browser screen's connection through the panel (gui/server_mode.py).
+websockets==17.2
 openpyxl==3.1.5
 pdfplumber==0.11.10
 pypdf[crypto]==6.19.0
