@@ -7,7 +7,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.42.0] - 2026-10-03
+
+Repairs from testers' reports and from checks run across every app.
+Walmart receipts and invoices print their items again, State Farm presses
+a receipt named the way State Farm's own list names it, Apple stops asking
+for receipts past the point where an account's refusals start, and Golden
+1 and amazon.de are confirmed. In an install the panel set up, Chromium
+and Edge on Windows no longer cancel every download, and a tax form that
+comes as a ZIP is saved. Across the apps, a purchase's page is checked to
+be its own before it is printed, a control that could not be read is never
+taken to be absent, every tab a press opens is closed, and a date or a
+total counts only as a number of its own.
 
 ### Fixed
 - **A receipt's date and total count only as numbers of their own.**
