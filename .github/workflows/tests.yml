@@ -7,6 +7,12 @@
 #
 # It runs on a push to main, on a pull request, and on a version tag, so the
 # packaging workflows and this one both answer for the same commit.
+#
+# The suites are split into four parts that run on four runners at once.
+# On one runner the suite grew from 37 minutes on 2026-09-27 to 82 by
+# 2026-10-03, and twice a run that passed every test was cut off by the job
+# limit and ended CANCELLED. Each part is balanced by tools/suite_times.json,
+# and the job named "tests" answers for all four, as the single job did.
 name: Tests
 
 on:
@@ -20,14 +26,16 @@ permissions:
   contents: read
 
 jobs:
-  tests:
+  part:
+    name: tests part ${{ matrix.part }} of 4
     runs-on: windows-latest
-    # A guard against a run that hangs, not a budget. The suite grew to
-    # about 37 minutes, and on 2026-09-27 the same commit took 37 minutes
-    # on one runner and ran past 40 on another, where the limit cut it off
-    # with no test failing. By 0.41.1 the suite itself took 56 minutes, and
-    # the tag's run passed every test and was then cut off in its cleanup.
-    timeout-minutes: 90
+    # A guard against a run that hangs, not a budget. A part takes about a
+    # quarter of the whole.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
 
@@ -49,10 +57,21 @@ jobs:
       - name: Install the browser the privacy canary needs
         run: python -m playwright install --with-deps chromium
 
-      - name: Run every suite
+      - name: Run this part of the suites
         # A failing suite prints each failure with every frame of its
         # traceback, then its whole pytest output in a group below that
         # opens with a click. The log is all there is of a CI run, and a
         # failure that does not come back on a rerun has to be explained
         # from it.
-        run: python tools/run_all_tests.py
+        run: python tools/run_all_tests.py --shard ${{ matrix.part }}/4 --jobs 1
+
+  tests:
+    # One check for the whole run, under the name the single job had.
+    needs: part
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every part passed
+        run: |
+          echo "the parts ended ${{ needs.part.result }}"
+          test "${{ needs.part.result }}" = "success"

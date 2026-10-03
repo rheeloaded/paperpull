@@ -2,6 +2,10 @@
 
     python tools/run_all_tests.py
     python tools/run_all_tests.py --quick     core and gui only
+    python tools/run_all_tests.py --jobs 4    four suites at a time
+    python tools/run_all_tests.py --shard 2/4 the second of four parts, for CI
+    python tools/run_all_tests.py --stop      stop this checkout's run
+    python tools/run_all_tests.py --replace   stop it, then run again
 
 Fifty suites live here: the shared core, the control panel, and one per
 app. Nothing gathered them, so "the tests pass" meant whichever ones the
@@ -53,6 +57,37 @@ writes them down as pytest holds them. The whole output of a failing suite
 is kept in test-output/<suite>.log, and on CI it is printed as well, in a
 group that opens with a click, because a CI run cannot be asked again.
 
+SIDE BY SIDE
+
+Sixty-three suites one after another took an hour and a half on this
+machine by October 2026, and the rule is the whole suite before every
+push. So suites run several at a time, longest first, which brings a run
+down to about the length of the longest suite. --jobs says how many, and
+the default is a quarter of the processors, at most six, or
+PAPERPULL_TEST_JOBS when it is set. Each suite is still its own pytest
+process with its own interpreter, and no test binds a fixed port, so they
+do not meet. A suite that runs past its time limit is a failing suite,
+never the end of the whole run.
+
+ONE RUN AT A TIME
+
+Several sessions run the suites on this machine, and two runs at once made
+both slow. A run takes a lock first, and a second run waits for it,
+saying whose run it is waiting for. The lock is the operating system's,
+held by an open file, so it goes with the process however that ends. A run
+of the same checkout is not waited for, because its answer would be about
+an older tree. This run stops and names it instead, --replace stops the
+earlier one and goes ahead, and --stop only stops it, with every process
+it started. A run started inside a test does not take the lock.
+
+PARTS ON CI
+
+On CI the suites are split by --shard K/N, balanced by how long each took
+on a full run (tools/suite_times.json, refreshed by --write-times), so
+several runners together finish in about the time of the longest part.
+Each part refuses to pass on what it ran, and the privacy canary runs in
+the part that holds the core.
+
 WHAT IT PRINTS
 
 Somebody may paste the summary into a public issue, so it is built from
@@ -85,8 +120,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -98,6 +135,14 @@ WHERE = "where_it_failed"
 WHERE_FILE = "PAPERPULL_WHERE_IT_FAILED"
 # A failing suite's whole output, one file per suite, from the latest run.
 OUTPUT = REPO / "test-output"
+# How long each suite took on a full run. The longest start first, and the
+# parts on CI are balanced by it. A suite not listed counts as a middling one.
+TIMES = REPO / "tools" / "suite_times.json"
+# Set for every suite this runs, so a run started inside one never waits
+# for the lock its own run holds.
+IN_RUN = "PAPERPULL_IN_TEST_RUN"
+LOCK_DIR = Path(os.environ.get("PAPERPULL_TEST_LOCK_DIR")
+                or Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "PaperPull-dev")
 
 DETAILED = 5          # failures per suite printed with their frames
 NAMED = 20            # failures named after those, one line each
@@ -193,25 +238,71 @@ def python_for(d: Path, kind: str, spares: list):
     return best, (lack or [])
 
 
+# Every pytest this run has started and not yet seen end, so an interrupted
+# run can end them too rather than leave them running on their own.
+_RUNNING: set = set()
+_RUNNING_LOCK = threading.Lock()
+
+
+def stop_tree(pid: int) -> None:
+    """End a process and everything it started. On Windows a process's
+    children outlive it, so the whole tree is ended by its root."""
+    if not pid or pid == os.getpid():
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+    else:
+        import signal
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except (OSError, AttributeError):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+
 def run_suite(d: Path, py: Path, timeout: int = 1800):
     """Run one suite. Its whole output, its exit code, and each failure as
-    the plugin wrote it down."""
+    the plugin wrote it down. A suite that runs out of time is ended with
+    everything it started and comes back as a failure that says so."""
     fd, record = tempfile.mkstemp(prefix="paperpull-where-", suffix=".jsonl")
     os.close(fd)
     env = with_this_core(PLUGINS)
     env[WHERE_FILE] = record
+    env[IN_RUN] = "1"
     try:
-        r = subprocess.run([str(py), "-m", "pytest", "-q", "--no-header",
-                            "-rsfE", "-p", "no:cacheprovider", "-p", WHERE],
-                           cwd=d, capture_output=True, text=True, errors="replace",
-                           timeout=timeout, env=env)
+        proc = subprocess.Popen([str(py), "-m", "pytest", "-q", "--no-header",
+                                 "-rsfE", "-p", "no:cacheprovider", "-p", WHERE],
+                                cwd=d, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, errors="replace", env=env)
+        with _RUNNING_LOCK:
+            _RUNNING.add(proc)
+        try:
+            out, err = proc.communicate(timeout=timeout)
+            code = proc.returncode
+        except subprocess.TimeoutExpired:
+            stop_tree(proc.pid)
+            out, err = proc.communicate()
+            err = (err or "") + "\ntimed out after %ds, the suite was stopped\n" % timeout
+            code = -1
+        finally:
+            with _RUNNING_LOCK:
+                _RUNNING.discard(proc)
         failures = read_failures(record)
     finally:
         try:
             os.remove(record)
         except OSError:
             pass
-    return (r.stdout or "") + (r.stderr or ""), r.returncode, failures
+    return (out or "") + (err or ""), code, failures
+
+
+def stop_everything() -> None:
+    with _RUNNING_LOCK:
+        running = list(_RUNNING)
+    for proc in running:
+        stop_tree(proc.pid)
 
 
 def read_failures(path) -> list:
@@ -368,10 +459,175 @@ def clear_old_output(folder=None) -> None:
             pass
 
 
-def main() -> int:
+# -- how many at once, in which order, which part ----------------------------
+
+def default_jobs() -> int:
+    try:
+        return max(1, int(os.environ.get("PAPERPULL_TEST_JOBS", "")))
+    except ValueError:
+        return max(1, min(6, (os.cpu_count() or 4) // 4))
+
+
+def load_times(path=None) -> dict:
+    try:
+        data = json.loads(Path(path or TIMES).read_text(encoding="utf-8"))
+        return {str(k): float(v) for k, v in data.items()}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
+def expected(name: str, times: dict) -> float:
+    if name in times:
+        return times[name]
+    known = sorted(times.values())
+    return known[len(known) // 2] if known else 60.0
+
+
+def longest_first(names: list, times: dict) -> list:
+    return sorted(names, key=lambda n: (-expected(n, times), n))
+
+
+def shard_of(names: list, times: dict, k: int, n: int) -> list:
+    """The suites of part k of n. Each suite, longest first, goes to the
+    part with the least time so far, so every runner works out the same
+    parts and they finish close together."""
+    parts = [[0.0, []] for _ in range(n)]
+    for name in longest_first(names, times):
+        i = min(range(n), key=lambda p: (parts[p][0], p))
+        parts[i][0] += expected(name, times)
+        parts[i][1].append(name)
+    return parts[k - 1][1]
+
+
+def parse_shard(text: str):
+    m = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", text or "")
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        raise SystemExit("--shard takes K/N with 1 <= K <= N, such as 2/4")
+    return int(m.group(1)), int(m.group(2))
+
+
+# -- one run at a time on this machine ---------------------------------------
+
+def same_checkout(a, b) -> bool:
+    return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
+
+
+class RunLock:
+    """The machine's one run at a time. Held by an open file, so it is let
+    go however the process that holds it ends, and never needs clearing."""
+
+    def __init__(self, folder=None):
+        self.folder = Path(folder or LOCK_DIR)
+        self.file = None
+
+    @property
+    def info(self) -> Path:
+        return self.folder / "test-run.json"
+
+    def holder(self) -> dict:
+        try:
+            data = json.loads(self.info.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def try_take(self) -> bool:
+        self.folder.mkdir(parents=True, exist_ok=True)
+        f = open(self.folder / "test-run.lock", "a+")
+        try:
+            if os.name == "nt":
+                import msvcrt
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            f.close()
+            return False
+        self.file = f
+        self.info.write_text(json.dumps({"pid": os.getpid(), "checkout": str(REPO),
+                                         "started": time.strftime("%Y-%m-%d %H:%M:%S")}),
+                             encoding="utf-8")
+        return True
+
+    def release(self) -> None:
+        if self.file is None:
+            return
+        try:
+            self.info.unlink()
+        except OSError:
+            pass
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self.file.seek(0)
+                msvcrt.locking(self.file.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        self.file.close()
+        self.file = None
+
+
+def take_turn(lock: RunLock, replace: bool):
+    """Wait for another checkout's run on this machine to end. None when
+    this run may go ahead, else the exit code to stop with."""
+    said = 0.0
+    while not lock.try_take():
+        who = lock.holder()
+        if same_checkout(who.get("checkout", ""), REPO):
+            if replace:
+                print("stopping the earlier run of this checkout, pid %s, started %s"
+                      % (who.get("pid"), who.get("started")), flush=True)
+                stop_tree(int(who.get("pid") or 0))
+                time.sleep(2)
+                continue
+            print("An earlier run of this same checkout is still going, pid %s, started %s, "
+                  "and its answer would be about an older tree. Stop it with --stop, or stop "
+                  "it and run this one with --replace." % (who.get("pid"), who.get("started")),
+                  flush=True)
+            return 3
+        if time.time() - said >= 60:
+            print("waiting for the run of %s, pid %s, started %s"
+                  % (who.get("checkout") or "another checkout", who.get("pid"), who.get("started")),
+                  flush=True)
+            said = time.time()
+        time.sleep(5)
+    return None
+
+
+def stop_earlier(lock: RunLock) -> int:
+    if lock.try_take():
+        lock.release()
+        print("no run is going on this machine")
+        return 0
+    who = lock.holder()
+    if not same_checkout(who.get("checkout", ""), REPO):
+        print("the run going is the one of %s, pid %s, so it was left alone"
+              % (who.get("checkout") or "another checkout", who.get("pid")))
+        return 1
+    stop_tree(int(who.get("pid") or 0))
+    print("stopped the run of this checkout, pid %s, started %s, and what it started"
+          % (who.get("pid"), who.get("started")))
+    return 0
+
+
+# -- the run -----------------------------------------------------------------
+
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--quick", action="store_true", help="core and gui only")
-    args = ap.parse_args()
+    ap.add_argument("--jobs", type=int, default=None,
+                    help="suites run at once, %d here by default" % default_jobs())
+    ap.add_argument("--shard", default=None, metavar="K/N",
+                    help="only part K of N, balanced by tools/suite_times.json")
+    ap.add_argument("--stop", action="store_true",
+                    help="stop a run of this checkout that is still going")
+    ap.add_argument("--replace", action="store_true",
+                    help="stop a run of this checkout that is still going, then run")
+    ap.add_argument("--write-times", action="store_true",
+                    help="keep this run's suite times in tools/suite_times.json")
+    args = ap.parse_args(argv)
 
     try:
         # A character the console cannot show is written escaped, not
@@ -379,13 +635,42 @@ def main() -> int:
         sys.stdout.reconfigure(errors="backslashreplace")
     except (AttributeError, ValueError):
         pass
+
+    lock = RunLock()
+    if args.stop:
+        return stop_earlier(lock)
+    if not (os.environ.get(IN_RUN) or os.environ.get("PYTEST_CURRENT_TEST")):
+        code = take_turn(lock, args.replace)
+        if code is not None:
+            return code
+    try:
+        return run(args)
+    finally:
+        lock.release()
+
+
+def run(args) -> int:
+    jobs = max(1, args.jobs or default_jobs())
+    times = load_times()
+    plan = suites(args.quick)
+    if args.shard:
+        k, n = parse_shard(args.shard)
+        mine = set(shard_of([name for name, _, _ in plan], times, k, n))
+        plan = [s for s in plan if s[0] in mine]
+        print("part %d of %d, %d suites" % (k, n, len(plan)), flush=True)
+    if jobs > 1:
+        order = longest_first([name for name, _, _ in plan], times)
+        plan = sorted(plan, key=lambda s: order.index(s[0]))
+
     spares = candidates()
     passed = failed = skipped = 0
     broken, under_equipped, skip_lines = [], [], []
+    took = {}
     t0 = time.time()
     clear_old_output()
 
-    for name, d, kind in suites(args.quick):
+    work = []
+    for name, d, kind in plan:
         py, lack = python_for(d, kind, spares)
         if py is None:
             print("%-4s %-16s no interpreter at all" % ("FAIL", name))
@@ -393,7 +678,19 @@ def main() -> int:
             continue
         if lack:
             under_equipped.append((name, lack))
+        work.append((name, d, py))
+    if jobs > 1 and len(work) > 1:
+        print("%d suites, %d at a time, longest first" % (len(work), min(jobs, len(work))), flush=True)
+
+    def one(item):
+        name, d, py = item
+        started = time.time()
         out, returncode, failures = run_suite(d, py)
+        return name, out, returncode, failures, time.time() - started
+
+    def report(name, out, returncode, failures, seconds):
+        nonlocal passed, failed, skipped
+        took[name] = round(seconds)
         lines = [ln for ln in out.strip().splitlines() if ln.strip()]
         summary = lines[-1] if lines else "no output"
         for n, kindword in re.findall(r"(\d+) (passed|failed|skipped|error)", summary):
@@ -403,7 +700,7 @@ def main() -> int:
                 skipped += int(n)
             else:
                 failed += int(n)
-        skip_lines += [ln for ln in out.splitlines() if ln.startswith("SKIPPED")]
+        skip_lines.extend(ln for ln in out.splitlines() if ln.startswith("SKIPPED"))
         ok = returncode in (0, 5)
         if not ok:
             broken.append((name, summary))
@@ -417,6 +714,19 @@ def main() -> int:
             for ln in where_it_failed(out, failures):
                 print("       " + ln, flush=True)
             keep_whole_output(name, out)
+
+    # Suites run in worker threads and are reported here, one at a time, as
+    # each ends, so the lines of two suites never mix.
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = [pool.submit(one, item) for item in work]
+        try:
+            for fut in as_completed(futures):
+                report(*fut.result())
+        except BaseException:
+            for fut in futures:
+                fut.cancel()
+            stop_everything()
+            raise
 
     print("\n" + "=" * 72)
     print("%d passed, %d failed, %d skipped, in %.0fs"
@@ -435,6 +745,8 @@ def main() -> int:
     for name, summary in broken:
         print("FAILING SUITE  %-14s %s" % (name, summary))
 
+    keep_times(took, write=args.write_times and not args.quick and not args.shard)
+
     if any(CANARY in ln for ln in skip_lines):
         print("\nTHE PRIVACY CANARY DID NOT RUN.")
         print("It is the only test holding the promise that a failure file")
@@ -445,6 +757,23 @@ def main() -> int:
         return 1
     print("\nall suites passed, privacy canary included")
     return 0
+
+
+def keep_times(took: dict, write: bool) -> None:
+    """This run's times beside its output, and in tools/suite_times.json
+    when asked, which is what orders the next run and splits CI."""
+    if not took:
+        return
+    try:
+        OUTPUT.mkdir(parents=True, exist_ok=True)
+        (OUTPUT / "times.json").write_text(json.dumps(dict(sorted(took.items())), indent=1) + "\n",
+                                           encoding="utf-8")
+        if write:
+            merged = {**load_times(), **took}
+            TIMES.write_text(json.dumps({k: round(v) for k, v in sorted(merged.items())}, indent=1) + "\n",
+                             encoding="utf-8")
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":
