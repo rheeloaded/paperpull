@@ -2,12 +2,11 @@
 
 When Golden 1 changes its site, repair this file only.
 
-STATUS: PARTLY VERIFIED (#35). Written without a Golden 1 account, so that
-someone who holds one can test it without writing code, and repaired from
-the surveys, failure files and a recording a tester sent. On his account
-a Pilot saved five checking statements. Reading every page of every
-account's statement history, the card's included, is round six's repair
-and has not yet run against the live site. On a first run it is
+STATUS: CONFIRMED on the tester's account (#35). Written without a Golden
+1 account and repaired from the surveys, failure files and a recording one
+tester sent. Discover reads every page of every account's statement
+history, a card's included, and on his two accounts every statement
+downloaded, the card's named Credit Card Statement. On a first run it is
 deliberately cautious.
 
   * --login opens a real Edge or Chrome, since a credit union's sign-in is happiest in a real browser.

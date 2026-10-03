@@ -1,13 +1,11 @@
 # Golden 1 document downloader
 
-**Partly tested against a real account.** This app was built without
-a Golden 1 checking, savings, credit card or loan account, so that someone who holds one can test it without
-writing code. It runs, its guards are tested, and every guess about
-golden1.com is marked in `golden1_site.py`. On a real account a Pilot
-saved five checking statements. A recording then showed why the older
-ones and the credit card were missed, the history is paged twelve at a
-time and each account has a panel of its own, and reading every page of
-every account is this round's repair. The conversation is
+**Working on the tester's account.** This app was built without a
+Golden 1 account and repaired across several rounds from the surveys,
+failure files and a recording one tester sent. Discover reads every page
+of every account's statement history, and on his two accounts, one of them
+a credit card, every statement downloaded, the card's named Credit Card
+Statement. The conversation is
 [issue #35](https://github.com/rheeloaded/paperpull/issues/35).
 
 Downloads your Golden 1 **statements and tax forms** as PDFs. Read-only,

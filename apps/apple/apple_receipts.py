@@ -89,7 +89,13 @@ class _SignedOut(Exception):
 
 
 class _AppleRefused(Exception):
-    """Report a Problem answered, still signed in, and gave no receipt."""
+    """Report a Problem answered, still signed in, and gave no receipt, or
+    was not asked, `asked` False, because Apple had just refused the
+    purchases before this one (#55)."""
+
+    def __init__(self, asked: bool = True):
+        super().__init__("refused" if asked else "not asked")
+        self.asked = asked
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +681,9 @@ class App:
     # -- processing core ----------------------------------------------------
 
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
+        # The line past which Apple refuses an account's receipts is learned
+        # anew in each run, from that run's answers (#55).
+        self.__dict__.pop("_age_line", None)
         page = self.page() if any(p.purchase_type != APPLE_STORE for p in purchases) else None
         for i, purchase in enumerate(purchases, 1):
             print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
@@ -698,6 +707,7 @@ class App:
                                 "take a document", ordinal=i)
             except Exception:
                 pass
+            not_asked = self.stats.get("not_asked", 0)
             try:
                 self.process_one(page, purchase, dry_run=dry_run)
             except KeyboardInterrupt:
@@ -707,7 +717,10 @@ class App:
                 log.exception("Unhandled failure on %s", purchase.key)
                 self._record_state(purchase, State.FAILED, notes=f"Unhandled error, {e}")
                 self.stats["failed"] += 1
-            self._delay()
+            # Nothing was asked of Apple for a purchase past the line (#55),
+            # so there is nothing to pace.
+            if self.stats.get("not_asked", 0) == not_asked:
+                self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
         if purchase.purchase_type in self._stopped_sides:
@@ -782,7 +795,8 @@ class App:
         self.journal.checkpoint('a document is saved')
         if is_record:
             print(f"  Saved {purchase.pdf_filename}, a record from Apple's purchase history, "
-                  f"since Apple refused the receipt on {site.REFUSED_RUNS_FOR_RECORD} runs")
+                  f"since Apple did not give the receipt on {site.REFUSED_RUNS_FOR_RECORD} "
+                  f"separate runs")
         else:
             self.stats["receipts_downloaded"] += 1
             print(f"  Saved {purchase.pdf_filename}")
@@ -816,8 +830,8 @@ class App:
                                notes="Signed out before the receipt was read, revisited next run")
             self._signed_out(e.side, e.page)
             return False
-        except _AppleRefused:
-            return self._apple_refused(page, purchase, rec)
+        except _AppleRefused as e:
+            return self._apple_refused(page, purchase, rec, asked=e.asked)
         except Exception as e:
             log.exception("PDF generation failed for %s", purchase.key)
             self._record_state(purchase, State.FAILED,
@@ -866,7 +880,12 @@ class App:
     def _capture_app_store_receipt(self, page, purchase: Purchase, out_path: Path, rec: dict):
         """Apple's receipt, as the page's own View Receipt asks for it, with
         the purchaser's dsid in the header, then drawn with set_content in a
-        blank tab of the same browser and printed by the core. Asked once."""
+        blank tab of the same browser and printed by the core. Asked once,
+        and not at all past the line this run has learned for the account
+        (#55)."""
+        if self._past_the_line(purchase) and not self._would_make_a_record(purchase):
+            self.stats["not_asked"] = self.stats.get("not_asked", 0) + 1
+            raise _AppleRefused(asked=False)
         got = self._ask_for_receipt(page, purchase.order_number, str(rec.get("dsid") or ""))
         if got["kind"] == site.SIGNED_OUT:
             raise _SignedOut(APP_STORE, page)
@@ -875,8 +894,11 @@ class App:
             # Apple answered and gave no receipt. No answer at all is not
             # counted, and neither is an order this app would not ask for.
             if got["status"] and got["kind"] in (site.REFUSED, site.ANSWERED):
+                self._note_answer(purchase, "refused")
                 raise _AppleRefused()
+            self._note_answer(purchase, "other")
             return None
+        self._note_answer(purchase, "given")
         html = got["html"]
         self.journal.checkpoint("the receipt is in hand")
         def draw(staged):
@@ -979,22 +1001,37 @@ class App:
             self._run_id = str(self.stats.get("started") or "") or now_iso()
         return self._run_id
 
-    def _apple_refused(self, page, purchase: Purchase, rec: dict) -> bool:
-        """Report a Problem answered, signed in, and gave no receipt. The
-        purchase is asked again on later runs, and once it has been refused
-        on REFUSED_RUNS_FOR_RECORD separate runs, a record made from Apple's
-        own purchase history is saved in its place."""
+    def _apple_refused(self, page, purchase: Purchase, rec: dict, asked: bool = True) -> bool:
+        """Report a Problem answered, signed in, and gave no receipt, or was
+        not asked, past the line this run learned for the account. The
+        purchase is looked at again on later runs, and once it has been
+        refused on REFUSED_RUNS_FOR_RECORD separate runs, asked or not, a
+        record made from Apple's own purchase history is saved in its place.
+        The runs it was not asked on are kept apart, so the record can say
+        so."""
         prog = self.progress.get(purchase.key) or {}
         runs = [r for r in (prog.get("refused_runs") or []) if isinstance(r, str) and r]
+        quiet = [r for r in (prog.get("not_asked_runs") or []) if isinstance(r, str) and r]
         if self._run_key() not in runs:
             runs.append(self._run_key())
+        if not asked and self._run_key() not in quiet:
+            quiet.append(self._run_key())
         needed = site.REFUSED_RUNS_FOR_RECORD
         if len(runs) >= needed:
-            return self._save_purchase_record(page, purchase, rec, runs)
-        self._record_state(purchase, State.FAILED, notes="Apple refused its receipt",
-                           extra={"refused_runs": runs})
-        self.stats["no_receipt"] += 1
+            return self._save_purchase_record(page, purchase, rec, runs, quiet)
+        self._record_state(purchase, State.FAILED,
+                           notes=("Apple refused its receipt" if asked else
+                                  "Not asked, Apple had refused this account's newer purchases "
+                                  "before it in this run"),
+                           extra={"refused_runs": runs, "not_asked_runs": quiet})
         self.stats["failed"] += 1
+        if not asked:
+            print(f"  Not asked. In this run Apple refused {site.REFUSAL_STREAK} of this "
+                  f"account's newer purchases in a row, each older than any receipt it had given "
+                  f"the account, so this counts as refused, on {len(runs)} of {needed} separate "
+                  f"runs. It is asked on the run that would make its record.")
+            return False
+        self.stats["no_receipt"] += 1
         self.write_failure("fetch the receipt", "Apple refused the receipt")
         self.journal.result("could not save the document")
         print(f"  Apple would not give this receipt, on {len(runs)} of {needed} separate runs. "
@@ -1002,7 +1039,113 @@ class App:
               f"Apple's purchase history instead.")
         return False
 
-    def _save_purchase_record(self, page, purchase: Purchase, rec: dict, runs: list) -> bool:
+    # -- the line past which Apple refuses an account's receipts (#55) -----
+    #
+    # Report a Problem refuses an account's oldest receipts, and where that
+    # starts differs by account (site.REFUSAL_STREAK). Every refused purchase
+    # used to be asked on every run, a few seconds each, until its third
+    # refusal made a record of it. Purchases go newest first, so once Apple
+    # has refused REFUSAL_STREAK of an account's purchases in a row, each
+    # older than any receipt it has given that account, the rest are past the
+    # line and are not asked this run. Each counts as refused on it, so a
+    # record still waits for three separate runs, and the run that would make
+    # a purchase's record asks it, so every record rests on Apple's own
+    # refusal. The newest purchase of each older year is still asked, and a
+    # receipt Apple gives there takes the line away, so a line in the wrong
+    # place does not hold for the run, and the next run starts from the older
+    # receipt. --redownload asks every purchase, as it always has.
+
+    def _line_state(self) -> dict:
+        return self.__dict__.setdefault(
+            "_age_line", {"given": {}, "streak": {}, "line": {}, "year": {}})
+
+    def _apple_account(self, purchase: Purchase) -> str:
+        """Whose purchase this is, the dsid it was searched under."""
+        return str((self.discovery.get(purchase.key) or {}).get("dsid") or "")
+
+    def _oldest_given(self, account: str) -> str:
+        """The date of the oldest App Store receipt Apple has given this
+        account, from every record kept and this run, or "" for none."""
+        given = self._line_state()["given"]
+        if account not in given:
+            dates = []
+            for key, prog in (getattr(self.progress, "data", None) or {}).items():
+                if not isinstance(prog, dict) or not prog.get("downloaded_ok"):
+                    continue
+                if prog.get("purchase_type") != APP_STORE or \
+                        prog.get("document_type") == site.RECORD_TYPE:
+                    continue
+                # A receipt whose account is not known counts for every
+                # account, since leaving it out would make a line easier to
+                # learn (review).
+                if str((self.discovery.get(key) or {}).get("dsid") or "") not in (account, ""):
+                    continue
+                if prog.get("purchase_date"):
+                    dates.append(str(prog["purchase_date"]))
+            given[account] = min(dates) if dates else ""
+        return given[account]
+
+    def _note_answer(self, purchase: Purchase, what: str) -> None:
+        """What Apple answered for an App Store receipt, "given", "refused" or
+        "other", kept per account. A refusal older than any receipt Apple
+        has given the account adds to its count in a row, anything else
+        ends it, and a receipt given past the line takes the line away."""
+        st = self._line_state()
+        account, when = self._apple_account(purchase), purchase.purchase_date or ""
+        if what != "refused":
+            st["streak"][account] = 0
+            if what == "given":
+                oldest = self._oldest_given(account)
+                if when and (not oldest or when < oldest):
+                    st["given"][account] = when
+                if st["line"].pop(account, None):
+                    print("  Apple gave this receipt, older than the ones it refused, so "
+                          "older purchases are asked again.")
+            return
+        oldest = self._oldest_given(account)
+        if not (when and oldest and when < oldest):
+            st["streak"][account] = 0
+            return
+        st["streak"][account] = st["streak"].get(account, 0) + 1
+        if st["streak"][account] >= site.REFUSAL_STREAK and account not in st["line"]:
+            st["line"][account] = when
+            print(f"  Apple has refused the last {site.REFUSAL_STREAK} of this account's "
+                  f"purchases, each older than any receipt it has given it. Older ones are not "
+                  f"asked this run, but for the newest of each year, and each counts as refused.")
+        # A year's purchases past the line go unasked only once Apple has
+        # refused one of them. One that got no answer leaves its year to be
+        # asked (review).
+        line = st["line"].get(account)
+        if line and when <= line:
+            st["year"][account] = when[:4]
+
+    def _past_the_line(self, purchase: Purchase) -> bool:
+        """Whether this App Store purchase is past the line this run has
+        learned for its account, and so is not asked. A year's purchases
+        are asked until Apple refuses one of them, and --redownload asks
+        every purchase."""
+        if purchase.purchase_type != APP_STORE or not purchase.purchase_date:
+            return False
+        if getattr(self.args, "redownload", False):
+            return False
+        st = self._line_state()
+        account = self._apple_account(purchase)
+        line = st["line"].get(account)
+        if not line or purchase.purchase_date > line:
+            return False
+        return purchase.purchase_date[:4] == st["year"].get(account)
+
+    def _would_make_a_record(self, purchase: Purchase) -> bool:
+        """Whether a refusal on this run would make the purchase's record. It
+        is asked then, so no record is made without Apple refusing the
+        receipt itself (review)."""
+        prog = self.progress.get(purchase.key) or {}
+        runs = {r for r in (prog.get("refused_runs") or []) if isinstance(r, str) and r}
+        runs.add(self._run_key())
+        return len(runs) >= site.REFUSED_RUNS_FOR_RECORD
+
+    def _save_purchase_record(self, page, purchase: Purchase, rec: dict, runs: list,
+                              quiet: tuple = ()) -> bool:
         """The record of a purchase whose receipt Apple refused on enough
         separate runs, printed like a receipt through delivery.render and
         checked for its own order ID, and filed as a Purchase Record so it is
@@ -1013,10 +1156,11 @@ class App:
                                       purchase.document_type, record=purchase)
         out_path = unique_path(folder, filename, self.config["max_path_length"],
                                distinguisher=purchase.order_number)
-        self.progress.update(purchase.key, {"refused_runs": runs})
+        self.progress.update(purchase.key, {"refused_runs": runs, "not_asked_runs": list(quiet)})
         page_html = site.purchase_record_html(purchase, rec.get("lines") or [],
                                               str(rec.get("purchaser") or ""), len(runs),
-                                              made_on=datetime.now().date().isoformat())
+                                              made_on=datetime.now().date().isoformat(),
+                                              not_asked=len(quiet))
 
         def draw(staged):
             receipt_pdf.print_html_to_pdf(page, page_html, staged)
@@ -1594,6 +1738,7 @@ class App:
             f"Canceled orders:           {s.get('canceled', 0)}",
             f"Not invoiced yet:          {s.get('not_invoiced', 0)}",
             f"No receipt returned:       {s.get('no_receipt', 0)}",
+            f"Older, not asked:          {s.get('not_asked', 0)}",
             f"Needs manual review:       {s.get('manual_review', 0)}",
             f"Failed:                    {s.get('failed', 0)}",
             f"Duplicate filenames (#'d): {s.get('duplicate_filenames', 0)}",

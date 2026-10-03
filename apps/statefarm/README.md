@@ -139,7 +139,13 @@ paperpull statefarm pilot            REM once the site layer is confirmed
   list gives. Its description faces the whole guard as well, less a
   description that is only Billing/Payments or how a payment was made,
   and the trim Limited in a vehicle's name, so those no longer keep a
-  document away. The PDF
+  document away. A description that is word for word what State Farm's
+  own list calls the document, its description or its category, is read
+  again with the money words a receipt is described by let off, payment,
+  paid, billing, receipt and a card ending in its last four, and every
+  other word of the guard still facing it (#37). When the guard
+  still refuses one, `download-attempt.json` gives its words from a fixed
+  list of ordinary ones, any other word as `*` and digits as `#`. The PDF
   it opens is caught and saved to `Statements\` or `Insurance Documents\`.
   A document from an earlier year is looked for in the list of its own
   year.

@@ -826,6 +826,15 @@ def identity_for(purchase) -> Identity:
 REFUSED_RUNS_FOR_RECORD = 3
 RECORD_TYPE = "Purchase Record"
 
+# Where an account's refusals start differs by account, before October 2016
+# on the one this was built on, before May 2015 on a tester's, anything older
+# than eighteen months on another tester's (#55). Purchases go newest first,
+# and once Apple has refused this many of an account's purchases in a row,
+# each older than any receipt it has given that account, the older ones are
+# not asked for the rest of the run, but for one a year until Apple refuses
+# it and the run that would make a purchase's record.
+REFUSAL_STREAK = 10
+
 _RECORD_STYLE = (
     "body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;"
     " margin: 40px; color: #1d1d1f; font-size: 13px }"
@@ -839,11 +848,15 @@ _RECORD_STYLE = (
     " .small { color: #6e6e73; font-size: 11px }")
 
 
-def purchase_record_html(purchase, lines, purchaser: str, runs: int, made_on: str) -> str:
+def purchase_record_html(purchase, lines, purchaser: str, runs: int, made_on: str,
+                         not_asked: int = 0) -> str:
     """A plain record of one App Store purchase, made from Apple's purchase
     history when Report a Problem refused its receipt on `runs` separate
     runs. It says at the top that it is not Apple's receipt and why, and it
-    carries the order ID, which it is checked against like a receipt."""
+    carries the order ID, which it is checked against like a receipt.
+    `not_asked` is how many of those runs did not ask for this receipt,
+    because Apple had just refused the purchases before it (#55), and the
+    record says so rather than claim Apple was asked each time."""
     esc = html.escape
     items = []
     for line in lines or []:
@@ -859,19 +872,27 @@ def purchase_record_html(purchase, lines, purchaser: str, runs: int, made_on: st
              ("Purchased by", purchaser), ("Total", purchase.total)]
     fact_rows = "".join("<tr><th>%s</th><td>%s</td></tr>" % (esc(k), esc(str(v or "")))
                         for k, v in facts if v)
+    if not_asked:
+        why = ("Apple's Report a Problem did not give the receipt for this purchase on %d "
+               "separate runs. On %d of them it was not asked, because on that run Apple had "
+               "already refused %d of this account's newer purchases in a row, each older than "
+               "any receipt Apple had given the account by then, and on the last it refused "
+               "this receipt itself, so" % (int(runs), int(not_asked), REFUSAL_STREAK))
+    else:
+        why = ("Apple's Report a Problem would not give the receipt for this purchase on %d "
+               "separate runs, so" % int(runs))
     return (
         "<html><head><meta charset='utf-8'><title>Apple purchase record</title>"
         "<style>%s</style></head><body>"
         "<h1>Apple purchase record</h1>"
-        "<p class='note'>This is not Apple's receipt. Apple's Report a Problem would not "
-        "give the receipt for this purchase on %d separate runs, so this record was made "
+        "<p class='note'>This is not Apple's receipt. %s this record was made "
         "from Apple's own purchase history. It shows what Apple lists for the purchase, "
         "and not the tax, payment method or billing address that a receipt carries.</p>"
         "<table>%s</table>"
         "<table><tr><th>Item</th><th>Detail</th><th>Kind</th><th class='n'>Paid</th></tr>"
         "%s</table>"
         "<p class='small'>Made by PaperPull on %s from reportaproblem.apple.com.</p>"
-        "</body></html>" % (_RECORD_STYLE, int(runs), fact_rows, item_rows, esc(made_on)))
+        "</body></html>" % (_RECORD_STYLE, why, fact_rows, item_rows, esc(made_on)))
 
 
 # ---------------------------------------------------------------------------

@@ -997,7 +997,8 @@ def test_a_press_that_moves_the_tab_is_left_before_the_census_listens_again(tmp_
         ("**/DocumentCenterProxyV1/document/**", lambda r: r.fulfill(
             status=200, content_type="application/json", body="{}"))])
     try:
-        def press_and_get_nothing(page, el, label, out_path, trace=None, dl_dir=None, check=None):
+        def press_and_get_nothing(page, el, label, out_path, trace=None, dl_dir=None, check=None,
+                                  own=()):
             el.click()
             page.wait_for_url("**/DocumentInformationUI/**")
             page.wait_for_timeout(800)
@@ -2247,10 +2248,10 @@ def test_an_older_document_whose_own_year_ends_on_a_sign_in_page_is_looked_for_i
         real = site._fresh_list
         loads = []
 
-        def ends_early_for_its_year(page, want="", year=None):
+        def ends_early_for_its_year(page, want="", year=None, answers=None):
             loads.append(year)
             if year is None:
-                return real(page, want)
+                return real(page, want, answers=answers)
             page.evaluate("document.getElementById('rows').replaceChildren()")
             return {"waited_ms": 0, "list_answered": False, "dated_controls": 0,
                     "wanted_date_seen": False, "rows_redrawn": 0, "year_asked": year,

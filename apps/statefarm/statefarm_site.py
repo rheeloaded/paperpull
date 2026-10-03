@@ -39,6 +39,7 @@ import base64
 import logging
 import re
 import time
+import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -603,11 +604,71 @@ def _description_left(description: str) -> str:
     return text
 
 
+def _plain(text: str) -> str:
+    """Text as it is compared with the list's, its case, spacing and
+    compatibility forms aside, so a ligature reads as its letters."""
+    return " ".join(unicodedata.normalize("NFKC", text or "").split()).lower()
+
+
+def _said_by_the_list(description: str, label: str, own, cut: bool = False) -> bool:
+    """Whether a revealed document's description, or its whole name, is
+    one of `own`, what State Farm's list calls this document.
+
+    `cut` says the name was read cut short, the way the page's controls
+    are listed, at _CUT_AT characters, and then it only has to be the start
+    of one of them. A receipt named past sixty characters was never matched
+    otherwise. The name read whole off the node before the press is held to
+    all of it (_revealed_document)."""
+    if not own:
+        return False
+    d, n = _plain(description), _plain(label)
+    if d in own or (n and n in own):
+        return True
+    if cut:
+        return any(w.startswith(d) or (n and w.startswith(n)) for w in own)
+    return False
+
+
 def _description_rules(description: str):
     """The (text, rule) pairs a description is read by, in order."""
     left = _description_left(description)
     return [(description, _DESCRIPTION_ACTION_RE), (description, AUTH_CONTROL_RE),
             (left, FORBIDDEN_CONTROL_RE), (left, SETTINGS_CONTROL_RE)]
+
+
+# The money words a receipt is described by, and nothing else. His Payment
+# Receipt of 2025-03-11 was refused twice for one of them in its
+# description, the second time on 0.41.1, in a shape no list of whole
+# descriptions here had guessed (#37).
+_LIST_MONEY_RE = re.compile(
+    r"\b(payments?|paid|billing|receipts?)\b"
+    r"|\b((credit|debit)\s+)?card\s+ending(\s+in)?\s+[\dxX*\u2022.]{2,}", re.I)
+
+
+def _own_rules(description: str):
+    """The rules a description is read by when it is what State Farm's own
+    list calls this document. The same rules, read in its compatibility
+    form, with the money words of _LIST_MONEY_RE taken out before the whole
+    guard reads it, so a word that acts or a setting is refused as ever."""
+    text = unicodedata.normalize("NFKC", description)
+    left = _LIST_MONEY_RE.sub(" ", _description_left(text))
+    return [(text, _DESCRIPTION_ACTION_RE), (text, AUTH_CONTROL_RE),
+            (left, FORBIDDEN_CONTROL_RE), (left, SETTINGS_CONTROL_RE)]
+
+
+def _rules_for(description: str, label: str, own=(), cut: bool = False):
+    """The rules a revealed document's description is read by.
+
+    `own` is what State Farm's own list calls this document, its
+    description and its category, from the list the page fetched for the
+    load the row is found on (_own_words). A description the rules of
+    _description_rules refuse gets a second reading by _own_rules when it,
+    or the whole name, is one of those, and never a stricter one."""
+    rules = _description_rules(description)
+    if any(rule.search(text) for text, rule in rules) and \
+            _said_by_the_list(description, label, own, cut):
+        return _own_rules(description)
+    return rules
 
 
 _DOCUMENT_PARTS_RE = re.compile(r"^\s*(.+?)\s+-\s+(.*?)\s*$")
@@ -620,13 +681,16 @@ def _document_parts(label: str):
     return (m.group(1), m.group(2)) if m else None
 
 
-def is_revealed_document(label: str) -> bool:
+def is_revealed_document(label: str, own=(), cut: bool = False) -> bool:
     """A document link a row revealed, once the guard has had its say.
 
     The type, before the dash, faces the whole guard, so "Pay Now - Payment
     Receipt" is refused however well it is shaped. The description, after
     it, faces the words that act, and the whole guard too once the nouns a
-    document is known to be named by are taken out of it (#37)."""
+    document is known to be named by are taken out of it (#37). One that is
+    what the list calls this document, `own`, is read again by _own_rules,
+    and `cut` says the label was read cut short (_rules_for)."""
+    cut = cut and len(label or "") >= _CUT_AT
     label = " ".join((label or "").split())
     if not label or VIEW_DOCUMENTS_RE.match(label) or not REVEALED_DOC_RE.match(label):
         return False
@@ -636,10 +700,11 @@ def is_revealed_document(label: str) -> bool:
     kind, description = parts
     if _guard_refuses_words(kind):
         return False
-    return not any(rule.search(text) for text, rule in _description_rules(description))
+    return not any(rule.search(text)
+                   for text, rule in _rules_for(description, label, own, cut))
 
 
-def _guard_refuses_name(text: str, want=None) -> bool:
+def _guard_refuses_name(text: str, want=None, own=()) -> bool:
     """The guard on a whole name, the name a control gives a screen reader
     say. A name shaped like a revealed document, and of the wanted type
     when `want` is given, is read the way a document's own words are.
@@ -650,19 +715,21 @@ def _guard_refuses_name(text: str, want=None) -> bool:
         return False
     if REVEALED_DOC_RE.match(text) and not VIEW_DOCUMENTS_RE.match(text) and \
             (want is None or _type_key(text) == want):
-        return not is_revealed_document(text)
+        return not is_revealed_document(text, own)
     return _guard_refuses_words(text)
 
 
-def _refused_document(label: str) -> bool:
+def _refused_document(label: str, own=(), cut: bool = False) -> bool:
     """Shaped like a revealed document and refused by the guard.
 
     The trace used to call such a document "another control", which cannot
-    be told from something that is not a document at all (#37)."""
-    label = " ".join((label or "").split())
-    if not label or VIEW_DOCUMENTS_RE.match(label) or not REVEALED_DOC_RE.match(label):
+    be told from something that is not a document at all (#37). The label
+    goes on as it came, since whether it was cut is read off its raw
+    length."""
+    text = " ".join((label or "").split())
+    if not text or VIEW_DOCUMENTS_RE.match(text) or not REVEALED_DOC_RE.match(text):
         return False
-    return not is_revealed_document(label)
+    return not is_revealed_document(label, own, cut)
 
 
 # The words a trace may give for why the guard refused a document, the
@@ -689,15 +756,16 @@ _GUARD_WORDS = frozenset([
     "application", "beneficiary", "beneficiaries", "set up"])
 
 
-def _refusing_word(label: str) -> str:
+def _refusing_word(label: str, own=(), cut: bool = False) -> str:
     """The guard's own word for why it refused a revealed document, from
     _GUARD_WORDS, else "another word". Nothing the page printed leaves."""
+    cut = cut and len(label or "") >= _CUT_AT
     parts = _document_parts(label)
     if parts is None:
         return "another word"
     kind, description = parts
     checks = [(kind, FORBIDDEN_CONTROL_RE), (kind, SETTINGS_CONTROL_RE), (kind, AUTH_CONTROL_RE)]
-    for text, rule in checks + _description_rules(description):
+    for text, rule in checks + _rules_for(description, label, own, cut):
         m = rule.search(text)
         if m:
             word = " ".join(m.group(0).lower().split())
@@ -789,7 +857,7 @@ def _names_type(text: str, want: str) -> bool:
     return any(_same_type(_type_key(m.group(0)), want) for m in _TYPE_NAME_RE.finditer(text))
 
 
-def _label_mask(label: str) -> str:
+def _label_mask(label: str, own=(), cut: bool = False) -> str:
     """A control's name as a trace may carry it, from a list and never the
     page's own words. Named a mask so the repo-wide check on trace entries
     knows it for a cleaner, and stricter than one, since nothing it returns
@@ -800,13 +868,114 @@ def _label_mask(label: str) -> str:
     m = _VIEW_N_RE.match(text)
     if m:
         return "View Documents" + (m.group(1) or "")
-    if is_revealed_document(text):
+    if is_revealed_document(label, own, cut):
         return "%s - ..." % _type_word(text)
-    if _refused_document(text):
-        return "%s - ..., refused by the guard for %s" % (_type_word(text), _refusing_word(text))
+    if _refused_document(label, own, cut):
+        return "%s - ..., refused by the guard for %s" % (_type_word(text),
+                                                          _refusing_word(label, own, cut))
     if _SECOND_STEP_RE.match(text):
         return text.lower()[:30]
     return "another control"
+
+
+# The words a refused description may be told by in a trace, the ordinary
+# words a document's description is made of and nothing that names anybody.
+# Any other word is "*", a run of digits "#", and a mark not listed "?". His
+# receipt was refused twice and the trace could only say for which word of
+# the guard's, so the second repair rested on a guess (#37). Left out, a word
+# that is also a first name, Bill, a card's brand, the kind of bank account,
+# and a payment that was declined, returned, reversed or canceled, since the
+# file is posted in public (review).
+_DESCRIPTION_WORDS = frozenset("""
+a an the and or of for to on in by with from at your you thank thanks
+payment payments paid pay receipt receipts billing billed statement statements
+invoice confirmation confirmed received processed posted applied accepted submitted
+completed pending online web mobile app phone mail agent office automatic auto autopay
+recurring scheduled one time onetime monthly quarterly annual installment installments
+plan premium premiums policy policies account accounts card ending credit debit
+bank eft electronic funds transfer check draft drafts ach wire sfpp state farm
+insurance home homeowners renters condo life fire health umbrella vehicle notice
+renewal document documents letter refund refunds change update amount balance due
+date method number no id limited new past final partial full initial down first
+last current summary copy details detail
+""".split())
+_DESCRIPTION_MARKS = frozenset("-/&,.:()#'")
+_DESCRIPTION_TOKEN_RE = re.compile(r"[^\W\d_]+|\d+|\S")
+
+
+def _description_mask(label: str, cut: bool = False) -> str:
+    """A revealed document's description as a trace may carry it, each word
+    one of _DESCRIPTION_WORDS or a placeholder, at most sixteen. Built from
+    that list, so nothing the page printed leaves as it stands. `cut` says
+    the label was read cut short, and one as long as the cut ends "...",
+    since its last word may be a part of one."""
+    parts = _document_parts(label)
+    if parts is None:
+        return ""
+    out = []
+    for tok in _DESCRIPTION_TOKEN_RE.findall(parts[1]):
+        low = tok.lower()
+        if low in _DESCRIPTION_WORDS:
+            out.append(low)
+        elif tok.isdigit():
+            out.append("#")
+        elif tok in _DESCRIPTION_MARKS:
+            out.append(tok)
+        elif tok.isalpha():
+            out.append("*")
+        else:
+            out.append("?")
+    more = len(out) > 16 or (cut and len(label or "") >= _CUT_AT)
+    return " ".join(out[:16]) + (" ..." if more else "")
+
+
+def _list_says(appeared, want: str, own) -> str:
+    """Whether a revealed document of the wanted type is named as the list
+    names this document, as a fixed phrase. A name read cut short that only
+    starts as the list's says so."""
+    if not own:
+        return "the list gave no words for it"
+    said = "no"
+    for t in appeared:
+        parts = _document_parts(t)
+        if not parts or _type_key(t) != want:
+            continue
+        if _said_by_the_list(parts[1], t, own):
+            return "yes"
+        if len(t or "") >= _CUT_AT and _said_by_the_list(parts[1], t, own, cut=True):
+            said = "its first sixty characters"
+    return said
+
+
+def _own_words(answers, hint: str) -> tuple:
+    """What State Farm's list calls the document `hint` names, its
+    description and its category as _plain text, read from the list
+    answers of the load its row is found on. Nothing when there is no hint,
+    or when no entry, or more than one document, carries it.
+
+    `hint` is what discovery kept, the document's file address when the list
+    gave one and its id when it did not, and it is matched against both.
+    Every entry carrying it has to be the same document, its type, date,
+    category and description too, since two that share an id would pool
+    their words (review). The words are compared in memory and never
+    written anywhere."""
+    if not hint:
+        return ()
+    found = []
+    for body in answers or []:
+        data = body.get("data") if isinstance(body, dict) else None
+        entries = data.get("attributes") if isinstance(data, dict) else None
+        for e in entries if isinstance(entries, list) else []:
+            if isinstance(e, dict) and hint in (str(e.get("filePathUrl") or ""),
+                                                str(e.get("documentId") or "")):
+                found.append(e)
+    whose = {tuple(str(e.get(k) or "") for k in ("documentId", "filePathUrl", "type",
+                                                 "creationDate", "category", "description"))
+             for e in found}
+    if len(whose) != 1:
+        return ()
+    words = {_plain(str(e.get(k) or "")) for e in found for k in ("description", "category")}
+    return tuple(sorted(w for w in words if w))
 
 
 def _attr_word(value) -> str:
@@ -910,7 +1079,7 @@ def _guard_refuses_words(text: str) -> bool:
                 or AUTH_CONTROL_RE.search(text))
 
 
-def _revealed_document(page, appeared: set, title: str):
+def _revealed_document(page, appeared: set, title: str, own=()):
     """The one document link that appeared after this row's press and is
     the wanted type, as (node, whole name, why). None when there is not
     exactly one, because a row can hold several and the wrong one would be
@@ -925,9 +1094,9 @@ def _revealed_document(page, appeared: set, title: str):
     if not getattr(appeared, "complete", True):
         return None, "", "the controls on the page could not all be read, so what the row revealed is not known"
     want = _type_key(title)
-    candidates = sorted(t for t in appeared if is_revealed_document(t))
+    candidates = sorted(t for t in appeared if is_revealed_document(t, own, cut=True))
     if not candidates:
-        if any(_refused_document(t) for t in appeared):
+        if any(_refused_document(t, own, cut=True) for t in appeared):
             return None, "", "what the row revealed looks like a document and the guard refuses it"
         return None, "", "nothing the row revealed looks like a document"
     if not want or want == "document":
@@ -955,7 +1124,8 @@ def _revealed_document(page, appeared: set, title: str):
         return None, "", "the control found by that name does not read as that document"
     # Its own words start with the type and the start of the description it
     # was found by, so only the guard is asked again, about the whole name.
-    if not is_revealed_document(name) or any(_guard_refuses_name(n, want) for n in read["names"]):
+    if not is_revealed_document(name, own) or \
+            any(_guard_refuses_name(n, want, own) for n in read["names"]):
         return None, "", "the guard refuses the document's whole name"
     return el, name, ""
 
@@ -1156,7 +1326,7 @@ def _openers_read(page, iso: str) -> dict:
 
 def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
                             trace: Optional[list], dl_dir, census=None, check=None,
-                            iso: str = "") -> bool:
+                            iso: str = "", own=()) -> bool:
     """Press the row's View Documents once, then the document it revealed.
 
     A Pilot pressed View Documents, saw "Payment Receipt - Payment Receipt"
@@ -1174,7 +1344,8 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
     the page that carries the date can hold the document then, and two rows
     with it, or none, press nothing more. `census` is the run's request
     census, which is not listening while the document is pressed and
-    caught."""
+    caught. `own` is what State Farm's list calls the document
+    (_own_words)."""
     def note(entry):
         if trace is not None:
             trace.append(entry)
@@ -1228,7 +1399,8 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
         while True:
             page.wait_for_timeout(500)
             appeared = _control_texts(page) - before
-            if any(is_revealed_document(t) for t in appeared) or time.monotonic() >= until:
+            if any(is_revealed_document(t, own, cut=True) for t in appeared) or \
+                    time.monotonic() >= until:
                 break
     finally:
         try:
@@ -1249,11 +1421,16 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
         after = "could not be read"
     want = _type_key(title)
     note({"note": "the row's documents", "wanted_type": _type_word(title),
-          "appeared": [_label_mask(t) for t in sorted(appeared)[:15]],
-          "look_like_documents": sum(1 for t in appeared if is_revealed_document(t)),
+          "appeared": [_label_mask(t, own, cut=True) for t in sorted(appeared)[:15]],
+          "look_like_documents": sum(1 for t in appeared
+                                     if is_revealed_document(t, own, cut=True)),
           "of_the_wanted_type": sum(1 for t in appeared
-                                    if is_revealed_document(t) and _type_key(t) == want),
-          "refused_by_the_guard": sum(1 for t in appeared if _refused_document(t)),
+                                    if is_revealed_document(t, own, cut=True)
+                                    and _type_key(t) == want),
+          "refused_by_the_guard": sum(1 for t in appeared if _refused_document(t, own, cut=True)),
+          "named_as_the_list_names_it": _list_says(appeared, want, own),
+          "refused_words": [_description_mask(t, cut=True) for t in sorted(appeared)
+                            if _refused_document(t, own, cut=True) and _type_key(t) == want][:3],
           "expanded_before": _attr_word(expanded), "expanded_after": _attr_word(expanded_after),
           "control_after_the_press": after,
           "list_calls_after_the_press": len(list_calls)})
@@ -1299,7 +1476,7 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
               "why": "the row's control could not be read after its press, "
                      "so nothing ties what appeared to its row"})
         return False
-    doc_el, doc_name, why = _revealed_document(page, appeared, title)
+    doc_el, doc_name, why = _revealed_document(page, appeared, title, own)
     if doc_el is None:
         note({"note": "no revealed document was pressed", "why": why})
         return False
@@ -1315,7 +1492,7 @@ def _open_row_then_document(page, el, label: str, title: str, out_path: Path,
     # document's own, and the census would keep any part of its path that is
     # not a number. What arrives is in the trace as facts instead (#37).
     return _press_unheard(page, census, trace, lambda: _catch_pdf(
-        page, doc_el, doc_name, out_path, trace, dl_dir, check=check_document))
+        page, doc_el, doc_name, out_path, trace, dl_dir, check=check_document, own=own))
 
 
 # How long a fresh Document Center may take to draw its rows. It draws none
@@ -1339,7 +1516,8 @@ def _all_on_page(handles) -> bool:
     return True
 
 
-def _fresh_list(page, want: str = "", year: Optional[int] = None) -> dict:
+def _fresh_list(page, want: str = "", year: Optional[int] = None,
+                answers: Optional[list] = None) -> dict:
     """Load the documents page again so every row starts folded, then wait
     for the rows.
 
@@ -1381,6 +1559,10 @@ def _fresh_list(page, want: str = "", year: Optional[int] = None) -> dict:
     change ends with the wait, and the facts count the page's list calls
     that were changed and those that were not (#37).
 
+    `answers`, when given, gets each list answer the page received, so the
+    caller can read what the list calls a document. Nothing of them goes
+    in the facts.
+
     Returns what the wait saw, as counts and yes or no, for the trace."""
     answered: list = []
     changed: list = []
@@ -1391,6 +1573,11 @@ def _fresh_list(page, want: str = "", year: Optional[int] = None) -> dict:
             url = res.url or ""
             if is_safe_url(url) and DOCS_API_RE.search(url):
                 answered.append(1)
+                if answers is not None:
+                    try:
+                        answers.append(res.json())
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -2252,13 +2439,14 @@ def _second_step(page, appeared: set):
 
 
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
-               dl_dir=None, check=None) -> bool:
+               dl_dir=None, check=None, own=()) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
     in `dl_dir`, a download event, a PDF response, a new tab, this tab
     moving to the document, or a second control the click revealed.
     `trace` collects what happened, the click's own outcome included.
     `check`, when given, says right before the click why `el` is no longer
-    the control that was checked, and then nothing is clicked."""
+    the control that was checked, and then nothing is clicked. `own` is
+    what the list calls the document, for the trace's name of `el`."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
@@ -2367,10 +2555,10 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         try:
             el.click(timeout=8000)
             if trace is not None:
-                trace.append({"note": "clicked", "control": _label_mask(label)})
+                trace.append({"note": "clicked", "control": _label_mask(label, own)})
         except Exception as e:
             if trace is not None:
-                trace.append({"note": "click failed", "control": _label_mask(label),
+                trace.append({"note": "click failed", "control": _label_mask(label, own),
                               "why": _click_failure(e)})
             # A press can wait eight seconds before it fails, and the page
             # can move in that time, so the control is checked again before
@@ -2385,7 +2573,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             try:
                 el.evaluate("el => el.click()")
                 if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead", "control": _label_mask(label)})
+                    trace.append({"note": "clicked through the DOM instead",
+                                  "control": _label_mask(label, own)})
             except Exception as e2:
                 if trace is not None:
                     trace.append({"note": "DOM click failed too", "why": _click_failure(e2)})
@@ -2772,8 +2961,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     # load that does not load ends the search. One that ends on a sign-in
     # page ends it only for the page's own period, so an older document whose
     # own year ended early is still looked for in the page's own period.
+    answers: list = []
     for year in _years_to_show(iso_date):
-        loaded = _fresh_list(page, iso_date, year=year)
+        answers = []
+        loaded = _fresh_list(page, iso_date, year=year, answers=answers)
         if trace is not None:
             said = ("loaded the documents page again and waited for its rows" if year is None else
                     "loaded the documents page again with its list asked for this document's "
@@ -2828,8 +3019,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         return _still_the_one(page, el, iso_date, label)
 
     if VIEW_DOCUMENTS_RE.match(label):
+        # What the list the page just fetched calls this document, so a
+        # description that is the list's own words is not refused for a
+        # noun (#37).
         return _open_row_then_document(page, el, label, title, out_path, trace, dl_dir,
-                                       census=census, check=check, iso=iso_date)
+                                       census=census, check=check, iso=iso_date,
+                                       own=_own_words(answers, hint))
 
     # Here the control is the document itself, so what it says it is has to
     # be what is wanted. A row whose one control was a Declarations Page was

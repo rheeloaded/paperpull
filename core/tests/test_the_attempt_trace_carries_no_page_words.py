@@ -27,7 +27,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 # Fields whose value came off the page and must be cleaned on the way in.
 FROM_THE_PAGE = {"control", "label", "text", "message", "url", "href",
-                 "title", "name", "identity"}
+                 "title", "name", "identity", "refused_words"}
 CLEANERS = ("redact", "mask_text", "mask_href", "mask", "_redact")
 
 APPS = sorted(d for d in (REPO / "apps").iterdir()

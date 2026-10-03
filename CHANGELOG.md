@@ -363,6 +363,47 @@ All notable changes to PaperPull are recorded here. Versioning follows
   "Robot or human?" under the totals. Now the person is asked to answer it
   first, or under the panel the run stops with its progress saved, and the
   order's page is opened again before it is printed.
+- **State Farm presses a document described the way State Farm's own list
+  describes it (#37).** His Payment Receipt of March 11, 2025 was refused
+  again on 0.41.1, for a payment word in what the page says after the
+  dash, in a shape the nouns 0.41.1 let through, Billing/Payments,
+  Payments, a card ending in its last four, did not cover. The list the
+  page loads names every document, and a description that is word for word
+  what it gives this document, its description or its category, read from
+  the list of the very load the row is found on, is now read again with
+  the money words a receipt is described by let off, payment, paid,
+  billing, receipt and a card ending in its last four. Every other word of
+  the guard still faces it, so "Switch to autopay" or "Billing settings" is
+  refused whatever the list says. Its type still faces the whole guard,
+  its names for a screen reader are asked too, and anything else is read
+  as before. A name the page lists cut at sixty characters only has to
+  start the list's words, and the whole name read off the control before
+  the press has to be all of them. When the guard still refuses a
+  document, `download-attempt.json` gives its description's words from a
+  fixed list of ordinary ones, any other word as `*` and digits as `#`, so
+  the next refusal says what shape it has.
+
+### Changed
+- **Apple stops asking for receipts past the point where an account's
+  refusals start (#55).** Report a Problem refuses an account's oldest
+  receipts, before October 2016 on one account, before May 2015 on another
+  and anything older than eighteen months on a third, and every refused
+  purchase was asked again on every run until its third refusal made a
+  purchase record of it. Purchases go newest first, and once Apple has
+  refused ten of an account's purchases in a row, each older than any
+  receipt it has given that account, the older ones are not asked for the
+  rest of the run, but for one a year until Apple refuses it. Each counts
+  as refused on that run, so a record still waits for three separate runs,
+  and the run that would make a purchase's record asks it, so every record
+  rests on Apple refusing that receipt itself. The record says how many
+  runs did not ask. If Apple gives one of the receipts still asked for,
+  older purchases are asked again, and the next run starts from that
+  receipt. `--redownload` asks every purchase, as before.
+- **Golden 1 is confirmed on the tester's account (#35).** Rename gave his
+  card's statements their new name, and his run saved every statement on
+  both of his accounts. The README's SMUD row says confirmed now too, as
+  PROVIDERS.md and SMUD's own README already did (#34).
+- **amazon.de is confirmed by a user,** over ten years of orders (#24).
 
 ## [0.41.1] - 2026-09-30
 

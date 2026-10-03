@@ -48,8 +48,9 @@ order summary instead. An account whose language is set to German gets that
 summary in German whatever the URL asks for, so German labels are read too.
 
 Tested by the maintainer on `amazon.com` only. `amazon.co.uk` was confirmed
-working by a user. The rest follow the same rules and are expected to work,
-and a `--diagnose` run is the way to show what a store does differently.
+working by a user, and `amazon.de` by another, over ten years of orders
+(#24). The rest follow the same rules and are expected to work, and a
+`--diagnose` run is the way to show what a store does differently.
 
 ## How it connects (important)
 

@@ -1,4 +1,4 @@
-"""Golden 1 statement and tax document downloader (local, supervised). PARTLY VERIFIED, see golden1_site.py.
+"""Golden 1 statement and tax document downloader (local, supervised). CONFIRMED on a tester's account, see golden1_site.py.
 
 This app was written without a Golden 1 account so that someone who holds one
 can test it without writing code. The orchestrator below is the same one
