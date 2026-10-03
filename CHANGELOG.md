@@ -28,6 +28,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   page they look for never appeared. They now say it did not load, so
   they cannot tell, and to look at the browser window and answer anything
   the site asks there.
+- **The panel's README gave the old place for its settings file on
+  Windows.** It said `%LOCALAPPDATA%\PaperPull\settings.json`, where
+  versions before 0.19.1 kept it. The file lives in Roaming AppData,
+  `%APPDATA%\PaperPull\settings.json`, and the panel moves an old one
+  across. The README says so now, and names the Linux location too.
 
 ## [0.42.0] - 2026-10-03
 
