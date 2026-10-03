@@ -79,11 +79,17 @@ pytest
 ```
 
 That runs this package's own suite. To run everything in the repository,
-the core, the control panel and all forty-eight apps, from the root:
+the core, the control panel and every app, run this from the root.
 
 ```bat
 python tools/run_all_tests.py
 ```
+
+It runs several suites at a time, longest first, a quarter of the
+processors by default (`--jobs N` to change it), and only one run at a
+time on a machine, so a second run waits for the first and says whose it
+is. `--stop` ends this checkout's run along with everything it started,
+and `--replace` ends it and runs again.
 
 Several suites skip themselves when a library is missing, and a skip is a
 quiet line nobody reads. One of them is `test_failure_canary.py`, the only
