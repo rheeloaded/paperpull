@@ -65,6 +65,28 @@ def _record(page, *selectors):
     return rec.stop()
 
 
+def _words(report) -> str:
+    """Every string in a recording, keys and values at any depth, one to a
+    line, and none of its numbers. A page's words would reach the file as
+    text, in a label or a locator, while a step's time is a number from the
+    page's clock that can hold any four digits."""
+    out = []
+
+    def walk(x):
+        if isinstance(x, str):
+            out.append(x)
+        elif isinstance(x, dict):
+            for k, v in x.items():
+                walk(k)
+                walk(v)
+        elif isinstance(x, (list, tuple)):
+            for v in x:
+                walk(v)
+
+    walk(report)
+    return "\n".join(out)
+
+
 def test_the_words_inside_a_data_cy_control_are_a_step(page):
     report = _record(page, BP)
     [step] = report["steps"]
@@ -125,6 +147,16 @@ def test_a_framework_prefix_counts_only_at_the_start():
 
 # -- from the pre-release review of 0.41.0, what a recording may carry ------------
 
+# The pages below keep a clock whose every reading holds 5678 and 4821, the
+# private digits they carry, while the milliseconds still pass as they do.
+# A step's time is the page's clock. On 2026-10-01 one read 1790875678992,
+# and a check that looked in the recording's numbers as well as its words
+# failed. Here every reading would fail such a check, not one in a thousand.
+_CLOCK = """(() => {
+  const real = Date.now.bind(Date), start = real();
+  Date.now = () => 56784821000000 + (real() - start);
+})();"""
+
 SECTION = """<!doctype html><html><body><main data-cy="billing-page">
 <section data-cy="policy-summary"><h2>Auto policy</h2>
 <p>Policy 00-1234-5678-90, named insured Invented Person and Another Person,
@@ -142,6 +174,7 @@ def section_page():
     except Exception as e:
         pytest.skip("no browser to drive: %s" % e)
     ctx = browser.new_context()
+    ctx.add_init_script(_CLOCK)
     ctx.route("%s/**" % HOST, lambda route: route.fulfill(
         status=200, content_type="text/html", body=SECTION))
     pg = ctx.new_page()
@@ -159,7 +192,7 @@ def test_a_click_inside_a_marked_section_never_writes_the_sections_words(section
     [step] = report["steps"]
     assert step["locator"] == {"how": "testid", "value": "policy-summary"}
     assert step["label"] == ""
-    text = json.dumps(report)
+    text = _words(report)
     for private in ("Invented Person", "Another Person", "Example Avenue", "Sedan", "5678"):
         assert private not in text, private
 
@@ -169,7 +202,8 @@ def test_a_click_inside_a_row_is_the_row_and_never_its_words(section_page):
     [step] = report["steps"]
     assert step["locator"] == {"how": "role", "role": "row"}
     assert step["label"] == ""
-    assert "Balance" not in json.dumps(report) and "4821" not in json.dumps(report)
+    text = _words(report)
+    assert "Balance" not in text and "4821" not in text
 
 
 # -- from the second review of 0.41.0 ---------------------------------------------------
@@ -192,6 +226,7 @@ def labeled_page():
     except Exception as e:
         pytest.skip("no browser to drive: %s" % e)
     ctx = browser.new_context()
+    ctx.add_init_script(_CLOCK)
     ctx.route("%s/**" % HOST, lambda route: route.fulfill(
         status=200, content_type="text/html", body=LABELED))
     pg = ctx.new_page()
@@ -206,9 +241,19 @@ def test_a_containers_aria_label_is_never_written(labeled_page):
     aria-label, the policyholder's name in it, and 0.40.0 had dropped the
     click. A region or a list item named for an account holder is the same."""
     report = _record(labeled_page, ".one", ".two", ".three")
-    text = json.dumps(report)
+    text = _words(report)
     for private in ("Invented Person", "Another Person", "5678", "Auto policy for"):
         assert private not in text, private
+
+
+def test_the_private_words_are_looked_for_in_every_string_and_no_number():
+    """What the private words in this file are looked for in. A label's
+    words and a locator's value are searched at any depth, and a step's time
+    is not."""
+    words = _words({"steps": [{"label": "Policy 00-1234-5678", "at": 56784821000123,
+                               "locator": {"how": "testid", "value": "holder-4821"}}]})
+    assert "Policy 00-1234-5678" in words and "holder-4821" in words
+    assert "56784821000123" not in words
 
 
 def test_a_controls_own_aria_label_is_still_its_name(labeled_page):
