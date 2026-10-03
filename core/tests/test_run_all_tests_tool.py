@@ -359,6 +359,12 @@ def one_suite(tmp_path, monkeypatch):
         monkeypatch.setattr(rat, "python_for", lambda d, kind, spares: (Path(sys.executable), []))
         monkeypatch.setattr(rat, "OUTPUT", tmp_path / "test-output")
         monkeypatch.setattr(sys, "argv", ["run_all_tests.py"])
+        # On CI a failing suite's whole output goes into a log group instead
+        # of a line naming its file, and the Tests job itself sets
+        # GITHUB_ACTIONS, so these runs are made the way a person's machine
+        # makes them. The group has its own test above. Left set, the tag of
+        # 0.42.0 failed here and nowhere else.
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
         return suite
     return make
 
