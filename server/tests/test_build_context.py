@@ -118,6 +118,28 @@ def test_text_files_get_lf_and_binary_files_are_left_alone(working_copy, tmp_pat
     assert (ctx / "packaging/paperpull.ico").read_bytes() == b"\x00\x00\x01\x00\r\n\x00"
 
 
+def test_a_saved_image_keeps_the_tag_server_md_names(monkeypatch, tmp_path):
+    """SERVER.md has a person who imports the saved file write
+    paperpull-server:dev in compose.yaml, and an import brings back only the
+    tags that were saved. Saving the version alone left nothing by that name."""
+    seen = []
+
+    def run(cmd, **kwargs):
+        seen.append(list(cmd))
+        if cmd[:2] == ["docker", "save"]:
+            Path(cmd[cmd.index("-o") + 1]).write_bytes(b"an image")
+        out = "" if kwargs.get("text") else b""
+        return subprocess.CompletedProcess(cmd, 0, out, out)
+
+    monkeypatch.setattr(build.subprocess, "run", run)
+    assert build.main(["--save", str(tmp_path / "paperpull-server.tar")]) == 0
+    saved = [c for c in seen if c[:2] == ["docker", "save"]]
+    version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
+    assert len(saved) == 1
+    assert {"paperpull-server:dev", "paperpull-server:%s" % version} <= set(saved[0])
+    assert "`paperpull-server:dev`" in (REPO / "SERVER.md").read_text(encoding="utf-8")
+
+
 # -- the Dockerfile and the folder agree ------------------------------------------------
 
 def dockerfile_sources():

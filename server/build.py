@@ -114,7 +114,10 @@ def main(argv=None) -> int:
     if disk:
         print("  %s on disk" % disk[0], flush=True)
     if args.save:
-        subprocess.run(["docker", "save", "-o", args.save, tags[0]], check=True)
+        # Both tags, since SERVER.md has a person who imports the file write
+        # paperpull-server:dev in compose.yaml, and an import brings back
+        # only the tags that were saved.
+        subprocess.run(["docker", "save", "-o", args.save, *tags], check=True)
         print("saved %s, %.0f MB" % (args.save, Path(args.save).stat().st_size / 1e6))
     return 0
 
