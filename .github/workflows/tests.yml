@@ -13,6 +13,12 @@
 # 2026-10-03, and twice a run that passed every test was cut off by the job
 # limit and ended CANCELLED. Each part is balanced by tools/suite_times.json,
 # and the job named "tests" answers for all four, as the single job did.
+#
+# The runner's own tests also run on Linux, and "tests" answers for them too.
+# The parts run on Windows, where the runner's POSIX branches (process
+# groups, fcntl locks, signals) never run. On 2026-10-03 one of them was
+# found ending the runner and every suite the first time a suite ran out of
+# time on macOS or Linux, and nothing here had ever run it.
 name: Tests
 
 on:
@@ -65,13 +71,39 @@ jobs:
         # from it.
         run: python tools/run_all_tests.py --shard ${{ matrix.part }}/4 --jobs 1
 
+  posix:
+    name: the runner on linux
+    runs-on: ubuntu-latest
+    # A guard against a run that hangs. The tests take about a minute.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pytest
+        # These tests need nothing else. Each fake suite they start runs in
+        # a pytest of its own and imports only the standard library.
+        run: python -m pip install pytest
+
+      - name: Run the runner's own tests
+        # Verbose, so the log names every test that ran here. A test that
+        # only means something on POSIX skips itself on Windows, so this is
+        # the one place it runs.
+        run: python -m pytest core/tests/test_run_all_tests_parallel.py core/tests/test_run_all_tests_tool.py -v -rs
+
   tests:
-    # One check for the whole run, under the name the single job had.
-    needs: part
+    # One check for the whole run, under the name the single job had. It
+    # answers for the parts and for the runner on Linux.
+    needs: [part, posix]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Every part passed
+      - name: Every part passed, and the runner on linux
         run: |
-          echo "the parts ended ${{ needs.part.result }}"
+          echo "the parts ended ${{ needs.part.result }}, the runner on linux ${{ needs.posix.result }}"
           test "${{ needs.part.result }}" = "success"
+          test "${{ needs.posix.result }}" = "success"
