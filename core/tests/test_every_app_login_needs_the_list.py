@@ -30,12 +30,6 @@ CLAIM = re.compile(r"success|signed-in session detected|connected and signed in|
 # the documents page opened, or the page asked for its orders.
 EVIDENCE = {"listed", "ok", "request"}
 
-# Still asking the old way. They were left out on 2026-09-29 because
-# another session had them open for the 0.41.0 round, and when the rest
-# landed on 2026-10-03 they were still to do. test_the_ones_left_are_still_to_do
-# keeps this from outliving their repair.
-LEFT = {"kroger", "meijer", "target"}
-
 
 def entries():
     out = []
@@ -143,17 +137,7 @@ def test_the_check_finds_what_it_looks_for():
 
 @pytest.mark.parametrize("entry", ENTRIES, ids=IDS)
 def test_login_claims_only_the_session_it_saw(entry):
-    if entry.parent.name in LEFT:
-        pytest.skip("still asking the old way, see LEFT")
     assert not breaks_the_rule(entry)
-
-
-@pytest.mark.parametrize("app", sorted(LEFT))
-def test_the_ones_left_are_still_to_do(app):
-    """An app taken off LEFT once it is repaired, so the list never hides
-    one that is fine, or one that went back to the old way."""
-    [entry] = [p for p in ENTRIES if p.parent.name == app]
-    assert breaks_the_rule(entry), "%s is repaired, so take it off LEFT" % app
 
 
 def test_the_rule_catches_the_old_way(tmp_path):

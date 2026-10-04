@@ -299,27 +299,43 @@ def _looks_like_orders(page) -> bool:
     return bool(EMPTY_RE.search(text) or (MONEY_RE.search(text) and re.search(r"order|receipt|purchase", text, re.I)))
 
 
-def goto_orders(page, page_no: int = 1) -> None:
+# How long each try at the orders page gets to draw its main content, and how
+# long it is left to settle after that. The list can come a moment after the
+# page, and a bot check can hold the page blank while it decides and only
+# then show itself, so a page the list never came to is watched for
+# CHALLENGE_WAIT_MS more, for the list or a check, whichever comes.
+ORDERS_WAIT_MS = 15000
+SETTLE_MS = 2500
+CHALLENGE_WAIT_MS = 30000
+
+
+def goto_orders(page, page_no: int = 1) -> bool:
     """Open the orders page. On the first page, try each candidate route
     in turn and stay on the first that is signed in and looks like a list
-    of orders or says there are none."""
+    of orders or says there are none. True when the list is on the page,
+    which orders_listed says.
+
+    False is not an empty history and not a signed-in session. A page can
+    sit blank while a bot check decides and only then turn into the check,
+    so one look at it finds nothing to name."""
     if page_no > 1:
         page.goto(orders_url(page_no), wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(2500)
-        return
+        page.wait_for_timeout(SETTLE_MS)
+        return orders_listed(page)
     for url in ORDER_CANDIDATES:
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         try:
-            page.wait_for_selector(FALLBACK["page_ready"], timeout=15000)
+            page.wait_for_selector(FALLBACK["page_ready"], timeout=ORDERS_WAIT_MS)
         except Exception:
             pass
-        page.wait_for_timeout(2500)
+        page.wait_for_timeout(SETTLE_MS)
         if looks_signed_out(page):
-            return
+            return False
         if _looks_like_orders(page):
-            return
+            return orders_listed(page)
     page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_timeout(2500)
+    page.wait_for_timeout(SETTLE_MS)
+    return orders_listed(page)
 
 
 def history_state(page) -> str:
@@ -329,6 +345,79 @@ def history_state(page) -> str:
     except Exception:
         return ""
     return "empty" if EMPTY_RE.search(text) else ""
+
+
+# Both of the orders page's tabs, drawn in its main content. A label is the
+# words an element shows, as open_tab reads it, so the words of anything
+# hidden inside it are left out, and the spacing around them does not count.
+_TABS_SHOWING_JS = r"""([online, inStore]) => {
+  const root = document.querySelector('main, [role=main], #main') || document.body;
+  if (!root) return false;
+  const named = [new RegExp(online, 'i'), new RegExp(inStore, 'i')];
+  const seen = [false, false];
+  for (const el of root.querySelectorAll('*')) {
+    const words = el.textContent || '';
+    if (words.length > 2000 || words.replace(/\s+/g, ' ').trim().length > 80) continue;
+    if (!el.getClientRects().length || getComputedStyle(el).visibility === 'hidden') continue;
+    const label = (el.innerText || '').replace(/\s+/g, ' ').trim();
+    named.forEach((re, i) => { if (!seen[i] && re.test(label)) seen[i] = true; });
+    if (seen[0] && seen[1]) return true;
+  }
+  return false;
+}"""
+
+# The words of the page's main content, or of the whole page when it has no
+# main content.
+_LIST_WORDS_JS = r"""() => {
+  const root = document.querySelector('main, [role=main], #main') || document.body;
+  return root ? (root.innerText || '') : '';
+}"""
+
+# The Online tab's own sentence for an account with no online orders, as a
+# tester's page showed it (#42). EMPTY_RE is wider than that, and a line such
+# as "No purchase necessary" anywhere on a page would pass for it.
+NO_ORDERS_YET_RE = re.compile(r"haven[’']?t\s+placed\s+any\s+orders", re.I)
+
+
+def orders_listed(page) -> bool:
+    """Whether the orders page has drawn its list now, its two tabs, a row
+    with a date and an amount on it, or the Online tab's own sentence for no
+    orders, in the page's main content. Nothing is waited for.
+
+    An amount anywhere on the page and the word order are enough for
+    _looks_like_orders, and the list's own heading gives the word. A
+    tester's Run All met a page that drew only that heading and a line
+    under it, no tabs and no rows (#42), and a page still blank while a bot
+    check decides has none of it either."""
+    try:
+        if page.evaluate(_TABS_SHOWING_JS, [TAB_ONLINE_RE.pattern, TAB_IN_STORE_RE.pattern]):
+            return True
+    except Exception:
+        pass
+    if any(parse_date(c.text) and parse_money(c.text) for c in collect_cards(page)):
+        return True
+    try:
+        return bool(NO_ORDERS_YET_RE.search(page.evaluate(_LIST_WORDS_JS) or ""))
+    except Exception:
+        return False
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the list never came to, looked for
+    several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    list turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 @dataclass

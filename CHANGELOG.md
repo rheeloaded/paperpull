@@ -23,6 +23,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   page that never drew by Amazon's own count, "0 orders", so the walk
   back through the years still ends where the history starts, and a year
   whose page never drew now stops the run instead of ending the walk.
+- **Kroger, Meijer and Target no longer call a page with no order list
+  signed in either.** Their Login called the session signed in whenever
+  one look at the history found neither a check nor a sign-in page, and
+  Target's never looked for a check at all. Now each says so only once its
+  list is there, or the site's own words that there is nothing in it, and
+  otherwise looks for a check for a little while and names it, or says the
+  list did not load and to look at the browser window. Discovery stops
+  there too, rather than finding nothing and finishing clean. Meijer no
+  longer takes a page that drew only the list's heading for its list,
+  which a tester's run met (#42). In the person's own browser, when
+  Target's orders do not come and nothing on the page can be named, it
+  lets go of the browser and stops, at a console too, so whatever the
+  window then asks is answered with the app gone, as Target's press and
+  hold check is (#48).
 - **Document apps no longer say signed in when their documents page did
   not come.** Forty-one of them said "Connected and signed in" when the
   page they look for never appeared. They now say it did not load, so

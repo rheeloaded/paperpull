@@ -61,6 +61,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -267,15 +268,73 @@ def is_safe_control(name: str) -> bool:
 # The purchase history, read through the page's own API
 # ---------------------------------------------------------------------------
 
-def goto_orders(page, page_no: int = 1) -> None:
-    """Open the purchase history. The page itself is only the place the API
-    is called from, and where a person sees what the app sees."""
+# How long the purchase history gets to show a purchase or its own words
+# that there is nothing to show, how long it is left to settle after that,
+# and how long a page they never came to is watched for a bot check. Akamai
+# can hold the page blank while it decides and only then show its check, so
+# a history running late is not the same as one with nothing in it.
+ORDERS_WAIT_MS = 30000
+SETTLE_MS = 2500
+CHALLENGE_WAIT_MS = 15000
+
+# A purchase on the history, a finished one's card, ten of which a tester's
+# Diagnose counted on a real history (#41), or a link to one, as the page's
+# own bundle routes them.
+LISTED = "%s, %s" % (FALLBACK["order_card"], FALLBACK["order_link"])
+
+_LISTED_JS = r"""([listed, words]) => !!document.querySelector(listed) ||
+  new RegExp(words, 'i').test(document.body ? document.body.innerText : '')"""
+
+
+def goto_orders(page, page_no: int = 1) -> bool:
+    """Open the purchase history. True when it appeared, a purchase on it or
+    its own words that there is nothing to show. The page is also the place
+    the API is called from, and where a person sees what the app sees.
+
+    False is not an empty history and not a signed-in session. A page can
+    sit blank while a bot check decides and only then turn into the check,
+    so one look at it finds nothing to name."""
     page.goto(orders_url(page_no), wait_until="domcontentloaded", timeout=60000)
+    words = "(?:%s)|(?:%s)" % (NO_ORDERS_RE.pattern, MISSING_LOYALTY_RE.pattern)
     try:
-        page.wait_for_selector("main", timeout=20000)
+        page.wait_for_function(_LISTED_JS, arg=[LISTED, words],
+                               timeout=ORDERS_WAIT_MS, polling=500)
+    except Exception:
+        log.warning("The purchase history did not appear within %gs",
+                    ORDERS_WAIT_MS / 1000)
+    page.wait_for_timeout(SETTLE_MS)
+    return orders_listed(page)
+
+
+def orders_listed(page) -> bool:
+    """Whether the purchase history is on the page now, a purchase on it or
+    its own words that there is nothing to show, an empty history or an
+    account with no loyalty card to look one up by. Either of those is the
+    signed-in page answering. Nothing is waited for."""
+    try:
+        if page.locator(LISTED).count() > 0:
+            return True
     except Exception:
         pass
-    page.wait_for_timeout(2500)
+    return history_state(page) in ("empty", "no-loyalty")
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the purchase history never came to,
+    looked for several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    history turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 def history_state(page) -> str:

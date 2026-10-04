@@ -299,14 +299,59 @@ def _frame_words(page) -> str:
 # Purchase history navigation
 # ---------------------------------------------------------------------------
 
-def goto_orders(page) -> None:
+# How long the order history gets to draw its Online tab or a purchase, how
+# long it is left to settle after that, and how long a page they never came
+# to is watched for a bot check. A check can hold /orders blank while it decides
+# and only then show itself, so a history running late is not the same as a
+# page that is fine.
+ORDERS_WAIT_MS = 30000
+SETTLE_MS = 2500
+CHALLENGE_WAIT_MS = 15000
+
+
+def goto_orders(page) -> bool:
+    """Open the order history. True when it appeared, its Online tab or a
+    purchase of either kind.
+
+    False is not an empty history and not a signed-in session. The history
+    is drawn by the page's own script after the page loads, and a page can
+    sit blank while a bot check decides and only then turn into the check,
+    so one look at it finds nothing to name."""
     page.goto(URLS["orders"], wait_until="domcontentloaded", timeout=60000)
-    # The purchase history is client-side rendered; wait for real content.
     try:
-        page.wait_for_selector(FALLBACK["page_ready"], timeout=30000)
+        page.wait_for_selector(FALLBACK["page_ready"], timeout=ORDERS_WAIT_MS)
     except Exception:
-        log.warning("Purchase-history content did not appear within 30s")
-    page.wait_for_timeout(2500)
+        log.warning("Purchase-history content did not appear within %gs",
+                    ORDERS_WAIT_MS / 1000)
+    page.wait_for_timeout(SETTLE_MS)
+    return orders_listed(page)
+
+
+def orders_listed(page) -> bool:
+    """Whether the order history is on the page now, its Online tab or a
+    purchase of either kind. Nothing is waited for."""
+    try:
+        return page.locator(FALLBACK["page_ready"]).count() > 0
+    except Exception:
+        return False
+
+
+def challenge_after_a_moment(page, wait_ms: Optional[int] = None) -> Optional[str]:
+    """A security challenge on a page the order history never came to,
+    looked for several times over a little while rather than once.
+
+    None when there is still none when the time is up, and also when the
+    history turns up after all, which the caller asks orders_listed about."""
+    wait_ms = CHALLENGE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while True:
+        found = detect_security_challenge(page)
+        if found or orders_listed(page) or time.monotonic() >= deadline:
+            return found
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return found
 
 
 # How long ago the orders page may have been loaded for a run to read it as it

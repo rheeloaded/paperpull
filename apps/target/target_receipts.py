@@ -353,6 +353,98 @@ class App:
         print(f"Profile: {profile}")
         print("Sign in to Target, leave that window OPEN, then press Discover or Pilot.")
 
+    def _look_at_orders(self, page):
+        """Open the order history and say what is there, as (listed,
+        challenge).
+
+        Only the history shows a signed-in session, its Online tab or a
+        purchase. When it does not come the page is looked at again for a
+        little while, because a bot check can leave the page blank and a
+        moment later turn it into the check, and one look at the blank page
+        finds nothing to name. Login looked once, and only for a sign-in
+        page, so it said the session was signed in on a page with no history
+        on it."""
+        if site.goto_orders(page):
+            return True, site.detect_security_challenge(page)
+        return self._look_where_it_is(page)
+
+    def _look_where_it_is(self, page):
+        """What the orders page shows now, as (listed, challenge), without
+        loading it again. A sign-in or a step-up answered at the console has
+        just loaded it, and a tester counted Target's page loads before its
+        check came, so another load straight after an answer is not made
+        (#48)."""
+        if site.orders_listed(page):
+            return True, site.detect_security_challenge(page)
+        challenge = site.challenge_after_a_moment(page)
+        return site.orders_listed(page), challenge
+
+    def _open_orders(self, page) -> None:
+        """Open the order history and go on only once it is there.
+
+        Discovery used to go on from a history that never came, find no
+        purchases on the blank page and finish as though there were none,
+        so a run read as clean with its new purchases missed."""
+        listed, challenge = self._look_at_orders(page)
+        answered = False
+        while True:
+            if listed:
+                # Asked about once, as it always was, since going round again
+                # would ask forever about a word on a page that is fine. A
+                # sign-in or a step-up answered here opened the orders page
+                # again, which is looked at where it is, and gone on from
+                # only once the list is on it.
+                if answered or not self.check_session(page):
+                    return
+                answered = True
+                listed, challenge = self._look_where_it_is(page)
+                continue
+            if challenge or site.looks_signed_out(page):
+                # Asked about, or under the panel the run stops there. In
+                # the person's own browser the press and hold check lets go
+                # of the browser and stops the run, at a console too (#48).
+                # An answer that opened the orders page again is looked at
+                # where it is.
+                if self.check_session(page):
+                    listed, challenge = self._look_where_it_is(page)
+                else:
+                    listed, challenge = self._look_at_orders(page)
+                continue
+            self.progress.save(backup=True)
+            self.write_failure("open the order list", "the order list did not appear")
+            if self.config.get("cdp_url"):
+                self._stop_for_a_list_that_never_came()
+            print("\n!! Your Target orders did not load, so this cannot find any of")
+            print("them. Look at the browser window. If Target is asking you to press")
+            print("and hold, or to sign in, answer it there yourself. I will NOT")
+            print("attempt to bypass it.")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page shows your orders (or Ctrl+C to quit)... ") is None:
+                print("Once it shows your orders, run this again.")
+                raise SystemExit(0)
+            listed, challenge = self._look_at_orders(page)
+
+    def _stop_for_a_list_that_never_came(self) -> None:
+        """The order history never came in the person's own browser, and
+        nothing on the page could be named. Whatever the window shows is
+        answered with this app gone, as Target's check is, since it may be
+        that check in a form this app cannot read, and such a check can
+        refuse a hold given under automation however long it is held (#48).
+        So what was read is saved, the app lets go of the browser and the
+        run stops, at a console too."""
+        try:
+            self.discovery.save()
+        except Exception:
+            pass
+        self.close()
+        print("\n!! Your Target orders did not load, so this cannot find any of them.")
+        print("It has let go of the browser and stopped, so anything Target asks")
+        print("sees only you. Look at the Target window. If it asks you to press and")
+        print("hold, reload the page first, then press and hold. If it asks you to")
+        print("sign in, sign in there. Once your orders show, press Resume here, or")
+        print("run this again. Everything read so far is kept.")
+        raise SystemExit(0)
+
     def cmd_login(self):
         # With a cdp_url this checks the window you signed into rather
         # than opening one. Opening it is --open-browser, which is a
@@ -360,13 +452,24 @@ class App:
         if self.config.get("cdp_url"):
             print("Checking the connection to your signed-in Target browser...\n")
             page = self.page()
-            site.goto_orders(page)
-            if site.looks_signed_out(page):
+            listed, challenge = self._look_at_orders(page)
+            if challenge:
+                print(f"!! {challenge}")
+                print("Answer it yourself in that window, keep it OPEN, and press Login")
+                print("again. If it asks you to press and hold, reload the page first,")
+                print("then press and hold.")
+            elif site.looks_signed_out(page):
                 print("Connected, but Target shows the signed-out page.")
                 print("Sign in in that window, keep it OPEN, and press Login again.")
-            else:
+            elif listed:
                 print("Connected to your signed-in Target session.")
                 print("Keep that window open, then press Discover or Pilot.")
+            else:
+                print("Connected, but your Target orders did not load, so this cannot say")
+                print("whether you are signed in. Look at the Target window. If it asks")
+                print("you to press and hold, reload the page first, then press and hold.")
+                print("If it asks you to sign in, sign in there. Keep the window OPEN,")
+                print("then press Login again.")
             self.close()
             return
 
@@ -381,13 +484,20 @@ class App:
         # somebody to wait for, and says what to do where there is not.
         if not browser_launcher.pause_for_sign_in():
             return
-        site.goto_orders(page)
-        if site.looks_signed_out(page):
+        listed, challenge = self._look_at_orders(page)
+        if challenge:
+            print(f"!! {challenge}")
+            print("Resolve it yourself in the browser window, then run --login again.")
+        elif site.looks_signed_out(page):
             print("It still looks like you are signed out; the orders page bounced to login.")
             print("Sign in in the browser, then run:  python target_receipts.py --login")
-        else:
+        elif listed:
             print("Signed-in session detected. Login state is stored in the local")
             print(f"browser profile: {self.config['profile_dir']}")
+        else:
+            print("Your Target orders did not load, so this cannot say whether you")
+            print("are signed in. Look at the browser window, answer anything Target")
+            print("asks there yourself, then run --login again.")
         self.close()
 
     def _unfinished_mark(self) -> Path:
@@ -421,13 +531,14 @@ class App:
             # so a check drawn over that list stops the run without the list
             # being loaded again under it. The second kind still loads the
             # page again, since by then the first kind's list is the one
-            # showing.
+            # showing. Anything else is opened, and gone on from only once
+            # the list is there.
             if site.orders_already_open(page, ptype):
                 log.info("Reading the %s order list already open, not loading it again",
                          ptype)
+                self.check_session(page)
             else:
-                site.goto_orders(page)
-            self.check_session(page)
+                self._open_orders(page)
             found_tab = site.select_history_tab(page, ptype)
             if ptype == IN_STORE and not found_tab:
                 log.warning("In-store tab not found; recording zero in-store purchases "

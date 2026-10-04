@@ -275,23 +275,73 @@ class App:
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
 
+    def _look_at_orders(self, page):
+        """Open the purchase history and say what is there, as (listed,
+        challenge).
+
+        Only the history shows a signed-in session, a purchase on it or its
+        own words that there is nothing to show. When it does not come the
+        page is looked at again for a little while, because a bot check can
+        leave the page blank and a moment later turn it into the check, and
+        one look at the blank page finds nothing to name. That one look is
+        how --login said Success on a page with no history on it."""
+        if site.goto_orders(page):
+            return True, site.detect_security_challenge(page)
+        challenge = site.challenge_after_a_moment(page)
+        return site.orders_listed(page), challenge
+
+    def _open_orders(self, page) -> None:
+        """Open the purchase history and go on only once it is there.
+
+        Discovery used to go on from a history that never came and ask the
+        purchase history API from that page, and when nothing came back it
+        finished as though there were no purchases, so a run read as clean
+        with its new receipts missed."""
+        while True:
+            listed, challenge = self._look_at_orders(page)
+            if listed:
+                # Checked once below, as it always was. Going round again
+                # here would ask forever about a word on a page that is fine.
+                break
+            if challenge or site.looks_signed_out(page):
+                # Asked about, or under the panel the run stops there.
+                self.check_session(page)
+                continue
+            self.progress.save(backup=True)
+            print("\n!! Your Kroger purchase history did not load, so this cannot find")
+            print("any of your purchases. Look at the browser window. If Kroger is")
+            print("asking you to prove you are a person, to sign in, or for a code,")
+            print("answer it there yourself. I will NOT attempt to bypass it.")
+            self.write_failure("open the purchase history",
+                               "the purchase history did not appear")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page shows your purchases (or Ctrl+C to quit)... ") is None:
+                print("Once it shows your purchases, run this again.")
+                raise SystemExit(0)
+        self.check_session(page)
+
     def cmd_login(self):
         if self.config.get("cdp_url"):
             # CDP mode: the browser is launched by login.bat (not here). This
             # just verifies we can connect and that you are signed in.
             print("Checking the connection to your signed-in Kroger browser...\n")
             page = self.page()
-            site.goto_orders(page)
-            challenge = site.detect_security_challenge(page)
+            listed, challenge = self._look_at_orders(page)
             if challenge:
                 print(f"!! {challenge}")
                 print("Resolve it yourself in the browser window, then re-run --login.")
             elif site.looks_signed_out(page):
                 print("Connected, but Kroger shows the signed-out page.")
                 print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-            else:
+            elif listed:
                 print("Success: connected to your signed-in Kroger session.")
                 print("Keep that browser window OPEN, then run the diagnostics or pilot.")
+            else:
+                print("Connected, but your Kroger purchase history did not load, so this")
+                print("cannot say whether you are signed in. Look at the browser window.")
+                print("If Kroger asks you to prove you are a person, to sign in, or for a")
+                print("code, answer it there yourself, keep the window OPEN, then")
+                print("re-run --login.")
             self.close()
             return
         print("Opening Kroger.com in a dedicated supervised browser profile.")
@@ -306,12 +356,19 @@ class App:
         # the browser is deliberately left open.
         if not browser_launcher.pause_for_sign_in():
             return
-        site.goto_orders(page)
-        if site.looks_signed_out(page):
+        listed, challenge = self._look_at_orders(page)
+        if challenge:
+            print(f"!! {challenge}")
+            print("Resolve it yourself in the browser window, then run --login again.")
+        elif site.looks_signed_out(page):
             print("It still looks like you are signed out; the orders page bounced to login.")
             print("Sign in in the browser, then run:  python kroger_receipts.py --login")
-        else:
+        elif listed:
             print("Signed-in session detected.")
+        else:
+            print("Your Kroger purchase history did not load, so this cannot say")
+            print("whether you are signed in. Look at the browser window, answer")
+            print("anything Kroger asks there yourself, then run --login again.")
         self.close()
 
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
@@ -322,8 +379,7 @@ class App:
         n_new = 0
         floor = self.args.start_date or self.config.get("default_start_date")
 
-        site.goto_orders(page)
-        self.check_session(page)
+        self._open_orders(page)
         state = site.history_state(page)
         if state == "no-loyalty":
             print("\nKroger says this account has no loyalty card on it, so it has no")
