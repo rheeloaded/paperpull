@@ -69,6 +69,13 @@ process with its own interpreter, and no test binds a fixed port, so they
 do not meet. A suite that runs past its time limit is a failing suite,
 never the end of the whole run.
 
+On macOS and Linux every suite is in the runner's process group, so Ctrl+C,
+a closed terminal or a kill of the run's group reaches every suite as it
+reaches the runner. Ending one suite that ran out of time follows the
+processes that suite started instead. Until 2026-10-03 it ended the
+suite's process group, which is the runner's, so the first suite out of
+time ended the runner and every suite with it.
+
 ONE RUN AT A TIME
 
 Several sessions run the suites on this machine, and two runs at once made
@@ -117,6 +124,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -246,20 +254,91 @@ _RUNNING_LOCK = threading.Lock()
 
 def stop_tree(pid: int) -> None:
     """End a process and everything it started. On Windows a process's
-    children outlive it, so the whole tree is ended by its root."""
-    if not pid or pid == os.getpid():
+    children outlive it, so the whole tree is ended by its root.
+
+    On POSIX this used to end the process group the process was in. Every
+    suite is in the runner's group (see run_suite), so a suite out of time
+    ended the runner and every suite beside it, and a test ending a process
+    it had started ended its own pytest. Now the root is paused, so it
+    starts nothing more, the tree below it is read, and each process in it
+    is ended, along with each process group one of them leads, such as a
+    browser started in a session of its own. The group the caller is in is
+    never ended whole. A process whose parent had already gone is out of
+    reach, as it is for taskkill /T."""
+    if not pid or pid <= 1 or pid == os.getpid():
         return
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
-    else:
-        import signal
-        try:
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
-        except (OSError, AttributeError):
+        return
+    try:
+        os.kill(pid, signal.SIGSTOP)
+    except OSError:
+        pass
+    try:
+        mine = os.getpgrp()
+        for p in [pid] + descendants(pid):
+            if p == os.getpid():
+                continue
             try:
-                os.kill(pid, signal.SIGKILL)
+                if p != mine and os.getpgid(p) == p:
+                    os.killpg(p, signal.SIGKILL)
             except OSError:
                 pass
+            try:
+                os.kill(p, signal.SIGKILL)
+            except OSError:
+                pass
+    finally:
+        # Never left paused, however the loop ended. A second Ctrl+C while
+        # the tree was read left a suite frozen and the runner waiting on it.
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def descendants(pid: int) -> list:
+    """Every process below pid, its children first, as the system lists them
+    now. Read from /proc on Linux, which needs no ps, and from ps elsewhere.
+    Empty when neither can say."""
+    parent_of = {}
+    if sys.platform.startswith("linux"):
+        try:
+            entries = [e for e in os.listdir("/proc") if e.isdigit()]
+        except OSError:
+            entries = []
+        for e in entries:
+            try:
+                # Bytes, since the kernel cuts a program's name at 15 bytes,
+                # which can split a letter. The name follows the pid in
+                # parentheses and may hold one itself, so the fields after it
+                # are found from the last.
+                with open("/proc/%s/stat" % e, "rb") as f:
+                    stat = f.read()
+                parent_of[int(e)] = int(stat[stat.rindex(b")") + 2:].split()[1])
+            except (OSError, ValueError, IndexError):
+                pass
+    else:
+        try:
+            listing = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "ppid="],
+                                     capture_output=True, text=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            listing = ""
+        for line in listing.splitlines():
+            fields = line.split()
+            if len(fields) == 2 and fields[0].isdigit() and fields[1].isdigit():
+                parent_of[int(fields[0])] = int(fields[1])
+    children = {}
+    for child, parent in parent_of.items():
+        children.setdefault(parent, []).append(child)
+    found, seen, todo = [], {pid}, [pid]
+    while todo:
+        for child in children.get(todo.pop(0), []):
+            if child not in seen:
+                seen.add(child)
+                found.append(child)
+                todo.append(child)
+    return found
 
 
 def run_suite(d: Path, py: Path, timeout: int = 1800):
@@ -272,6 +351,11 @@ def run_suite(d: Path, py: Path, timeout: int = 1800):
     env[WHERE_FILE] = record
     env[IN_RUN] = "1"
     try:
+        # Left in the runner's process group, so Ctrl+C, a closed terminal or
+        # a kill of the run's group reaches the suite as it reaches the
+        # runner. Tried on 2026-10-03, a session of its own heard none of
+        # them, and the runner passing them on still lost suites. So
+        # stop_tree follows what the suite started instead of ending a group.
         proc = subprocess.Popen([str(py), "-m", "pytest", "-q", "--no-header",
                                  "-rsfE", "-p", "no:cacheprovider", "-p", WHERE],
                                 cwd=d, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

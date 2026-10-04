@@ -8,6 +8,12 @@ runs out of time ends with everything it started, the parts CI splits the
 suites into cover each suite once, a second run waits for the first one's
 lock, a run of the same checkout is named rather than waited for, and
 --stop ends a run with the processes it started.
+
+On POSIX a suite out of time used to end the runner and every suite beside
+it, and a test's cleanup ended the test's own pytest, because stop_tree
+ended a whole process group. CI runs on Windows only, where none of that
+could happen, so the checks for it were also run on Linux by hand when it
+was fixed on 2026-10-03.
 """
 import json
 import os
@@ -269,21 +275,26 @@ def test_a_second_run_waits_for_the_first_ones_lock(tmp_path):
     second.release()
 
 
+# A run's stand-in. It holds the lock and starts a child in a session of its
+# own, as a browser a suite's test opens can be, so on POSIX the child is
+# outside the run's process group and only following the tree reaches it.
 HOLDER = """
     import subprocess, sys, time
     sys.path.insert(0, %r)
     import run_all_tests as r
     lock = r.RunLock(%r)
     assert lock.try_take()
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
+                             start_new_session=True)
     print(child.pid, flush=True)
     time.sleep(120)
     """
 
 
 def start_holder(tmp_path):
+    # In a process group of its own, as a shell starts a run.
     proc = subprocess.Popen([sys.executable, "-c", textwrap.dedent(HOLDER) % (str(REPO / "tools"), str(tmp_path))],
-                            stdout=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, text=True, start_new_session=True)
     child = int(proc.stdout.readline())
     return proc, child
 
@@ -301,7 +312,7 @@ def test_the_lock_goes_with_its_process_however_it_ends(tmp_path):
             time.sleep(0.5)
         lock.release()
     finally:
-        rat.stop_tree(child)
+        end_tree(child)
 
 
 def test_stop_ends_this_checkouts_run_and_what_it_started(tmp_path, capsys):
@@ -312,8 +323,8 @@ def test_stop_ends_this_checkouts_run_and_what_it_started(tmp_path, capsys):
         assert gone(child), "the run's own child was left running"
         assert "stopped the run of this checkout" in capsys.readouterr().out
     finally:
-        rat.stop_tree(proc.pid)
-        rat.stop_tree(child)
+        proc.kill()
+        end_tree(child)
 
 
 def test_a_run_of_the_same_checkout_is_named_not_waited_for(tmp_path, capsys):
@@ -323,11 +334,11 @@ def test_a_run_of_the_same_checkout_is_named_not_waited_for(tmp_path, capsys):
         assert "--replace" in capsys.readouterr().out
         lock = rat.RunLock(tmp_path)
         assert rat.take_turn(lock, replace=True) is None, "--replace did not take over"
-        assert gone(child)
+        assert gone(child), "the earlier run's own child was left running"
         lock.release()
     finally:
-        rat.stop_tree(proc.pid)
-        rat.stop_tree(child)
+        proc.kill()
+        end_tree(child)
 
 
 def test_another_checkouts_run_is_left_alone(tmp_path, capsys):
@@ -349,6 +360,134 @@ def test_another_checkouts_run_is_left_alone(tmp_path, capsys):
         assert "left alone" in capsys.readouterr().out
     finally:
         holder.kill()
+
+
+def test_stop_tree_ends_a_process_beside_its_caller_but_never_the_caller():
+    # Started plainly, so on POSIX it is in this test's process group, as any
+    # process a test starts is. stop_tree used to end that whole group, which
+    # is this test's own pytest and, inside a run, the runner and every suite.
+    proc = subprocess.Popen([sys.executable, "-c", textwrap.dedent("""
+        import subprocess, sys, time
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        print(child.pid, flush=True)
+        time.sleep(120)
+        """)], stdout=subprocess.PIPE, text=True)
+    child = int(proc.stdout.readline())
+    try:
+        rat.stop_tree(proc.pid)
+        assert proc.wait(timeout=30) is not None
+        assert gone(child), "what it started was left running"
+    finally:
+        proc.kill()
+        end_tree(child)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="taskkill pauses nothing")
+def test_stop_tree_never_leaves_its_process_paused(monkeypatch):
+    # stop_tree pauses the process before it reads the tree below it, so it
+    # starts nothing more. A second Ctrl+C while the tree was read left a
+    # suite paused for good and the runner waiting on it.
+    def interrupted(pid):
+        raise KeyboardInterrupt
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    monkeypatch.setattr(rat, "descendants", interrupted)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            rat.stop_tree(proc.pid)
+        try:
+            ended = proc.wait(timeout=30) == -signal.SIGKILL
+        except subprocess.TimeoutExpired:
+            ended = False
+        assert ended, "the process was left paused, not ended"
+    finally:
+        proc.kill()
+
+
+def test_a_suite_out_of_time_is_not_the_end_of_the_run(fake_run, tmp_path, monkeypatch, capsys):
+    # The slow suite is stopped at 3s while the steady one is still starting
+    # or asleep, and that one goes on to pass. On POSIX every suite is in the
+    # runner's process group, and stopping the first suite out of time used
+    # to end that group, which is the runner and every suite in it.
+    fake_run({"slow": suite_with(tmp_path / "s", "slow", """
+                  import time
+                  def test_forever():
+                      time.sleep(60)
+                  """),
+              "steady": suite_with(tmp_path / "s", "steady", """
+                  import time
+                  def test_a_while():
+                      time.sleep(6)
+                  """)})
+    real = rat.run_suite
+    monkeypatch.setattr(rat, "run_suite",
+                        lambda d, py, timeout=1800: real(d, py, timeout=3 if d.name == "slow" else timeout))
+    assert rat.main(["--jobs", "2"]) == 1
+    lines = capsys.readouterr().out.splitlines()
+    out = "\n".join(lines)
+    assert any(ln.split()[:2] == ["FAIL", "slow"] and "timed out after 3s" in ln for ln in lines), out
+    assert any(ln.split()[:2] == ["ok", "steady"] and "1 passed" in ln for ln in lines), out
+    assert "1 passed, 0 failed" in out, out
+
+
+# A real run of two suites side by side, with signals as a run started at a
+# terminal has them, whatever this test was started with.
+RUN = """
+    import signal, sys
+    from pathlib import Path
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    signal.signal(signal.SIGHUP, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    sys.path.insert(0, %(tools)r)
+    import run_all_tests as r
+    here = Path(%(here)r)
+    r.OUTPUT, r.TIMES, r.LOCK_DIR = here / "test-output", here / "times.json", here / "lock"
+    r.candidates = lambda: []
+    r.python_for = lambda d, kind, spares: (Path(sys.executable), [])
+    r.suites = lambda quick: [(n, here / n, "app") for n in ("sleepy", "drowsy")]
+    raise SystemExit(r.main(["--jobs", "2"]))
+    """
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Ctrl+C and a closed console reach every process there")
+@pytest.mark.parametrize("name", ["SIGINT", "SIGHUP", "SIGTERM"], ids=["ctrl-c", "hangup", "term"])
+def test_ctrl_c_a_closed_terminal_or_term_ends_every_suite_of_the_run(tmp_path, name):
+    # Each is sent to the run's process group, as Ctrl+C, a closed terminal
+    # and kill -TERM send it. Every suite is in that group, so each hears it
+    # as the runner does. On 2026-10-03 suites were tried in sessions of
+    # their own, which none of these reach. The runner then had to pass them
+    # on, and lost suites when a closed terminal sent two HUPs 0.3ms apart.
+    log = tmp_path / "run.log"
+    pid_files = [tmp_path / (n + ".pid") for n in ("sleepy", "drowsy")]
+    for f in pid_files:
+        suite_with(tmp_path, f.stem, SLEEPY % {"part": str(f.with_suffix(".part")), "pid": str(f)})
+    with open(log, "w") as out:
+        run = subprocess.Popen([sys.executable, "-c", textwrap.dedent(RUN) % {"tools": str(REPO / "tools"),
+                                                                              "here": str(tmp_path)}],
+                               stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    procs = []
+    try:
+        end = time.time() + 90
+        while not all(f.exists() for f in pid_files):
+            assert time.time() < end and run.poll() is None, "the suites never started\n" + log.read_text()
+            time.sleep(0.2)
+        procs = [p for f in pid_files for p in started(f)]
+        os.killpg(run.pid, getattr(signal, name))
+        try:
+            run.wait(timeout=60)
+            still_going = False
+        except subprocess.TimeoutExpired:
+            still_going = True
+        assert not still_going, "the run was still going 60s after %s\n%s" % (name, log.read_text())
+        left = [p for p in procs if not gone(p)]
+        assert not left, "after %s the suites' processes %s were still running\n%s" % (name, left, log.read_text())
+    finally:
+        # The whole run, and what it started, never with rat.stop_tree.
+        try:
+            os.killpg(run.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        for p in procs:
+            end_tree(p)
 
 
 def test_a_run_inside_a_test_takes_no_lock(fake_run, tmp_path, monkeypatch):
