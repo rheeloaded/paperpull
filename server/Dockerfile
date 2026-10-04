@@ -85,7 +85,8 @@ COPY apps /opt/paperpull/templates/apps
 COPY gui /opt/paperpull/gui
 COPY tools/add_account.py /opt/paperpull/tools/add_account.py
 COPY packaging/paperpull.ico /opt/paperpull/packaging/paperpull.ico
-COPY server/entrypoint.sh server/chrome.sh server/start.sh server/selftest.py /opt/paperpull/server/
+COPY server/entrypoint.sh server/chrome.sh server/start.sh server/selftest.py \
+     server/reset_password.py /opt/paperpull/server/
 COPY server/plugins /opt/paperpull/server/plugins
 RUN pip install --no-cache-dir --no-deps /opt/paperpull/core \
  && chmod 755 /opt/paperpull/server/entrypoint.sh /opt/paperpull/server/chrome.sh \

@@ -6,6 +6,9 @@ unless specifically requested by the user.
 That is the whole policy. The rest of this page says what it means in
 practice, so you can check it against the code.
 
+This page is about the desktop app. PaperPull Server, the edition you run on
+a machine at home, has a page of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md).
+
 ## What the program contacts
 
 - **The providers you sign in to.** When you run a download, the program

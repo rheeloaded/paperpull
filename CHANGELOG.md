@@ -9,6 +9,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **PaperPull Server, experimental.** PaperPull can run on an always-on
+  machine at home, a NAS or a home server with Docker, next to
+  Paperless-ngx, and be used from a browser on any computer on the home
+  network. It is one Docker image built by `server/build.py` from the files
+  git tracks. Chrome is not in it. The container downloads Chrome from
+  Google at its first start, checked against Google's signing key, and
+  keeps it up to date in a volume of its own. Chrome's sandbox stays on,
+  under a security profile that is Docker's default with the two system
+  calls the sandbox needs allowed. The panel listens on the network only
+  there and only behind a password, chosen on the first visit with a setup
+  code from the container's log, and the providers' sign-in windows open on
+  a browser screen the panel shows behind the same password. Providers are
+  set up into the shared data folder, with their signed-in profiles in a
+  volume of their own. After every run the panel tells its plug-ins, and
+  the first plug-in copies the run's new documents into Paperless's consume
+  folder. Setting it up is in SERVER.md, and it has privacy and security
+  pages of its own, PRIVACY-SERVER.md and SECURITY-SERVER.md.
+- **The PaperPull icon on the panel's browser tab.** The panel's page named
+  no icon, so its tab showed the browser's blank one. It now shows the same
+  icon as the installers.
+
 ### Fixed
 - **Meijer records each store receipt once, and waits for the In-Store
   receipts to show.** On a page that keeps the In-Store receipts while

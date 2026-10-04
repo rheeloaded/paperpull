@@ -215,6 +215,36 @@ def test_a_new_password_signs_every_session_out(base, on_server):
     assert ask(base + "/", session=session)[0] == 303
 
 
+def test_a_password_forgotten_by_another_process_signs_everyone_out(base, on_server):
+    """server/reset_password.py runs in a process of its own, beside the
+    panel, and the panel's sessions still end."""
+    session = signed_in(base)
+    data = server_mode._read()
+    del data["password"]
+    server_mode._write(data)
+
+    status, headers, _ = ask(base + "/", session=session)
+    assert status == 303 and headers["Location"] == "/setup"
+
+
+def test_the_reset_tool_forgets_the_password_and_nothing_else(on_server, tmp_path, capsys):
+    import importlib.util
+    server_mode.set_password(PASSWORD)
+    data = server_mode._read()
+    data["kept"] = "another setting"
+    server_mode._write(data)
+    tool = Path(__file__).resolve().parents[2] / "server" / "reset_password.py"
+    spec = importlib.util.spec_from_file_location("reset_password", tool)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.main() == 0
+
+    assert not server_mode.password_set()
+    assert server_mode._read() == {"kept": "another setting"}
+    assert "signed out" in capsys.readouterr().out
+
+
 # -- requests from somewhere else ---------------------------------------------------
 
 def test_another_sites_request_is_refused_even_signed_in(base, on_server):

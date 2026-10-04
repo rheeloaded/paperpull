@@ -123,6 +123,7 @@ def test_text_files_get_lf_and_binary_files_are_left_alone(working_copy, tmp_pat
 def dockerfile_sources():
     """Every path the Dockerfile copies from the build folder."""
     text = (SERVER / "Dockerfile").read_text(encoding="utf-8")
+    text = re.sub(r"\\\n", " ", text)       # a step continued on the next line
     out = []
     for line in text.splitlines():
         m = re.match(r"\s*COPY\s+(?!--from)(.+)$", line)

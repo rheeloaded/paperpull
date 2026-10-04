@@ -489,6 +489,21 @@ xattr -dr com.apple.quarantine .
 chmod +x setup-all.command apps/*/*.command gui/*.command
 ```
 
+## PaperPull Server (experimental)
+
+PaperPull can also run on an always-on machine at home, a NAS or a home
+server with Docker, next to Paperless-ngx, and be used from a browser on any
+computer on your home network. The panel is the same, the providers' sign-in
+windows open on a browser screen the server shows you, and each run's new
+documents can be copied straight into Paperless's consume folder. You still
+sign in to each provider yourself, as on the desktop.
+
+It listens on your home network behind a password, so it has privacy and
+security pages of its own. Setting it up is in [SERVER.md](SERVER.md), and
+the two pages are [PRIVACY-SERVER.md](PRIVACY-SERVER.md) and
+[SECURITY-SERVER.md](SECURITY-SERVER.md). It is free, like the rest of
+PaperPull.
+
 ## Requirements
 
 - **Windows, macOS, or Linux**

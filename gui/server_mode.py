@@ -186,17 +186,25 @@ def on_start() -> None:
 
 # -- sessions and waiting ------------------------------------------------------------
 
+def _password_stamp() -> str:
+    """What tells one password from the next, its salt. A session belongs to
+    the password it was signed in under, so a password changed or removed by
+    any process, server/reset_password.py among them, ends it."""
+    return str((_read().get("password") or {}).get("salt") or "")
+
+
 def new_session() -> str:
     token = secrets.token_urlsafe(32)
-    _SESSIONS[token] = time.time() + SESSION_SECONDS
+    _SESSIONS[token] = (time.time() + SESSION_SECONDS, _password_stamp())
     return token
 
 
 def session_valid(token: str) -> bool:
-    expiry = _SESSIONS.get(token or "")
-    if not expiry:
+    entry = _SESSIONS.get(token or "")
+    if not entry:
         return False
-    if expiry < time.time():
+    expiry, stamp = entry
+    if expiry < time.time() or not stamp or stamp != _password_stamp():
         _SESSIONS.pop(token, None)
         return False
     return True

@@ -3,6 +3,10 @@
 These tools sign in to **real financial and shopping accounts** and download
 **real statements and receipts**. Treat this repository accordingly.
 
+PaperPull Server, the edition you run on a machine at home, listens on your
+network where the desktop app does not, and has a page of its own,
+[SECURITY-SERVER.md](SECURITY-SERVER.md).
+
 ## What must never be committed
 
 The `.gitignore` already blocks all of the following. Do not override it.
