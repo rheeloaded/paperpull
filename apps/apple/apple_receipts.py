@@ -747,6 +747,30 @@ class App:
 
     # -- processing core ----------------------------------------------------
 
+    def _report_tab(self):
+        """The Report a Problem tab, on Report a Problem, which every App
+        Store call is made from, or None when it asked for a sign-in, which
+        is said and stops the App Store side.
+
+        A call from a tab anywhere else is refused before it is sent. A run
+        that read no list first, Resume after a Discover that read both to
+        their end, had only the new blank tab page() opens when no tab is on
+        Report a Problem, and every receipt it asked for failed, run after
+        run. So a tab that is not on it is opened there first, the way
+        discovery opens it. A page that never comes to hold its session
+        token is still used while Report a Problem answers its family list,
+        as discovery does."""
+        page = self.page()
+        if site.on_report_page(page):
+            return page
+        ready = site.open_report_page(page)
+        if not ready and not site.session_alive(page):
+            self._signed_out(APP_STORE, page)
+            return None
+        if not ready:
+            log.warning("Report a Problem answered without the page's session token")
+        return page
+
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
         # The line past which Apple refuses an account's receipts is learned
         # anew in each run, from that run's answers (#55).
@@ -839,6 +863,12 @@ class App:
             filename = build_pdf_filename(purchase.purchase_date, purchase.summary, record=purchase)
             print(f"  DRY RUN, would save {filename}")
             return
+
+        # ---- Report a Problem's own page, opened when its tab is not on it ----
+        if purchase.purchase_type == APP_STORE:
+            page = self._report_tab()
+            if page is None:
+                return  # it asked for a sign-in, said already, and this one is asked for next run
 
         # ---- locate + save receipt ----
         saved = self._save_receipt(page, purchase, rec)

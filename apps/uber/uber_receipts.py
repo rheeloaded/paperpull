@@ -701,6 +701,22 @@ class App:
 
     # -- processing core ----------------------------------------------------
 
+    def _on_its_site(self, side: str, tab):
+        """The side's tab, on the side's own site, which every call for a
+        receipt is made from, or None when the side asked for a sign-in or
+        showed a check, which is said and stops the side.
+
+        A call from a tab anywhere else is refused before it is sent. A run
+        that read no list first, Resume after a Discover that read both to
+        their end, had only the new blank tab _tab opens when no tab is on
+        the site, and every receipt it asked for failed, run after run. So
+        a tab that is not on the site is opened on the side's list page
+        first, the way discovery opens it."""
+        on_site = site.on_riders_page if side == RIDES else site.on_eats_page
+        if on_site(tab):
+            return tab
+        return self._open(side)
+
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
         for i, purchase in enumerate(purchases, 1):
             print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
@@ -757,6 +773,11 @@ class App:
             filename = build_pdf_filename(purchase.purchase_date, purchase.summary, record=purchase)
             print(f"  DRY RUN, would save {filename}")
             return
+
+        # ---- the side's own page, opened when its tab is not on it ----
+        page = self._on_its_site(purchase.purchase_type, page)
+        if page is None:
+            return  # the side stopped and said why, and this one is asked for next run
 
         # ---- locate + save receipt ----
         saved = self._save_receipt(page, purchase, rec)
