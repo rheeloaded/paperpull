@@ -14,11 +14,11 @@
 # limit and ended CANCELLED. Each part is balanced by tools/suite_times.json,
 # and the job named "tests" answers for all four, as the single job did.
 #
-# The runner's own tests also run on Linux, and "tests" answers for them too.
-# The parts run on Windows, where the runner's POSIX branches (process
-# groups, fcntl locks, signals) never run. On 2026-10-03 one of them was
-# found ending the runner and every suite the first time a suite ran out of
-# time on macOS or Linux, and nothing here had ever run it.
+# The runner's own tests also run on Linux and macOS, and "tests" answers
+# for them too. The parts run on Windows, where the runner's POSIX branches
+# (process groups, fcntl locks, signals) never run. On 2026-10-03 one of
+# them was found ending the runner and every suite the first time a suite
+# ran out of time on macOS or Linux, and nothing here had ever run it.
 name: Tests
 
 on:
@@ -72,10 +72,20 @@ jobs:
         run: python tools/run_all_tests.py --shard ${{ matrix.part }}/4 --jobs 1
 
   posix:
-    name: the runner on linux
-    runs-on: ubuntu-latest
+    name: the runner on ${{ matrix.system }}
+    runs-on: ${{ matrix.os }}
     # A guard against a run that hangs. The tests take about a minute.
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both, since stop_tree reads the process tree from /proc on Linux
+        # and from ps on macOS, so each runs a branch the other does not.
+        include:
+          - os: ubuntu-latest
+            system: linux
+          - os: macos-latest
+            system: macos
     steps:
       - uses: actions/checkout@v4
 
@@ -97,13 +107,13 @@ jobs:
 
   tests:
     # One check for the whole run, under the name the single job had. It
-    # answers for the parts and for the runner on Linux.
+    # answers for the parts and for the runner on Linux and macOS.
     needs: [part, posix]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Every part passed, and the runner on linux
+      - name: Every part passed, and the runner on linux and macos
         run: |
-          echo "the parts ended ${{ needs.part.result }}, the runner on linux ${{ needs.posix.result }}"
+          echo "the parts ended ${{ needs.part.result }}, the runner on linux and macos ${{ needs.posix.result }}"
           test "${{ needs.part.result }}" = "success"
           test "${{ needs.posix.result }}" = "success"
