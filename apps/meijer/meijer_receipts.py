@@ -337,6 +337,52 @@ class App:
                 raise SystemExit(0)
         self.check_session(page)
 
+    def _read_both_tabs(self, page) -> list:
+        """Open the orders page and read the rows on both of its tabs, each
+        once its rows show.
+
+        A tab whose rows did not come is not a tab with nothing on it. The
+        In-Store rows come only after that tab is pressed, and they used to
+        be read at the press's own pause, so rows that came later were read
+        as none, and the Online tab's "You haven't placed any orders yet" was
+        then taken to speak for both tabs, which told a run with receipts
+        to find that there were none. Before that, the Online tab's words
+        were believed before anything opened the other tab, and a tester who
+        only shops in the store was told twice that the account had no
+        orders (#42). What the In-Store tab says when there are no receipts
+        has not been seen, so a tab without rows is never read as empty.
+
+        When one tab gave rows, the run goes on with them and says which tab
+        showed nothing. When neither did, nothing is claimed, and the run
+        asks the person to look, or stops under the panel, as it does when
+        the orders page itself does not load."""
+        while True:
+            self._open_orders(page)
+            facts: dict = {}
+            found = site.collect_both_tabs(page, facts)
+            unread = facts.get("unread") or []
+            if found and not unread:
+                return found
+            # Rows that showed and were gone again by the time they were read
+            # leave no tab named, and then both are.
+            named = unread or ["In-Store Receipts", "Online Orders"]
+            where = "Meijer's %s %s" % (" and ".join(named), "tab" if len(named) == 1 else "tabs")
+            seconds = site.LIST_WAIT_MS // 1000
+            if found:
+                print(f"\nNothing showed on {where} within {seconds} seconds, so nothing")
+                print("there was looked for this run. The next run looks again.")
+                return found
+            self.progress.save(backup=True)
+            print(f"\n!! Nothing showed on {where} within {seconds} seconds, so this")
+            print("cannot say whether there is anything there to find. Look at the browser")
+            print("window. If Meijer is asking you to prove you are a person, to sign in, or")
+            print("for a code, answer it there yourself. I will NOT attempt to bypass it.")
+            self.write_failure("read both tabs of the order list", "a tab showed nothing")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page shows your receipts (or Ctrl+C to quit)... ") is None:
+                print("Once it shows them, run this again.")
+                raise SystemExit(0)
+
     def cmd_login(self):
         if self.config.get("cdp_url"):
             # CDP mode: the browser is launched by login.bat (not here). This
@@ -398,7 +444,7 @@ class App:
         seen_texts = set()
         for page_no in range(1, 60):
             if page_no == 1:
-                self._open_orders(page)
+                found = self._read_both_tabs(page)
             else:
                 # What a page past the last one answers has not been seen,
                 # so a later page is read as it always was. Signing in again
@@ -409,15 +455,7 @@ class App:
                 site.goto_orders(page, page_no)
                 while self.check_session(page):
                     site.goto_orders(page, page_no)
-            found = site.collect_both_tabs(page) if page_no == 1 else site.collect_cards(page)
-            # "You haven't placed any orders yet" is the ONLINE tab saying
-            # so, and that is the tab this page opens on. A tester who only
-            # shops in the store has every receipt behind the other tab and
-            # was told his account has no orders, twice, because this asked
-            # the page before anything opened the tab that holds them (#42).
-            if page_no == 1 and not found and site.history_state(page) == "empty":
-                print("\nMeijer says this account has no orders on either tab.")
-                break
+                found = site.collect_cards(page)
             fresh = [c for c in found if c.text not in seen_texts]
             log.info("Orders page %d: %d row(s), %d new", page_no, len(found), len(fresh))
             if not fresh:
@@ -425,9 +463,6 @@ class App:
             for c in fresh:
                 seen_texts.add(c.text)
             cards.extend(fresh)
-        if not cards and site.history_state(page) != "empty":
-            log.warning("No order rows found. If you are signed in and do have "
-                        "orders, run --diagnose and share the file.")
         seen_keys = set()
         for card in cards:
             purchase = site.card_to_purchase(card)

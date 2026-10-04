@@ -137,8 +137,11 @@ def test_both_tabs_are_read_and_named_as_the_page_names_them():
         assert site.TAB_ONLINE_RE.match(t), t
     assert not site.TAB_IN_STORE_RE.match("Add Paper Receipt")
     import inspect
+    # Each tab is shown by show_list_for, through show_tab_for.
     src = inspect.getsource(site.collect_both_tabs)
-    assert "TAB_IN_STORE_RE" in src and "TAB_ONLINE_RE" in src
+    assert "(IN_STORE, " in src and "(ONLINE, " in src
+    shown_by = inspect.getsource(site.show_tab_for)
+    assert "TAB_IN_STORE_RE" in shown_by and "TAB_ONLINE_RE" in shown_by
 
 
 def test_a_pdf_icon_with_no_text_is_still_the_receipt_control():
@@ -165,18 +168,27 @@ def test_a_controls_own_words_decide_whether_it_looks_like_the_receipt():
         "the control's own text is part of the test, not just its label and class"
 
 
-def test_the_empty_message_is_only_believed_after_both_tabs_were_read():
+class _Words:
+    """A page showing these words in its main content."""
+
+    def __init__(self, words):
+        self.words = words
+
+    def evaluate(self, js, *args):
+        return self.words
+
+
+def test_the_online_tabs_sentence_never_speaks_for_the_in_store_tab():
     """The online tab is the one the page opens on, and it says "You
     haven't placed any orders yet" to somebody whose receipts are all
-    behind the other tab. He was told his account has no orders, twice."""
-    import inspect
-    from pathlib import Path
-    src = (Path(site.__file__).parent / "meijer_receipts.py").read_text(encoding="utf-8")
-    # The loop's own body, up to the statement after it, rather than a
-    # fixed count of characters that a comment added to the loop outgrows.
-    block = src.split("for page_no in range(1, 60):")[1].split("\n        if not cards")[0]
-    collect_at = block.index("collect_both_tabs")
-    empty_at = block.index('history_state(page) == "empty"')
-    assert collect_at < empty_at, "the tabs are read before the page is believed"
-    assert "not found and" in block, "and the message needs both tabs to be empty"
-    assert inspect.getsource(site.collect_both_tabs)
+    behind the other tab. A tester who only shops in the store was told
+    twice that the account had no orders, and would have been told again
+    whenever the In-Store rows came after the press's own pause. What the
+    In-Store tab says when it has nothing has not been seen, so no words
+    count for it. The run itself is played in test_both_tabs_in_a_browser.py."""
+    for words in ("Orders and Receipts\nYou haven't placed any orders yet",
+                  "You don't have any receipts yet", "No receipts to show"):
+        assert not site.says_it_has_none(_Words(words), IN_STORE), words
+    assert site.says_it_has_none(_Words("Orders and Receipts\nYou haven't placed any orders yet"), ONLINE)
+    assert not site.says_it_has_none(_Words("Orders and Receipts\nSomething went wrong."), ONLINE)
+    assert not site.says_it_has_none(_Words("No purchase necessary"), ONLINE)

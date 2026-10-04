@@ -436,6 +436,12 @@ _COLLECT_ROWS_JS = r"""
   const money = /\$\s*-?[\d,]+\.\d{2}/;
   const dated = /\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}/i;
   const withMoney = cands.filter(e => money.test(e.innerText || ''));
+  // Whether the page draws an element. A row on a tab that is hidden
+  // rather than removed draws nothing, and its innerText runs its lines
+  // together, "In-Store: 06/11/202618 Example Road", where no date can be
+  // read. Having a box is also what row_controls asks of a row it presses,
+  // so a row read here is one that can be pressed.
+  const drawn = (e) => e.getClientRects().length > 0;
   // The innermost element holding an amount, and then up from there
   // until the text also carries a date.
   //
@@ -447,68 +453,108 @@ _COLLECT_ROWS_JS = r"""
   //
   // It stops climbing at an element holding more than one amount, since
   // that is no longer one receipt.
-  const rows = [];
-  for (const r of withMoney) {
-    if (withMoney.some(o => o !== r && r.contains(o))) continue;
-    let best = r, el = r;
-    for (let up = 0; up < 5 && el && el.parentElement; up += 1) {
-      if (dated.test(best.innerText || '')) break;
-      el = el.parentElement;
-      const t = el.innerText || '';
-      if ((t.match(new RegExp(money.source, 'g')) || []).length > 1) break;
-      best = el;
+  const rowsAmong = (found) => {
+    const rows = [];
+    for (const r of found) {
+      if (found.some(o => o !== r && r.contains(o))) continue;
+      let best = r, el = r;
+      for (let up = 0; up < 5 && el && el.parentElement; up += 1) {
+        if (dated.test(best.innerText || '')) break;
+        el = el.parentElement;
+        const t = el.innerText || '';
+        if ((t.match(new RegExp(money.source, 'g')) || []).length > 1) break;
+        best = el;
+      }
+      if (!rows.some(o => o === best)) rows.push(best);
     }
-    if (!rows.some(o => o === best)) rows.push(best);
-  }
+    return rows.filter(r => !rows.some(o => o !== r && r.contains(o)));
+  };
+  // What the page draws and what it does not are looked through apart. A
+  // row can carry a copy of itself for a narrower screen, kept out of
+  // sight, and taken together that copy was the innermost element with an
+  // amount, so the row came back as the copy, undrawn and with no date.
+  // The rows it does not draw come back as well, marked, so a caller can
+  // say how many it left out.
   const out = [];
-  for (const r of rows) {
-    if (rows.some(o => o !== r && r.contains(o))) continue;
-    const links = Array.from(r.querySelectorAll('a')).map(a => ({
-      text: (a.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80),
-      href: a.getAttribute('href') || '',
-      label: a.getAttribute('aria-label') || a.getAttribute('title') || '',
-      download: a.hasAttribute('download'),
-    }));
-    // Whether the row is drawn at all. A row on a hidden tab still hands
-    // back its text, and it cannot be pressed.
-    out.push({text: (r.innerText || '').trim().slice(0, 600), links,
-              shown: r.getClientRects().length > 0});
-    if (out.length >= 400) break;
+  for (const [rows, shown] of [[rowsAmong(withMoney.filter(drawn)), true],
+                               [rowsAmong(withMoney.filter(e => !drawn(e))), false]]) {
+    for (const r of rows) {
+      if (out.length >= 400) break;
+      const links = Array.from(r.querySelectorAll('a')).map(a => ({
+        text: (a.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80),
+        href: a.getAttribute('href') || '',
+        label: a.getAttribute('aria-label') || a.getAttribute('title') || '',
+        download: a.hasAttribute('download'),
+      }));
+      // Whether the row is drawn at all. A row on a hidden tab still hands
+      // back its text, and it cannot be pressed.
+      out.push({text: (r.innerText || '').trim().slice(0, 600), links,
+                shown: shown && drawn(r)});
+    }
   }
   return out;
 }
 """
 
 
-def collect_both_tabs(page) -> List[RawCard]:
+def collect_both_tabs(page, facts: Optional[dict] = None) -> List[RawCard]:
     """Every row on both tabs. The page opens on Online Orders, and a
     person who only shops in the store has everything on the other one
-    (#42)."""
+    (#42).
+
+    Each tab is read once rows of its own kind show on it, and is given
+    LIST_WAIT_MS for that, as a purchase's tab is (show_list_for). The
+    In-Store rows come only after that tab is pressed, and they used to be
+    read at the press's own pause of two and a half seconds, so rows that
+    came later were read as none. The Online tab is read as soon as it says
+    it has no orders. A page without the tabs is read as it stands, once
+    rows show on it.
+
+    A tab whose rows never came is not a tab with nothing on it, and
+    `facts`, when given, names each one as "unread". Only rows the page
+    draws are read, see collect_cards."""
     cards: List[RawCard] = []
     seen = set()
-    for pattern, label in ((TAB_IN_STORE_RE, "In-Store Receipts"), (TAB_ONLINE_RE, "Online Orders")):
-        if not open_tab(page, pattern):
+    unread = []
+    for kind, label in ((IN_STORE, "In-Store Receipts"), (ONLINE, "Online Orders")):
+        shown = show_list_for(page, kind, or_none=True)
+        if not (shown.get("rows") or shown.get("none")):
+            unread.append(label)
+        if not (shown.get("opened") or shown.get("rows")):
             log.info("no %s tab on this page", label)
             continue
-        found = collect_cards(page)
-        log.info("%s: %d row(s)", label, len(found))
+        read: dict = {}
+        found = collect_cards(page, facts=read)
+        log.info("%s: %d row(s)%s", label, len(found),
+                 ", %d more not showing, left out" % read["not_showing"] if read.get("not_showing") else "")
         for c in found:
             if c.text in seen:
                 continue
             seen.add(c.text)
             cards.append(c)
-    if not cards:
-        cards = collect_cards(page)
+    if facts is not None:
+        facts["unread"] = unread
     return cards
 
 
-def collect_cards(page, purchase_type: str = "") -> List[RawCard]:
+def collect_cards(page, purchase_type: str = "", facts: Optional[dict] = None) -> List[RawCard]:
+    """Every row the page draws, with its links.
+
+    A row the page does not draw is left out, and `facts`, when given, says
+    how many as "not_showing". A tab hidden rather than removed hands back
+    its rows with their lines run together and no date to read, and every
+    store receipt was read once more that way from behind the Online tab
+    and recorded a second time, undated. Such a row cannot be pressed
+    either, since row_controls takes only a row that shows."""
     try:
         raw = page.evaluate(_COLLECT_ROWS_JS, FALLBACK["row"]) or []
     except Exception as e:
         log.warning("Row collection failed: %s", e)
         raw = []
-    return [RawCard(text=r.get("text") or "", links=r.get("links") or []) for r in raw]
+    shown = [r for r in raw if r.get("shown")]
+    if facts is not None:
+        facts["not_showing"] = len(raw) - len(shown)
+    return [RawCard(text=r.get("text") or "", links=r.get("links") or []) for r in shown]
 
 
 # A row's own controls, including an icon with no text, so the PDF icon
@@ -621,7 +667,24 @@ def rows_showing(page, purchase_type: str) -> int:
 LIST_WAIT_MS = 30000
 
 
-def show_list_for(page, purchase_type: str, wait_ms: Optional[int] = None) -> dict:
+def says_it_has_none(page, purchase_type: str) -> bool:
+    """Whether the tab a kind of purchase lives on says, in its own words
+    and where they show, that it has nothing.
+
+    Only the Online tab has been seen saying so, as NO_ORDERS_YET_RE
+    (#42). What the In-Store tab says when there are no receipts has not
+    been seen, so it is never taken to say it, and an In-Store tab without
+    rows is a list that did not come."""
+    if purchase_type == IN_STORE:
+        return False
+    try:
+        return bool(NO_ORDERS_YET_RE.search(page.evaluate(_LIST_WORDS_JS) or ""))
+    except Exception:
+        return False
+
+
+def show_list_for(page, purchase_type: str, wait_ms: Optional[int] = None,
+                  or_none: bool = False) -> dict:
     """Show the tab a purchase's row lives on, and wait until its rows show.
 
     The tab is looked for until it is there, and pressed once. Its rows are
@@ -633,20 +696,24 @@ def show_list_for(page, purchase_type: str, wait_ms: Optional[int] = None) -> di
 
     Returns what it found, whether the tab was pressed ("opened") and how
     many rows of the purchase's kind are showing ("rows"). No rows is a list
-    that did not come."""
+    that did not come. With `or_none` the wait also ends when the tab says
+    it has nothing (says_it_has_none), which is then "none". Discovery asks
+    for that. A purchase's own row is looked for without it, as it always
+    was, since the purchase was on the list when it was found."""
     wait_ms = LIST_WAIT_MS if wait_ms is None else wait_ms
     deadline = time.monotonic() + wait_ms / 1000.0
-    opened, rows = False, 0
+    opened, rows, none = False, 0, False
     while True:
         if not opened:
             opened = show_tab_for(page, purchase_type)
         rows = rows_showing(page, purchase_type)
-        if rows or time.monotonic() >= deadline:
-            return {"opened": opened, "rows": rows}
+        none = bool(or_none and not rows and says_it_has_none(page, purchase_type))
+        if rows or none or time.monotonic() >= deadline:
+            return {"opened": opened, "rows": rows, "none": none}
         try:
             page.wait_for_timeout(1000)
         except Exception:
-            return {"opened": opened, "rows": rows}
+            return {"opened": opened, "rows": rows, "none": none}
 
 
 def row_controls(page, purchase, facts: Optional[dict] = None):

@@ -13,8 +13,9 @@ new in it.
 
 The orders page has two tabs, Online Orders, which it opens on, and
 In-Store Receipts, whose rows come when that tab is pressed. A history
-with nothing in it is real, and is read as empty only when the page says
-so.
+with nothing in it is real, and a page that says so is a signed-in one.
+Discovery reads a tab as empty only when that tab says so, and only the
+Online tab has been seen saying it.
 
 The browser for the attached runs is started here as a program of its own
 with a debugging port, the way login.bat leaves one open, and the app
@@ -90,8 +91,8 @@ STORE_ROWS = _row("06/11/2026", "$23.41", 7) + _row("06/03/2026", "$58.07", 12)
 def tabbed(store_rows):
     """The orders page, open on Online Orders, its In-Store rows drawn when
     that tab is pressed and taken away when the other one is. A tab hidden
-    rather than emptied is read a second time from behind the other one,
-    which is a matter of its own and not what this file is about."""
+    rather than emptied, and rows that come late or never, are played in
+    test_both_tabs_in_a_browser.py."""
     return ("<!doctype html><html><head><title>Your Orders</title></head><body>%s<main>"
             "<h1>Orders and Receipts</h1><div role='tablist'>"
             "<a role='tab' href='#' onclick=\"show('online');return false\">Online Orders</a>"
@@ -210,6 +211,7 @@ def fake_meijer(server, monkeypatch):
     monkeypatch.setattr(site, "ORDERS_WAIT_MS", 800, raising=False)
     monkeypatch.setattr(site, "SETTLE_MS", 0, raising=False)
     monkeypatch.setattr(site, "CHALLENGE_WAIT_MS", 1500, raising=False)
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 3000, raising=False)
     return SITE
 
 
@@ -394,14 +396,17 @@ def test_discovery_still_reads_a_list_that_comes(attached, tmp_path, capsys):
     assert "did not load" not in printed(capsys)
 
 
-def test_an_orders_page_with_nothing_on_it_finishes_with_nothing_found(attached, tmp_path,
-                                                                       capsys):
+def test_an_orders_page_with_nothing_on_it_claims_nothing(attached, tmp_path, capsys):
+    """The Online tab says it has no orders, and the In-Store tab shows a
+    line and no receipts. What that tab says when there are none has not
+    been seen (#42), and this line is made up, so the run stops rather than
+    say the account has nothing, and nothing is recorded. The list itself
+    came, so it is not said to have not loaded."""
     SITE.orders = EMPTY
-    cfg = config_for(tmp_path, attached)
-    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+    out = stopped_run(tmp_path, attached, capsys, "--discover")
 
-    out = printed(capsys)
-    assert "Discovery complete" in out and "did not load" not in out, out
+    assert "Nothing showed on Meijer's In-Store Receipts tab" in out, out
+    assert "Discovery complete" not in out and "orders did not load" not in out, out
     assert not known(tmp_path)
 
 

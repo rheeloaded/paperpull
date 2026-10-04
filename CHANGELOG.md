@@ -10,6 +10,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **Meijer records each store receipt once, and waits for the In-Store
+  receipts to show.** On a page that keeps the In-Store receipts while
+  Online Orders is shown, hidden rather than removed, discovery read every
+  one a second time from behind that tab, without its date, so each was
+  recorded twice and Pilot could press the same receipt for both. Only the
+  receipts the page shows are read now, and undated copies left by an
+  earlier run go at the next discovery unless they were downloaded. The
+  In-Store receipts come only once their tab is pressed, and they were
+  read two and a half seconds after the press, so receipts that came later
+  were missed and the Online tab's "You haven't placed any orders yet" was
+  taken to mean neither tab had any. Each tab now gets up to 30 seconds,
+  as a purchase's tab already did, and a tab that shows nothing is never
+  taken to be empty. With nothing on either tab the run stops and says to
+  look at the browser window, rather than finish as though there were
+  nothing to find (#42).
 - **Seven more receipt apps no longer call a page with no order list
   signed in.** Amazon, Costco, eBay, Gap, GitHub, Home Depot and Lowe's
   asked the way Walmart and Best Buy did before 0.41.0. Login said Success

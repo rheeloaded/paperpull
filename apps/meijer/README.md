@@ -102,6 +102,11 @@ already on your machine is used and not the bundled one.
   total becomes one order, with its date and the links on it. An order
   keeps its identity by the id in its link, or by a short hash of the row
   when the link has none.
+- **Both tabs are read**, In-Store Receipts and Online Orders, each once
+  its rows show, for up to 30 seconds, and only the rows the page shows.
+  A tab that shows nothing is never taken to be empty. When one tab has
+  rows the run goes on with them and says which tab showed nothing. When
+  neither does, the run stops and asks you to look at the browser window.
 - **The receipt link is the document.** The app fetches the row's receipt
   or order-details link from inside the signed-in page. If the answer is a
   PDF, that is the file. If it is a page, the app opens it, hides
