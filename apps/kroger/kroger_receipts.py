@@ -102,6 +102,9 @@ class App:
         self._browser = None
         self._work_page = None
         self._cdp_mode = False
+        # Set when the history API stopped before its last page, so the run
+        # stops at its end rather than finish (see _stop_if_cut_short).
+        self._history_cut_short = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "online_discovered": 0, "instore_discovered": 0,
@@ -371,20 +374,96 @@ class App:
             print("anything Kroger asks there yourself, then run --login again.")
         self.close()
 
-    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
+    def _unfinished_mark(self) -> Path:
+        """Present while a Discover is under way and after one that did not
+        read the whole purchase history, so Resume knows to read it first,
+        as Target's does. Only the history's last page takes it away."""
+        return self.paths.discovery_json.with_name(".discovery-unfinished")
+
+    @staticmethod
+    def _history_facts(hist: dict) -> dict:
+        """How far the history API got, for a failure file, since nobody has
+        seen how a long history ends. Counts, and the word for why it
+        stopped."""
+        return {"pages": hist.get("pages", 0), "last": bool(hist.get("last")),
+                "stop": hist.get("stop") or "", "status": hist.get("status", 0)}
+
+    def _read_history(self, page, need_it: bool = True):
+        """The purchase history from its API, asked from inside the open
+        history the way the page asks, and the page's own word on it, as
+        (hist, state).
+
+        The page drawing is not the API answering. Kroger sits behind Akamai
+        Bot Manager, and a call made from a page that drew can still be
+        refused. Discovery read a first page that never came as a history
+        with nothing new in it and finished clean, so Pilot and Run All went
+        on as though there were nothing to download. Now the run stops here
+        the way it stops on a history that never drew, claiming nothing, and
+        at a console it asks and then reads the history again. Resume, which
+        does not need it (need_it=False), says so and goes on with the
+        purchases already found, as it did before it read the history.
+
+        An account with no loyalty card is the one exception. Kroger says
+        why it has no history, and what the API answers for such an account
+        has never been seen, so those words stand whatever it answers."""
+        while True:
+            self._open_orders(page)
+            state = site.history_state(page)
+            if state == "no-loyalty":
+                print("\nKroger says this account has no loyalty card on it, so it has no")
+                print("purchase history to show. Add your card under Account, then run again.")
+            hist = site.fetch_history(page)
+            if hist.get("pages") or state == "no-loyalty":
+                return hist, state
+            self.progress.save(backup=True)
+            print("\n!! Your purchase history did not come when this asked Kroger for it")
+            print(f"({site.why_it_stopped(hist)}), so this cannot say which purchases are new.")
+            print("Look at the browser window. If Kroger is asking you to prove you are a")
+            print("person, to sign in, or for a code, answer it there yourself. I will NOT")
+            print("attempt to bypass it.")
+            self.write_failure("read the purchase history",
+                               "the purchase history api gave no page",
+                               postmortem=self._history_facts(hist))
+            if not need_it:
+                print("This goes on with the purchases already found, and stops at its end.")
+                return hist, state
+            if browser_launcher.ask_or_none(
+                    "Press Enter to ask Kroger for your purchases again (or Ctrl+C to quit)... ") is None:
+                print("Run this again in a while.")
+                raise SystemExit(0)
+
+    def _stop_if_cut_short(self) -> None:
+        """A run that did not read the whole purchase history did not finish,
+        and must not read as a clean one. Once it has used what came, it
+        leaves on SystemExit the way a run leaves on a sign-out, which the
+        panel reports as stopped after Pilot, Run All and Resume."""
+        if self._history_cut_short:
+            print("\nNot all of your purchase history came, so this run stops here rather")
+            print("than finish. Run it again later to read the rest.")
+            raise SystemExit(0)
+
+    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False,
+                     finish: bool = True, need_history: bool = True) -> dict:
         """Discovery pass: the purchase-history API, called from inside the
         signed-in page the way the page itself calls it, every page of it
-        until the API says it is the last. Nothing clicked."""
+        until the API says it is the last. Nothing clicked.
+
+        Only that last page, or an empty one, shows the history was read
+        whole. When the API stops short of it after giving some pages, the
+        purchases on them are real and are kept, and Pilot, Run All and
+        Resume go on with them, but older ones are missing, so the run stops
+        at its end rather than finish. With finish=False the caller does
+        that once it has used them. need_history=False is Resume's, which
+        goes on with the purchases already found even when no page comes."""
+        try:
+            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
+        except OSError:
+            pass
         page = self.page()
         n_new = 0
         floor = self.args.start_date or self.config.get("default_start_date")
 
-        self._open_orders(page)
-        state = site.history_state(page)
-        if state == "no-loyalty":
-            print("\nKroger says this account has no loyalty card on it, so it has no")
-            print("purchase history to show. Add your card under Account, then run again.")
-        hist = site.fetch_history(page)
+        hist, state = self._read_history(page, need_it=need_history)
         records = hist.get("records") or []
         log.info("Purchase history API: %d record(s) over %d page(s), last page %s",
                  len(records), hist.get("pages", 0), hist.get("last"))
@@ -421,6 +500,24 @@ class App:
                 }, save=False)
         self.discovery.save()
 
+        if hist.get("last"):
+            try:
+                self._unfinished_mark().unlink()
+            except OSError:
+                pass
+        elif hist.get("pages"):
+            self._history_cut_short = True
+            print(f"\n!! Only {hist.get('pages', 0)} page(s) of your purchase history came "
+                  f"({site.why_it_stopped(hist)}),")
+            print("so older purchases may be missing. What came is kept, and this run stops at")
+            print("its end rather than finish. Run it again later to read the rest.")
+            self.write_failure("read the purchase history",
+                               "the purchase history api stopped partway",
+                               postmortem=self._history_facts(hist))
+        elif state != "no-loyalty":
+            # Resume, going on with the purchases found before (_read_history).
+            self._history_cut_short = True
+
         all_recs = list(self.discovery.data.values())
         self.stats["online_discovered"] = sum(
             1 for r in all_recs if r.get("purchase_type") == ONLINE)
@@ -428,7 +525,10 @@ class App:
             1 for r in all_recs if r.get("purchase_type") == IN_STORE)
 
         if not quiet:
-            print(f"\nDiscovery complete. Purchases known: {len(all_recs)}")
+            if self._history_cut_short:
+                print(f"\nDiscovery read part of your purchase history. Purchases known: {len(all_recs)}")
+            else:
+                print(f"\nDiscovery complete. Purchases known: {len(all_recs)}")
             by_year = {}
             for r in all_recs:
                 y = (r.get("purchase_date") or "?")[:4]
@@ -438,6 +538,8 @@ class App:
             dates = sorted(r.get("purchase_date") for r in all_recs if r.get("purchase_date"))
             if dates:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
+        if finish:
+            self._stop_if_cut_short()
         return {"new": n_new}
 
     # -- selection ----------------------------------------------------------
@@ -836,17 +938,19 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.")
-        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False)
+        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False, finish=False)
         selected: List[Purchase] = self._select_purchases(
             ONLINE, limit=self.config["pilot_online"])
         selected += self._select_purchases(
             IN_STORE, limit=self.config["pilot_instore"])
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
+            self._stop_if_cut_short()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
         self._pilot_report(selected)
+        self._stop_if_cut_short()
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -893,15 +997,25 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover(types=types, quiet=False)
+        self.cmd_discover(types=types, quiet=False, finish=False)
         selected: List[Purchase] = []
         for t in types:
             selected += self._select_purchases(t)
         print(f"\nProcessing {len(selected)} purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume works from the purchases a Discover found. After one that
+        # stopped before the history came, or when only part of it came,
+        # that is none or some of them, and Resume finished clean on those
+        # with the rest never looked for. So the history is read first, and
+        # when it does not come this time either, Resume still goes on with
+        # the purchases it has and stops at its end.
+        if self._unfinished_mark().exists():
+            print("The last Discover did not read your whole purchase history, so it runs again first.")
+            self.cmd_discover(quiet=True, finish=False, need_history=False)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]
         pend = [p for p in pend if not self._already_done(p)]
@@ -910,9 +1024,11 @@ class App:
             pend = pend[:self.args.max_purchases]
         if not pend:
             print("Nothing to resume - all discovered purchases are complete.")
+            self._stop_if_cut_short()
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
 
     def cmd_rename(self):

@@ -352,42 +352,73 @@ def history_state(page) -> str:
 
 
 # Runs inside the signed-in page. Same URL, same header the page's own code
-# sends, same cookies. Pages until the API says it is the last one.
+# sends, same cookies. Pages until the API says it is the last one. A call
+# that fails partway keeps the pages before it, which a failure thrown out
+# of here used to lose along with it, and only a list is read as a page of
+# the history, since a page with no list on it is not an empty one.
 _FETCH_HISTORY_JS = r"""
 async ([api, pageSize, maxPages]) => {
   const headers = {'X-Kroger-Channel': 'WEB', 'Accept': 'application/json'};
   try { if (window.bmak && bmak.get_telemetry) headers['Akamai-BM-Telemetry'] = bmak.get_telemetry(); } catch (e) {}
   const records = [];
-  let pageNo = 1, pages = 0, status = 0, last = false;
+  let pageNo = 1, pages = 0, status = 0, last = false, stop = 'limit';
   while (pageNo <= maxPages) {
-    const res = await fetch(`${api}?pageNo=${pageNo}&pageSize=${pageSize}`, {credentials: 'include', headers});
+    status = 0;
+    let res = null, body = null;
+    try {
+      res = await fetch(`${api}?pageNo=${pageNo}&pageSize=${pageSize}`, {credentials: 'include', headers});
+    } catch (e) { stop = 'no answer'; break; }
     status = res.status;
-    if (!res.ok) break;
-    const body = await res.json();
+    if (!res.ok) { stop = 'refused'; break; }
+    try { body = await res.json(); } catch (e) {}
     const search = body && body.data && body.data.postOrderSearch;
-    if (!search) break;
+    if (!search || !Array.isArray(search.data)) { stop = 'no list'; break; }
     pages += 1;
-    for (const r of (search.data || [])) records.push(r);
-    last = !!search.isLastPage || !(search.data || []).length;
-    if (last) break;
+    for (const r of search.data) records.push(r);
+    last = !!search.isLastPage || !search.data.length;
+    if (last) { stop = ''; break; }
     pageNo += 1;
   }
-  return {status, pages, last, records};
+  return {status, pages, last, records, stop};
 }
 """
 
 
 def fetch_history(page, max_pages: int = 200) -> dict:
     """Every purchase record the API lists, newest first as the site
-    orders them. Returns {"status", "pages", "last", "records"}."""
+    orders them. Returns {"status", "pages", "last", "records", "stop"}.
+
+    "last" is what shows the history was read whole, set when the API says
+    a page is its last or a page comes back empty. "pages" counts the pages
+    it gave, so 0 is a history that did not come and never an empty one,
+    which comes as one page with nothing on it. "stop" says why it ended
+    short of its last page, "refused" for an HTTP error ("status" says
+    which), "no answer" when the call itself failed, "no list" for an
+    answer without the history in it and "limit" once max_pages were read,
+    and is empty when it did not. Diagnose reads one page on purpose, so a
+    limit is not warned about."""
     try:
         out = page.evaluate(_FETCH_HISTORY_JS, [SEARCH_API, PAGE_SIZE, max_pages]) or {}
     except Exception as e:
         log.warning("Purchase history API call failed: %s", e)
-        return {"status": 0, "pages": 0, "last": False, "records": []}
-    if out.get("status") and out["status"] != 200:
-        log.warning("Purchase history API answered HTTP %s", out["status"])
+        return {"status": 0, "pages": 0, "last": False, "records": [], "stop": "no answer"}
+    if out.get("stop") and out.get("stop") != "limit":
+        log.warning("The purchase history API gave %d page(s) and not its last, %s",
+                    out.get("pages", 0), why_it_stopped(out))
     return out
+
+
+def why_it_stopped(hist: dict) -> str:
+    """Why the history API ended short of its last page, in words for a
+    message. Its status, never anything from its body."""
+    stop = hist.get("stop")
+    if stop == "refused":
+        return "Kroger answered HTTP %s" % hist.get("status")
+    if stop == "no list":
+        return "Kroger's answer held no purchase list"
+    if stop == "limit":
+        return "this app reads no more pages than that"
+    return "no answer came back from Kroger"
 
 
 def _first(d: dict, *names, default=None):

@@ -52,6 +52,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   lets go of the browser and stops, at a console too, so whatever the
   window then asks is answered with the app gone, as Target's press and
   hold check is (#48).
+- **Kroger no longer finishes clean when its purchase history API does not
+  give the history.** Discovery asks the history API from inside the
+  history page, and a refusal (Kroger's bot protection can refuse a call
+  from a page that drew), no answer, or an answer without the list was
+  read as a history with nothing new in it. The run finished clean, so
+  Pilot and Run All went on with every new purchase missed. Now the run
+  stops there, says so and writes a failure file, or at a console asks
+  and then reads the history again. When the API stops partway, what came
+  is kept and used, and the run stops at its end rather than finish, since
+  older purchases may be missing. Resume after either reads the history
+  again first, and when Kroger refuses again it still downloads the
+  purchases already found and stops at its end. An account with no loyalty
+  card keeps Kroger's own words for it.
 - **Document apps no longer say signed in when their documents page did
   not come.** Forty-one of them said "Connected and signed in" when the
   page they look for never appeared. They now say it did not load, so
