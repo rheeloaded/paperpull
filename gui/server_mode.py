@@ -35,6 +35,8 @@ import html
 import json
 import os
 import secrets
+import subprocess
+import sys
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -75,6 +77,27 @@ def novnc_dir() -> Path:
 
 def vnc_port() -> int:
     return int(os.environ.get("PAPERPULL_VNC_PORT") or "5900")
+
+
+def data_root() -> Path:
+    """The one folder the providers' folders live in, the shared folder."""
+    return Path(os.environ.get("APPS_ROOT") or "/data")
+
+
+def profiles_root() -> Path:
+    """Where the signed-in browser profiles live, a volume of their own,
+    never the shared folder anyone with the share can read."""
+    return Path(os.environ.get("PAPERPULL_PROFILES") or "/profiles")
+
+
+def plugins_dir() -> Path:
+    return Path(os.environ.get("PAPERPULL_PLUGINS") or "/opt/paperpull/server/plugins")
+
+
+def profile_for(install_name: str, account: str = "primary") -> str:
+    """A provider account's browser profile folder on the server."""
+    name = install_name if account == "primary" else "%s - %s" % (install_name, account)
+    return str(profiles_root() / name)
 
 
 # -- the password -------------------------------------------------------------
@@ -478,6 +501,112 @@ def install(app) -> None:
             await websocket.close()
         except RuntimeError:
             pass
+
+
+# -- after a run, the plug-ins ----------------------------------------------------------
+#
+# A plug-in is a program of its own in a folder with a plugin.json, which
+# names it, the events it wants and the command that runs it. After a run
+# the panel hands each one that wants "run-finished" the run's description
+# as JSON on stdin and shows what it prints. It is never loaded into the
+# panel, so a plug-in that fails cannot take a run down with it, it can be
+# written in anything, and its license is its own business. The first one,
+# server/plugins/paperless, copies a run's new documents to Paperless.
+
+PLUGIN_SECONDS = 300
+
+
+def plugins() -> list:
+    """(folder, manifest) for every plug-in with a usable manifest."""
+    out = []
+    root = plugins_dir()
+    if not root.is_dir():
+        return out
+    for folder in sorted(root.iterdir()):
+        try:
+            info = json.loads((folder / "plugin.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        run = info.get("run") if isinstance(info, dict) else None
+        if isinstance(run, list) and run and all(isinstance(part, str) for part in run):
+            out.append((folder, info))
+    return out
+
+
+def output_root(install: Path, account: str) -> Path:
+    """The folder an account's documents and records are written to."""
+    config = install / ("config.json" if account == "primary" else "config.%s.json" % account)
+    try:
+        out = json.loads(config.read_text(encoding="utf-8-sig")).get("output_dir") or "."
+    except (OSError, ValueError, AttributeError):
+        out = "."
+    return (install / out).resolve()
+
+
+def new_files(install: Path, account: str, started: float) -> list:
+    """The documents a run saved, from the new-this-run.txt it wrote.
+
+    Only a list written after the run started counts, since a run that
+    stopped early leaves the last run's list in place, and its files were
+    handed on then. Only files that exist inside the shared folder are
+    passed on, whatever the list says."""
+    root = output_root(install, account)
+    listed = root / "new-this-run.txt"
+    try:
+        if listed.stat().st_mtime < started:
+            return []
+        lines = listed.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    data = data_root().resolve()
+    out = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        path = Path(line)
+        path = (path if path.is_absolute() else root / path).resolve()
+        if data in path.parents and path.is_file() and str(path) not in out:
+            out.append(str(path))
+    return out
+
+
+def run_finished(meta: dict, account: str, action: str, started: float,
+                 code: int, result) -> dict:
+    """What every plug-in is told about a run that has ended."""
+    install = Path(meta["dir"])
+    return {"event": "run-finished", "version": 1,
+            "provider": meta.get("name", ""), "account": account, "action": action,
+            "install": str(install), "exit_code": code, "result": result,
+            "new_files": new_files(install, account, started)}
+
+
+def after_run(meta: dict, account: str, action: str, started: float,
+              code: int, result) -> list:
+    """Run the plug-ins that want to hear a run ended, and the lines they
+    said, each with its plug-in's name in front."""
+    event = json.dumps(run_finished(meta, account, action, started, code, result))
+    lines = []
+    for folder, info in plugins():
+        if "run-finished" not in (info.get("events") or []):
+            continue
+        name = str(info.get("name") or folder.name)
+        cmd = [sys.executable if part == "python" else part for part in info["run"]]
+        try:
+            done = subprocess.run(cmd, cwd=folder, input=event, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=PLUGIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            lines.append("[%s] did not finish in %d seconds, and was stopped."
+                         % (name, PLUGIN_SECONDS))
+            continue
+        except OSError as e:
+            lines.append("[%s] could not start, %s" % (name, e))
+            continue
+        said = [line for line in (done.stdout + done.stderr).splitlines() if line.strip()]
+        lines += ["[%s] %s" % (name, line) for line in said[-20:]]
+        if done.returncode:
+            lines.append("[%s] ended with code %d." % (name, done.returncode))
+    return lines
 
 
 async def bridge(receive, send_bytes, reader, writer) -> None:

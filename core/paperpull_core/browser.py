@@ -273,7 +273,19 @@ def profile_note(name: str) -> str:
     side is the one people get caught by: they are NOT already signed in, and
     a window that looks like their browser but knows none of their accounts is
     alarming if nobody warned them.
+
+    On PaperPull Server the window opens on the container's virtual screen,
+    which the person sees through the panel, so it says where to look
+    instead. That browser is the server's own, never theirs.
     """
+    if os.environ.get("PAPERPULL_SERVER") == "1":
+        return (
+            "The %s window is open on PaperPull Server's browser screen. Open\n"
+            "it from the Browser screen link at the top of the panel.\n"
+            "\n"
+            "It is a browser of the server's own, so you are NOT signed in there\n"
+            "yet. Sign in as you would on a new computer, and leave the window open." % name
+        )
     return (
         "This is the copy of %s already on this computer, opened with a\n"
         "separate profile of its own. Your normal browsing is untouched, and\n"

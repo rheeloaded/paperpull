@@ -314,10 +314,11 @@ def test_nothing_is_downloaded_behind_a_closed_stdin(monkeypatch, capsys):
     assert "install Chrome or Edge" in capsys.readouterr().out
 
 
-def test_the_wording_says_their_own_profile_is_not_used():
+def test_the_wording_says_their_own_profile_is_not_used(monkeypatch):
     """Someone is about to look at a browser they recognize which knows none of
     their accounts. Both halves have to be said, that their real profile is
     untouched AND that they are therefore not signed in."""
+    monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
     note = browser.profile_note("Microsoft Edge")
     # Whitespace-normalized, because the note is hard-wrapped for a console and
     # a phrase can straddle a line break.
@@ -326,6 +327,16 @@ def test_the_wording_says_their_own_profile_is_not_used():
     assert "untouched" in flat
     assert "not signed in" in flat
     assert "microsoft edge" in flat
+
+
+def test_on_the_server_it_says_where_the_window_is(monkeypatch):
+    """On PaperPull Server the window opens on the container's own screen,
+    so "the copy already on this computer" would be wrong and send the
+    person looking on their own desktop."""
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    flat = " ".join(browser.profile_note("Google Chrome").split()).lower()
+    assert "browser screen" in flat and "not signed in" in flat
+    assert "this computer" not in flat
 
 
 # -- bugs found in review, before 1.0 ---------------------------------------

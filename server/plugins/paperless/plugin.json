@@ -1,0 +1,7 @@
+{
+  "name": "Paperless",
+  "about": "Copies the documents each run saved into the folder Paperless consumes.",
+  "version": 1,
+  "events": ["run-finished"],
+  "run": ["python", "paperless.py"]
+}

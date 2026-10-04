@@ -78,10 +78,15 @@ RUN useradd --create-home --uid 1000 pp \
 
 COPY VERSION LICENSE LICENSE-MIT NOTICE.md TRADEMARK.md paperpull.py /opt/paperpull/
 COPY core /opt/paperpull/core
-COPY apps /opt/paperpull/apps
+# The apps as the packaged desktop build keeps them, templates the panel
+# makes each provider's folder from, run by this one Python with no
+# environment of their own (gui/app.py, _is_packaged).
+COPY apps /opt/paperpull/templates/apps
 COPY gui /opt/paperpull/gui
+COPY tools/add_account.py /opt/paperpull/tools/add_account.py
 COPY packaging/paperpull.ico /opt/paperpull/packaging/paperpull.ico
 COPY server/entrypoint.sh server/chrome.sh server/start.sh server/selftest.py /opt/paperpull/server/
+COPY server/plugins /opt/paperpull/server/plugins
 RUN pip install --no-cache-dir --no-deps /opt/paperpull/core \
  && chmod 755 /opt/paperpull/server/entrypoint.sh /opt/paperpull/server/chrome.sh \
               /opt/paperpull/server/start.sh
@@ -91,6 +96,8 @@ ENV DISPLAY=:99 \
     PYTHONDONTWRITEBYTECODE=1 \
     PAPERPULL_SERVER=1 \
     PAPERPULL_CONFIG=/config \
+    PAPERPULL_PROFILES=/profiles \
+    PAPERPULL_PLUGINS=/opt/paperpull/server/plugins \
     XDG_CONFIG_HOME=/config \
     APPS_ROOT=/data
 

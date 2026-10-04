@@ -38,6 +38,10 @@ services:
       # ten characters. Only its hash is kept, so it can come out of this
       # file once the container has started with it.
       # PAPERPULL_PASSWORD: "choose one"
+      # With Paperless, 1 puts each provider's documents in a folder of the
+      # provider's name inside the consume folder, which Paperless turns into
+      # a tag when PAPERLESS_CONSUMER_SUBDIRS_AS_TAGS is on there.
+      # PAPERLESS_SUBFOLDERS: "1"
     volumes:
       # Each provider's folder, its documents, records and logs. A shared
       # folder on a NAS, so the documents can be opened and imported.
@@ -48,6 +52,10 @@ services:
       - settings:/config
       # Chrome, downloaded from Google at the first start.
       - browser:/browser
+      # Paperless's consume folder, if you use Paperless. Each run's new
+      # documents are copied into it, and PaperPull keeps its own copies.
+      # Leave this out and nothing is copied.
+      # - /path/to/paperless/consume:/paperless
     restart: unless-stopped
 volumes:
   profiles:

@@ -28,7 +28,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 ALLOWED = ("VERSION", "LICENSE", "LICENSE-MIT", "NOTICE.md", "TRADEMARK.md",
            "paperpull.py", "core/", "apps/", "gui/", "packaging/paperpull.ico",
-           "server/")
+           "tools/add_account.py", "server/")
 LEFT_OUT_PARTS = {"tests", ".venv", "__pycache__", "browser-profile", "Diagnostics"}
 LEFT_OUT_SUFFIXES = (".pdf", ".png", ".gif", ".jpg", ".jpeg", ".bat", ".cmd",
                      ".command", ".csv", ".xlsx", ".zip", ".tar", ".gz")

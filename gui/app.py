@@ -29,6 +29,7 @@ from datetime import date, datetime
 import re
 import shutil
 import subprocess
+import time
 from typing import Optional
 import sys
 from pathlib import Path
@@ -38,7 +39,7 @@ import run_result
 
 from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 
 # PaperPull targets Python 3.11+ (README, and core/pyproject.toml's
 # requires-python). Nothing here declared that, so a reader - or a scanner -
@@ -689,6 +690,19 @@ def api_export_reveal():
     return {"ok": True}
 
 
+@app.get("/api/export/download", dependencies=[Depends(_same_origin_only)])
+def api_export_download():
+    """On PaperPull Server, the last spreadsheet this panel wrote, handed to
+    the browser, where the desktop shows it in a folder. Like reveal, it
+    takes no path from the page, only the one the panel itself wrote."""
+    if not server_mode.enabled():
+        raise HTTPException(404)
+    p = _LAST_EXPORT
+    if not p or not p.is_file():
+        raise HTTPException(404, "nothing exported yet")
+    return FileResponse(p, filename=p.name)
+
+
 def _jsonable(value):
     """Dates arrive as date/datetime objects, which JSON cannot carry."""
     if isinstance(value, datetime):
@@ -975,7 +989,21 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
         shutil.copy2(example, dst / "config.json")
     if owner:
         _set_owner(dst / "config.json", owner)
+    if server_mode.enabled():
+        _set_profile(dst / "config.json", server_mode.profile_for(dst.name))
     return "created"
+
+
+def _set_profile(config: Path, profile: str) -> None:
+    """Where an install's signed-in browser profile lives. On PaperPull
+    Server that is the profiles volume, since the install itself is in the
+    shared folder, which anyone the share is open to can read."""
+    try:
+        data = json.loads(config.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return
+    data["profile_dir"] = profile
+    config.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _set_owner(config: Path, owner: str) -> None:
@@ -1238,16 +1266,23 @@ def api_providers():
     out = list_providers()
     for p in out:
         p["installed"] = p["folder"] in installed
+    suggested = (server_mode.data_root() if server_mode.enabled()
+                 else Path.home() / "Documents" / "PaperPull")
     return {"providers": out, "templates": _templates_root() is not None,
-            "suggested_root": str(Path.home() / "Documents" / "PaperPull")}
+            "suggested_root": str(suggested), "server": server_mode.enabled()}
 
 
 @app.post("/api/create", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
 async def api_create(request: Request):
     """Make installs for the chosen providers under the chosen folder, and
     remember that folder. The folder is created if it does not exist, since a
-    new user has no reason to have made one first."""
-    if os.environ.get("APPS_ROOT"):
+    new user has no reason to have made one first.
+
+    On PaperPull Server there is no choosing. Every install goes in the
+    shared folder the container was given, whatever the page sent, and
+    nothing is remembered, since the image sets that folder every start."""
+    server = server_mode.enabled()
+    if os.environ.get("APPS_ROOT") and not server:
         raise HTTPException(409, "APPS_ROOT is set in the environment, which "
                                  "overrides any saved choice. Unset it first.")
     try:
@@ -1255,6 +1290,8 @@ async def api_create(request: Request):
     except Exception:
         raise HTTPException(400, "expected a JSON body")
     raw = str((body or {}).get("root") or "").strip().strip('"')
+    if server:
+        raw = str(server_mode.data_root())
     owner = str((body or {}).get("owner") or "").strip()[:80]
     slugs = (body or {}).get("providers") or []
     if not raw:
@@ -1277,12 +1314,13 @@ async def api_create(request: Request):
         result = create_install(root, slug, owner=owner)
         (created if result == "created" else existed).append(slug)
 
-    data = _read_settings()
-    data["apps_root"] = str(root.resolve())
-    try:
-        _write_settings(data)
-    except OSError as e:
-        raise HTTPException(500, "could not save the choice: %s" % e)
+    if not server:
+        data = _read_settings()
+        data["apps_root"] = str(root.resolve())
+        try:
+            _write_settings(data)
+        except OSError as e:
+            raise HTTPException(500, "could not save the choice: %s" % e)
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"root": str(root.resolve()), "created": created, "existed": existed,
@@ -1358,6 +1396,10 @@ async def api_account(request: Request):
         dest = mod.make_config(app_dir, label, owner=owner)
     except Exception as e:
         raise HTTPException(500, "could not make the account: %s" % str(e).splitlines()[0][:160])
+    if server_mode.enabled():
+        # make_config puts the profile in the account's own folder, which on
+        # the server is the shared folder, so it moves to the profiles volume.
+        _set_profile(Path(dest), server_mode.profile_for(app_dir.name, label))
     cfg = json.loads(Path(dest).read_text(encoding="utf-8"))
     global _STATUS_MOD
     _STATUS_MOD = None
@@ -1441,6 +1483,22 @@ async def api_failure_reveal(request: Request):
     except Exception as e:
         raise HTTPException(500, "could not open the folder, %s" % e)
     return {"ok": True}
+
+
+@app.get("/api/failure/download", dependencies=[Depends(_same_origin_only)])
+def api_failure_download(app: str = ""):
+    """On PaperPull Server, the newest failure file of one app, handed to the
+    browser to attach to an issue. Only the app's name comes from the page,
+    and the file is found here the way reveal finds it."""
+    if not server_mode.enabled():
+        raise HTTPException(404)
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "unknown app")
+    found = _latest_failure(apps[app])
+    if found is None:
+        raise HTTPException(404, "no recent failure file")
+    return FileResponse(found, filename=found.name)
 
 
 @app.post("/api/record/stop", dependencies=[Depends(_same_origin_only)])
@@ -1582,6 +1640,9 @@ def api_run(app: str, account: str = "primary", action: str = "pilot",
         # version, which is the one field that says what a tester ran.
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
                    PAPERPULL_VERSION=VERSION)
+        # When the run began, so that only a list of new files this run
+        # wrote is handed to the server's plug-ins afterwards.
+        started = time.time()
         try:
             _RUNNING.add(app)
             proc = subprocess.Popen(
@@ -1641,6 +1702,13 @@ def api_run(app: str, account: str = "primary", action: str = "pilot",
                 else:
                     yield f"data: {line.rstrip()}\n\n"
             code = await to_thread.run_sync(proc.wait)
+            # On PaperPull Server the plug-ins hear the run ended, the
+            # Paperless copy among them, and what they say joins the output.
+            if server_mode.enabled():
+                said = await to_thread.run_sync(server_mode.after_run, meta, account,
+                                                action, started, code, result)
+                for told in said:
+                    yield f"data: {told}\n\n"
             if result is not None:
                 yield f"event: result\ndata: {json.dumps(result)}\n\n"
             yield "data: \n\n"
@@ -1883,8 +1951,10 @@ async def api_naming_save(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    bar = server_mode.server_bar() if server_mode.enabled() else ""
-    return HTML.replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
+    server = server_mode.enabled()
+    bar = server_mode.server_bar() if server else ""
+    return (HTML.replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
+            .replace("__SERVER__", "true" if server else "false"))
 
 
 # The PaperPull icon, for the browser tab the panel opens in. There is one
@@ -2058,7 +2128,7 @@ HTML = r"""<!doctype html>
     spreadsheets before you point this at a real account. Nothing is
     downloaded and nothing of yours is touched.
   </p>
-  <p class="hint" style="margin-top:18px">
+  <p class="hint" style="margin-top:18px" id="existinglink">
     <a href="#" onclick="toggleExisting(); return false;" style="color:var(--accent)">Already have PaperPull downloaders from before?</a>
   </p>
   <div id="existing" style="display:none">
@@ -2226,6 +2296,8 @@ HTML = r"""<!doctype html>
   <span>Free, and it costs money to make. Show your appreciation: <a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a> or <a href="https://github.com/rheeloaded/paperpull#support" target="_blank" rel="noopener">buy the Store edition</a></span>
 </footer>
 <script>
+// PaperPull Server, where the panel is in a browser on another computer.
+const SERVER = __SERVER__;
 async function saveRoot() {
   const root = $('rootinput').value.trim();
   $('rootmsg').textContent = '';
@@ -2467,6 +2539,9 @@ async function buildSpreadsheet(asCsv) {
   $('xlreveal').style.display = '';
 }
 async function revealSpreadsheet() {
+  // A server cannot open a folder on the computer the page is on, so it
+  // hands the spreadsheet to the browser instead.
+  if (SERVER) { location.href = '/api/export/download'; return; }
   try { await fetch('/api/export/reveal', {method: 'POST'}); } catch (e) {}
 }
 function showTab(which) {
@@ -2908,6 +2983,7 @@ async function checkFailure(app) {
 }
 async function revealFailure() {
   if (!failureApp) return;
+  if (SERVER) { location.href = '/api/failure/download?app=' + encodeURIComponent(failureApp); return; }
   try {
     await fetch('/api/failure/reveal', { method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2929,6 +3005,18 @@ async function stopRecording() {
 function unlockButtons() {
   document.querySelectorAll('button[data-runlock]').forEach(b => { b.disabled = false; delete b.dataset.runlock; });
 }
+// On the server the downloads folder is the shared folder the container was
+// given, so it is shown and not asked for, and what would open a folder on
+// this computer downloads the file instead.
+function serverPage() {
+  if (!SERVER) return;
+  $('newroot').readOnly = true;
+  $('existinglink').style.display = 'none';
+  $('failreveal').textContent = 'Download the file to attach';
+  $('xlreveal').textContent = 'Download';
+  $('txreveal').textContent = 'Download';
+}
+serverPage();
 load();
 </script>
 </body>

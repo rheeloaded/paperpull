@@ -135,10 +135,10 @@ def dockerfile_sources():
 def test_everything_the_dockerfile_copies_is_in_the_folder_build_makes():
     chosen = build.selected(build.tracked(REPO))
     for src in dockerfile_sources():
-        if src.endswith("/") or "." not in Path(src).name and src in ("core", "apps", "gui"):
-            assert any(p.startswith(src.rstrip("/") + "/") for p in chosen), src
-        else:
-            assert src in chosen, "%s is copied but build.py does not hand it over" % src
+        folder = src.rstrip("/") + "/"
+        if any(p.startswith(folder) for p in chosen):
+            continue        # a folder, and build.py hands over what is in it
+        assert src in chosen, "%s is copied but build.py does not hand it over" % src
 
 
 def test_the_dockerfile_copies_nothing_from_outside_the_allowed_places():
