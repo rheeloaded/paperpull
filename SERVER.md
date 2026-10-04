@@ -37,15 +37,23 @@ a Raspberry Pi cannot run it.
 
 ## Get the image
 
-There is no published image yet, so for now you build it yourself from a
-checkout of this repository, on any computer with Docker and Python.
+`compose.yaml` names the image every PaperPull release publishes,
+`ghcr.io/rheeloaded/paperpull-server:latest`, and Docker downloads it from
+GitHub the first time the project starts. Before a release publishes it,
+the image is built from that release's code, started the way this page
+describes and checked, and only that very image goes out.
+
+If Docker cannot download it, no release has published it yet. Build it
+yourself then, from a checkout of this repository, on any computer with
+Docker and Python.
 
 ```bash
 python server/build.py --save paperpull-server.tar
 ```
 
 That builds `paperpull-server:dev` from the files git tracks, nothing else
-from the folder, and writes it to a file you can import on the NAS.
+from the folder, and writes it to a file you can import on the NAS. Write
+`paperpull-server:dev` as the `image:` in `compose.yaml` to use it.
 Building it downloads its parts from Debian, the Python Package Index and
 Google.
 
@@ -82,15 +90,17 @@ Google.
 
 The labels in the UGOS Docker app may differ a little from these.
 
-1. In the Docker app, open **Image**, choose to add or import a local image,
-   and pick `paperpull-server.tar`.
-2. Put `compose.yaml` and `seccomp-chrome.json` in a shared folder of their
+1. Put `compose.yaml` and `seccomp-chrome.json` in a shared folder of their
    own, and fill in `compose.yaml` as above. UGOS shows your user's
    `PUID` and `PGID` above the compose editor.
-3. Open **Project**, create one with that folder as its path, and paste or
+2. Open **Project**, create one with that folder as its path, and paste or
    import `compose.yaml`. Leave **Run immediately after creation** ticked.
-4. The setup code is in the container's log. Open the `paperpull` container
+   The Docker app downloads the image itself.
+3. The setup code is in the container's log. Open the `paperpull` container
    in the Docker app and look at its log.
+
+With an image you built yourself, import `paperpull-server.tar` first. In
+the Docker app, open **Image** and choose to add or import a local image.
 
 Synology and Unraid should work the same way and have not been tried yet.
 
@@ -137,9 +147,10 @@ documents to Paperless".
 
 ## Updating, backing up and removing
 
-- **Updating.** Build or import a newer image and recreate the container.
-  Everything you set up is in the volumes and stays. Chrome brings itself
-  up to date at every start.
+- **Updating.** Download the newer image and recreate the container, with
+  `docker compose pull` and then `docker compose up -d` in the project's
+  folder, or the same from your NAS's Docker app. Everything you set up is
+  in the volumes and stays. Chrome brings itself up to date at every start.
 - **Backing up.** Your documents are in the data folder. The `profiles`
   volume holds your live sign-ins, so a backup of it is as sensitive as your
   passwords, and you can always sign in again instead. The `settings` volume

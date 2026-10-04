@@ -10,7 +10,9 @@
 # notes at .release/notes-<version>.md.
 #
 # The workflows deliberately publish nothing on their own, so this is the
-# one step that makes a build public, and a person runs it.
+# one step that makes a build public, and a person runs it. Publishing the
+# release is also what has the Server image workflow publish that release's
+# server image, once the image has passed its checks.
 set -euo pipefail
 
 VERSION="${1:-}"
@@ -142,3 +144,5 @@ echo "publishing $TAG ..."
   --jq '{draft: .isDraft, prerelease: .isPrerelease, assets: [.assets[].name]}'
 rm -rf "$WORK"
 echo "done. https://github.com/rheeloaded/paperpull/releases/tag/$TAG"
+echo "the Server image workflow now builds, checks and publishes ghcr.io/rheeloaded/paperpull-server:$VERSION, see"
+echo "  \"$GH\" run list --workflow \"Server image\" --event release --limit 1"

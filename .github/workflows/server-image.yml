@@ -1,0 +1,124 @@
+# Builds the PaperPull Server image and starts it the way SERVER.md tells a
+# person to, so an image is never first tried by the person who installs it.
+#
+# It runs on a push to main, on a pull request and on a version tag, like
+# the tests. server/build.py builds the image from the files git tracks,
+# and server/smoke.py starts it with compose.yaml, chooses a password with
+# the setup code from the container's log, signs in, sets up a provider and
+# runs the self-test inside the container, Chrome's sandbox included.
+#
+# Nothing publishes on a push or a tag. The image goes to the GitHub
+# Container Registry only when a release is published, which
+# tools/release.sh does and a person runs, the same rule as the package
+# workflows. That run builds and tests the image from the release's tag
+# again, and the job that publishes takes that very image, never a build of
+# its own, so what is pushed is what passed.
+#
+# GitHub makes a new package private. After the first release the package
+# has to be made public once in its settings, and the publish job warns
+# when the image cannot be pulled without signing in.
+
+name: Server image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: build and start the image
+    runs-on: ubuntu-latest
+    # A guard against a run that hangs. The build takes a few minutes and
+    # the first start downloads Chrome.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: A release publishes the version it is named for
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          echo "the release is $TAG, VERSION says $(cat VERSION)"
+          test "v$(tr -d '[:space:]' < VERSION)" = "$TAG"
+
+      - name: Build the image from the files git tracks
+        run: python server/build.py
+
+      - name: Start it the way SERVER.md says, and check it
+        run: python server/smoke.py --image paperpull-server:dev
+
+      - name: Keep the tested image for the publish job
+        if: github.event_name == 'release'
+        run: docker save "paperpull-server:$(tr -d '[:space:]' < VERSION)" | gzip -1 > paperpull-server.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'release'
+        with:
+          name: paperpull-server-image
+          path: paperpull-server.tar.gz
+          # Already compressed, and only the publish job reads it.
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: publish the tested image
+    needs: image
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The one job that may write a package, and it runs only for a release
+    # a person published.
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      PRERELEASE: ${{ github.event.release.prerelease }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: paperpull-server-image
+
+      - name: Push it to the GitHub Container Registry
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          version="${TAG#v}"
+          image="ghcr.io/${OWNER,,}/paperpull-server"
+          gunzip -c paperpull-server.tar.gz | docker load
+          printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker tag "paperpull-server:$version" "$image:$version"
+          docker push "$image:$version"
+          # A prerelease is for its testers, and latest stays on the last
+          # release everyone gets.
+          if [ "$PRERELEASE" != "true" ]; then
+            docker tag "paperpull-server:$version" "$image:latest"
+            docker push "$image:latest"
+          fi
+          docker logout ghcr.io
+
+      - name: Check that anyone can pull it
+        run: |
+          image="ghcr.io/${OWNER,,}/paperpull-server:${TAG#v}"
+          if docker manifest inspect "$image" > /dev/null 2>&1; then
+            echo "anyone can pull $image"
+          else
+            echo "::warning title=The server image is private::GitHub makes a new package private, so nobody can pull $image yet. Make it public once, in the package's settings under Danger Zone, https://github.com/users/${OWNER}/packages/container/paperpull-server/settings"
+          fi

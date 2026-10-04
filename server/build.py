@@ -92,7 +92,8 @@ def main(argv=None) -> int:
     try:
         n = make_context(ctx)
         print("build context, %d tracked files in %s" % (n, ctx), flush=True)
-        cmd = ["docker", "build", "-f", str(ctx / "server" / "Dockerfile")]
+        cmd = ["docker", "build", "-f", str(ctx / "server" / "Dockerfile"),
+               "--label", "org.opencontainers.image.version=%s" % version]
         for tag in tags:
             cmd += ["-t", tag]
         r = subprocess.run(cmd + [str(ctx)])

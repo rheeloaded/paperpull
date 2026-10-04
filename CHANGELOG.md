@@ -13,8 +13,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **PaperPull Server, experimental.** PaperPull can run on an always-on
   machine at home, a NAS or a home server with Docker, next to
   Paperless-ngx, and be used from a browser on any computer on the home
-  network. It is one Docker image built by `server/build.py` from the files
-  git tracks. Chrome is not in it. The container downloads Chrome from
+  network. It is one Docker image, built by `server/build.py` from the
+  files git tracks, which every release publishes at
+  `ghcr.io/rheeloaded/paperpull-server` once that very image has started
+  and passed its checks the way SERVER.md sets it up. Chrome is not in it. The container downloads Chrome from
   Google at its first start, checked against Google's signing key, and
   keeps it up to date in a volume of its own. Chrome's sandbox stays on,
   under a security profile that is Docker's default with the two system

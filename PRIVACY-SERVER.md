@@ -24,9 +24,10 @@ code in `server/` and `gui/server_mode.py`.
   Usage statistics, sync, signing in to the browser, search suggestions,
   spell checking and translation are switched off by policy
   (`server/chrome-policies.json`).
-- **Where you get the image from,** when you build or download it.
-  Building it downloads its parts from Debian, the Python Package Index and
-  Google.
+- **Where you get the image from,** when you download or build it.
+  Downloading it fetches it from GitHub's container registry (`ghcr.io`).
+  Building it yourself downloads its parts from Debian, the Python Package
+  Index and Google.
 
 Nothing else. There is no update check of PaperPull's own, no crash
 reporting, no usage statistics, no analytics, and no account with this
