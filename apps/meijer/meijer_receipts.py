@@ -369,8 +369,11 @@ class App:
             where = "Meijer's %s %s" % (" and ".join(named), "tab" if len(named) == 1 else "tabs")
             seconds = site.LIST_WAIT_MS // 1000
             if found:
-                print(f"\nNothing showed on {where} within {seconds} seconds, so nothing")
-                print("there was looked for this run. The next run looks again.")
+                # The tab was looked at for the whole wait, and a Pilot or Run
+                # All still presses the receipts found on it before, so this
+                # says only what discovery found there.
+                print(f"\nNothing showed on {where} within {seconds} seconds, so this run")
+                print("found nothing new there. The next run looks again.")
                 return found
             self.progress.save(backup=True)
             print(f"\n!! Nothing showed on {where} within {seconds} seconds, so this")

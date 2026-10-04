@@ -332,13 +332,16 @@ def test_rows_that_never_come_are_not_read_as_none(attached, tmp_path, capsys):
 
 def test_online_orders_are_kept_when_the_in_store_rows_never_come(attached, tmp_path, capsys):
     """One tab's rows are a list, so the run goes on with them, and says
-    the other tab showed nothing and was not looked at."""
+    the other tab showed nothing and gave nothing new. It does not say that
+    tab was not looked at, since it was, for the whole wait, and a Pilot or
+    Run All still presses the receipts found on it before."""
     SITE.orders = orders_page(STORE_ROWS, late_ms=None, online=ONLINE_ORDER)
     out = discover(tmp_path, attached, capsys)
 
     assert found(tmp_path) == [("2026-06-09", "$31.50")]
-    assert "Nothing showed on Meijer's In-Store Receipts tab" in out, out
-    assert "The next run looks again" in out
+    assert ("Nothing showed on Meijer's In-Store Receipts tab within 3 seconds, so this run "
+            "found nothing new there. The next run looks again.") in out, out
+    assert "looked for this run" not in out
     assert "Discovery complete" in out
 
 
