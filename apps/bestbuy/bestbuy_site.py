@@ -347,12 +347,23 @@ PAGE_SIZE = 10
 def fetch_year(page, query: dict, year: int, max_pages: int = 30) -> dict:
     """Every entry the history holds for one year, ten at a time. Online
     orders and store purchases page separately, so each keeps its own
-    offset. Returns {"entries": [...], "status": s, "complete": bool}."""
+    offset. Returns {"entries": [...], "status": s, "complete": bool,
+    "pages": n, "stop": word, "code": n}.
+
+    "pages" counts the pages that answered with the history, so 0 is a year
+    that did not come. "stop" says why the year ended short of its last
+    page, "refused" for an HTTP error, "graphql errors" for an answer that
+    carried errors, which is also how Best Buy answers past the oldest year
+    it keeps, "no list" for an answer without the history in it, which is
+    what a bot check sends in place of one, and "no answer" when the call
+    itself failed, and is empty when it did not. "code" is the answer's
+    HTTP status, 0 when none came."""
     if not query or not is_safe_url(query.get("url") or ""):
-        return {"entries": [], "status": "no query", "complete": False}
+        return {"entries": [], "status": "no query", "complete": False, "pages": 0,
+                "stop": "no query", "code": 0}
     entries, seen = [], set()
     order_offset = purchase_offset = 0
-    status, complete = "", False
+    status, complete, pages, stop, code = "", False, 0, "", 0
     for _ in range(max_pages):
         body = json.loads(json.dumps(query["body"]))
         body["variables"].update(year=int(year), orderLimit=PAGE_SIZE, purchaseLimit=PAGE_SIZE,
@@ -373,15 +384,27 @@ def fetch_year(page, query: dict, year: int, max_pages: int = 30) -> dict:
                     pass
                 page.wait_for_timeout(2000 * (attempt + 1))
         if got is None:
-            status = "fetch failed: %s" % type(error).__name__
+            status, stop, code = "fetch failed: %s" % type(error).__name__, "no answer", 0
             break
         status = got.get("status")
+        code = status if isinstance(status, int) else 0
         data = got.get("data") if isinstance(got.get("data"), dict) else {}
-        if status != 200 or data.get("errors"):
-            status = status if status != 200 else "errors"
+        if status != 200:
+            stop = "refused"
             break
-        exp = (((data.get("data") or {}).get("customer") or {})
-               .get("purchaseHistoryOrdersExperience") or {})
+        if data.get("errors"):
+            status, stop = "errors", "graphql errors"
+            break
+        inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+        customer = inner.get("customer") if isinstance(inner.get("customer"), dict) else {}
+        exp = customer.get("purchaseHistoryOrdersExperience")
+        if not isinstance(exp, dict):
+            # A page where the answer should be, or an answer without the
+            # history in it. Read as an empty year, three of them ended the
+            # walk as though the history were over.
+            status, stop = "no list", "no list"
+            break
+        pages += 1
         closed = exp.get("closedOrdersAndTransactions") or {}
         opened = exp.get("openOrders") or {}
         batch = [e for e in (closed.get("entries") or []) + (opened.get("entries") or [])
@@ -401,7 +424,23 @@ def fetch_year(page, query: dict, year: int, max_pages: int = 30) -> dict:
         # Paced like a person paging. Best Buy's bot protection reset every
         # request, the page's own included, after a burst of these.
         page.wait_for_timeout(2500)
-    return {"entries": entries, "status": status, "complete": complete}
+    return {"entries": entries, "status": status, "complete": complete, "pages": pages,
+            "stop": stop, "code": code}
+
+
+def why_it_stopped(hist: dict) -> str:
+    """Why the history ended short of its end, in words for a message. Its
+    status, never anything from its body."""
+    stop = hist.get("stop")
+    if stop == "refused":
+        return "Best Buy answered HTTP %s" % hist.get("status")
+    if stop == "graphql errors":
+        return "Best Buy answered with an error"
+    if stop == "no list":
+        return "Best Buy's answer held no purchase history"
+    if stop == "no query":
+        return "the page made no history query"
+    return "no answer came back from Best Buy"
 
 
 def _entry_date(created: str) -> str:

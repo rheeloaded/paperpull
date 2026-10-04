@@ -134,6 +134,10 @@ class App:
         self._left_open = set()
         # The sides that asked for a sign-in during this run.
         self._stopped_sides = set()
+        # The sides whose list did not come whole, refused or not answered
+        # partway, or with trips whose details Uber did not answer. What came
+        # is used, and the run stops at its end (see _stop_if_unfinished).
+        self._cut_short_sides = set()
         self._survey = {}
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
@@ -302,13 +306,28 @@ class App:
         print("\n!! Uber is showing a check in that window. Deal with it yourself,")
         print("   this tool will not, then run this again.")
 
-    def _stop_if_signed_out(self) -> None:
-        """A run where a side stopped for a sign-in did not finish, and it
-        must not read as a clean one. It leaves the way every app's run leaves
-        on a sign-out, which the panel reports as stopped."""
+    def _stop_if_unfinished(self) -> None:
+        """A run where a side stopped for a sign-in, or where a side's list
+        did not come whole, did not finish, and it must not read as a clean
+        one. It leaves the way every app's run leaves on a sign-out, which
+        the panel reports as stopped."""
+        if self._cut_short_sides:
+            said = " and ".join("your trips" if side == RIDES else "your Uber Eats orders"
+                                for side in PURCHASE_TYPES if side in self._cut_short_sides)
+            print("\nNot all of %s came, so this run stops here rather than finish." % said)
+            print("Run it again later to read the rest.")
         if self._stopped_sides:
             print("\nSign in where it asked, then press Resume or run this again.")
+        if self._stopped_sides or self._cut_short_sides:
             raise SystemExit(0)
+
+    def _unfinished_mark(self) -> Path:
+        """Present while a Discover is under way and after one that did not
+        read both lists to their end, so Resume knows to read them first, as
+        Target's and Kroger's do. A side that asked for a sign-in or was cut
+        short leaves it, and so does a run that read one side, or one year or
+        stretch of a list, since the rest was not read."""
+        return self.paths.discovery_json.with_name(".discovery-unfinished")
 
     def _open(self, side: str):
         """The side's tab, opened on its list page. The tab, or None when
@@ -415,14 +434,31 @@ class App:
         Each side asks Uber's own list from inside its signed-in page, the
         way the page asks, and keeps the purchases where money was spent. A
         ride's day comes from the trip itself, one trip at a time, since the
-        list writes no year. Nothing is clicked on either."""
+        list writes no year. Nothing is clicked on either.
+
+        A side whose list did not come whole keeps what came, and Pilot, Run
+        All and Resume go on with it and with the other side, but the rest
+        is missing, so the run stops at its end rather than finish, as it
+        does when a side asks for a sign-in. With finish=False the caller
+        does that once it has used them."""
         types = list(types or PURCHASE_TYPES)
+        try:
+            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
+        except OSError:
+            pass
         n_new = {RIDES: 0, EATS: 0}
         if RIDES in types:
             n_new[RIDES] = self._discover_rides()
         if EATS in types:
             n_new[EATS] = self._discover_eats()
         self.discovery.save()
+        unfinished = bool(self._stopped_sides or self._cut_short_sides)
+        narrowed = bool(getattr(self.args, "year", None) or self.args.start_date)
+        if not unfinished and not narrowed and set(PURCHASE_TYPES) <= set(types):
+            try:
+                self._unfinished_mark().unlink()
+            except OSError:
+                pass
 
         all_recs = [r for r in self.discovery.data.values() if isinstance(r, dict)]
         self.stats["rides_discovered"] = sum(
@@ -431,7 +467,9 @@ class App:
             1 for r in all_recs if r.get("purchase_type") == EATS)
 
         if not quiet:
-            print(f"\nDiscovery complete. Purchases known {len(all_recs)} "
+            said = ("Discovery did not read all of your trips and orders." if unfinished
+                    else "Discovery complete.")
+            print(f"\n{said} Purchases known {len(all_recs)} "
                   f"({self.stats['rides_discovered']} rides, "
                   f"{self.stats['eats_discovered']} Uber Eats)")
             by_year = {}
@@ -444,7 +482,7 @@ class App:
             if dates:
                 print(f"  Date range {dates[0]} to {dates[-1]}")
         if finish:
-            self._stop_if_signed_out()
+            self._stop_if_unfinished()
         return n_new
 
     def _discover_rides(self) -> int:
@@ -461,6 +499,7 @@ class App:
         self.journal.result("read the trip list", pages=walk["pages"],
                             trips=len(walk["rides"]))
         n_new, dropped, unplaced, unpaid, asked, unread = 0, 0, 0, 0, 0, 0
+        unanswered = 0
         # After a sign-out no trip's details would be answered, and a trip
         # must never be recorded from its subtitle alone for that reason.
         rows = [] if walk["stop"] == site.SIGNED_OUT else walk["rides"]
@@ -483,8 +522,16 @@ class App:
                 break
             if got["kind"] != site.ANSWERED:
                 # Asked again next run. Only a trip whose details answered
-                # without a start is placed by its subtitle.
-                unread += 1
+                # without a start is placed by its subtitle. No answer, a
+                # 429 or a server error is Uber not answering, and the run
+                # does not finish clean on it. Any other answer without the
+                # trip is the trip's own, and asking again may change
+                # nothing, so it does not stop every run.
+                status = got.get("status") or 0
+                if got["kind"] == site.FAILED or status == 429 or status >= 500:
+                    unanswered += 1
+                else:
+                    unread += 1
                 continue
             purchase = site.ride_purchase(row, got["trip"])
             if purchase is None:
@@ -499,9 +546,15 @@ class App:
               f"{len(walk['rides']) - unpaid} paid, {unpaid} with nothing charged skipped.")
         if dropped:
             print(f"  {dropped} fell outside the scope you set.")
-        if unread:
-            print(f"  {unread} trip(s) did not answer with their details. They are read again next run.")
+        if unanswered:
+            # Trips missed, which a run that finished clean left unsaid.
+            self._cut_short_sides.add(RIDES)
+            print(f"  {unanswered} trip(s) did not answer with their details. They are read again next run,")
+            print("  and this run stops at its end rather than finish.")
             self.write_failure("read a trip", "a trip's details were not answered")
+        if unread:
+            print(f"  {unread} trip(s) were answered without their details. They are read again next run.")
+            self.write_failure("read a trip", "a trip's details came without the trip")
         if unplaced:
             print(f"  {unplaced} trip(s) could not be placed on a day. They are read again next run.")
             self.write_failure("read a trip", "a trip could not be placed on a day")
@@ -543,11 +596,24 @@ class App:
     def _say_walk_stop(self, side: str, walk: dict, page) -> None:
         if walk["stop"] == site.SIGNED_OUT:
             self._signed_out(side, page)
-        elif walk["stop"] in (site.REFUSED, site.FAILED):
-            print("\n!! Uber stopped answering the %s list partway (%s)."
-                  % ("trip" if side == RIDES else "order", walk["status"] or "no answer"))
-            print("   What was read is kept. Run it again later.")
-            self.write_failure("read the list", "a list call was not answered")
+        elif walk["stop"] in (site.REFUSED, site.FAILED, site.NO_LIST):
+            # Read as a list with nothing more in it, this let the run finish
+            # clean with the rest of the side missed. What came is used, and
+            # the run stops at its end.
+            self._cut_short_sides.add(side)
+            what = "trip" if side == RIDES else "order"
+            how = ("an answer with errors and no %ss" % what if walk["stop"] == site.NO_LIST
+                   else walk["status"] or "no answer")
+            if walk["pages"] > 1:
+                print("\n!! Uber stopped answering the %s list partway (%s)." % (what, how))
+                print("   What was read is kept and used, and this run stops at its end")
+                print("   rather than finish. Run it again later to read the rest.")
+            else:
+                print("\n!! Uber did not answer when this asked for the %s list (%s)." % (what, how))
+                print("   This run stops at its end rather than finish. Run it again later.")
+            self.write_failure("read the list", "a list call was not answered",
+                               postmortem={"side": side.lower(), "calls": walk["pages"],
+                                           "stop": walk["stop"], "status": walk["status"]})
         elif walk["stop"] == site.PAGE_CAP:
             print("  The list was stopped after %d calls. Set default_start_date or" % walk["pages"])
             print("  pass --start-date to read a shorter stretch at a time.")
@@ -973,12 +1039,12 @@ class App:
             + self._select_purchases(EATS, limit=self.config.get("pilot_eats", 3)))
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
-            self._stop_if_signed_out()
+            self._stop_if_unfinished()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
         self._pilot_report(selected)
-        self._stop_if_signed_out()
+        self._stop_if_unfinished()
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -1032,10 +1098,20 @@ class App:
             selected += self._select_purchases(t)
         print(f"\nProcessing {len(selected)} purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
-        self._stop_if_signed_out()
+        self._stop_if_unfinished()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume works from the purchases a Discover found. After one where a
+        # side asked for a sign-in or its list did not come whole, that is
+        # some of them, and Resume finished clean on those with the rest
+        # never looked for. So both lists are read first, and a side that
+        # does not come this time either still leaves the purchases already
+        # found to download, and the run stops at its end.
+        if self._unfinished_mark().exists():
+            print("The last Discover did not read both of your lists to their end, "
+                  "so it runs again first.")
+            self.cmd_discover(quiet=True, finish=False)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]
         pend = [p for p in pend if not self._already_done(p)]
@@ -1044,10 +1120,11 @@ class App:
             pend = pend[:self.args.max_purchases]
         if not pend:
             print("Nothing to resume, all discovered purchases are complete.")
+            self._stop_if_unfinished()
             return
         print(f"Resuming {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
-        self._stop_if_signed_out()
+        self._stop_if_unfinished()
 
     def cmd_rename(self):
         """Rename what is already downloaded, without downloading it again.

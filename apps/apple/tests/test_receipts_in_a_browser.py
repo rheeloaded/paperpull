@@ -94,6 +94,7 @@ def _app(tmp_path, context, page=None):
     app.order_csv = storage.CsvFile(app.paths.order_history_csv, storage.ORDER_HISTORY_COLUMNS)
     app.rules = classification.load_rules(Path(app_mod.__file__).parent / "category_rules.json")
     app._opened, app._left_open, app._stopped_sides, app._survey = [], set(), set(), {}
+    app._cut_short_sides = set()
     app._cdp_mode, app._context, app._work_page, app._store_page = True, context, page, None
     app._pw = app._browser = None
     app.browser = lambda: context
@@ -337,7 +338,7 @@ def test_a_403_stops_the_app_store_side_and_asks_for_a_sign_in(browser, tmp_path
     assert "Report a Problem asked you to sign in again" in capsys.readouterr().out
     assert len(fake.requested(REPORT + "/api/purchase/search")) == 2, "never asked again"
     with pytest.raises(SystemExit):
-        app._stop_if_signed_out()
+        app._stop_if_unfinished()
 
 
 # -- the Apple Store --------------------------------------------------------------------
@@ -410,7 +411,7 @@ def test_a_signed_out_store_list_stops_with_the_sign_in_message(browser, tmp_pat
     assert not [s for s in fake.seen if "/shop/order/detail/" in s[1]], "nothing else was opened"
     assert app.discovery.data == {}
     with pytest.raises(SystemExit):
-        app._stop_if_signed_out()
+        app._stop_if_unfinished()
 
 
 def page_with(data):

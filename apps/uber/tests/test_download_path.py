@@ -117,6 +117,7 @@ def _app(tmp_path, monkeypatch, discovery=None, strict=True, receipts=None, pdfs
     app._journal = Journal()
     app._requests = None
     app._opened, app._left_open, app._stopped_sides = [], set(), set()
+    app._cut_short_sides = set()
     app._cdp_mode = True
     app._work_page, app._eats_page = RIDES_TAB, EATS_TAB
     failures, asked, fetched = [], [], []
@@ -241,7 +242,7 @@ def test_a_sign_in_stops_its_own_side_and_the_other_carries_on(tmp_path, monkeyp
     assert [c.arguments["expect"].number for c in spy.calls] == [RECEIPT_ID]
     assert "Uber asked you to sign in again for your trips" in capsys.readouterr().out
     try:
-        app._stop_if_signed_out()
+        app._stop_if_unfinished()
     except SystemExit as e:
         assert e.code == 0
     else:

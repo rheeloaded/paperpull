@@ -98,6 +98,9 @@ class App:
         self._browser = None
         self._work_page = None
         self._cdp_mode = False
+        # Set when the history request stopped before its last page, so the
+        # run stops at its end rather than finish (see _stop_if_cut_short).
+        self._history_cut_short = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "online_discovered": 0, "instore_discovered": 0,
@@ -365,7 +368,68 @@ class App:
             print("anything Home Depot asks there yourself, then run --login again.")
         self.close()
 
-    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
+    def _unfinished_mark(self) -> Path:
+        """Present while a Discover is under way and after one that did not
+        read the whole purchase history, so Resume knows to read it first,
+        as Target's and Kroger's do. Only the history's last page takes it
+        away."""
+        return self.paths.discovery_json.with_name(".discovery-unfinished")
+
+    @staticmethod
+    def _history_facts(got: dict) -> dict:
+        """How far the history request got, for a failure file. Counts, and
+        the word for why it stopped."""
+        status = got.get("status")
+        return {"pages": got.get("pages", 0), "last": bool(got.get("last")),
+                "stop": got.get("stop") or "", "status": status if isinstance(status, int) else 0}
+
+    def _read_history(self, page, need_it: bool = True) -> dict:
+        """The order history, from the page's own request asked again from
+        inside the page, as site.fetch_orders gives it.
+
+        The page asking for its orders is not the request answering when it
+        is asked again. Home Depot sits behind bot protection, which can
+        refuse a call from a page that drew, or answer one with a page of
+        its own. A refusal wrote a failure file and discovery finished clean,
+        and an answer that was not the history was read as an empty one, so
+        Pilot and Run All went on as though there were nothing to download.
+        Now the run stops here the way it stops on a history page that never
+        asked, claiming nothing, and at a console it asks and then reads the
+        history again. Resume and Diagnose, which do not need it
+        (need_it=False), say so and go on with the orders already found."""
+        while True:
+            request = self._open_orders(page)
+            got = site.fetch_orders(page, request)
+            if got.get("pages"):
+                return got
+            self.progress.save(backup=True)
+            print("\n!! Your purchase history did not come when this asked Home Depot for it")
+            print(f"({site.why_it_stopped(got)}), so this cannot say which purchases are new.")
+            print("Look at the browser window. If Home Depot is asking you to press and hold")
+            print("or prove you are a person, or asking you to sign in, answer it there")
+            print("yourself. I will NOT attempt to bypass it.")
+            self.write_failure("read the purchase history", "the order request gave no page",
+                               postmortem=self._history_facts(got))
+            if not need_it:
+                print("This goes on with the orders already found.")
+                return got
+            if browser_launcher.ask_or_none(
+                    "Press Enter to ask Home Depot for your orders again (or Ctrl+C to quit)... ") is None:
+                print("Run this again in a while.")
+                raise SystemExit(0)
+
+    def _stop_if_cut_short(self) -> None:
+        """A run that did not read the whole purchase history did not finish,
+        and must not read as a clean one. Once it has used what came, it
+        leaves on SystemExit the way a run leaves on a sign-out, which the
+        panel reports as stopped after Pilot, Run All and Resume."""
+        if self._history_cut_short:
+            print("\nNot all of your purchase history came, so this run stops here rather")
+            print("than finish. Run it again later to read the rest.")
+            raise SystemExit(0)
+
+    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False,
+                     finish: bool = True, need_history: bool = True) -> dict:
         """Discovery pass: the history through the page's own request.
 
         The purchase history page asks Home Depot for its orders with one
@@ -373,18 +437,28 @@ class App:
         page made it and asked again from inside the page, a page of results
         at a time, until every order is in. Home Depot keeps two years, and
         a wider range is refused, so the page's own range is the whole of
-        what there is. Nothing is pressed."""
+        what there is. Nothing is pressed.
+
+        Only a page that comes back short, or the count Home Depot gave,
+        shows the history was read whole. When the request stops short of
+        that after giving some pages, the orders on them are real and are
+        kept, and Pilot, Run All and Resume go on with them, but older ones
+        are missing, so the run stops at its end rather than finish. With
+        finish=False the caller does that once it has used them.
+        need_history=False is Resume's and Diagnose's, which go on with the
+        orders already found even when no page comes."""
+        try:
+            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
+        except OSError:
+            pass
         page = self.page()
         n_new = {ONLINE: 0, IN_STORE: 0}
         floor = self.args.start_date or self.config.get("default_start_date")
 
-        request = self._open_orders(page)
-        got = site.fetch_orders(page, request)
-        log.info("Order history: %d of %d order(s), answer %s",
-                 len(got["orders"]), got["count"], got["status"])
-        if got["status"] != 200:
-            self.write_failure("read the purchase history",
-                               "the order request answered %s" % got["status"])
+        got = self._read_history(page, need_it=need_history)
+        log.info("Order history: %d of %d order(s) over %d page(s), answer %s, last page %s",
+                 len(got["orders"]), got["count"], got.get("pages", 0), got["status"],
+                 got.get("last"))
         dropped_by_scope = 0
         for order in got["orders"]:
             purchase = site.order_to_purchase(order)
@@ -409,6 +483,25 @@ class App:
                 }, save=False)
         self.discovery.save()
 
+        if got.get("last"):
+            try:
+                self._unfinished_mark().unlink()
+            except OSError:
+                pass
+        elif got.get("pages"):
+            self._history_cut_short = True
+            print(f"\n!! Only {got.get('pages', 0)} page(s) of your purchase history came "
+                  f"({site.why_it_stopped(got)}),")
+            print("so older purchases may be missing. What came is kept, and this run stops at")
+            print("its end rather than finish. Run it again later to read the rest.")
+            self.write_failure("read the purchase history",
+                               "the order request stopped partway",
+                               postmortem=self._history_facts(got))
+        else:
+            # Resume or Diagnose, going on with the orders found before
+            # (_read_history).
+            self._history_cut_short = True
+
         all_recs = list(self.discovery.data.values())
         self.stats["online_discovered"] = sum(
             1 for r in all_recs if r.get("purchase_type") == ONLINE)
@@ -416,7 +509,9 @@ class App:
             1 for r in all_recs if r.get("purchase_type") == IN_STORE)
 
         if not quiet:
-            print(f"\nDiscovery complete. Purchases known: {len(all_recs)} "
+            said = ("Discovery read part of your purchase history." if self._history_cut_short
+                    else "Discovery complete.")
+            print(f"\n{said} Purchases known: {len(all_recs)} "
                   f"({self.stats['online_discovered']} online, "
                   f"{self.stats['instore_discovered']} in store)")
             print("  Home Depot keeps the last two years online, so run this every few")
@@ -432,6 +527,8 @@ class App:
             dates = sorted(r.get("purchase_date") for r in all_recs if r.get("purchase_date"))
             if dates:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
+        if finish:
+            self._stop_if_cut_short()
         return n_new
 
     # -- selection ----------------------------------------------------------
@@ -821,7 +918,7 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.")
-        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False)
+        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False, finish=False)
         # Some of each kind, since a store receipt and an online order are
         # two different pages and a pilot of one proves nothing about the
         # other.
@@ -830,10 +927,12 @@ class App:
             + self._select_purchases(ONLINE, limit=self.config.get("pilot_online", 3)))
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
+            self._stop_if_cut_short()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
         self._pilot_report(selected)
+        self._stop_if_cut_short()
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -880,15 +979,25 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover(types=types, quiet=False)
+        self.cmd_discover(types=types, quiet=False, finish=False)
         selected: List[Purchase] = []
         for t in types:
             selected += self._select_purchases(t)
         print(f"\nProcessing {len(selected)} purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume works from the orders a Discover found. After one that
+        # stopped before the history came, or when only part of it came,
+        # that is none or some of them, and Resume finished clean on those
+        # with the rest never looked for. So the history is read first, and
+        # when it does not come this time either, Resume still goes on with
+        # the orders it has and stops at its end.
+        if self._unfinished_mark().exists():
+            print("The last Discover did not read your whole purchase history, so it runs again first.")
+            self.cmd_discover(quiet=True, finish=False, need_history=False)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]
         pend = [p for p in pend if not self._already_done(p)]
@@ -897,9 +1006,11 @@ class App:
             pend = pend[:self.args.max_purchases]
         if not pend:
             print("Nothing to resume - all discovered purchases are complete.")
+            self._stop_if_cut_short()
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
 
     def cmd_rename(self):
@@ -1108,7 +1219,9 @@ class App:
         import json as _json
         page = self.page()
         if not self.discovery.data:
-            self.cmd_discover(quiet=True)
+            # A survey goes on whatever the history does, since a history
+            # that does not come is what one is for.
+            self.cmd_discover(quiet=True, finish=False, need_history=False)
         # The history first, since an order missing from it is invisible
         # from any one receipt.
         try:

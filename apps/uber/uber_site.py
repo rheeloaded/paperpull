@@ -243,6 +243,7 @@ ANSWERED = "answered"
 SIGNED_OUT = "signed out"
 REFUSED = "refused"
 FAILED = "failed"
+NO_LIST = "no list"
 END = "end"
 DATE_LIMIT = "date limit"
 PAGE_CAP = "page cap"
@@ -697,7 +698,8 @@ def walk_rides(page, limit_date: str = "", pause_ms: Optional[int] = None,
     """Every past trip, newest first, one page at a time with a pause, for
     each profile. A profile stops at its end or at limit_date (a floor,
     YYYY-MM-DD), and the next profile is still read. The walk stops at a
-    sign-in, at a call that is not answered, or at the page cap.
+    sign-in, at a call that is not answered, at an answer carrying errors
+    and no trips (NO_LIST), or at the page cap.
 
     Each trip comes back with the time window its page covered, the time
     the page before it ended and the time its own page ended, because a
@@ -724,6 +726,14 @@ def walk_rides(page, limit_date: str = "", pause_ms: Optional[int] = None,
             if kind != ANSWERED:
                 stop = SIGNED_OUT if kind == SIGNED_OUT else (
                     REFUSED if kind == REFUSED else FAILED)
+                break
+            if not isinstance(_payload(got).get("activities"), dict) \
+                    and (got.get("data") or {}).get("errors"):
+                # GraphQL errors and no trips at all, which was read as a
+                # profile with nothing more in it. An answer with no trips and
+                # no errors still is one, since what a profile with no trips
+                # is answered was never seen.
+                stop = NO_LIST
                 break
             found, token = activities_of(got)
             lower = token_time(token)

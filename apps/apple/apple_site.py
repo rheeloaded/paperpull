@@ -131,6 +131,7 @@ ANSWERED = "answered"
 SIGNED_OUT = "signed out"
 REFUSED = "refused"
 FAILED = "failed"
+NO_LIST = "no list"
 END = "end"
 DATE_LIMIT = "date limit"
 BATCH_CAP = "batch cap"
@@ -464,10 +465,19 @@ def members_from(data) -> List[Member]:
 
 
 def read_family(page) -> dict:
-    """{"kind", "status", "members"}"""
+    """{"kind", "status", "members"}
+
+    The family list is a list of members, empty for an account with no
+    Family Sharing, RECORDED (#55). An answer without one, an empty body or a
+    page, is NO_LIST. Read as an empty family, it sent the search out for
+    the account signed in alone, and the rest of a family's purchases were
+    missed."""
     got = api_call(page, FAMILY_PATH)
     kind = answer_kind(got)
-    members = members_from(got.get("data")) if kind == ANSWERED else []
+    data = got.get("data")
+    if kind == ANSWERED and not (isinstance(data, dict) and isinstance(data.get("members"), list)):
+        kind = NO_LIST
+    members = members_from(data) if kind == ANSWERED else []
     return {"kind": kind, "status": got.get("status") or 0, "members": members}
 
 
@@ -514,9 +524,9 @@ def walk_purchases(page, dsids, limit_date: str = "", pause_ms: int = SEARCH_PAU
     no Family Sharing is searched by one dsid instead, `single`, which is
     how the page's own code asks for it (#55). It stops at the end, when a
     whole batch is older than `limit_date`, since the list is newest first
-    and everything after it is older still, or at the first answer that is
-    not a 200, which is never asked again. A cursor seen twice is the end
-    too, rather than a loop.
+    and everything after it is older still, at the first answer that is
+    not a 200, which is never asked again, or at a 200 without the search
+    in it (NO_LIST). A cursor seen twice is the end too, rather than a loop.
 
     Returns {"purchases": [...], "stop": word, "status": n, "batches": n}."""
     dsids = [str(d) for d in dsids if DSID_RE.match(str(d))]
@@ -541,8 +551,15 @@ def walk_purchases(page, dsids, limit_date: str = "", pause_ms: int = SEARCH_PAU
         if kind != ANSWERED:
             stop = kind
             break
-        data = got.get("data") if isinstance(got.get("data"), dict) else {}
-        batch = [p for p in (data.get("purchases") or []) if isinstance(p, dict)]
+        data = got.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("purchases"), list):
+            # An answer without the search in it, an empty body, which is how
+            # Report a Problem answers a call it fails, RECORDED for a
+            # receipt, or a page in its place. It was read as the end of the
+            # search, and the purchases past it were missed.
+            stop = NO_LIST
+            break
+        batch = [p for p in data["purchases"] if isinstance(p, dict)]
         purchases += batch
         nxt = data.get("nextBatchId")
         if not batch or not nxt or nxt in seen:

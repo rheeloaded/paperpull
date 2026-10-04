@@ -147,6 +147,7 @@ def _app(tmp_path, context, riders=None, eats=None):
     app.order_csv = storage.CsvFile(app.paths.order_history_csv, storage.ORDER_HISTORY_COLUMNS)
     app.rules = classification.load_rules(Path(app_mod.__file__).parent / "category_rules.json")
     app._opened, app._left_open, app._stopped_sides, app._survey = [], set(), set(), {}
+    app._cut_short_sides = set()
     app._cdp_mode, app._context = True, context
     app._work_page, app._eats_page = riders, eats
     app._pw = app._browser = None
@@ -324,7 +325,7 @@ def test_a_session_a_fresh_load_cannot_bring_back_stops_the_rides_side(browser, 
     assert len(fake.requested(RIDERS + "/graphql")) == 1, "never asked again in a loop"
     assert "Uber asked you to sign in again for your trips" in capsys.readouterr().out
     with pytest.raises(SystemExit):
-        app._stop_if_signed_out()
+        app._stop_if_unfinished()
 
 
 def test_a_failure_file_written_after_a_receipt_carries_no_trip_or_receipt_id(browser, tmp_path):

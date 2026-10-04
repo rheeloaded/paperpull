@@ -86,6 +86,7 @@ def _app(tmp_path, monkeypatch, discovery=None, strict=True, invoice_answers=Non
     app.rules = classification.load_rules(Path(app_mod.__file__).parent / "category_rules.json")
     app._journal = Journal()
     app._opened, app._left_open, app._stopped_sides = [], set(), set()
+    app._cut_short_sides = set()
     app._cdp_mode = True
     failures, tabs, asked = [], [], []
     app.page = lambda: _Page()
@@ -262,7 +263,7 @@ def test_a_sign_in_stops_its_own_store_and_the_other_carries_on(tmp_path, monkey
     assert [c.arguments["expect"].number for c in spy.calls] == ["W0000000001"]
     assert "Report a Problem asked you to sign in again" in capsys.readouterr().out
     try:
-        app._stop_if_signed_out()
+        app._stop_if_unfinished()
     except SystemExit as e:
         assert e.code == 0
     else:

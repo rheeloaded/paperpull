@@ -89,6 +89,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
   again first, and when Kroger refuses again it still downloads the
   purchases already found and stops at its end. An account with no loyalty
   card keeps Kroger's own words for it.
+- **Best Buy, Home Depot, Uber and Apple no longer finish clean when their
+  purchase list stops coming partway.** Each asks the site for its
+  purchase list from inside the signed-in page. A request that was refused
+  or got no answer, at the first page or partway through, wrote a failure
+  file, and the run went on as though the list had ended and finished
+  clean, with purchases missed and the failure file never offered. An
+  answer that was not the list, a page in its place or an empty answer,
+  was read as a list with nothing more in it. Now what came is kept and
+  used, and the run stops at its end rather than finish, which the panel
+  reports as stopped after Pilot, Run All and Resume. When nothing came at
+  all, Best Buy and Home Depot stop there, and at a console they ask and
+  then read the history again. Uber and Apple go on with their other side
+  first, as they do when one side asks for a sign-in, and an Uber trip
+  whose details got no answer counts the same way. Resume reads the list
+  again first while the last Discover left it unread, for Uber and Apple
+  after a sign-in too, and when the site refuses again it still downloads
+  the purchases already found and stops at its end. For Best Buy only the
+  errors it answers past the oldest year it keeps end the history,
+  wherever they come, and a refusal no longer does after an empty year, so
+  a January with nothing bought yet no longer ends a history Best Buy
+  refused at last year.
 - **Document apps no longer say signed in when their documents page did
   not come.** Forty-one of them said "Connected and signed in" when the
   page they look for never appeared. They now say it did not load, so

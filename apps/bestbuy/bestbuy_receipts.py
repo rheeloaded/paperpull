@@ -98,6 +98,9 @@ class App:
         self._browser = None
         self._work_page = None
         self._cdp_mode = False
+        # Set when the history query stopped before the history's end, so the
+        # run stops at its end rather than finish (see _stop_if_cut_short).
+        self._history_cut_short = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "online_discovered": 0, "instore_discovered": 0,
@@ -364,7 +367,147 @@ class App:
             print("anything Best Buy asks there yourself, then run --login again.")
         self.close()
 
-    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
+    def _unfinished_mark(self) -> Path:
+        """Present while a Discover is under way and after one that did not
+        read the whole purchase history, so Resume knows to read it first,
+        as Target's and Kroger's do. Only a walk to the history's end that
+        was not narrowed to part of it takes it away."""
+        return self.paths.discovery_json.with_name(".discovery-unfinished")
+
+    @staticmethod
+    def _history_facts(hist: dict) -> dict:
+        """How far the history query got, for a failure file. Counts, and the
+        word for why it stopped."""
+        return {"years": hist.get("years", 0), "answered": hist.get("answered", 0),
+                "last": bool(hist.get("last")), "stop": hist.get("stop") or "",
+                "status": hist.get("status", 0)}
+
+    def _walk_years(self, page, query) -> dict:
+        """The history, asked of the page's own query for each year back from
+        this one, ten at a time, until three years in a row hold nothing or
+        the oldest year asked for has been read. Returns {"entries", "years",
+        "answered", "last", "stop", "status", "year"}.
+
+        "last" is what shows the history was read to its end. "answered"
+        counts the years that gave at least one page, so 0 is a history that
+        did not come and never an empty one. "stop" is the word for why the
+        walk ended short of its end (site.fetch_year), "status" the HTTP
+        status of that answer, 0 when none came, and "year" the year it
+        stopped at.
+
+        Past the oldest year Best Buy keeps, the query answers with GraphQL
+        errors in place of the year's first page rather than with an empty
+        list, RECORDED on the account this was built on, where an empty year
+        came just before. That is the end of the history wherever it comes,
+        after a year with purchases too, since an account's oldest year can
+        hold purchases, and a stop there would end every run on it. This
+        year is never past it, so errors there are a fault. A refusal, a
+        request with no answer and an answer without the history are faults
+        wherever they come, after an empty year too, since a January with
+        nothing bought yet would otherwise end a history refused at last
+        year. A year refused right after a year with purchases, and a request
+        with no answer at all, used to end the walk as though the history
+        were over, and the run finished clean with the older purchases
+        missed."""
+        from datetime import date as _date
+        floor = self.args.start_date or self.config.get("default_start_date")
+        this_year = _date.today().year
+        if self.args.year:
+            years = [int(self.args.year)]
+        else:
+            last = int(floor[:4]) if floor else 2000
+            years = list(range(this_year, last - 1, -1))
+        hist = {"entries": [], "years": 0, "answered": 0, "last": False,
+                "stop": "", "status": 0, "year": 0}
+        if not years:
+            hist["last"] = True
+            return hist
+        if not query:
+            hist["stop"] = "no query"
+            return hist
+        empty_run, seen = 0, set()
+        for year in years:
+            got = site.fetch_year(page, query, year)
+            hist["years"] += 1
+            fresh = [e for e in got["entries"] if str(e.get("id")) not in seen]
+            for e in fresh:
+                seen.add(str(e.get("id")))
+            hist["entries"] += fresh
+            if got.get("pages"):
+                hist["answered"] += 1
+            log.info("Purchase history %d: %d purchase(s)%s", year, len(fresh),
+                     "" if got["complete"] else ", answer %s, not complete" % got["status"])
+            stop = got.get("stop") or ""
+            if stop == "graphql errors" and not got.get("pages") and year != this_year:
+                log.info("%d answered errors in place of its first page, the history ends here", year)
+                break
+            if stop:
+                hist.update(stop=stop, status=got.get("code") or 0, year=year)
+                return hist
+            empty_run = 0 if fresh else empty_run + 1
+            if empty_run >= 3 and not self.args.year:
+                log.info("three years in a row with nothing, the history ends here")
+                break
+            # A polite pause between years. Asked for quickly, Best Buy's bot
+            # protection starts resetting every request, the page's own too.
+            self._delay()
+        hist["last"] = True
+        return hist
+
+    def _read_history(self, page, need_it: bool = True) -> dict:
+        """The purchase history, as _walk_years gives it.
+
+        The page drawing is not the query answering. Best Buy's bot
+        protection stops answering a session that asks too quickly, and it
+        can refuse a request from a page that drew. Discovery read a history
+        that gave no year as one with nothing new in it and finished clean,
+        so Pilot and Run All went on as though there were nothing to
+        download. Now the run stops here the way it stops on a history that
+        never drew, claiming nothing, and at a console it asks and then reads
+        the history again. Resume and Diagnose, which do not need it
+        (need_it=False), say so and go on with the purchases already found
+        when the query gives no year. A history page that never draws stops
+        them in _open_orders, as it stops every run."""
+        from datetime import date as _date
+        while True:
+            self._open_orders(page)
+            choices = site.year_choices(page)
+            query = site.capture_history_query(page, choices[0] if choices else str(_date.today().year))
+            hist = self._walk_years(page, query)
+            if hist["answered"] or hist["last"]:
+                return hist
+            self.progress.save(backup=True)
+            print("\n!! Your purchase history did not come when this asked Best Buy for it")
+            print(f"({site.why_it_stopped(hist)}), so this cannot say which purchases are new.")
+            if hist["stop"] == "no answer":
+                print("Best Buy's bot protection does this after too many requests in a short")
+                print("time. Nothing is lost. Leave it for an hour before asking again.")
+            else:
+                print("Look at the browser window. If Best Buy is asking you to prove you are")
+                print("human, or asking you to sign in, answer it there yourself. I will NOT")
+                print("attempt to bypass it.")
+            self.write_failure("read the purchase history", "the history query gave no year",
+                               postmortem=self._history_facts(hist))
+            if not need_it:
+                print("This goes on with the purchases already found.")
+                return hist
+            if browser_launcher.ask_or_none(
+                    "Press Enter to ask Best Buy for your purchases again (or Ctrl+C to quit)... ") is None:
+                print("Run this again in a while.")
+                raise SystemExit(0)
+
+    def _stop_if_cut_short(self) -> None:
+        """A run that did not read the whole purchase history did not finish,
+        and must not read as a clean one. Once it has used what came, it
+        leaves on SystemExit the way a run leaves on a sign-out, which the
+        panel reports as stopped after Pilot, Run All and Resume."""
+        if self._history_cut_short:
+            print("\nNot all of your purchase history came, so this run stops here rather")
+            print("than finish. Run it again later to read the rest.")
+            raise SystemExit(0)
+
+    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False,
+                     finish: bool = True, need_history: bool = True) -> dict:
         """Discovery pass: the history through the page's own query, a year
         at a time.
 
@@ -374,57 +517,25 @@ class App:
         menu, the query the page makes is kept, and that query is asked again
         from inside the page for each year back from this one, ten at a time,
         until three years in a row hold nothing. Choosing the year is a
-        filter, and nothing else is pressed."""
-        from datetime import date as _date
+        filter, and nothing else is pressed.
+
+        When the query stops short of the history's end after giving some
+        years (_walk_years), the purchases in them are real and are kept, and
+        Pilot, Run All and Resume go on with them, but older ones are
+        missing, so the run stops at its end rather than finish. With
+        finish=False the caller does that once it has used them.
+        need_history=False is Resume's and Diagnose's, which go on with the
+        purchases already found even when no year comes."""
+        try:
+            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
+        except OSError:
+            pass
         page = self.page()
         n_new = {ONLINE: 0, IN_STORE: 0}
         floor = self.args.start_date or self.config.get("default_start_date")
 
-        self._open_orders(page)
-        choices = site.year_choices(page)
-        query = site.capture_history_query(page, choices[0] if choices else str(_date.today().year))
-        if not query:
-            log.warning("The purchase history made no history query. If you are "
-                        "signed in and do have purchases, run --diagnose.")
-            self.write_failure("read the purchase history", "the page made no history query")
-        this_year = _date.today().year
-        if self.args.year:
-            years = [int(self.args.year)]
-        else:
-            last = int(floor[:4]) if floor else 2000
-            years = list(range(this_year, last - 1, -1))
-        entries, empty_run, seen = [], 0, set()
-        for year in (years if query else []):
-            got = site.fetch_year(page, query, year)
-            fresh = [e for e in got["entries"] if str(e.get("id")) not in seen]
-            for e in fresh:
-                seen.add(str(e.get("id")))
-            entries += fresh
-            log.info("Purchase history %d: %d purchase(s)%s", year, len(fresh),
-                     "" if got["complete"] else ", answer %s, not complete" % got["status"])
-            if str(got["status"]).startswith("fetch failed"):
-                self.progress.save(backup=True)
-                print()
-                print("!! Best Buy stopped answering the history requests. Its bot")
-                print("   protection does this after too many in a short time. Nothing")
-                print("   is lost. Leave it for an hour, then run Discover again.")
-                self.write_failure("read the purchase history", "the history requests stopped being answered")
-                break
-            if got["status"] != 200:
-                # Past the oldest year Best Buy keeps, the query answers with
-                # an error rather than an empty list. After an empty year
-                # that is the end of the history, not a fault.
-                if empty_run == 0:
-                    self.write_failure("read the purchase history",
-                                       "the history query for %d answered %s" % (year, got["status"]))
-                break
-            empty_run = 0 if fresh else empty_run + 1
-            if empty_run >= 3 and not self.args.year:
-                log.info("three years in a row with nothing, the history ends here")
-                break
-            # A polite pause between years. Asked for quickly, Best Buy's bot
-            # protection starts resetting every request, the page's own too.
-            self._delay()
+        hist = self._read_history(page, need_it=need_history)
+        entries = hist["entries"]
         references = sum(1 for e in entries if site.is_reference(e))
         if references:
             log.info("%d older order(s) Best Buy keeps only as a reference, with no "
@@ -454,6 +565,34 @@ class App:
                 }, save=False)
         self.discovery.save()
 
+        if hist["last"]:
+            # A run for one year, or from a start date, reads only that part
+            # of the history, so the mark a run cut short left stays for
+            # Resume.
+            if not (self.args.year or self.args.start_date):
+                try:
+                    self._unfinished_mark().unlink()
+                except OSError:
+                    pass
+        elif hist["answered"]:
+            self._history_cut_short = True
+            year = hist.get("year")
+            print(f"\n!! Best Buy stopped giving your purchase history at {year} "
+                  f"({site.why_it_stopped(hist)}),")
+            print(f"so purchases from {year} and before may be missing. What came is kept,")
+            print("and this run stops at its end rather than finish.")
+            if hist.get("stop") == "no answer":
+                print("Its bot protection does this after too many requests in a short time.")
+                print("Leave it for an hour, then run it again.")
+            else:
+                print("Run it again later to read the rest.")
+            self.write_failure("read the purchase history", "the history query stopped partway",
+                               postmortem=self._history_facts(hist))
+        else:
+            # Resume or Diagnose, going on with the purchases found before
+            # (_read_history).
+            self._history_cut_short = True
+
         all_recs = list(self.discovery.data.values())
         self.stats["online_discovered"] = sum(
             1 for r in all_recs if r.get("purchase_type") == ONLINE)
@@ -461,7 +600,9 @@ class App:
             1 for r in all_recs if r.get("purchase_type") == IN_STORE)
 
         if not quiet:
-            print(f"\nDiscovery complete. Purchases known: {len(all_recs)} "
+            said = ("Discovery read part of your purchase history." if self._history_cut_short
+                    else "Discovery complete.")
+            print(f"\n{said} Purchases known: {len(all_recs)} "
                   f"({self.stats['online_discovered']} online, "
                   f"{self.stats['instore_discovered']} in store)")
             if dropped_by_scope:
@@ -475,6 +616,8 @@ class App:
             dates = sorted(r.get("purchase_date") for r in all_recs if r.get("purchase_date"))
             if dates:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
+        if finish:
+            self._stop_if_cut_short()
         return n_new
 
     # -- selection ----------------------------------------------------------
@@ -863,7 +1006,7 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.")
-        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False)
+        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False, finish=False)
         # Some of each kind, since a store receipt and an online order are
         # two different pages and a pilot of one proves nothing about the
         # other.
@@ -872,10 +1015,12 @@ class App:
             + self._select_purchases(ONLINE, limit=self.config.get("pilot_online", 3)))
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
+            self._stop_if_cut_short()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
         self._pilot_report(selected)
+        self._stop_if_cut_short()
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -922,15 +1067,25 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover(types=types, quiet=False)
+        self.cmd_discover(types=types, quiet=False, finish=False)
         selected: List[Purchase] = []
         for t in types:
             selected += self._select_purchases(t)
         print(f"\nProcessing {len(selected)} purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume works from the purchases a Discover found. After one that
+        # stopped before the history came, or when only part of it came,
+        # that is none or some of them, and Resume finished clean on those
+        # with the rest never looked for. So the history is read first, and
+        # when it does not come this time either, Resume still goes on with
+        # the purchases it has and stops at its end.
+        if self._unfinished_mark().exists():
+            print("The last Discover did not read your whole purchase history, so it runs again first.")
+            self.cmd_discover(quiet=True, finish=False, need_history=False)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]
         pend = [p for p in pend if not self._already_done(p)]
@@ -939,9 +1094,11 @@ class App:
             pend = pend[:self.args.max_purchases]
         if not pend:
             print("Nothing to resume - all discovered purchases are complete.")
+            self._stop_if_cut_short()
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
 
     def cmd_rename(self):
@@ -1150,7 +1307,9 @@ class App:
         import json as _json
         page = self.page()
         if not self.discovery.data:
-            self.cmd_discover(quiet=True)
+            # A survey goes on whatever the history does, since a history
+            # that does not come is what one is for.
+            self.cmd_discover(quiet=True, finish=False, need_history=False)
         # The history first, every year of it, since a purchase missing
         # from the list is invisible from any one receipt.
         try:

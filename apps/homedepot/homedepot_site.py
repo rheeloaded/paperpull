@@ -268,28 +268,72 @@ async ([url, body]) => {
 
 def fetch_orders(page, request: dict, page_size: int = 20, max_pages: int = 50) -> dict:
     """Every order the history request reaches, a page at a time, with the
-    page's own date range. Returns {"orders": [...], "count": n, "status": s}."""
+    page's own date range. Returns {"orders": [...], "count": n, "status": s,
+    "pages": n, "last": bool, "stop": word}.
+
+    "last" is what shows the history was read whole, set when a page comes
+    back short or the count Home Depot gave is reached. "pages" counts the
+    pages that answered with the history, so 0 is a history that did not
+    come and never an empty one, which comes as one page with nothing on
+    it. "stop" says why it ended short of its last page, "refused" for an
+    HTTP error ("status" says which), "no answer" when the call itself
+    failed and "no list" for an answer that was not JSON, or that carried
+    errors and no order history, and is empty when it did not."""
     if not request or not history_request_ok(request.get("url") or ""):
-        return {"orders": [], "count": 0, "status": "no history request"}
+        return {"orders": [], "count": 0, "status": "no history request", "pages": 0,
+                "last": False, "stop": "no request"}
     base = dict(request["body"]["orderHistoryRequest"])
-    orders, count, status = [], None, ""
+    orders, count, status, pages, last, stop = [], None, "", 0, False, ""
     for n in range(1, max_pages + 1):
         body = {"orderHistoryRequest": dict(base, pageSize=page_size, pageNumber=n)}
         try:
             got = page.evaluate(_FETCH_HISTORY_JS, [request["url"], body]) or {}
         except Exception as e:
-            status = "fetch failed: %s" % type(e).__name__
+            status, stop = "fetch failed: %s" % type(e).__name__, "no answer"
             break
         status = got.get("status")
-        data = got.get("data") if isinstance(got.get("data"), dict) else {}
         # Only an answer that says it succeeded is believed.
-        batch = [o for o in (data.get("orders") or []) if isinstance(o, dict)] if status == 200 else []
+        if status != 200:
+            stop = "refused"
+            break
+        data = got.get("data")
+        if not isinstance(data, dict) or ("orders" not in data and "orderCount" not in data
+                                          and data.get("errors")):
+            # A page where the answer should be, or an answer carrying errors
+            # and no order history. Read as an empty page, either ended the
+            # history as though there were nothing more in it. An answer
+            # without the history and without errors is still read as an
+            # empty page, since what an account with no orders is answered
+            # was never seen.
+            stop = "no list"
+            break
+        pages += 1
+        batch = [o for o in (data.get("orders") or []) if isinstance(o, dict)]
         if count is None and isinstance(data.get("orderCount"), int):
             count = data["orderCount"]
         orders += batch
-        if status != 200 or len(batch) < page_size or (count is not None and len(orders) >= count):
+        if len(batch) < page_size or (count is not None and len(orders) >= count):
+            last = True
             break
-    return {"orders": orders, "count": count if count is not None else len(orders), "status": status}
+    else:
+        # Every page as long as it can be, as many as are read. Taken as the
+        # end, as it always was.
+        last = True
+    return {"orders": orders, "count": count if count is not None else len(orders),
+            "status": status, "pages": pages, "last": last, "stop": stop}
+
+
+def why_it_stopped(hist: dict) -> str:
+    """Why the history request ended short of its last page, in words for a
+    message. Its status, never anything from its body."""
+    stop = hist.get("stop")
+    if stop == "refused":
+        return "Home Depot answered HTTP %s" % hist.get("status")
+    if stop == "no list":
+        return "Home Depot's answer held no order list"
+    if stop == "no request":
+        return "the page's own request for its orders could not be asked again"
+    return "no answer came back from Home Depot"
 
 
 def details_url(number: str, sales_date: str, origin: str = "online") -> str:

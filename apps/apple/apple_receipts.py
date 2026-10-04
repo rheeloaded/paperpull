@@ -144,6 +144,11 @@ class App:
         self._left_open = set()
         # The stores that asked for a sign-in during this run.
         self._stopped_sides = set()
+        # The stores whose list did not come whole, the family list or the
+        # purchase search refused, not answered, or answered without the list.
+        # What came is used, and the run stops at its end (see
+        # _stop_if_unfinished).
+        self._cut_short_sides = set()
         self._survey = {}
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
@@ -326,13 +331,29 @@ class App:
         print("\n!! The Apple Store is showing a check in that window. Deal with it")
         print("   yourself, this tool will not, then run this again.")
 
-    def _stop_if_signed_out(self) -> None:
-        """A run where a store stopped for a sign-in did not finish, and it
-        must not read as a clean one. It leaves the way every app's run leaves
-        on a sign-out, which the panel reports as stopped."""
+    def _stop_if_unfinished(self) -> None:
+        """A run where a store stopped for a sign-in, or where a store's list
+        did not come whole, did not finish, and it must not read as a clean
+        one. It leaves the way every app's run leaves on a sign-out, which
+        the panel reports as stopped."""
+        if self._cut_short_sides:
+            said = " and ".join("your App Store purchases" if side == APP_STORE
+                                else "your Apple Store orders"
+                                for side in PURCHASE_TYPES if side in self._cut_short_sides)
+            print("\nNot all of %s came, so this run stops here rather than finish." % said)
+            print("Run it again later to read the rest.")
         if self._stopped_sides:
             print("\nSign in where it asked, then press Resume or run this again.")
+        if self._stopped_sides or self._cut_short_sides:
             raise SystemExit(0)
+
+    def _unfinished_mark(self) -> Path:
+        """Present while a Discover is under way and after one that did not
+        read both stores' lists to their end, so Resume knows to read them
+        first, as Target's and Kroger's do. A store that asked for a sign-in
+        or was cut short leaves it, and so does a run that read one store, or
+        one year or stretch of the purchases, since the rest was not read."""
+        return self.paths.discovery_json.with_name(".discovery-unfinished")
 
     # -- commands -----------------------------------------------------------
 
@@ -423,14 +444,31 @@ class App:
         inside the signed-in page, for the whole family, a batch at a time,
         and keeps the purchases where money was spent. The Apple Store side
         reads the order list's embedded data and then each order's details
-        page, one at a time. Nothing is clicked on either."""
+        page, one at a time. Nothing is clicked on either.
+
+        A store whose list did not come whole keeps what came, and Pilot, Run
+        All and Resume go on with it and with the other store, but the rest
+        is missing, so the run stops at its end rather than finish, as it
+        does when a store asks for a sign-in. With finish=False the caller
+        does that once it has used them."""
         types = list(types or PURCHASE_TYPES)
+        try:
+            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
+        except OSError:
+            pass
         n_new = {APP_STORE: 0, APPLE_STORE: 0}
         if APP_STORE in types:
             n_new[APP_STORE] = self._discover_app_store()
         if APPLE_STORE in types:
             n_new[APPLE_STORE] = self._discover_apple_store()
         self.discovery.save()
+        unfinished = bool(self._stopped_sides or self._cut_short_sides)
+        narrowed = bool(getattr(self.args, "year", None) or self.args.start_date)
+        if not unfinished and not narrowed and set(PURCHASE_TYPES) <= set(types):
+            try:
+                self._unfinished_mark().unlink()
+            except OSError:
+                pass
 
         all_recs = [r for r in self.discovery.data.values() if isinstance(r, dict)]
         self.stats["app_store_discovered"] = sum(
@@ -439,7 +477,9 @@ class App:
             1 for r in all_recs if r.get("purchase_type") == APPLE_STORE)
 
         if not quiet:
-            print(f"\nDiscovery complete. Purchases known {len(all_recs)} "
+            said = ("Discovery did not read all of your purchases and orders." if unfinished
+                    else "Discovery complete.")
+            print(f"\n{said} Purchases known {len(all_recs)} "
                   f"({self.stats['app_store_discovered']} App Store, "
                   f"{self.stats['apple_store_discovered']} Apple Store)")
             by_year = {}
@@ -452,7 +492,7 @@ class App:
             if dates:
                 print(f"  Date range {dates[0]} to {dates[-1]}")
         if finish:
-            self._stop_if_signed_out()
+            self._stop_if_unfinished()
         return n_new
 
     def _discover_app_store(self) -> int:
@@ -474,14 +514,21 @@ class App:
             # the search is tried, and a refusal says to sign in again.
             log.warning("Report a Problem answered without the page's session token")
         if family["kind"] != site.ANSWERED:
-            print("\n!! Report a Problem did not answer with the family list (%s)."
-                  % (family["status"] or "no answer"))
+            # No purchase of this store can be searched for, which is not a
+            # store with nothing in it.
+            self._cut_short_sides.add(APP_STORE)
+            how = ("an answer without the list" if family["kind"] == site.NO_LIST
+                   else family["status"] or "no answer")
+            print("\n!! Report a Problem did not answer with the family list (%s)." % how)
+            print("   This run stops at its end rather than finish. Run it again later.")
             self.write_failure("read the family list", "the family list was not answered")
             return 0
         members = family["members"]
         if not members:
             # The search refuses a call that names nobody, and neither the
             # family list nor the page's own account said who is signed in.
+            # Both answered, so asking again gets the same, and the run is
+            # not stopped for it.
             print("\n!! Report a Problem named no family member and no account, and its")
             print("   purchase search needs one. Run Diagnose and send the survey.")
             self.write_failure("read the family list", "neither the family nor the account named anyone")
@@ -527,10 +574,24 @@ class App:
             print(f"  {dropped} fell outside the scope you set.")
         if walk["stop"] == site.SIGNED_OUT:
             self._signed_out(APP_STORE, page)
-        elif walk["stop"] in (site.REFUSED, site.FAILED):
-            print("\n!! Report a Problem stopped answering the purchase search partway")
-            print("   (%s). What was read is kept. Run it again later." % (walk["status"] or "no answer"))
-            self.write_failure("search the purchases", "a search was not answered")
+        elif walk["stop"] in (site.REFUSED, site.FAILED, site.NO_LIST):
+            # Read as a search with nothing more in it, this let the run
+            # finish clean with the older purchases missed. What came is
+            # used, and the run stops at its end.
+            self._cut_short_sides.add(APP_STORE)
+            how = ("an answer without the purchases" if walk["stop"] == site.NO_LIST
+                   else walk["status"] or "no answer")
+            if walk["batches"] > 1:
+                print("\n!! Report a Problem stopped answering the purchase search partway")
+                print("   (%s). What was read is kept and used, and this run stops at its" % how)
+                print("   end rather than finish. Run it again later to read the rest.")
+            else:
+                print("\n!! Report a Problem did not answer when this asked for your purchases")
+                print("   (%s). This run stops at its end rather than finish. Run it again" % how)
+                print("   later.")
+            self.write_failure("search the purchases", "a search was not answered",
+                               postmortem={"side": "app store", "batches": walk["batches"],
+                                           "stop": walk["stop"], "status": walk["status"]})
         elif walk["stop"] == site.BATCH_CAP:
             print("  The search was stopped after %d batches. Set default_start_date or"
                   % walk["batches"])
@@ -550,6 +611,10 @@ class App:
             self._challenged(tab)
             return 0
         if state != site.READY:
+            # What the list of an account with no Apple Store orders carries
+            # was never seen, so a list without its data is not taken for a
+            # list that did not come, which would stop every run of such an
+            # account.
             print("\n!! The Apple Store order list did not carry its orders.")
             self.write_failure("read the store orders", "the order list carried no data")
             return 0
@@ -593,6 +658,8 @@ class App:
         if dropped:
             print(f"  {dropped} fell outside the scope you set.")
         if unread:
+            # One order's own page, which may come the same way every time,
+            # so the run is not stopped for it.
             print(f"  {unread} details page(s) did not carry the order. They are read again next run.")
             self.write_failure("read an order details page", "a details page carried no order")
         return n_new
@@ -1326,12 +1393,12 @@ class App:
             + self._select_purchases(APPLE_STORE, limit=self.config.get("pilot_apple_store", 2)))
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
-            self._stop_if_signed_out()
+            self._stop_if_unfinished()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
         self._pilot_report(selected)
-        self._stop_if_signed_out()
+        self._stop_if_unfinished()
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -1387,10 +1454,20 @@ class App:
             selected += self._select_purchases(t)
         print(f"\nProcessing {len(selected)} purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
-        self._stop_if_signed_out()
+        self._stop_if_unfinished()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume works from the purchases a Discover found. After one where a
+        # store asked for a sign-in or its list did not come whole, that is
+        # some of them, and Resume finished clean on those with the rest
+        # never looked for. So both lists are read first, and a store that
+        # does not come this time either still leaves the purchases already
+        # found to download, and the run stops at its end.
+        if self._unfinished_mark().exists():
+            print("The last Discover did not read both of your lists to their end, "
+                  "so it runs again first.")
+            self.cmd_discover(quiet=True, finish=False)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]
         pend = [p for p in pend if not self._already_done(p)]
@@ -1399,10 +1476,11 @@ class App:
             pend = pend[:self.args.max_purchases]
         if not pend:
             print("Nothing to resume, all discovered purchases are complete.")
+            self._stop_if_unfinished()
             return
         print(f"Resuming {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
-        self._stop_if_signed_out()
+        self._stop_if_unfinished()
 
     def cmd_rename(self):
         """Rename what is already downloaded, without downloading it again.
