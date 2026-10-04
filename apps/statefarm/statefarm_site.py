@@ -2,10 +2,11 @@
 
 When State Farm changes its site, repair this file only.
 
-STATUS: UNVERIFIED, round three, repaired from two surveys (#37). Written
-without a State Farm account, so that someone who holds one can
-test it without writing code. Nothing below has run against the live
-signed-in site. On a first run it is deliberately cautious:
+STATUS: CONFIRMED on the tester's account (#37). Written without a State
+Farm account and repaired from surveys, failure files and a recording one
+tester sent. Discovery reads State Farm's own list of documents, and on his
+account a full run saved every document that list holds for his policies.
+On a first run it is deliberately cautious.
 
   * --login opens a real Edge or Chrome, since statefarm.com's sign-in is happiest in a real browser.
   * --diagnose surveys whatever the documents page turns out to be,

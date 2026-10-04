@@ -1,4 +1,4 @@
-"""State Farm statement and tax document downloader (local, supervised). UNVERIFIED, see statefarm_site.py.
+"""State Farm statement and tax document downloader (local, supervised). CONFIRMED on a tester's account, see statefarm_site.py.
 
 This app was written without a State Farm account so that someone who holds one
 can test it without writing code. The orchestrator below is the same one

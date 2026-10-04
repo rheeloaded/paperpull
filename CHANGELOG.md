@@ -34,6 +34,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   `%APPDATA%\PaperPull\settings.json`, and the panel moves an old one
   across. The README says so now, and names the Linux location too.
 
+### Changed
+- **State Farm is confirmed on the tester's account (#37).** His full run
+  saved every document State Farm lists for his policies, the payment
+  receipt earlier rounds refused among them, so it moves from untested to
+  confirmed.
+
 ## [0.42.0] - 2026-10-03
 
 Repairs from testers' reports and from checks run across every app.

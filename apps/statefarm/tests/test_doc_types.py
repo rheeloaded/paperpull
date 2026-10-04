@@ -95,11 +95,15 @@ def test_only_the_providers_own_hosts():
     assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
 
 
-def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
+def test_the_confirmed_status_is_stated_where_a_tester_will_read_it():
+    """His full run saved every document State Farm lists for his
+    policies (#37)."""
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "UNVERIFIED" in src.split('"""')[1]
+    assert "STATUS: CONFIRMED on the tester's account" in src.split('"""')[1]
+    assert "UNVERIFIED" not in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "Not yet tested against a real account" in readme
+    assert readme.split("\n\n")[1].startswith("**Working on the tester's account.**")
+    assert "Not yet tested" not in readme
 
 
 # -- round two, from the first survey --------------------------------------

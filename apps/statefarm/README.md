@@ -1,12 +1,12 @@
 # State Farm document downloader
 
-**Not yet tested against a real account as far as a saved PDF.** This app
-was built without a State Farm auto, home or life policy, so that someone
-who holds one can test it without writing code. A tester's surveys, a
-recording and several Pilots on a real account have since shown where the
-documents are and how a row opens, marked RECORDED in `statefarm_site.py`,
-and what is still a guess is marked GUESS. Discovery reads State Farm's own
-list of documents, and no run has saved a PDF yet. The conversation is
+**Working on the tester's account.** This app was built without a State
+Farm auto, home or life policy and repaired over several rounds from the
+surveys, failure files and a recording one tester sent. Discovery reads
+State Farm's own list of documents, and on his account a full run saved
+every document that list holds for his policies. What the page showed is
+marked RECORDED in `statefarm_site.py`, and what is still a guess is marked
+GUESS. The conversation is
 [issue #37](https://github.com/rheeloaded/paperpull/issues/37).
 
 Downloads your State Farm **bills, renewal notices, ID cards and payment receipts** as PDFs. Read-only,
