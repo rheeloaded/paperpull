@@ -33,6 +33,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   versions before 0.19.1 kept it. The file lives in Roaming AppData,
   `%APPDATA%\PaperPull\settings.json`, and the panel moves an old one
   across. The README says so now, and names the Linux location too.
+- **AT&T no longer chooses a date range past a dropdown it could not
+  read.** A bill the history does not show is looked for through the
+  history's date range, and the bill buttons carry no year, so the year a
+  chosen span names dates every bill on the list. A dropdown whose name or
+  options could not be read was passed over as though it were not there,
+  so when it was the list's own filter, the span went to the next control
+  of years the list does not follow, a second dropdown, a Date range menu
+  or a legend beside the filter. The list was then dated to the year asked
+  for, and its bill of the same month was saved under the older bill's
+  date. Now no span is chosen when a dropdown could not be read, and the
+  bill is marked for review and tried again on the next run. att.com's own
+  date range is a calendar, which is never filled in, so no run is known
+  to have met this.
 
 ### Changed
 - **State Farm is confirmed on the tester's account (#37).** His full run

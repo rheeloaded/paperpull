@@ -1470,9 +1470,24 @@ def _opener_state(el) -> dict:
         return {}
 
 
+# A dropdown's option words, read in one go.
+_OPTIONS_JS = "s => Array.from(s.options).map(o => o.text)"
+
+
 def _try_range_selects(page, iso_date: str, today, note: dict):
     """Choose the span in a plain select, through the shared filter.
-    (True, year) when one was set, None otherwise."""
+    (True, year) when one was set, False when a dropdown could not be
+    read, None otherwise.
+
+    The year a span names dates every bill button, so the span has to be
+    set where the list follows it. A dropdown whose name or options could
+    not be read may be the list's own filter. Then a dropdown of spans
+    after it may be one the list does not follow, and finding none after
+    it does not mean the page has none, so no span is chosen at all, in a
+    dropdown or in anything a Date range opener shows. Set anywhere else,
+    the year would date the list as it stands, and its bill of the same
+    month would be pressed and saved for an older one."""
+    missed = []
     try:
         # Through the shared filter, which refuses every dropdown on a page
         # that is not signed in and any whose surroundings name a payment
@@ -1480,12 +1495,17 @@ def _try_range_selects(page, iso_date: str, today, note: dict):
         # is not reason enough to set it on a page nobody has confirmed.
         for sel, _identity in _safe_selects(page, FORBIDDEN_CONTROL_RE,
                                             signed_out=looks_signed_out,
-                                            limit=6):
-            labels = [re.sub(r"\s+", " ", t).strip() for t in
-                      (sel.evaluate("s => Array.from(s.options).map(o => o.text)")
-                       or [])]
+                                            limit=6, unread=missed):
+            try:
+                labels = [re.sub(r"\s+", " ", t).strip() for t in
+                          (sel.evaluate(_OPTIONS_JS) or [])]
+            except Exception:
+                missed.append(sel)
+                continue
             if not any(RANGE_OPTION_RE.match(t) for t in labels):
                 continue
+            if missed:
+                break
             label, year = _range_choice(labels, iso_date, today)
             note.update(kind="select", options=[redact(t)[:40] for t in labels][:12],
                         chose=redact(label or "")[:40])
@@ -1495,6 +1515,10 @@ def _try_range_selects(page, iso_date: str, today, note: dict):
                 return True, year
     except Exception as e:
         log.info("date range select: %s", e)
+    if missed:
+        note["kind"] = "a dropdown could not be read"
+        log.info("no date range chosen for %s, a dropdown could not be read", iso_date)
+        return False
     return None
 
 
@@ -1502,9 +1526,9 @@ def widen_range(page, iso_date: str, trace: Optional[list] = None,
                 today=None):
     """Open the history's date filter and choose a span that reaches
     `iso_date`. Returns (chose, anchor_year). chose is False when there
-    was no filter or no option covering it, and the trace says which,
-    with the options it saw, so a wrong guess costs one report and not
-    a round of guessing."""
+    was no filter, no option covering it, or a dropdown that could not be
+    read, and the trace says which, with the options it saw, so a wrong
+    guess costs one report and not a round of guessing."""
     note = {"note": "date range", "wanted": iso_date}
 
     def done(result):
@@ -1514,6 +1538,8 @@ def widen_range(page, iso_date: str, trace: Optional[list] = None,
 
     # A plain select first, since choosing in one clicks nothing.
     got = _try_range_selects(page, iso_date, today, note)
+    if got is False:
+        return done((False, None))
     if got:
         return done(got)
 
@@ -1566,6 +1592,12 @@ def widen_range(page, iso_date: str, trace: Optional[list] = None,
     if not options:
         # A select that only exists once the opener is pressed.
         got = _try_range_selects(page, iso_date, today, note)
+        if got is False:
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+            return done((False, None))
         if got:
             note["kind"] = "select after opener"
             return done(got)
