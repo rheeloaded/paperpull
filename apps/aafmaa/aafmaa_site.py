@@ -81,7 +81,6 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
-from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import is_document as _is_document
 
 log = logging.getLogger("aafmaa_docs.site")
@@ -857,10 +856,11 @@ def _fresh_view_target(page, title: str, date_text: str, account: str) -> str:
 
 # How long a press has to have been quiet, after an answer that called itself
 # a PDF and held none, before that answer's address is asked for once more.
-# The PDF the same press hands over another way came within 0.3 seconds in
-# every measured run, so this is ample, and asking too soon costs one more
-# request and nothing else.
-ASK_AGAIN_AFTER = 2.0
+# The PDF the same press handed over another way came 0.1 to 1.9 seconds
+# after such an answer in every press measured, so asking sooner would mostly
+# ask for nothing new, and asking too soon costs one more request and
+# nothing else.
+ASK_AGAIN_AFTER = 5.0
 
 
 def _answer_body(answer) -> bytes:
@@ -893,6 +893,25 @@ def _may_ask_again(answer) -> bool:
         return False
 
 
+def _ask_again(page, url: str) -> bytes:
+    """The PDF at an address on Armed Forces Mutual's own host, asked for
+    once more with the browser's cookies, or nothing.
+
+    No redirect is followed. Playwright's own client follows twenty by
+    default and checks nothing on the way, so a redirect would carry the
+    browser's cookies for wherever it led and could bring back that host's
+    PDF (a review probe did both). An answer that is not a PDF is nothing."""
+    if not is_safe_url(url):
+        return b""
+    try:
+        resp = page.context.request.get(url, max_redirects=0, timeout=20000)
+        body = resp.body() if resp.ok else b""
+    except Exception as e:
+        log.info("asking again failed: %s", str(e).splitlines()[0][:90])
+        return b""
+    return body if body.startswith(b"%PDF") else b""
+
+
 def download_document_row(page, title: str, date_text: str, account: str,
                           out_path) -> bool:
     """Click the row's View control and capture the PDF it produces.
@@ -911,11 +930,11 @@ def download_document_row(page, title: str, date_text: str, account: str,
     answer came back empty, which hid this, and 1.63 no longer does for a
     document, fetch or XHR answer. A PDF shown in a tab or a window answers
     with the browser's own viewer page, 536 bytes of HTML, and the viewer's
-    own answer brings the PDF a tenth of a second later. So an answer that
+    own answer brings the PDF 0.1 to 1.9 seconds later. So an answer that
     holds no PDF is set aside and the press is listened to until its time
     is up. Once the press has gone quiet, an answer to a GET on this site's
-    own host is asked for one more time with the session's cookies, and
-    those bytes are measured like any others.
+    own host is asked for one more time with the session's cookies,
+    following no redirect, and those bytes are measured like any others.
     """
     _clear_leftover_dialog(page)
     target = _fresh_view_target(page, title, date_text, account)
@@ -1023,9 +1042,7 @@ def download_document_row(page, title: str, date_text: str, account: str,
                 url = again.pop(0)
                 asked.add(url)
                 deadline -= 0.5
-                # The core asks only for an address is_safe_url passes, with
-                # the signed-in browser's cookies, and hands back only a PDF.
-                data = _core_fetch_pdf(page, url, is_safe_url) or b""
+                data = _ask_again(page, url)
                 if data.startswith(b"%PDF"):
                     out = Path(out_path)
                     out.parent.mkdir(parents=True, exist_ok=True)

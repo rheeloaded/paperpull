@@ -32,6 +32,7 @@ machine. Every title, policy, name and date is invented.
 """
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -56,10 +57,12 @@ STATEMENT = testkit.text_pdf(["Armed Forces Mutual", "Premium Statement", "6/15/
 # The documents page, one row. How its View press hands the document over is
 # named in the page's address, press=<way>.
 #   download   reads it into a blob, waits until the app has read its
-#              answer, then hands it over as a download (CI's order)
+#              answer, then hands it over as a download (CI's order) and
+#              says so at /handed
 #   blob       reads it into a blob and hands nothing over
 #   elsewhere  reads it from another site into a blob, nothing more
 #   postback   posts the page back, and the answer is the PDF, shown in the tab
+#   flood      asks for it 400 times at once, each read into a blob
 PAGE = """<!doctype html><html><head><title>Documents</title></head><body>
 <main><h1>My Documents</h1>
 <form method="post" action=""><input type="hidden" name="__EVENTTARGET" value=""></form>
@@ -86,9 +89,13 @@ async function readIt() {
 document.querySelector('a.view').addEventListener('click', async (e) => {
   e.preventDefault();
   if (press === 'postback') { document.forms[0].submit(); return; }
+  if (press === 'flood') {
+    for (let i = 0; i < 400; i++) { fetch('/doc/0').then(r => r.blob()); }
+    return;
+  }
   const from = press === 'elsewhere' ? ELSEWHERE + '/doc/0' : '/doc/0';
   const blob = await (await fetch(from)).blob();
-  if (press === 'download') { await readIt(); handOver(blob); }
+  if (press === 'download') { await readIt(); handOver(blob); fetch('/handed'); }
 });
 </script></body></html>"""
 
@@ -103,10 +110,12 @@ class FakeSite:
         # client names none, so a None is a request from outside the page.
         self.seen = []
         # The page hands the document over only once this opens, which the
-        # app's read of its answer does (EmptyReads).
+        # app's read of its answer does (EmptyReads), and then says so.
         self.read = False
+        self.handed_over = False
         # What Armed Forces Mutual answers once the document has been handed
-        # over, "pdf" the same again, "gone" a 410, "page" a web page.
+        # over, "pdf" the same again, "gone" a 410, "page" a web page, and
+        # "redirect" a 302 to the same document on another host.
         self.after_first = "pdf"
         self.handed = 0
 
@@ -139,6 +148,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif SITE.handed and SITE.after_first == "page":
             self._send(b"<!doctype html><title>Signed out</title><p>Sign in again</p>",
                        "text/html; charset=utf-8")
+        elif SITE.handed and SITE.after_first == "redirect":
+            self._send(b"", "text/plain", status=302, extra=[(
+                "Location", "http://%s:%d/doc/0" % (ELSEWHERE_HOST, self.server.server_address[1]))])
         else:
             SITE.handed += 1
             self._send(STATEMENT, "application/pdf")
@@ -151,6 +163,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(page.encode("utf-8"), "text/html; charset=utf-8")
         elif host == AAFMAA_HOST and path == "/gate":
             self._send(b"open" if SITE.read else b"shut", "text/plain")
+        elif host == AAFMAA_HOST and path == "/handed":
+            SITE.handed_over = True
+            self._send(b"ok", "text/plain")
         elif host == AAFMAA_HOST and path == "/doc/0":
             self._document()
         elif host == ELSEWHERE_HOST and path == "/doc/0":
@@ -209,15 +224,22 @@ def fake_aafmaa(server, monkeypatch):
     return SITE
 
 
+class Enough(BaseException):
+    """Far more answers read than a press's window has looks. A
+    BaseException, so the capture's own handlers cannot swallow it."""
+
+
 class EmptyReads:
     """body() reads nothing for the answers `which` picks, as Chromium
     answered on CI, the first time each is read, or every time with
-    `every`. Reading one opens the gate the page waits on."""
+    `every`. Reading one opens the gate the page waits on. Past `cap`
+    reads the capture is stopped with Enough."""
 
     def __init__(self):
         self.which = lambda response: False
         self.every = False
         self.emptied = []
+        self.cap = 1000
 
     def read(self):
         """Whether the app has read one of those answers yet."""
@@ -233,6 +255,8 @@ def empty_reads(monkeypatch):
 
     def body(self):
         if rule.which(self) and (rule.every or not any(r is self for r in rule.emptied)):
+            if len(rule.emptied) >= rule.cap:
+                raise Enough("%d answers read" % len(rule.emptied))
             rule.emptied.append(self)
             SITE.read = True
             return b""
@@ -256,7 +280,9 @@ def press(attached, server, tmp_path):
     own length, so a slow browser cannot run the press out of time before
     that answer is heard, and after it each look is a tenth as long, so the
     press is given up in about three seconds. The capture counts its looks
-    rather than the clock, so what it does is the same either way."""
+    rather than the clock, so what it does is the same either way. While
+    `hold` says the page is in the middle of a step the test waits on, a
+    look does not pass at all, for thirty seconds at most."""
     from playwright.sync_api import sync_playwright
 
     driver = sync_playwright().start()
@@ -266,9 +292,14 @@ def press(attached, server, tmp_path):
         page = browser.contexts[0].new_page()
         own_wait = page.wait_for_timeout
 
-        def run(way, quick=None):
-            page.wait_for_timeout = lambda ms: own_wait(
-                max(1, ms // 10) if quick is not None and quick() else ms)
+        def run(way, quick=None, hold=None):
+            def look(ms):
+                give_up = time.monotonic() + 30
+                while hold is not None and hold() and time.monotonic() < give_up:
+                    own_wait(25)
+                own_wait(max(1, ms // 10) if quick is not None and quick() else ms)
+
+            page.wait_for_timeout = look
             page.goto("http://%s:%d%s?press=%s" % (AAFMAA_HOST, server, DOCUMENTS_PATH, way),
                       wait_until="domcontentloaded")
             SITE.seen.clear()
@@ -301,13 +332,17 @@ def test_an_answer_read_empty_then_the_download(press, empty_reads):
     the answer and reads nothing in it, and only then does the page hand
     the document over as a download. Asked for again, the document is gone,
     so the download is the only way it can come. The capture stopped at the
-    empty answer and the document went to manual review."""
+    empty answer and the document went to manual review. The press was
+    never quiet, so Armed Forces Mutual is not asked again, and no look of
+    the app's passes while the page is handing the document over."""
     empty_reads.which = is_the_document
     SITE.after_first = "gone"
-    saved, out = press("download")
+    saved, out = press("download", hold=lambda: empty_reads.read() and not SITE.handed_over)
     assert empty_reads.emptied, "the app read the answer before the download came"
     assert saved is True
     assert out.read_bytes() == STATEMENT
+    assert SITE.handed_over
+    assert not asked_from_outside(), "asked again before the press went quiet, %s" % SITE.seen
 
 
 def test_an_answer_read_empty_and_nothing_more_is_asked_for_again(press, empty_reads):
@@ -362,6 +397,34 @@ def test_a_postback_is_never_sent_again(press, empty_reads):
     assert not out.exists()
     assert [s[0] for s in SITE.seen if s[2] == DOCUMENTS_PATH] == ["POST"], SITE.seen
     assert not asked_from_outside(), SITE.seen
+
+
+def test_an_address_asked_again_follows_no_redirect(press, empty_reads):
+    """Asked for again, the document's address answers with a redirect to
+    the same document on another host. Playwright's own client would follow
+    it with the browser's cookies for that host. The redirect is not
+    followed, so nothing reaches the other host and nothing is filed."""
+    empty_reads.which = is_the_document
+    SITE.after_first = "redirect"
+    saved, out = press("blob", quick=empty_reads.read)
+    assert saved is False
+    assert not out.exists()
+    assert [(s[0], s[1], s[3]) for s in SITE.seen if s[2] == "/doc/0"] == [
+        ("GET", AAFMAA_HOST, "cors"), ("GET", AAFMAA_HOST, None)], SITE.seen
+
+
+def test_a_page_that_answers_without_end_is_given_up_in_its_time(press, empty_reads):
+    """The page asks for the document 400 times at once, and every answer
+    reads empty. Each answer read costs the press one of its sixty looks,
+    so the capture ends when its window does, having read no more answers
+    than the window has looks, and nothing is filed."""
+    empty_reads.which = is_the_document
+    empty_reads.every = True
+    empty_reads.cap = 150
+    saved, out = press("flood", quick=empty_reads.read)
+    assert saved is False
+    assert not out.exists()
+    assert len(empty_reads.emptied) <= 60, len(empty_reads.emptied)
 
 
 def test_what_an_address_asked_again_answers_is_measured(press, empty_reads):

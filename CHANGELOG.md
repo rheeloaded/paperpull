@@ -19,10 +19,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   quietly asked AAFMAA for it again, and a PDF the browser shows in a tab
   or a window answers first with the PDF viewer's own page. Now every such
   answer is read in turn while the press keeps its full thirty seconds,
-  the download included, and when nothing more comes, an answer AAFMAA
-  gave to an ordinary request on its own site is asked for once more. A
-  postback is never sent twice, nothing is asked of another site, only a
-  PDF is kept, and it still has to carry its row's policy number.
+  the download included, and when nothing more comes for five seconds, an
+  answer AAFMAA gave to an ordinary request on its own site is asked for
+  once more. That ask goes only to AAFMAA's own site and follows no
+  redirect, a postback is never sent twice, only a PDF is kept, and a
+  document whose row shows a policy number still has to carry it.
 
 ## [0.43.0] - 2026-10-05
 
