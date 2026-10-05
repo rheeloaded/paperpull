@@ -370,6 +370,12 @@ def one_suite(tmp_path, monkeypatch):
         # makes them. The group has its own test above. Left set, the tag of
         # 0.42.0 failed here and nowhere else.
         monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        # The Chromium build this interpreter's Playwright was made for, in
+        # a browsers folder of the test's own, so the run's check of it does
+        # not depend on what this machine has installed.
+        build = rat.asked(Path(sys.executable))["chromium"]
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH",
+                           str(_installed(tmp_path / "browsers", *([build] if build else []))))
         return suite
     return make
 
@@ -409,20 +415,26 @@ def test_a_failing_suite_in_a_run_prints_its_frames_and_keeps_its_output(one_sui
 
 # -- which Playwright each suite runs on ----------------------------------------
 #
-# CI and the packaged app install the newest Playwright. On the machine the
-# whole suite runs on before every push, the panel's environment held 1.63
-# and the app environments 1.62, and 60 of the 61 app suites ran on 1.62,
-# in their own environment or one they borrowed. 1.63 stopped asking an
-# address again when Chromium gave back an empty body for a document, a
-# fetch or an xhr, and on 2026-10-05 AAFMAA's capture failed on CI because
-# of it while it passed every time there. These build real environments
-# whose packages are nothing but a name and a version, so the runner asks
-# real interpreters what they hold. They leave the core off the path, as a
-# person's shell has it, so only the runner can put it where a suite finds it.
+# CI and the packaged app install the newest Playwright and the Chromium it
+# was made for. On the machine the whole suite runs on before every push,
+# the panel's environment held 1.63 and the app environments 1.62, and 60
+# of the 61 app suites ran on 1.62, in their own environment or one they
+# borrowed. 1.63 stopped asking an address again when Chromium gave back an
+# empty body for a document, a fetch or an xhr, and on 2026-10-05 AAFMAA's
+# capture failed on CI because of it while it passed there. These build
+# real environments whose packages are nothing but a name and a version, so
+# the runner asks real interpreters what they hold. They leave the core off
+# the path and work from a folder of their own, so only the runner can put
+# the core where a suite finds it.
+
+# The Chromium build each fake Playwright says it was made for.
+CHROMIUM_FOR = {"1.62.0": "1234", "1.63.0": "1243", "1.64.0": "1250"}
+
 
 def _environment(folder: Path, packages: dict) -> Path:
     """An environment at folder/.venv holding each package named, empty
-    but for its version, and nothing else."""
+    but for its version, and nothing else. A Playwright also says which
+    Chromium build it was made for, where a real one says it."""
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(folder / ".venv")],
                    check=True, capture_output=True, timeout=300)
     py = rat.venv_python(folder)
@@ -435,17 +447,29 @@ def _environment(folder: Path, packages: dict) -> Path:
         info.mkdir()
         (info / "METADATA").write_text("Metadata-Version: 2.1\nName: %s\nVersion: %s\n" % (name, version),
                                        encoding="utf-8")
+        if name == "playwright":
+            driver = site / name / "driver" / "package"
+            driver.mkdir(parents=True)
+            (driver / "browsers.json").write_text(json.dumps({"browsers": [
+                {"name": "chromium-headless-shell", "revision": "1"},
+                {"name": "chromium", "revision": CHROMIUM_FOR[version]}]}), encoding="utf-8")
     return py
 
 
-# The panel's holds what CI and the packaged app hold, an app's own is a
-# version behind, one has a browser and nothing to read a PDF with, and one
-# has no Playwright at all.
+# The panel's holds what CI and the packaged app hold. An app's own is a
+# version behind, and so is the only one that can read a workbook, and the
+# only one with what the panel's suite needs. One has a browser and nothing
+# to read a PDF with, one has the newest Playwright and no pytest, and one
+# has everything the core suite needs but Playwright.
 HOLDING = {
-    "panel": {"playwright": "1.63.0", "pypdf": "6.19.0"},
-    "app": {"playwright": "1.62.0", "pypdf": "6.16.1"},
-    "browser_only": {"playwright": "1.63.0"},
-    "no_browser": {"fastapi": "0.141.1"},
+    "panel": {"pytest": "9.1.1", "playwright": "1.63.0", "pypdf": "6.19.0"},
+    "app": {"pytest": "9.1.1", "playwright": "1.62.0", "pypdf": "6.16.1"},
+    "spreadsheets": {"pytest": "9.1.1", "playwright": "1.62.0", "pypdf": "6.16.1",
+                     "openpyxl": "3.1.5", "pdfplumber": "0.11.10"},
+    "panel_ui": {"pytest": "9.1.1", "playwright": "1.62.0", "fastapi": "0.141.1"},
+    "browser_only": {"pytest": "9.1.1", "playwright": "1.63.0"},
+    "no_pytest": {"playwright": "1.64.0", "pypdf": "6.20.0"},
+    "no_browser": {"pytest": "9.1.1", "pypdf": "6.19.0", "openpyxl": "3.1.5", "pdfplumber": "0.11.10"},
 }
 
 
@@ -460,10 +484,23 @@ def environments(tmp_path_factory):
 
 
 @pytest.fixture
-def asked_afresh(monkeypatch):
-    """Every interpreter asked again in this test, with the core off the path."""
+def asked_afresh(monkeypatch, tmp_path):
+    """Every interpreter asked again in this test, from a folder of its own
+    and with the core off the path."""
     monkeypatch.setattr(rat, "_ASKED", {})
     monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+
+def _installed(folder: Path, *builds, unfinished=()) -> Path:
+    """A browsers folder holding the full Chromium builds named, each one
+    finished as Playwright finishes one, and the unfinished ones without the
+    mark Playwright leaves when it is done."""
+    for build in builds + tuple(unfinished):
+        (folder / ("chromium-%s" % build)).mkdir(parents=True)
+        if build in builds:
+            (folder / ("chromium-%s" % build) / "INSTALLATION_COMPLETE").write_text("", encoding="utf-8")
+    return folder
 
 
 def test_a_suite_runs_on_the_newest_playwright_here_not_its_own_older_one(environments, asked_afresh):
@@ -485,62 +522,124 @@ def test_of_two_with_the_same_playwright_the_earlier_runs_it(environments, asked
     assert rat.python_for(tmp_path, "server", [browser_only, panel])[0] == browser_only
 
 
+def test_an_environment_without_pytest_runs_no_suite(environments, asked_afresh, tmp_path):
+    """However new its Playwright. Every suite is a pytest run, so in an
+    environment without pytest it fails before its first test."""
+    _, no_pytest = environments["no_pytest"]
+    _, panel = environments["panel"]
+    for kind in ("server", "app"):
+        assert rat.python_for(tmp_path, kind, [no_pytest, panel]) == (panel, []), kind
+
+
 def test_a_newer_playwright_is_a_higher_number_not_a_later_string():
     assert sorted(["1.100.0", "1.9.0", "1.63.1", "1.62.0", "1.63.0"], key=rat.version_key) == \
         ["1.9.0", "1.62.0", "1.63.0", "1.63.1", "1.100.0"]
     assert rat.version_key(None) == rat.version_key("unknown") == ()
 
 
+@pytest.mark.parametrize("override", [None, "browsers of its own"])
+def test_the_runner_looks_for_chromium_where_the_core_does(override, tmp_path, monkeypatch):
+    """Two places that must agree. A test that starts Chromium itself finds
+    it through the core's browser module, and the runner looks for the
+    newest Playwright's own build there."""
+    from paperpull_core import browser
+    if override:
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / override))
+    else:
+        monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    assert rat.browsers_folder() == browser._playwright_root()
+
+
 @pytest.fixture
 def run_with(environments, asked_afresh, tmp_path, monkeypatch):
     """main() over suites of our making, each run in whichever of the
-    environments named the runner picks, and each passing at once. Hands
-    back which interpreter ran each suite."""
-    def make(suites: dict, names: list) -> dict:
+    environments named the runner picks, and each passing at once, with
+    the Chromium builds named installed. Hands back which interpreter ran
+    each suite."""
+    def make(suites: dict, names: list, builds=("1234", "1243"), unfinished=()) -> dict:
         ran = {}
 
         def run_suite(d, py, timeout=1800):
             ran[d.name] = py
             return "1 passed in 0.01s", 0, []
         monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH",
+                           str(_installed(tmp_path / "browsers", *builds, unfinished=unfinished)))
         monkeypatch.setattr(rat, "OUTPUT", tmp_path / "test-output")
         monkeypatch.setattr(rat, "TIMES", tmp_path / "times.json")
         monkeypatch.setattr(rat, "suites", lambda quick: [(n, tmp_path / n, k) for n, k in suites.items()])
-        monkeypatch.setattr(rat, "candidates", lambda: [environments[n][1] for n in names])
+        monkeypatch.setattr(rat, "candidates", lambda: [environments[n][1] if isinstance(n, str) else n
+                                                        for n in names])
         monkeypatch.setattr(rat, "run_suite", run_suite)
         return ran
     return make
 
 
 def test_a_run_where_a_suite_ran_on_an_older_playwright_fails_and_names_it(run_with, environments, capsys):
-    # The environment with the newest Playwright cannot read a PDF, so the
-    # app suite can only run in the one a version behind.
-    ran = run_with({"server": "server", "aafmaa": "app"}, ["browser_only", "app"])
+    # Only the environment a version behind can read a workbook, so the core
+    # suite runs there while the app suite runs on the newest.
+    ran = run_with({"core": "core", "aafmaa": "app"}, ["panel", "spreadsheets"])
     assert rat.main(["--jobs", "1"]) == 1
     out = capsys.readouterr().out
-    assert ran == {"server": environments["browser_only"][1], "aafmaa": environments["app"][1]}
-    assert "\n1 suite ran on Playwright 1.63.0 and 1 on an older one, named below\n" in out, out
-    assert re.search(r"\n   aafmaa +1\.62\.0, in <elsewhere>/python", out), out
+    assert ran == {"core": environments["spreadsheets"][1], "aafmaa": environments["panel"][1]}
+    assert "\nPlaywright 1.63.0 for 1 of the suites that use it, an older one for 1, named below\n" in out, out
+    assert re.search(r"\n   core +1\.62\.0, in <elsewhere>/python", out), out
     assert "\nNOT EVERY SUITE RAN ON PLAYWRIGHT 1.63.0.\n" in out, out
     assert "all suites passed" not in out
 
 
-def test_a_run_on_the_newest_playwright_says_so_and_passes(run_with, environments, capsys):
+def test_a_run_on_the_newest_playwright_and_its_own_chromium_says_so_and_passes(run_with, environments, capsys):
     ran = run_with({"server": "server", "aafmaa": "app"}, ["app", "panel"])
     assert rat.main(["--jobs", "1"]) == 0
     out = capsys.readouterr().out
     assert ran == {"server": environments["panel"][1], "aafmaa": environments["panel"][1]}
-    assert "\nevery suite ran on Playwright 1.63.0\n" in out, out
+    assert ("\nPlaywright 1.63.0 for every suite that uses it\n"
+            "and its own Chromium, build 1243, for the tests that start one themselves\n") in out, out
     assert out.rstrip().endswith("all suites passed, privacy canary included")
 
 
-def test_a_suite_whose_environment_has_no_playwright_is_not_counted(run_with, environments, capsys):
-    # Only the environment without Playwright has what the panel's suite
-    # needs. A suite that wanted Playwright and ran without it is named
-    # among those missing something, and the canary refuses a core without it.
-    ran = run_with({"gui": "gui", "aafmaa": "app"}, ["no_browser", "app", "panel"])
+def test_a_suite_that_does_not_use_playwright_is_not_held_to_it(run_with, environments, capsys):
+    # Only an environment a version behind has what the panel's suite needs,
+    # and that suite never starts a browser.
+    ran = run_with({"gui": "gui", "aafmaa": "app"}, ["panel_ui", "panel"])
     assert rat.main(["--jobs", "1"]) == 0
     out = capsys.readouterr().out
-    assert ran == {"gui": environments["no_browser"][1], "aafmaa": environments["panel"][1]}
-    assert "\nevery suite ran on Playwright 1.63.0, apart from 1 whose environment has none\n" in out, out
+    assert ran == {"gui": environments["panel_ui"][1], "aafmaa": environments["panel"][1]}
+    assert "\nPlaywright 1.63.0 for every suite that uses it\n" in out, out
     assert out.rstrip().endswith("all suites passed, privacy canary included")
+
+
+def test_a_suite_whose_environment_has_no_playwright_is_named_apart(run_with, environments, capsys):
+    # Nothing here has all the core suite needs, and the environment missing
+    # least has no Playwright at all.
+    ran = run_with({"core": "core", "aafmaa": "app"}, ["panel", "no_browser"])
+    assert rat.main(["--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    assert ran == {"core": environments["no_browser"][1], "aafmaa": environments["panel"][1]}
+    assert "\nPlaywright 1.63.0 for every suite that uses it, apart from 1 whose environment has none\n" in out, out
+    assert re.search(r"\n   core +playwright \(", out), out
+
+
+@pytest.mark.parametrize("builds, unfinished, take, here", [
+    (("1234",), (), "take build 1234", "1234 here"),
+    (("1234",), ("1243",), "take build 1234", "1234 here"),
+    ((), (), "have none to take", "and there is none here"),
+], ids=["an older one", "its own unfinished", "none"])
+def test_a_run_without_the_newest_playwrights_own_chromium_is_refused(run_with, capsys, builds, unfinished,
+                                                                    take, here):
+    run_with({"server": "server", "aafmaa": "app"}, ["app", "panel"], builds=builds, unfinished=unfinished)
+    assert rat.main(["--jobs", "1"]) == 1
+    out = capsys.readouterr().out
+    assert ("\nbut its own Chromium, build 1243, is not installed, so the tests that start one "
+            "themselves %s\n" % take) in out, out
+    assert "\nPLAYWRIGHT 1.63.0'S OWN CHROMIUM, BUILD 1243, IS NOT INSTALLED HERE.\n" in out, out
+    assert "\n%s, while CI and the packaged app run 1243. Install it with\n" % here in out, out
+    assert "all suites passed" not in out
+
+
+def test_an_environment_that_could_not_be_asked_is_named(run_with, tmp_path, capsys):
+    run_with({"aafmaa": "app"}, [tmp_path / "gone" / "python.exe", "panel"])
+    assert rat.main(["--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    assert ("\nenvironments that could not say what they hold\n"
+            "   <elsewhere>/python.exe, could not be started\n") in out, out

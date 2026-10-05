@@ -104,7 +104,9 @@ python -m playwright install chromium
 `run_all_tests.py` prints every skip at the end and refuses to report
 success while the canary is one of them.
 
-CI and the packaged app install the newest Playwright, and two versions can
-differ in what a page hands over. So `run_all_tests.py` runs every suite on
-the newest Playwright any environment here holds, says which version that
-was, and refuses to report success when a suite had to run on an older one.
+CI and the packaged app install the newest Playwright and the Chromium it
+was made for, and two versions can differ in what a page hands over. So
+`run_all_tests.py` runs each suite on the newest Playwright among the
+environments here that can run it, says which version that was, and
+refuses to report success when a suite that uses Playwright had to run on
+an older one, or when that Playwright's own Chromium is not installed.

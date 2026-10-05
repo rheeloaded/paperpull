@@ -71,6 +71,14 @@ def fake_run(tmp_path, monkeypatch):
     monkeypatch.setattr(rat, "LOCK_DIR", tmp_path / "lock")
     monkeypatch.setattr(rat, "candidates", lambda: [])
     monkeypatch.setattr(rat, "python_for", lambda d, kind, spares: (Path(sys.executable), []))
+    # The Chromium build this interpreter's Playwright was made for, in a
+    # browsers folder of the test's own, so the run's check of it does not
+    # depend on what this machine has installed.
+    build = rat.asked(Path(sys.executable))["chromium"]
+    if build:
+        (tmp_path / "browsers" / ("chromium-" + build)).mkdir(parents=True)
+        (tmp_path / "browsers" / ("chromium-" + build) / "INSTALLATION_COMPLETE").write_text("", encoding="utf-8")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "browsers"))
 
     def make(dirs: dict, times: dict = None):
         monkeypatch.setattr(rat, "suites", lambda quick: [(n, d, "app") for n, d in dirs.items()])

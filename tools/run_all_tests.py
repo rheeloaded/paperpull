@@ -27,12 +27,13 @@ prints every other skip at the end where it can be seen.
 WHICH INTERPRETER RUNS WHAT
 
 Each suite runs with the environment holding the newest Playwright that
-can import what the suite needs, and of two holding the same, the earlier
-in the list, the panel's first. An environment is asked with this
-checkout's core on its path, as its suite will have it, so one that has
-no core installed can still run an app suite. A run uses one environment
-wherever it can, as CI does, and any suite with nothing to run it is
-reported rather than skipped quietly.
+can import what the suite needs, pytest included, and of two holding the
+same, the earlier in the list, the panel's first. An environment is asked
+from the checkout's root with this checkout's core on its path, as its
+suite will have it, so one that has no core installed can still run an
+app suite. A run uses one environment wherever it can, as CI does, and
+any suite with nothing to run it is reported rather than skipped quietly,
+as is any environment that could not say what it holds.
 
 Until 2026-10-05 a suite ran in its app's own environment, or else the
 first that could run it. CI and the packaged app install the newest
@@ -42,10 +43,18 @@ two differ in what a page hands over. When Chromium gave back an empty
 body for an answer that had a length, 1.62 asked the address again
 whatever the answer was, and 1.63 does that only for fonts, images,
 scripts, stylesheets and the like, so a document, a fetch or an xhr now
-reads empty. AAFMAA's capture failed on CI because of it and passed every
-time here. So a suite that still has to run on an older Playwright than
-another suite of the same run makes the run fail, and the summary names
-the version every suite ran on.
+reads empty. AAFMAA's capture failed on CI because of it and passed
+here. So a suite that uses Playwright and still has to run on an older
+one than another such suite of the same run makes the run fail, and the
+summary names the version they ran on. The panel's suite and the
+server's never start a browser and are not held to it.
+
+Each Playwright is made for one Chromium build and downloads that one,
+while a test that starts Chromium itself, with a debugging port as
+login.bat does, takes the newest full build installed. On 2026-10-05 the
+newest Playwright's own build was not installed here, so those tests ran
+Chromium 151 while CI and the packaged app ran 153. A run now refuses to
+pass while the newest Playwright's own build is missing.
 
 WHICH CORE IT TESTS
 
@@ -183,14 +192,17 @@ def with_this_core(*after) -> dict:
     env["PYTHONPATH"] = os.pathsep.join([str(REPO / "core")] + [str(p) for p in after] + rest)
     return env
 
-# What a suite has to be able to import before it is worth running.
+# What a suite has to be able to import before it is worth running. pytest
+# runs every suite, so an environment without it runs none, however new
+# its Playwright.
 NEEDS = {
-    "core": ("pypdf", "playwright", "openpyxl", "pdfplumber"),
-    "gui": ("fastapi",),
-    "server": (),
-    "app": ("paperpull_core", "pypdf", "playwright"),
+    "core": ("pytest", "pypdf", "playwright", "openpyxl", "pdfplumber"),
+    "gui": ("pytest", "fastapi"),
+    "server": ("pytest",),
+    "app": ("pytest", "paperpull_core", "pypdf", "playwright"),
 }
 WHY = {
+    "pytest": "running the suite at all",
     "paperpull_core": "every app suite",
     "playwright": "the privacy canary and every browser test",
     "pypdf": "PDF validation",
@@ -200,19 +212,27 @@ WHY = {
 }
 CANARY = "test_failure_canary"
 _ASKED: dict = {}
+ASK_WITHIN = 300
 
-# What an interpreter is asked, once. The modules it can import, and the
-# version of the Playwright it holds, None when it holds none.
+# What an interpreter is asked, once. The modules it can import, the
+# version of the Playwright it holds, and the Chromium build that
+# Playwright was made for, each None when there is none to say.
 ASK = """
-import importlib.metadata, importlib.util, json, sys
+import importlib.metadata, importlib.util, json, os, sys
 found = [m for m in sys.argv[1:] if importlib.util.find_spec(m) is not None]
-version = None
+version = chromium = None
 if "playwright" in found:
     try:
         version = importlib.metadata.version("playwright")
     except Exception:
         version = "unknown"
-print(json.dumps({"found": found, "playwright": version}))
+    try:
+        where = importlib.util.find_spec("playwright").submodule_search_locations[0]
+        with open(os.path.join(where, "driver", "package", "browsers.json"), encoding="utf-8") as f:
+            chromium = next(str(b["revision"]) for b in json.load(f)["browsers"] if b["name"] == "chromium")
+    except Exception:
+        chromium = None
+print(json.dumps({"found": found, "playwright": version, "chromium": chromium}))
 """
 
 
@@ -225,21 +245,30 @@ def venv_python(d: Path):
 
 
 def asked(py: Path) -> dict:
-    """What this interpreter can import and which Playwright it holds,
-    asked once each, with this checkout's core on its path as its suite
-    will have it. Nothing at all when it cannot say."""
+    """What this interpreter can import, which Playwright it holds and the
+    Chromium build that was made for, asked once each, with this checkout's
+    core on its path as its suite will have it. Asked from the checkout's
+    root, so the folder a run was started from adds nothing. When it cannot
+    say, nothing at all, and why, in words that name no place."""
     key = str(py)
     if key not in _ASKED:
-        answer = {"found": [], "playwright": None}
+        answer = {"found": [], "playwright": None, "chromium": None, "failed": None}
         try:
             r = subprocess.run([str(py), "-c", ASK, *WHY], capture_output=True, text=True,
-                               env=with_this_core(PLUGINS), timeout=300)
-            said = json.loads(r.stdout.strip().splitlines()[-1])
-            version = said.get("playwright")
-            answer = {"found": [str(m) for m in said.get("found") or []],
-                      "playwright": None if version is None else str(version)}
-        except (OSError, subprocess.SubprocessError, ValueError, IndexError, AttributeError, TypeError):
-            pass
+                               cwd=str(REPO), env=with_this_core(PLUGINS), timeout=ASK_WITHIN)
+        except subprocess.TimeoutExpired:
+            answer["failed"] = "did not answer within %ds" % ASK_WITHIN
+        except (OSError, subprocess.SubprocessError):
+            answer["failed"] = "could not be started"
+        else:
+            try:
+                said = json.loads(r.stdout.strip().splitlines()[-1])
+                version, chromium = said.get("playwright"), said.get("chromium")
+                answer.update(found=[str(m) for m in said.get("found") or []],
+                              playwright=None if version is None else str(version),
+                              chromium=None if chromium is None else str(chromium))
+            except (ValueError, IndexError, AttributeError, TypeError):
+                answer["failed"] = "gave no answer that could be read, and ended with code %s" % r.returncode
         _ASKED[key] = answer
     return _ASKED[key]
 
@@ -310,10 +339,11 @@ def python_for(d: Path, kind: str, spares: list):
 
 
 def older_playwright(work: list):
-    """The newest Playwright among the environments a run uses, and each
-    suite run on another one, as (name, version, interpreter). A suite
-    whose environment holds no Playwright is not counted here. One that
-    needed it is named among those missing something."""
+    """The newest Playwright among the environments the suites handed in
+    run in, and each of them run on another one, as (name, version,
+    interpreter). A suite whose environment holds no Playwright is not
+    counted here. One that needed it is named among those missing
+    something."""
     held = [(name, playwright_of(py), py) for name, _d, py in work]
     known = [v for _name, v, _py in held if version_key(v)]
     if not known:
@@ -321,6 +351,40 @@ def older_playwright(work: list):
     newest = max(known, key=version_key)
     return newest, [(name, v, py) for name, v, py in held
                     if v is not None and version_key(v) != version_key(newest)]
+
+
+def browsers_folder() -> Path:
+    """Where the browsers Playwright downloads are kept, found the way the
+    core's browser module finds them for a test that starts Chromium itself."""
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if override and override not in ("0", "1"):
+        return Path(override)
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ms-playwright"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ms-playwright"
+    return Path.home() / ".cache" / "ms-playwright"
+
+
+def chromium_builds() -> list:
+    """The full Chromium builds Playwright finished installing here, newest
+    first. A test that starts Chromium itself takes the first."""
+    out = []
+    for p in browsers_folder().glob("chromium-*"):
+        m = re.fullmatch(r"chromium-(\d+)", p.name)
+        if m and (p / "INSTALLATION_COMPLETE").is_file():
+            out.append(int(m.group(1)))
+    return sorted(out, reverse=True)
+
+
+def own_chromium(newest, work: list):
+    """The Chromium build the newest Playwright of a run was made for, None
+    when no environment holding it could say."""
+    for _name, _d, py in work:
+        build = asked(py)["chromium"]
+        if newest and version_key(playwright_of(py)) == version_key(newest) and build and build.isdigit():
+            return build
+    return None
 
 
 # Every pytest this run has started and not yet seen end, so an interrupted
@@ -835,7 +899,8 @@ def run(args) -> int:
     # each start of an interpreter here can take seconds.
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(asked, spares))
-    work = []
+    unasked = [(py, asked(py)["failed"]) for py in spares if asked(py)["failed"]]
+    work, counted = [], []
     for name, d, kind in plan:
         py, lack = python_for(d, kind, spares)
         if py is None:
@@ -845,7 +910,13 @@ def run(args) -> int:
         if lack:
             under_equipped.append((name, lack))
         work.append((name, d, py))
-    newest, older = older_playwright(work)
+        # Only a suite that uses Playwright is held to the newest one. The
+        # panel's suite and the server's never start a browser.
+        if "playwright" in NEEDS[kind]:
+            counted.append((name, d, py))
+    newest, older = older_playwright(counted)
+    build = own_chromium(newest, counted)
+    builds = chromium_builds() if build else []
     if jobs > 1 and len(work) > 1:
         print("%d suites, %d at a time, longest first" % (len(work), min(jobs, len(work))), flush=True)
 
@@ -899,16 +970,25 @@ def run(args) -> int:
     print("%d passed, %d failed, %d skipped, in %.0fs"
           % (passed, failed, skipped, time.time() - t0))
     if newest:
-        without = sum(1 for _name, _d, py in work if playwright_of(py) is None)
+        without = sum(1 for _name, _d, py in counted if playwright_of(py) is None)
         if older:
-            on_newest = len(work) - without - len(older)
-            print("%d suite%s ran on Playwright %s and %d on an older one, named below"
-                  % (on_newest, "" if on_newest == 1 else "s", newest, len(older)))
+            print("Playwright %s for %d of the suites that use it, an older one for %d, named below"
+                  % (newest, len(counted) - without - len(older), len(older)))
         elif without:
-            print("every suite ran on Playwright %s, apart from %d whose environment has none"
+            print("Playwright %s for every suite that uses it, apart from %d whose environment has none"
                   % (newest, without))
         else:
-            print("every suite ran on Playwright %s" % newest)
+            print("Playwright %s for every suite that uses it" % newest)
+    if build and int(build) in builds:
+        print("and its own Chromium, build %s, for the tests that start one themselves" % build)
+    elif build:
+        print("but its own Chromium, build %s, is not installed, so the tests that start one "
+              "themselves %s" % (build, "take build %d" % builds[0] if builds else "have none to take"))
+
+    if unasked:
+        print("\nenvironments that could not say what they hold")
+        for py, why in unasked:
+            print("   %s, %s" % (printable_place(py, REPO, []), why))
 
     if skip_lines:
         print("\nwhat did not run:")
@@ -943,6 +1023,14 @@ def run(args) -> int:
         print("can differ in what a page hands over, so a pass on an older one says")
         print("nothing about them. Upgrade Playwright in each environment named above,")
         print("or give the one holding the newest what those suites need.")
+        refused = True
+    if build and int(build) not in builds:
+        print("\nPLAYWRIGHT %s'S OWN CHROMIUM, BUILD %s, IS NOT INSTALLED HERE." % (newest, build))
+        print("A test that starts Chromium itself takes the newest build installed,")
+        print(("%d here" % builds[0] if builds else "and there is none here")
+              + ", while CI and the packaged app run %s. Install it with" % build)
+        print("   python -m playwright install chromium")
+        print("in an environment holding Playwright %s." % newest)
         refused = True
     if refused or broken:
         return 1
