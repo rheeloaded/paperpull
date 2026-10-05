@@ -34,6 +34,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   icon as the installers.
 
 ### Fixed
+- **Home Depot reads every page of a purchase history longer than one
+  page.** It asked Home Depot for twenty orders a page, whatever its own
+  page asks for, and took a page with fewer for the last. Where Home Depot
+  gives fewer orders a page than are asked for, every order past the first
+  page was missed while the run finished clean. It now asks for as many a
+  page as Home Depot's own page does and reads on until the count Home
+  Depot gives is reached. A page with nothing new on it ends the reading,
+  so a count larger than what comes is not asked after page by page.
 - **Resume downloads Uber receipts and App Store receipts with no tab open
   on their sites.** After a Discover that read every list to its end,
   Resume goes straight to the purchases found, and each receipt is asked

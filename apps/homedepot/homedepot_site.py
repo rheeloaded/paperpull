@@ -16,8 +16,9 @@ How Home Depot works, mapped against a signed-in account on 2026-09-25:
 * **Two years is all Home Depot keeps.** A start date further back than
   about two years is refused with ``B2B_ORDER_HISTORY_ERR_8013``, "Start
   date and end date not in the range", however short the window. So the
-  page's own date range is used as it is, and the history is walked by
-  ``pageNumber``. Run this every few months and nothing is lost.
+  page's own date range and page size are used as they are, and the
+  history is walked by ``pageNumber`` until ``orderCount`` is reached. Run
+  this every few months and nothing is lost.
 * The details page is
   ``/myaccount/order-details?orderNumber=<n>&salesDate=<iso>&orderOrigin=<origin>``.
   **Its receipt is already on it**, a block styled ``sui-hidden
@@ -266,13 +267,37 @@ async ([url, body]) => {
 """
 
 
-def fetch_orders(page, request: dict, page_size: int = 20, max_pages: int = 50) -> dict:
-    """Every order the history request reaches, a page at a time, with the
-    page's own date range. Returns {"orders": [...], "count": n, "status": s,
-    "pages": n, "last": bool, "stop": word}.
+# When the page's own request names no page size.
+PAGE_SIZE = 20
+# The most orders one reading asks for, two years of a busy account's.
+MAX_ORDERS = 1000
 
-    "last" is what shows the history was read whole, set when a page comes
-    back short or the count Home Depot gave is reached. "pages" counts the
+
+def page_size_of(base: dict) -> int:
+    """The page size the page's own request asks for, or PAGE_SIZE."""
+    size = (base or {}).get("pageSize")
+    if isinstance(size, int) and not isinstance(size, bool) and 0 < size <= 200:
+        return size
+    return PAGE_SIZE
+
+
+def fetch_orders(page, request: dict, page_size: Optional[int] = None,
+                 max_pages: Optional[int] = None) -> dict:
+    """Every order the history request reaches, a page at a time, with the
+    page's own date range and page size. Returns {"orders": [...], "count":
+    n, "status": s, "pages": n, "last": bool, "stop": word}.
+
+    Pages are asked for at the page's own size, which is the one Home Depot
+    is seen answering, and by number until the count Home Depot gave is
+    reached. Twenty were asked for whatever the page asks, and a page with
+    fewer than twenty was taken for the last, so wherever Home Depot gives
+    no more than its own page size, every order past the first page was
+    missed while the run finished clean. A page that brings nothing new, an
+    empty one or one already read, is the end too, so a count larger than
+    what comes is not asked after page by page. Without a count, a page
+    shorter than the size asked for is the last.
+
+    "last" is what shows the history was read whole. "pages" counts the
     pages that answered with the history, so 0 is a history that did not
     come and never an empty one, which comes as one page with nothing on
     it. "stop" says why it ended short of its last page, "refused" for an
@@ -283,9 +308,11 @@ def fetch_orders(page, request: dict, page_size: int = 20, max_pages: int = 50) 
         return {"orders": [], "count": 0, "status": "no history request", "pages": 0,
                 "last": False, "stop": "no request"}
     base = dict(request["body"]["orderHistoryRequest"])
-    orders, count, status, pages, last, stop = [], None, "", 0, False, ""
+    size = page_size or page_size_of(base)
+    max_pages = max_pages or -(-MAX_ORDERS // size)
+    orders, count, status, pages, last, stop, seen = [], None, "", 0, False, "", set()
     for n in range(1, max_pages + 1):
-        body = {"orderHistoryRequest": dict(base, pageSize=page_size, pageNumber=n)}
+        body = {"orderHistoryRequest": dict(base, pageSize=size, pageNumber=n)}
         try:
             got = page.evaluate(_FETCH_HISTORY_JS, [request["url"], body]) or {}
         except Exception as e:
@@ -311,14 +338,22 @@ def fetch_orders(page, request: dict, page_size: int = 20, max_pages: int = 50) 
         batch = [o for o in (data.get("orders") or []) if isinstance(o, dict)]
         if count is None and isinstance(data.get("orderCount"), int):
             count = data["orderCount"]
-        orders += batch
-        if len(batch) < page_size or (count is not None and len(orders) >= count):
+        fresh = []
+        for o in batch:
+            key = json.dumps(o, sort_keys=True, default=str)
+            if key not in seen:
+                seen.add(key)
+                fresh.append(o)
+        orders += fresh
+        if not fresh or (count is not None and len(orders) >= count) \
+                or (count is None and len(batch) < size):
             last = True
             break
     else:
-        # Every page as long as it can be, as many as are read. Taken as the
-        # end, as it always was.
+        # As many pages as are read. Taken as the end, as it always was.
         last = True
+    if last and count is not None and len(orders) < count:
+        log.info("Home Depot counted %d order(s) and %d came", count, len(orders))
     return {"orders": orders, "count": count if count is not None else len(orders),
             "status": status, "pages": pages, "last": last, "stop": stop}
 

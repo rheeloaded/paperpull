@@ -48,8 +48,9 @@ DETAILS = "/myaccount/order-details"
 # left alone, so a page the test forgot to point here goes nowhere.
 NO_HOSTS = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
 
-# Home Depot pages twenty orders at a time, two here, so a short history
-# still takes more than one page.
+# Home Depot's own page asks for its orders a few at a time, and this app
+# asks for as many as the page does, two here, so a short history still
+# takes more than one page.
 PAGE_SIZE = 2
 
 # Three online orders, newest first as Home Depot lists them, with what
@@ -97,22 +98,31 @@ def details_page(number):
 
 
 # The history asks for its orders the way Home Depot's own page does, one
-# POST with the range it wants, ten at a time where this app asks for its
-# own page size, which is how the two are told apart below.
+# POST with the range it wants and its own page size. This app's asks say
+# they accept JSON, and the page's does not, which is how the two are told
+# apart below.
 LISTED = """<!doctype html><html><head><title>Purchase History</title></head><body>
 <h1>Purchase History</h1>
 <a href="/myaccount/order-details?orderNumber=W000000041">Order #W000000041</a>
 <script>
 fetch('%s', {method: 'POST', headers: {'content-type': 'application/json'},
-  body: JSON.stringify({orderHistoryRequest: {pageSize: 10, pageNumber: 1,
+  body: JSON.stringify({orderHistoryRequest: {pageSize: %d, pageNumber: 1,
     startDate: '2024-09-29', endDate: '2026-09-29', timezone: 'America/New_York'}})});
-</script></body></html>""" % ASK
+</script></body></html>""" % (ASK, PAGE_SIZE)
 
 
 # What the history request answers for one page.
 def listed(numbers, count):
     return ("body", "application/json",
             json.dumps({"orderCount": count, "orders": [order(n) for n in numbers]}))
+
+
+def paged(numbers, count=None, cap=PAGE_SIZE, clamp=False):
+    """Every page the way a server pages a list, at most `cap` orders a page
+    whatever is asked for, counted from the page number at that size, with
+    Home Depot's count of them when `count` is given. With `clamp` a page
+    past the end answers the last page again, as some servers do."""
+    return ("paged", numbers, count, cap, clamp)
 
 
 def refused(status):
@@ -150,7 +160,9 @@ class FakeHomeDepot:
 
     def reset(self):
         self.answers = {}
+        self.paged = None
         self.asked = []
+        self.sizes = []
         self.seen = []
 
 
@@ -191,10 +203,21 @@ class _Handler(BaseHTTPRequestHandler):
             return
         wanted = (json.loads(body or b"{}").get("orderHistoryRequest") or {})
         number = wanted.get("pageNumber") or 1
-        if wanted.get("pageSize") == PAGE_SIZE:
+        if self.headers.get("Accept") == "application/json":
             # This app's own ask, not the one the page made as it loaded.
             SITE.asked.append(number)
-        answer = SITE.answers.get(number, refused(404))
+            SITE.sizes.append(wanted.get("pageSize"))
+        answer = SITE.paged or SITE.answers.get(number, refused(404))
+        if answer[0] == "paged":
+            _kind, numbers, count, cap, clamp = answer
+            start = (number - 1) * cap
+            if clamp and numbers and start >= len(numbers):
+                start = (len(numbers) - 1) // cap * cap
+            value = {"orders": [order(n) for n in numbers[start:start + cap]]}
+            if count is not None:
+                value["orderCount"] = count
+            self._answer(json.dumps(value), "application/json")
+            return
         if answer[0] == "drop":
             self.close_connection = True
             return
@@ -247,8 +270,8 @@ def attached(browser_exe, tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def fake_home_depot(server, monkeypatch):
-    """Every address the app opens points at the made-up site, every wait
-    is short, and the history is asked for two orders at a time."""
+    """Every address the app opens points at the made-up site, and every
+    wait is short."""
     SITE.reset()
     monkeypatch.setattr(site, "ORDERS_URL", server + HISTORY)
     monkeypatch.setattr(site, "DETAILS_URL", server + DETAILS)
@@ -263,10 +286,6 @@ def fake_home_depot(server, monkeypatch):
     monkeypatch.setattr(site, "ORDERS_WAIT_MS", 4000, raising=False)
     monkeypatch.setattr(site, "SETTLE_MS", 0, raising=False)
     monkeypatch.setattr(site, "CHALLENGE_WAIT_MS", 1500, raising=False)
-    real_fetch = site.fetch_orders
-    monkeypatch.setattr(site, "fetch_orders",
-                        lambda page, request, page_size=20, max_pages=50:
-                        real_fetch(page, request, page_size=PAGE_SIZE, max_pages=max_pages))
     real_wait = site.wait_for_details
     monkeypatch.setattr(site, "wait_for_details",
                         lambda page, timeout_ms=30000: real_wait(page, timeout_ms=min(timeout_ms, 4000)))
@@ -482,6 +501,65 @@ def test_an_answer_with_no_orders_and_no_errors_is_still_read_as_an_empty_histor
     out = finished_run(tmp_path, attached, capsys, "--pilot")
 
     assert "Discovery complete" in folded(out), out
+    assert panel_reads(out)["stopped"] == 0
+    assert not failure_files(tmp_path)
+
+
+# -- a history longer than a page -------------------------------------------------------
+
+ALL = NEWER + OLDER
+
+
+def test_a_history_is_asked_for_a_page_at_a_time_of_the_pages_own_size(attached, tmp_path,
+                                                                        capsys):
+    """Home Depot was asked for twenty orders a page whatever its own page
+    asks for, and a page shorter than twenty was taken for the last. Where
+    Home Depot gives no more than its own page size, every page past the
+    first was missed while the run finished clean."""
+    SITE.paged = paged(ALL, count=3)
+    out = finished_run(tmp_path, attached, capsys, "--discover")
+
+    said = folded(out)
+    assert "Discovery complete" in said, said
+    assert sorted(known(tmp_path)) == keys(ALL)
+    assert SITE.asked == [1, 2] and set(SITE.sizes) == {PAGE_SIZE}, (SITE.asked, SITE.sizes)
+    assert not failure_files(tmp_path)
+
+
+def test_pages_shorter_than_asked_are_read_on_to_the_count(attached, tmp_path, capsys):
+    """Home Depot's count says how many orders there are, so a page shorter
+    than asked is not the end while the count says more."""
+    SITE.paged = paged(ALL, count=3, cap=1)
+    out = finished_run(tmp_path, attached, capsys, "--discover")
+
+    assert "Discovery complete" in folded(out), out
+    assert sorted(known(tmp_path)) == keys(ALL)
+    assert SITE.asked == [1, 2, 3]
+
+
+def test_without_a_count_a_short_page_is_still_the_end(attached, tmp_path, capsys):
+    SITE.paged = paged(ALL)
+    out = finished_run(tmp_path, attached, capsys, "--discover")
+
+    assert "Discovery complete" in folded(out), out
+    assert sorted(known(tmp_path)) == keys(ALL)
+    assert SITE.asked == [1, 2]
+
+
+@pytest.mark.parametrize("clamp", [False, True], ids=["an empty page", "the last page again"])
+def test_a_count_larger_than_what_comes_ends_at_a_page_with_nothing_new(attached, clamp,
+                                                                        tmp_path, capsys):
+    """A count larger than the orders Home Depot gives ends at the first page
+    with nothing new on it, empty or the last page again, rather than ask
+    the same page dozens of times or stop every run. The run finishes,
+    since nothing was refused."""
+    SITE.paged = paged(ALL, count=5, clamp=clamp)
+    out = finished_run(tmp_path, attached, capsys, "--pilot")
+
+    said = folded(out)
+    assert "Discovery complete" in said and "did not come" not in said, said
+    assert sorted(known(tmp_path)) == keys(ALL)
+    assert SITE.asked == [1, 2, 3]
     assert panel_reads(out)["stopped"] == 0
     assert not failure_files(tmp_path)
 
