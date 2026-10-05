@@ -280,8 +280,8 @@ def profile_note(name: str) -> str:
     """
     if os.environ.get("PAPERPULL_SERVER") == "1":
         return (
-            "The %s window is open on PaperPull Server's browser screen. Open\n"
-            "it from the Browser screen link at the top of the panel.\n"
+            "The %s window is open on PaperPull Server's Browser Screen. Open\n"
+            "it with the Browser Screen button at the top of the panel.\n"
             "\n"
             "It is a browser of the server's own, so you are NOT signed in there\n"
             "yet. Sign in as you would on a new computer, and leave the window open." % name

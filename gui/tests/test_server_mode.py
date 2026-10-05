@@ -281,6 +281,7 @@ def test_the_screen_is_behind_the_password(base, on_server, tmp_path, monkeypatc
     session = signed_in(base)
     status, _, page = ask(base + "/screen", session=session)
     assert status == 200 and "path=screen/websockify" in page and "/favicon.ico" in page
+    assert "<title>PaperPull Browser Screen</title>" in page
     assert ask(base + "/screen/novnc/vnc.html", session=session)[2] == "<title>noVNC</title>"
     assert ask(base + "/screen/novnc/%2e%2e/secret.txt", session=session)[0] == 404
 
@@ -378,6 +379,33 @@ def test_the_welcome_page_says_where_the_data_folder_is_on_the_server(base, on_s
     assert server_page.strip().splitlines()[0] == "if (!SERVER) return;"
     assert "$('serverroot').style.display = 'block';" in server_page
     assert "the data folder beside compose.yaml" in page
+
+
+def test_the_browser_screen_is_a_button_at_the_top_that_says_what_it_is_for(base, on_server):
+    """Every sign-in on the server happens on the browser screen, so it is
+    a button, not a small link, and Login's step points to it."""
+    page = ask(base + "/", session=signed_in(base))[2]
+    bar = page[page.index('<div class="serverbar">'):]
+    bar = bar[:bar.index("</div>")]
+    assert '<a class="screenbtn" href="/screen"' in bar and "Browser Screen</a>" in bar
+    assert "sign-in windows open" in bar and 'action="/logout"' in bar
+    assert "header .serverbar a.screenbtn" in page
+    login_step = page.split("$('steplogin').innerHTML = ", 1)[1].split(";\n", 1)[0]
+    assert "Browser Screen" in login_step and "the button at the top" in login_step
+
+
+def test_both_editions_say_what_discover_is_for(base, on_server, monkeypatch):
+    """The four buttons a normal day needs are Login, Discover, Pilot and
+    Run All, and the steps under them named three."""
+    server_page = ask(base + "/", session=signed_in(base))[2]
+    monkeypatch.delenv("PAPERPULL_SERVER")
+    desktop_page = ask(base + "/")[2]
+    for page in (server_page, desktop_page):
+        steps = page[page.index('1. <span id="steplogin">'):]
+        steps = " ".join(steps[:steps.index("</p>")].split())
+        assert "2. <b>Discover</b> shows what the provider has for you and downloads nothing." in steps
+        assert "It is optional, since Pilot and Run All look too." in steps
+        assert steps.index("2. <b>Discover") < steps.index("3. <b>Pilot") < steps.index("4. <b>Run All")
 
 
 def test_the_shared_folder_is_the_only_one_offered(base, on_server, tmp_path):

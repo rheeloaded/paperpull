@@ -12,7 +12,7 @@ code in `server/` and `gui/server_mode.py`.
 
 - **The providers you sign in to.** When you run a download, the server
   talks to that provider's website, and only that one, in the browser you
-  signed in with yourself on the browser screen. It reads your document
+  signed in with yourself on the Browser Screen. It reads your document
   list and fetches the PDFs the provider already generated. It never has
   your password or a verification code, because you type those into the
   provider's own page.
@@ -45,7 +45,7 @@ you gave the container.
   it is kept out of the data folder on purpose, since a shared folder is
   often open to more people than you.
 - **The `settings` volume.** The password's hash, never the password, the
-  panel's own settings and the browser screen's logs.
+  panel's own settings and the Browser Screen's logs.
 - **The `browser` volume.** Chrome as Google sent it.
 
 If you mount Paperless's consume folder, each run's new documents are also
@@ -55,7 +55,7 @@ copied there, and nowhere else.
 
 Unlike the desktop app, the server listens on your home network, by
 design. Apart from the page that asks for the password, every page, the
-browser screen and the panel's API answer only after it, see
+Browser Screen and the panel's API answer only after it, see
 [SECURITY-SERVER.md](SECURITY-SERVER.md).
 
 ## What this project collects about you

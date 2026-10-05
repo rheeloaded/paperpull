@@ -369,18 +369,27 @@ def setup_body(message: str = "") -> str:
 SCREEN = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PaperPull browser screen</title><link rel="icon" href="/favicon.ico">
+<title>PaperPull Browser Screen</title><link rel="icon" href="/favicon.ico">
 <style>html,body{margin:0;height:100%;background:#0f1115}
 iframe{border:0;width:100%;height:100%;display:block}</style></head>
 <body><iframe src="/screen/novnc/vnc.html?autoconnect=1&amp;reconnect=1&amp;resize=scale&amp;path=screen/websockify"
-title="The browser screen"></iframe></body></html>"""
+title="The Browser Screen"></iframe></body></html>"""
+
+
+# A screen, drawn with the page's own color so it suits light and dark.
+_SCREEN_ICON = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>')
 
 
 def server_bar() -> str:
-    """The links the panel's header carries on the server. A div, since a
-    form inside a paragraph closes the paragraph where the form starts."""
-    return ('<div class="serverbar"><a href="/screen" target="_blank" rel="noopener">'
-            "Browser screen</a> &middot; "
+    """What the panel's header carries on the server. The browser screen is
+    where every sign-in happens, so it is a button that cannot be missed,
+    with what it is for beside it. A div, since a form inside a paragraph
+    closes the paragraph where the form starts."""
+    return ('<div class="serverbar"><a class="screenbtn" href="/screen" target="_blank" rel="noopener">'
+            + _SCREEN_ICON + "Browser Screen</a>"
+            '<span class="screenhint">where the providers\' sign-in windows open</span>'
             '<form method="post" action="/logout"><button>Sign out</button></form></div>')
 
 

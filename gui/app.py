@@ -1996,8 +1996,13 @@ HTML = r"""<!doctype html>
   header h1 { margin:0; font-size:18px; }
   header h1 .tag { color:var(--muted); font-weight:400; }
   header h1 .ver { color:var(--accent); font-weight:400; font-size:13px; vertical-align:middle; }
-  header .serverbar { margin:6px 0 0; font-size:13px; color:var(--muted); }
+  header .serverbar { margin:12px 0 0; font-size:13px; color:var(--muted);
+                      display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
   header .serverbar a { color:var(--accent); text-decoration:none; }
+  header .serverbar a.screenbtn { display:inline-flex; align-items:center; gap:8px;
+                                  background:var(--accent); color:#fff; padding:9px 18px;
+                                  border-radius:8px; font-size:15px; font-weight:600; }
+  header .serverbar a.screenbtn:hover { filter:brightness(1.12); }
   header .serverbar form { display:inline; }
   header .serverbar button { background:none; border:0; padding:0; color:var(--accent);
                              font:inherit; cursor:pointer; }
@@ -2182,9 +2187,11 @@ HTML = r"""<!doctype html>
          sit. Nothing is downloaded either way, nothing moves between folders, and only files
          this app downloaded are touched.</p>
     </div>
-    <p class="hint">1. <b>Login</b> opens a browser. Sign in yourself and leave it open.<br>
-       2. <b>Pilot</b> tests the newest few.<br>
-       3. <b>Run All</b> downloads everything you don't already have.</p>
+    <p class="hint">1. <span id="steplogin"><b>Login</b> opens a browser. Sign in yourself and leave it open.</span><br>
+       2. <b>Discover</b> shows what the provider has for you and downloads
+       nothing. It is optional, since Pilot and Run All look too.<br>
+       3. <b>Pilot</b> tests the newest few.<br>
+       4. <b>Run All</b> downloads everything you don't already have.</p>
     <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
        ↻ <b>Safe to re-run.</b> Run All and Resume skip any statement or receipt
        you've already downloaded. Nothing is ever fetched twice, even if you
@@ -3023,6 +3030,8 @@ function serverPage() {
     + 'gets a folder of its own, and nothing is downloaded until you ask.';
   $('newrootlabel').textContent = 'Where your downloads go';
   $('serverroot').style.display = 'block';
+  $('steplogin').innerHTML = '<b>Login</b> opens the provider\'s sign-in window on the '
+    + '<b>Browser Screen</b>, the button at the top. Sign in there yourself and leave it open.';
   $('newroot').readOnly = true;
   $('existinglink').style.display = 'none';
   $('failreveal').textContent = 'Download the file to attach';

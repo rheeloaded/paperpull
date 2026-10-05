@@ -35,7 +35,7 @@ See "Design safety" in [SECURITY.md](SECURITY.md).
 ## Treat it like a bank password
 
 Whoever has the password can use every site you are signed in to on the
-browser screen, as you. Choose one you use nowhere else, and keep it in your
+Browser Screen, as you. Choose one you use nowhere else, and keep it in your
 password manager.
 
 ## Keep it on your home network
@@ -64,7 +64,7 @@ password manager.
   Never run the container with `seccomp=unconfined` or `privileged`.
 - **Only the panel is on the network.** Each provider's browser debugging
   port and the screen sharing server listen inside the container only. The
-  browser screen reaches you through the panel, behind the password, on the
+  Browser Screen reaches you through the panel, behind the password, on the
   panel's one port.
 - **Chrome keeps no passwords.** Its password manager and card autofill are
   switched off by policy, since a container's browser profile has no

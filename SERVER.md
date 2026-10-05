@@ -82,7 +82,7 @@ Google.
 5. **Add your providers** from the panel. Each one gets a folder in the data
    folder.
 6. **Sign in.** Pick a provider and press Login. Its sign-in window opens on
-   the browser screen, which the **Browser screen** link at the top of the
+   the Browser Screen, which the **Browser Screen** button at the top of the
    panel opens. Sign in there as you would on a new computer, then come back
    to the panel and run Pilot, then Run All.
 
@@ -130,14 +130,14 @@ documents that run saved are copied into it.
 What happened is in each run's output, a line such as "Copied 3 new
 documents to Paperless".
 
-## Signing in on the browser screen
+## Signing in on the Browser Screen
 
 - **Pasting a password.** Open noVNC's side panel, the small tab on the left
-  edge of the browser screen, paste into its clipboard box, then press
+  edge of the Browser Screen, paste into its clipboard box, then press
   Ctrl+V in the page. Chrome on the server does not save passwords, so keep
   them in your own password manager.
 - **"Robot or human?"** Some providers check, especially Walmart. Press and
-  hold the button on the browser screen yourself. PaperPull never answers
+  hold the button on the Browser Screen yourself. PaperPull never answers
   one for you.
 - **How long you stay signed in** depends on the provider. In testing, Best
   Buy stayed signed in for more than a day and through a restart, Verizon
