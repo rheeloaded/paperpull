@@ -31,8 +31,10 @@ so with no EOB left and no Anthem tab open they stop the run too.
 import json
 import sys
 import threading
+from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
@@ -43,7 +45,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import anthem_docs as app_mod
 import anthem_site as site
 from paperpull_core import browser as browser_launcher
-from paperpull_core import run_reporting, testkit
+from paperpull_core import run_reporting, tabs, testkit
 from paperpull_core.models import State
 
 ANTHEM_HOST = "membersecure.anthem.test"
@@ -328,6 +330,75 @@ def test_with_no_eob_left_the_other_lists_stop_too_rather_than_read_as_empty(
     tabs = {t["id"]: t["url"] for t in testkit.tabs_of(attached)}
     assert tabs == {elsewhere: address(server, ELSEWHERE_HOST, "/inbox")}, \
         "the other site's tab is where it was, and no tab of the run's own is left behind"
+
+
+class _Context:
+    """The signed-in context, for the test below, which needs no browser."""
+
+    def __init__(self):
+        self.pages = []
+
+    def new_page(self):
+        tab = _Tab("about:blank", self)
+        self.pages.append(tab)
+        return tab
+
+
+class _Tab:
+    def __init__(self, url, context):
+        self.url, self.context, self.closed = url, context, False
+
+    def is_closed(self):
+        return self.closed
+
+    def close(self):
+        self.closed = True
+
+
+def test_a_member_document_is_never_fetched_from_a_tab_off_anthem(tmp_path, monkeypatch,
+                                                                  capsys):
+    """Member documents, ID cards and letters fetch each one through the tab
+    the EOBs use. When the person's Anthem tab has left Anthem after the list
+    was read, nothing is fetched through it and the run stops and says the
+    tab is not open. Each one was fetched through whatever tab page() still
+    held, another site's page included."""
+    monkeypatch.setattr(site, "is_anthem_owned",
+                        lambda url: urlsplit(url or "").hostname == ANTHEM_HOST)
+    context = _Context()
+    theirs = _Tab("https://www.elsewhere.test/inbox", context)
+    context.pages.append(theirs)
+    app = object.__new__(app_mod.App)
+    app.args = SimpleNamespace(redownload=False, dry_run=False)
+    app.progress = SimpleNamespace(get=lambda key: None, update=lambda *a, **k: None,
+                                   save=lambda **k: None)
+    app.stats = defaultdict(int, new_files=[], dates=[])
+    app.paths = SimpleNamespace(manual_review=tmp_path, other_documents=tmp_path)
+    app.config = {"max_path_length": 240, "min_pdf_bytes": 1000}
+    app.index_csv = SimpleNamespace(append_rows=lambda rows: None)
+    app._work_page = theirs
+
+    def page():
+        if app._work_page is None:
+            app._work_page = tabs.new_tab(context)
+        return app._work_page
+
+    app.page = page
+    fetched = []
+    row = {"label": "Summary of Benefits and Coverage", "key": "member:900000000000001",
+           "date": "2026-06-15", "folder_attr": "other_documents"}
+
+    code = "finished"
+    try:
+        app._save_collected("member documents", [row],
+                            lambda tab, r: fetched.append(tab.url) or b"")
+    except SystemExit as stopped:
+        code = stopped.code
+    out = capsys.readouterr().out
+
+    assert not fetched, "a member document was fetched through %s" % fetched
+    assert code == 0, "the run %s rather than stopping\n%s" % (code, out)
+    assert "The Anthem tab you signed in with is not open." in folded(out), out
+    assert theirs.url == "https://www.elsewhere.test/inbox" and not theirs.closed
 
 
 def test_their_tab_on_the_member_portal_is_still_the_one_used(attached, server, tmp_path,

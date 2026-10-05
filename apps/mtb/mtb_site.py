@@ -572,6 +572,20 @@ def collect_statement_rows(page) -> List[dict]:
     return rows
 
 
+def open_online_banking(page) -> bool:
+    """Online banking's own front page, loaded in a tab of the run's own so
+    the run has a tab on M&T's site when the person has none open. Never in
+    the person's own tab, where loading anything would wipe the statements
+    they listed (goto_documents). Each document is fetched by its own
+    address with the session's cookie (download_statement), so this is all
+    a document needs. False when it shows a sign-in."""
+    try:
+        page.goto(URLS["home"], wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        log.info("could not open online banking: %s", str(e).splitlines()[0][:90])
+    return not looks_signed_out(page)
+
+
 def ensure_statements(page) -> bool:
     """Only confirms you are still signed in, and never navigates.
 

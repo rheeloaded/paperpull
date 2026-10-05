@@ -720,6 +720,11 @@ class App:
             except Exception:
                 pass
             try:
+                # Asked for again before each purchase, so a Target tab of the
+                # person's that has left Target's site during the run is let go
+                # of rather than loaded back onto Target, and a tab of the run's
+                # own is used instead.
+                page = self.page()
                 self.process_one(page, purchase, dry_run=dry_run)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress is saved; run --resume to continue.")

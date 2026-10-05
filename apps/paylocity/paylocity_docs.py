@@ -453,17 +453,25 @@ class App:
         History has been loaded in this browser, so a tab of the person's on
         another page of the site is sent there first."""
         return tabs.on_its_site(self, site.is_safe_url, "Paylocity",
-                                self._open_documents, ready=site.on_pay_history)
+                                self._open_documents, ready=self._pay_history_open)
+
+    def _pay_history_open(self, page):
+        """Whether Pay History has been loaded in this run, or the tab is
+        showing it. Once it has loaded, the statements answer whichever page
+        of the site the tab is on, so the address it lands on is never
+        checked against the one this app knows."""
+        return getattr(self, "_pay_history_loaded", False) or site.on_pay_history(page)
 
     def _open_documents(self, page):
         """Paylocity's documents page, opened by its address the way discovery
         opens it."""
         if not site.goto_documents(page):
             self.check_session(page)
-            site.goto_documents(page)
+            if not site.goto_documents(page):
+                return
+        self._pay_history_loaded = True
 
     def process(self, docs: List[Document], dry_run: bool = False):
-        page = self.page()
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")

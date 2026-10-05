@@ -450,7 +450,6 @@ class App:
         return tabs.on_its_site(self, site.is_safe_url, "TSP")
 
     def process(self, docs: List[Document], dry_run: bool = False):
-        page = self.page()
         # Every row, so a capture can be checked against the ones it
         # could have come back with instead. Built once rather than per
         # document, because it is the same list every time.

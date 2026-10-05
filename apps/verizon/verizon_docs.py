@@ -496,7 +496,6 @@ class App:
         return tabs.on_its_site(self, site.is_safe_url, "Verizon")
 
     def process(self, docs: List[Document], dry_run: bool = False):
-        page = self.page()
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")

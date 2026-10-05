@@ -83,10 +83,11 @@ def on_its_site(app, on_its_host, provider: str, open_documents=None, ready=None
     `open_documents(tab)` opens the provider's documents page in a tab by
     its address, the way discovery does, and is given for a provider whose
     session is a cookie, which a new tab shares. `ready(tab)` is given when
-    the documents are taken from one page of the site and says the tab is
-    on it, and a tab on the site that is not there is sent there first.
-    Without `open_documents` the provider keeps its session in the tab the
-    person signed in with, which a new tab never has, so the run stops here
+    the documents need one page of the site, or something done there, and
+    says the tab has it, and a tab on the site without it is sent there
+    first. Without `open_documents` the provider keeps its session in the
+    tab the person signed in with, which a tab of the run's own never has,
+    even once something has loaded the site in it, so the run stops here
     and says so. It also stops when the page would not open on the site.
     Either way nothing is asked of the provider for this document, which is
     left as it was for the next run."""
@@ -95,10 +96,8 @@ def on_its_site(app, on_its_host, provider: str, open_documents=None, ready=None
         app._work_page = None
         page = app.page()
     there = on_site(page, on_its_host)
-    if there and (ready is None or ready(page)):
-        return page
     if open_documents is None:
-        if there:
+        if there and not is_own(page):
             return page
         _close_if_blank(page)
         stop(app, [
@@ -108,9 +107,12 @@ def on_its_site(app, on_its_host, provider: str, open_documents=None, ready=None
             "Open %s with login.bat, sign in, keep the window open, and run "
             "this again." % provider,
         ])
+    if there and (ready is None or ready(page)):
+        return page
     open_documents(page)
     if on_site(page, on_its_host) and (ready is None or ready(page)):
         return page
+    _close_if_blank(page)
     stop(app, [
         "Your %s documents page did not open, so nothing was asked of %s "
         "for this document." % (provider, provider),

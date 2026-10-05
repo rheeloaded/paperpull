@@ -444,21 +444,23 @@ class App:
     def _on_its_site(self):
         """The tab the next document is taken in, on M&T Bank's own site and
         never a tab of another site. M&T Bank keeps its session in a cookie
-        a new tab shares, so with no tab of the person's on the site the
-        documents page is opened in a tab of this run's own
+        a new tab shares, and each document is fetched by its own address
+        with that cookie, so with no tab of the person's on the site online
+        banking's front page is opened in a tab of this run's own
         (tabs.on_its_site)."""
         return tabs.on_its_site(self, site.is_safe_url, "M&T Bank",
                                 self._open_documents)
 
     def _open_documents(self, page):
-        """M&T Bank's documents page, opened by its address the way discovery
-        opens it."""
-        if not site.ensure_statements(page):
+        """Online banking's front page, opened by its address in a tab of this
+        run's own. The statement list is never opened by address, since only
+        the person's own View lists it (site.goto_documents), and a document
+        needs no more than a tab on the site to be fetched by its own
+        address."""
+        if not site.open_online_banking(page):
             self.check_session(page)
-            site.ensure_statements(page)
 
     def process(self, docs: List[Document], dry_run: bool = False):
-        page = self.page()
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")

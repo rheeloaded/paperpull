@@ -492,7 +492,6 @@ class App:
             site.ensure_statements(page)
 
     def process(self, docs: List[Document], dry_run: bool = False):
-        page = self.page()
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")

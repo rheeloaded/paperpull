@@ -51,13 +51,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   to open it with login.bat and run again, with nothing marked. Anthem's
   member documents, ID cards and letters stop the same way rather than come
   back empty. The other document apps open their documents page in a tab of
-  their own, the way Discover does, and Target works in a tab of its own when
-  no Target tab of yours is open. AAFMAA and Paylocity
-  also send a tab of yours that is on another page of their site to the
-  documents page first, so Paylocity's statements no longer come back empty
-  after a fresh sign-in. The tab you signed in with is still the one used
-  when it is open, and a tab of yours that leaves the provider's site during
-  a run is left as it is.
+  their own, the way Discover does, or for M&T Bank online banking's front
+  page, since its statement list is only ever the one you list. Target
+  works in a tab of its own when no Target tab of yours is open. AAFMAA and
+  Paylocity also send a tab of yours that is on another page of their site
+  to the documents page first, so Paylocity's statements no longer come
+  back empty after a fresh sign-in. The tab you signed in with is still the
+  one used when it is open, and a tab of yours that leaves the provider's
+  site during a run is left as it is.
 - **Home Depot reads every page of a purchase history longer than one
   page.** It asked Home Depot for twenty orders a page, whatever its own
   page asks for, and took a page with fewer for the last. Where Home Depot

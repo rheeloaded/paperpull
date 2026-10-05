@@ -152,11 +152,29 @@ def test_a_tab_of_the_runs_own_off_the_site_is_opened_on_it_again():
 
 
 def test_a_page_that_does_not_open_on_the_site_stops_the_run(capsys):
-    run, context = a_run()
+    run, context = a_run(ELSEWHERE)
     with pytest.raises(SystemExit) as stopped:
         tabs.on_its_site(run, on_its_host, "Provider", lambda tab: None)
     assert stopped.value.code == 0
     assert "documents page did not open" in capsys.readouterr().out
+    own = [t for t in context.pages if tabs.is_own(t)]
+    assert own and own[0].closed, "the blank tab the run opened is not left behind"
+    assert not context.pages[0].done, "the other site's tab was never touched"
+
+
+def test_a_tab_of_the_runs_own_is_never_taken_for_the_signed_in_tab(capsys):
+    """A provider that keeps its session in the tab the person signed in
+    with is never worked in a tab of the run's own, even once something,
+    discovery for one, has loaded the site in it, since that tab never
+    signed in."""
+    run, context = a_run(ELSEWHERE)
+    own = run.page()
+    assert tabs.is_own(own)
+    own.url = ON_SITE
+    with pytest.raises(SystemExit):
+        tabs.on_its_site(run, on_its_host, "Provider")
+    assert "The Provider tab you signed in with is not open." in capsys.readouterr().out
+    assert not own.closed, "a tab the run opened that is not blank is left for the person"
 
 
 def test_a_tab_on_the_site_but_not_on_the_page_the_documents_come_from_is_sent_there():
