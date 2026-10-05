@@ -118,8 +118,13 @@ class FakeSite:
         # "redirect" a 302 to the same document on another host.
         self.after_first = "pdf"
         self.handed = 0
+        # Whether a request for the document from outside the page, the
+        # app's second ask, is refused whatever the page's own requests get.
+        self.refuse_outside = False
 
 
+# The running test's fake site. The server fixture makes a new one for every
+# test and points this at it, and each server answers from its own.
 SITE = FakeSite()
 
 
@@ -139,20 +144,24 @@ class _Handler(BaseHTTPRequestHandler):
     def _noted(self):
         host = (self.headers.get("Host") or "").split(":")[0]
         path = urlsplit(self.path).path
-        SITE.seen.append((self.command, host, path, self.headers.get("Sec-Fetch-Mode")))
+        self.server.site.seen.append((self.command, host, path,
+                                      self.headers.get("Sec-Fetch-Mode")))
         return host, path
 
     def _document(self):
-        if SITE.handed and SITE.after_first == "gone":
+        fake = self.server.site
+        if fake.refuse_outside and self.headers.get("Sec-Fetch-Mode") is None:
+            self._send(b"refused", "text/plain", status=403)
+        elif fake.handed and fake.after_first == "gone":
             self._send(b"gone", "text/plain", status=410)
-        elif SITE.handed and SITE.after_first == "page":
+        elif fake.handed and fake.after_first == "page":
             self._send(b"<!doctype html><title>Signed out</title><p>Sign in again</p>",
                        "text/html; charset=utf-8")
-        elif SITE.handed and SITE.after_first == "redirect":
+        elif fake.handed and fake.after_first == "redirect":
             self._send(b"", "text/plain", status=302, extra=[(
                 "Location", "http://%s:%d/doc/0" % (ELSEWHERE_HOST, self.server.server_address[1]))])
         else:
-            SITE.handed += 1
+            fake.handed += 1
             self._send(STATEMENT, "application/pdf")
 
     def do_GET(self):
@@ -162,14 +171,14 @@ class _Handler(BaseHTTPRequestHandler):
             page = PAGE % {"target": TARGET, "elsewhere": "http://%s:%d" % (ELSEWHERE_HOST, port)}
             self._send(page.encode("utf-8"), "text/html; charset=utf-8")
         elif host == AAFMAA_HOST and path == "/gate":
-            self._send(b"open" if SITE.read else b"shut", "text/plain")
+            self._send(b"open" if self.server.site.read else b"shut", "text/plain")
         elif host == AAFMAA_HOST and path == "/handed":
-            SITE.handed_over = True
+            self.server.site.handed_over = True
             self._send(b"ok", "text/plain")
         elif host == AAFMAA_HOST and path == "/doc/0":
             self._document()
         elif host == ELSEWHERE_HOST and path == "/doc/0":
-            SITE.handed += 1
+            self.server.site.handed += 1
             self._send(STATEMENT, "application/pdf", extra=[
                 ("Access-Control-Allow-Origin", "http://%s:%d" % (AAFMAA_HOST, port))])
         else:
@@ -187,9 +196,17 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def server():
+    """A fake site of this test's own, a server on a port of its own with
+    its own state, so a request that outlives its test reaches only that
+    test's site. The flood's 400 requests outlived their test on a busy
+    machine, and while the tests shared one site, one that came in after
+    the next test began made that test's document look handed over
+    already, so its page was given the web page instead of the PDF."""
+    global SITE
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    httpd.site = SITE = FakeSite()
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield httpd.server_address[1]
     httpd.shutdown()
@@ -197,7 +214,7 @@ def server():
 
 
 @pytest.fixture(scope="module")
-def attached(server, tmp_path_factory):
+def attached(tmp_path_factory):
     pytest.importorskip("playwright.sync_api")
     found = browser_launcher.browser_candidates(mode=browser_launcher.BUNDLED)
     if not found:
@@ -215,7 +232,6 @@ def fake_aafmaa(server, monkeypatch):
     """Armed Forces Mutual is the made-up site, its own host the only one
     the app may ask, and the row is found where the pager walk would find
     it."""
-    SITE.reset()
     base = "http://%s:%d" % (AAFMAA_HOST, server)
     monkeypatch.setitem(site.URLS, "documents", base + DOCUMENTS_PATH)
     monkeypatch.setattr(site, "is_safe_url", lambda url: (
@@ -417,9 +433,13 @@ def test_a_page_that_answers_without_end_is_given_up_in_its_time(press, empty_re
     """The page asks for the document 400 times at once, and every answer
     reads empty. Each answer read costs the press one of its sixty looks,
     so the capture ends when its window does, having read no more answers
-    than the window has looks, and nothing is filed."""
+    than the window has looks, and nothing is filed. Every request of the
+    page's own is answered with the PDF, so the answers are all PDF answers,
+    and an ask from outside the page is refused, so how fast the answers
+    come cannot decide whether anything is filed."""
     empty_reads.which = is_the_document
     empty_reads.every = True
+    SITE.refuse_outside = True
     empty_reads.cap = 150
     saved, out = press("flood", quick=empty_reads.read)
     assert saved is False
