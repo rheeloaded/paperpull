@@ -7,6 +7,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **AAFMAA no longer gives up on a document when the first answer to its
+  View press holds no PDF.** The capture took the first answer that called
+  itself a PDF and, when that answer held none, marked the document for
+  manual review, although the same press went on to hand the PDF over a
+  moment later. A PDF the page reads before handing it over leaves its
+  answer empty in Playwright 1.63, which the packaged app runs, where 1.62
+  quietly asked AAFMAA for it again, and a PDF the browser shows in a tab
+  or a window answers first with the PDF viewer's own page. Now every such
+  answer is read in turn while the press keeps its full thirty seconds,
+  the download included, and when nothing more comes, an answer AAFMAA
+  gave to an ordinary request on its own site is asked for once more. A
+  postback is never sent twice, nothing is asked of another site, only a
+  PDF is kept, and it still has to carry its row's policy number.
+
 ## [0.43.0] - 2026-10-05
 
 PaperPull Server arrives, in beta, for an always-on machine at home

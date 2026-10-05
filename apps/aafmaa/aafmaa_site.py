@@ -81,6 +81,7 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import is_document as _is_document
 
 log = logging.getLogger("aafmaa_docs.site")
@@ -854,6 +855,44 @@ def _fresh_view_target(page, title: str, date_text: str, account: str) -> str:
     return ""
 
 
+# How long a press has to have been quiet, after an answer that called itself
+# a PDF and held none, before that answer's address is asked for once more.
+# The PDF the same press hands over another way came within 0.3 seconds in
+# every measured run, so this is ample, and asking too soon costs one more
+# request and nothing else.
+ASK_AGAIN_AFTER = 2.0
+
+
+def _answer_body(answer) -> bytes:
+    """The bytes the browser kept of an answer, or nothing when it kept none
+    or would not say."""
+    try:
+        return answer.body() or b""
+    except Exception as e:
+        log.info("could not read a PDF answer's body: %s", str(e).splitlines()[0][:90])
+        return b""
+
+
+def _what_it_held(data: bytes) -> str:
+    """A few words for the log on bytes that are not a PDF, never the bytes."""
+    if not data:
+        return "nothing"
+    if data.lstrip()[:1] == b"<":
+        return "a web page of %d bytes" % len(data)
+    return "%d bytes of something else" % len(data)
+
+
+def _may_ask_again(answer) -> bool:
+    """Whether an answer that held no PDF may be asked for once more. Only
+    an answer to a GET on Armed Forces Mutual's own host. A postback is a
+    POST and is never sent twice, and the browser's PDF viewer is no host
+    at all."""
+    try:
+        return answer.request.method == "GET" and is_safe_url(answer.url)
+    except Exception:
+        return False
+
+
 def download_document_row(page, title: str, date_text: str, account: str,
                           out_path) -> bool:
     """Click the row's View control and capture the PDF it produces.
@@ -861,8 +900,22 @@ def download_document_row(page, title: str, date_text: str, account: str,
     How the PDF arrives after the postback is not knowable in advance, so
     three channels are watched at once: a download event, a popup whose
     response is a PDF, and a PDF response in the page itself. Whichever
-    happens first wins. Bytes are kept only if they begin %PDF, or if a
+    brings a PDF first wins. Bytes are kept only if they begin %PDF, or if a
     download event brought a ZIP, which the docs module opens.
+
+    An answer that calls itself a PDF can hold none while the same press
+    hands the PDF over a moment later (measured 2026-10-05 in Chromium 153
+    attached over CDP). A PDF the page reads into a blob leaves its answer
+    empty under Playwright 1.63, and the download the page then makes holds
+    the bytes. Playwright 1.62 asked the address again by itself when an
+    answer came back empty, which hid this, and 1.63 no longer does for a
+    document, fetch or XHR answer. A PDF shown in a tab or a window answers
+    with the browser's own viewer page, 536 bytes of HTML, and the viewer's
+    own answer brings the PDF a tenth of a second later. So an answer that
+    holds no PDF is set aside and the press is listened to until its time
+    is up. Once the press has gone quiet, an answer to a GET on this site's
+    own host is asked for one more time with the session's cookies, and
+    those bytes are measured like any others.
     """
     _clear_leftover_dialog(page)
     target = _fresh_view_target(page, title, date_text, account)
@@ -884,7 +937,11 @@ def download_document_row(page, title: str, date_text: str, account: str,
         log.warning("refusing control %r", label[:60])
         return False
 
-    state = {"download": None, "pdf": None}
+    state = {"download": None}
+    # Every answer that calls itself a PDF, in the order they were heard.
+    # Only the first was kept, and when it held no PDF the capture ended
+    # there while the press went on to hand the PDF over (see above).
+    answers: list = []
     # Every window the press opens, not only the newest. Keeping one let a
     # press that opened two close the second and leave the first open.
     popups: list = []
@@ -894,8 +951,8 @@ def download_document_row(page, title: str, date_text: str, account: str,
 
     def on_response(r):
         try:
-            if state["pdf"] is None and                     "pdf" in (r.headers.get("content-type") or "").lower():
-                state["pdf"] = r
+            if "pdf" in (r.headers.get("content-type") or "").lower():
+                answers.append(r)
         except Exception:
             pass
 
@@ -912,6 +969,13 @@ def download_document_row(page, title: str, date_text: str, account: str,
     saved = False
     answered = False
     answer_tries = 0
+    # Answers that held no PDF, how many, the addresses that may be asked
+    # for once more and those already asked, and the look at which the last
+    # such answer was heard.
+    held_none = 0
+    again: list = []
+    asked: set = set()
+    quiet_from = 0.0
     try:
         try:
             link.first.click(timeout=15000)
@@ -936,21 +1000,40 @@ def download_document_row(page, title: str, date_text: str, account: str,
                 except Exception as e:
                     log.info("saving the download failed: %s", e)
                     break
-            elif state["pdf"] is not None:
-                try:
-                    data = state["pdf"].body()
-                except Exception as e:
-                    log.info("could not read the PDF response body: %s", e)
-                    state["pdf"] = None
-                    continue
+            elif answers:
+                answer = answers.pop(0)
+                # Each answer read costs a look, so a page that answers
+                # without end cannot hold the capture open.
+                deadline -= 0.5
+                data = _answer_body(answer)
                 if data.startswith(b"%PDF"):
                     out = Path(out_path)
                     out.parent.mkdir(parents=True, exist_ok=True)
                     out.write_bytes(data)
                     saved = True
+                    continue
+                held_none += 1
+                quiet_from = deadline
+                log.info("an answer called itself a PDF and held %s, so the press "
+                         "is listened to on", _what_it_held(data))
+                url = answer.url if _may_ask_again(answer) else ""
+                if url and url not in again and url not in asked:
+                    again.append(url)
+            elif again and quiet_from - deadline >= ASK_AGAIN_AFTER:
+                url = again.pop(0)
+                asked.add(url)
+                deadline -= 0.5
+                # The core asks only for an address is_safe_url passes, with
+                # the signed-in browser's cookies, and hands back only a PDF.
+                data = _core_fetch_pdf(page, url, is_safe_url) or b""
+                if data.startswith(b"%PDF"):
+                    out = Path(out_path)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_bytes(data)
+                    saved = True
+                    log.info("the PDF came when its address was asked for again")
                 else:
-                    log.warning("response called itself a PDF and was not")
-                    break
+                    log.info("its address, asked for again, gave no PDF")
             else:
                 if not answered and answer_tries < 3:
                     answer_tries += 1
@@ -958,7 +1041,11 @@ def download_document_row(page, title: str, date_text: str, account: str,
                 page.wait_for_timeout(500)
                 deadline -= 0.5
         if not saved and deadline <= 0:
-            log.info("no PDF arrived within 30s for %r", title[:50])
+            if held_none:
+                log.warning("%d answer(s) called themselves a PDF and held none, and no "
+                            "PDF came within 30s for %r", held_none, title[:50])
+            else:
+                log.info("no PDF arrived within 30s for %r", title[:50])
     finally:
         for event, fn in (("download", on_download), ("popup", on_popup),
                           ("response", on_response)):
