@@ -22,7 +22,8 @@ See "Design safety" in [SECURITY.md](SECURITY.md).
 - **Sessions.** Signing in gives your browser a random token in a cookie
   that the page's scripts cannot read and other sites cannot send. A
   session lasts 14 days, and ends sooner when the container restarts, the
-  password changes, or you sign out.
+  password changes, or you sign out. A Browser Screen left open closes
+  within seconds of its session ending.
 - **Wrong guesses wait.** After five wrong passwords or setup codes from one
   address, each next try waits, twice as long each time, up to a quarter of
   an hour.

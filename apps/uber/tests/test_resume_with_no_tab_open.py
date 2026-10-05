@@ -544,6 +544,41 @@ def test_a_tab_that_leaves_the_site_partway_is_opened_on_it_again(attached, tmp_
         "the trips page was opened again for the second trip"
 
 
+def test_a_tab_of_theirs_that_leaves_the_site_is_let_go_of(attached, server, tmp_path, capsys,
+                                                          monkeypatch):
+    """The person took their trips tab to another page after the first
+    trip's receipt. The tab is theirs, so it is let go of where they took
+    it, never loaded back onto Uber, and the next trip opens the trips page
+    in a tab of the run's own. The trips page was loaded into their tab."""
+    trips = "http://%s:%d/trips?tab=theirs" % (RIDERS_HOST, server)
+    their_trips = open_their_tab(attached, trips, "My Trips")
+    open_their_tab(attached, "http://%s:%d/orders?tab=theirs" % (EATS_HOST, server), "Past Orders")
+    finished_run(tmp_path, attached, capsys, "--discover")
+
+    real_fetch = site.fetch_pdf
+    left = []
+
+    def fetch_then_leave(page, path, side=site.RIDES):
+        got = real_fetch(page, path, side)
+        if side == site.RIDES and not left:
+            left.append(path)
+            page.goto("about:blank")
+        return got
+
+    monkeypatch.setattr(site, "fetch_pdf", fetch_then_leave)
+    SITE.seen.clear()
+    out = finished_run(tmp_path, attached, capsys, "--resume")
+
+    assert left, "their trips tab left the site after the first receipt"
+    assert downloaded(tmp_path) == sorted(RIDES_KEYS + EATS_KEYS), folded(out)
+    assert [t["url"] for t in tabs(attached) if t["id"] == their_trips] == ["about:blank"], \
+        "their tab is still open where they took it, never loaded back onto Uber"
+    from_theirs = [referer == trips for host, referer in receipt_calls() if host == RIDERS_HOST]
+    assert from_theirs[0] and not from_theirs[-1] \
+        and from_theirs == sorted(from_theirs, reverse=True), \
+        "trips were asked from their tab until it left, and from the run's own after"
+
+
 def test_a_dry_run_resume_opens_no_page(attached, tmp_path, capsys):
     """A dry run asks Uber for nothing, and that holds for the pages too."""
     finished_run(tmp_path, attached, capsys, "--discover")

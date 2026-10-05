@@ -502,6 +502,39 @@ def test_a_tab_that_leaves_the_site_partway_is_opened_on_it_again(attached, tmp_
     assert len(report_pages_loaded()) == 2, "Report a Problem was opened again for the second"
 
 
+def test_a_tab_of_theirs_that_leaves_the_site_is_let_go_of(attached, server, tmp_path, capsys,
+                                                          monkeypatch):
+    """The person took their Report a Problem tab to another page after the
+    first receipt. The tab is theirs, so it is let go of where they took it,
+    never loaded back, and the next purchase opens Report a Problem in a tab
+    of the run's own. Report a Problem was loaded into their tab."""
+    address = "http://%s:%d/?tab=theirs" % (REPORT_HOST, server)
+    theirs = open_their_tab(attached, address, "Report a Problem")
+    finished_run(tmp_path, attached, capsys, "--discover")
+
+    real_fetch = site.fetch_invoice
+    left = []
+
+    def fetch_then_leave(page, weborder, dsid):
+        got = real_fetch(page, weborder, dsid)
+        if not left:
+            left.append(weborder)
+            page.goto("about:blank")
+        return got
+
+    monkeypatch.setattr(site, "fetch_invoice", fetch_then_leave)
+    SITE.seen.clear()
+    out = finished_run(tmp_path, attached, capsys, "--resume")
+
+    assert left, "their tab left Report a Problem after the first receipt"
+    assert downloaded(tmp_path) == ALL_KEYS, folded(out)
+    assert [t["url"] for t in tabs(attached) if t["id"] == theirs] == ["about:blank"], \
+        "their tab is still open where they took it, never loaded back"
+    asked_from = receipt_calls()
+    assert asked_from[0] == address and "tab=theirs" not in "".join(asked_from[1:]), \
+        "the first receipt was asked from their tab and the rest from the run's own"
+
+
 def test_a_dry_run_resume_opens_no_page(attached, tmp_path, capsys):
     """A dry run asks Apple for nothing, and that holds for the pages too."""
     finished_run(tmp_path, attached, capsys, "--discover")

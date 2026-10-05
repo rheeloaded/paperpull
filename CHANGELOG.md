@@ -75,12 +75,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   new blank tab, every request was refused before it was sent, and each
   purchase was recorded failed with "No receipt came back", run after run.
   Resume now opens the trips page, the Uber Eats orders page or Report a
-  Problem first, the way Discover does, and again whenever the tab has
-  left the site partway through. A side that asks for a sign-in or shows a
-  check there stops with its tab left open, as in Discover. A tab of yours
-  already on the site is still the one used, and it is never reloaded or
-  closed. Pilot and Run All were not affected, since they read the lists
-  in the same run.
+  Problem first, the way Discover does, and again whenever a tab the run
+  opened has left the site partway through. A side that asks for a sign-in
+  or shows a check there stops with its tab left open, as in Discover. A
+  tab of yours already on the site is still the one used, and it is never
+  reloaded or closed, and a tab of yours that leaves the site during a run
+  is let go of where you took it, never loaded back, with the next receipt
+  asked for from a tab of the run's own. Pilot and Run All were not
+  affected, since they read the lists in the same run.
 - **Meijer records each store receipt once, and waits for the In-Store
   receipts to show.** On a page that keeps the In-Store receipts while
   Online Orders is shown, hidden rather than removed, discovery read every

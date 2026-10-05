@@ -49,6 +49,9 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 SESSION_COOKIE = "paperpull_session"
 SESSION_SECONDS = 14 * 86400
+# How often an open Browser Screen asks whether its session still holds, so
+# signing out, a new password or reset_password.py ends it within seconds.
+SCREEN_CHECK_SECONDS = 3
 MIN_PASSWORD = 10
 # scrypt's cost. About 16 MB and a few tenths of a second per guess.
 SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1}
@@ -434,11 +437,16 @@ def install(app) -> None:
             return RedirectResponse("/setup", status_code=303)
         if not same_origin(dict(request.headers)):
             return refused(login_body("That request did not come from this page."), 403)
+        # The body is read before the wait is looked at. Read after it, many
+        # logins whose headers came at once all passed the wait together,
+        # before any of them was counted wrong. From here to the count
+        # nothing waits, so each is judged after the one before it.
+        given = await form(request)
         client = request.client.host if request.client else "?"
         wait = wait_left(client)
         if wait:
             return refused(login_body("Too many wrong passwords. Try again in %d seconds." % wait), 429)
-        if not check_password((await form(request)).get("password", "")):
+        if not check_password(given.get("password", "")):
             note_failure(client)
             return refused(login_body("That is not the password."))
         note_success(client)
@@ -459,11 +467,12 @@ def install(app) -> None:
             return RedirectResponse("/login", status_code=303)
         if not same_origin(dict(request.headers)):
             return refused(setup_body("That request did not come from this page."), 403)
+        # Read before the wait is looked at, as at /login.
+        given = await form(request)
         client = request.client.host if request.client else "?"
         wait = wait_left(client)
         if wait:
             return refused(setup_body("Too many wrong codes. Try again in %d seconds." % wait), 429)
-        given = await form(request)
         code = given.get("code", "").strip().upper()
         if not hmac.compare_digest(code.encode(), setup_code().encode()):
             note_failure(client)
@@ -506,6 +515,11 @@ def install(app) -> None:
         if not enabled():
             await websocket.close(code=1008)
             return
+        # The gate let this connection in on its session, and the screen is
+        # live keyboard and mouse on every provider signed in there, so the
+        # session is asked again every few seconds and the screen closes once
+        # it has ended, by signing out, a new password or reset_password.py.
+        token = websocket.cookies.get(SESSION_COOKIE, "")
         asked = websocket.headers.get("sec-websocket-protocol", "")
         await websocket.accept(subprotocol="binary" if "binary" in asked else None)
         try:
@@ -513,8 +527,9 @@ def install(app) -> None:
         except OSError:
             await close_quietly(websocket, 1011)
             return
-        await bridge(websocket.receive, websocket.send_bytes, reader, writer)
-        await close_quietly(websocket)
+        await bridge(websocket.receive, websocket.send_bytes, reader, writer,
+                     allowed=lambda: session_valid(token))
+        await close_quietly(websocket, 1000 if session_valid(token) else 1008)
 
 
 # -- after a run, the plug-ins ----------------------------------------------------------
@@ -633,13 +648,18 @@ async def close_quietly(websocket, code: int = 1000) -> None:
         pass
 
 
-async def bridge(receive, send_bytes, reader, writer) -> None:
+async def bridge(receive, send_bytes, reader, writer, allowed=None) -> None:
     """Carry the browser screen's bytes both ways until either side ends.
 
     noVNC speaks the screen sharing protocol over a WebSocket, and the
     screen sharing server speaks it over plain TCP, so each message from
     the page goes to the server as it is, and each block from the server
-    goes back as one binary message."""
+    goes back as one binary message. When `allowed` is given it is asked
+    every SCREEN_CHECK_SECONDS, and the bridge ends once it says no."""
+    async def watch():
+        while allowed():
+            await asyncio.sleep(SCREEN_CHECK_SECONDS)
+
     async def to_screen():
         while True:
             message = await receive()
@@ -659,6 +679,8 @@ async def bridge(receive, send_bytes, reader, writer) -> None:
             await send_bytes(data)
 
     tasks = [asyncio.ensure_future(to_screen()), asyncio.ensure_future(to_page())]
+    if allowed is not None:
+        tasks.append(asyncio.ensure_future(watch()))
     try:
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:

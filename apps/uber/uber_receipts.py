@@ -715,6 +715,19 @@ class App:
         on_site = site.on_riders_page if side == RIDES else site.on_eats_page
         if on_site(tab):
             return tab
+        if self._cdp_mode and tab is not None and tab not in self._opened:
+            # A tab of the person's that has left the site is theirs, and it
+            # is let go of where they took it, never loaded back onto Uber,
+            # the rule core's tabs module gives every app. Another tab of
+            # theirs on the site is taken, or one of the run's own is opened
+            # on the list page below.
+            if side == RIDES:
+                self._work_page = None
+            else:
+                self._eats_page = None
+            fresh = self.page() if side == RIDES else self.eats_page()
+            if on_site(fresh):
+                return fresh
         return self._open(side)
 
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):

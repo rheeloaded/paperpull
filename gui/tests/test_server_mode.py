@@ -360,6 +360,102 @@ def test_a_closed_screen_tab_ends_its_connection_quietly(on_server, monkeypatch)
     run(scenario())
 
 
+@pytest.mark.parametrize("end", ["signing out", "a new password", "the reset tool"])
+def test_an_open_browser_screen_closes_once_its_session_ends(on_server, monkeypatch, end):
+    """The gate looks at the session when the Browser Screen connects, and
+    the connection then carried keyboard and mouse until one side closed.
+    Signing out, a new password and reset_password.py all left a screen
+    already open working, on every provider signed in there. It now closes
+    within seconds of any of them, and stays open while the session holds."""
+    from fastapi import FastAPI
+    monkeypatch.setattr(server_mode, "SCREEN_CHECK_SECONDS", 0.05)
+    server_mode.set_password(PASSWORD)
+
+    async def scenario():
+        connected = asyncio.Event()
+
+        async def screen_sharing(reader, writer):
+            connected.set()
+            await reader.read()
+            writer.close()
+
+        sharing = await asyncio.start_server(screen_sharing, "127.0.0.1", 0)
+        monkeypatch.setenv("PAPERPULL_VNC_PORT", str(sharing.sockets[0].getsockname()[1]))
+        app = FastAPI()
+        server_mode.install(app)
+        token = server_mode.new_session()
+        from_page = [{"type": "websocket.connect"}]
+        sent = []
+
+        async def receive():
+            if from_page:
+                return from_page.pop()
+            await asyncio.Event().wait()     # the page says nothing more
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {"type": "websocket", "path": "/screen/websockify", "query_string": b"",
+                 "headers": [(b"host", b"nas.local:8765"), (b"origin", b"http://nas.local:8765"),
+                             (b"cookie", ("%s=%s" % (server_mode.SESSION_COOKIE, token)).encode())]}
+        screen = asyncio.ensure_future(app(scope, receive, send))
+        try:
+            await asyncio.wait_for(connected.wait(), 10)
+            await asyncio.sleep(0.3)
+            assert not screen.done(), "the screen stays open while its session holds"
+            if end == "signing out":
+                server_mode.end_session(token)
+            elif end == "a new password":
+                server_mode.set_password(PASSWORD + " changed")
+            else:
+                settings = server_mode._read()
+                del settings["password"]
+                server_mode._write(settings)
+            await asyncio.wait_for(screen, 5)
+        finally:
+            screen.cancel()
+            sharing.close()
+        return sent
+
+    sent = run(scenario())
+    assert sent[-1] == {"type": "websocket.close", "code": 1008, "reason": ""}
+
+
+def test_wrong_passwords_sent_at_once_still_wait(base, on_server):
+    """The wait after wrong passwords was looked at before a login's body
+    came in, so logins whose headers all arrived first passed it together
+    and guesses were limited only by how fast scrypt runs. Each is judged
+    once its body is in now, after the one before it was counted."""
+    server_mode.set_password(PASSWORD)
+    port = int(base.rsplit(":", 1)[1])
+    body = b"password=not+the+password"
+    head = ("POST /login HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nOrigin: %s\r\n"
+            "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n"
+            "Connection: close\r\n\r\n" % (port, base, len(body))).encode()
+    tries = 12
+    socks = [socket.create_connection(("127.0.0.1", port), timeout=60) for _ in range(tries)]
+    try:
+        for s in socks:
+            s.sendall(head)
+        time.sleep(0.5)    # every login's headers are in before any body
+        for s in socks:
+            s.sendall(body)
+        statuses = []
+        for s in socks:
+            answer = b""
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                answer += chunk
+            statuses.append(int(answer.split(b" ", 2)[1]))
+    finally:
+        for s in socks:
+            s.close()
+    assert statuses.count(401) <= server_mode.FREE_TRIES, statuses
+    assert statuses.count(429) == tries - statuses.count(401), statuses
+
+
 def test_the_screen_bridge_carries_bytes_both_ways():
     """The page's messages reach the screen sharing server as they are, and
     what the server sends comes back as binary messages, until the page

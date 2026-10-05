@@ -763,6 +763,16 @@ class App:
         page = self.page()
         if site.on_report_page(page):
             return page
+        if self._cdp_mode and page not in self._opened:
+            # A tab of the person's that has left Report a Problem is theirs,
+            # and it is let go of where they took it, never loaded back, the
+            # rule core's tabs module gives every app. Another tab of theirs
+            # on Report a Problem is taken, or one of the run's own is opened
+            # there below.
+            self._work_page = None
+            page = self.page()
+            if site.on_report_page(page):
+                return page
         ready = site.open_report_page(page)
         if not ready and not site.session_alive(page):
             self._signed_out(APP_STORE, page)
