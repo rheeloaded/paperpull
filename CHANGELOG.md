@@ -7,7 +7,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.43.0] - 2026-10-05
+
+PaperPull Server arrives, experimental, for an always-on machine at home
+next to Paperless-ngx, with a setup guide and privacy and security pages
+of its own. No app reads, clicks or takes over a tab of another site
+anymore. Ten more receipt apps and forty-one document apps no longer call
+a page signed in when their list did not come, and Kroger, Best Buy, Home
+Depot, Uber and Apple no longer finish clean when their purchase list
+stops partway. Home Depot reads every page of a long history, Meijer
+records each store receipt once, Uber and Apple download on Resume with
+no tab open, and State Farm is confirmed.
 
 ### Added
 - **PaperPull Server, experimental.** PaperPull can run on an always-on
