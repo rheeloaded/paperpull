@@ -294,7 +294,7 @@ def _start_browser(exe, profile):
 
     It starts with no window of its own, so its only tab is the one opened
     here. The blank tab a fresh browser starts with sometimes never closed,
-    or was never listed, and the app works in the first tab it finds."""
+    or was never listed, and the app worked in the first tab it found."""
     proc = subprocess.Popen(
         [exe, "--headless=new", "--remote-debugging-port=0",
          "--user-data-dir=%s" % profile, "--disable-extensions", "--disable-sync",

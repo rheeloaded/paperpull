@@ -242,9 +242,14 @@ def attached(tmp_path_factory, server):
 
 @pytest.fixture(autouse=True)
 def fake_target(server, monkeypatch):
+    """The made-up site stands in for Target's own, so the tab Login opened
+    on it is a tab on Target's site, the one the app works in."""
     SITE.reset()
     monkeypatch.setitem(site.URLS, "orders", server + "/orders")
     monkeypatch.setitem(site.URLS, "home", server + "/")
+    real = site.is_safe_url
+    monkeypatch.setattr(site, "is_safe_url",
+                        lambda url: (url or "").startswith(server + "/") or real(url))
     return SITE
 
 

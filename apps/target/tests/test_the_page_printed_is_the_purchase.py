@@ -196,9 +196,10 @@ def attached(browser_exe, tmp_path_factory):
     testkit.drawn_browser hands it over only once a tab has drawn a page,
     since a browser that has only just started can abort its first
     navigation, and this test's first goto came back net::ERR_ABORTED on
-    CI that way (run 37123796050). Target works in the first tab it finds,
-    the one the person signed in with at home, so the tab that drew is the
-    browser's only tab."""
+    CI that way (run 37123796050). The tab that drew is the browser's only
+    tab, as it was while Target worked in the first tab it found. Target now
+    works in the tab the person signed in with on its own site, or else in a
+    tab of its own."""
     try:
         with testkit.drawn_browser(browser_exe, lambda: tmp_path_factory.mktemp("attached-profile"),
                                    args=(NO_HOSTS,), only_tab=True) as url:

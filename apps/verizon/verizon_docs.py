@@ -23,6 +23,7 @@ from __future__ import annotations
 from paperpull_core import failure
 from paperpull_core import capture
 from paperpull_core import renaming
+from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -222,9 +223,12 @@ class App:
             # would be unauthenticated and would also trip Verizon's bot block.
             # Matched on parsed host, not substring: "provider.com" in the
             # URL also matches "provider.com.phish.example".
+            # With no tab of the person's on the site, a tab of this run's own
+            # is opened, never a tab of another site, and the first document
+            # stops the run and says so (tabs.on_its_site).
             live = [p for p in ctx.pages if not p.is_closed()]
             dom = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = dom[0] if dom else (live[0] if live else ctx.new_page())
+            self._work_page = dom[0] if dom else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # Downloads (from the real Edge/Chrome we attach to) bypass Playwright's
@@ -484,6 +488,13 @@ class App:
 
     # -- processing --------------------------------------------------------
 
+    def _on_its_site(self):
+        """The tab the next document is taken in, on Verizon's own site and
+        never a tab of another site. Verizon keeps its session in the tab it
+        was signed in with, so with no tab of the person's on the site the
+        run stops here and says so (tabs.on_its_site)."""
+        return tabs.on_its_site(self, site.is_safe_url, "Verizon")
+
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
         for i, doc in enumerate(docs, 1):
@@ -505,6 +516,7 @@ class App:
             except Exception:
                 pass
             try:
+                page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")

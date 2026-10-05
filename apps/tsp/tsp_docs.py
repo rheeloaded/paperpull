@@ -27,6 +27,7 @@ from paperpull_core import delivery
 from paperpull_core import identity
 from paperpull_core import failure
 from paperpull_core import renaming
+from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -208,14 +209,12 @@ class App:
             # Matched by parsed host, not by substring: "tsp.com" in the URL
             # would also accept nottsp.com.example, and would have picked an
             # unrelated tab as the work page when no TSP tab was open.
+            # With no tab of the person's on the site, a tab of this run's own
+            # is opened, never a tab of another site, and the first document
+            # stops the run and says so (tabs.on_its_site).
             live = [p for p in ctx.pages if not p.is_closed()]
             mine = [p for p in live if site.is_safe_url(p.url or "")]
-            if mine:
-                self._work_page = mine[0]
-            else:
-                log.warning("No TSP tab is open. Sign in with login.bat and "
-                            "leave the statements page open.")
-                self._work_page = live[0] if live else ctx.new_page()
+            self._work_page = mine[0] if mine else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self.requests
@@ -443,6 +442,13 @@ class App:
 
     # -- processing --------------------------------------------------------
 
+    def _on_its_site(self):
+        """The tab the next document is taken in, on TSP's own site and never a
+        tab of another site. TSP keeps its session in the tab it was signed
+        in with, so with no tab of the person's on the site the run stops
+        here and says so (tabs.on_its_site)."""
+        return tabs.on_its_site(self, site.is_safe_url, "TSP")
+
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
         # Every row, so a capture can be checked against the ones it
@@ -468,6 +474,7 @@ class App:
             except Exception:
                 pass
             try:
+                page = self._on_its_site()
                 self.download_one(
                     page, doc, filename,
                     rivals=identity.rivals_for(all_rows, i - 1))

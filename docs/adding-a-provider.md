@@ -250,6 +250,17 @@ open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 - **SPA vs server session.** If `page.goto` logs you out, the session lives in an
   in-memory token, navigate by **clicking** the app's own links and reuse the
   signed-in tab (see `amex`). If `goto` is fine, use URLs (most providers).
+- **Never work in a tab of another site.** The browser an app attaches to is
+  the person's own, with whatever tabs they have open. `page()` takes their
+  tab on the provider's own host when one is open and otherwise a new tab of
+  the run's own from `paperpull_core.tabs.new_tab`, never the first tab it
+  finds. `process()` asks `tabs.on_its_site` for the tab before each
+  document. A provider whose session is a cookie passes it a way to open its
+  documents page by address, and one that keeps its session in the tab it
+  was signed in with passes none, so Resume with that tab closed stops and
+  says so rather than reading or clicking whatever page is open.
+  `core/tests/test_no_app_acts_on_another_sites_tab.py` holds every app to
+  both.
 - **Short sessions.** Some bank portals expire fast and the SPA keeps showing a
   cached page while download clicks silently no-op. Detect it (a hard reload
   bounces to the login URL) and report it so `--resume` retries after re-login

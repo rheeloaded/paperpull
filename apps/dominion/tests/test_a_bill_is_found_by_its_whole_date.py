@@ -264,6 +264,10 @@ def _app(tmp_path):
     app.progress, app.discovery, app.index_csv = _Records(), _Records(), _Records()
     app._journal = Journal()
     app.check_session = lambda page: None
+    # The page here is on a made-up host, not the provider's, so the
+    # check that the tab is on the provider's own site
+    # (tabs.on_its_site) is stood in for too.
+    app._on_its_site = lambda: app.page()
     app._delay = lambda *a, **kw: None
     app.write_failure = lambda *a, **kw: None
     return app

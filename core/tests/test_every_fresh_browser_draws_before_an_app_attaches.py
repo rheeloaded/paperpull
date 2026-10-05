@@ -23,7 +23,7 @@ beside it, and a string holding a whole command line, and only a docstring,
 an assert or a comparison is left out. This file names the argument and
 starts no browser, so it is left out too.
 
-An app that works in the first tab it finds, as Target does, rather than
+An app that works in the first tab it finds, as Target did, rather than
 in a tab it opens for itself, is handed the browser with only_tab, so that
 the tab that drew is the only one it can find.
 
@@ -487,19 +487,21 @@ def test_the_shared_helper_is_held_to_the_same_check():
 
 
 def test_the_apps_that_work_in_the_first_tab_they_find_are_known():
-    """Target's page() takes the first tab when attached, where every other
-    app opens a tab of its own. One that starts taking the first tab is
-    named here, so that its tests are handed the drawn tab alone."""
-    assert sorted(FIRST_TAB) == ["target"], FIRST_TAB
+    """No app takes the first tab when attached. Target's page() did until
+    it took the tab on Target's own site or else a tab of its own, never a
+    tab of another site (tabs.new_tab). One that starts taking the first
+    tab is named here, so that its tests are handed the drawn tab alone."""
+    assert sorted(FIRST_TAB) == [], FIRST_TAB
 
 
-@pytest.mark.parametrize("name", sorted(n for n in DRAWN if n.split("/")[0] == "apps"
-                                        and n.split("/")[1] in FIRST_TAB))
-def test_an_app_that_works_in_the_first_tab_it_finds_is_handed_the_drawn_tab_alone(name):
-    calls = DRAWN[name].drawn_calls
-    assert all(only_tab(call) for call in calls), (
-        "%s works in the first tab it finds, %s. Hand it the browser with "
-        "testkit.drawn_browser(..., only_tab=True)" % (name.split("/")[1], FIRST_TAB[name.split("/")[1]]))
+def test_an_app_that_works_in_the_first_tab_it_finds_is_handed_the_drawn_tab_alone():
+    for name in sorted(n for n in DRAWN if n.split("/")[0] == "apps"
+                       and n.split("/")[1] in FIRST_TAB):
+        calls = DRAWN[name].drawn_calls
+        assert all(only_tab(call) for call in calls), (
+            "%s works in the first tab it finds, %s. Hand it the browser with "
+            "testkit.drawn_browser(..., only_tab=True)"
+            % (name.split("/")[1], FIRST_TAB[name.split("/")[1]]))
 
 
 # Fixtures for the census itself. The first is the shape of the six page

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import renaming
+from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -222,7 +223,10 @@ class App:
             # Prefer a member-portal (data-host) tab, but accept any Anthem-owned
             # tab (e.g. a www.anthem.com landing tab) - the site layer steers it to
             # the member EOB center to capture the session. Matched by parsed host,
-            # not by substring, so a lookalike cannot be picked.
+            # not by substring, so a lookalike cannot be picked. With no Anthem
+            # tab of the person's open, a tab of this run's own is opened, never
+            # a tab of another site, and the first document stops the run and
+            # says so (tabs.on_its_site).
             live = [p for p in ctx.pages if not p.is_closed()]
             member = [p for p in live if site.is_safe_url(p.url or "")]
             owned = [p for p in live if site.is_anthem_owned(p.url or "")]
@@ -231,9 +235,7 @@ class App:
             elif owned:
                 self._work_page = owned[0]
             else:
-                log.warning("No Anthem tab is open. Sign in with login.bat and "
-                            "leave the member portal tab open.")
-                self._work_page = live[0] if live else ctx.new_page()
+                self._work_page = tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self.requests
@@ -457,6 +459,13 @@ class App:
 
     # -- processing --------------------------------------------------------
 
+    def _on_its_site(self):
+        """The tab the next document is taken in, on Anthem's own site and
+        never a tab of another site. Anthem keeps its session in the tab it
+        was signed in with, so with no tab of the person's on the site the
+        run stops here and says so (tabs.on_its_site)."""
+        return tabs.on_its_site(self, site.is_anthem_owned, "Anthem")
+
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
         for i, doc in enumerate(docs, 1):
@@ -478,6 +487,7 @@ class App:
             except Exception:
                 pass
             try:
+                page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
@@ -724,7 +734,7 @@ class App:
                 print(f"  DRY RUN - would save: {build_pdf_filename(fdate, label, '', record=r)}")
                 continue
             try:
-                pdf = fetch_fn(self.page(), r)
+                pdf = fetch_fn(self._on_its_site(), r)
             except site.SessionExpired:
                 self._session_expired()
                 return
@@ -793,7 +803,11 @@ class App:
         each document is downloaded by a URL built from its validated coverage
         period and type."""
         print("\nMember documents (all coverage years)...")
-        page = self.page()
+        # The tab the EOBs are taken in, on Anthem's own site, and the same
+        # for ID cards and letters. With no Anthem tab of the person's open
+        # the run stops and says so, rather than list nothing from a blank
+        # tab and call it empty (tabs.on_its_site).
+        page = self._on_its_site()
         self.check_session(page)
         try:
             rows = site.list_member_documents(page)
@@ -813,7 +827,7 @@ class App:
         back). Fetched by the idcard microapp API; nothing is clicked or ordered.
         The patient name rides into the filename so a family's cards stay apart."""
         print("\nID / insurance cards...")
-        page = self.page()
+        page = self._on_its_site()
         self.check_session(page)
         try:
             rows = site.list_id_cards(page)
@@ -833,7 +847,7 @@ class App:
         the message list already carries each body, so no message is opened and no
         read flag is ever changed - the tool never marks a message read."""
         print("\nLetters (Message Center)...")
-        page = self.page()
+        page = self._on_its_site()
         self.check_session(page)
         try:
             rows = site.list_letters(page)

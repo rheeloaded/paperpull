@@ -49,6 +49,9 @@ def _app(tmp_path, monkeypatch):
     failures = []
     app.page = lambda: object()
     app.check_session = lambda page: None
+    # The tab here is a stand-in with no address, so the check that it is
+    # on the provider's own site (tabs.on_its_site) is stood in for too.
+    app._on_its_site = lambda: app.page()
     app._delay = lambda *a, **kw: None
     app._already_done = lambda doc: False
     app.write_failure = lambda *a, **kw: failures.append(a)

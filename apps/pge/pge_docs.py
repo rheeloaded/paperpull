@@ -38,6 +38,7 @@ from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core import failure
 from paperpull_core import renaming
+from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -209,11 +210,12 @@ class App:
             live = [p for p in ctx.pages if not p.is_closed()]
             # The tab already on the bill history is preferred, then any
             # PG&E tab. Anything else in that browser is left alone, and a
-            # fresh tab is opened rather than borrowing one.
+            # fresh tab of this run's own is opened rather than borrowing one
+            # (tabs.new_tab).
             pge_tabs = [p for p in live if site.is_safe_url(p.url or "")]
             portal_tabs = [p for p in pge_tabs if "bill-and-payment-history" in (p.url or "")]
             chosen = portal_tabs or pge_tabs
-            self._work_page = chosen[0] if chosen else ctx.new_page()
+            self._work_page = chosen[0] if chosen else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self.requests
@@ -400,6 +402,21 @@ class App:
 
     # -- processing --------------------------------------------------------
 
+    def _on_its_site(self):
+        """The tab the next document is taken in, on PG&E's own site and never
+        a tab of another site. PG&E keeps its session in a cookie a new tab
+        shares, so with no tab of the person's on the site the documents
+        page is opened in a tab of this run's own (tabs.on_its_site)."""
+        return tabs.on_its_site(self, site.is_safe_url, "PG&E",
+                                self._open_documents)
+
+    def _open_documents(self, page):
+        """PG&E's documents page, opened by its address the way discovery opens
+        it."""
+        if not site.goto_documents(page):
+            self.check_session(page)
+            site.goto_documents(page)
+
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
         for i, doc in enumerate(docs, 1):
@@ -421,6 +438,7 @@ class App:
             except Exception:
                 pass
             try:
+                page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")

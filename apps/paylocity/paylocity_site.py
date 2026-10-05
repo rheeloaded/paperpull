@@ -223,6 +223,19 @@ def goto_documents(page) -> bool:
     return not looks_signed_out(page)
 
 
+def on_pay_history(page) -> bool:
+    """Whether the tab is showing the Pay History screen. Loading it is what
+    sets the session the JSON endpoints answer to (goto_documents), so a tab
+    showing it has done that in this browser's session. A tab on the sign-in
+    host or anywhere else on the site has not, and the endpoints then answer
+    every statement with nothing."""
+    try:
+        url = page.url or ""
+        return is_safe_url(url) and "/employeeinformation/payhistory/" in url.lower()
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # The pay area, driven by the same JSON endpoints the Escher "Pay History"
 # React app uses. CONFIRMED against a live account 2026-08-22.

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import renaming
+from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -225,12 +226,14 @@ class App:
             # means the app never sees the page you left open for it, so a
             # wrong URL guess has nothing to fall back to and diagnose reports
             # about:blank, which is exactly what happened on the first run.
+            # With none open, a tab of this run's own is opened, never a tab
+            # of another site, and the documents page is opened in it before
+            # the first document (tabs.new_tab, tabs.on_its_site).
             # Matched on parsed host, not substring: "provider.com" in the
             # URL also matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
             mine = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = mine[0] if mine else (
-                live[0] if live else ctx.new_page())
+            self._work_page = mine[0] if mine else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self.requests
@@ -496,6 +499,24 @@ class App:
 
     # -- processing --------------------------------------------------------
 
+    def _on_its_site(self):
+        """The tab the next document is taken in, on Armed Forces Mutual's own
+        site and never a tab of another site. Armed Forces Mutual keeps its
+        session in a cookie a new tab shares, so with no tab of the person's
+        on the site the documents page is opened in a tab of this run's own
+        (tabs.on_its_site). Each row is looked for in the documents table
+        alone, so a tab of the person's on another page of the site is sent
+        there first."""
+        return tabs.on_its_site(self, site.is_safe_url, "Armed Forces Mutual",
+                                self._open_documents, ready=site.on_documents_page)
+
+    def _open_documents(self, page):
+        """Armed Forces Mutual's documents page, opened by its address the way
+        discovery opens it."""
+        if not site.goto_documents(page):
+            self.check_session(page)
+            site.goto_documents(page)
+
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
         for i, doc in enumerate(docs, 1):
@@ -517,6 +538,7 @@ class App:
             except Exception:
                 pass
             try:
+                page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")

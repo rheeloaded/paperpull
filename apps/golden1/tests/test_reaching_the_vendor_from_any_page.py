@@ -534,7 +534,9 @@ def test_the_run_works_in_the_banks_tab_even_when_the_vendors_is_listed_first():
     lookalike = _Tab("https://digitalbanking.golden1.com.phish.example/")
     assert golden1_docs.work_tab([vendor, lookalike, bank]) is bank
     assert golden1_docs.work_tab([lookalike, vendor]) is vendor
-    assert golden1_docs.work_tab([lookalike]) is lookalike
+    # A tab of another site, a look-alike included, is never the tab a run
+    # works in, even when it is the only one open.
+    assert golden1_docs.work_tab([lookalike]) is None
     assert golden1_docs.work_tab([]) is None
 
 

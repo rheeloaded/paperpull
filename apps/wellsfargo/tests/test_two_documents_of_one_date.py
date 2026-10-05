@@ -306,6 +306,9 @@ def run(page, tmp_path, monkeypatch):
     monkeypatch.setattr(site, "_catch_pdf", fake)
     app = receipt_app(app_mod, tmp_path)
     app._context, app._work_page, app._dl_dir = page.context, page, tmp_path / "downloads"
+    # The page is set into a blank tab, not on Wells Fargo's own site, so the
+    # check that the tab is on it (tabs.on_its_site) is stood in for too.
+    app._on_its_site = lambda: page
     return app
 
 

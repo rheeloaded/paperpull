@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import renaming
+from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -233,9 +234,24 @@ class App:
 
     def page(self):
         ctx = self.browser()
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        if self._cdp_mode:
+            # The tab Login left open on Target's own site, or else a tab of
+            # this run's own, never a tab of another site. This took the
+            # browser's first tab, whatever site it showed, read it for the
+            # order list and then loaded it away to Target. A tab kept from
+            # an earlier call is used again while it is still the run's own
+            # or still on Target's site (tabs.new_tab).
+            kept = getattr(self, "_work_page", None)
+            if kept is not None and not kept.is_closed() and (
+                    tabs.is_own(kept) or site.is_safe_url(kept.url or "")):
+                return kept
+            live = [p for p in ctx.pages if not p.is_closed()]
+            mine = [p for p in live if site.is_safe_url(p.url or "")]
+            page = mine[0] if mine else tabs.new_tab(ctx)
+        else:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # Remembered, so the diagnostics have something to look at and
-        # to listen on. It is the same page this always returned.
+        # to listen on.
         self._work_page = page
         self.requests
         return page

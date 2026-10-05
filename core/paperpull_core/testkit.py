@@ -443,6 +443,47 @@ def _draws_alone(url, ready, tries):
     return False, did
 
 
+def tabs_of(url) -> list:
+    """Every tab the browser has, as its own debugging address lists them,
+    so nothing has to attach to it to look."""
+    return _page_tabs(url)
+
+
+def open_tab(url, address, title, seconds=15) -> str:
+    """A tab the browser opens itself at this address, the way the person's
+    own tab is opened at home, once it shows this title. Its id. The
+    debugging address lists a title with & written as &amp;, so titles are
+    compared as they read. A # in the address would end the request's own
+    address there, so it is sent as %23, which the browser reads back as #."""
+    import html
+    import urllib.request
+
+    made = json.loads(urllib.request.urlopen(urllib.request.Request(
+        "%s/json/new?%s" % (url, address.replace("#", "%23")), method="PUT"),
+        timeout=15).read().decode("utf-8"))
+    if not _within(seconds, lambda: any(
+            t.get("id") == made.get("id") and html.unescape(t.get("title") or "") == title
+            for t in _page_tabs(url))):
+        raise FreshBrowserError("the tab for %s never drew %r" % (address, title))
+    return made["id"]
+
+
+def close_tab(url, tab_id, seconds=10) -> None:
+    """Close one tab through the debugging address, and wait for it to go."""
+    import urllib.request
+
+    urllib.request.urlopen("%s/json/close/%s" % (url, tab_id), timeout=10).read()
+    _within(seconds, lambda: all(t.get("id") != tab_id for t in _page_tabs(url)))
+
+
+def keep_only(url, keep) -> None:
+    """Close every tab of the browser but these, so a run attaches to a
+    browser holding just the tabs a test opened."""
+    for tab in _page_tabs(url):
+        if tab.get("id") not in keep:
+            close_tab(url, tab["id"])
+
+
 def _close_browser(proc, url) -> None:
     try:
         from playwright.sync_api import sync_playwright
@@ -478,7 +519,7 @@ def drawn_browser(exe, make_profile, args=(), starts=3, tries=3, only_tab=False)
     the browser opened no port at all, FreshBrowserError that no start got
     there, naming what each one did.
 
-    An app that works in the first tab it finds, as Target does, rather
+    An app that works in the first tab it finds, as Target did, rather
     than in a tab it opens for itself, needs only_tab. Without it the
     browser's own blank tab stays beside the one that drew, Playwright
     lists the two in no fixed order, and such an app works in the tab that

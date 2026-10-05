@@ -34,6 +34,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
   icon as the installers.
 
 ### Fixed
+- **No app reads, clicks or takes over a tab of another site.** Most
+  document apps worked in the tab you signed in with when it was open, and
+  otherwise in the first open tab of any site at all, and Target always took
+  the browser's first tab. Resume goes straight to the documents a Discover
+  found, so nothing opened the provider's page first. With the provider's
+  tab closed, AAFMAA clicked a link named "1" on whatever page the other tab
+  showed, American Express and Navy Federal clicked links named like their
+  own menus there, Ally and Chase pressed a documents control on it and then
+  loaded their own addresses into it, as TSP did, and every document was
+  marked for manual review, or the run said your session had expired. Each
+  app read that page for a sign-in or a check first. Now no app hands over a
+  tab of another site. American Express, Navy Federal, Ally, Chase, Anthem,
+  DFAS myPay, TSP and Verizon keep your session in the tab you signed in
+  with, so with that tab closed a run stops at its first document and says
+  to open it with login.bat and run again, with nothing marked. Anthem's
+  member documents, ID cards and letters stop the same way rather than come
+  back empty. The other document apps open their documents page in a tab of
+  their own, the way Discover does, and Target works in a tab of its own when
+  no Target tab of yours is open. AAFMAA and Paylocity
+  also send a tab of yours that is on another page of their site to the
+  documents page first, so Paylocity's statements no longer come back empty
+  after a fresh sign-in. The tab you signed in with is still the one used
+  when it is open, and a tab of yours that leaves the provider's site during
+  a run is left as it is.
 - **Home Depot reads every page of a purchase history longer than one
   page.** It asked Home Depot for twenty orders a page, whatever its own
   page asks for, and took a page with fewer for the last. Where Home Depot

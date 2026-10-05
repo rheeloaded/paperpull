@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import renaming
+from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -222,12 +223,15 @@ class App:
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
         if self._cdp_mode:
-            # Reuse the user's already-signed-in Citi tab.
-            # Matched on parsed host, not substring: "provider.com" in the
-            # URL also matches "provider.com.phish.example".
+            # Reuse the person's own tab on Citi's site, the page they left
+            # open for this. With none open, a tab of this run's own is
+            # opened, never a tab of another site, since the session is a
+            # cookie a new tab shares (tabs.new_tab). Matched on the parsed
+            # host, never a substring, since "provider.com" in an address also
+            # matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
             dom = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = dom[0] if dom else (live[0] if live else ctx.new_page())
+            self._work_page = dom[0] if dom else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # The PDF arrives as bytes from an in-page fetch. No download event,
@@ -454,6 +458,21 @@ class App:
 
     # -- processing --------------------------------------------------------
 
+    def _on_its_site(self):
+        """The tab the next document is taken in, on Citi's own site and never
+        a tab of another site. Citi keeps its session in a cookie a new tab
+        shares, so with no tab of the person's on the site the documents
+        page is opened in a tab of this run's own (tabs.on_its_site)."""
+        return tabs.on_its_site(self, site.is_safe_url, "Citi",
+                                self._open_documents)
+
+    def _open_documents(self, page):
+        """Citi's documents page, opened by its address the way discovery opens
+        it."""
+        if not site.goto_documents(page):
+            self.check_session(page)
+            site.goto_documents(page)
+
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
         for i, doc in enumerate(docs, 1):
@@ -475,6 +494,7 @@ class App:
             except Exception:
                 pass
             try:
+                page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")

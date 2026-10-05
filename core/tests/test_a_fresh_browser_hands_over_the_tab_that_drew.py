@@ -2,12 +2,13 @@
 drawn a page, and with only_tab the tab that drew is the browser's only
 one, in a real browser.
 
-Target works in the first tab it finds rather than in a tab it opens for
+Target worked in the first tab it found rather than in a tab it opens for
 itself. A browser from drawn_browser without only_tab keeps its own blank
 tab beside the one that drew, and Playwright listed the two in no fixed
 order, the blank one first in three fresh starts of seven, so the app
 worked in a tab nothing had shown could draw. Target's page check test
-relies on only_tab for that, and this holds the helper to it.
+was handed the drawn tab alone with only_tab for that, and this holds the
+helper to it for any app that works in the first tab it finds.
 
 The first page the browser asks for is answered three seconds late, so a
 helper that handed the browser over without waiting for its tab would be

@@ -30,6 +30,7 @@ from __future__ import annotations
 from paperpull_core import failure
 from paperpull_core import capture
 from paperpull_core import renaming
+from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -123,8 +124,9 @@ class Document:
 
 
 def work_tab(tabs):
-    """The tab a run works in, among the open ones, or None when none is
-    open. The bank's own tab comes first. The vendor's tab is on an
+    """The tab a run works in, among the open ones, or None when none of them
+    is on the bank's site or the vendor's, never a tab of another site. The
+    bank's own tab comes first. The vendor's tab is on an
     allowed host too, and one an earlier run left open still shows a
     list its ended session can no longer fetch, so it is never taken
     over a tab of the bank's (#35). Matched on the parsed host, not a
@@ -135,7 +137,7 @@ def work_tab(tabs):
         for p in tabs:
             if wanted(p.url or ""):
                 return p
-    return tabs[0] if tabs else None
+    return None
 
 
 def migrate_legacy_keys(records: dict) -> int:
@@ -243,9 +245,11 @@ class App:
             return self._work_page
         if self._cdp_mode:
             # Reuse the user's already-signed-in Golden 1 tab, the bank's
-            # own before the vendor's (see work_tab).
+            # own before the vendor's (see work_tab). With neither open, a
+            # tab of this run's own is opened, never a tab of another site,
+            # and the documents page is opened in it (tabs.new_tab).
             live = [p for p in ctx.pages if not p.is_closed()]
-            self._work_page = work_tab(live) or ctx.new_page()
+            self._work_page = work_tab(live) or tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # A real Edge or Chrome attached over CDP saves a download itself,
@@ -664,6 +668,22 @@ class App:
 
     # -- processing --------------------------------------------------------
 
+    def _on_its_site(self):
+        """The tab the next document is taken in, on Golden 1's own site and
+        never a tab of another site. Golden 1 keeps its session in a cookie
+        a new tab shares, so with no tab of the person's on the site the
+        documents page is opened in a tab of this run's own
+        (tabs.on_its_site)."""
+        return tabs.on_its_site(self, site.is_safe_url, "Golden 1",
+                                self._open_documents)
+
+    def _open_documents(self, page):
+        """Golden 1's documents page, opened by its address the way discovery
+        opens it."""
+        if not site.goto_documents(page):
+            self.check_session(page)
+            site.goto_documents(page)
+
     def process(self, docs: List[Document], dry_run: bool = False):
         page = self.page()
         for i, doc in enumerate(docs, 1):
@@ -685,6 +705,7 @@ class App:
             except Exception:
                 pass
             try:
+                page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
