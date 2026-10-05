@@ -652,3 +652,156 @@ def take_same_tab(page, start_url: str, out_path: Path, trace, is_safe_url) -> b
         out_path.write_bytes(body)
         return True
     return False
+
+
+# -- an answer that held nothing ----------------------------------------------
+#
+# MEASURED 2026-10-05 in Chromium 153 attached over DevTools, with every
+# scaffold capture pressed against made-up pages in Playwright 1.62 and
+# 1.63. A PDF the page fetches and reads with Response.blob() leaves the
+# browser holding nothing of the answer it came in. Playwright 1.62 then
+# asked the address again by itself, through the browser, for any answer
+# with a length, and handed over the PDF. 1.63 asks again only for a GET of
+# a font, image, manifest, media, script, stylesheet or text track, so a
+# fetch or a page's answer now reads empty, without raising. One the page
+# reads as an array buffer, a stream or through XMLHttpRequest still reads
+# whole.
+#
+# Where the page also hands the PDF over as a download, at a blob address
+# in a tab of its own, or by moving the tab to it, the capture still has
+# it. Where the page keeps it and draws it itself, or shows it in a frame of
+# its own page, a tab whose blob address it let go, or a data address, that
+# empty answer was the only trace of it.
+
+# How long asking again may take.
+ASK_AGAIN_MS = 60000
+
+# The page's own fetch, with the page's cookies, refusing a redirect, given
+# up after `ms` whether or not the page's fetch heeds the signal, since a
+# site can wrap fetch and pass the call on without it.
+ASK_AGAIN_JS = r"""async ({url, ms}) => {
+    const late = new Promise((_, no) => setTimeout(() => no(new Error('no answer in time')), ms));
+    const ask = (async () => {
+        const r = await fetch(url, {credentials: 'include', redirect: 'error',
+                                    signal: AbortSignal.timeout(ms)});
+        if (!r.ok) return null;
+        const buf = new Uint8Array(await r.arrayBuffer());
+        let s = '';
+        for (let i = 0; i < buf.length; i += 0x8000) {
+            s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+        }
+        return btoa(s);
+    })();
+    return await Promise.race([ask, late]);
+}"""
+
+
+def ask_again(page, answers: list, out_path: Path, is_safe_url, *, zip_ok: bool = False) -> bool:
+    """The document behind the one answer a press read empty, asked for once
+    more and written to `out_path`. True when it was.
+
+    `answers` holds (method, address) for each answer to a request the press
+    made that called itself a PDF and read empty. A capture calls this only
+    once nothing else has brought the document, so a download, a tab or a
+    second control the same press leads to has had its whole time first.
+    Nothing is asked unless there is exactly one, and it answered a GET on
+    an address the app's guard allows. Two could be two documents, a
+    statement and a notice, and which one is this cannot be told, and a POST
+    is never sent twice. It is asked from inside the page with the page's
+    own fetch, so it goes with the browser's own cookies and is seen as
+    the page, and only while the tab is on a site the guard allows, since a
+    tab the press sent elsewhere, a sign-in page on another host or a
+    viewer, would see the document's address in its own page. A redirect is
+    refused rather than followed. Only a PDF, or with `zip_ok` a ZIP, is
+    kept. `answers` is empty afterwards."""
+    held = list(dict.fromkeys(answers))
+    answers.clear()
+    if not held:
+        return False
+    if len(held) > 1:
+        log.info("%d answers held no PDF, and none was asked for again, since which "
+                 "is this document cannot be told", len(held))
+        return False
+    method, url = held[0]
+    if method != "GET":
+        log.info("an answer to a %s held no PDF, and a %s is never sent twice", method, method)
+        return False
+    if not is_safe_url(url):
+        return False
+    try:
+        where = page.url or ""
+    except Exception:
+        where = ""
+    if where.startswith("blob:"):
+        where = where[len("blob:"):]
+    if not is_safe_url(where):
+        log.info("the tab is not on the provider's site, so nothing was asked again")
+        return False
+    try:
+        b64 = page.evaluate(ASK_AGAIN_JS, {"url": url, "ms": ASK_AGAIN_MS})
+        data = base64.b64decode(b64) if b64 else b""
+    except Exception as e:
+        log.info("asking again for %s failed: %s", redact(url)[:80],
+                 (str(e).splitlines() or [type(e).__name__])[0][:90])
+        return False
+    if is_document(data, zip_ok):
+        out_path.write_bytes(data)
+        return True
+    log.info("asked again, %s gave no document", redact(url)[:80])
+    return False
+
+
+class RequestsSince:
+    """The requests a press makes, from its own tab or a tab opened since it
+    began, so an answer can be tied to that press.
+
+    A late answer to the last document's press was saved under this one's
+    name in E*TRADE (#36) and Newrez (#38), and State Farm saved a PDF that
+    loaded in a tab of the person's that was already open (#37). So a request
+    made before the press, or from a tab that was open before it, is not the
+    press's, nor is one whose tab cannot be named, a service worker's. A
+    redirect counts as the request it began with. Nothing in here raises."""
+
+    def __init__(self, page, before=()):
+        self._page = page
+        self._before = list(before)
+        self._made: list = []
+        self._context = None
+        try:
+            self._context = page.context
+            self._context.on("request", self._heard)
+        except Exception:
+            self._context = None
+
+    def _heard(self, request):
+        try:
+            owner = request.frame.page
+        except Exception:
+            return
+        try:
+            if owner is self._page or not any(owner is p for p in self._before):
+                self._made.append(request)
+        except Exception:
+            pass
+
+    def made(self, request) -> bool:
+        """Whether `request`, or the request its redirects began with, is one
+        this press made."""
+        try:
+            first = request
+            for _ in range(20):
+                earlier = getattr(first, "redirected_from", None)
+                if earlier is None:
+                    break
+                first = earlier
+            return any(r is first for r in self._made)
+        except Exception:
+            return False
+
+    def stop(self) -> None:
+        if self._context is not None:
+            try:
+                self._context.remove_listener("request", self._heard)
+            except Exception:
+                pass
+            self._context = None

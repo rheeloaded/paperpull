@@ -65,6 +65,8 @@ from paperpull_core.capture import snapshot as _snapshot
 from paperpull_core.capture import take_download as _take_download
 from paperpull_core.capture import is_document as _is_document
 from paperpull_core.capture import clear_copies as _clear_copies
+from paperpull_core.capture import ask_again as _ask_again
+from paperpull_core.capture import RequestsSince as _RequestsSince
 from paperpull_core.capture import arrived as _arrived
 from paperpull_core.capture import UNFINISHED as _UNFINISHED
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
@@ -1414,7 +1416,7 @@ _CAPTURE_FLAGS = {"scrolled": "list", "chosen_visible": "list", "signed_out": "l
 # The wait a PDF landed in, and the way it arrived.
 _CAPTURE_WINDOWS = ("first wait", "second step wait", "last wait", "in flight wait", "no click")
 _CAPTURE_HOWS = ("download folder", "download event", "pdf response", "refetched response",
-                 "same tab", "new tab", "own link")
+                 "same tab", "new tab", "own link", "asked again")
 # Why the control about to be pressed was no longer the one the guard
 # approved.
 _CHECK_WHYS = ("it left the page", "its name changed", "it no longer carries this date",
@@ -1992,6 +1994,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     ctx = page.context
     got: dict = {}
     downloads: list = []
+    # Answers to a request this press made, from its tab or one it opened,
+    # that called themselves a PDF and read empty. Asked for once more only
+    # when nothing else brings the document (capture.ask_again).
+    empty_answers: list = []
+    made_here = _RequestsSince(page, ctx.pages)
     start_url = page.url or ""
     before = set(ctx.pages)
     # The other tabs of the browser are not this capture's business.
@@ -2023,6 +2030,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                     got["refetch"] = url
                 if body[:5] == b"%PDF-":
                     got["body"] = body
+                elif not body and not got and made_here.made(res.request) \
+                        and (res.request.method, url) not in empty_answers:
+                    # A PDF the page reads into a blob leaves its answer
+                    # empty under Playwright 1.63 (capture.ask_again).
+                    empty_answers.append((res.request.method, url))
         except Exception:
             pass
 
@@ -2215,6 +2227,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return ended(how, "in flight wait")
         if in_flight_s and _take_new_tab(page, new_tabs(), out_path):
             return ended("new tab", "in flight wait")
+        # Nothing else brought it, so the one answer that read empty is asked
+        # for once more (capture.ask_again).
+        if _ask_again(page, empty_answers, out_path, is_safe_url, zip_ok=True):
+            return ended("asked again", "in flight wait") if in_flight_s \
+                else ended("asked again", "last wait")
         if trace is not None:
             # What reached the download folder and was not taken. A file
             # still being written is a document on its way that the wait
@@ -2233,6 +2250,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         log.info("click on %r produced no PDF", label)
         return False
     finally:
+        made_here.stop()
         for event, fn in listeners:
             try:
                 ctx.remove_listener(event, fn)

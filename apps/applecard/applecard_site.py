@@ -96,6 +96,8 @@ from paperpull_core.capture import snapshot as _snapshot
 from paperpull_core.capture import take_download as _take_download
 from paperpull_core.capture import is_document as _is_document
 from paperpull_core.capture import clear_copies as _clear_copies
+from paperpull_core.capture import ask_again as _ask_again
+from paperpull_core.capture import RequestsSince as _RequestsSince
 from paperpull_core.capture import arrived as _folder_arrived
 from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
@@ -1557,6 +1559,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     ctx = page.context
     got: dict = {}
     downloads: list = []
+    # Answers to a request this press made, from its tab or one it opened,
+    # that called themselves a PDF and read empty. Asked for once more only
+    # when nothing else brings the document (capture.ask_again).
+    empty_answers: list = []
+    made_here = _RequestsSince(page, ctx.pages)
     refused: list = []
     start_url = page.url or ""
 
@@ -1604,6 +1611,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                     got["refetch"] = url
                 if body[:5] == b"%PDF-":
                     got["body"] = body
+                elif not body and not got and made_here.made(res.request) \
+                        and (res.request.method, url) not in empty_answers:
+                    # A PDF the page reads into a blob leaves its answer
+                    # empty under Playwright 1.63 (capture.ask_again).
+                    empty_answers.append((res.request.method, url))
         except Exception:
             pass
 
@@ -1731,9 +1743,21 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return False
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
+        # Looked at once more, so a file that arrived meanwhile is checked by
+        # the name Apple gave it first. Then, when nothing else brought it and
+        # nothing was refused, the one answer that read empty is asked for
+        # once more, on the hosts an answer is read from (capture.ask_again).
+        if landed():
+            return True
+        if refused:
+            return False
+        if _ask_again(page, empty_answers, out_path,
+                      lambda u: is_safe_url(u) or _is_apple_file_host(u), zip_ok=True):
+            return True
         log.info("click on %r produced no PDF", label)
         return False
     finally:
+        made_here.stop()
         try:
             ctx.remove_listener("response", on_response)
         except Exception:

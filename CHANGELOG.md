@@ -24,6 +24,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
   once more. That ask goes only to AAFMAA's own site and follows no
   redirect, a postback is never sent twice, only a PDF is kept, and a
   document whose row shows a policy number still has to carry it.
+- **Ten apps no longer give up on a PDF their provider's page reads for
+  itself.** Apple Card, AT&T, E*TRADE, Golden 1, Newrez, SBA, SMUD, State
+  Farm, Verizon Mobile and Wells Fargo share one way of catching a
+  document. Under Playwright 1.63, which the packaged app runs, the
+  browser's answer for a PDF the page reads into its own memory comes back
+  empty, where 1.62 quietly asked for it again through the browser. When
+  the page then kept that PDF to itself, drawing it in a viewer of its own,
+  or showed it in a frame of its page or in a tab whose address it had
+  already let go, nothing else brought it and the app saved nothing for
+  that document. Now, once the app has waited its whole time and nothing
+  else has come, the one answer that came back empty is asked for once
+  more from inside the page, on the provider's own site and refusing any
+  redirect, and only a PDF, or a ZIP where the app opens one, is kept. It
+  is asked only when it answered a request that same press made, from its
+  own tab or one it opened, and when the press read no other answer empty,
+  since two could be two documents. A download, a tab or a second button
+  the same press leads to still comes first, and a page's POST is never
+  sent twice. American Family is left as it was, since it never takes a
+  PDF the press made without a tab of its own. No provider is known to
+  hand a document over this way, and every way a real account has shown
+  still worked under 1.63, so this covers what a page could do.
 
 ## [0.43.0] - 2026-10-05
 
