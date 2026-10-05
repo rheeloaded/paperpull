@@ -9,6 +9,11 @@
 # checksums the runs published, and then creates the release with the
 # notes at .release/notes-<version>.md.
 #
+# Beside the packages it puts PaperPull Server's setup files, compose.yaml
+# and the security profile from the tag itself, as one zip, gives every file
+# a label that says what it is for, and ends the notes with a Downloads
+# section unless they have one (tools/release_assets.py does all three).
+#
 # The workflows deliberately publish nothing on their own, so this is the
 # one step that makes a build public, and a person runs it. Publishing the
 # release is also what has the Server image workflow publish that release's
@@ -77,6 +82,27 @@ cd "$HERE"
 [ -f "$NOTES" ] || { echo "no notes at $NOTES" >&2; exit 2; }
 git rev-parse "$TAG" >/dev/null 2>&1 || { echo "no tag $TAG" >&2; exit 2; }
 
+# tools/release_assets.py makes the server's zip, the labels and the
+# Downloads section. The checkout's own Python first, since a Windows shell
+# often has no python on its PATH. A Windows Python run from WSL is handed
+# Windows paths, as gh is.
+PY="${PY:-}"
+if [ -z "$PY" ]; then
+  for candidate in "$HERE/gui/.venv/Scripts/python.exe" "$HERE/gui/.venv/bin/python" \
+                   "$(command -v python3 || true)" "$(command -v python || true)"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then PY="$candidate"; break; fi
+  done
+fi
+[ -n "$PY" ] || { echo "no Python found for tools/release_assets.py. Set PY to one and run again." >&2; exit 2; }
+PY_WANTS_WINDOWS_PATHS=0
+case "$PY" in
+  /mnt/*) command -v wslpath >/dev/null 2>&1 && PY_WANTS_WINDOWS_PATHS=1 ;;
+esac
+pypath() {
+  if [ "$PY_WANTS_WINDOWS_PATHS" = 1 ]; then wslpath -w "$1"; else printf '%s' "$1"; fi
+}
+ASSETS_PY="$(pypath "$HERE/tools/release_assets.py")"
+
 echo "waiting for the package runs on $TAG ..."
 for name in "Windows package" "macOS package"; do
   id=$("$GH" run list --limit 20 --json databaseId,name,headBranch \
@@ -128,20 +154,32 @@ $SUMS
 SUMSLIST
 [ "$CHECKED" -gt 0 ] || { echo "no file was checked against a published checksum" >&2; exit 1; }
 
+# PaperPull Server has no package. Its image goes to the container registry
+# from the Server image workflow, and a person needs compose.yaml and the
+# security profile beside it, taken here from the tag itself.
+"$PY" "$ASSETS_PY" kit "$VERSION" "$(pypath "$WORK/flat")" >/dev/null
+
+# Each file goes up as path#label, and the label is what the Assets list
+# shows, what the file is for and then its name.
 ASSETS=()
 for f in "$WORK/flat"/*; do
-  [ -f "$f" ] && ASSETS+=("$(winpath "$f")")
+  [ -f "$f" ] || continue
+  label="$("$PY" "$ASSETS_PY" label "$(basename "$f")" "$VERSION" | tr -d '\r')"
+  ASSETS+=("$(winpath "$f")#$label")
 done
 [ "${#ASSETS[@]}" -gt 0 ] || { echo "nothing to upload from $WORK/flat" >&2; exit 1; }
 ls -1 "$WORK/flat"
 
+# The notes as written, ending with what each download is for.
+"$PY" "$ASSETS_PY" notes "$VERSION" "$(pypath "$NOTES")" "$(pypath "$WORK/notes.md")"
+
 echo
 echo "publishing $TAG ..."
-"$GH" release create "$TAG" --title "PaperPull $VERSION" --notes-file "$(winpath "$NOTES")" \
+"$GH" release create "$TAG" --title "PaperPull $VERSION" --notes-file "$(winpath "$WORK/notes.md")" \
   ${EXTRA[@]+"${EXTRA[@]}"} "${ASSETS[@]}"
 
 "$GH" release view "$TAG" --json isDraft,isPrerelease,assets \
-  --jq '{draft: .isDraft, prerelease: .isPrerelease, assets: [.assets[].name]}'
+  --jq '{draft: .isDraft, prerelease: .isPrerelease, assets: [.assets[] | "\(.name) shown as \(.label)"]}'
 rm -rf "$WORK"
 echo "done. https://github.com/rheeloaded/paperpull/releases/tag/$TAG"
 echo "the Server image workflow now builds, checks and publishes ghcr.io/rheeloaded/paperpull-server:$VERSION, see"
