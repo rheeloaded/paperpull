@@ -26,13 +26,26 @@ prints every other skip at the end where it can be seen.
 
 WHICH INTERPRETER RUNS WHAT
 
-On a development machine there is rarely one environment that can run
-everything. Each app is installed in its own, which is where its copy of
-the core lives, while the spreadsheet libraries are only in the panel's.
-So each suite is run with the first environment that can actually import
-what it needs, and any suite with nothing to run it is reported rather
-than skipped quietly. On CI one environment has the lot and all of this
-collapses to a single answer.
+Each suite runs with the environment holding the newest Playwright that
+can import what the suite needs, and of two holding the same, the earlier
+in the list, the panel's first. An environment is asked with this
+checkout's core on its path, as its suite will have it, so one that has
+no core installed can still run an app suite. A run uses one environment
+wherever it can, as CI does, and any suite with nothing to run it is
+reported rather than skipped quietly.
+
+Until 2026-10-05 a suite ran in its app's own environment, or else the
+first that could run it. CI and the packaged app install the newest
+Playwright, 1.63 then, and so did the panel's environment here, while the
+app environments held 1.62, so 60 of the 61 app suites ran on 1.62. The
+two differ in what a page hands over. When Chromium gave back an empty
+body for an answer that had a length, 1.62 asked the address again
+whatever the answer was, and 1.63 does that only for fonts, images,
+scripts, stylesheets and the like, so a document, a fetch or an xhr now
+reads empty. AAFMAA's capture failed on CI because of it and passed every
+time here. So a suite that still has to run on an older Playwright than
+another suite of the same run makes the run fail, and the summary names
+the version every suite ran on.
 
 WHICH CORE IT TESTS
 
@@ -186,7 +199,21 @@ WHY = {
     "fastapi": "the control panel",
 }
 CANARY = "test_failure_canary"
-_HAS: dict = {}
+_ASKED: dict = {}
+
+# What an interpreter is asked, once. The modules it can import, and the
+# version of the Playwright it holds, None when it holds none.
+ASK = """
+import importlib.metadata, importlib.util, json, sys
+found = [m for m in sys.argv[1:] if importlib.util.find_spec(m) is not None]
+version = None
+if "playwright" in found:
+    try:
+        version = importlib.metadata.version("playwright")
+    except Exception:
+        version = "unknown"
+print(json.dumps({"found": found, "playwright": version}))
+"""
 
 
 def venv_python(d: Path):
@@ -197,16 +224,42 @@ def venv_python(d: Path):
     return None
 
 
-def has(py: Path, modules) -> set:
-    """Which of `modules` this interpreter can import. Asked once each."""
+def asked(py: Path) -> dict:
+    """What this interpreter can import and which Playwright it holds,
+    asked once each, with this checkout's core on its path as its suite
+    will have it. Nothing at all when it cannot say."""
     key = str(py)
-    if key not in _HAS:
-        code = ("import importlib.util,sys;"
-                "print(' '.join(m for m in sys.argv[1:] "
-                "if importlib.util.find_spec(m) is not None))")
-        r = subprocess.run([str(py), "-c", code, *WHY], capture_output=True, text=True)
-        _HAS[key] = set(r.stdout.split())
-    return _HAS[key] & set(modules)
+    if key not in _ASKED:
+        answer = {"found": [], "playwright": None}
+        try:
+            r = subprocess.run([str(py), "-c", ASK, *WHY], capture_output=True, text=True,
+                               env=with_this_core(PLUGINS), timeout=300)
+            said = json.loads(r.stdout.strip().splitlines()[-1])
+            version = said.get("playwright")
+            answer = {"found": [str(m) for m in said.get("found") or []],
+                      "playwright": None if version is None else str(version)}
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError, AttributeError, TypeError):
+            pass
+        _ASKED[key] = answer
+    return _ASKED[key]
+
+
+def has(py: Path, modules) -> set:
+    """Which of `modules` this interpreter can import."""
+    return set(asked(py)["found"]) & set(modules)
+
+
+def playwright_of(py: Path):
+    """The version of the Playwright this interpreter holds, None when it
+    holds none."""
+    return asked(py)["playwright"]
+
+
+def version_key(version) -> tuple:
+    """A version as numbers, so 1.100 comes after 1.63. Empty when there is
+    none to read."""
+    m = re.match(r"\d+(?:\.\d+)*", str(version or ""))
+    return tuple(int(n) for n in m.group(0).split(".")) if m else ()
 
 
 def candidates() -> list:
@@ -234,19 +287,40 @@ def suites(quick: bool) -> list:
 
 
 def python_for(d: Path, kind: str, spares: list):
-    """The suite's own environment if it can do the job, else the first
-    spare that can. None when nothing here can run it."""
+    """The environment holding the newest Playwright that can import what
+    the suite needs, and of two holding the same, the earlier in the list.
+    The suite's own environment is one of them, with no turn of its own.
+    When none can, the one missing least. None when there is nothing here
+    at all."""
     need = NEEDS[kind]
+    pool = list(spares)
     own = venv_python(d)
-    for py in ([own] if own else []) + spares:
-        if len(has(py, need)) == len(need):
-            return py, []
+    if own and str(own) not in [str(p) for p in pool]:
+        pool.append(own)
+    able = [py for py in pool if len(has(py, need)) == len(need)]
+    if able:
+        # max keeps the first of several equal, the earlier in the list.
+        return max(able, key=lambda py: version_key(playwright_of(py))), []
     best, lack = None, None
-    for py in ([own] if own else []) + spares:
+    for py in pool:
         missing = sorted(set(need) - has(py, need))
         if lack is None or len(missing) < len(lack):
             best, lack = py, missing
     return best, (lack or [])
+
+
+def older_playwright(work: list):
+    """The newest Playwright among the environments a run uses, and each
+    suite run on another one, as (name, version, interpreter). A suite
+    whose environment holds no Playwright is not counted here. One that
+    needed it is named among those missing something."""
+    held = [(name, playwright_of(py), py) for name, _d, py in work]
+    known = [v for _name, v, _py in held if version_key(v)]
+    if not known:
+        return None, []
+    newest = max(known, key=version_key)
+    return newest, [(name, v, py) for name, v, py in held
+                    if v is not None and version_key(v) != version_key(newest)]
 
 
 # Every pytest this run has started and not yet seen end, so an interrupted
@@ -756,6 +830,11 @@ def run(args) -> int:
     t0 = time.time()
     clear_old_output()
 
+    # Every environment is asked before any suite is given one, since the
+    # newest Playwright is found by asking them all, and all at once, since
+    # each start of an interpreter here can take seconds.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(asked, spares))
     work = []
     for name, d, kind in plan:
         py, lack = python_for(d, kind, spares)
@@ -766,6 +845,7 @@ def run(args) -> int:
         if lack:
             under_equipped.append((name, lack))
         work.append((name, d, py))
+    newest, older = older_playwright(work)
     if jobs > 1 and len(work) > 1:
         print("%d suites, %d at a time, longest first" % (len(work), min(jobs, len(work))), flush=True)
 
@@ -818,6 +898,17 @@ def run(args) -> int:
     print("\n" + "=" * 72)
     print("%d passed, %d failed, %d skipped, in %.0fs"
           % (passed, failed, skipped, time.time() - t0))
+    if newest:
+        without = sum(1 for _name, _d, py in work if playwright_of(py) is None)
+        if older:
+            on_newest = len(work) - without - len(older)
+            print("%d suite%s ran on Playwright %s and %d on an older one, named below"
+                  % (on_newest, "" if on_newest == 1 else "s", newest, len(older)))
+        elif without:
+            print("every suite ran on Playwright %s, apart from %d whose environment has none"
+                  % (newest, without))
+        else:
+            print("every suite ran on Playwright %s" % newest)
 
     if skip_lines:
         print("\nwhat did not run:")
@@ -829,18 +920,31 @@ def run(args) -> int:
         for name, lack in under_equipped:
             print("   %-16s %s" % (name, ", ".join("%s (%s)" % (m, WHY[m]) for m in lack)))
 
+    if older:
+        print("\nsuites run on an older Playwright than %s, the newest this run used" % newest)
+        for name, version, py in older:
+            print("   %-16s %s, in %s" % (name, version, printable_place(py, REPO, [])))
+
     for name, summary in broken:
         print("FAILING SUITE  %-14s %s" % (name, summary))
 
     keep_times(took, write=args.write_times and not args.quick and not args.shard)
 
+    refused = False
     if any(CANARY in ln for ln in skip_lines):
         print("\nTHE PRIVACY CANARY DID NOT RUN.")
         print("It is the only test holding the promise that a failure file")
         print("carries no page content, so this run proves nothing about it.")
         print("   pip install playwright && python -m playwright install chromium")
-        return 1
-    if broken:
+        refused = True
+    if older:
+        print("\nNOT EVERY SUITE RAN ON PLAYWRIGHT %s." % newest)
+        print("CI and the packaged app install the newest Playwright, and two versions")
+        print("can differ in what a page hands over, so a pass on an older one says")
+        print("nothing about them. Upgrade Playwright in each environment named above,")
+        print("or give the one holding the newest what those suites need.")
+        refused = True
+    if refused or broken:
         return 1
     print("\nall suites passed, privacy canary included")
     return 0

@@ -11,6 +11,10 @@ that writes down each failure, and check that every frame of each
 traceback comes out, in a form that names no folder of the machine it ran
 on, that the whole output is kept, and that the run still refuses to pass
 without the privacy canary.
+
+They also check that every suite runs on the newest Playwright the
+machine holds, as CI and the packaged app do, and that a run where one
+could not is refused.
 """
 import io
 import json
@@ -19,6 +23,7 @@ import re
 import subprocess
 import sys
 import textwrap
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -400,3 +405,142 @@ def test_a_failing_suite_in_a_run_prints_its_frames_and_keeps_its_output(one_sui
     kept = tmp_path / "test-output" / "core.log"
     assert "       whole output in %s\n" % kept in out
     assert "1 failed, 1 passed" in kept.read_text(encoding="utf-8")
+
+
+# -- which Playwright each suite runs on ----------------------------------------
+#
+# CI and the packaged app install the newest Playwright. On the machine the
+# whole suite runs on before every push, the panel's environment held 1.63
+# and the app environments 1.62, and 60 of the 61 app suites ran on 1.62,
+# in their own environment or one they borrowed. 1.63 stopped asking an
+# address again when Chromium gave back an empty body for a document, a
+# fetch or an xhr, and on 2026-10-05 AAFMAA's capture failed on CI because
+# of it while it passed every time there. These build real environments
+# whose packages are nothing but a name and a version, so the runner asks
+# real interpreters what they hold. They leave the core off the path, as a
+# person's shell has it, so only the runner can put it where a suite finds it.
+
+def _environment(folder: Path, packages: dict) -> Path:
+    """An environment at folder/.venv holding each package named, empty
+    but for its version, and nothing else."""
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(folder / ".venv")],
+                   check=True, capture_output=True, timeout=300)
+    py = rat.venv_python(folder)
+    site = Path(subprocess.run([str(py), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                               check=True, capture_output=True, text=True, timeout=300).stdout.strip())
+    for name, version in packages.items():
+        (site / name).mkdir(parents=True)
+        (site / name / "__init__.py").write_text("", encoding="utf-8")
+        info = site / ("%s-%s.dist-info" % (name, version))
+        info.mkdir()
+        (info / "METADATA").write_text("Metadata-Version: 2.1\nName: %s\nVersion: %s\n" % (name, version),
+                                       encoding="utf-8")
+    return py
+
+
+# The panel's holds what CI and the packaged app hold, an app's own is a
+# version behind, one has a browser and nothing to read a PDF with, and one
+# has no Playwright at all.
+HOLDING = {
+    "panel": {"playwright": "1.63.0", "pypdf": "6.19.0"},
+    "app": {"playwright": "1.62.0", "pypdf": "6.16.1"},
+    "browser_only": {"playwright": "1.63.0"},
+    "no_browser": {"fastapi": "0.141.1"},
+}
+
+
+@pytest.fixture(scope="module")
+def environments(tmp_path_factory):
+    """Each one's folder and interpreter. Made side by side, since a new
+    environment can take seconds on Windows."""
+    root = tmp_path_factory.mktemp("environments")
+    with ThreadPoolExecutor(len(HOLDING)) as pool:
+        made = dict(zip(HOLDING, pool.map(lambda n: _environment(root / n, HOLDING[n]), HOLDING)))
+    return {n: (root / n, py) for n, py in made.items()}
+
+
+@pytest.fixture
+def asked_afresh(monkeypatch):
+    """Every interpreter asked again in this test, with the core off the path."""
+    monkeypatch.setattr(rat, "_ASKED", {})
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+
+def test_a_suite_runs_on_the_newest_playwright_here_not_its_own_older_one(environments, asked_afresh):
+    """What hid AAFMAA's failure. An app suite went to its own environment
+    first, and one without its own to another app's, because the panel's
+    has no core installed and was asked without the core the runner gives
+    every suite."""
+    folder, own = environments["app"]
+    _, panel = environments["panel"]
+    assert rat.python_for(folder, "app", [panel]) == (panel, [])
+    assert rat.python_for(folder, "app", [own, panel]) == (panel, []), "the earlier went first, not the newest"
+
+
+def test_of_two_with_the_same_playwright_the_earlier_runs_it(environments, asked_afresh, tmp_path):
+    """So a run uses one environment wherever it can, as CI does."""
+    _, panel = environments["panel"]
+    _, browser_only = environments["browser_only"]
+    assert rat.python_for(tmp_path, "server", [panel, browser_only])[0] == panel
+    assert rat.python_for(tmp_path, "server", [browser_only, panel])[0] == browser_only
+
+
+def test_a_newer_playwright_is_a_higher_number_not_a_later_string():
+    assert sorted(["1.100.0", "1.9.0", "1.63.1", "1.62.0", "1.63.0"], key=rat.version_key) == \
+        ["1.9.0", "1.62.0", "1.63.0", "1.63.1", "1.100.0"]
+    assert rat.version_key(None) == rat.version_key("unknown") == ()
+
+
+@pytest.fixture
+def run_with(environments, asked_afresh, tmp_path, monkeypatch):
+    """main() over suites of our making, each run in whichever of the
+    environments named the runner picks, and each passing at once. Hands
+    back which interpreter ran each suite."""
+    def make(suites: dict, names: list) -> dict:
+        ran = {}
+
+        def run_suite(d, py, timeout=1800):
+            ran[d.name] = py
+            return "1 passed in 0.01s", 0, []
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.setattr(rat, "OUTPUT", tmp_path / "test-output")
+        monkeypatch.setattr(rat, "TIMES", tmp_path / "times.json")
+        monkeypatch.setattr(rat, "suites", lambda quick: [(n, tmp_path / n, k) for n, k in suites.items()])
+        monkeypatch.setattr(rat, "candidates", lambda: [environments[n][1] for n in names])
+        monkeypatch.setattr(rat, "run_suite", run_suite)
+        return ran
+    return make
+
+
+def test_a_run_where_a_suite_ran_on_an_older_playwright_fails_and_names_it(run_with, environments, capsys):
+    # The environment with the newest Playwright cannot read a PDF, so the
+    # app suite can only run in the one a version behind.
+    ran = run_with({"server": "server", "aafmaa": "app"}, ["browser_only", "app"])
+    assert rat.main(["--jobs", "1"]) == 1
+    out = capsys.readouterr().out
+    assert ran == {"server": environments["browser_only"][1], "aafmaa": environments["app"][1]}
+    assert "\n1 suite ran on Playwright 1.63.0 and 1 on an older one, named below\n" in out, out
+    assert re.search(r"\n   aafmaa +1\.62\.0, in <elsewhere>/python", out), out
+    assert "\nNOT EVERY SUITE RAN ON PLAYWRIGHT 1.63.0.\n" in out, out
+    assert "all suites passed" not in out
+
+
+def test_a_run_on_the_newest_playwright_says_so_and_passes(run_with, environments, capsys):
+    ran = run_with({"server": "server", "aafmaa": "app"}, ["app", "panel"])
+    assert rat.main(["--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    assert ran == {"server": environments["panel"][1], "aafmaa": environments["panel"][1]}
+    assert "\nevery suite ran on Playwright 1.63.0\n" in out, out
+    assert out.rstrip().endswith("all suites passed, privacy canary included")
+
+
+def test_a_suite_whose_environment_has_no_playwright_is_not_counted(run_with, environments, capsys):
+    # Only the environment without Playwright has what the panel's suite
+    # needs. A suite that wanted Playwright and ran without it is named
+    # among those missing something, and the canary refuses a core without it.
+    ran = run_with({"gui": "gui", "aafmaa": "app"}, ["no_browser", "app", "panel"])
+    assert rat.main(["--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    assert ran == {"gui": environments["no_browser"][1], "aafmaa": environments["panel"][1]}
+    assert "\nevery suite ran on Playwright 1.63.0, apart from 1 whose environment has none\n" in out, out
+    assert out.rstrip().endswith("all suites passed, privacy canary included")
