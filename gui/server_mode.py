@@ -44,7 +44,7 @@ from urllib.parse import parse_qs, urlsplit
 # At the top, not inside install(), because the routes' annotations are
 # read as names from this module, and FastAPI has to find Request there to
 # know the argument is the request.
-from fastapi import HTTPException, Request, WebSocket
+from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 SESSION_COOKIE = "paperpull_session"
@@ -511,13 +511,10 @@ def install(app) -> None:
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", vnc_port())
         except OSError:
-            await websocket.close(code=1011)
+            await close_quietly(websocket, 1011)
             return
         await bridge(websocket.receive, websocket.send_bytes, reader, writer)
-        try:
-            await websocket.close()
-        except RuntimeError:
-            pass
+        await close_quietly(websocket)
 
 
 # -- after a run, the plug-ins ----------------------------------------------------------
@@ -624,6 +621,16 @@ def after_run(meta: dict, account: str, action: str, started: float,
         if done.returncode:
             lines.append("[%s] ended with code %d." % (name, done.returncode))
     return lines
+
+
+async def close_quietly(websocket, code: int = 1000) -> None:
+    """Close the Browser Screen's connection, unless the page already went,
+    a tab closed for instance, when there is nothing left to close. Found on
+    the NAS, where every tab closed logged a whole traceback."""
+    try:
+        await websocket.close(code=code)
+    except (RuntimeError, WebSocketDisconnect):
+        pass
 
 
 async def bridge(receive, send_bytes, reader, writer) -> None:

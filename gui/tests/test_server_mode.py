@@ -322,6 +322,44 @@ def test_a_screen_connection_needs_a_session_from_the_panels_own_page(on_server)
     assert run(attempt(own)) == [] and passed == ["/screen/websockify"]
 
 
+def test_a_closed_screen_tab_ends_its_connection_quietly(on_server, monkeypatch):
+    """Closing the Browser Screen's tab drops its connection, and the panel
+    closing it afterwards found it gone. Every tab closed on the NAS logged
+    a whole traceback for it. It ends quietly now."""
+    from fastapi import FastAPI
+
+    async def scenario():
+        async def screen_sharing(reader, writer):
+            await reader.read()
+            writer.close()
+
+        sharing = await asyncio.start_server(screen_sharing, "127.0.0.1", 0)
+        monkeypatch.setenv("PAPERPULL_VNC_PORT", str(sharing.sockets[0].getsockname()[1]))
+        app = FastAPI()
+        server_mode.install(app)
+        cookie = "%s=%s" % (server_mode.SESSION_COOKIE, server_mode.new_session())
+        from_page = [{"type": "websocket.connect"}, {"type": "websocket.disconnect", "code": 1006}]
+
+        async def receive():
+            return from_page.pop(0)
+
+        async def send(message):
+            # What uvicorn raises for a page that is already gone.
+            if message["type"] == "websocket.close":
+                raise OSError("the page is gone")
+
+        scope = {"type": "websocket", "path": "/screen/websockify", "query_string": b"",
+                 "headers": [(b"host", b"nas.local:8765"), (b"origin", b"http://nas.local:8765"),
+                             (b"cookie", cookie.encode())]}
+        try:
+            await asyncio.wait_for(app(scope, receive, send), 10)
+        finally:
+            sharing.close()
+
+    server_mode.set_password(PASSWORD)
+    run(scenario())
+
+
 def test_the_screen_bridge_carries_bytes_both_ways():
     """The page's messages reach the screen sharing server as they are, and
     what the server sends comes back as binary messages, until the page
