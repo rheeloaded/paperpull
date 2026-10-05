@@ -489,7 +489,7 @@ xattr -dr com.apple.quarantine .
 chmod +x setup-all.command apps/*/*.command gui/*.command
 ```
 
-## PaperPull Server (experimental)
+## PaperPull Server (beta)
 
 PaperPull can also run on an always-on machine at home, a NAS or a home
 server with Docker, next to Paperless-ngx, and be used from a browser on any

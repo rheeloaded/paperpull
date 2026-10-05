@@ -9,7 +9,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [0.43.0] - 2026-10-05
 
-PaperPull Server arrives, experimental, for an always-on machine at home
+PaperPull Server arrives, in beta, for an always-on machine at home
 next to Paperless-ngx, with a setup guide and privacy and security pages
 of its own. No app reads, clicks or takes over a tab of another site
 anymore. Ten more receipt apps and forty-one document apps no longer call
@@ -20,7 +20,7 @@ records each store receipt once, Uber and Apple download on Resume with
 no tab open, and State Farm is confirmed.
 
 ### Added
-- **PaperPull Server, experimental.** PaperPull can run on an always-on
+- **PaperPull Server, in beta.** PaperPull can run on an always-on
   machine at home, a NAS or a home server with Docker, next to
   Paperless-ngx, and be used from a browser on any computer on the home
   network. It is one Docker image, built by `server/build.py` from the

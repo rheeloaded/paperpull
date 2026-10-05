@@ -1,6 +1,6 @@
 # PaperPull Server
 
-**Experimental.** PaperPull for an always-on machine at home, such as a NAS
+**Beta.** PaperPull for an always-on machine at home, such as a NAS
 or a home server, used from a browser on any computer on your home network.
 It is meant to sit next to [Paperless-ngx](https://docs.paperless-ngx.com/),
 so the documents PaperPull collects can go straight into it.

@@ -14,9 +14,10 @@
 # again, and the job that publishes takes that very image, never a build of
 # its own, so what is pushed is what passed.
 #
-# GitHub makes a new package private. After the first release the package
-# has to be made public once in its settings, and the publish job warns
-# when the image cannot be pulled without signing in.
+# GitHub's documentation says a new package starts private, but this one
+# came out public on its first publish, 0.43.0, since the image's source
+# label links it to this public repository. The publish job still warns
+# if the image ever cannot be pulled without signing in.
 
 name: Server image
 

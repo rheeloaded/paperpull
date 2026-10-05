@@ -1,4 +1,4 @@
-# PaperPull Server, as a Docker Compose project. EXPERIMENTAL.
+# PaperPull Server, as a Docker Compose project. BETA.
 #
 #   docker compose -f server/compose.yaml up -d
 #

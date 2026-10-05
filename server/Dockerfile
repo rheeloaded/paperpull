@@ -110,6 +110,6 @@ ENTRYPOINT ["/opt/paperpull/server/entrypoint.sh"]
 # What the image is. The source is what links a published image to this
 # repository on GitHub's registry. server/build.py adds the version.
 LABEL org.opencontainers.image.title="PaperPull Server" \
-      org.opencontainers.image.description="PaperPull on an always-on machine at home, used from a browser on the home network. Experimental." \
+      org.opencontainers.image.description="PaperPull on an always-on machine at home, used from a browser on the home network. Beta." \
       org.opencontainers.image.source="https://github.com/rheeloaded/paperpull" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
