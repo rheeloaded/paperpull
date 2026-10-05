@@ -186,6 +186,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   saved every document State Farm lists for his policies, the payment
   receipt earlier rounds refused among them, so it moves from untested to
   confirmed.
+- **The steps under the panel's buttons say what Discover does.** They
+  named Login, Pilot and Run All and left Discover out, though it is one of
+  the four buttons a normal day shows. They now say it shows what the
+  provider has and downloads nothing, and that it is optional, since Pilot
+  and Run All look too.
 
 ## [0.42.0] - 2026-10-03
 
