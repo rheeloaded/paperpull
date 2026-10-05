@@ -366,6 +366,20 @@ def test_the_page_knows_it_is_on_the_server(base, on_server, monkeypatch):
     assert "const SERVER = false;" in ask(base + "/")[2]
 
 
+def test_the_welcome_page_says_where_the_data_folder_is_on_the_server(base, on_server):
+    """/data is only the container's name for the folder. A person looking
+    for it on the NAS finds a folder named data beside compose.yaml, so the
+    page says so, on the server and nowhere else."""
+    page = ask(base + "/", session=signed_in(base))[2]
+    start = page.index('<p class="hint" id="serverroot" style="display:none;')
+    note = page[start:page.index("</p>", start)]
+    assert "<b>data</b>" in note and "compose.yaml" in note
+    server_page = page.split("function serverPage() {", 1)[1].split("\n}\n", 1)[0]
+    assert server_page.strip().splitlines()[0] == "if (!SERVER) return;"
+    assert "$('serverroot').style.display = 'block';" in server_page
+    assert "the data folder beside compose.yaml" in page
+
+
 def test_the_shared_folder_is_the_only_one_offered(base, on_server, tmp_path):
     session = signed_in(base)
     status, _, page = ask(base + "/api/providers", session=session)

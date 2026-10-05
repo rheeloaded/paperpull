@@ -2110,11 +2110,18 @@ HTML = r"""<!doctype html>
 <section id="setup" class="setup" style="display:none">
   <div id="newuser">
     <h2>Welcome to PaperPull</h2>
-    <p class="lead">Two steps. Choose where your downloads will live, then tick
+    <p class="lead" id="newlead">Two steps. Choose where your downloads will live, then tick
     the providers you have accounts with. A folder is set up for each one, and
     nothing is downloaded until you ask.</p>
-    <label>Folder for your downloads</label>
+    <label id="newrootlabel">Folder for your downloads</label>
     <input id="newroot" type="text">
+    <p class="hint" id="serverroot" style="display:none; margin:8px 0 0; line-height:1.5">
+      <b>/data</b> is the container's name for its data folder. On your server
+      it is the folder named <b>data</b> inside the folder that holds
+      compose.yaml, unless your compose.yaml points it somewhere else. Each
+      provider you tick gets a folder of its own in there, and its documents
+      go in that folder.
+    </p>
     <label>Providers you have accounts with</label>
     <div id="providers" class="providers"></div>
     <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
@@ -2814,6 +2821,7 @@ async function load() {
   $('samplebar').style.display = inSample ? 'flex' : 'none';
   $('root').innerHTML = 'apps root: ' + esc(META.apps_root) +
     (inSample ? ' <span class="hint">(the sample)</span>'
+     : SERVER ? ' <span class="hint">(the data folder beside compose.yaml on your server)</span>'
      : (META.root_source === 'environment' ? ' <span class="hint">(from APPS_ROOT)</span>'
         : ' <a href="#" onclick="changeRoot(); return false;" style="color:var(--accent)">change</a>')
        // Reachable with an archive already open, not just from the welcome
@@ -3006,10 +3014,15 @@ function unlockButtons() {
   document.querySelectorAll('button[data-runlock]').forEach(b => { b.disabled = false; delete b.dataset.runlock; });
 }
 // On the server the downloads folder is the shared folder the container was
-// given, so it is shown and not asked for, and what would open a folder on
-// this computer downloads the file instead.
+// given, so it is shown and not asked for, with where to find it on the
+// server, and what would open a folder on this computer downloads the file
+// instead.
 function serverPage() {
   if (!SERVER) return;
+  $('newlead').textContent = 'Tick the providers you have accounts with. Each one '
+    + 'gets a folder of its own, and nothing is downloaded until you ask.';
+  $('newrootlabel').textContent = 'Where your downloads go';
+  $('serverroot').style.display = 'block';
   $('newroot').readOnly = true;
   $('existinglink').style.display = 'none';
   $('failreveal').textContent = 'Download the file to attach';
