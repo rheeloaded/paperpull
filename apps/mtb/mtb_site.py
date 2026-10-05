@@ -39,6 +39,7 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import redirects
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 
@@ -627,24 +628,26 @@ def download_statement(page, href: str, out_path) -> bool:
     if _endpoint_of(url) is None:
         log.error("refusing a URL that is not an M&T document endpoint")
         return False
-    # Redirects are capped and the FINAL url is re-checked: "every URL this app
-    # requests is on an M&T host" has to hold for every hop, not just the first.
-    # Exceeding the cap RAISES rather than returning a response, and an expired
-    # session is exactly what produces a long redirect chain here (M&T bounces
-    # a document request towards sign-in), so that is reported as an expired
-    # session rather than as an unexplained failure.
+    # "Every URL this app requests is on an M&T host" has to hold for every
+    # hop, not just the first. So a redirect is followed one hop at a time,
+    # each address checked before it is asked, and one that leaves M&T's
+    # hosts is never asked at all. Checking only where Playwright ended up
+    # was too late, since it had carried the browser's cookies through every
+    # hop on the way. More than three redirects is an expired session, which
+    # is exactly what produces a long chain here (M&T bounces a document
+    # request toward sign-in), so that is reported as an expired session
+    # rather than as an unexplained failure.
     try:
-        resp = page.context.request.get(url, max_redirects=3)
+        resp = redirects.get(page.context.request, url, is_safe_url, hops=3)
+    except redirects.TooManyRedirects:
+        raise SessionExpired(
+            "M&T redirected the document request, which means the "
+            "signed-in session is no longer valid") from None
     except Exception as e:
-        if "redirect" in str(e).lower():
-            raise SessionExpired(
-                "M&T redirected the document request, which means the "
-                "signed-in session is no longer valid") from None
         log.warning("fetch failed: %s", str(e).splitlines()[0][:100])
         return False
-    final = getattr(resp, "url", url) or url
-    if not is_safe_url(final):
-        log.error("refusing a redirect that left M&T's hosts")
+    if resp.status in redirects.REDIRECTS:
+        log.error("M&T sent the document request somewhere this app does not follow")
         return False
     if not resp.ok:
         log.warning("fetch returned %s", resp.status)

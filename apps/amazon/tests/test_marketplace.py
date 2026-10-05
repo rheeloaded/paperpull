@@ -196,6 +196,9 @@ POPOVER = ('<ul><li><a class="a-link-normal" href="/gp/css/summary/print.html?or
 
 
 class _Resp:
+    status = 200
+    headers: dict = {}
+
     def __init__(self, url, text):
         self.url, self._text, self.ok = url, text, True
 

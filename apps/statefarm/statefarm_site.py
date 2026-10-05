@@ -2536,7 +2536,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if got.get("refetch"):
             try:
-                resp = page.context.request.get(got.pop("refetch"), timeout=60000)
+                # This address answered the press directly, so asking it
+                # again needs no redirect, and one would take the
+                # browser's cookies wherever it led.
+                resp = page.context.request.get(got.pop("refetch"), max_redirects=0,
+                                                timeout=60000)
                 body = resp.body() if resp.ok else b""
                 if _is_document(body, zip_ok=True):
                     out_path.write_bytes(body)

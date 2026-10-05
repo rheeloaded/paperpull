@@ -89,6 +89,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core import controls as _controls
+from paperpull_core import redirects
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.dates import last_day as _last_day
@@ -997,8 +998,11 @@ def discovercard_download(page, ctx, account: str, date: str, out_path,
         log.warning("refusing an off-host statement URL for %s: %s",
                     date, href[:80])
         return False
+    # Every redirect on the way has to stay on Discover's hosts as well.
+    # Playwright alone would follow one wherever it led, carrying the
+    # session's cookies, so each hop is checked before it is asked.
     try:
-        resp = ctx.request.get(url, timeout=90000)
+        resp = redirects.get(ctx.request, url, is_safe_url, timeout=90000)
     except Exception as e:
         log.info("fetch failed for %s: %s", date, str(e).splitlines()[0][:80])
         return False

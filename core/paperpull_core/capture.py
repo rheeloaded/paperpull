@@ -22,6 +22,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+from . import redirects
 from .receipt_pdf import ZIP_MAGIC
 from .redact import redact
 
@@ -572,11 +573,17 @@ def fetch_as_b64(page, url: str, hosts=(), *, subdomains: bool = True,
 def fetch_pdf(page, href: str, is_safe_url, *, zip_ok: bool = False) -> Optional[bytes]:
     """A PDF link fetched from inside the signed-in page, cookies and all.
     None unless the address passes the app's guard and the answer really is
-    a PDF, or with `zip_ok` a ZIP for the app to open."""
+    a PDF, or with `zip_ok` a ZIP for the app to open.
+
+    A link asked for the first time may be sent on to another address, so
+    a redirect is followed one hop at a time, each address checked with the
+    app's guard before it is asked (redirects.get). Followed by Playwright
+    alone, a redirect carried the browser's cookies to wherever it led, and
+    that host's PDF was kept."""
     if not is_safe_url(href):
         return None
     try:
-        resp = page.context.request.get(href, timeout=60000)
+        resp = redirects.get(page.context.request, href, is_safe_url, timeout=60000)
         body = resp.body() if resp.ok else b""
     except Exception as e:
         log.info("fetch %s failed: %s", redact(href)[:80], e)
@@ -629,15 +636,18 @@ def take_same_tab(page, start_url: str, out_path: Path, trace, is_safe_url) -> b
                       "content_type": kind[:40]})
     if "pdf" not in kind and not url.lower().split("?")[0].endswith(".pdf"):
         return False
+    # The tab already holds the document at this address, so asking it
+    # again needs no redirect, here or in the page. One now would be the
+    # address sending the cookies somewhere else, not the document.
     body = b""
     try:
-        resp = page.context.request.get(url, timeout=60000)
+        resp = page.context.request.get(url, max_redirects=0, timeout=60000)
         body = resp.body() if resp.ok else b""
     except Exception as e:
         log.info("same-tab fetch failed: %s", e)
     if body[:5] != b"%PDF-":
         try:
-            b64 = fetch_as_b64(page, url)
+            b64 = fetch_as_b64(page, url, no_redirect=True)
             body = base64.b64decode(b64) if b64 else b""
         except Exception:
             body = b""

@@ -332,8 +332,11 @@ def test_a_row_whose_pdf_control_is_not_an_anchor_still_hands_it_over():
 # -- round five, the tab moves instead of opening one (#33) -------------------
 
 class _Res:
+    headers: dict = {}
+
     def __init__(self, body, ok=True):
         self._b, self.ok = body, ok
+        self.status = 200 if ok else 404
 
     def body(self):
         return self._b
@@ -344,7 +347,7 @@ class _Request:
         self._bodies = bodies
         self.asked = []
 
-    def get(self, url, timeout=0):
+    def get(self, url, timeout=0, max_redirects=None):
         self.asked.append(url)
         if url not in self._bodies:
             raise RuntimeError("not found")

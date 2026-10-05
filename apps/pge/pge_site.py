@@ -127,6 +127,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import redirects
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.capture import fetch_with_status as _fetch_with_status
 from paperpull_core.failure import SAFE_TAGS as _CORE_TAGS
@@ -1366,9 +1367,12 @@ def _pdf_from_here(page, before=()) -> Optional[bytes]:
     seen = [s for s in seen if s not in old]
     blobs = [s for s in blobs if s not in old]
 
+    # A viewer's source is an address as the page wrote it, which may send
+    # the session on, so a redirect is followed one hop at a time and only
+    # to PG&E's own hosts.
     for candidate in seen[:6]:
         try:
-            res = page.request.get(candidate, timeout=60000)
+            res = redirects.get(page.request, candidate, is_safe_url, timeout=60000)
             body = res.body() if res.ok else b""
         except Exception as e:
             log.info("fetch %s: %s", _url_shape(candidate), type(e).__name__)
@@ -1523,11 +1527,15 @@ def _remember_blob(url: str) -> None:
 
 def _pdf_at(page, url: str) -> Optional[bytes]:
     """A PDF at a PG&E address, asked for through the signed-in session.
-    Nothing is clicked and no tab moves. None unless it is a PDF."""
+    Nothing is clicked and no tab moves. None unless it is a PDF.
+
+    The address is one a new tab already stands at, so it answered once
+    without a redirect, and none is followed now. One would take the
+    browser's cookies wherever it led."""
     if not is_safe_url(url):
         return None
     try:
-        res = page.request.get(url, timeout=60000)
+        res = page.request.get(url, max_redirects=0, timeout=60000)
         body = res.body() if res.ok else b""
     except Exception as e:
         log.info("fetch %s: %s", _url_shape(url), type(e).__name__)
@@ -2053,7 +2061,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
             if href and ("http" in href or ".pdf" in href):
                 target_url = href if href.startswith("http") else (BASE.rstrip("/") + "/" + href.lstrip("/"))
                 if is_safe_url(target_url):
-                    res = page.request.get(target_url)
+                    res = redirects.get(page.request, target_url, is_safe_url)
                     if res.ok and res.body()[:5] == b"%PDF-":
                         out_path.write_bytes(res.body())
                         print("  [site] Successfully fetched PDF via direct href!")

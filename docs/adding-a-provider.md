@@ -261,6 +261,16 @@ open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
   says so rather than reading or clicking whatever page is open.
   `core/tests/test_no_app_acts_on_another_sites_tab.py` holds every app to
   both.
+- **Ask from outside the page without following a redirect.**
+  `page.request` and `page.context.request` send every cookie the person's
+  browser holds for the host they ask, and by themselves they follow up to
+  twenty redirects to any host. Asking again an address the browser already
+  got its document from needs none, so pass `max_redirects=0`. A link asked
+  for the first time goes through `paperpull_core.redirects.get` with the
+  app's own `is_safe_url`, which follows a redirect one step at a time and
+  only to the provider's own hosts.
+  `core/tests/test_no_request_follows_a_redirect_off_the_allowlist.py`
+  fails any other call.
 - **Short sessions.** Some bank portals expire fast and the SPA keeps showing a
   cached page while download clicks silently no-op. Detect it (a hard reload
   bounces to the login URL) and report it so `--resume` retries after re-login

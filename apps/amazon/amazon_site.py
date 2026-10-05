@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from paperpull_core import page_check as _page_check
+from paperpull_core import redirects
 from paperpull_core.models import ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
@@ -937,8 +938,8 @@ def find_invoice_pdf_links(page, order_id: str) -> List[Tuple[str, str]]:
     A plain GET of the popover fragment with the signed-in session; nothing on
     the page is clicked. Empty when the order has only the printable summary."""
     try:
-        resp = page.context.request.get(invoice_popover_url(order_id),
-                                        max_redirects=3, timeout=30000)
+        resp = redirects.get(page.context.request, invoice_popover_url(order_id),
+                             is_safe_url, hops=3, timeout=30000)
     except Exception as e:
         log.warning("invoice popover fetch failed: %s", str(e).splitlines()[0][:100])
         return []
@@ -962,7 +963,10 @@ def download_invoice_pdf(page, url: str, out_path) -> bool:
     if not is_safe_url(url):
         return False
     try:
-        resp = page.context.request.get(url, max_redirects=3, timeout=90000)
+        # A redirect is followed only to the store's own hosts, each
+        # checked before it is asked, since Playwright alone would carry
+        # the browser's cookies wherever one led.
+        resp = redirects.get(page.context.request, url, is_safe_url, hops=3, timeout=90000)
     except Exception as e:
         log.warning("invoice download failed: %s", str(e).splitlines()[0][:100])
         return False

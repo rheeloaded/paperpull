@@ -102,7 +102,13 @@ def test_every_request_is_a_GET():
     src = (Path(__file__).resolve().parents[1] / "paylocity_site.py").read_text(encoding="utf-8")
     for verb in (".post(", ".put(", ".patch(", ".delete("):
         assert verb not in src, verb
-    assert "request.get(" in src
+    # Every request goes out through Playwright's GET, here or through the
+    # core's redirects.get, which asks each hop with GET alone.
+    assert "request.get(" in src or "redirects.get(" in src
+    from paperpull_core import redirects
+    helper = Path(redirects.__file__).read_text(encoding="utf-8")
+    for verb in (".post(", ".put(", ".patch(", ".delete(", ".fetch("):
+        assert verb not in helper, verb
 
 
 def test_report_urls_must_stay_on_paylocitys_host():
@@ -116,10 +122,12 @@ def _collect(rows):
     `rows` for the check-dates call and an empty assignment list otherwise."""
     class _Resp:
         ok = True
+        status = 200
+        headers: dict = {}
         def __init__(self, payload): self._p = payload
         def json(self): return self._p
     class _Req:
-        def get(self, url, params=None):
+        def get(self, url, params=None, max_redirects=None):
             if "GetCheckDatesForPayAssignment" in url:
                 return _Resp(rows)
             return _Resp({"payAssignments": []})

@@ -1049,11 +1049,12 @@ def _click_and_capture(page, control, title: str, out_path) -> bool:
         log.error("refusing to fetch %r from an unexpected host (%s)", title, host)
         return False
     try:
-        # page.request shares the browser's cookie jar and follows redirects.
-        # The link is pre-signed so it needs neither, but this is the one
-        # fetch path in Playwright that returns raw bytes without a download
-        # event, which is the whole point.
-        resp = page.request.get(url, timeout=60000)
+        # page.request shares the browser's cookie jar, and left to itself it
+        # follows redirects anywhere with those cookies. The link is
+        # pre-signed so it needs neither, and no redirect is followed. This
+        # is the one fetch path in Playwright that returns raw bytes without
+        # a download event, which is the whole point.
+        resp = page.request.get(url, max_redirects=0, timeout=60000)
         data = resp.body() if resp.ok else b""
     except Exception as e:
         log.info("fetching the PDF for %r failed: %s", title, e)

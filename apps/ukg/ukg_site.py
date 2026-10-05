@@ -62,6 +62,8 @@ from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import List, Optional
 
+from paperpull_core import redirects
+
 log = logging.getLogger("ukg_docs.site")
 
 # ---------------------------------------------------------------------------
@@ -247,11 +249,16 @@ def parse_period_date(title: str):
 
 
 def _get_json(page, path):
-    """GET a proxied API path using the signed-in session."""
+    """GET a proxied API path using the signed-in session.
+
+    A redirect is followed only to an address this app may request, each
+    hop checked before it is asked (redirects.get, which asks with GET
+    alone). Playwright by itself would follow one anywhere, cookies and
+    all."""
     url = api_url(path)
     if not is_safe_url(url):
         raise RuntimeError(f"refusing to request a non-view URL: {url}")
-    resp = page.context.request.get(url)
+    resp = redirects.get(page.context.request, url, is_safe_url)
     if not resp.ok:
         log.warning("API %s returned %s", path, resp.status)
         return None
@@ -342,7 +349,7 @@ def download_document(page, pdf_url: str, out_path) -> bool:
     if not is_safe_url(url):
         log.error("refusing to fetch a non-view URL")
         return False
-    resp = page.context.request.get(url)
+    resp = redirects.get(page.context.request, url, is_safe_url)
     if not resp.ok:
         log.warning("PDF fetch returned %s", resp.status)
         return False

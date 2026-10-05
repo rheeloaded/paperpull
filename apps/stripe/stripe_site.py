@@ -64,6 +64,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
+from paperpull_core import redirects
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 # Everything on its way into a diagnostic file goes through here. It
@@ -549,7 +550,9 @@ def _fetch_file(page, link: str) -> dict:
         raise
     except Exception as e:
         log.info("in-page fetch refused (%s), asking through the session", str(e)[:80])
-    resp = page.context.request.get(link, max_redirects=5)
+    # Followed by Playwright alone, a redirect would carry the browser's
+    # cookies wherever it led, so each hop is checked before it is asked.
+    resp = redirects.get(page.context.request, link, is_safe_url, hops=5)
     if not is_safe_url(resp.url or link):
         raise ValueError("the file moved off stripe.com: %r" % redact(resp.url))
     ct = (resp.headers.get("content-type") or "").lower()

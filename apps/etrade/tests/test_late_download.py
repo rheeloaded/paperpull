@@ -65,7 +65,7 @@ class Provider:
     def __init__(self):
         self.asked: list = []
 
-    def get(self, url, timeout=0):
+    def get(self, url, timeout=0, max_redirects=None):
         self.asked.append(url)
         data = SEPTEMBER if url.endswith("september.pdf") else AUGUST
         return type("Answer", (), {"ok": True, "body": lambda self: data})()

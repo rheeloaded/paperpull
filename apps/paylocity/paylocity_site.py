@@ -42,6 +42,8 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
+from paperpull_core import redirects
+
 log = logging.getLogger("paylocity_docs.site")
 
 # One fixed public address, unlike UKG's per-employer tenant. The employer is
@@ -268,9 +270,12 @@ REPORT_BASE = f"{APP_HOST}/Escher/Escher_WebUI/views"
 
 
 def _get_json(page, url, params=None):
+    # A redirect is followed only to Paylocity's own hosts, each hop checked
+    # before it is asked (redirects.get, which asks with GET alone).
+    # Playwright by itself would follow one anywhere, cookies and all.
     if not is_safe_url(url):
         raise RuntimeError(f"refusing a non-Paylocity URL: {url}")
-    resp = page.context.request.get(url, params=params or {})
+    resp = redirects.get(page.context.request, url, is_safe_url, params=params or {})
     if not resp.ok:
         log.warning("GET %s -> %s", url.rsplit("/", 1)[-1], resp.status)
         return None
@@ -387,7 +392,7 @@ def download_document(page, pdf_url: str, out_path) -> bool:
     if not is_safe_url(final):
         log.error("refusing a non-Paylocity report URL")
         return False
-    resp = page.context.request.get(final)
+    resp = redirects.get(page.context.request, final, is_safe_url)
     if not resp.ok:
         log.warning("PDF fetch returned %s", resp.status)
         return False

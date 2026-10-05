@@ -178,6 +178,8 @@ def test_an_unfinished_zip_is_not_taken(tmp_path):
 
 class _Answer:
     ok = True
+    status = 200
+    headers: dict = {}
 
     def __init__(self, body):
         self._body = body
@@ -190,7 +192,7 @@ class _Page:
     def __init__(self, body):
         answer = _Answer(body)
         self.context = type("C", (), {"request": type("R", (), {
-            "get": staticmethod(lambda href, timeout=0: answer)})()})()
+            "get": staticmethod(lambda href, timeout=0, max_redirects=20: answer)})()})()
 
 
 def test_a_link_that_answers_with_a_zip_is_kept_only_when_asked():

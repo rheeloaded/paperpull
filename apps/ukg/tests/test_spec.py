@@ -171,7 +171,13 @@ def test_every_request_is_a_GET():
     source = (Path(__file__).resolve().parents[1] / "ukg_site.py").read_text(encoding="utf-8")
     for verb in (".post(", ".put(", ".patch(", ".delete(", ".fetch("):
         assert verb not in source, verb
-    assert source.count("request.get(") >= 1
+    # Every request goes out through Playwright's GET, here or through the
+    # core's redirects.get, which asks each hop with GET alone.
+    assert source.count("request.get(") + source.count("redirects.get(") >= 1
+    from paperpull_core import redirects
+    helper = Path(redirects.__file__).read_text(encoding="utf-8")
+    for verb in (".post(", ".put(", ".patch(", ".delete(", ".fetch("):
+        assert verb not in helper, verb
 
 
 def test_records_do_not_carry_the_employer_tenant(monkeypatch):
