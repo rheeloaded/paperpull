@@ -15,21 +15,24 @@ in the name of the file they wrote, which is the name an attachment shows.
 So every line Diagnose prints is tried here with an invented value, letters
 and digits, standing in for everything that came off a page or out of a
 record, and a line passes only when that value does not come out as it went
-in. What may come out whole is a word we wrote, a count made with len or
-sum, a yes or no, a word from a list written in the app's source and a path
-in the app's own folders whose name we wrote. Anything else goes through
+in. What may come out whole is a word we wrote, a count made with len, a
+yes or no, a word from a list written in the app's source and a path in
+the app's own folders whose name we wrote. Anything else goes through
 shape, shape_url or shape_tree with the app's own words first. That holds
 for a count read back from what an app gathered too, since shape_tree leaves
 a whole number and a yes or no as they are, so no key is trusted to hold
-one.
+one. A Fixed string is trusted where it is made, as it is in a file.
 
-The lines are found by what they do. Every print in cmd_diagnose, in any
-function that names a diagnose- file and in any method only those call.
+The lines are found by what they do. Every print, log line and traceback in
+cmd_diagnose, in any function that names a diagnose- file and in any
+function only those call. A log line a provider's site module writes while
+Diagnose runs is not read here, since that module serves every command.
 Nothing here is a real value.
 """
 import ast
 import builtins
 import importlib
+import re
 import sys
 from pathlib import Path
 
@@ -48,6 +51,12 @@ PARTS = ("zorvex", "4821", "quillam")
 
 SHAPERS = ("shape", "shape_url", "shape_name", "shape_tree")
 CONSOLE = ("print", "sys.stdout.write", "sys.stderr.write")
+# Every app logs at INFO to the console, which the panel shows.
+LOGS = ("info", "warning", "warn", "error", "exception", "critical", "log")
+LOGGER = re.compile(r"(^|\.)(_?log|logger|LOG|logging)$")
+# What these print is an exception's own text, which nothing here can shape.
+TRACEBACKS = ("traceback.print_exc", "traceback.print_exception",
+              "traceback.print_stack", "traceback.print_tb")
 
 
 def entry_of(app: Path):
@@ -104,9 +113,7 @@ class Leak(str):
         return Leak()
 
     def __radd__(self, other):
-        # sum() of what a page gave is a number, or it raises.
-        if isinstance(other, int) and not isinstance(other, bool):
-            return other + 1
+        # A sum of what a page gave can be an amount, so it is a page's too.
         return Leak()
 
 
@@ -165,16 +172,27 @@ def names_a_diagnose_file(fn) -> bool:
 
 def diagnose_functions(tree):
     """cmd_diagnose, every function that names a diagnose- file, the functions
-    defined inside those, and every method of the module that only those
-    call, until nothing more turns up."""
+    defined inside those, and every method or function of the module that
+    only those call, until nothing more turns up."""
     fns = functions_of(tree)
+    module_level = {fn for fn in tree.body if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))}
     chosen = {fn for fn in fns if fn.name == "cmd_diagnose" or names_a_diagnose_file(fn)}
-    callers = {}
+    through_self, by_name = {}, {}
     for fn in fns:
         for node in own_nodes(fn):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                    and isinstance(node.func.value, ast.Name) and node.func.value.id == "self":
-                callers.setdefault(node.func.attr, set()).add(fn)
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) \
+                    and node.func.value.id == "self":
+                through_self.setdefault(node.func.attr, set()).add(fn)
+            elif isinstance(node.func, ast.Name):
+                by_name.setdefault(node.func.id, set()).add(fn)
+    for node in top_level(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for call in ast.walk(node):
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
+                by_name.setdefault(call.func.id, set()).add(tree)
     grew = True
     while grew:
         grew = False
@@ -182,17 +200,24 @@ def diagnose_functions(tree):
             if fn in chosen:
                 continue
             inside = any(fn in set(functions_of(c)) - {c} for c in chosen)
-            called = callers.get(fn.name)
+            called = (by_name if fn in module_level else through_self).get(fn.name)
             if inside or (called and called <= chosen):
                 chosen.add(fn)
                 grew = True
     return sorted(chosen, key=lambda fn: fn.lineno)
 
 
+def is_log(call) -> bool:
+    f = call.func
+    return isinstance(f, ast.Attribute) and f.attr in LOGS \
+        and bool(LOGGER.search(ast.unparse(f.value)))
+
+
 def console_lines(fn):
     """Every call in fn's own body that writes to the console."""
     return sorted((n for n in own_nodes(fn) if isinstance(n, ast.Call)
-                   and ast.unparse(n.func) in CONSOLE), key=lambda n: n.lineno)
+                   and (ast.unparse(n.func) in CONSOLE + TRACEBACKS or is_log(n))),
+                  key=lambda n: n.lineno)
 
 
 def stores(target, name) -> bool:
@@ -308,7 +333,7 @@ class Scope:
     """What each name a line reads stands for when the line is tried."""
 
     def __init__(self, app: Path, tree, fn, root: Path):
-        self.app, self.fn = app, fn
+        self.app, self.fn, self.root = app, fn, root
         self.module = module_names(tree)
         self.me = App(root)
         outer = enclosing(tree, fn)
@@ -351,8 +376,14 @@ class Scope:
                 before = [node for _, node in found if node.lineno < line]
                 if not before:
                     raise NotDefined("%s, which is read before it is set" % name)
-                if followed(before[-1].value) and name not in seen:
-                    return self.evaluate(before[-1].value, line, seen + (name,))
+                # Followed only when every assignment is. A loop can bring
+                # a later one back round to the line, so the one that lets
+                # a page's words out is the one tried, if any does.
+                if all(followed(node.value) for _, node in found) and name not in seen:
+                    values = [self.evaluate(node.value, line, seen + (name,))
+                              for _, node in found]
+                    return next((v for v in values if leaks(v, self.root)),
+                                values[found.index(("assign", before[-1]))])
             return Leak()
         if self.outer is not None:
             return self.outer.value(name, line, seen)
@@ -369,12 +400,18 @@ class Scope:
         return eval(compile(ast.Expression(body=expr), "<diagnose>", "eval"), env)
 
     def said(self, call):
+        args = call.args
+        if is_log(call) and call.func.attr == "log":
+            args = args[1:]
         out = []
-        for arg in call.args:
+        for arg in args:
             if isinstance(arg, ast.Starred):
                 out.extend(self.evaluate(arg.value, call.lineno))
             else:
                 out.append(self.evaluate(arg, call.lineno))
+        if is_log(call):
+            # A log line is its message with the rest put in its places.
+            return str(out[0]) % tuple(out[1:]) if len(out) > 1 else str(out[0] if out else "")
         return " ".join(str(v) for v in out)
 
 
@@ -395,6 +432,9 @@ def what_diagnose_prints(app: Path, tree, root: Path):
     for fn in diagnose_functions(tree):
         scope = Scope(app, tree, fn, root)
         for call in console_lines(fn):
+            if ast.unparse(call.func) in TRACEBACKS:
+                yield call.lineno, None, "it prints an exception's own text"
+                continue
             if all(isinstance(a, ast.Constant) for a in call.args):
                 continue
             try:
@@ -430,11 +470,9 @@ def test_every_line_diagnose_prints_keeps_no_word_off_the_list(app, tmp_path):
     assert not wrong, "%s prints what a page said\n  %s" % (app.name, "\n  ".join(wrong))
 
 
-@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
-def test_what_diagnose_prints_is_shaped_with_the_apps_own_words(app):
-    """The words the file is written with, from what the app's source calls
-    it, and never a set with a page's words added to it."""
-    tree = ast.parse(entry_of(app).read_text(encoding="utf-8"))
+def shaped_with_other_words(tree):
+    """Each shaping in a Diagnose line whose words are not the app's own,
+    words_for with the name the app gives its survey, bound once."""
     expected = "words_for(%s, site)" % provider_of(tree)
     wrong = []
     for fn in diagnose_functions(tree):
@@ -452,6 +490,24 @@ def test_what_diagnose_prints_is_shaped_with_the_apps_own_words(app):
                 elif words is not None and ast.unparse(words) == expected:
                     continue
                 wrong.append("line %d, %s" % (c.lineno, ast.unparse(c)[:90]))
+    return expected, wrong
+
+
+def diagnose_file_names(app: Path, tree, root: Path):
+    """Each path Diagnose makes in the app's folders, as (line, path)."""
+    for fn in diagnose_functions(tree):
+        scope = Scope(app, tree, fn, root)
+        for node in own_nodes(fn):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) \
+                    and ast.unparse(node.left).startswith("self.paths."):
+                yield node.lineno, scope.evaluate(node, node.lineno)
+
+
+@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
+def test_what_diagnose_prints_is_shaped_with_the_apps_own_words(app):
+    """The words the file is written with, from what the app's source calls
+    it, and never a set with a page's words added to it."""
+    expected, wrong = shaped_with_other_words(ast.parse(entry_of(app).read_text(encoding="utf-8")))
     assert not wrong, "%s shapes a line with words other than %s\n  %s" % (
         app.name, expected, "\n  ".join(wrong))
 
@@ -461,18 +517,10 @@ def test_every_file_diagnose_writes_is_named_by_the_app(app, tmp_path):
     """A tester attaches the detailed file, and an attachment shows its name.
     Every path Diagnose makes in the app's folders is tried the same way."""
     tree = ast.parse(entry_of(app).read_text(encoding="utf-8"))
-    tried, wrong = 0, []
-    for fn in diagnose_functions(tree):
-        scope = Scope(app, tree, fn, tmp_path)
-        for node in own_nodes(fn):
-            if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
-                    and ast.unparse(node.left).startswith("self.paths.")):
-                continue
-            tried += 1
-            path = scope.evaluate(node, node.lineno)
-            if leaks(path, tmp_path):
-                wrong.append("line %d, %s" % (node.lineno, ast.unparse(node)[:90]))
-    assert tried, "%s makes no path for Diagnose, so nothing was tried" % app.name
+    names = list(diagnose_file_names(app, tree, tmp_path))
+    assert names, "%s makes no path for Diagnose, so nothing was tried" % app.name
+    wrong = ["line %d, %s" % (line, Path(path).name) for line, path in names
+             if leaks(path, tmp_path)]
     assert not wrong, "%s names a Diagnose file after what a page said\n  %s" % (
         app.name, "\n  ".join(wrong))
 
@@ -480,43 +528,65 @@ def test_every_file_diagnose_writes_is_named_by_the_app(app, tmp_path):
 # -- and that the census can tell ------------------------------------------------------
 
 LOOKS = '''
+import logging
+import traceback
+
 import zorbank_site as site
 from paperpull_core.models import IN_STORE, ONLINE
 from paperpull_core.words import shape, shape_tree, shape_url, words_for, write_shaped
+
+log = logging.getLogger(__name__)
+
+
+def report(info):
+    print(%(module_line)s)
 
 
 class Downloader:
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
-        words = words_for('Zorbank', site)
+        words = %(words)s
         page = self.page()
         info = {"collected": 0, "samples": []}
         out = self.paths.diagnostics / "diagnose-history.json"
         write_shaped(out, info, words)
         print(f"Wrote {out}")
+        label = "Documents"
         for ptype in (ONLINE, IN_STORE):
             p = self.pick(ptype)
-            out = self.paths.diagnostics / f"diagnose-{ptype}%s.json"
+            out = self.paths.diagnostics / f"diagnose-{ptype}%(name_part)s.json"
             write_shaped(out, info, words)
             print(f"Wrote {out}")
-            print(%s)
+            print(%(line)s)
+            %(statement)s
         self.helper(info)
+        report(info)
 
     def helper(self, info):
-        print(%s)
+        print(%(helper_line)s)
 
     def write_survey(self):
         failure.write_survey(self.paths.diagnostics, provider='Zorbank')
 '''
 
+PLAIN = {"module_line": "len(info)", "words": "words_for('Zorbank', site)", "name_part": "",
+         "line": "len(info)", "statement": "pass", "helper_line": "len(info)"}
 
-def census_of(tmp_path, name_part, line, helper_line="len(info)"):
+
+def looks_like(**parts):
+    return ast.parse(LOOKS % dict(PLAIN, **parts))
+
+
+def census_of(tmp_path, **parts):
     app = tmp_path / "zorbank"
     app.mkdir(exist_ok=True)
-    tree = ast.parse(LOOKS % (name_part, line, helper_line))
-    said = list(what_diagnose_prints(app, tree, tmp_path))
+    said = list(what_diagnose_prints(app, looks_like(**parts), tmp_path))
     return [(None if text is None else text.replace(str(tmp_path), "<folder>"), why)
             for _, text, why in said]
+
+
+def caught(said) -> bool:
+    return any(text is not None and leaks(text) for text, _ in said)
 
 
 @pytest.mark.parametrize("line", [
@@ -527,10 +597,10 @@ def census_of(tmp_path, name_part, line, helper_line="len(info)"):
     "f'Diagnosing {ptype} purchase #{p.order_number} ...'",
     "', '.join(info['year_options'])",
     "shape(info['title'], words) + info['date']",
+    "sum(info['amounts'])",
 ])
 def test_the_census_catches_a_line_that_says_what_a_page_said(tmp_path, line):
-    said = census_of(tmp_path, "", line)
-    assert any(text is not None and leaks(text) for text, _ in said), said
+    assert caught(census_of(tmp_path, line=line))
 
 
 @pytest.mark.parametrize("line", [
@@ -539,23 +609,57 @@ def test_the_census_catches_a_line_that_says_what_a_page_said(tmp_path, line):
     "f'Rows collected: {shape_tree(info.get(\"collected\", \"?\"), words)}, found {len(info)}'",
     "f'Diagnosing {ptype} purchase #{shape(p.order_number, words)} ...'",
     "', '.join(shape(o, words) for o in info['year_options'])",
+    "f'{label} {shape_tree(sum(info[\"counts\"]), words)}'",
 ])
 def test_the_census_passes_a_line_built_from_the_list(tmp_path, line):
-    said = census_of(tmp_path, "", line)
+    said = census_of(tmp_path, line=line)
     assert all(why is None for _, why in said), said
-    assert not any(leaks(text) for text, _ in said), said
+    assert not caught(said), said
 
 
-def test_the_census_reads_a_helper_only_diagnose_calls(tmp_path):
-    said = census_of(tmp_path, "", "len(info)", helper_line="info['title']")
-    assert any(text is not None and leaks(text) for text, _ in said), said
+@pytest.mark.parametrize("parts", [
+    {"helper_line": "info['title']"},
+    {"module_line": "info['title']"},
+    {"statement": "log.info('could not select %r', info['title'])"},
+    {"statement": "log.warning('landed on %s', page.url)"},
+    {"statement": "label = info['title']"},
+], ids=["a method only Diagnose calls", "a function only Diagnose calls", "a log line",
+        "another log line", "a name a page's words reach later in a loop"])
+def test_the_census_reads_every_way_a_page_can_reach_the_console(tmp_path, parts):
+    if "label" not in parts.get("statement", ""):
+        assert caught(census_of(tmp_path, **parts))
+    else:
+        assert caught(census_of(tmp_path, line="label", **parts))
+
+
+def test_the_census_refuses_a_traceback(tmp_path):
+    said = census_of(tmp_path, statement="traceback.print_exc()")
+    assert any(why and "exception" in why for _, why in said), said
 
 
 def test_the_census_catches_an_order_number_in_a_files_name(tmp_path):
-    said = census_of(tmp_path, "-{p.order_number}", "len(info)")
-    assert any(text is not None and leaks(text) for text, _ in said), said
+    assert caught(census_of(tmp_path, name_part="-{p.order_number}"))
+    app = tmp_path / "zorbank"
+    named = [path for _, path in diagnose_file_names(
+        app, looks_like(name_part="-{p.order_number}"), tmp_path)]
+    assert any(leaks(path, tmp_path) for path in named), named
+    plain = [path for _, path in diagnose_file_names(app, looks_like(), tmp_path)]
+    assert plain and not any(leaks(path, tmp_path) for path in plain), plain
 
 
 def test_the_census_catches_a_line_whose_words_were_never_set(tmp_path):
-    said = census_of(tmp_path, "", "shape(info['title'], wordz)")
+    said = census_of(tmp_path, line="shape(info['title'], wordz)")
     assert any(why and "not defined" in why for _, why in said), said
+
+
+@pytest.mark.parametrize("parts", [
+    {"words": "words_for(page.title(), site)"},
+    {"line": "shape(info['title'], words | {'zorvex4821quillam'})"},
+    {"line": "shape(info['title'])"},
+])
+def test_the_census_catches_words_that_are_not_the_apps_own(parts):
+    _, wrong = shaped_with_other_words(looks_like(line=parts.get(
+        "line", "shape(info['title'], words)"), **{k: v for k, v in parts.items() if k != "line"}))
+    assert wrong
+    _, plain = shaped_with_other_words(looks_like(line="shape(info['title'], words)"))
+    assert not plain, plain

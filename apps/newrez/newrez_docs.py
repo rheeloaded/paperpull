@@ -1128,10 +1128,15 @@ class App:
             found_docs = site.collect_download_docs(page, walk) if found else []
             info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_pdf_link": bool(b.href)}
                                             for b in found_docs[:40]]
-            info["year_pickers"] = walk
+            # The file is attached in public like the failure file, so it
+            # takes the same facts, each year as its place in the picker.
+            # The walk itself held each year as a number, and a number
+            # leaves the word list as it is.
+            info["year_pickers"] = site.year_walk_facts(walk)
             year_lines = site.year_walk_lines(walk)
-            # Printed whole below. The file holds them as plain lines, so
-            # it keeps their shapes, as it did, and not their years.
+            # Printed whole below, years included, as the console line has
+            # always been. The file holds them as plain lines, which leave
+            # as shapes.
             info["year_picker_lines"] = [str(line) for line in year_lines]
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)

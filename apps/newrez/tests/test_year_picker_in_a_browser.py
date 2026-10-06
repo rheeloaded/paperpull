@@ -772,3 +772,40 @@ def test_discovery_prints_the_years_and_the_journal_keeps_only_their_places(tmp_
                for e in report["journal"]["entries"]]
     assert walked["facts"] in [e.get("facts") for e in journal]
     assert not YEAR_RE.search(json.dumps(journal)), json.dumps(journal)
+
+
+def test_diagnose_prints_the_years_and_its_file_keeps_only_their_places(tmp_path, monkeypatch):
+    """The detailed file Diagnose writes is attached in public like the
+    failure file. It held the walk itself, each year a number, and a number
+    leaves the word list as it is, so it holds the same facts as the
+    journal now. The line Diagnose prints still names the years."""
+    import contextlib
+    import io
+    import newrez_docs
+    app = object.__new__(newrez_docs.App)
+    app.config = {"owner": ""}
+    app.paths = storage.Paths(tmp_path)
+    app.paths.ensure()
+    app.stats = {}
+    app.page = lambda: SimpleNamespace(url=MONTHLY,
+                                       locator=lambda sel: SimpleNamespace(count=lambda: 0))
+    for name, value in (("goto_documents", True), ("looks_signed_out", False),
+                        ("detect_security_challenge", None), ("survey", {}),
+                        ("expand_all", None), ("scroll_full_page", None),
+                        ("collect_documents", [])):
+        monkeypatch.setattr(newrez_docs.site, name, lambda *a, v=value, **kw: v)
+
+    def collect(page, walk=None):
+        walk.update(WALK)
+        return []
+
+    monkeypatch.setattr(newrez_docs.site, "collect_download_docs", collect)
+    said = io.StringIO()
+    with contextlib.redirect_stdout(said):
+        app.cmd_diagnose()
+    assert "Year picker on the monthly page walked 4 years, 2026 gave 9" in said.getvalue()
+    text = (app.paths.diagnostics / "diagnose-documents.json").read_text(encoding="utf-8")
+    assert not YEAR_RE.search(text), text
+    report = json.loads(text)
+    assert report["year_pickers"]["monthly"]["walked"] == [[1, 9, "shown"], [2, 12, "shown"],
+                                                          [3, 7, "shown"], [4, 0, "never showed"]]

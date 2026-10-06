@@ -1039,7 +1039,8 @@ class App:
         print("  name starts with survey-, is the one to send first.")
         recognized = info.get("documents_recognized") or {}
         print(f"Documents page found: {shape_tree(info.get('documents_page_found', '?'), words)}, "
-              f"documents recognized: {sum(recognized.get('by_kind', {}).values())}, "
+              f"documents recognized: "
+              f"{shape_tree(sum(recognized.get('by_kind', {}).values()), words)}, "
               f"rows: {shape_tree(info.get('rows_collected', '?'), words)}")
         print("No screenshot was taken.")
 

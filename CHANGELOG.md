@@ -57,12 +57,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its controls, Capital One the page's headings and its accounts, Ally,
   Chase, Discover and U.S. Bank the label of a dropdown, the addresses the
   page asked for and values from the provider's answers, and eight receipt
-  apps an order number. Every value a Diagnose line prints now goes
+  apps an order number. Every value in the lines Diagnose prints now goes
   through the list first, so a word that is not on it is written as its
-  shape, while a count or a yes or no prints as it did. Amazon, Best Buy,
-  eBay, Gap, Home Depot, Lowe's, Target and Walmart also no longer name a
-  purchase's Diagnose files after its order number, since a file attached
-  to an issue shows its name.
+  shape, while a count or a yes or no prints as it did. Newrez's year
+  picker lines still name the years, as they were made to. The lines a
+  provider's own module logs while Diagnose runs are not covered yet, so
+  read the output through before pasting it. Amazon, Best Buy, eBay, Gap,
+  Home Depot, Lowe's, Target and Walmart also no longer name a purchase's
+  Diagnose files after its order number, since a file attached to an issue
+  shows its name. And Newrez's detailed Diagnose file keeps each year its
+  picker offered as its place in the picker, as its failure file does,
+  since how many statements a year holds says when a loan began.
 - **AAFMAA no longer gives up on a document when the first answer to its
   View press holds no PDF.** The capture took the first answer that called
   itself a PDF and, when that answer held none, marked the document for
