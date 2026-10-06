@@ -761,12 +761,22 @@ def parse_shard(text: str):
 # -- one run at a time on this machine ---------------------------------------
 
 def same_checkout(a, b) -> bool:
+    """Whether two paths are one checkout. An empty one is none, where
+    os.path.abspath would take it for the current folder."""
+    if not a or not b:
+        return False
     return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
 
 
 class RunLock:
     """The machine's one run at a time. Held by an open file, so it is let
-    go however the process that holds it ends, and never needs clearing."""
+    go however the process that holds it ends, and never needs clearing.
+
+    test-run.json beside it says whose run holds it. For a moment each time
+    the lock changes hands, the lock is held while that file is missing or
+    half written, since release() removes it before letting go, try_take()
+    writes it after taking hold, and writing it empties it first. A holder
+    read then names no checkout, and is another run until it says so."""
 
     def __init__(self, folder=None):
         self.folder = Path(folder or LOCK_DIR)
@@ -806,6 +816,8 @@ class RunLock:
     def release(self) -> None:
         if self.file is None:
             return
+        # The file goes first. Removed after letting go, it could be the
+        # next holder's.
         try:
             self.info.unlink()
         except OSError:
@@ -823,7 +835,11 @@ class RunLock:
 
 def take_turn(lock: RunLock, replace: bool):
     """Wait for another checkout's run on this machine to end. None when
-    this run may go ahead, else the exit code to stop with."""
+    this run may go ahead, else the exit code to stop with.
+
+    A run whose checkout is not known yet is waited for and read again.
+    Taken for this checkout's, it stopped a run waiting from the checkout's
+    root, as land starts one, with 3 the moment the lock changed hands."""
     said = 0.0
     while not lock.try_take():
         who = lock.holder()
@@ -840,9 +856,11 @@ def take_turn(lock: RunLock, replace: bool):
                   flush=True)
             return 3
         if time.time() - said >= 60:
-            print("waiting for the run of %s, pid %s, started %s"
-                  % (who.get("checkout") or "another checkout", who.get("pid"), who.get("started")),
-                  flush=True)
+            if who.get("checkout"):
+                print("waiting for the run of %s, pid %s, started %s"
+                      % (who["checkout"], who.get("pid"), who.get("started")), flush=True)
+            else:
+                print("waiting for a run whose checkout is not known yet", flush=True)
             said = time.time()
         time.sleep(5)
     return None
@@ -854,9 +872,15 @@ def stop_earlier(lock: RunLock) -> int:
         print("no run is going on this machine")
         return 0
     who = lock.holder()
-    if not same_checkout(who.get("checkout", ""), REPO):
+    if not who.get("checkout"):
+        # Read the moment the lock changed hands. Taken for this checkout's
+        # run, it was said to be stopped and nothing was.
+        print("the checkout of the run going is not known yet, so it was left alone. "
+              "Try again in a moment.")
+        return 1
+    if not same_checkout(who["checkout"], REPO):
         print("the run going is the one of %s, pid %s, so it was left alone"
-              % (who.get("checkout") or "another checkout", who.get("pid")))
+              % (who["checkout"], who.get("pid")))
         return 1
     stop_tree(int(who.get("pid") or 0))
     print("stopped the run of this checkout, pid %s, started %s, and what it started"

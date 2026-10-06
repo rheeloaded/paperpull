@@ -6,8 +6,9 @@ had processors to spare and two sessions' runs often slowed each other.
 These check what replaced that. Suites really overlap in time, a run that
 runs out of time ends with everything it started, the parts CI splits the
 suites into cover each suite once, a second run waits for the first one's
-lock, a run of the same checkout is named rather than waited for, and
---stop ends a run with the processes it started.
+lock, a run of the same checkout is named rather than waited for, a run
+whose checkout is not known yet is waited for, and --stop ends a run with
+the processes it started.
 
 On POSIX a suite out of time used to end the runner and every suite beside
 it, and a test's cleanup ended the test's own pytest, because stop_tree
@@ -368,6 +369,101 @@ def test_another_checkouts_run_is_left_alone(tmp_path, capsys):
         assert "left alone" in capsys.readouterr().out
     finally:
         holder.kill()
+
+
+class Hurried:
+    """The time module as the runner sees it, with every wait cut to a
+    moment. A run waiting for the lock tries it every 5 s."""
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    @staticmethod
+    def sleep(seconds):
+        time.sleep(min(seconds, 0.05))
+
+
+def held_without_its_file(tmp_path):
+    """The lock as it is for a moment each time it changes hands. The run
+    giving it up removes its file before letting go, and the run taking it
+    writes its own file just after taking hold, so the lock is held while
+    no file says whose run holds it."""
+    held = rat.RunLock(tmp_path)
+    assert held.try_take()
+    held.info.unlink()
+    return held
+
+
+@pytest.mark.parametrize("replace", [False, True], ids=["plain", "replace"])
+def test_a_run_whose_checkout_is_unknown_is_waited_for(tmp_path, monkeypatch, capsys, replace):
+    # A run waiting at that moment read no checkout, which os.path.abspath
+    # took for the current folder. Started from its checkout's root, as land
+    # starts it, the run said an earlier run of its own checkout was going,
+    # pid None, and stopped with 3 (seen 2026-10-05). With --replace it said
+    # it was stopping that run and stopped nothing.
+    held = held_without_its_file(tmp_path)
+    monkeypatch.chdir(rat.REPO)
+    monkeypatch.setattr(rat, "time", Hurried())
+    lock = rat.RunLock(tmp_path)
+    read, real = [], lock.holder
+
+    def holder():
+        read.append(real())
+        # Given up once the run has read it twice, so the run has waited
+        # and read it again rather than stopped or gone ahead.
+        if len(read) == 2:
+            held.release()
+        return read[-1]
+    lock.holder = holder
+    try:
+        code = rat.take_turn(lock, replace=replace)
+        out = capsys.readouterr().out
+        assert code is None, out
+        assert read == [{}, {}], read
+        assert "this checkout" not in out and "same checkout" not in out and "None" not in out, out
+        other = rat.RunLock(tmp_path)
+        try:
+            assert not other.try_take(), "the run went ahead without the lock"
+        finally:
+            other.release()
+    finally:
+        lock.release()
+        held.release()
+
+
+def test_stop_leaves_a_run_whose_checkout_is_unknown_alone(tmp_path, monkeypatch, capsys):
+    # Met at that moment, --stop from the checkout's root said it had
+    # stopped this checkout's run, pid None, and stopped nothing.
+    held = held_without_its_file(tmp_path)
+    monkeypatch.chdir(rat.REPO)
+    try:
+        code = rat.stop_earlier(rat.RunLock(tmp_path))
+        out = capsys.readouterr().out
+        assert code == 1 and "left alone" in out, out
+        assert "this checkout" not in out and "None" not in out, out
+    finally:
+        held.release()
+
+
+def test_a_run_lets_go_of_the_lock_only_once_its_file_is_gone(tmp_path):
+    # Hence that moment with no file. Removed after letting go, the file
+    # could be the next holder's, and that run would go unnamed to the end,
+    # out of reach of --stop.
+    lock = rat.RunLock(tmp_path)
+    assert lock.try_take()
+    file, there = lock.file, []
+
+    class Watched:
+        """The lock's file. Letting go of the lock goes through its number
+        or its close, and each notes whether test-run.json is still there."""
+        def __getattr__(self, name):
+            if name in ("fileno", "close"):
+                there.append(lock.info.exists())
+            return getattr(file, name)
+    lock.file = Watched()
+    lock.release()
+    assert there and not any(there), there
+    assert file.closed
 
 
 def test_stop_tree_ends_a_process_beside_its_caller_but_never_the_caller():
