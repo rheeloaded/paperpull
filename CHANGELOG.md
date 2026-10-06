@@ -131,11 +131,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   left out. A rename that fails is said and leaves that receipt as it was
   while the review goes on. Each rename goes into both CSVs as it happens,
   so they name the files as they are on disk however the review ends, and
-  into every index row naming the file, since Target archives from before
-  0.42.0 hold two for most invoice orders. A receipt whose file is gone is
-  not offered either, where a new name for it used to change the CSVs
-  alone. Every receipt app now runs the same Review Names, so this holds in
-  all fourteen.
+  into every index row of that purchase naming the file, since Target
+  archives from before 0.42.0 hold two for most invoice orders. A receipt
+  whose file is gone is not offered either, where a new name for it used
+  to change the CSVs alone. Every receipt app now runs the same Review
+  Names, so this holds in all fourteen.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

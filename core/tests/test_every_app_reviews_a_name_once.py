@@ -63,18 +63,20 @@ def default_names():
 
 def app_in(mod, out: Path):
     """The app's own downloader over an output folder on disk, without its
-    __init__, which would want a config file and a console."""
+    __init__, which would want a config file and a console. Its stores and
+    CSVs keep their backups in Backups, as the app's own do."""
     storage = sys.modules["storage"]            # the app's own, loaded with it
     inst = object.__new__(mod.App)
     inst.config = {"max_path_length": 240}
     inst.paths = storage.Paths(out)
     inst.paths.ensure()
-    inst.progress = storage.JsonStore(inst.paths.progress_json)
-    inst.discovery = storage.JsonStore(inst.paths.discovery_json)
+    backups = inst.paths.backups
+    inst.progress = storage.JsonStore(inst.paths.progress_json, backups)
+    inst.discovery = storage.JsonStore(inst.paths.discovery_json, backups)
     inst.index_csv = storage.CsvFile(inst.paths.receipt_index_csv,
-                                     storage.RECEIPT_INDEX_COLUMNS)
+                                     storage.RECEIPT_INDEX_COLUMNS, backups)
     inst.order_csv = storage.CsvFile(inst.paths.order_history_csv,
-                                     storage.ORDER_HISTORY_COLUMNS)
+                                     storage.ORDER_HISTORY_COLUMNS, backups)
     return inst
 
 
@@ -155,7 +157,7 @@ def test_a_receipt_renamed_before_the_fix_is_not_asked_about_either(app, tmp_pat
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
 def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, capsys):
-    """Of thirteen rows, three name a receipt in a folder the app files
+    """Of fourteen rows, three name a receipt in a folder the app files
     receipts in, and each is offered once, though a second row the run was
     unsure of names the first. Eight are left out, and the review says so.
     They name no file, the folder the app runs in, the output folder
@@ -163,10 +165,12 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
     one no longer on disk, the app's own config file in an output folder
     set to the app's folder, and a PDF in Logs. The second receipt offered
     cannot be renamed, which is said, and the review goes on to its end.
-    Every row naming a renamed file follows it, a finished one included,
-    and the CSVs and progress.json name every file as it now is. Every
-    question is answered with a new name, so a row offered by mistake would
-    be renamed, and it would show."""
+    Every row of a purchase naming its renamed file follows it, a finished
+    one included, and a finished row of another purchase naming the same
+    file is left as it is. The CSVs and progress.json name every file as it
+    now is, and each CSV is backed up once. Every question is answered with
+    a new name, so a row offered by mistake would be renamed, and it would
+    show."""
     mod = load(app)
     here = tmp_path / "here"                     # the folder the app runs in
     receipt(here, "2026-05-14 Here Receipt.pdf")
@@ -185,6 +189,8 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
     logged = receipt(inst.paths.logs, "2026-05-14 Logged Receipt.pdf")
     finished = index_row("ORDER-0011", last, status="Completed")
     finished["Classification Confidence"] = "High"
+    another = index_row("ORDER-0012", first, status="Completed")
+    another["Classification Confidence"] = "High"
     rows = [index_row("ORDER-0001", first),
             index_row("ORDER-0001", first),      # a second row for the one file
             index_row("ORDER-0002", "", status="Needs Manual Review"),
@@ -198,7 +204,8 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
             index_row("ORDER-0009", logged),
             index_row("ORDER-0010", locked),
             index_row("ORDER-0011", last),
-            finished]
+            finished,
+            another]                             # another purchase naming the first's file
     inst.index_csv.append_rows(rows)
     inst.order_csv.append_rows([order_row(r["Order or Receipt Number"], r["PDF Filename"])
                                 for r in rows])
@@ -245,6 +252,56 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
     progress = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))
     assert {key: record["pdf_filename"] for key, record in progress.items()} \
         == {"Online:ORDER-0001": garden[0].name, "Online:ORDER-0011": lamp[0].name}
+    assert sorted(p.name.split(".")[0] for p in inst.paths.backups.iterdir()) \
+        == sorted([inst.index_csv.path.stem, inst.order_csv.path.stem])
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+@pytest.mark.parametrize("trouble", ["ctrl c in a write", "progress fails", "index locked"])
+def test_a_rename_is_written_down_when_writing_it_goes_wrong(app, trouble, tmp_path,
+                                                            monkeypatch):
+    """Something goes wrong after the first receipt is renamed. Ctrl+C lands
+    while the index is written, saving progress.json fails, or the index
+    stays open in another program. The review stops with that error, and
+    the CSVs name the file as it now is, the order history even when the
+    index cannot be written."""
+    mod = load(app)
+    inst = app_in(mod, tmp_path / "out")
+    filed = inst.paths.folder_for("Online")
+    first = receipt(filed, "2026-05-14 First Receipt.pdf")
+    second = receipt(filed, "2026-05-14 Second Receipt.pdf")
+    inst.index_csv.append_rows([index_row("ORDER-0001", first),
+                                index_row("ORDER-0002", second)])
+    inst.order_csv.append_rows([order_row("ORDER-0001", first.name),
+                                order_row("ORDER-0002", second.name)])
+    csv_class, index_path = type(inst.index_csv), inst.index_csv.path
+    real_rewrite = csv_class.rewrite
+    index_writes = []
+
+    def rewrite(self, rows, *args, **kwargs):
+        if self.path == index_path:
+            index_writes.append(len(rows))
+            if trouble == "index locked":
+                raise PermissionError(13, "The file is open in another program")
+            if trouble == "ctrl c in a write" and len(index_writes) == 1:
+                raise KeyboardInterrupt
+        return real_rewrite(self, rows, *args, **kwargs)
+    monkeypatch.setattr(csv_class, "rewrite", rewrite)
+    if trouble == "progress fails":
+        def update(key, record, save=True):
+            raise PermissionError(13, "progress.json is open in another program")
+        monkeypatch.setattr(inst.progress, "update", update)
+    monkeypatch.setattr(mod, "ask", lambda prompt: "Garden Hose")
+
+    with pytest.raises(KeyboardInterrupt if trouble == "ctrl c in a write"
+                       else PermissionError):
+        inst.cmd_review_names()
+
+    garden = [p.name for p in filed.iterdir() if "Garden Hose" in p.name]
+    assert len(garden) == 1 and not first.exists() and second.is_file()
+    assert [r["PDF Filename"] for r in inst.order_csv.read_all()] == [garden[0], second.name]
+    if trouble != "index locked":
+        assert [r["PDF Filename"] for r in inst.index_csv.read_all()] == [garden[0], second.name]
 
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])

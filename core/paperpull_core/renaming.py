@@ -773,20 +773,21 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             pending = True
             number = r.get("Order or Receipt Number")
             old_filename = r.get("PDF Filename")
-            # Every index row naming this file follows it. Target once wrote
-            # two for most invoice orders, and the one not renamed named a
-            # file that was gone.
+            # Every index row of this purchase naming this file follows it.
+            # Target once wrote two for most invoice orders, and the one not
+            # renamed named a file that was gone. A row of another purchase
+            # is left as it is, since its other records are not this one's.
             for row in rows:
                 text = (row.get("PDF Full Path") or "").strip()
-                if not text or str(Path(text)) != str(old_path):
+                if (row.get("Order or Receipt Number") != number or not text
+                        or str(Path(text)) != str(old_path)):
                     continue
                 row["PDF Filename"] = new_path.name
                 row["PDF Full Path"] = str(new_path)
-                if row.get("Order or Receipt Number") == number:
-                    row["Purchase Summary"] = new_summary
-                    row["Processing Status"] = "Completed"
-                    row["Classification Confidence"] = "High"
-                    row["Notes"] = (row.get("Notes", "") + "; " + REVIEWED).strip("; ")
+                row["Purchase Summary"] = new_summary
+                row["Processing Status"] = "Completed"
+                row["Classification Confidence"] = "High"
+                row["Notes"] = (row.get("Notes", "") + "; " + REVIEWED).strip("; ")
             for orow in order_rows:
                 if (orow.get("Order or Receipt Number") == number
                         and orow.get("PDF Filename") == old_filename):
@@ -797,13 +798,12 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                 "summary": new_summary, "pdf_filename": new_path.name,
                 "pdf_path": str(new_path), "confidence": "High",
                 "state": State.COMPLETED.value})
-            pending = False
             _write_down(app, rows, order_rows, backup=not written)
-            written = True
+            pending, written = False, True
             print(f"{words.renamed}{new_path.name}\n")
     finally:
         # A rename whose rows were not written down yet, because something
-        # between the two went wrong.
+        # between the two went wrong or the writing itself was cut short.
         if pending:
             _write_down(app, rows, order_rows, backup=not written)
             written = True
