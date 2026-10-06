@@ -72,6 +72,25 @@ DROPPED_OFF = "dropped off the list"
 LIST_DID_NOT_LOAD = "the list did not load"
 PUT_ASIDE = "put aside in manual review"
 
+# Marks a purchase's record in progress.json once its rows as no longer
+# listed are in the CSVs, so they are written once (see _no_longer_listed).
+UNLISTED_ROWS = "unlisted_rows_written"
+
+
+def _today():
+    """Today's date, asked for here so that a test can say which day it is."""
+    return datetime.now().date()
+
+
+def _months_before(day, months: int):
+    """The day `months` months before `day`, or the last day of that month
+    when it has fewer days."""
+    import calendar
+    year, month = divmod(day.year * 12 + day.month - 1 - months, 12)
+    month += 1
+    return day.replace(year=year, month=month,
+                       day=min(day.day, calendar.monthrange(year, month)[1]))
+
 
 def ask(prompt: str) -> str:
     """input() that stops cleanly (progress already saved by callers) when
@@ -98,6 +117,10 @@ class App:
     # The purchases this run's discovery found on Meijer's list. None of
     # them is ever taken for one it no longer lists (see _dropped_off).
     _listed_now = frozenset()
+    # The kinds of purchase whose rows this run's discovery read. Without
+    # its own reading of the In-Store tab, as in Resume, a run never says a
+    # store receipt has dropped off the list.
+    _kinds_read = frozenset()
     # Every attempt this run wrote down for a tester, in the order they
     # came, and which purchase of the run is being worked on, as (its place,
     # how many in all). See _write_attempt.
@@ -376,6 +399,7 @@ class App:
             self._open_orders(page)
             facts: dict = {}
             found = site.collect_both_tabs(page, facts)
+            self._kinds_read = frozenset(facts.get("read") or ())
             unread = facts.get("unread") or []
             if found and not unread:
                 return found
@@ -747,6 +771,8 @@ class App:
 
         # ---- CSVs + progress ----
         receipt_status = "Downloaded"
+        if (self.progress.get(purchase.key) or {}).get(UNLISTED_ROWS):
+            self._forget_unlisted_rows(purchase)
         self._write_csv_rows(purchase, receipt_status=receipt_status,
                              processing_status="Review Needed" if review_needed else "Completed",
                              notes_extra=notes_extra)
@@ -912,7 +938,7 @@ class App:
                 return body, True, {}
             found = {"outcome": pressed.get("outcome") or site.NO_PDF}
             if found["outcome"] == site.NOT_ON_THE_PAGE:
-                found.update(self._dropped_off(page, purchase, pressed, trace))
+                found.update(self._dropped_off(page, purchase, pressed, shown, trace))
             judged.append(bool(found.get("dropped")))
         if found:
             found["dropped"] = all(judged)
@@ -921,54 +947,82 @@ class App:
     def _press_once_settled(self, page, purchase: Purchase, trace: list, pressed: dict):
         """The receipt from a row the press did not find, once the list has
         stopped changing. Its bytes or None, and `pressed` then says what the
-        last press found and whether the list had stopped changing by then
-        without changing again ("final").
+        last press found and whether the list was seen whole ("final").
 
         A row is not called missing until the count of the tab's rows has
-        stayed the same for a while (site.settle_rows). A list read while it
-        was still filling left out the rows it had not drawn yet, and a
-        purchase among them looked like one Meijer no longer lists. When the
-        count changed meanwhile, the row is looked for once more, and the
-        list is let settle again."""
+        stayed the same for a while (site.settle_rows), counted on from the
+        press's own looks. A list read while it was still filling left out
+        the rows it had not drawn yet, and a purchase among them looked like
+        one Meijer no longer lists. Once the count has stopped, the list is
+        scrolled to its end (site.scroll_to_end), since a list can draw more
+        of itself as it is scrolled. Whenever the count changed, the row is
+        looked for once more, and a list that drew more as it was scrolled
+        was never seen whole, however it ends."""
         kind = purchase.purchase_type
-        settled = site.settle_rows(page, kind)
+        settled = site.settle_rows(page, kind, seen=(pressed.get("rows"), pressed.get("since")))
         if settled["changed"]:
             pressed.clear()
             body = site.press_row_receipt(page, purchase, trace, facts=pressed)
             if body or pressed.get("outcome") != site.NOT_ON_THE_PAGE:
                 return body
-            settled = site.settle_rows(page, kind)
-        stopped = bool(settled["settled"] and not settled["changed"])
-        pressed["final"] = stopped
+            settled = site.settle_rows(page, kind, seen=(pressed.get("rows"), pressed.get("since")))
+        scrolled = {"changed": False}
+        if settled["settled"] and not settled["changed"]:
+            scrolled = site.scroll_to_end(page, kind)
+            if scrolled["changed"]:
+                pressed.clear()
+                body = site.press_row_receipt(page, purchase, trace, facts=pressed)
+                if body or pressed.get("outcome") != site.NOT_ON_THE_PAGE:
+                    return body
+        whole = bool(settled["settled"] and not settled["changed"] and not scrolled["changed"])
+        pressed["final"] = whole
         trace.append({"note": "the rows once they settled", "rows": int(settled["rows"]),
-                      "settled": stopped})
+                      "settled": whole, "more_after_scrolling": bool(scrolled["changed"])})
         return None
 
-    def _dropped_off(self, page, purchase: Purchase, pressed: dict, trace: list) -> dict:
+    def _dropped_off(self, page, purchase: Purchase, pressed: dict, shown: dict,
+                     trace: list) -> dict:
         """Whether a purchase whose row is not on its tab has dropped off
         Meijer's list, as {"dropped", "oldest"}, the date of the oldest row
         the list shows.
 
-        It has when it is a store receipt, the list had stopped changing,
-        every row of its kind on it shows a date, the purchase is older than
-        the oldest of them, and this run's discovery did not find it there.
         Meijer appears to list about two years of store receipts. A tester's
         three oldest had dropped off, and each was looked for twice on every
-        run and written down as a row with no receipt (#42). A purchase
-        inside the range the list shows is missing from it for some other
-        reason, and stays a failure. So does an online order, since the
-        Online tab may go on over later pages, which discovery reads and a
-        row is never looked for on, and an order older than every row of the
-        first page can be on the next."""
-        now = site.listed_rows(page, purchase.purchase_type)
+        run and written down as a row with no receipt (#42). A list that
+        shows only part of what Meijer holds looks the same, though, behind
+        a Load more button or a pager, under a filter it remembers, or cut
+        short while Meijer slows requests, and a purchase is said to have
+        dropped off only when every one of these holds (review).
+
+        It is a store receipt. Its tab was opened on this look, and the list
+        was seen whole, its rows stopped changing and drew no more when
+        scrolled to its end. No control shows that would show more of it or
+        a narrower part of it, and a control that could not be read counts.
+        Every row of its kind shows a date, the oldest of them is at least
+        WHOLE_LIST_MONTHS old, and the purchase is older still. This run's
+        own discovery read the In-Store rows, so Resume never decides it,
+        and did not find this purchase among them. Anything else stays a
+        failure the next run looks for again, an online order among them,
+        since the Online tab may go on over later pages, which discovery
+        reads and a row is never looked for on."""
+        kind = purchase.purchase_type
+        now = site.listed_rows(page, kind)
         oldest = now["oldest"]
         older = bool(purchase.purchase_date and oldest and purchase.purchase_date < oldest)
-        final = bool(pressed.get("final"))
+        back = bool(oldest and oldest <= _months_before(
+            _today(), site.WHOLE_LIST_MONTHS).isoformat())
+        more = site.more_controls(page)
+        opened = bool(shown.get("opened"))
+        read = IN_STORE in self._kinds_read
         listed = purchase.key in self._listed_now
-        store = purchase.purchase_type == IN_STORE
         trace.append({"note": "the oldest row the list shows", "rows": int(now["rows"]),
-                      "earlier_than_every_row": older, "listed_by_discovery": listed})
-        return {"dropped": store and final and older and not listed, "oldest": oldest}
+                      "earlier_than_every_row": older, "listed_by_discovery": listed,
+                      "tab_opened": opened, "controls_read": more is not None,
+                      "more_controls": int(more or 0), "back_twenty_months": back,
+                      "discovery_read_the_tab": read})
+        dropped = (kind == IN_STORE and opened and bool(pressed.get("final")) and more == 0
+                   and back and read and older and not listed)
+        return {"dropped": dropped, "oldest": oldest}
 
     # What is said of a purchase whose list showed and whose row gave no
     # receipt, by what the press found.
@@ -985,10 +1039,11 @@ class App:
         """A purchase whose list showed and whose row gave no receipt.
 
         One that has dropped off Meijer's list is written down as no longer
-        listed. Any other is a failure, said as what the press found, and
-        the next run looks for it again. Neither goes into the CSVs, since
-        each would go in again on every run that looked for it, and neither
-        is counted for manual review, where there is nothing to look at."""
+        listed (_no_longer_listed). Any other is a failure, said as what the
+        press found, and the next run looks for it again. A failure goes
+        into neither CSV, since it would go in again on every run that looked
+        for it. Neither is counted for manual review, where there is nothing
+        to look at."""
         if found.get("dropped"):
             self._write_attempt(page, purchase, trace, DROPPED_OFF, say=False)
             return self._no_longer_listed(purchase, found.get("oldest") or "")
@@ -1006,18 +1061,42 @@ class App:
         """Write down a purchase Meijer no longer lists, and say so.
 
         Nothing failed and nothing was put aside, so no failure file is
-        written and nothing counts for review. Later runs skip it
-        (_already_done) until a discovery finds it on the list again
-        (_listed_again)."""
+        written and nothing counts for review. It goes into both CSVs once,
+        so a spend summary built from the Order History still counts it,
+        as it counted such a purchase before, and never again, whatever
+        later runs find. Later runs skip it (_already_done) until a
+        discovery finds it on the list again (_listed_again), and if its
+        receipt is then saved, these rows give way to the saved receipt's
+        (_forget_unlisted_rows)."""
         tab = site.TAB_LABELS.get(purchase.purchase_type, purchase.purchase_type)
+        written = (self.progress.get(purchase.key) or {}).get(UNLISTED_ROWS)
         self._record_state(purchase, State.NO_LONGER_LISTED,
                            notes=f"Meijer's {tab} tab no longer lists it. Its oldest row "
-                                 f"is from {oldest}.")
+                                 f"is from {oldest}.", extra={UNLISTED_ROWS: True})
+        if not written:
+            self._write_csv_rows(purchase, receipt_status="No longer listed",
+                                 processing_status=State.NO_LONGER_LISTED.value)
         self.stats["no_longer_listed"] = self.stats.get("no_longer_listed", 0) + 1
         print(f"  Meijer no longer lists this purchase. Its {tab} tab goes back to {oldest}, "
               "and this purchase is older, so there is no row to press. Later runs skip it "
               "unless Meijer lists it again.")
         return False
+
+    def _forget_unlisted_rows(self, purchase: Purchase) -> None:
+        """Take out of both CSVs the rows written for a purchase while
+        Meijer no longer listed it, before the rows of its saved receipt go
+        in, so that it stays one purchase there. Only rows of this purchase
+        that say it was no longer listed are taken out, and each file is
+        backed up before it is rewritten."""
+        for book in (self.order_csv, self.index_csv):
+            rows = book.read_all()
+            kept = [r for r in rows if not (
+                r.get("Purchase Type") == purchase.purchase_type
+                and r.get("Order or Receipt Number") == purchase.order_number
+                and r.get("Processing Status") == State.NO_LONGER_LISTED.value)]
+            if len(kept) != len(rows):
+                book.rewrite(kept)
+        self.progress.update(purchase.key, {UNLISTED_ROWS: False})
 
     def _list_did_not_load(self, purchase: Purchase) -> bool:
         """A purchase whose tab showed no rows on either look.
@@ -1415,14 +1494,36 @@ class App:
             for k, c in dups.items():
                 print(f"  {k}: {c} rows")
 
+    def _yours_to_rename(self, row) -> bool:
+        """Whether a row of the index names a file this review may rename,
+        one inside this app's own output folder.
+
+        A row written for a purchase with no receipt has an empty path, which
+        reads as the folder the app runs in, and that folder exists. A new
+        summary typed for such a row had the app rename its own folder, and
+        on Windows stopped with a traceback partway through, its earlier
+        renames on disk and in progress.json and the CSVs left as they were
+        (review)."""
+        text = (row.get("PDF Full Path") or "").strip()
+        if not text:
+            return False
+        try:
+            path = Path(text).resolve()
+            root = self.paths.root.resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return root in path.parents and path.is_file()
+
     def cmd_review_names(self):
         rows = self.index_csv.read_all()
         # A row somebody already renamed is left out, even one renamed
-        # before its confidence was marked High as well (#47).
+        # before its confidence was marked High as well (#47). So is a row
+        # that names no file of this app's own, which nothing here renames.
         review = [r for r in rows
                   if (r.get("Classification Confidence") == "Low"
                       or "Review" in (r.get("Processing Status") or ""))
-                  and "renamed via --review-names" not in (r.get("Notes") or "")]
+                  and "renamed via --review-names" not in (r.get("Notes") or "")
+                  and self._yours_to_rename(r)]
         if not review:
             print("No receipts need name review.")
             return
@@ -1430,56 +1531,62 @@ class App:
               "press Enter to keep, or 'q' to stop.\n")
         order_rows = self.order_csv.read_all()
         changed = False
-        for r in review:
-            key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
-            prog = self.progress.get(key) or {}
-            items = [i.get("name", "") for i in prog.get("items", [])][:10]
-            print(f"  {r.get('Purchase Date')}  #{r.get('Order or Receipt Number')}"
-                  f"  [{r.get('Classification Confidence')}]")
-            print(f"    Current file: {r.get('PDF Filename')}")
-            if items:
-                print(f"    Items: {'; '.join(items)}")
-            new = ask("    New summary (blank=keep, q=quit): ").strip()
-            if new.lower() == "q":
-                break
-            if not new:
-                print()
-                continue
-            new_summary = title_case(new)
-            old_path = Path(r.get("PDF Full Path") or "")
-            date = r.get("Purchase Date") or (old_path.name[:10] if old_path.name else "")
-            doc_type = r.get("Document Type") or "Receipt"
-            new_name = build_pdf_filename(date, new_summary, doc_type, record=prog)
-            if old_path.exists():
+        try:
+            for r in review:
+                key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
+                prog = self.progress.get(key) or {}
+                items = [i.get("name", "") for i in prog.get("items", [])][:10]
+                print(f"  {r.get('Purchase Date')}  #{r.get('Order or Receipt Number')}"
+                      f"  [{r.get('Classification Confidence')}]")
+                print(f"    Current file: {r.get('PDF Filename')}")
+                if items:
+                    print(f"    Items: {'; '.join(items)}")
+                new = ask("    New summary (blank=keep, q=quit): ").strip()
+                if new.lower() == "q":
+                    break
+                if not new:
+                    print()
+                    continue
+                new_summary = title_case(new)
+                old_path = Path(r["PDF Full Path"].strip())
+                date = r.get("Purchase Date") or old_path.name[:10]
+                doc_type = r.get("Document Type") or "Receipt"
+                new_name = build_pdf_filename(date, new_summary, doc_type, record=prog)
                 new_path = unique_path(old_path.parent, new_name,
                                        self.config["max_path_length"])
-                old_path.rename(new_path)  # unique_path guarantees no overwrite
-            else:
-                new_path = old_path.parent / new_name if old_path.name else Path(new_name)
-                print("    (warning: original PDF not found on disk; records updated only)")
-            old_filename = r.get("PDF Filename")
-            r["PDF Filename"] = new_path.name
-            r["PDF Full Path"] = str(new_path)
-            r["Purchase Summary"] = new_summary
-            r["Processing Status"] = "Completed"
-            r["Classification Confidence"] = "High"
-            r["Notes"] = (r.get("Notes", "") + "; renamed via --review-names").strip("; ")
-            for orow in order_rows:
-                if (orow.get("Order or Receipt Number") == r.get("Order or Receipt Number")
-                        and orow.get("PDF Filename") == old_filename):
-                    orow["PDF Filename"] = new_path.name
-                    orow["Purchase Summary"] = new_summary
-                    orow["Processing Status"] = "Completed"
-            self.progress.update(key, {  # key (purchase identifier) unchanged
-                "summary": new_summary, "pdf_filename": new_path.name,
-                "pdf_path": str(new_path), "confidence": "High",
-                "state": State.COMPLETED.value})
-            changed = True
-            print(f"    Renamed -> {new_path.name}\n")
-        if changed:
-            self.index_csv.rewrite(rows)
-            self.order_csv.rewrite(order_rows)
-            print("CSV files and progress.json updated.")
+                try:
+                    old_path.rename(new_path)  # unique_path guarantees no overwrite
+                except OSError as e:
+                    print(f"    It could not be renamed ({type(e).__name__}), so it keeps "
+                          "its name.\n")
+                    continue
+                old_filename = r.get("PDF Filename")
+                r["PDF Filename"] = new_path.name
+                r["PDF Full Path"] = str(new_path)
+                r["Purchase Summary"] = new_summary
+                r["Processing Status"] = "Completed"
+                r["Classification Confidence"] = "High"
+                r["Notes"] = (r.get("Notes", "") + "; renamed via --review-names").strip("; ")
+                for orow in order_rows:
+                    if (orow.get("Order or Receipt Number") == r.get("Order or Receipt Number")
+                            and orow.get("PDF Filename") == old_filename):
+                        orow["PDF Filename"] = new_path.name
+                        orow["Purchase Summary"] = new_summary
+                        orow["Processing Status"] = "Completed"
+                self.progress.update(key, {  # key (purchase identifier) unchanged
+                    "summary": new_summary, "pdf_filename": new_path.name,
+                    "pdf_path": str(new_path), "confidence": "High",
+                    "state": State.COMPLETED.value})
+                changed = True
+                print(f"    Renamed -> {new_path.name}\n")
+        finally:
+            # Written however the review ends, a quit, a console that went
+            # away or a rename that failed, so the CSVs name the files as they
+            # now are on disk and in progress.json.
+            if changed:
+                self.index_csv.rewrite(rows)
+                self.order_csv.rewrite(order_rows)
+                print("CSV files and progress.json updated.")
 
     @property
     def requests(self):

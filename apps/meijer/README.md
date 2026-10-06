@@ -127,12 +127,17 @@ already on your machine is used and not the bundled one.
 - **Meijer appears to list about two years of store receipts.** That is
   inferred from one account, whose three oldest receipts had gone from the
   In-Store Receipts tab, and Meijer has not said so. A purchase found by an
-  earlier run that is older than every receipt the tab shows, once the
-  tab's rows have stopped changing, is reported as no longer listed, with
-  the oldest date the tab still shows. That is not a failure. It writes no
-  failure file, counts for no review and goes into neither CSV. Later runs
-  skip it, and a run whose discovery finds it on the tab again tries it
-  again.
+  earlier run that is older than every receipt the tab shows is reported
+  as no longer listed, with the oldest date the tab still shows, but only
+  when the tab was seen whole. It was opened on that look, its rows
+  stopped changing and drew no more when scrolled to the end, it showed no
+  control for more, older or filtered receipts, its oldest receipt is at
+  least 20 months old, and the run's own discovery read it, so Resume never
+  decides it. That is not a failure. It writes no failure file and counts
+  for no review, and it goes into both CSVs once, so a spend summary still
+  counts it. Later runs skip it, and a run whose discovery finds it on the
+  tab again tries it again. Short of all that, it stays a failure the next
+  run looks for again.
 - **A row that gives no receipt** is said as what happened, that its row
   is not on the page, that more than one row fits it, that nothing on it
   reads as its receipt, or that pressing it brought no PDF. Each is a

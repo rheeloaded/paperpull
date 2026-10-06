@@ -82,6 +82,14 @@ def default_names():
     yield
 
 
+@pytest.fixture(autouse=True)
+def rows_settle_quickly(monkeypatch):
+    """These pages draw a tab's rows all at once, so they count as settled
+    once they have held still for a third of a second. None of the tests
+    here is about rows that keep coming."""
+    monkeypatch.setattr(site, "ROWS_STEADY_MS", 300, raising=False)
+
+
 def _purchase(date="2026-08-21", total="$47.18", key="pexample0821"):
     return Purchase(purchase_type=IN_STORE, purchase_date=date, order_number=key,
                     total=total, status="Paid", summary="Mixed Purchases", confidence="Low",

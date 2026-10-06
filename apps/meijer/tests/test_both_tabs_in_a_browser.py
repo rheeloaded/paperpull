@@ -186,7 +186,9 @@ def attached(browser_exe, tmp_path_factory):
 def fake_meijer(server, monkeypatch):
     """Every address the app opens points at the made-up site, and every
     wait is short. A tab's rows are given three seconds here, the thirty
-    a purchase's tab is given at home cut down to keep the suite quick."""
+    a purchase's tab is given at home cut down to keep the suite quick, and
+    count as settled once they have held still for a third of a second,
+    since these pages draw them all at once."""
     SITE.reset()
     monkeypatch.setattr(site, "BASE", server)
     monkeypatch.setattr(site, "ORDERS_URL", server + ORDERS)
@@ -198,6 +200,7 @@ def fake_meijer(server, monkeypatch):
     monkeypatch.setattr(site, "SETTLE_MS", 0, raising=False)
     monkeypatch.setattr(site, "CHALLENGE_WAIT_MS", 1500, raising=False)
     monkeypatch.setattr(site, "LIST_WAIT_MS", 3000, raising=False)
+    monkeypatch.setattr(site, "ROWS_STEADY_MS", 300, raising=False)
     return SITE
 
 

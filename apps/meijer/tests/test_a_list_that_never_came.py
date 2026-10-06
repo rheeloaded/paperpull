@@ -200,7 +200,9 @@ def attached(browser_exe, tmp_path_factory):
 def fake_meijer(server, monkeypatch):
     """Every address the app opens points at the made-up site, and every
     wait is short. The orders page is the one route tried, as it is the
-    one a tester's pages showed (#42)."""
+    one a tester's pages showed (#42). Rows these pages draw come all at
+    once, so they count as settled once they have held still for a third
+    of a second."""
     SITE.reset()
     monkeypatch.setattr(site, "BASE", server)
     monkeypatch.setattr(site, "ORDERS_URL", server + ORDERS)
@@ -212,6 +214,7 @@ def fake_meijer(server, monkeypatch):
     monkeypatch.setattr(site, "SETTLE_MS", 0, raising=False)
     monkeypatch.setattr(site, "CHALLENGE_WAIT_MS", 1500, raising=False)
     monkeypatch.setattr(site, "LIST_WAIT_MS", 3000, raising=False)
+    monkeypatch.setattr(site, "ROWS_STEADY_MS", 300, raising=False)
     return SITE
 
 

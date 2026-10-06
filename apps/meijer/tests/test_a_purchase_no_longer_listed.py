@@ -10,27 +10,35 @@ looks found the In-Store tab drawing 95 rows and not the purchase's. Meijer
 appears to list about two years of store receipts, and those three had
 dropped off the end of the list.
 
-Now a purchase older than every row its tab draws, once the rows have
-stopped changing, is written down as no longer listed, with the oldest date
-the list shows, and later runs skip it until a discovery finds it on the
-list again. One missing from inside the range the list shows is a failure
-that says so. Neither goes into the CSVs, and the file to attach keeps every
-attempt of the run.
+Now a purchase older than every row its tab draws is written down as no
+longer listed, with the oldest date the list shows, and later runs skip it
+until a discovery finds it on the list again. It goes into the CSVs once, so
+a spend summary still counts it. That is said only of a list seen whole, its
+tab opened, its rows stopped changing and drawing no more when scrolled to
+the end, no control showing that would show more of it or a narrower part of
+it, going back at least twenty months, and read by the run's own discovery.
+A list behind a Load more button, under a remembered filter or cut short
+looks the same otherwise (review), and every such purchase, and one missing
+from inside the range the list shows, stays a failure that says so. The file
+to attach keeps every attempt of the run.
 
 The browser is started as a program of its own with a debugging port, the
 way login.bat leaves one open, and the app attaches to it over CDP exactly
 as it does at home. Every page comes from a server on this machine and the
 browser resolves no host name, so nothing reaches Meijer. Every store, date
-and amount is invented.
+and amount is invented, and the runs take a day in 2028 to be today.
 """
 import contextlib
+import importlib.util
 import io
 import json
 import re
 import sys
 import threading
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
@@ -52,6 +60,22 @@ NO_HOSTS = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
 # The site's own header, with an amount in it, on every page it draws.
 HEADER = ("<header><a href='/shopping/account.html'>Account</a>"
           "<span>mPerks savings this year $8.15</span></header>")
+
+# The day the runs here take to be today. Twenty months before it is
+# 2026-10-01, so a list going back to 2026-09-12 goes back far enough and
+# one going back only to 2028 does not.
+TODAY = date(2028, 6, 1)
+
+NO_ONLINE_ORDERS = "<p>You haven't placed any orders yet</p>"
+ONLINE_ORDER = ("<ul><li class='order-card'><div>Pickup</div><div>Jun 9, 2026</div>"
+                "<div>Order 4417</div><div>$31.50</div></li></ul>")
+
+# The purchases tool, which builds its Orders and Summary sheets from each
+# app's Order History.
+_spec = importlib.util.spec_from_file_location(
+    "export_purchases", Path(__file__).resolve().parents[3] / "tools" / "export_purchases.py")
+export = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(export)
 
 
 def _text_pdf(lines) -> bytes:
@@ -116,52 +140,96 @@ GROWING = [Receipt("2026-08-%02d" % (28 - 3 * i), "$%d.%02d" % (20 + i, 11 * i %
            for i in range(9)]
 GONE = Receipt("2026-03-02", "$12.34", 3)
 
+# A list going back far enough, K1 and K2, a row it draws only when it is
+# scrolled to its end, S1, two purchases older than all of them, C1 and C2,
+# and two from the last few months, F1 and F2.
+K1 = Receipt("2026-09-20", "$41.10", 5)
+K2 = Receipt("2026-09-12", "$17.35", 3)
+S1 = Receipt("2026-09-05", "$22.22", 2)
+C1 = Receipt("2026-08-30", "$26.40", 4)
+C2 = Receipt("2026-08-21", "$63.12", 8)
+F1 = Receipt("2028-05-20", "$12.80", 2)
+F2 = Receipt("2028-04-11", "$35.55", 6)
+KNOWN = [F1, F2, K1, K2, C1, C2]
 
-def orders_page(receipts, grow_ms=None, endless=False):
-    """The orders page, open on Online Orders, which has none. Its In-Store
-    rows are drawn when that tab is pressed and taken away when the other
-    one is. All at once, or with `grow_ms` one at a time that many
-    milliseconds apart, and with `endless`, made-up rows newer than any here
-    go on coming after them for as long as the tab is open.
+# A row's receipt link downloads the receipt from this site.
+SAVE_JS = ("function saveReceipt(rid) { const a = document.createElement('a');"
+           " a.href = '/receipt/' + rid + '.pdf'; a.download = 'receipt.pdf';"
+           " document.body.appendChild(a); a.click(); a.remove(); }")
 
-    A row's receipt link downloads the receipt from this site."""
-    script = (
-        "const ROWS = %s, GROW = %s, ENDLESS = %s; let timer = null;"
-        "function made(k) {"
-        " const d = new Date(2026, 7, 31 - k);"
-        " const two = (n) => String(n).padStart(2, '0');"
-        " const when = two(d.getMonth() + 1) + '/' + two(d.getDate()) + '/' + d.getFullYear();"
-        " return \"<li class='order-card'><div class='date'>In-Store: \" + when + \"</div>\""
-        "  + \"<div>18 Example Road</div><div class='totals'><span>$\" + (100 + k) + \".37</span>\""
-        "  + \"&nbsp;&nbsp;3 items</div><a href='javascript:void(0)'>view receipt pdf</a></li>\"; }"
-        "function show(which) {"
-        " document.getElementById('online').style.display = which === 'online' ? '' : 'none';"
-        " document.getElementById('store').style.display = which === 'store' ? '' : 'none';"
-        " clearInterval(timer);"
-        " const list = document.getElementById('rows');"
-        " list.innerHTML = '';"
-        " if (which !== 'store') return;"
-        " if (GROW === null) { list.innerHTML = ROWS.join(''); return; }"
-        " let n = 0;"
-        " const add = () => {"
-        "  if (n < ROWS.length) list.insertAdjacentHTML('beforeend', ROWS[n]);"
-        "  else if (ENDLESS) list.insertAdjacentHTML('beforeend', made(n));"
-        "  else { clearInterval(timer); return; }"
-        "  n += 1; };"
-        " add(); timer = setInterval(add, GROW); }"
-        "function saveReceipt(rid) {"
-        " const a = document.createElement('a');"
-        " a.href = '/receipt/' + rid + '.pdf'; a.download = 'receipt.pdf';"
-        " document.body.appendChild(a); a.click(); a.remove(); }"
-        % (json.dumps([r.row() for r in receipts]),
-           "null" if grow_ms is None else int(grow_ms), "true" if endless else "false"))
+# The In-Store list. Drawn whole when its tab is pressed, or with GROWS one
+# row at a time, the first when the tab is pressed and each next one when
+# drawOne is called, which is never by a clock, and with ENDLESS made-up rows
+# newer than any purchase here go on after them. LATER rows come only from
+# the Load more button, which nothing presses, and SCROLLED rows once the
+# page is scrolled to its end.
+_LIST_JS = r"""
+let n = 0, scrolledIn = false;
+function list() { return document.getElementById('rows'); }
+function made(k) {
+  const d = new Date(2026, 7, 31 - k);
+  const two = (v) => String(v).padStart(2, '0');
+  const when = two(d.getMonth() + 1) + '/' + two(d.getDate()) + '/' + d.getFullYear();
+  return "<li class='order-card'><div class='date'>In-Store: " + when + "</div>"
+    + "<div>18 Example Road</div><div class='totals'><span>$" + (100 + k) + ".37</span>"
+    + "&nbsp;&nbsp;3 items</div><a href='javascript:void(0)'>view receipt pdf</a></li>";
+}
+function drawOne() {
+  if (document.getElementById('store').style.display === 'none') return;
+  if (n < ROWS.length) list().insertAdjacentHTML('beforeend', ROWS[n]);
+  else if (ENDLESS) list().insertAdjacentHTML('beforeend', made(n));
+  else return;
+  n += 1;
+}
+window.drawOne = drawOne;
+function show(which) {
+  document.getElementById('online').style.display = which === 'online' ? '' : 'none';
+  document.getElementById('store').style.display = which === 'store' ? '' : 'none';
+  list().innerHTML = '';
+  n = 0;
+  scrolledIn = false;
+  if (which !== 'store') return;
+  if (GROWS) { drawOne(); return; }
+  list().innerHTML = ROWS.join('');
+}
+function loadMore() { list().insertAdjacentHTML('beforeend', LATER.join('')); }
+window.addEventListener('scroll', () => {
+  if (!SCROLLED.length || scrolledIn) return;
+  if (window.innerHeight + window.scrollY < document.documentElement.scrollHeight - 10) return;
+  scrolledIn = true;
+  list().insertAdjacentHTML('beforeend', SCROLLED.join(''));
+});
+"""
+
+
+def orders_page(receipts, grows=False, endless=False, later=(), scrolled=(), choose=False,
+                tabs=True, online=NO_ONLINE_ORDERS):
+    """The orders page, open on Online Orders, whose In-Store rows are drawn
+    when that tab is pressed and taken away when the other one is (see
+    _LIST_JS). `choose` puts a remembered choice of period above the list,
+    and without `tabs` the rows are drawn on a page with no tabs at all."""
+    if not tabs:
+        return ("<!doctype html><html><head><title>Your Orders</title></head><body>%s<main>"
+                "<h1>Orders and Receipts</h1>%s<ul id='rows'>%s</ul><script>%s</script>"
+                "</main></body></html>"
+                % (HEADER, NO_ONLINE_ORDERS, "".join(r.row() for r in receipts), SAVE_JS))
+    above = ("<div class='period'><label>Show <select id='period'>"
+             "<option selected>Last 6 months</option><option>Last 12 months</option>"
+             "<option>All receipts</option></select></label></div>") if choose else ""
+    below = ("<button id='more' onclick='loadMore()'>Load more</button>" if later else "") + \
+        ("<div style='height:4000px'></div>" if scrolled else "")
+    head = ("const ROWS = %s, LATER = %s, SCROLLED = %s, GROWS = %s, ENDLESS = %s;"
+            % (json.dumps([r.row() for r in receipts]), json.dumps([r.row() for r in later]),
+               json.dumps([r.row() for r in scrolled]), "true" if grows else "false",
+               "true" if endless else "false"))
     return ("<!doctype html><html><head><title>Your Orders</title></head><body>%s<main>"
             "<h1>Orders and Receipts</h1><div role='tablist'>"
             "<a role='tab' href='#' onclick=\"show('online');return false\">Online Orders</a>"
             "<a role='tab' href='#' onclick=\"show('store');return false\">In-Store Receipts</a></div>"
-            "<div id='online'><p>You haven't placed any orders yet</p></div>"
-            "<div id='store' style='display:none'><ul id='rows'></ul></div>"
-            "<script>%s</script></main></body></html>" % (HEADER, script))
+            "<div id='online'>%s</div>"
+            "<div id='store' style='display:none'>%s<ul id='rows'></ul>%s</div>"
+            "<script>%s%s%s</script></main></body></html>"
+            % (HEADER, online, above, below, head, _LIST_JS, SAVE_JS))
 
 
 class FakeMeijer:
@@ -170,7 +238,7 @@ class FakeMeijer:
 
     def __init__(self):
         self.orders = orders_page([])
-        self.pdfs = {r.rid: r.pdf() for r in EVERY + GROWING + [GONE]}
+        self.pdfs = {r.rid: r.pdf() for r in EVERY + GROWING + KNOWN + [GONE, S1]}
         self.failures = []
         self.asked = []
 
@@ -248,11 +316,12 @@ def attached(browser_exe, tmp_path_factory):
 
 @pytest.fixture(scope="module", autouse=True)
 def fake_meijer(server):
-    """Every address the app opens points at the made-up site, and every
-    wait is short. Held for the whole file, since one history of runs is
-    read by several tests. A tab's rows are given three seconds, the row a
-    purchase is looked for two, and the rows count as settled after one
-    second without a change.
+    """Every address the app opens points at the made-up site, every wait is
+    short, and today is TODAY. Held for the whole file, since a history of
+    runs is read by several tests. A tab is given half a second to start
+    drawing once pressed and three seconds for its rows, a purchase's row is
+    looked for twice, and the rows count as settled after a second without
+    a change.
 
     Every failure file the app is asked to write, and every purchase it
     takes to the receipt step, is noted as well."""
@@ -269,6 +338,8 @@ def fake_meijer(server):
         mp.setattr(site, "LIST_WAIT_MS", 3000, raising=False)
         mp.setattr(site, "ROWS_STEADY_MS", 1000, raising=False)
         mp.setattr(site, "ROW_LOOKS", 2, raising=False)
+        mp.setattr(site, "TAB_PAUSE_MS", 500, raising=False)
+        mp.setattr(app_mod, "_today", lambda: TODAY, raising=False)
         real_failure = app_mod.App.write_failure
         real_save = app_mod.App._save_receipt
 
@@ -282,6 +353,23 @@ def fake_meijer(server):
         mp.setattr(app_mod.App, "write_failure", write_failure)
         mp.setattr(app_mod.App, "_save_receipt", save_receipt)
         yield SITE
+
+
+@pytest.fixture
+def growing(monkeypatch):
+    """Each time the app asks the page how many rows it draws, the page
+    draws its next row first. The list grows as fast as the app looks at it
+    and no faster, however busy the machine is, and stops once it has drawn
+    them all."""
+    real = site.rows_showing
+
+    def look(page, purchase_type):
+        try:
+            page.evaluate("() => window.drawOne && window.drawOne()")
+        except Exception:
+            pass
+        return real(page, purchase_type)
+    monkeypatch.setattr(site, "rows_showing", look)
 
 
 def config_for(folder, cdp_url):
@@ -302,8 +390,8 @@ def run(folder, cdp_url, *flags) -> dict:
     printed, with its line breaks read as spaces, since a message is wrapped
     wherever it happens to fill a line, the result it gave the panel, the
     failure files it was asked for and wrote, the purchases it took to the
-    receipt step, and what it left in progress.json, the CSVs and the file
-    to attach."""
+    receipt step, what it left in progress.json, the CSVs and the file to
+    attach, and the orders the purchases tool builds from its Order History."""
     diagnostics = folder / "out" / "Diagnostics"
     before = set(diagnostics.glob("failure-*.json"))
     SITE.failures.clear()
@@ -322,6 +410,7 @@ def run(folder, cdp_url, *flags) -> dict:
         rows[name] = (storage.CsvFile(path, storage.ORDER_HISTORY_COLUMNS
                                       if "History" in name else storage.RECEIPT_INDEX_COLUMNS)
                       .read_all() if path.exists() else [])
+    history = folder / "out" / "Meijer Order History.csv"
     summary = folder / "out" / "run-summary.txt"
     return {"out": out, "result": json.loads(result[-1]) if result else {},
             "failures": list(SITE.failures), "asked": list(SITE.asked),
@@ -330,6 +419,8 @@ def run(folder, cdp_url, *flags) -> dict:
             "discovery": _json(folder / "out" / "discovery.json", {}),
             "attempts": attempt.get("attempts") if isinstance(attempt, dict) else None,
             "rows": rows,
+            "orders": (export.orders_from(export.load_purchases("Meijer", history))
+                       if history.exists() else []),
             "summary": summary.read_text(encoding="utf-8") if summary.exists() else ""}
 
 
@@ -351,6 +442,12 @@ def attempts_said(took) -> list:
 
 def notes_in(attempt, note) -> list:
     return [t for t in attempt.get("responses") or [] if t.get("note") == note]
+
+
+def judged(attempt) -> list:
+    """How each look of an attempt judged its list, as the file to attach
+    keeps it."""
+    return notes_in(attempt, "the oldest row the list shows")
 
 
 def mark_saved(folder, receipts):
@@ -385,11 +482,16 @@ def history(attached, tmp_path_factory):
     return took
 
 
+def statuses(rows, receipt) -> list:
+    return [r.get("Processing Status") for r in rows if r.get("Purchase Date") == receipt.iso]
+
+
 def test_the_two_oldest_are_written_down_as_no_longer_listed(history):
     """Each says the oldest date the list still shows, writes no failure
-    file, goes into neither CSV, and counts for no review. The receipts
-    saved beside them count for review as they always did, since a store
-    address names nothing the app can sort them by."""
+    file and counts for no review. Each goes into both CSVs once, so the
+    purchases tool's spend summary still counts it. The receipts saved
+    beside them count for review as they always did, since a store address
+    names nothing the app can sort them by."""
     assert len(by_date(history["discovery"]["discovery"])) == 6, "discovery knew all six"
     first = history["first"]
     records = by_date(first["progress"])
@@ -411,7 +513,11 @@ def test_the_two_oldest_are_written_down_as_no_longer_listed(history):
     assert first["result"].get("failed") == 1, first["result"]
     assert "No longer listed:          2" in first["summary"], first["summary"]
     for name, rows in first["rows"].items():
-        assert dates_in(rows) == sorted(r.iso for r in saved), (name, dates_in(rows))
+        assert dates_in(rows) == sorted(r.iso for r in saved + [OLD1, OLD2]), (name, dates_in(rows))
+        assert statuses(rows, OLD1) == statuses(rows, OLD2) == ["No Longer Listed"], name
+    totals = {o["Date"]: o["Order Total"] for o in first["orders"]}
+    assert totals[OLD1.iso] == 9.85 and totals[OLD2.iso] == 40.16, first["orders"]
+    assert [o["Date"] for o in first["orders"]].count(OLD1.iso) == 1
     assert first["out"].count("What the page answered is in") == 1, \
         "only the failure asks for the file to be attached"
 
@@ -419,7 +525,7 @@ def test_the_two_oldest_are_written_down_as_no_longer_listed(history):
 def test_a_purchase_missing_from_inside_the_listed_range_is_a_failure(history):
     """Its date is inside the range the list shows, so it is not said to
     have dropped off. It says what happened, and the next run looks for it
-    again without writing it down a second time."""
+    again without writing it down at all."""
     first, second = history["first"], history["second"]
     rec = by_date(first["progress"])[GAP.iso]
     assert rec["state"] == "Failed", rec
@@ -436,24 +542,25 @@ def test_a_purchase_missing_from_inside_the_listed_range_is_a_failure(history):
 
 def test_the_file_to_attach_keeps_every_attempt_of_the_run_in_order(history):
     """It kept only the last, so his Run All left a record of one of the
-    three. Each says its place in the run and what it came to."""
+    three. Each says its place in the run, what it came to, and how each
+    look judged the list."""
     first = history["first"]
     assert attempts_said(first) == [(3, 6, "its row is not on the page"),
                                      (5, 6, "dropped off the list"),
                                      (6, 6, "dropped off the list")], first["attempts"]
     gap, old1, old2 = first["attempts"]
+    whole = {"note": "the oldest row the list shows", "rows": 3, "earlier_than_every_row": True,
+             "listed_by_discovery": False, "tab_opened": True, "controls_read": True,
+             "more_controls": 0, "back_twenty_months": True, "discovery_read_the_tab": True}
     for a in (old1, old2):
-        assert notes_in(a, "the oldest row the list shows") == [{
-            "note": "the oldest row the list shows", "rows": 3,
-            "earlier_than_every_row": True, "listed_by_discovery": False}] * 2, a
-    assert all(not n["earlier_than_every_row"]
-               for n in notes_in(gap, "the oldest row the list shows")), gap
+        assert judged(a) == [whole] * 2, a
+    assert [n["earlier_than_every_row"] for n in judged(gap)] == [False, False], gap
     assert len(notes_in(gap, "the purchase's tab")) == 2, "two looks, as before"
 
 
 def test_a_later_run_does_not_try_them_again(history):
     """The second run takes neither to the receipt step, says why it skips
-    each, and adds nothing to the CSVs, where every saved receipt is still
+    each, and adds nothing to the CSVs, where every purchase is still
     written once."""
     second = history["second"]
     assert OLD1.iso not in second["asked"] and OLD2.iso not in second["asked"], second["asked"]
@@ -461,7 +568,8 @@ def test_a_later_run_does_not_try_them_again(history):
     assert second["out"].count("Meijer no longer lists it, so it is skipped.") == 2, second["out"]
     assert attempts_said(second) == [(3, 6, "its row is not on the page")]
     for name, rows in second["rows"].items():
-        assert dates_in(rows) == sorted([R1.iso, R2.iso, R3.iso]), (name, dates_in(rows))
+        assert dates_in(rows) == sorted([R1.iso, R2.iso, R3.iso, OLD1.iso, OLD2.iso]), \
+            (name, dates_in(rows))
     records = by_date(second["progress"])
     assert records[OLD1.iso]["state"] == records[OLD2.iso]["state"] == "No Longer Listed"
     assert second["result"].get("failed") == 1 and "No longer listed:          2" in second["summary"]
@@ -469,7 +577,9 @@ def test_a_later_run_does_not_try_them_again(history):
 
 def test_one_the_list_shows_again_is_tried_again(history):
     """A discovery that finds it on the list again puts it back, and the
-    receipt is saved. The other is still skipped."""
+    receipt is saved. Its rows as no longer listed give way to the saved
+    receipt's, so it is still one purchase in the CSVs. The other is still
+    skipped."""
     again = history["listed again"]
     assert ("1 purchase(s) Meijer had stopped listing are on its list again, so this run "
             "tries them again.") in again["out"], again["out"]
@@ -479,41 +589,96 @@ def test_one_the_list_shows_again_is_tried_again(history):
     assert Path(records[OLD1.iso]["pdf_path"]).read_bytes() == OLD1.pdf()
     assert records[OLD2.iso]["state"] == "No Longer Listed"
     assert again["out"].count("Meijer no longer lists it, so it is skipped.") == 1
+    for name, rows in again["rows"].items():
+        assert dates_in(rows).count(OLD1.iso) == 1, (name, dates_in(rows))
+        assert statuses(rows, OLD1) != ["No Longer Listed"], name
+        assert statuses(rows, OLD2) == ["No Longer Listed"], name
+    assert [o["Date"] for o in again["orders"]].count(OLD1.iso) == 1
 
 
-# -- a list that draws its rows a few at a time ----------------------------------------
+# -- a purchase that drops off a second time ----------------------------------------------
+
+@pytest.fixture(scope="module")
+def known(attached, tmp_path_factory):
+    """What a discovery of the whole list found, KNOWN, as its
+    discovery.json, for the tests below that start from it."""
+    folder = tmp_path_factory.mktemp("known")
+    SITE.orders = orders_page(KNOWN)
+    took = run(folder, attached, "--discover")
+    assert len(by_date(took["discovery"])) == len(KNOWN), took["out"]
+    return (folder / "out" / "discovery.json").read_text(encoding="utf-8")
+
+
+def start_from(folder, known_list):
+    out = folder / "out"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "discovery.json").write_text(known_list, encoding="utf-8")
+
+
+ONLY_C1 = ("--start-date", C1.iso, "--end-date", C1.iso)
+
+
+def test_its_rows_go_into_the_csvs_once_even_when_it_drops_off_again(attached, known, tmp_path,
+                                                                     monkeypatch):
+    """It drops off, a later discovery finds it again although its row is
+    gone by the time it is looked for, so it fails that run, and the run
+    after says once more that it has dropped off. Its rows as no longer
+    listed are in each CSV once."""
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([K1, K2])
+    first = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+    assert by_date(first["progress"])[C1.iso]["state"] == "No Longer Listed", first["out"]
+
+    SITE.orders = orders_page([K1, K2, C1])
+    real = app_mod.App.process_purchases
+
+    def then_without_it(self, purchases, dry_run=False):
+        SITE.orders = orders_page([K1, K2])
+        return real(self, purchases, dry_run=dry_run)
+    monkeypatch.setattr(app_mod.App, "process_purchases", then_without_it)
+    second = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+    assert by_date(second["progress"])[C1.iso]["state"] == "Failed", second["out"]
+
+    monkeypatch.setattr(app_mod.App, "process_purchases", real)
+    third = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+    assert by_date(third["progress"])[C1.iso]["state"] == "No Longer Listed", third["out"]
+    for name, rows in third["rows"].items():
+        assert dates_in(rows) == [C1.iso], (name, dates_in(rows))
+
+
+# -- a list that draws its rows a few at a time -----------------------------------------
 
 def test_discovery_reads_a_list_that_draws_its_rows_a_few_at_a_time(attached, tmp_path,
-                                                                     monkeypatch):
-    """The rows come one at a time for about six seconds after the tab is
-    pressed. Read at its first rows, discovery found the few drawn by then
-    and left the rest for a later run."""
+                                                                     monkeypatch, growing):
+    """The rows come one at a time, one more each time the app counts them.
+    Read at its first rows, discovery found the two drawn by then and left
+    the rest for a later run."""
     monkeypatch.setattr(site, "LIST_WAIT_MS", 10000, raising=False)
-    monkeypatch.setattr(site, "ROWS_STEADY_MS", 2500, raising=False)
-    SITE.orders = orders_page(GROWING, grow_ms=800)
+    monkeypatch.setattr(site, "ROWS_STEADY_MS", 1500, raising=False)
+    SITE.orders = orders_page(GROWING, grows=True)
     took = run(tmp_path, attached, "--discover")
 
     found = sorted((r["purchase_date"], r["total"]) for r in took["discovery"].values())
     assert found == sorted((r.iso, r.amount) for r in GROWING), took["out"]
 
 
-def test_a_list_still_drawing_its_rows_is_judged_once_they_stop(attached, tmp_path,
-                                                                monkeypatch):
-    """The rows come one at a time, and the purchase's row is the last. The
-    press gives up on it while the list is still drawing, and only once the
-    rows stop changing is it looked for again and saved. The one that has
-    dropped off is judged against the whole list, so the date it names is
-    the oldest of all of it, not of the rows drawn when the press gave up."""
+def test_a_list_still_drawing_its_rows_is_judged_once_they_stop(attached, tmp_path, monkeypatch,
+                                                                growing):
+    """The rows come one at a time, one more each time the app counts them,
+    and the purchase's row is the last. The press gives up on it while the
+    list is still drawing, and only once the rows stop changing is it
+    looked for again and saved. The one that has dropped off is judged
+    against the whole list, so the date it names is the oldest of all of
+    it, not of the rows drawn when the press gave up."""
     monkeypatch.setattr(site, "LIST_WAIT_MS", 10000, raising=False)
-    monkeypatch.setattr(site, "ROWS_STEADY_MS", 2500, raising=False)
-    monkeypatch.setattr(site, "ROW_LOOKS", 1, raising=False)
+    monkeypatch.setattr(site, "ROWS_STEADY_MS", 1500, raising=False)
     SITE.orders = orders_page(GROWING + [GONE])
     run(tmp_path, attached, "--discover")
-    mark_saved(tmp_path, GROWING[:-1])
-    SITE.orders = orders_page(GROWING, grow_ms=800)
-    took = run(tmp_path, attached, "--all", "--yes")
-
+    SITE.orders = orders_page(GROWING, grows=True)
     last = GROWING[-1]
+    took = run(tmp_path, attached, "--all", "--yes", "--start-date", GONE.iso,
+               "--end-date", last.iso)
+
     assert took["asked"] == [last.iso, GONE.iso], took["asked"]
     records = by_date(took["progress"])
     assert records[last.iso].get("downloaded_ok") is True, took["out"]
@@ -522,17 +687,17 @@ def test_a_list_still_drawing_its_rows_is_judged_once_they_stop(attached, tmp_pa
 
 
 def test_a_list_that_never_stops_changing_is_never_read_as_whole(attached, tmp_path,
-                                                                  monkeypatch):
-    """Rows go on coming for as long as the tab is open, every one newer
-    than the purchase. However long it is watched the list was never seen
-    whole, so the purchase is not said to have dropped off it. It is a
-    failure, and the next run looks for it again."""
-    # Longer than a row's gap even where the browser lets a timer run late.
-    monkeypatch.setattr(site, "ROWS_STEADY_MS", 2000, raising=False)
+                                                                  monkeypatch, growing):
+    """Rows go on coming for as long as the tab is open, one more each time
+    the app counts them, every one newer than the purchase. However long it
+    is watched the list was never seen whole, so the purchase is not said to
+    have dropped off it. It is a failure, and the next run looks for it
+    again."""
     SITE.orders = orders_page([GONE])
     run(tmp_path, attached, "--discover")
-    SITE.orders = orders_page([], grow_ms=300, endless=True)
-    took = run(tmp_path, attached, "--resume")
+    SITE.orders = orders_page([], grows=True, endless=True)
+    took = run(tmp_path, attached, "--all", "--yes", "--start-date", GONE.iso,
+               "--end-date", GONE.iso)
 
     rec = by_date(took["progress"])[GONE.iso]
     assert rec["state"] == "Failed", took["out"]
@@ -541,6 +706,161 @@ def test_a_list_that_never_stops_changing_is_never_read_as_whole(attached, tmp_p
     assert attempt.get("outcome") == "its row is not on the page", attempt
     settled = notes_in(attempt, "the rows once they settled")
     assert settled and not any(n["settled"] for n in settled), attempt
+    assert all(n["discovery_read_the_tab"] and n["back_twenty_months"] for n in judged(attempt))
+
+
+# -- a list that shows only part of what Meijer holds -----------------------------------
+#
+# Each list goes back far enough and draws no newer purchase than the one
+# looked for, which is older than every row it shows, and the run's own
+# discovery read it. Only what each test names keeps the purchase from
+# being said to have dropped off.
+
+FAILED = "Its row is not on Meijer's In-Store Receipts tab, so nothing was pressed."
+
+
+def kept_a_failure(took, receipt):
+    rec = by_date(took["progress"])[receipt.iso]
+    assert rec["state"] == "Failed", took["out"]
+    assert "Meijer no longer lists" not in took["out"]
+    assert FAILED in took["out"], took["out"]
+    for rows in took["rows"].values():
+        assert receipt.iso not in dates_in(rows)
+
+
+def test_rows_behind_a_load_more_button_are_never_taken_for_dropped(attached, known, tmp_path):
+    """The tab draws its newest rows and a Load more button, which nothing
+    presses, and the two oldest behind it. They are on Meijer's list, so
+    each stays a failure the next run looks for again."""
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([K1, K2], later=[C1, C2])
+    took = run(tmp_path, attached, "--all", "--yes", "--start-date", C2.iso, "--end-date", C1.iso)
+
+    for r in (C1, C2):
+        kept_a_failure(took, r)
+    assert len(took["attempts"] or []) == 2, took["attempts"]
+    for attempt in took["attempts"]:
+        assert [n["more_controls"] for n in judged(attempt)] == [1, 1], attempt
+        assert all(n["earlier_than_every_row"] and n["back_twenty_months"] for n in judged(attempt))
+
+
+def test_a_list_under_a_remembered_filter_is_never_taken_for_the_whole(attached, known, tmp_path):
+    """The tab remembers a choice of the last six months and draws only
+    those. The purchase is older, and on Meijer's list all the same."""
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([F1, F2], choose=True)
+    took = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
+    assert [n["more_controls"] for n in judged(attempt)] == [1, 1], attempt
+
+
+def test_a_list_that_goes_back_less_than_twenty_months_is_never_taken_for_the_whole(
+        attached, known, tmp_path):
+    """Meijer answers with its newest receipts only, as it might while it
+    slows requests down, and shows no control for more. A list going back
+    a few months is not taken for all it holds."""
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([F1, F2])
+    took = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
+    assert [n["back_twenty_months"] for n in judged(attempt)] == [False, False], attempt
+    assert [n["more_controls"] for n in judged(attempt)] == [0, 0], attempt
+
+
+def test_resume_never_decides_it(attached, known, tmp_path):
+    """Resume reads no list of its own before it presses, so what a
+    purchase's tab shows then is never taken for all of Meijer's list. The
+    run that stopped and told the person to press Resume did so because
+    Meijer seemed to be slowing requests, when a short list is likeliest."""
+    start_from(tmp_path, known)
+    mark_saved(tmp_path, [F1, F2, K1, K2, C2])
+    SITE.orders = orders_page([K1, K2])
+    took = run(tmp_path, attached, "--resume")
+
+    assert took["asked"] == [C1.iso], took["asked"]
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
+    assert [n["discovery_read_the_tab"] for n in judged(attempt)] == [False, False], attempt
+
+
+def test_a_run_whose_discovery_could_not_read_the_tab_never_decides_it(attached, known, tmp_path,
+                                                                        monkeypatch):
+    """The In-Store tab draws nothing while discovery reads it, and the run
+    goes on with the Online order it found. By the time the purchase is
+    looked for the tab draws its rows, which the run's discovery never read."""
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([], online=ONLINE_ORDER)
+    real = app_mod.App.process_purchases
+
+    def then_drawn(self, purchases, dry_run=False):
+        SITE.orders = orders_page([K1, K2])
+        return real(self, purchases, dry_run=dry_run)
+    monkeypatch.setattr(app_mod.App, "process_purchases", then_drawn)
+    took = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+
+    assert "Nothing showed on Meijer's In-Store Receipts tab" in took["out"], took["out"]
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
+    assert [n["discovery_read_the_tab"] for n in judged(attempt)] == [False, False], attempt
+
+
+@pytest.mark.parametrize("brings", ["more rows", "its row"])
+def test_a_list_that_draws_more_as_it_is_scrolled_is_never_taken_for_the_whole(
+        attached, known, tmp_path, brings):
+    """The list draws more of itself once it is scrolled to its end. Its
+    row is looked for again then, and saved when it came, and a list that
+    drew more as it was scrolled is never taken for all Meijer holds."""
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([K1, K2], scrolled=[S1] if brings == "more rows" else [C1])
+    took = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+
+    if brings == "its row":
+        rec = by_date(took["progress"])[C1.iso]
+        assert rec.get("downloaded_ok") is True, took["out"]
+        assert Path(rec["pdf_path"]).read_bytes() == C1.pdf()
+        return
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
+    settled = notes_in(attempt, "the rows once they settled")
+    assert [n["more_after_scrolling"] for n in settled] == [True, True], attempt
+
+
+def test_a_page_without_the_tab_never_decides_it(attached, known, tmp_path):
+    """The page draws the rows with no tabs at all, so no look opened the
+    In-Store Receipts tab, and what it draws is not taken for that list."""
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([K1, K2], tabs=False)
+    took = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
+    assert [n["tab_opened"] for n in judged(attempt)] == [False, False], attempt
+
+
+def test_controls_that_could_not_be_read_count_as_ones_that_show_more(attached, known, tmp_path,
+                                                                     monkeypatch):
+    """The page does not answer when asked what controls the list shows,
+    the way a stalled page does not, and that is never taken for none."""
+    from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
+    script = getattr(site, "_MORE_CONTROLS_JS", None)
+    real = Page.evaluate
+
+    def evaluate(self, expression, *args, **kwargs):
+        if script is not None and expression == script:
+            raise PlaywrightTimeout("Timeout exceeded, a stalled read.")
+        return real(self, expression, *args, **kwargs)
+    monkeypatch.setattr(Page, "evaluate", evaluate)
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([K1, K2])
+    took = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
+    assert [n["controls_read"] for n in judged(attempt)] == [False, False], attempt
 
 
 def test_a_purchase_this_runs_discovery_found_is_never_taken_for_one_no_longer_listed(
@@ -561,8 +881,8 @@ def test_a_purchase_this_runs_discovery_found_is_never_taken_for_one_no_longer_l
     assert rec["state"] == "Failed", took["out"]
     assert "Its row is not on Meijer's In-Store Receipts tab" in took["out"], took["out"]
     [attempt] = took["attempts"] or [{}]
-    assert {"note": "the oldest row the list shows", "rows": 1, "earlier_than_every_row": True,
-            "listed_by_discovery": True} in attempt.get("responses", []), attempt
+    assert [(n["earlier_than_every_row"], n["listed_by_discovery"]) for n in judged(attempt)] == \
+        [(True, True), (True, True)], attempt
 
 
 def test_it_has_dropped_off_only_when_every_look_finds_so(attached, tmp_path, monkeypatch):
@@ -570,7 +890,7 @@ def test_it_has_dropped_off_only_when_every_look_finds_so(attached, tmp_path, mo
     and the second, a moment later, a list that no longer does. The second
     look alone does not make it one Meijer no longer lists. It is a
     failure, and the next run looks for it again."""
-    SITE.orders = orders_page([OLD1])
+    SITE.orders = orders_page([R1, OLD1, OLD2])
     run(tmp_path, attached, "--discover")
     SITE.orders = orders_page([R1, OLD2])
     real = getattr(site, "listed_rows", None)
@@ -580,15 +900,17 @@ def test_it_has_dropped_off_only_when_every_look_finds_so(attached, tmp_path, mo
         SITE.orders = orders_page([R1])
         return got
     monkeypatch.setattr(site, "listed_rows", then_shorter, raising=False)
-    took = run(tmp_path, attached, "--resume")
+    took = run(tmp_path, attached, "--all", "--yes", "--start-date", OLD1.iso,
+               "--end-date", OLD1.iso)
 
     rec = by_date(took["progress"])[OLD1.iso]
     assert rec["state"] == "Failed", took["out"]
     assert "Meijer no longer lists" not in took["out"]
     [attempt] = took["attempts"] or [{}]
-    assert [n["earlier_than_every_row"] for n in
-            notes_in(attempt, "the oldest row the list shows")] == [False, True], attempt
+    assert [n["earlier_than_every_row"] for n in judged(attempt)] == [False, True], attempt
 
+
+# -- reading the list ------------------------------------------------------------------------
 
 def test_the_oldest_date_a_list_shows_is_read_only_when_every_row_shows_one():
     """A row whose date cannot be read could be the oldest, so then the
@@ -609,3 +931,31 @@ def test_the_oldest_date_a_list_shows_is_read_only_when_every_row_shows_one():
     finally:
         browser.close()
         driver.stop()
+
+
+def test_a_pause_right_after_a_read_is_never_counted_as_the_rows_holding_still(monkeypatch):
+    """This program is held up right after it reads three rows, longer than
+    the rows have to hold still, and the page draws a fourth meanwhile. The
+    time it was held up is not time anything saw the count stay the same,
+    so the wait goes on, reads the fourth row, and settles on four. Time is
+    this test's own clock, moved only by the page's waits and the hold-up."""
+    clock = [0.0]
+    monkeypatch.setattr(site, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(site, "ROWS_STEADY_MS", 1500, raising=False)
+    row = {"text": "In-Store: 05/20/2026\n18 Example Road\n$31.90", "shown": True, "links": []}
+
+    class Page:
+        reads = 0
+
+        def evaluate(self, script, arg=None):
+            self.reads += 1
+            drawn = 3 if self.reads <= 2 else 4
+            if self.reads == 2:
+                clock[0] += 1.6     # held up after this read, while the fourth row comes
+            return [dict(row) for _ in range(drawn)]
+
+        def wait_for_timeout(self, ms):
+            clock[0] += ms / 1000.0
+
+    assert site.settle_rows(Page(), "In-Store", wait_ms=10000) == \
+        {"rows": 4, "changed": True, "settled": True}

@@ -15,6 +15,7 @@ leaves this machine. Every date, store and amount is invented.
 """
 import json
 import sys
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -96,7 +97,10 @@ def test_the_press_says_why_it_took_nothing(browser_ctx, monkeypatch, rows, date
     monkeypatch.setattr(site, "ROW_LOOKS", 1, raising=False)
     body, facts = pressed_on(browser_ctx, rows, date)
     assert body is None
-    assert facts == {"outcome": outcome}
+    assert facts.get("outcome") == outcome, facts
+    if outcome in ("its row is not on the page", "more than one row fits it"):
+        # and how many rows its last look counted, for the wait that follows
+        assert facts.get("rows") == len(rows) and facts.get("since"), facts
 
 
 def test_a_press_that_took_its_receipt_says_nothing_of_the_kind(browser_ctx):
@@ -212,11 +216,18 @@ def test_only_a_store_receipt_is_said_to_have_dropped_off(tmp_path, monkeypatch,
         if facts is not None:
             facts["outcome"] = "its row is not on the page"
     monkeypatch.setattr(site, "press_row_receipt", press)
-    monkeypatch.setattr(site, "settle_rows", lambda pg, t, wait_ms=None:
-                        {"rows": 3, "changed": False, "settled": True}, raising=False)
+    steady = {"rows": 3, "changed": False, "settled": True}
+    monkeypatch.setattr(site, "settle_rows", lambda pg, t, wait_ms=None, seen=None: steady,
+                        raising=False)
+    monkeypatch.setattr(site, "scroll_to_end", lambda pg, t: steady, raising=False)
     monkeypatch.setattr(site, "listed_rows", lambda pg, t: {"rows": 3, "oldest": "2026-06-01"},
                         raising=False)
+    monkeypatch.setattr(site, "more_controls", lambda pg: 0, raising=False)
+    # Today is long enough after the oldest row, and this run's discovery
+    # read the In-Store rows.
+    monkeypatch.setattr(mr, "_today", lambda: date(2028, 6, 1), raising=False)
     app = _app(tmp_path)
+    app._kinds_read = frozenset({IN_STORE})
     p = Purchase(purchase_type=kind, purchase_date="2026-05-01", order_number="pexample0501",
                  total="$5.00", items=[Item(name="400 Example Avenue")])
     assert app._save_receipt(_Page(), p) is False

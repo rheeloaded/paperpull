@@ -262,6 +262,10 @@ TAB_ONLINE_RE = re.compile(r"^\s*online\s+orders?\s*$", re.I)
 IN_STORE_ROW_RE = re.compile(r"\bin-?store\b\s*:", re.I)
 
 
+# How long a tab is given to start drawing once it is pressed.
+TAB_PAUSE_MS = 2500
+
+
 def open_tab(page, pattern) -> bool:
     """Show one of the two tabs. A tab is not a control that buys or
     changes anything, and its name has to read as one of the two."""
@@ -276,7 +280,7 @@ def open_tab(page, pattern) -> bool:
                 if not pattern.match(label) or FORBIDDEN_CONTROL_RE.search(label):
                     continue
                 el.click(timeout=5000)
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(TAB_PAUSE_MS)
                 return True
         # Not a role the page declares, so by its text.
         loc = page.get_by_text(pattern)
@@ -284,7 +288,7 @@ def open_tab(page, pattern) -> bool:
             el = loc.nth(i)
             if el.is_visible():
                 el.click(timeout=5000)
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(TAB_PAUSE_MS)
                 return True
     except Exception as e:
         log.info("could not open the tab: %s", e)
@@ -517,14 +521,16 @@ def collect_both_tabs(page, facts: Optional[dict] = None) -> List[RawCard]:
     Rows that have begun to show are read once their count has stopped
     changing (settle_rows). A tab can draw its rows a few at a time, and
     read at its first rows, the ones it had not drawn yet were left for a
-    later run to find."""
+    later run to find. `facts` names each kind whose rows were there to
+    read as "read"."""
     cards: List[RawCard] = []
     seen = set()
     unread = []
+    drew = []
     for kind, label in ((IN_STORE, "In-Store Receipts"), (ONLINE, "Online Orders")):
         shown = show_list_for(page, kind, or_none=True)
-        if shown.get("rows"):
-            settle_rows(page, kind)
+        if shown.get("rows") and settle_rows(page, kind)["rows"]:
+            drew.append(kind)
         if not (shown.get("rows") or shown.get("none")):
             unread.append(label)
         if not (shown.get("opened") or shown.get("rows")):
@@ -541,6 +547,7 @@ def collect_both_tabs(page, facts: Optional[dict] = None) -> List[RawCard]:
             cards.append(c)
     if facts is not None:
         facts["unread"] = unread
+        facts["read"] = drew
     return cards
 
 
@@ -702,30 +709,139 @@ LIST_WAIT_MS = 30000
 ROWS_STEADY_MS = 3000
 
 
-def settle_rows(page, purchase_type: str, wait_ms: Optional[int] = None) -> dict:
+def settle_rows(page, purchase_type: str, wait_ms: Optional[int] = None,
+                seen: Optional[tuple] = None) -> dict:
     """Wait until the count of a purchase's rows has stayed the same for
     ROWS_STEADY_MS, for up to `wait_ms` in all, LIST_WAIT_MS when not given.
+    `seen`, when given, is what reads made already found, the count and the
+    time it was first read, and the wait goes on from there rather than
+    starting over.
 
-    Returns the count ("rows"), whether it changed while this waited
+    Returns the count ("rows"), whether it changed from the first count
     ("changed"), and whether it stayed the same long enough before the time
     was up ("settled"). A list still changing when the time is up was not
-    seen whole, and is never read as if it had been."""
+    seen whole, and is never read as if it had been.
+
+    The count has stayed the same only as long as reads that agree span.
+    Time after the last read is never counted, since the page can change in
+    it, and a pause in this program right after a read used to end the wait
+    on a count nothing had read again (review)."""
     wait_ms = LIST_WAIT_MS if wait_ms is None else wait_ms
     deadline = time.monotonic() + wait_ms / 1000.0
-    rows = rows_showing(page, purchase_type)
+    if seen is None or seen[0] is None or seen[1] is None:
+        rows = rows_showing(page, purchase_type)
+        since = time.monotonic()
+    else:
+        rows, since = seen
     changed = False
-    since = time.monotonic()
-    while time.monotonic() - since < ROWS_STEADY_MS / 1000.0:
-        if time.monotonic() >= deadline:
-            return {"rows": rows, "changed": changed, "settled": False}
+    while time.monotonic() < deadline:
         try:
             page.wait_for_timeout(500)
         except Exception:
-            return {"rows": rows, "changed": changed, "settled": False}
+            break
+        began = time.monotonic()
         now = rows_showing(page, purchase_type)
         if now != rows:
             rows, changed, since = now, True, time.monotonic()
-    return {"rows": rows, "changed": changed, "settled": True}
+        elif began - since >= ROWS_STEADY_MS / 1000.0:
+            return {"rows": rows, "changed": changed, "settled": True}
+    return {"rows": rows, "changed": changed, "settled": False}
+
+
+# A list whose oldest row is younger than this many months is never taken for
+# all Meijer holds. It appears to list about two years of store receipts,
+# inferred from one account, and a list that goes back less far than that may
+# be filtered, paged, or cut short while Meijer slows requests (review).
+WHOLE_LIST_MONTHS = 20
+
+# What a control says when it would show more of the list than the list
+# shows, or a narrower part of it. Load more, older, earlier, next or
+# previous pages, page numbers, Show all, and filters, the arrows of a pager
+# included. Nothing the app presses, only what it looks for.
+MORE_CONTROL_RE = re.compile(
+    r"\b(load|show|see|view)\s+(more|all|older|earlier|previous)\b"
+    r"|\bmore\s+(receipts|orders|purchases|results|transactions)\b"
+    r"|^\s*(more|older|earlier|next|previous|prev)\s*$|\bolder\b|\bearlier\b"
+    r"|\bnext\b|\bprevious\b|\bpage\s+\d+\b|^\s*\d{1,3}\s*$|\bfilter|\bdate\s+range\b"
+    r"|\b(last|past)\s+\d+\s+(days?|weeks?|months?|years?)\b"
+    r"|^\s*[<>" + "".join(chr(c) for c in (0x2039, 0x203A, 0x00AB, 0x00BB)) + r"]+\s*$",
+    re.I)
+
+# Every control of the list's main content that shows, and how many of them
+# would show more of the list or a narrower part of it. A choice of what the
+# list shows, a dropdown or a date, counts whatever it says.
+_MORE_CONTROLS_JS = r"""(words) => {
+  const root = document.querySelector('main, [role=main], #main') || document.body;
+  const said = new RegExp(words, 'i');
+  const choosing = ['date', 'month', 'week', 'search', 'range'];
+  let found = 0;
+  for (const el of root.querySelectorAll(
+      'a, button, input, select, [role=button], [role=link], [role=combobox], [role=listbox]')) {
+    if (!el.getClientRects().length || getComputedStyle(el).visibility === 'hidden') continue;
+    const tag = el.tagName.toLowerCase();
+    const role = el.getAttribute('role') || '';
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    if (tag === 'select' || role === 'combobox' || role === 'listbox' ||
+        (tag === 'input' && choosing.includes(type))) {
+      found += 1;
+      continue;
+    }
+    const label = [el.innerText, tag === 'input' ? el.value : '', el.getAttribute('aria-label'),
+                   el.getAttribute('title')].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    if (said.test(label)) found += 1;
+  }
+  return found;
+}"""
+
+
+def more_controls(page) -> Optional[int]:
+    """How many controls the list's main content shows that would show more
+    of it, or a narrower part of it, than it does now (MORE_CONTROL_RE, and
+    every dropdown or date to choose). None when the page could not be
+    read, which is never taken for none. Nothing is pressed.
+
+    A list behind a Load more button, a pager or a remembered filter draws
+    only part of what Meijer holds, and the rest used to be read as
+    purchases Meijer no longer lists (review)."""
+    try:
+        found = page.evaluate(_MORE_CONTROLS_JS, MORE_CONTROL_RE.pattern)
+    except Exception as e:
+        log.info("could not read the list's controls: %s", e)
+        return None
+    return found if isinstance(found, int) and not isinstance(found, bool) else None
+
+
+# The page, and every part of its main content that scrolls, taken to its
+# end, the way a person scrolls to the bottom of a list.
+_SCROLL_TO_END_JS = r"""() => {
+  const root = document.querySelector('main, [role=main], #main') || document.body;
+  const page = document.scrollingElement || document.documentElement;
+  page.scrollTop = page.scrollHeight;
+  for (const el of root.querySelectorAll('*')) {
+    if (el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+  return true;
+}"""
+
+
+def scroll_to_end(page, purchase_type: str) -> dict:
+    """Scroll the list to its end and let its rows settle, as settle_rows
+    answers, "changed" meaning they changed from the count before the
+    scroll. A list that draws more of itself as it is scrolled shows only
+    its first part until then, and the rows it adds can come before the
+    first read after the scroll, so the count is read before it. A page
+    that could not be scrolled is said to have changed, so nothing on it is
+    read as the whole list."""
+    before = rows_showing(page, purchase_type)
+    since = time.monotonic()
+    try:
+        page.evaluate(_SCROLL_TO_END_JS)
+    except Exception as e:
+        log.info("could not scroll the list: %s", e)
+        return {"rows": before, "changed": True, "settled": False}
+    return settle_rows(page, purchase_type, seen=(before, since))
 
 
 def says_it_has_none(page, purchase_type: str) -> bool:
@@ -925,19 +1041,30 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
 
     When it is None, `facts`, when given, says why as "outcome", one of
     NOT_ON_THE_PAGE, MORE_THAN_ONE_ROW, NO_RECEIPT_CONTROL and NO_PDF. A run
-    used to say of all four that the row carried no receipt link (#42)."""
+    used to say of all four that the row carried no receipt link (#42).
+    For a row not on the page it also gives how many rows of the purchase's
+    kind its last look counted ("rows") and when that count was first read
+    ("since"), so a wait for the list to settle goes on from these looks
+    (settle_rows) rather than starting over."""
     said = facts if facts is not None else {}
     # The tab's rows arrive after the tab is shown, so the row is given a
-    # few seconds to appear before it is called missing.
+    # few seconds to appear before it is called missing. The rows are
+    # counted before each look for the row, so every row counted was
+    # looked through.
     found = None
     fit: dict = {}
+    rows, since = None, None
     for _ in range(ROW_LOOKS):
+        count = rows_showing(page, getattr(purchase, "purchase_type", ""))
+        if count != rows:
+            rows, since = count, time.monotonic()
         found = row_controls(page, purchase, fit)
         if found or fit.get("ambiguous"):
             break
         page.wait_for_timeout(1000)
     if not found:
         said["outcome"] = MORE_THAN_ONE_ROW if fit.get("ambiguous") else NOT_ON_THE_PAGE
+        said["rows"], said["since"] = rows, since
         if trace is not None:
             if fit.get("ambiguous"):
                 trace.append({"note": "more than one row fits this purchase, so none was pressed",

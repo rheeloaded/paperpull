@@ -60,6 +60,14 @@ class _Store:
         self.data.setdefault(key, {}).update(record)
 
 
+def output_folder(folder: Path):
+    """The app's own folders, made from the provider the app just loaded
+    bound, with `folder` as its output folder. The receipts are written in
+    it, and an app may rename only a file it holds."""
+    from paperpull_core.storage import Paths
+    return Paths(folder)
+
+
 def _row(folder: Path, number: str, name: str) -> dict:
     pdf = folder / name
     pdf.write_bytes(b"%PDF-1.4\n% invented\n%%EOF\n")
@@ -84,6 +92,7 @@ def test_a_renamed_receipt_is_not_asked_about_again(app, tmp_path, monkeypatch, 
     inst.progress = _Store()
     inst.discovery = _Store()
     inst.config = {"max_path_length": 240}
+    inst.paths = output_folder(tmp_path)
 
     answers = iter(["Garden Hose", ""])          # rename the first, keep the second
     monkeypatch.setattr(mod, "ask", lambda prompt: next(answers))
@@ -111,6 +120,7 @@ def test_a_receipt_renamed_before_the_fix_is_not_asked_about_either(app, tmp_pat
     inst.progress = _Store()
     inst.discovery = _Store()
     inst.config = {"max_path_length": 240}
+    inst.paths = output_folder(tmp_path)
     asked = []
     monkeypatch.setattr(mod, "ask", lambda prompt: asked.append(prompt) or "")
     inst.cmd_review_names()

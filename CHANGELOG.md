@@ -208,16 +208,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   row had no receipt or details link, was counted for manual review, and
   was written into both CSVs again each time. It is now reported as no
   longer listed, naming the oldest date the tab still shows, writes no
-  failure file, counts for no review, goes into neither CSV, and is
-  skipped by later runs until a discovery finds it on the tab again. A row
-  that gave no receipt for any other reason now says what happened, that
-  its row is not on the page, that more than one row fits it, that nothing
-  on it reads as its receipt, or that pressing it brought no PDF, and is a
-  failure the next run looks for again without writing it into the CSVs.
-  A tab's rows count as all there only once their count has stopped
-  changing, so a list still drawing its rows is never taken for one that
-  has dropped a purchase, and `download-attempt.json` keeps every attempt
-  of a run in order, where it kept only the last.
+  failure file, counts for no review, goes into both CSVs once so a spend
+  summary still counts it, and is skipped by later runs until a discovery
+  finds it on the tab again. That is said only of a tab seen whole. It was
+  opened on that look, its rows stopped changing and drew no more when
+  scrolled to the end, it showed no control for more, older or filtered
+  receipts, its oldest receipt is at least 20 months old, and the run's
+  own discovery read it, so Resume never decides it. A row that gave no
+  receipt for any other reason now says what happened, that its row is not
+  on the page, that more than one row fits it, that nothing on it reads as
+  its receipt, or that pressing it brought no PDF, and is a failure the
+  next run looks for again without writing it into the CSVs.
+  `download-attempt.json` keeps every attempt of a run in order, where it
+  kept only the last.
+- **Meijer's Review Names offers only receipts it holds.** It offered every
+  receipt marked for review, and a purchase recorded with no receipt file
+  has an empty path, which reads as the folder the app runs in. Typing a
+  new name for one tried to rename that folder, which on Windows stopped
+  the review with an error partway through, and the receipts renamed
+  before it were left out of both CSVs. It now offers only a receipt that
+  is a file inside the app's own folder, a rename that fails leaves that
+  receipt as it was and the review goes on, and the CSVs are written
+  however the review ends.
 
 ### Security
 - **Every redirect is checked against the provider's own sites before it

@@ -165,7 +165,8 @@ def fake_meijer(server, monkeypatch):
     is read against Meijer's own host, and only an address on it is
     followed. Here that host is this machine. These orders are all online
     ones on a page without tabs, so the wait for In-Store rows is cut short,
-    since none ever come."""
+    since none ever come, and so is the wait for rows to hold still, since
+    the page draws them all at once."""
     SITE.reset()
     monkeypatch.setattr(site, "BASE", server)
     monkeypatch.setattr(site, "ORDERS_URL", server + ORDERS)
@@ -174,6 +175,7 @@ def fake_meijer(server, monkeypatch):
     monkeypatch.setitem(site.URLS, "home", server + ORDERS)
     monkeypatch.setattr(site, "is_safe_url", lambda url: (url or "").startswith(server + "/"))
     monkeypatch.setattr(site, "LIST_WAIT_MS", 2000, raising=False)
+    monkeypatch.setattr(site, "ROWS_STEADY_MS", 300, raising=False)
     monkeypatch.setattr(browser_launcher, "ask_or_none", lambda prompt: "")
     return SITE
 
