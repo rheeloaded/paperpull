@@ -141,9 +141,93 @@ def test_every_statement_is_checked_by_its_first_and_last_day_whatever_its_range
 def test_a_rows_words_name_its_days_only_as_dates_of_their_own():
     period = site.Period(*AUGUST)
     assert period.named_in("Monthly statement Aug 1, 2031 - Aug 31, 2031 PDF Ready") == 2
-    assert period.named_in("August 2031") == 2 and period.named_in("08/2031") == 2
+    assert period.named_in("August 2031") == 2 and period.named_in("Aug 2031") == 2
     assert period.named_in("Requested 08/31/2031") == 1
     assert period.named_in("Aug 11, 2031 - Aug 31, 2031") == 1, "the 1st found inside the 11th"
+    assert period.named_in("Aug 01, 2031 - Aug 31, 2031") == 2
     assert period.named_in("Statement 2031-08-15") == 0, "an ISO day of the month is not the month"
     assert period.named_in("Jul 1, 2031 - Jul 31, 2031 Requested Aug 2, 2031") == 0
     assert site.Period(created="2031-09-02").named_in("Created Sep 2, 2031") == 2
+
+
+def test_a_month_is_named_in_a_row_only_by_its_name():
+    """July's 07/2031 is the end of the September day 09/07/2031 in
+    August's row, and the ISO 2031-07 the front of every ISO day of July,
+    so a row names a month by the month's name alone (review of c880958)."""
+    july = site.Period("2031-07-01", "2031-07-31")
+    assert july.named_in("08/01/2031 - 08/31/2031 09/07/2031 PDF Ready") == 0
+    assert july.named_in("Statement 2031-07-15") == 0
+    assert july.named_in("Period 07/2031") == 0 and july.named_in("Period 2031-07") == 0
+    assert july.named_in("July 2031") == 2 and july.named_in("Jul 2031 PDF") == 2
+    assert july.named_in("07/01/2031 - 07/31/2031 08/02/2031 PDF Ready") == 2
+
+
+AUGUST_ROW = "Aug 1, 2031 - Aug 31, 2031 Sep 2, 2031 PDF Ready Download"
+JULY_ROW = "Jul 1, 2031 - Jul 31, 2031 Aug 2, 2031 PDF Ready Download"
+CUSTOM_ROW = "Jul 1, 2031 - Aug 31, 2031 Sep 3, 2031 PDF Ready Download"
+
+
+def test_a_row_is_chosen_by_the_days_it_names_never_by_its_place():
+    """A row naming another kind of file is never it. Of the rest, the one
+    row naming the days, or the one naming them plainly where others name
+    only the last day. Two naming them as plainly as each other are never
+    told apart, whatever place the statement has in the list's answer."""
+    aug = site.Period(*AUGUST)
+    csv = "Aug 1, 2031 - Aug 31, 2031 Sep 2, 2031 CSV Ready Download CSV"
+    assert site.choose_row([JULY_ROW, csv, AUGUST_ROW], aug) == (2, 2, "")
+    assert site.choose_row([CUSTOM_ROW, AUGUST_ROW], aug) == (1, 2, "")
+    assert site.choose_row([CUSTOM_ROW], aug) == (0, 1, "")
+    assert site.choose_row([AUGUST_ROW, JULY_ROW, AUGUST_ROW], aug) == (-1, 0, site.MANY_ROWS)
+    assert site.choose_row([CUSTOM_ROW, "Requested 08/31/2031 PDF"], aug) == \
+        (-1, 0, site.MANY_ROWS)
+    assert site.choose_row([JULY_ROW, csv], aug) == (-1, 0, site.NO_ROW)
+
+
+def _view(*reports):
+    view = site.Reports(None)
+    view.take([(200, [{"reports": list(reports), "hasMore": False}])])
+    return view
+
+
+READY_PDF = {"fileFormat": "PDF", "reportStatus": "COMPLETED", "createdOn": "2031-09-02T10:15:00Z"}
+
+
+def test_two_reports_naming_the_same_first_and_last_day_are_one_statement():
+    listing = site.listing_of(_view(dict(READY_PDF, id="A", duration="Aug 1, 2031 - Aug 31, 2031"),
+                                    dict(READY_PDF, id="B", duration="2031-08-01 to 2031-08-31",
+                                         createdOn="2031-09-05T08:00:00Z")))
+    assert [doc.href for doc in listing] == [site.Period(*AUGUST).href()]
+    assert listing.unread == [] and listing.counts[site.UNREAD_SAME_DAY] == 0
+
+
+def test_a_second_report_known_only_by_the_same_made_day_is_refused_and_written_down():
+    """Two statements made on one day and naming no days of their own are
+    not known to be one. Only one record was kept, and the other was let go
+    of in silence. It is refused now, counted and written down."""
+    listing = site.listing_of(_view(dict(READY_PDF, id="A", duration="MONTHLY"),
+                                    dict(READY_PDF, id="B", duration="CUSTOM")))
+    assert [doc.href for doc in listing] == [site.Period(created="2031-09-02").href()]
+    assert [u["reads_as"] for u in listing.unread] == [site.UNREAD_SAME_DAY]
+    assert listing.counts[site.READY] == 1 and listing.counts[site.UNREAD_SAME_DAY] == 1
+
+
+@pytest.mark.parametrize("href,asked", [
+    ("https://www.paypal.com/reports/apis/rux/reports/download/QZ4XKRWPT7MVN", True),
+    ("https://www.paypal.com/myaccount/transfer/homepage/send", False),
+    ("https://www.paypal.com/reports/../myaccount/transfer/homepage", False),
+    ("https://www.paypal.com/reports/%2e%2e/myaccount/transfer/homepage", False),
+    ("https://www.paypal.com/reportsdownload/statement", False),
+    ("https://www.paypal.example/reports/apis/download", False),
+])
+def test_with_no_download_only_an_address_under_reports_is_asked_for_again(
+        monkeypatch, tmp_path, href, asked):
+    """The page's link is read only for an address it may have saved a
+    statement from, under /reports/ on www.paypal.com. Any other address of
+    PayPal's own was asked for too (review of c880958)."""
+    calls = []
+    monkeypatch.setattr(site.blob_capture, "saved_links", lambda page: [href])
+    monkeypatch.setattr(site.capture, "ask_again",
+                        lambda page, requests, held, safe: calls.append(requests) or False)
+    assert site.taken_from_the_page(object(), tmp_path / "statement.pdf") is None
+    assert bool(calls) is asked, href
+    assert site.is_reports_file(href) is asked

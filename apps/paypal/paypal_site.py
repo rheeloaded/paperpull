@@ -67,7 +67,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from paperpull_core import blob_capture
 from paperpull_core import capture
@@ -75,6 +75,7 @@ from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.controls import click_next_page, control_labels, is_next_control
 from paperpull_core.delivery import DOWNLOAD, DocumentRequest
 from paperpull_core.identity import Identity, date_variants, on_its_own, period_variants
+from paperpull_core.identity import month_on_its_own
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -546,10 +547,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
 # page. Its statements are under Activity, All Reports and then the
 # Statements card, at /reports/accountStatements. As that page loads it
 # asks for its own list, a POST to /reports/apis/rux/reports/list, and the
-# answer is a list of one object holding "reports" and "hasMore". That
-# account had forty-one reports, each carrying id, createdOn, duration,
-# fileFormat, action, type and reportStatus, and the page drew a table row
-# of six cells for each, the last holding a Download button. Pressed, the
+# answer is a list of one object holding "reports" and "hasMore". Each
+# report carries id, createdOn, duration, fileFormat, action, type and
+# reportStatus, and the page drew a table row of six cells for each, the
+# last holding a Download button. Pressed, the
 # page's own script added a hidden link with a download mark and clicked
 # it a fifth of a second later, and the browser downloaded the statement
 # under a name holding what looks like the account's id and two stamps of
@@ -569,6 +570,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
 # ---------------------------------------------------------------------------
 REPORTS_PATH = "/reports/accountStatements"
 REPORTS_PAGE = BASE + REPORTS_PATH
+# Where on www.paypal.com a statement the page saved through a link of its
+# own may be asked for again from, when no download arrived.
+REPORTS_ROOT = "/reports/"
 REPORTS_LIST_PATH = "/reports/apis/rux/reports/list"
 # How long the business statements page has to hand over its list, and the
 # moment more it is given once the list came, for the table to be drawn.
@@ -625,6 +629,9 @@ OTHER_TYPE = "other type"
 UNREAD_TYPE = "unread type"
 UNREAD_STATUS = "unread status"
 UNREAD_PERIOD = "unread period"
+# A second ready statement known only by the day it was made, the same day
+# as one already taken, so which is which cannot be told.
+UNREAD_SAME_DAY = "unread same day"
 
 # Why a statement was not pressed for, in words of this app's own.
 NOT_LISTED = "the list does not hold it as ready"
@@ -806,9 +813,10 @@ class Period:
         """How plainly a row's words name these days. 2 for the month or
         for the first day and the last, 1 for the last day alone, 0 for
         neither. Each is found only as a date of its own, so the 1st is not
-        found inside the 11th. A month is looked for written with its name
-        or as 08/2026, never as 2026-08, which is how every ISO day of that
-        month begins."""
+        found inside the 11th. A month is looked for only by its name,
+        August 2026 or Aug 2026, never as digits, since July written 07/2031
+        is found inside the September day 09/07/2031 and the ISO 2031-07
+        begins every ISO day of July."""
         low = (text or "").lower()
 
         def has(variants):
@@ -817,7 +825,9 @@ class Period:
         if not self.start:
             return 2 if has(date_variants(self.created)) else 0
         got = self.month()
-        if got and has([v for v in period_variants("%04d-%02d" % got) if "-" not in v]):
+        named = [v for v in period_variants("%04d-%02d" % got) if any(c.isalpha() for c in v)] \
+            if got else []
+        if any(month_on_its_own(v, low) for v in named):
             return 2
         last = has(date_variants(self.end))
         if last and has(date_variants(self.start)):
@@ -1159,10 +1169,15 @@ class Listing(list):
 
 def listing_of(view: Reports) -> Listing:
     """The statements every page of the list read holds, newest first, each
-    once."""
+    once. A statement is kept by its days (Period.href), so one record
+    stands for every report naming the same first and last day, which hold
+    the same statement. Two reports known only by the day each was made
+    are not known to be one, and the one after the first is refused as
+    one this app could not tell apart, counted and written down with the
+    rest it could not read, never let go of in silence."""
     rows, taken, docs, unread = set(), set(), [], []
     counts = {k: 0 for k in (READY, NOT_READY, OTHER_TYPE, UNREAD_TYPE, UNREAD_STATUS,
-                             UNREAD_PERIOD)}
+                             UNREAD_PERIOD, UNREAD_SAME_DAY)}
     for reports, _more in view.pages:
         for row in reports:
             mark = _fingerprint(row)
@@ -1170,6 +1185,8 @@ def listing_of(view: Reports) -> Listing:
                 continue
             rows.add(mark)
             verdict, period = read_row(row)
+            if verdict == READY and period.href() in taken and not period.start:
+                verdict = UNREAD_SAME_DAY
             counts[verdict] += 1
             if verdict == READY:
                 if period.href() in taken:
@@ -1298,19 +1315,34 @@ def _drawn_rows(page) -> List[str]:
     return [str(r or "") for r in rows] if isinstance(rows, list) else []
 
 
-def _row_text(row) -> str:
-    try:
-        return row.evaluate("(tr) => (tr.innerText || '').replace(/\\s+/g, ' ').trim()") or ""
-    except Exception:
-        return ""
-
-
 def _table_drawn(page, wait_ms: int = 10000) -> bool:
     try:
         page.locator(ROW_SELECTOR).first.wait_for(state="attached", timeout=wait_ms)
         return True
     except Exception:
         return False
+
+
+def choose_row(rows, ref: Period) -> Tuple[int, int, str]:
+    """Which drawn row is the statement's, as (its place among the rows, how
+    plainly it names the days, why none is), found by the days the rows'
+    words name and never by a position. A row naming a kind of file other
+    than a PDF is never it. When more than one row names the days, the one
+    naming them plainly, by its month's name or its first and last day, is
+    it only when no other names them as plainly, and otherwise none is. The
+    place a statement has in the list's answer decided between them once,
+    and a table drawn in another order sent July's press to August's row."""
+    named = [(i, ref.named_in(words)) for i, words in enumerate(rows)
+             if not OTHER_KIND_RE.search(words)]
+    named = [(i, level) for i, level in named if level]
+    if len(named) > 1:
+        plain = [(i, level) for i, level in named if level >= 2]
+        if len(plain) != 1:
+            return -1, 0, MANY_ROWS
+        named = plain
+    if not named:
+        return -1, 0, NO_ROW
+    return named[0][0], named[0][1], ""
 
 
 def statement_request(page, ref: Period, view: Reports,
@@ -1320,34 +1352,22 @@ def statement_request(page, ref: Period, view: Reports,
 
     The statement is found in the list's answer, a later page of it pressed
     for when it is not on this one. Then its row in the drawn table, by the
-    days its words name and never by its position alone. A row's position
-    decides only between rows whose words name the statement equally, and
-    only when it is the statement's own place in the answer the table was
-    drawn from. A row naming a kind of file other than a PDF is never it.
-    In that row, the one control whose two readings both call it Download
+    days its words name and never by a position (choose_row). In that row,
+    the one control whose two readings both call it Download
     (is_download_control, which holds every label to is_safe_control) is
-    the one pressed, once the row and the control have both been read again
-    at the moment of the press."""
-    index = _index_in(view.drawn, ref)
-    while index < 0:
+    the one pressed. At the moment of the press the rows are read again and
+    the whole choice made again, and it has to come to the same row naming
+    the days as plainly, and the control has to read the same."""
+    while _index_in(view.drawn, ref) < 0:
         if view.more is not True or len(view.pages) >= REPORTS_MAX_PAGES \
                 or not more_reports(page, view):
             return None, NOT_LISTED
-        index = _index_in(view.drawn, ref)
     if not _table_drawn(page):
         return None, NO_ROWS
-    rows = _drawn_rows(page)
-    named = [i for i, words in enumerate(rows)
-             if ref.named_in(words) and not OTHER_KIND_RE.search(words)]
-    if len(named) > 1:
-        plain = [i for i in named if ref.named_in(rows[i]) >= 2]
-        if len(plain) == 1:
-            named = plain
-        elif index in named:
-            named = [index]
-    if len(named) != 1:
-        return None, (NO_ROW if not named else MANY_ROWS)
-    row = page.locator("table tbody tr").nth(named[0])
+    chosen, level, why = choose_row(_drawn_rows(page), ref)
+    if chosen < 0:
+        return None, why
+    row = page.locator("table tbody tr").nth(chosen)
     controls = row.locator("button, a[href], [role='button'], [role='link']")
     try:
         count = min(controls.count(), 12)
@@ -1362,11 +1382,12 @@ def statement_request(page, ref: Period, view: Reports,
     def press():
         # Armed first, so a PDF the page builds for this press is kept.
         blob_capture.arm(page)
-        # Both read again at the moment of the press. A row drawn again
-        # since it was found can hold another statement in the same place,
-        # and a control can be given another label.
-        if not ref.named_in(_row_text(row)):
-            raise RuntimeError("the row no longer shows this statement's days")
+        # The choice made again on the rows as they are drawn now. A row
+        # drawn again since it was chosen can hold another statement in the
+        # same place, one that ends on the same day included, and a control
+        # can be given another label.
+        if choose_row(_drawn_rows(page), ref)[:2] != (chosen, level):
+            raise RuntimeError("the rows no longer choose this statement's row")
         if not is_download_control(*read_twice(control)):
             raise RuntimeError("the control no longer reads as its Download")
         control.click(timeout=8000)
@@ -1375,14 +1396,30 @@ def statement_request(page, ref: Period, view: Reports,
                            close_new_tabs=True, hints=(DOWNLOAD,)), ""
 
 
+def is_reports_file(href: str) -> bool:
+    """Whether an address is one the business statements page may have
+    saved a statement from, a path under /reports/ on www.paypal.com, with
+    no step back out of it. Anything else the page's link pointed at is
+    never asked for, whatever the host."""
+    try:
+        u = urlparse(href or "")
+    except ValueError:
+        return False
+    if not (is_safe_url(href) and u.hostname == "www.paypal.com"
+            and u.path.startswith(REPORTS_ROOT)):
+        return False
+    return not any(unquote(part) in (".", "..") for part in u.path.split("/"))
+
+
 def taken_from_the_page(page, out_path) -> Optional[bytes]:
     """The statement a press handed over, read from the page, for when no
     download arrived. Only when the page clicked exactly one link with a
     download mark since the press was armed. A blob it made is read from
-    the page's own memory (blob_capture), and an address of its own on
-    www.paypal.com is asked for once more from inside the page, a GET that
-    follows no redirect (capture.ask_again). Only a PDF is kept, and never
-    the name the page gave it, which holds the account's id."""
+    the page's own memory (blob_capture), and an address under /reports/ on
+    www.paypal.com (is_reports_file) is asked for once more from inside the
+    page, a GET that follows no redirect (capture.ask_again). Nothing else
+    is asked for. Only a PDF is kept, and never the name the page gave it,
+    which holds the account's id."""
     links = blob_capture.saved_links(page) or []
     if len(set(links)) != 1:
         return None
@@ -1390,11 +1427,7 @@ def taken_from_the_page(page, out_path) -> Optional[bytes]:
     if href.startswith("blob:"):
         kept = blob_capture.take(page, urls=[href])
         return kept[0] if kept else None
-    try:
-        host = urlparse(href).hostname
-    except ValueError:
-        return None
-    if not (is_safe_url(href) and host == "www.paypal.com"):
+    if not is_reports_file(href):
         return None
     held = Path(out_path).parent / (Path(out_path).name + ".asking")
     try:
