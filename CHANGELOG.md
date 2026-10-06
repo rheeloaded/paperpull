@@ -9,6 +9,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Download again, from the panel.** A box under Scope, Download again
+  what this app already downloaded, makes the next Pilot or Run All fetch
+  every document in the chosen year or dates again, the ones already
+  downloaded included, the way `--redownload` does from a terminal.
+  Downloads are remembered for good, so this is how somebody who deleted
+  their PDFs after importing them elsewhere gets them back. Nothing is
+  overwritten. Each new copy is saved beside the file already there, under
+  a name of its own. The box needs a year or dates, asks before the run
+  starts and clears once it has, and is never remembered. The panel adds
+  the flag only to a confirmed, scoped Pilot or Run All asked for in a
+  request body, and refuses it from anywhere else. PaperPull Server does
+  not offer it, since every copy would go to Paperless a second time. A
+  test of every app's own parser and done check makes sure each one takes
+  the flag beside the panel's other flags and fetches a document it
+  downloaded before when asked.
+
 ### Fixed
 - **`./setup-all.command` sets up a checkout on macOS and Linux again.**
   From 0.19.0 it stopped before setting anything up. Taking the browser

@@ -285,6 +285,78 @@ def _scope_flags(year: str = "", start: str = "", end: str = "") -> list:
         flags += ["--end-date", end]
     return flags
 
+
+# Download again. Every app takes --redownload, which makes it fetch every
+# document in scope again, the ones it already downloaded included, and save
+# each as a new file beside the one already there, under a name of its own.
+# Nothing is overwritten. Downloads are otherwise remembered for good, so
+# somebody who deleted their PDFs after importing them elsewhere has no
+# other way to get them back.
+#
+# The panel adds the flag to Pilot and Run All only, only to a run scoped to
+# a year or to dates, so a whole history is never asked for again by
+# accident, and only when the request says the person agreed to the page's
+# question. Both arrive as JSON true in a POST body, never as text, and what
+# reaches the app is this one fixed flag.
+REDOWNLOAD_FLAG = "--redownload"
+REDOWNLOAD_ACTIONS = ("pilot", "all")
+
+
+def _redownload_ok(action: str, scope_flags, redownload, confirmed) -> bool:
+    """Whether a run may download again. False when it did not ask, True
+    when it asked and may, and a refusal saying why for anything else."""
+    if redownload is False:
+        return False
+    if redownload is not True:
+        raise HTTPException(400, "redownload is true or false")
+    if server_mode.enabled():
+        # PaperPull Server hands every file a run saves to its plug-ins as
+        # a new document, and the Paperless one copies each into Paperless.
+        # Downloading again there would send Paperless every document in the
+        # range a second time, so the server does not offer it.
+        raise HTTPException(404, "Download again is not offered on PaperPull Server. "
+                                 "Each copy would go to Paperless a second time.")
+    if action not in REDOWNLOAD_ACTIONS:
+        raise HTTPException(400, "Download again works with Pilot and Run All only.")
+    if not scope_flags:
+        raise HTTPException(400, "Download again needs a year or dates chosen in Scope, "
+                                 "so a whole history is never asked for again by accident.")
+    if confirmed is not True:
+        raise HTTPException(400, "Download again needs the question on the page answered "
+                                 "first.")
+    return True
+
+
+# What a run asked for in a body holds, and of what kind. Anything else is
+# refused, so a body cannot carry more than the page itself sends.
+_RUN_TEXT = ("app", "account", "action", "year", "start", "end")
+_RUN_CHOICES = ("redownload", "confirmed")
+
+
+def _run_request(body) -> dict:
+    """The run a JSON body asks for, each field checked for its kind."""
+    if not isinstance(body, dict):
+        raise HTTPException(400, "expected a JSON object")
+    if set(body) - set(_RUN_TEXT) - set(_RUN_CHOICES):
+        raise HTTPException(400, "a run's body holds only app, account, action, year, "
+                                 "start, end, redownload and confirmed")
+    asked = {"account": "primary", "year": "", "start": "", "end": "",
+             "redownload": False, "confirmed": False}
+    for key in _RUN_TEXT:
+        if key in body:
+            if type(body[key]) is not str:
+                raise HTTPException(400, "%s is text" % key)
+            asked[key] = body[key]
+    for key in _RUN_CHOICES:
+        if key in body:
+            if type(body[key]) is not bool:
+                raise HTTPException(400, "%s is true or false" % key)
+            asked[key] = body[key]
+    for key in ("app", "action"):
+        if not asked.get(key):
+            raise HTTPException(400, "a run needs its %s" % key)
+    return asked
+
 app = FastAPI(title="PaperPull")
 
 # PaperPull Server's sign-in, its gate and its browser screen. They do
@@ -468,7 +540,8 @@ def api_apps():
     refreshed = refresh_installs()
     apps = discover_apps()
     return {"apps_root": str(apps_root()), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
-            "more_actions": list(MORE_ACTIONS), "apps": apps, "refreshed": refreshed}
+            "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
+            "apps": apps, "refreshed": refreshed}
 
 
 # -- how current each archive is ---------------------------------------------
@@ -1586,7 +1659,7 @@ async def api_remove(request: Request):
     return {"app": name, "moved_to": str(dest), **summary}
 
 
-def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=()):
+def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=(), redownload=False):
     if action not in ACTIONS:
         raise HTTPException(400, "unknown action")
     if account not in app_meta["accounts"]:
@@ -1596,6 +1669,13 @@ def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=()):
         flags.append(app_meta["login_flag"] if f == "__LOGIN__" else f)
     if action != "login":
         flags += list(scope_flags)
+    if redownload is not False:
+        # _redownload_ok has said yes before this is reached. This is the
+        # last word on the command line itself, so nothing that skipped
+        # that check can put the flag on any other action.
+        if redownload is not True or action not in REDOWNLOAD_ACTIONS:
+            raise ValueError("%s goes only on %s" % (REDOWNLOAD_FLAG, " and ".join(REDOWNLOAD_ACTIONS)))
+        flags.append(REDOWNLOAD_FLAG)
     cmd = [app_meta["python"], app_meta["script"], *flags]
     if account != "primary":
         cmd += ["--config", f"config.{account}.json"]
@@ -1604,13 +1684,46 @@ def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=()):
 
 @app.get("/api/run", dependencies=[Depends(_same_origin_only)])
 def api_run(app: str, account: str = "primary", action: str = "pilot",
-            year: str = "", start: str = "", end: str = ""):
+            year: str = "", start: str = "", end: str = "",
+            redownload: Optional[str] = None, confirmed: Optional[str] = None):
+    # Download again is asked for in a POST body only. An address that
+    # carries it is refused rather than run as an ordinary run, which would
+    # skip everything already downloaded and look as if it had worked.
+    if redownload is not None or confirmed is not None:
+        raise HTTPException(400, "Download again is asked for in a POST body, "
+                                 "never in an address.")
+    return _start_run(app, account, action, _scope_flags(year, start, end))
+
+
+@app.post("/api/run", dependencies=[Depends(_same_origin_only)])
+async def api_run_body(request: Request):
+    """The run GET /api/run starts, asked for with a JSON body instead.
+
+    It is how the page asks to download again, since that is a box the
+    person ticked and a question they agreed to, and both arrive as JSON
+    true or false, never as text an address could carry. A body that is
+    not JSON, holds anything more, or has a field of the wrong kind is
+    refused before anything starts."""
+    kind = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if kind != "application/json":
+        raise HTTPException(415, "a run's body is JSON")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    asked = _run_request(body)
+    scope = _scope_flags(asked["year"], asked["start"], asked["end"])
+    again = _redownload_ok(asked["action"], scope, asked["redownload"], asked["confirmed"])
+    return _start_run(asked["app"], asked["account"], asked["action"], scope, again)
+
+
+def _start_run(app: str, account: str, action: str, scope_flags, redownload=False):
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "unknown app")
     meta = apps[app]
     blocked = setup_needed(meta)
-    cmd = _build_cmd(meta, account, action, _scope_flags(year, start, end))
+    cmd = _build_cmd(meta, account, action, scope_flags, redownload)
 
     if blocked:
         # Said here rather than let the app start under an interpreter
@@ -2075,6 +2188,9 @@ HTML = r"""<!doctype html>
            border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box; }
   .scope input[type=date]:disabled { opacity:.45; }
   .scope .sub { font-size:11px; color:var(--muted); text-transform:none; letter-spacing:0; margin:6px 0 4px; }
+  label.again { display:flex; gap:8px; align-items:flex-start; text-transform:none; letter-spacing:0;
+                font-size:13px; color:var(--fg); margin:12px 0 0; cursor:pointer; }
+  label.again input { margin:3px 0 0; flex:none; }
   .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
   .actions.more { margin-top:8px; }
   .morelink { font-size:12px; color:var(--muted); margin-top:10px; }
@@ -2170,6 +2286,12 @@ HTML = r"""<!doctype html>
       <div><div class="sub">To</div><input id="end" type="date" onchange="onScope()"></div>
     </div>
     <p class="hint" id="scopehint" style="margin-top:8px"></p>
+    <label class="again" id="againrow"><input type="checkbox" id="again" autocomplete="off"
+           onchange="onAgain()"> Download again what this app already downloaded</label>
+    <p class="hint" id="againhint" style="display:none; margin-top:6px">For the next Pilot or
+       Run All, with a year or dates chosen above. Each document in range is asked for again,
+       and its new copy is saved beside the file you have. Nothing is overwritten. The box
+       clears once a run starts.</p>
     <div class="actions" id="actions"></div>
     <button id="stoprec" class="primary" style="display:none;margin-top:8px"
             onclick="stopRecording()">Stop recording</button>
@@ -2196,7 +2318,8 @@ HTML = r"""<!doctype html>
     <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
        ↻ <b>Safe to re-run.</b> Run All and Resume skip any statement or receipt
        you've already downloaded. Nothing is ever fetched twice, even if you
-       deleted the PDFs after importing them elsewhere.</p>
+       deleted the PDFs after importing them elsewhere<span id="againnote">, unless
+       you tick <b>Download again</b> under Scope</span>.</p>
     <p class="hint warn" id="venvwarn" style="display:none"></p>
   </div>
   <div style="display:flex; flex-direction:column; min-width:0;">
@@ -2862,6 +2985,7 @@ async function load() {
   for (const k of keys) appSel.append(new Option(META.apps[k].name, k));
   appSel.onchange = onApp;
   fillScope();
+  clearAgain();
   const acts = $('actions'); acts.innerHTML = '';
   const more = $('moreactions'); more.innerHTML = '';
   const tucked = new Set(META.more_actions || []);
@@ -2926,6 +3050,74 @@ function onScope() {
   $('scopehint').textContent = text;
   try { localStorage.setItem('scope', JSON.stringify(s)); } catch (e) {}
 }
+// Download again. Unlike the scope it is never remembered. It starts clear
+// on every visit and clears itself once a run starts, so a later ordinary
+// Run All never downloads again by surprise.
+function onAgain() { $('againhint').style.display = $('again').checked ? 'block' : 'none'; }
+function clearAgain() { $('again').checked = false; onAgain(); }
+// A page the browser brings back from its back and forward cache keeps
+// what was ticked, and load() does not run again for it.
+window.addEventListener('pageshow', e => { if (e.persisted) clearAgain(); });
+function againQuestion(action, app, account, s) {
+  const range = s.year ? 'dated ' + s.year
+    : (s.start && s.end) ? 'dated ' + s.start + ' to ' + s.end
+    : s.start ? 'dated ' + s.start + ' or later' : 'dated ' + s.end + ' or earlier';
+  return 'Download again from ' + app + (account === 'primary' ? '' : ', account ' + account) + '?\n\n' +
+    (action === 'pilot' ? 'Pilot downloads the newest few documents ' + range + ' again'
+                        : 'Run All downloads every document ' + range + ' again') +
+    ', the ones this app already downloaded included.\n\n' +
+    'Nothing is overwritten. Each new copy is saved beside the file you have, ' +
+    'under a name of its own.\n\n' +
+    'This asks the provider for each document again, just as the first download did.';
+}
+// A run that downloads again is asked for in a POST body, so the ticked box
+// and the answer to the question arrive as true and false, never as text in
+// an address. EventSource can only GET, so this reads the same stream with
+// fetch and hands its events to the same handlers.
+function postRun(body) {
+  const stop = new AbortController(), on = {};
+  const src = { onmessage: null, onerror: null, refused: '',
+                addEventListener(name, fn) { on[name] = fn; }, close() { stop.abort(); } };
+  const lost = () => { if (!stop.signal.aborted && src.onerror) src.onerror(); };
+  (async () => {
+    let r;
+    try {
+      r = await fetch('/api/run', { method: 'POST', signal: stop.signal,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    } catch (e) { lost(); return; }
+    if (!r.ok) {
+      try { const d = await r.json(); if (typeof d.detail === 'string') src.refused = d.detail; } catch (e) {}
+      src.refused = src.refused || 'the panel refused this run';
+      lost(); return;
+    }
+    const reader = r.body.getReader(), text = new TextDecoder();
+    let buf = '', ended = false;
+    try {
+      for (;;) {
+        const part = await reader.read();
+        if (part.done) break;
+        buf += text.decode(part.value, { stream: true });
+        let cut;
+        while ((cut = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, cut);
+          buf = buf.slice(cut + 2);
+          let name = 'message';
+          const data = [];
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) name = line.slice(6).trim();
+            else if (line.startsWith('data:')) data.push(line.slice(line.startsWith('data: ') ? 6 : 5));
+          }
+          if (name === 'done') ended = true;
+          const e = { data: data.join('\n') };
+          if (name === 'message') { if (src.onmessage) src.onmessage(e); }
+          else if (on[name]) on[name](e);
+        }
+      }
+    } catch (e) { lost(); return; }
+    if (!ended) lost();
+  })();
+  return src;
+}
 // opts is for a run the page starts for itself rather than from a button,
 // the File names page's renames. It names the app and account, leaves the
 // Scope out, adds to the console instead of clearing it, and is told when
@@ -2938,12 +3130,18 @@ function run(action, opts) {
   if (s.year === '' && s.start && s.end && s.start > s.end) {
     setStatus('err', 'the From date is after the To date'); return;
   }
+  const again = !opts.app && $('again').checked && (META.redownload_actions || []).includes(action);
+  if (again && !s.year && !s.start && !s.end) {
+    setStatus('err', 'Download again needs a year or dates chosen in Scope first'); return;
+  }
+  if (again && !confirm(againQuestion(action, app, account, s))) return;
+  clearAgain();
   const q = new URLSearchParams({ app, account, action });
   if (s.year) q.set('year', s.year); else { if (s.start) q.set('start', s.start); if (s.end) q.set('end', s.end); }
   if (!opts.append) $('console').textContent = '';
   $('failnote').style.display = 'none';
   const scoped = s.year ? ` (${s.year})` : (s.start || s.end) ? ` (${s.start || '…'} to ${s.end || '…'})` : '';
-  setStatus('run', `running ${action} on ${app} / ${account}${scoped}`);
+  setStatus('run', `running ${action}${again ? ', downloading again,' : ''} on ${app} / ${account}${scoped}`);
   // Only the buttons this run locked are unlocked at the end. The Spreadsheet
   // tab's build buttons stay disabled when there is nothing to build from.
   document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl):not(#tabnm):not(#stoprec):not(:disabled)')
@@ -2955,7 +3153,9 @@ function run(action, opts) {
   // never stop at all.
   recordingApp = (action === 'record') ? app : null;
   $('stoprec').style.display = recordingApp ? 'block' : 'none';
-  es = new EventSource(`/api/run?${q.toString()}`);
+  es = again ? postRun(Object.assign({ app, account, action, redownload: true, confirmed: true },
+                                     Object.fromEntries(q.entries())))
+             : new EventSource(`/api/run?${q.toString()}`);
   const con = $('console');
   let result = null;
   es.addEventListener('result', e => { result = JSON.parse(e.data); });
@@ -2987,7 +3187,7 @@ function run(action, opts) {
     if (code !== '0' || (result && result.attention)) checkFailure(app);
     if (opts.onDone) opts.onDone(code);
   });
-  es.onerror = () => { if (es) { setStatus('err','connection lost'); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; if (opts.onDone) opts.onDone('lost'); } };
+  es.onerror = () => { if (es) { if (es.refused) con.textContent += es.refused + '\n'; setStatus('err', es.refused || 'connection lost'); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; if (opts.onDone) opts.onDone('lost'); } };
 }
 let failureApp = null;
 async function checkFailure(app) {
@@ -3035,6 +3235,9 @@ function serverPage() {
     + '<b>Browser Screen</b>, the button at the top. Sign in there yourself and leave it open.';
   $('newroot').readOnly = true;
   $('existinglink').style.display = 'none';
+  // Download again is not offered here, see _redownload_ok.
+  $('againrow').style.display = 'none';
+  $('againnote').style.display = 'none';
   $('failreveal').textContent = 'Download the file to attach';
   $('xlreveal').textContent = 'Download';
   $('txreveal').textContent = 'Download';

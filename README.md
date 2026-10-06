@@ -196,7 +196,10 @@ Three plain-text files carry the state, and you can read all of them:
 That last step is what makes a re-run safe. `downloaded_ok` is keyed to the
 document, not to the file on disk, so you can import everything into
 paperless-ngx, delete the PDFs, and the next run still skips them. It only
-fetches what is genuinely new, and lists it in `new-this-run.txt`.
+fetches what is genuinely new, and lists it in `new-this-run.txt`. To fetch
+them again anyway, tick **Download again** under Scope in the control panel
+and choose a year or dates, or add `--redownload` to a run from a terminal.
+Nothing is overwritten. Each copy is saved beside whatever is still there.
 
 ### Read-only by construction
 
@@ -275,7 +278,9 @@ straight through, so `paperpull chase all --year 2025 --account spouse` works.
 The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
 `verify`, `diagnose` and `dry-run`. The panel offers the six of those a
 person uses day to day, plus a Scope row (one year, or a date range) that
-becomes the same `--year`, `--start-date` and `--end-date` every app takes.
+becomes the same `--year`, `--start-date` and `--end-date` every app takes,
+and a **Download again** box under it that adds `--redownload` to one Pilot
+or Run All in that scope, after asking.
 
 Each app also has its own README with provider-specific details and quirks.
 (Prefer to set apps up one at a time? `paperpull <app> setup`, or the app's

@@ -26,8 +26,9 @@ APPS = sorted(d for d in (REPO / "apps").iterdir()
               and (next(iter(d.glob("*_docs.py")), None)
                    or next(iter(d.glob("*_receipts.py")), None)))
 
-# Flags the panel adds itself, outside the actions table.
-ALWAYS = {"--year", "--start-date", "--end-date", "--config", "--yes"}
+# Flags the panel adds itself, outside the actions table. --redownload goes
+# on a Pilot or Run All only, see test_every_app_downloads_again_when_the_panel_asks.py.
+ALWAYS = {"--year", "--start-date", "--end-date", "--config", "--yes", "--redownload"}
 
 
 def panel_flags() -> set:

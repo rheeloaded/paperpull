@@ -116,7 +116,9 @@ documents that run saved are copied into it.
 
 - **Copied, never moved.** PaperPull keeps its own files and its record of
   what it downloaded. Deleting them later never makes it download a
-  document again.
+  document again. The desktop panel's Download again box is not offered
+  here, since every document it fetched would reach Paperless a second
+  time.
 - **Only what that run saved.** A run that saved nothing copies nothing,
   and a run that stopped early does not hand over the last run's documents
   a second time.

@@ -81,8 +81,12 @@ It finds any subfolder containing an entry script (`*_receipts.py` /
 | **Discover** | Enumerate available documents (downloads nothing) |
 | **Pilot** | Download the newest few as a test |
 | **Run All** | Download everything available (`--yes`, no prompt) |
-| **Resume** | Continue an interrupted run |
+| **Resume** | Continue an interrupted run. It skips whatever is already downloaded, with the Download again box ticked or not |
 | **Verify** | Re-check the downloaded PDFs |
+
+With the **Download again** box ticked under Scope, Pilot and Run All also
+get `--redownload` for that one run, after the panel asks. See
+[Download again](#download-again).
 
 ## Scope
 
@@ -94,6 +98,27 @@ Chase, Target RedCard, Wealthfront, Target, Amazon) a scoped run skips the
 years outside its window, which is the difference between a three-second
 check and a minute of clicking through a decade. The choice is remembered
 in your browser, so glance at the hint under the row before a Run All.
+
+## Download again
+
+Downloads are remembered for good, so a document is never fetched twice,
+even after you delete its PDF, say once it is in paperless-ngx. To get such
+files back, tick **Download again what this app already downloaded** under
+Scope, choose a year or a From and To date, and press **Pilot** or **Run
+All**. The panel asks first, then adds `--redownload` to that one run, and
+every document in the range is fetched again, the ones already downloaded
+included.
+
+- Nothing is overwritten. Each new copy is saved beside the file already
+  there, under a name of its own.
+- The provider is asked for each document again, so a long range takes as
+  long as the first download did.
+- It needs a year or dates, so a whole history is never fetched again by
+  accident.
+- The box clears once a run starts and is never remembered, so the next
+  Run All is an ordinary one. Resume never downloads again.
+- PaperPull Server does not offer it. A run there hands every file it saves
+  to Paperless, which would get each of these documents a second time.
 
 ## Spreadsheet
 
