@@ -42,8 +42,7 @@ import meijer_site as site
 from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
 from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
-                     RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
-                     unique_path)
+                     RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 def _reason_words(reason: str) -> str:
@@ -1537,104 +1536,8 @@ class App:
             for k, c in dups.items():
                 print(f"  {k}: {c} rows")
 
-    def _yours_to_rename(self, row) -> bool:
-        """Whether a row of the index names a file this review may rename, a
-        PDF in one of the folders this app files receipts in, Online,
-        In-Store or Manual Review.
-
-        A row written for a purchase with no receipt has an empty path, which
-        reads as the folder the app runs in, and that folder exists. A new
-        summary typed for such a row had the app rename its own folder, and
-        on Windows stopped with a traceback partway through, its earlier
-        renames on disk and in progress.json and the CSVs left as they were.
-        With the output folder set to ".", the folder the app runs in is the
-        output folder itself, so a damaged row naming the app's config.json
-        was inside it (reviews)."""
-        text = (row.get("PDF Full Path") or "").strip()
-        if not text:
-            return False
-        try:
-            path = Path(text).resolve()
-            folders = [Path(f).resolve() for f in (
-                self.paths.online, self.paths.instore, self.paths.manual_review)]
-        except (OSError, RuntimeError, ValueError, AttributeError):
-            return False
-        return (path.suffix.lower() == ".pdf" and path.is_file()
-                and any(folder in path.parents for folder in folders))
-
     def cmd_review_names(self):
-        rows = self.index_csv.read_all()
-        # A row somebody already renamed is left out, even one renamed
-        # before its confidence was marked High as well (#47). So is a row
-        # that names no file of this app's own, which nothing here renames.
-        review = [r for r in rows
-                  if (r.get("Classification Confidence") == "Low"
-                      or "Review" in (r.get("Processing Status") or ""))
-                  and "renamed via --review-names" not in (r.get("Notes") or "")
-                  and self._yours_to_rename(r)]
-        if not review:
-            print("No receipts need name review.")
-            return
-        print(f"{len(review)} receipt(s) need review. Enter a new summary, "
-              "press Enter to keep, or 'q' to stop.\n")
-        order_rows = self.order_csv.read_all()
-        changed = False
-        try:
-            for r in review:
-                key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
-                prog = self.progress.get(key) or {}
-                items = [i.get("name", "") for i in prog.get("items", [])][:10]
-                print(f"  {r.get('Purchase Date')}  #{r.get('Order or Receipt Number')}"
-                      f"  [{r.get('Classification Confidence')}]")
-                print(f"    Current file: {r.get('PDF Filename')}")
-                if items:
-                    print(f"    Items: {'; '.join(items)}")
-                new = ask("    New summary (blank=keep, q=quit): ").strip()
-                if new.lower() == "q":
-                    break
-                if not new:
-                    print()
-                    continue
-                new_summary = title_case(new)
-                old_path = Path(r["PDF Full Path"].strip())
-                date = r.get("Purchase Date") or old_path.name[:10]
-                doc_type = r.get("Document Type") or "Receipt"
-                new_name = build_pdf_filename(date, new_summary, doc_type, record=prog)
-                new_path = unique_path(old_path.parent, new_name,
-                                       self.config["max_path_length"])
-                try:
-                    old_path.rename(new_path)  # unique_path guarantees no overwrite
-                except OSError as e:
-                    print(f"    It could not be renamed ({type(e).__name__}), so it keeps "
-                          "its name.\n")
-                    continue
-                old_filename = r.get("PDF Filename")
-                r["PDF Filename"] = new_path.name
-                r["PDF Full Path"] = str(new_path)
-                r["Purchase Summary"] = new_summary
-                r["Processing Status"] = "Completed"
-                r["Classification Confidence"] = "High"
-                r["Notes"] = (r.get("Notes", "") + "; renamed via --review-names").strip("; ")
-                for orow in order_rows:
-                    if (orow.get("Order or Receipt Number") == r.get("Order or Receipt Number")
-                            and orow.get("PDF Filename") == old_filename):
-                        orow["PDF Filename"] = new_path.name
-                        orow["Purchase Summary"] = new_summary
-                        orow["Processing Status"] = "Completed"
-                self.progress.update(key, {  # key (purchase identifier) unchanged
-                    "summary": new_summary, "pdf_filename": new_path.name,
-                    "pdf_path": str(new_path), "confidence": "High",
-                    "state": State.COMPLETED.value})
-                changed = True
-                print(f"    Renamed -> {new_path.name}\n")
-        finally:
-            # Written however the review ends, a quit, a console that went
-            # away or a rename that failed, so the CSVs name the files as they
-            # now are on disk and in progress.json.
-            if changed:
-                self.index_csv.rewrite(rows)
-                self.order_csv.rewrite(order_rows)
-                print("CSV files and progress.json updated.")
+        renaming.review_names(self, ask)
 
     @property
     def requests(self):

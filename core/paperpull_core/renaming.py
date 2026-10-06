@@ -8,6 +8,9 @@ being the one we know of, those requests are the ones you wanted for
 something else. Nothing about the file needs fetching. Only its name is
 wrong (#43, #49).
 
+Review Names is here too. Every receipt app runs it to rename the receipts
+it was unsure how to name, one at a time, to a summary the person types.
+
 WHY THIS IS SAFE
 
 A filename is never an identity here. A receipt is remembered by its
@@ -42,7 +45,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
-from .storage import unique_path
+from .models import State
+from .storage import build_pdf_filename, title_case, unique_path
 
 
 @dataclass
@@ -340,8 +344,6 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
     Nothing is downloaded, nothing moves folder, and the identity that
     stops a second download is not touched.
     """
-    from .storage import build_pdf_filename
-
     # Every app holds its index as self.index_csv, and a receipt app holds
     # the order history as self.order_csv as well. That is the same in all
     # forty-eight, which is why this is one function rather than forty-eight.
@@ -629,3 +631,146 @@ def _same_file(raw: str) -> str:
     if os.name == "nt" or sys.platform == "darwin":
         path = path.lower()
     return path
+
+
+# ---------------------------------------------------------------------------
+# Review Names, the command every receipt app runs
+# ---------------------------------------------------------------------------
+
+# The note every rename leaves on its row. It is what tells a name somebody
+# fixed from one still to be looked at, since a receipt renamed before its
+# confidence was marked High as well still says Low (#47).
+REVIEWED = "renamed via --review-names"
+
+
+@dataclass(frozen=True)
+class ReviewWords:
+    """What Review Names prints around each receipt. An app keeps the words
+    it has always printed."""
+
+    current: str = "    Current file: "
+    items: str = "    Items: "
+    question: str = "    New summary (blank=keep, q=quit): "
+    renamed: str = "    Renamed -> "
+
+
+WORDS = ReviewWords()
+
+# Apple and Uber, written after the rest, print the same without the colons.
+PLAIN_WORDS = ReviewWords(current="    Current file  ", items="    Items  ",
+                          question="    New summary (blank=keep, q=quit) ",
+                          renamed="    Renamed to ")
+
+
+def held_receipt(row: dict, paths) -> Optional[Path]:
+    """The receipt a row of the index names, when it is a PDF in a folder
+    the app files receipts in, and None for anything else.
+
+    A row written for a purchase with no receipt has an empty path, which
+    reads as the folder the app runs in, and that folder exists. A new name
+    typed for such a row had the app rename the folder it runs in, which no
+    system allows, and the review stopped with a traceback partway through.
+    A row can also name the output folder itself, a file reached by
+    climbing out of it through "..", a file somewhere else, one no longer
+    on disk, or, with the output folder set to the app's own folder, the
+    app's config file. None of those is a receipt this app holds."""
+    text = (row.get("PDF Full Path") or "").strip()
+    if not text:
+        return None
+    try:
+        path = Path(text).resolve()
+        folders = [Path(folder).resolve() for folder in paths.filing_folders()]
+        held = (path.suffix.lower() == ".pdf" and path.is_file()
+                and any(folder in path.parents for folder in folders))
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return Path(text) if held else None
+
+
+def review_names(app, ask, words: ReviewWords = WORDS,
+                 record_for: Optional[Callable[[str, dict], dict]] = None) -> None:
+    """Ask for a better name for each receipt the app was unsure of, and
+    rename the file to it.
+
+    One function for every receipt app, so what may be renamed is decided
+    once. `ask` is the app's own, which stops cleanly when no console is
+    attached. `record_for(key, record)` gives the record a new name is
+    built from, for an app that knows more than its progress record holds.
+    Without it the progress record is used.
+
+    Only a receipt the app holds is offered (held_receipt). A rename that
+    fails is said, that receipt keeps its name, and the review goes on.
+    Each rename is written to progress.json as it happens, and the CSVs
+    are written however the review ends, a quit, a console that went away,
+    Ctrl+C or an error, so they name the files as they are on disk."""
+    rows = app.index_csv.read_all()
+    # A row somebody already renamed is left out, even one renamed before
+    # its confidence was marked High as well (#47).
+    review = []
+    for r in rows:
+        unsure = (r.get("Classification Confidence") == "Low"
+                  or "Review" in (r.get("Processing Status") or ""))
+        if unsure and REVIEWED not in (r.get("Notes") or ""):
+            path = held_receipt(r, app.paths)
+            if path is not None:
+                review.append((r, path))
+    if not review:
+        print("No receipts need name review.")
+        return
+    print(f"{len(review)} receipt(s) need review. Enter a new summary, "
+          "press Enter to keep, or 'q' to stop.\n")
+    order_rows = app.order_csv.read_all()
+    changed = False
+    try:
+        for r, old_path in review:
+            key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
+            prog = app.progress.get(key) or {}
+            items = [i.get("name", "") for i in prog.get("items", [])][:10]
+            print(f"  {r.get('Purchase Date')}  #{r.get('Order or Receipt Number')}"
+                  f"  [{r.get('Classification Confidence')}]")
+            print(f"{words.current}{r.get('PDF Filename')}")
+            if items:
+                print(f"{words.items}{'; '.join(items)}")
+            new = ask(words.question).strip()
+            if new.lower() == "q":
+                break
+            if not new:
+                print()
+                continue
+            new_summary = title_case(new)
+            date = r.get("Purchase Date") or old_path.name[:10]
+            doc_type = r.get("Document Type") or "Receipt"
+            record = record_for(key, prog) if record_for else prog
+            new_name = build_pdf_filename(date, new_summary, doc_type, record=record)
+            try:
+                new_path = unique_path(old_path.parent, new_name,
+                                       app.config["max_path_length"])
+                old_path.rename(new_path)  # unique_path guarantees no overwrite
+            except (OSError, ValueError) as e:
+                print(f"    It could not be renamed ({type(e).__name__}), so it keeps "
+                      "its name.\n")
+                continue
+            changed = True
+            old_filename = r.get("PDF Filename")
+            r["PDF Filename"] = new_path.name
+            r["PDF Full Path"] = str(new_path)
+            r["Purchase Summary"] = new_summary
+            r["Processing Status"] = "Completed"
+            r["Classification Confidence"] = "High"
+            r["Notes"] = (r.get("Notes", "") + "; " + REVIEWED).strip("; ")
+            for orow in order_rows:
+                if (orow.get("Order or Receipt Number") == r.get("Order or Receipt Number")
+                        and orow.get("PDF Filename") == old_filename):
+                    orow["PDF Filename"] = new_path.name
+                    orow["Purchase Summary"] = new_summary
+                    orow["Processing Status"] = "Completed"
+            app.progress.update(key, {  # key (purchase identifier) unchanged
+                "summary": new_summary, "pdf_filename": new_path.name,
+                "pdf_path": str(new_path), "confidence": "High",
+                "state": State.COMPLETED.value})
+            print(f"{words.renamed}{new_path.name}\n")
+    finally:
+        if changed:
+            app.index_csv.rewrite(rows)
+            app.order_csv.rewrite(order_rows)
+            print("CSV files and progress.json updated.")

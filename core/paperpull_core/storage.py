@@ -240,6 +240,14 @@ class Paths:
             attr = sp.default_route
         return self._ready(getattr(self, attr))
 
+    def filing_folders(self) -> List[Path]:
+        """Every folder a document is filed in, the ones routing reaches and
+        Manual Review, where a file that failed its check is put aside.
+        Logs, Diagnostics and Backups hold no documents."""
+        sp = self._spec
+        attrs = dict.fromkeys([*sp.routes.values(), sp.default_route, "manual_review"])
+        return [getattr(self, attr) for attr in attrs if attr and hasattr(self, attr)]
+
 
 # ---------------------------------------------------------------------------
 # Windows-safe filenames

@@ -55,7 +55,7 @@ from paperpull_core.words import shape_tree, words_for, write_shaped
 from storage import (EATS, PURCHASE_TYPES, RIDES, CsvFile, JsonStore,
                      ORDER_HISTORY_COLUMNS, Paths, RECEIPT_INDEX_COLUMNS,
                      atomic_write_text, build_pdf_filename, load_config, now_iso,
-                     title_case, unique_path)
+                     unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("uber_receipts")
@@ -1194,70 +1194,7 @@ class App:
                 print(f"  {k}, {c} rows")
 
     def cmd_review_names(self):
-        rows = self.index_csv.read_all()
-        # A row somebody already renamed is left out, even one renamed
-        # before its confidence was marked High as well (#47).
-        review = [r for r in rows
-                  if (r.get("Classification Confidence") == "Low"
-                      or "Review" in (r.get("Processing Status") or ""))
-                  and "renamed via --review-names" not in (r.get("Notes") or "")]
-        if not review:
-            print("No receipts need name review.")
-            return
-        print(f"{len(review)} receipt(s) need review. Enter a new summary, "
-              "press Enter to keep, or 'q' to stop.\n")
-        order_rows = self.order_csv.read_all()
-        changed = False
-        for r in review:
-            key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
-            prog = self.progress.get(key) or {}
-            items = [i.get("name", "") for i in prog.get("items", [])][:10]
-            print(f"  {r.get('Purchase Date')}  #{r.get('Order or Receipt Number')}"
-                  f"  [{r.get('Classification Confidence')}]")
-            print(f"    Current file  {r.get('PDF Filename')}")
-            if items:
-                print(f"    Items  {'; '.join(items)}")
-            new = ask("    New summary (blank=keep, q=quit) ").strip()
-            if new.lower() == "q":
-                break
-            if not new:
-                print()
-                continue
-            new_summary = title_case(new)
-            old_path = Path(r.get("PDF Full Path") or "")
-            date = r.get("Purchase Date") or (old_path.name[:10] if old_path.name else "")
-            doc_type = r.get("Document Type") or "Receipt"
-            new_name = build_pdf_filename(date, new_summary, doc_type, record=prog)
-            if old_path.exists():
-                new_path = unique_path(old_path.parent, new_name,
-                                       self.config["max_path_length"])
-                old_path.rename(new_path)  # unique_path guarantees no overwrite
-            else:
-                new_path = old_path.parent / new_name if old_path.name else Path(new_name)
-                print("    (warning, original PDF not found on disk, records updated only)")
-            old_filename = r.get("PDF Filename")
-            r["PDF Filename"] = new_path.name
-            r["PDF Full Path"] = str(new_path)
-            r["Purchase Summary"] = new_summary
-            r["Processing Status"] = "Completed"
-            r["Classification Confidence"] = "High"
-            r["Notes"] = (r.get("Notes", "") + "; renamed via --review-names").strip("; ")
-            for orow in order_rows:
-                if (orow.get("Order or Receipt Number") == r.get("Order or Receipt Number")
-                        and orow.get("PDF Filename") == old_filename):
-                    orow["PDF Filename"] = new_path.name
-                    orow["Purchase Summary"] = new_summary
-                    orow["Processing Status"] = "Completed"
-            self.progress.update(key, {  # key (purchase identifier) unchanged
-                "summary": new_summary, "pdf_filename": new_path.name,
-                "pdf_path": str(new_path), "confidence": "High",
-                "state": State.COMPLETED.value})
-            changed = True
-            print(f"    Renamed to {new_path.name}\n")
-        if changed:
-            self.index_csv.rewrite(rows)
-            self.order_csv.rewrite(order_rows)
-            print("CSV files and progress.json updated.")
+        renaming.review_names(self, ask, words=renaming.PLAIN_WORDS)
 
     def _diag_page(self):
         """The tab the journal, the census and a failure file look at, the
