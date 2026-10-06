@@ -7,6 +7,8 @@ dict to the engine's (category, date, period, title)."""
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage
@@ -307,7 +309,23 @@ class _FakePage:
         return _NoEvent()
 
 
-def test_an_unsafe_label_never_reaches_the_click(tmp_path, monkeypatch):
+@pytest.fixture()
+def pressed_as_given(monkeypatch):
+    """pressing.click reads what is on top of a control in a real page, and
+    these pages are fakes, so the press is handed straight to the fake
+    icon. It is bound to the real function's signature first, so a keyword
+    the real one would refuse fails here too."""
+    import inspect
+    from paperpull_core import pressing
+    real = inspect.signature(pressing.click)
+
+    def stand_in(*args, **kwargs):
+        real.bind(*args, **kwargs).arguments["locator"].click()
+
+    monkeypatch.setattr(pressing, "click", stand_in)
+
+
+def test_an_unsafe_label_never_reaches_the_click(tmp_path, monkeypatch, pressed_as_given):
     """The wiring, not the function: download_document() with an unsafe
     icon label must return False with the icon never clicked. If the
     guard call is deleted from download_document again, THIS test fails
@@ -323,7 +341,7 @@ def test_an_unsafe_label_never_reaches_the_click(tmp_path, monkeypatch):
     assert not out.exists()
 
 
-def test_a_safe_nbsp_label_reaches_the_click(tmp_path, monkeypatch):
+def test_a_safe_nbsp_label_reaches_the_click(tmp_path, monkeypatch, pressed_as_given):
     """The same wiring with the real label shape (unfolded NBSPs) must
     get as far as the click attempt; the fake icon records the attempt
     and the download event then fails closed (no event on a fake page),

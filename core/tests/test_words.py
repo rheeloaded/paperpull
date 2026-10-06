@@ -297,10 +297,14 @@ def _entry_of(app):
 
 APPS = sorted(d for d in (REPO / "apps").iterdir() if d.is_dir() and _entry_of(d))
 
-# Each method an app names a step with, and where its words are.
+# Each method an app names a step with, and where its words are. A press
+# through paperpull_core.pressing names its step for the failure file too,
+# and a stop the app raises itself names its step and its reason.
 _STEPS = {"write_failure": ([0, 1], ("step", "reason")), "op": ([1], ("operation",)),
           "checkpoint": ([0], ("name",)), "result": ([0], ("outcome",)),
-          "chose": ([0, 1], ("collection", "selector_id")), "waited": ([0], ("name",))}
+          "chose": ([0, 1], ("collection", "selector_id")), "waited": ([0], ("name",)),
+          "click": ([], ("step",)), "check": ([], ("step",)),
+          "Stop": ([0, 1], ("step", "reason")), "no_answer": ([0, 1], ("step", "reason"))}
 
 # Calls whose keyword arguments are facts, a name and a value of the app's.
 _FACTS = {"op", "result", "chose", "checkpoint", "waited", "_trace"}
@@ -357,6 +361,37 @@ def test_every_word_an_app_writes_into_a_failure_file_comes_through(app):
                     found += _strings(k.value)
     changed = sorted({s for s in found if W.shape(s, words) != s})
     assert not changed, "%s would leave as their shape: %s" % (app.name, changed)
+
+
+def test_every_word_a_press_writes_into_a_failure_file_comes_through():
+    """paperpull_core.pressing names the step, the reason and the facts of
+    every stop it raises, and an app writes them into the failure file. A
+    word of them missing from the list would leave as its shape, as
+    "covers" first did."""
+    from paperpull_core import pressing
+    tree = ast.parse((CORE / "paperpull_core" / "pressing.py").read_text(encoding="utf-8"))
+    stops = {"Stop", "Covered", "Unread", "NotPressed", "NoAnswer", "no_answer"}
+    found = set(pressing._WHY)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "attr", None) or getattr(node.func, "id", "")
+            if name in stops:
+                found.update(a.value for a in node.args[:2]
+                             if isinstance(a, ast.Constant) and isinstance(a.value, str))
+                facts = node.args[3] if len(node.args) > 3 else None
+                if isinstance(facts, ast.Dict):
+                    found.update(k.value for k in facts.keys if isinstance(k, ast.Constant))
+        if isinstance(node, ast.FunctionDef):
+            pos = node.args.args
+            pairs = list(zip(pos[len(pos) - len(node.args.defaults):], node.args.defaults))
+            pairs += list(zip(node.args.kwonlyargs, node.args.kw_defaults))
+            for arg, default in pairs:
+                if arg.arg == "step" and isinstance(default, ast.Constant):
+                    found.add(default.value)
+    found |= {"tag", "role", "label"}
+    assert {"something on the page is over the control", "over_it", "press a control"} <= found
+    changed = sorted(s for s in found if W.shape(s) != s)
+    assert not changed, "these would leave as their shape: %s" % changed
 
 
 def test_is_shape_reads_a_shape_back():

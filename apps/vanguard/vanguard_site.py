@@ -11,6 +11,10 @@ SAFETY (this is a brokerage):
   like a document action (SAFE_DOC_CONTROL_RE) before it may be clicked.
   There is no code here that submits a form or confirms a dialog.
 
+  Every press goes through paperpull_core.pressing, never forced, so a
+  control is pressed only when it is the thing on top in the middle of the
+  window, and otherwise nothing is pressed and the run stops.
+
 Site truth (verified live 2026-09-28 against the signed-in pages):
 
   - Sign-in lives at https://logon.vanguard.com/logon?site=pi; the portal
@@ -40,9 +44,12 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from paperpull_core import pressing
+from paperpull_core.words import words_for as _words_for
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.capture import set_download_dir as _set_download_dir
@@ -52,6 +59,12 @@ from paperpull_core.capture import clear_copies as _clear_copies
 from paperpull_core.controls import control_identity
 
 log = logging.getLogger("vanguard_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("Vanguard", sys.modules[__name__])
 
 
 ALLOWED_HOSTS = {'investor.vanguard.com', 'logon.vanguard.com',
@@ -169,7 +182,9 @@ def dismiss_timeout(page) -> None:
         try:
             c = page.get_by_role("button", name=re.compile(pattern, re.I))
             if c.count() and c.first.is_visible():
-                c.first.click()
+                pressing.click(page, c.first, css=pressing.BUTTONS,
+                               what="the button that keeps the session going",
+                               words=_words(), step="continue the session")
                 page.wait_for_timeout(1000)
                 return
         except Exception:
@@ -582,8 +597,13 @@ def download_document(page, account_id: str, charitable: bool,
     dl = None
     failed = ""
     try:
+        # Never forced. The icon is brought to the middle of the window and
+        # pressed only when it is the thing on top there, and otherwise
+        # nothing is pressed and the run stops (paperpull_core.pressing).
         with page.expect_download(timeout=EVENT_WAIT_MS) as dl_info:
-            icon.click(force=True)
+            pressing.click(page, icon, css="[title]",
+                           what="the download icon of the statement dated %s" % date,
+                           words=_words(), step="press a download icon")
         dl = dl_info.value
         try:
             failed = dl.failure() or ""   # returns once the download has finished

@@ -12,6 +12,12 @@ SAFETY (this is a credit-card account):
   a document action (SAFE_DOC_CONTROL_RE) before it may be clicked. There is no
   code here that submits a form or confirms a dialog.
 
+  Every press goes through paperpull_core.pressing, never forced. A control
+  is brought to the middle of the window and pressed only when it is the
+  thing on top there, and otherwise nothing is pressed and the run stops. A
+  forced press once landed on a chat bubble over the last Download button,
+  and the presses after it on the chat's suggested replies.
+
 Amex is a heavy React SPA behind Akamai. The signed-in browser session (opened
 by login.bat and attached over CDP) carries the auth, so this module only reads
 and clicks document/download controls. Statement PDFs may be plain <a> download
@@ -26,16 +32,26 @@ import base64
 import html as _html
 import logging
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import pressing
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import human_date as _human_date
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.controls import click_next_page as _click_next_page
+from paperpull_core.failure import error_kind as _error_kind
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("amex_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("American Express", sys.modules[__name__])
 
 BASE = "https://global.americanexpress.com"
 URLS = {
@@ -244,6 +260,9 @@ def is_safe_control(name: str) -> bool:
 # Documents page navigation
 # ---------------------------------------------------------------------------
 
+_PDF_LINK_SEL = "[data-testid='goToPdfLinkLg'], [data-testid='goToPdfLinkSm']"
+
+
 def goto_documents(page) -> bool:
     """Reach the PDF Statements page ('Statements and Year End Summaries') by
     CLICKING within the SPA. Amex holds the session in an in-memory token, so a
@@ -258,15 +277,18 @@ def goto_documents(page) -> bool:
                 link = page.get_by_role("link", name=re.compile(
                     r"statements?\s*&\s*activity", re.I))
                 if link.count() and link.first.is_visible():
-                    link.first.click()
+                    pressing.click(page, link.first, css=pressing.LINKS,
+                                   what="the Statements and Activity link",
+                                   words=_words(), step="open the statements page")
                     page.wait_for_timeout(5000)
-            pdf = page.locator(
-                "[data-testid='goToPdfLinkLg'], [data-testid='goToPdfLinkSm']")
+            pdf = page.locator(_PDF_LINK_SEL)
             if pdf.count() == 0:
                 pdf = page.get_by_role("link", name=re.compile(
                     r"go to pdf statements", re.I))
             if pdf.count() and pdf.first.is_visible():
-                pdf.first.click()
+                pressing.click(page, pdf.first, css="%s, %s" % (_PDF_LINK_SEL, pressing.LINKS),
+                               what="the Go to PDF Statements link",
+                               words=_words(), step="open the statements page")
                 page.wait_for_timeout(6000)
         try:
             page.wait_for_selector("[data-testid*='download-button']", timeout=12000)
@@ -284,7 +306,8 @@ def expand_sections(page) -> None:
     so their download buttons become clickable. 'Older Statements' is expanded
     by default; 'Year End Summary' is collapsed - only click a header whose
     aria-expanded is 'false' (clicking an open one would collapse it)."""
-    for label in (r"older\s+statements", r"year.?end\s+summary"):
+    for label, name in ((r"older\s+statements", "Older Statements"),
+                        (r"year.?end\s+summary", "Year End Summary")):
         try:
             hdr = page.get_by_role("button", name=re.compile(label, re.I))
             for i in range(min(hdr.count(), 3)):
@@ -292,7 +315,9 @@ def expand_sections(page) -> None:
                 if not el.is_visible():
                     continue
                 if (el.get_attribute("aria-expanded") or "").lower() == "false":
-                    el.click()
+                    pressing.click(page, el, css=pressing.BUTTONS,
+                                   what="the heading of the %s section" % name,
+                                   words=_words(), step="open a section")
                     page.wait_for_timeout(1500)
                 break
         except Exception:
@@ -324,7 +349,10 @@ def expand_all(page) -> None:
                 if loc.count() > 0 and loc.first.is_visible():
                     label = loc.first.inner_text(timeout=1000) or ""
                     if not FORBIDDEN_CONTROL_RE.search(label):
-                        loc.first.click()
+                        pressing.click(page, loc.first,
+                                       css="%s, %s" % (pressing.BUTTONS, pressing.LINKS),
+                                       what="a control that shows more of the list",
+                                       words=_words(), step="show more of the list")
                         page.wait_for_timeout(1600)
                         clicked = True
                         break
@@ -467,28 +495,64 @@ def _first_visible(loc):
     return loc.first if (n and loc.count()) else None
 
 
-def _select_pdf_radio(page) -> bool:
-    """In the 'Select File Type' dialog, choose the plain PDF option (never the
-    screen-reader / Excel / CSV / Quicken / Quickbooks variants)."""
-    for sel in ("input[type='radio'][value='statement_pdf']",
-                "input[type='radio'][value*='pdf' i]"):
-        loc = page.locator(sel)
-        try:
-            n = loc.count()
-        except Exception:
-            n = 0
-        for i in range(n):
-            el = loc.nth(i)
-            v = (el.get_attribute("value") or "").lower()
-            if "accessible" in v or "screen" in v:
-                continue
-            try:
-                if el.is_visible():
-                    el.check(force=True, timeout=3000)
-                    return True
-            except Exception:
-                continue
-    return False
+def _shows(el) -> bool:
+    try:
+        return bool(el.is_visible())
+    except Exception:
+        return False
+
+
+def _last_visible(loc):
+    """The last element of `loc` that shows, which for dialogs held one
+    inside the other is the innermost, or None."""
+    n = _safe_count(loc)
+    for i in range(min(n, 12) - 1, -1, -1):
+        if _shows(loc.nth(i)):
+            return loc.nth(i)
+    return None
+
+
+def _pdf_radio(page):
+    """The file-type dialog's plain PDF choice, never the one for a screen
+    reader, statement_pdf before any other PDF and one that shows before one
+    that does not. A radio button that does not show is drawn by its label
+    alone, the way a styled one can be, and pressing.check checks it
+    through that label. A dialog can draw its choices a moment after its
+    Download, so they are looked for again for a few seconds."""
+    for _ in range(10):
+        for sel in ("input[type='radio'][value='statement_pdf']",
+                    "input[type='radio'][value*='pdf' i]"):
+            loc = page.locator(sel)
+            found = []
+            for i in range(min(_safe_count(loc), 12)):
+                el = loc.nth(i)
+                try:
+                    v = (el.get_attribute("value", timeout=2000) or "").lower()
+                except Exception:
+                    continue
+                if "accessible" in v or "screen" in v:
+                    continue
+                found.append(el)
+            shown = [el for el in found if _shows(el)]
+            if shown or found:
+                return (shown or found)[0]
+        page.wait_for_timeout(500)
+    return None
+
+
+def _choose_pdf(page, thing: str, words) -> None:
+    """Choose the plain PDF in the open file-type dialog, or stop the run.
+    The dialog's Download is never pressed with the PDF not chosen, since
+    it would bring whichever kind of file was chosen before."""
+    radio = _pdf_radio(page)
+    if radio is None:
+        raise pressing.Stop("choose the pdf", "the dialog offered no pdf", [
+            "The file type dialog for %s opened without its plain PDF choice, "
+            "so its Download was not pressed." % thing,
+            "Nothing more was pressed.", pressing.AGAIN])
+    pressing.check(page, radio, css="input[type='radio']",
+                   what="the plain PDF choice in the file type dialog for %s" % thing,
+                   words=words, step="choose the pdf")
 
 
 # The "Select File Type" dialog's confirm button renders its label as an icon
@@ -498,6 +562,18 @@ _DIALOG_CONFIRM_SEL = (
     "[id*='download-confirm'][id$='-anchor']")
 # The dialog is "open" when its PDF radio or its confirm button is present.
 _DIALOG_OPEN_SEL = "input[type='radio'][value*='pdf' i], " + _DIALOG_CONFIRM_SEL
+# The file-type dialog itself, the dialog that holds those controls. Only its
+# own Cancel or Close is ever pressed to close a dialog. A dialog, frame or
+# widget of anything else on the page, a chat window among them, is left as
+# it is.
+_DIALOGS = "[role='dialog'], [role='alertdialog'], dialog, [aria-modal='true']"
+_CLOSE_NAME = re.compile(r"^\s*(cancel|close)\s*$", re.I)
+
+
+def _file_type_dialog(page):
+    """The file-type dialog's own element, known by the controls only it
+    has, or None."""
+    return _last_visible(page.locator(_DIALOGS).filter(has=page.locator(_DIALOG_OPEN_SEL)))
 
 
 def _dialog_download_button(page, timeout: int = 8000):
@@ -509,10 +585,15 @@ def _dialog_download_button(page, timeout: int = 8000):
     except Exception:
         pass
     vb = _first_visible(loc)
-    if vb is not None:
+    if vb is not None and _shows(vb):
         return vb
-    # last resort: a visible button named Download that is not a row button
-    cands = page.get_by_role("button", name=re.compile(r"^\s*download\s*$", re.I))
+    # Last resort, a button named Download inside the file-type dialog itself
+    # that is not a row's button. One anywhere else on the page belongs to
+    # something else.
+    dialog = _file_type_dialog(page)
+    if dialog is None:
+        return None
+    cands = dialog.get_by_role("button", name=re.compile(r"^\s*download\s*$", re.I))
     for i in range(min(_safe_count(cands), 12)):
         el = cands.nth(i)
         try:
@@ -531,91 +612,148 @@ def _safe_count(loc) -> int:
         return 0
 
 
-def _dismiss_dialog(page) -> None:
-    """Close any open file-type dialog (Cancel/Close, else Escape) so it does
-    not intercept clicks on the next document."""
+def _dialog_open(page) -> bool:
+    """Whether the file-type dialog shows, by its PDF choice or its
+    Download. A copy left hidden in the page does not count."""
+    loc = page.locator(_DIALOG_OPEN_SEL)
+    return any(_shows(loc.nth(i)) for i in range(min(_safe_count(loc), 12)))
+
+
+def _wait_for_dialog(page, ms: int) -> bool:
+    """Whether the file-type dialog shows within `ms`. Any of its controls
+    that shows counts, where page.wait_for_selector looks at the first one
+    in the page alone, a radio button that may be drawn by its label."""
+    import time
+    deadline = time.monotonic() + ms / 1000.0
+    while True:
+        if _dialog_open(page):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        page.wait_for_timeout(250)
+
+
+def close_file_type_dialog(page, quiet: bool = False) -> None:
+    """Close the file-type dialog when it shows, once, through its own
+    Cancel or Close, or with Escape sent to one of its own controls when it
+    has neither. Nothing outside that dialog is pressed, so a chat window or
+    a dialog of anything else is left as it is.
+
+    The Cancel or Close goes through pressing.click like every press. A
+    dialog that is still there afterwards stops the run, since every press
+    after it would land on the dialog. Right after a document is saved this
+    is `quiet`, so a stop waits for the next document, which tries once
+    more before pressing anything else."""
+    if not _dialog_open(page):
+        return
     try:
-        for _ in range(3):
-            if _safe_count(page.locator(_DIALOG_OPEN_SEL)) == 0:
-                return
-            closed = False
-            for name in (r"^\s*cancel\s*$", r"^\s*close\s*$"):
-                c = page.get_by_role("button", name=re.compile(name, re.I))
-                if _safe_count(c) and c.first.is_visible():
-                    try:
-                        c.first.click(timeout=1500)
-                        closed = True
-                        break
-                    except Exception:
-                        pass
-            if not closed:
-                page.keyboard.press("Escape")
-            page.wait_for_timeout(700)
-    except Exception:
-        pass
+        dialog = _file_type_dialog(page)
+        closer = None
+        if dialog is not None:
+            closer = _first_visible(dialog.get_by_role("button", name=_CLOSE_NAME))
+        if closer is not None and _shows(closer):
+            pressing.click(page, closer, css=pressing.BUTTONS,
+                           what="the Cancel of the file type dialog", words=_words(),
+                           step="close the file type dialog")
+        else:
+            own = _first_visible(page.locator(_DIALOG_OPEN_SEL))
+            if own is not None:
+                # A key goes to the element that has the focus, so it is
+                # given to one of the dialog's own controls first.
+                own.press("Escape", timeout=3000)
+        page.wait_for_timeout(700)
+    except pressing.Stop as stop:
+        if not quiet:
+            raise
+        log.info("the file type dialog was left open (%s)", stop.reason)
+        return
+    except Exception as e:
+        log.info("the file type dialog could not be closed (%s)", _error_kind(e))
+    if _dialog_open(page) and not quiet:
+        raise pressing.Stop("close the file type dialog", "the dialog did not close", [
+            "The file type dialog was open and would not close, so nothing was "
+            "pressed for this document.",
+            "Close it in the browser window, then press Resume here, or run this again."])
+
+
+# How long the file-type dialog is given to open after its row's Download,
+# and the dialog's Download is given to start its download.
+DIALOG_WAIT_MS = 10000
+DOWNLOAD_WAIT_MS = 45000
 
 
 def download_document(page, category: str, date: str, out_path) -> bool:
-    """Download one statement / year-end-summary PDF: click its row Download
-    button, choose 'Billing Statement (PDF)' in the Select File Type dialog,
-    click the dialog's confirm Download, and capture the download event.
-    Retries once because Amex's dialog occasionally fails to open/settle."""
+    """Download one statement or year-end summary PDF. Its row's Download
+    button is pressed once, the plain PDF is chosen in the Select File Type
+    dialog, the dialog's own Download is pressed once, and the download
+    event is saved.
+
+    Every press goes through paperpull_core.pressing and none is forced, so
+    a control with anything on top of it is never pressed and the run stops
+    there. A press that does not bring what it should, the dialog after the
+    row's button or a download after the dialog's, is not made again and
+    the run stops (pressing.Stop). This used to try a second time and go on
+    to the next document, so a press that had opened something else was
+    followed by more presses, on whatever it had opened.
+
+    False only when the row's button is not on the page, and then nothing
+    was pressed for this document."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    words = _words()
     if category == "Year-End Summary":
         sel = f"[data-testid$='/year-end-summary/{date[:4]}/download-button']"
+        thing = "the %s year-end summary" % date[:4]
     else:
         sel = f"[data-testid$='/{date}/download-button']"
+        thing = "the statement dated %s" % date
+    button = "the Download button of %s" % thing
+
+    close_file_type_dialog(page)   # one the document before left open
+    expand_sections(page)          # Older Statements / Year End Summary open
+
+    btn = _first_visible(page.locator(sel))
+    if btn is None or not _shows(btn):
+        log.info("row download button not found for %s %s (sel=%s)", category, date, sel)
+        return False
+    pressing.click(page, btn, css=sel, what=button, words=words,
+                   step="press a download button")
+
+    if not _wait_for_dialog(page, DIALOG_WAIT_MS):
+        log.info("file-type dialog did not open for %s %s", category, date)
+        raise pressing.no_answer("open the file type dialog", "the dialog did not open",
+                                 "%s was pressed once and the file type dialog did not "
+                                 "open." % ("T" + button[1:]))
+
+    _choose_pdf(page, thing, words)
+    confirm = _dialog_download_button(page)
+    if confirm is None:
+        raise pressing.Stop("find the dialog download", "the dialog has no download", [
+            "The file type dialog for %s showed no Download of its own, so "
+            "nothing in it was pressed." % thing,
+            "Nothing more was pressed.", pressing.AGAIN])
 
     from paperpull_core.receipt_pdf import save_download
-    for attempt in range(2):
-        _dismiss_dialog(page)       # clear any stale/prior dialog
-        expand_sections(page)       # Older Statements / Year End Summary open
-
-        btn = _first_visible(page.locator(sel))
-        if btn is None:
-            log.info("row download button not found for %s %s (sel=%s)", category, date, sel)
-            return False
-        try:
-            btn.click(force=True, timeout=8000)
-        except Exception as e:
-            log.info("row download click failed for %s %s: %s", category, date, e)
-            continue
-
-        # wait for the file-type dialog to actually open
-        try:
-            page.wait_for_selector(_DIALOG_OPEN_SEL, timeout=10000)
-        except Exception:
-            log.info("file-type dialog did not open for %s %s (attempt %d)",
-                     category, date, attempt + 1)
-            continue
-
-        _select_pdf_radio(page)
-        confirm = _dialog_download_button(page)
-        if confirm is None:
-            log.info("dialog confirm button not found for %s %s (attempt %d)",
-                     category, date, attempt + 1)
-            _dismiss_dialog(page)
-            continue
-
-        try:
-            with page.expect_download(timeout=45000) as dl:
-                # The click's own post-action navigation wait can time out even
-                # though the download fires; swallow it and let expect_download
-                # capture the event.
-                try:
-                    confirm.click(force=True, timeout=8000)
-                except Exception:
-                    pass
-            save_download(dl.value, out_path)
-            _dismiss_dialog(page)
-            return True
-        except Exception as e:
-            log.info("dialog download failed for %s %s (attempt %d): %s",
-                     category, date, attempt + 1, e)
-            _dismiss_dialog(page)
-            continue
-    return False
+    try:
+        with page.expect_download(timeout=DOWNLOAD_WAIT_MS) as dl:
+            pressing.click(page, confirm, css="%s, %s" % (_DIALOG_CONFIRM_SEL, pressing.BUTTONS),
+                           what="the Download of the file type dialog for %s" % thing,
+                           words=words, step="press the dialog download")
+        download = dl.value
+    except Exception as e:
+        log.info("no download came for %s %s (%s)", category, date, _error_kind(e))
+        raise pressing.no_answer("download from the dialog", "no download came",
+                                 "The Download of the file type dialog for %s was pressed "
+                                 "once and no download came." % thing)
+    try:
+        save_download(download, out_path)
+    except Exception as e:
+        log.info("the download for %s %s could not be saved (%s)", category, date,
+                 _error_kind(e))
+        close_file_type_dialog(page, quiet=True)
+        return False
+    close_file_type_dialog(page, quiet=True)
+    return True
 
 
 _BLOB_FETCH_JS = r"""async () => {
@@ -727,7 +865,9 @@ def download_named(page, title: str, out_path) -> bool:
     from paperpull_core.receipt_pdf import save_download
     try:
         with page.expect_download(timeout=45000) as dl:
-            control.click()
+            pressing.click(page, control, css="a, button, [role=button]",
+                           what="the download control for this document",
+                           words=_words(), step="press a download control")
         save_download(dl.value, out_path)
         return True
     except Exception as e:
