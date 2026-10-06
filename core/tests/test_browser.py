@@ -4,6 +4,7 @@ The paths are faked so the same assertions run on any OS, this checks the
 lookup logic and the ordering, which is what actually differs between
 Windows, macOS and Linux.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -287,6 +288,230 @@ def test_bundled_chromium_wins_when_prefer_real_is_off(monkeypatch, tmp_path):
                         lambda: [(browser.EDGE, str(edge))])
     assert browser.find_browser(prefer_real=False)[0] == browser.CHROMIUM
     assert browser.find_browser(prefer_real=True)[0] == browser.EDGE
+
+
+# -- every folder Playwright has unpacked its Chromium into -----------------
+#
+# Playwright's registry (EXECUTABLE_PATHS in playwright-core) names the
+# folder inside chromium-<build> for each platform. Up to 1.56 it built
+# Chromium itself, in chrome-linux, chrome-mac and chrome-win. From 1.57 it
+# unpacks Chrome for Testing, in chrome-linux64, chrome-mac-x64,
+# chrome-mac-arm64 and chrome-win64, while Linux on ARM kept Playwright's
+# own build in chrome-linux until 1.63 moved it to chrome-linux-arm64. Only
+# chrome-linux was looked for on Linux, so no bundled Chromium was found on
+# x64 from 1.57 or on ARM from 1.63, and there the browser tests that attach
+# to one skipped themselves.
+
+_CFT_APP = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+
+# (platform, the Playwright releases, a build of theirs, where Chromium is
+# inside chromium-<build>, where the headless shell installed beside it is
+# inside chromium_headless_shell-<build>). The headless shell has no window
+# to sign in to, so it must never be offered.
+PLAYWRIGHT_LAYOUTS = [
+    ("linux", "up to 1.56, and ARM up to 1.62", "1194",
+     "chrome-linux/chrome", "chrome-linux/headless_shell"),
+    ("linux", "1.57 on, x64", "1243",
+     "chrome-linux64/chrome", "chrome-headless-shell-linux64/chrome-headless-shell"),
+    ("linux", "1.63 on, ARM", "1243",
+     "chrome-linux-arm64/chrome", "chrome-headless-shell-linux-arm64/chrome-headless-shell"),
+    ("darwin", "up to 1.56", "1194",
+     "chrome-mac/Chromium.app/Contents/MacOS/Chromium", "chrome-mac/headless_shell"),
+    ("darwin", "1.57 on, Intel", "1243",
+     "chrome-mac-x64/" + _CFT_APP, "chrome-headless-shell-mac-x64/chrome-headless-shell"),
+    ("darwin", "1.57 on, Apple silicon", "1243",
+     "chrome-mac-arm64/" + _CFT_APP, "chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    ("win32", "up to 1.56", "1194",
+     "chrome-win/chrome.exe", "chrome-win/headless_shell.exe"),
+    ("win32", "1.57 on", "1243",
+     "chrome-win64/chrome.exe", "chrome-headless-shell-win64/chrome-headless-shell.exe"),
+]
+
+
+def _layout_id(layout):
+    return "%s %s" % (layout[0], layout[1].replace(",", ""))
+
+
+# Files a real install keeps beside the executable, named so that a pattern
+# ending in a wildcard would take them too (the Windows ones as
+# chromium-1243/chrome-win64 holds them here). The macOS folder holds only
+# the executable.
+_BESIDE = {
+    "chrome": ("chrome-wrapper", "chrome_crashpad_handler", "chrome_sandbox",
+               "chrome_100_percent.pak"),
+    "chrome.exe": ("chrome.dll", "chrome_proxy.exe", "chrome_pwa_launcher.exe",
+                   "chrome_100_percent.pak"),
+}
+
+
+def _install(root, build, chromium, shell):
+    """What "playwright install chromium" leaves for one build, Chromium with
+    the files beside it and the headless shell, each marked complete, and
+    the Chrome Canary for Testing that Playwright installs only on request,
+    in Chromium's layout. Only Chromium may be offered. Returns it."""
+    for folder, inner in (("chromium-" + build, chromium),
+                          ("chromium_headless_shell-" + build, shell),
+                          ("chromium_tip_of_tree-1433", chromium)):
+        exe = root / folder / inner
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        for name in (exe.name, *_BESIDE.get(exe.name, ())):
+            (exe.parent / name).write_text("")
+        (root / folder / "INSTALLATION_COMPLETE").write_text("")
+    return root / ("chromium-" + build) / chromium
+
+
+@pytest.mark.parametrize("platform,releases,build,chromium,shell", PLAYWRIGHT_LAYOUTS,
+                         ids=[_layout_id(layout) for layout in PLAYWRIGHT_LAYOUTS])
+def test_every_folder_playwright_unpacks_chromium_into_is_found(
+        monkeypatch, tmp_path, platform, releases, build, chromium, shell):
+    monkeypatch.setattr(browser.sys, "platform", platform)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.CHROME, "/x/chrome")])
+    exe = str(_install(tmp_path, build, chromium, shell))
+    assert browser._bundled_chromium() == [exe]
+    assert browser.bundled_chromium_present()
+    assert browser.browser_candidates(mode=browser.BUNDLED) == [(browser.CHROMIUM, exe)]
+    # AUTO offers it beside their own browser, ahead or behind
+    # (test_auto_keeps_the_order_each_machine_had).
+    bundled, real = (browser.CHROMIUM, exe), (browser.CHROME, "/x/chrome")
+    assert sorted(browser.browser_candidates(mode=browser.AUTO)) == sorted([bundled, real])
+
+
+# (platform, the builds on disk as (build, where Chromium is inside
+# chromium-<build>), whether AUTO puts the bundled copy ahead of a browser of
+# their own). A build in chrome-linux was found and went first, and builds
+# only in chrome-linux64 or chrome-linux-arm64 were never found, so the
+# person has been signing in through their own browser. Finding those
+# folders moves nobody.
+_ORDERS = [
+    ("win32", [("1243", "chrome-win64/chrome.exe")], True),
+    ("darwin", [("1243", "chrome-mac-arm64/" + _CFT_APP)], True),
+    ("linux", [("1243", "chrome-linux64/chrome")], False),
+    ("linux", [("1243", "chrome-linux-arm64/chrome")], False),
+    ("linux", [("1234", "chrome-linux/chrome")], True),
+    ("linux", [("1234", "chrome-linux/chrome"), ("1243", "chrome-linux-arm64/chrome")], True),
+    ("linux", [("1194", "chrome-linux/chrome"), ("1243", "chrome-linux64/chrome")], True),
+]
+
+
+@pytest.mark.parametrize("platform,builds,bundled_first", _ORDERS,
+                         ids=["%s %s" % (p, " and ".join(inner.split("/")[0] for _b, inner in b))
+                              for p, b, _f in _ORDERS])
+def test_auto_keeps_the_order_each_machine_had(monkeypatch, tmp_path, platform, builds,
+                                               bundled_first):
+    """Moving someone to another browser costs them a sign-in, and on
+    Ubuntu 23.10 and later the Chrome for Testing that Playwright downloads
+    could not even start with its sandbox. So on Linux the bundled copy goes
+    first only where it already did. The newest build is offered either way,
+    an app that asks for a real browser gets theirs first, and with no
+    browser of their own the bundled copy is used."""
+    monkeypatch.setattr(browser.sys, "platform", platform)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    for build, inner in builds:
+        exe = tmp_path / ("chromium-" + build) / inner
+        exe.parent.mkdir(parents=True)
+        exe.write_text("")
+    newest_build, newest_inner = max(builds, key=lambda b: int(b[0]))
+    bundled = (browser.CHROMIUM, str(tmp_path / ("chromium-" + newest_build) / newest_inner))
+    real = (browser.CHROME, "/x/chrome")
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [real])
+    expected = [bundled, real] if bundled_first else [real, bundled]
+    assert browser.browser_candidates() == expected
+    assert browser.find_browser() == expected[0]
+    assert browser.bundled_chromium_first() is bundled_first
+    assert browser.browser_candidates(prefer_real=True) == [real, bundled]
+    assert browser.find_browser(prefer_real=True) == real
+    assert browser.browser_candidates(mode=browser.BUNDLED) == [bundled]
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [])
+    assert browser.browser_candidates() == [bundled]
+    assert browser.find_browser() == bundled
+    assert browser.find_browser(prefer_real=True) == bundled
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin", "linux"])
+def test_with_no_bundled_copy_none_goes_first(monkeypatch, tmp_path, platform):
+    monkeypatch.setattr(browser.sys, "platform", platform)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    assert browser.bundled_chromium_first() is False
+
+
+_UPGRADES = [(old, new) for old in PLAYWRIGHT_LAYOUTS for new in PLAYWRIGHT_LAYOUTS
+             if old[0] == new[0] and int(old[2]) < int(new[2])]
+
+
+@pytest.mark.parametrize("old,new", _UPGRADES,
+                         ids=["%s to %s" % (_layout_id(o), n[1].replace(",", ""))
+                              for o, n in _UPGRADES])
+def test_the_newer_build_comes_first_when_its_folder_was_renamed(monkeypatch, tmp_path, old, new):
+    """An older build stays on disk while another installation still uses
+    it, as an app venv on an older Playwright does here, and it is older
+    than the Playwright now installed expects. Linux used to find only the
+    older one."""
+    monkeypatch.setattr(browser.sys, "platform", new[0])
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    older = str(_install(tmp_path, *old[2:]))
+    newer = str(_install(tmp_path, *new[2:]))
+    assert browser._bundled_chromium() == [newer, older]
+    assert browser.browser_candidates(mode=browser.BUNDLED) == [(browser.CHROMIUM, newer)]
+
+
+# Playwright's names for the platforms, and the sys.platform of each
+_PLAYWRIGHT_PLATFORMS = (("linux", "linux"), ("mac", "darwin"), ("win", "win32"))
+
+
+def _installed_chromium_folders():
+    """Where the installed Playwright unpacks Chromium on each platform it
+    names, read from its own EXECUTABLE_PATHS, for example "linux-x64" and
+    "chrome-linux64/chrome". Returns (its version, that table)."""
+    playwright = pytest.importorskip("playwright")
+    from importlib.metadata import version
+    lib = Path(playwright.__file__).parent / "driver" / "package" / "lib"
+    start = re.compile(r"EXECUTABLE_PATHS\s*=\s*\{")
+    for js in sorted(lib.rglob("*.js")):
+        text = js.read_text(encoding="utf-8", errors="replace")
+        at = start.search(text)
+        if not at:
+            continue
+        # Its comments go first, since a brace in one would end the table early
+        region = re.sub(r"/\*.*?\*/|//[^\n]*", "", text[at.end():at.end() + 20000], flags=re.S)
+        table = re.search(r"[\"']chromium[\"']\s*:\s*\{([^}]*)\}", region)
+        if table:
+            entries = re.findall(r"[\"']([\w.-]+)[\"']\s*:\s*\[([^\]]*)\]", table.group(1))
+            return version("playwright"), {
+                key: "/".join(re.findall(r"[\"']([^\"']+)[\"']", parts))
+                for key, parts in entries}
+    pytest.fail("Playwright %s names no chromium folders in an EXECUTABLE_PATHS table "
+                "under %s. Find where it says where Chromium goes inside "
+                "chromium-<build> and read it from there." % (version("playwright"), lib))
+
+
+def test_the_installed_playwright_puts_chromium_where_it_is_looked_for(monkeypatch, tmp_path):
+    """The table above is what Playwright has done. This asks the Playwright
+    installed here what it does now, for every platform it names, so a folder
+    it renames fails here as soon as that release is installed. CI installs
+    the newest Playwright on every run, so its first run after the release
+    catches it."""
+    release, folders = _installed_chromium_folders()
+    named = {prefix for key in folders for prefix, _p in _PLAYWRIGHT_PLATFORMS
+             if key.startswith(prefix)}
+    assert named == {"linux", "mac", "win"}, (
+        "Playwright %s's table was not read whole, it names only %s" % (
+            release, ", ".join(sorted(folders)) or "nothing"))
+    missed = []
+    for key, inner in sorted(folders.items()):
+        platform = next((p for prefix, p in _PLAYWRIGHT_PLATFORMS if key.startswith(prefix)), None)
+        assert platform, "Playwright %s names a platform this test does not know, %s" % (
+            release, key)
+        root = tmp_path / key
+        exe = root / "chromium-1243" / inner
+        exe.parent.mkdir(parents=True)
+        exe.write_text("")
+        monkeypatch.setattr(browser.sys, "platform", platform)
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(root))
+        if browser._bundled_chromium() != [str(exe)]:
+            missed.append("%s %s" % (key, inner))
+    assert not missed, "Playwright %s puts Chromium where it is not looked for, %s" % (
+        release, ", ".join(missed))
 
 
 def test_a_window_that_opens_without_a_debugging_port_is_reported(monkeypatch, tmp_path, capsys):

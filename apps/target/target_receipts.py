@@ -189,7 +189,11 @@ class App:
 
         # No cdp_url: the old way, kept for an install made before this.
         executable = None
-        if not browser_launcher.bundled_chromium_present():
+        # Playwright's own Chromium is used only where the sign-in step would
+        # put it first. On Linux that is only where a build sits in
+        # chrome-linux, so an install that has been using its own browser
+        # keeps it.
+        if not browser_launcher.bundled_chromium_first():
             name, path = browser_launcher.find_browser(prefer_real=True)
             if path:
                 executable = path

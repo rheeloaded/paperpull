@@ -26,8 +26,9 @@ def test_an_installed_browser_is_used_when_there_is_no_bundled_one():
 
 def test_the_bundled_copy_still_wins_when_it_is_already_there():
     """Somebody whose Target app works today keeps the browser it works
-    with. The search only happens when there is no bundled copy."""
-    before, _, after = SRC.partition("if not browser_launcher.bundled_chromium_present():")
+    with. The search only happens when there is no bundled copy, or on
+    Linux when the bundled copy was never the one in use."""
+    before, _, after = SRC.partition("if not browser_launcher.bundled_chromium_first():")
     assert after, "the bundled check still guards the search"
     assert "find_browser" not in before, "nothing looks for another browser first"
     assert "executable_path" not in before

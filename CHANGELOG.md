@@ -85,6 +85,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   app find the Chromium after it had been opening another browser, it may
   ask you to sign in once more. PaperPull Server uses a Chrome of its own
   and was not affected.
+- **Linux finds the Chromium that Playwright downloads.** Playwright 1.57
+  began unpacking its Chromium on x64 into a folder named chrome-linux64,
+  and 1.63 moved ARM machines to chrome-linux-arm64, while PaperPull
+  looked only in chrome-linux, the folder older releases used. So on Linux
+  an app set to use only that Chromium found none, and with no browser of
+  your own the sign-in step said none was found although that Chromium
+  was there. Every folder Playwright has used is looked in now, and when
+  several builds are on disk, the newest is used. Finding the new
+  folders moves nobody to another browser, since on Linux an app left to
+  choose puts this Chromium ahead of your own browser only where a build
+  sits in chrome-linux, as it did before. Windows, macOS and PaperPull
+  Server were not affected.
 
 ### Security
 - **Every redirect is checked against the provider's own sites before it

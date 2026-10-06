@@ -266,7 +266,7 @@ def _launched_here(monkeypatch):
         return real(self, user_data_dir, **kw)
 
     monkeypatch.setattr(pw.BrowserType, "launch_persistent_context", headless)
-    monkeypatch.setattr(browser_launcher, "bundled_chromium_present", lambda: True)
+    monkeypatch.setattr(browser_launcher, "bundled_chromium_first", lambda: True)
     # The person pressed Enter after signing in.
     monkeypatch.setattr(browser_launcher, "pause_for_sign_in", lambda *a, **k: True)
 

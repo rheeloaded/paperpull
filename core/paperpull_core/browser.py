@@ -121,15 +121,25 @@ def _bundled_chromium() -> List[str]:
                     "chromium-*/chrome-mac*/Google Chrome for Testing.app"
                     "/Contents/MacOS/Google Chrome for Testing"]
     else:
-        patterns = ["chromium-*/chrome-linux/chrome"]
+        # Playwright 1.57 moved Linux on x64 to Chrome for Testing, which
+        # unpacks into chrome-linux64, and 1.63 moved ARM from Playwright's
+        # own build in chrome-linux to chrome-linux-arm64. Only chrome-linux
+        # was matched here, so no bundled Chromium was found on x64 from
+        # 1.57 or on ARM from 1.63. BUNDLED had nothing to offer there, and
+        # an older build still on disk was handed over instead of the new.
+        patterns = ["chromium-*/chrome-linux64/chrome",
+                    "chromium-*/chrome-linux-arm64/chrome",
+                    "chromium-*/chrome-linux/chrome"]
     found: List[str] = []
     for pattern in patterns:
         found += glob.glob(str(root / pattern))
 
-    # Newest build first. Playwright pins a build per release and leaves older
-    # ones behind, so "whatever glob returned first" can hand back a build
-    # older than the installed playwright expects. Sort on the build NUMBER,
-    # not the string - "chromium-1000" sorts before "chromium-999" as text.
+    # Newest build first. Playwright pins a build per release, and an older
+    # build stays on disk while another installation still uses it (an app
+    # venv on an older Playwright, for example), so "whatever glob returned
+    # first" can hand back a build older than the installed playwright
+    # expects. Sort on the build NUMBER, not the string, since
+    # "chromium-1000" sorts before "chromium-999" as text.
     def build_number(path: str) -> int:
         m = re.search(r"chromium-(\d+)", path)
         return int(m.group(1)) if m else -1
@@ -242,16 +252,39 @@ def _real_browsers() -> List[Tuple[str, str]]:
     return out
 
 
+def _real_first(prefer_real: bool, bundled: List[str]) -> bool:
+    """Whether a browser of the person's own goes ahead of the bundled
+    Chromium, given what _bundled_chromium found.
+
+    An app asks for that when its provider's bot protection turns the
+    Playwright build away. On Linux it is also so unless a build sits in
+    chrome-linux, the one folder looked in there before October 2026.
+    Builds in chrome-linux64 (x64 since Playwright 1.57) and
+    chrome-linux-arm64 (ARM since 1.63) were never found, so where only
+    those are on disk the person has been signing in through a browser of
+    their own, and putting the bundled copy first would move them and cost
+    them a sign-in. So finding those folders moves nobody. Ubuntu 23.10
+    and later also keep a downloaded Chrome for Testing from the user
+    namespaces its sandbox needs, so there it stops with "No usable
+    sandbox!" (Puppeteer's troubleshooting guide says so), and a window for
+    signing in to a bank is never started without its sandbox.
+    """
+    if prefer_real or sys.platform in ("win32", "darwin"):
+        return prefer_real
+    return not any(Path(path).parent.name == "chrome-linux" for path in bundled)
+
+
 def find_browser(prefer_real: bool = False) -> Tuple[Optional[str], Optional[str]]:
     """Return (name, executable path) for the browser to sign in with.
 
-    With prefer_real, an installed Edge/Chrome wins over the bundled Chromium
-   , that is what gets past the providers whose bot protection rejects the
-    Playwright build.
+    With prefer_real, an installed Edge/Chrome wins over the bundled
+    Chromium, which is what gets past the providers whose bot protection
+    rejects the Playwright build. On Linux one also does unless a build sits
+    in chrome-linux (_real_first).
     """
     real = _real_browsers()
     bundled = _bundled_chromium()
-    if prefer_real and real:
+    if _real_first(prefer_real, bundled) and real:
         return real[0]
     if bundled:
         return CHROMIUM, bundled[0]
@@ -298,11 +331,12 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
     list until one actually answers.
     """
     real = _real_browsers()
+    found = _bundled_chromium()
     # Only the newest bundled build. Playwright leaves older ones behind, and
     # retrying the same browser at a different revision opens a second window
     # to fail the same way, since the usual cause is the port rather than the
     # build.
-    bundled = [(CHROMIUM, p) for p in _bundled_chromium()[:1]]
+    bundled = [(CHROMIUM, p) for p in found[:1]]
     if mode == INSTALLED:
         return real
     if mode == BUNDLED:
@@ -311,11 +345,21 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
     # a real browser. Reordering that would move existing users onto a
     # different browser, and a profile built by one is not guaranteed to open
     # cleanly in another, which would cost them a sign-in for no benefit.
-    return (real + bundled) if prefer_real else (bundled + real)
+    # For the same reason a Linux machine that never found its bundled copy
+    # keeps the person's own browser first (_real_first).
+    return (real + bundled) if _real_first(prefer_real, found) else (bundled + real)
 
 
 def bundled_chromium_present() -> bool:
     return bool(_bundled_chromium())
+
+
+def bundled_chromium_first() -> bool:
+    """Whether the bundled Chromium is there and goes ahead of a browser of
+    the person's own for an app that does not ask for a real one. Off Linux
+    that is whenever it is there (_real_first)."""
+    found = _bundled_chromium()
+    return bool(found) and not _real_first(False, found)
 
 
 def profile_note(name: str) -> str:
