@@ -69,6 +69,14 @@ CUSTOM = statement("07/01/2031", "08/31/2031", "06/30/2031",
                    (("07/17/2031", "Transfer to bank"), ("07/31/2031", "Payment received"),
                     ("08/12/2031", "Fee")), "09/25/2031",
                    kind="Custom account statement")
+# The same custom statement with a payment on the first day of its second
+# month. Its text names its own first day and August's both, and its last
+# day is August's too, so beside August's statement it names each as
+# plainly as the other.
+CUSTOM_TIES = statement("07/01/2031", "08/31/2031", "06/30/2031",
+                        (("07/17/2031", "Transfer to bank"), ("08/01/2031", "Payment received"),
+                         ("08/12/2031", "Fee")), "09/25/2031",
+                        kind="Custom account statement")
 
 
 def row(rid, duration, status="COMPLETED", kind="PDF", created="2031-09-02T10:15:00Z"):

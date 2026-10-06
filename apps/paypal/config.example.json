@@ -16,6 +16,8 @@
   "pilot_count": 5,
   "//refuse": "Off. A business statement that names another statement's days",
   "//refuse2": "better than its own goes to Manual Review for you to look at.",
-  "//refuse3": "On, such a statement is not kept at all.",
+  "//refuse3": "On, such a statement is not kept at all when it has a day of its",
+  "//refuse4": "own to be checked by. One whose first and last day are both other",
+  "//refuse5": "statements' days too goes to Manual Review even then.",
   "refuse_wrong_documents": false
 }

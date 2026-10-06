@@ -281,18 +281,62 @@ def test_a_monthly_and_a_custom_statement_ending_the_same_day_are_both_filed(
     assert not result["manual_review"] and not result["wrong_document"]
 
 
+@pytest.mark.parametrize("refuse", [False, True], ids=["by default", "refusing"])
 def test_with_both_months_and_the_custom_listed_nothing_is_destroyed(
-        business, tmp_path, monkeypatch, capsys):
+        business, tmp_path, monkeypatch, capsys, refuse):
     """The custom statement's first day is July's and its last day August's,
     so nothing of its own is left to tell it by, and the July day among its
     transactions reads as July's. It waits in Manual Review, and both
-    monthly statements are filed."""
+    monthly statements are filed. With refuse_wrong_documents set it was
+    destroyed, refused with nothing of its own ever checked."""
     fake, context = business
     _with_custom(fake, B.ACCOUNT_ID + "1", B.ACCOUNT_ID + "4")
-    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys,
+                           cfg={"refuse_wrong_documents": refuse})
     assert B.statements(tmp_path) == B.FILED, said
     assert B.statements(tmp_path, "Manual Review") == {B.CUSTOM_FILED: B.CUSTOM}
     assert result["manual_review"] == 1 and not result["wrong_document"]
+
+
+# -- a statement ending on the same day as another ----------------------------------
+#
+# The custom statement over July and August, with a payment on August 1, the
+# first day of August's statement. Its text names its own first day and
+# August's both, and its last day is August's too.
+
+def test_a_statement_naming_one_ending_the_same_day_as_plainly_is_filed_as_neither(
+        business, tmp_path, monkeypatch, capsys):
+    """The custom statement's own row hands over the custom statement. It
+    names August's first day as plainly as its own, so it is not filed,
+    and August's statement, which does not name the custom one's first
+    day, is."""
+    fake, context = business
+    _with_custom(fake, B.ACCOUNT_ID + "1")
+    fake.served[B.CUSTOM_ID] = B.CUSTOM_TIES
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert B.statements(tmp_path) == {"2031-08-31 PayPal Monthly Statement.pdf": B.AUGUST}, said
+    assert B.statements(tmp_path, "Manual Review") == {B.CUSTOM_FILED: B.CUSTOM_TIES}
+    assert result["manual_review"] == 1 and not result["wrong_document"]
+    assert "ending on the same day as plainly as its own" in said
+
+
+@pytest.mark.parametrize("also", [(), (B.ACCOUNT_ID + "4",)], ids=["alone", "july listed"])
+def test_the_custom_statement_handed_over_in_augusts_row_is_not_filed_as_augusts(
+        business, tmp_path, monkeypatch, capsys, also):
+    """August's row hands over the custom statement. Beside the whole list
+    it named August's own day and nothing of the custom one's, since July
+    shares its first day, and it was filed as August's (review of c880958).
+    Compared alone with the statement that ends on the same day, it names
+    each as plainly, and it waits in Manual Review."""
+    fake, context = business
+    _with_custom(fake, B.ACCOUNT_ID + "1", *also)
+    fake.served[B.ACCOUNT_ID + "1"] = B.CUSTOM_TIES
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    filed = B.statements(tmp_path)
+    assert "2031-08-31 PayPal Monthly Statement.pdf" not in filed, said
+    review = B.statements(tmp_path, "Manual Review")
+    assert review["2031-08-31 PayPal Monthly Statement.pdf"] == B.CUSTOM_TIES
+    assert not result["wrong_document"]
 
 
 def test_a_row_is_found_by_its_days_whatever_order_the_table_draws(business, tmp_path,
@@ -308,6 +352,45 @@ def test_a_row_is_found_by_its_days_whatever_order_the_table_draws(business, tmp
     assert sorted(fake.pressed) == sorted([B.ACCOUNT_ID + "1", B.ACCOUNT_ID + "4"])
     assert fake.flags == []
     assert not result["manual_review"] and not result["wrong_document"]
+
+
+def test_a_table_of_numeric_dates_drawn_in_another_order_presses_each_in_its_own_row(
+        business, tmp_path, monkeypatch, capsys):
+    """The dates written MM/DD/YYYY, August's statement made on the 7th of
+    September, and the table drawn in the opposite order to the answer.
+    July's 07/2031 was found inside 09/07/2031 in August's row, and the
+    row in July's place in the answer, August's, was pressed for July
+    (review of c880958)."""
+    fake, context = business
+    aug, csv, sep, jul = (B.ACCOUNT_ID + n for n in "1234")
+    fake.reverse = True
+    fake.shown = {
+        aug: B.shown("08/01/2031 - 08/31/2031", "09/07/2031", "PDF", "Ready", "download"),
+        csv: B.shown("08/01/2031 - 08/31/2031", "09/07/2031", "CSV", "Ready", "csv"),
+        sep: B.shown("09/01/2031 - 09/30/2031", "10/01/2031", "PDF", "In progress", "generate"),
+        jul: B.shown("07/01/2031 - 07/31/2031", "08/02/2031", "PDF", "Ready", "download"),
+    }
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert sorted(fake.pressed) == sorted([aug, jul]), said
+    assert B.statements(tmp_path) == B.FILED
+    assert not result["manual_review"] and fake.flags == []
+
+
+def test_two_rows_naming_a_statements_days_are_never_told_apart_by_position(
+        business, tmp_path, monkeypatch, capsys):
+    """July's row is drawn with August's days, so two rows name August's
+    days and none names July's. The row in August's place in the answer,
+    under a table drawn in the opposite order, is July's, and it was pressed
+    for August. Now neither is pressed, and both wait for a later run."""
+    fake, context = business
+    fake.reverse = True
+    fake.shown[B.ACCOUNT_ID + "4"] = B.shown("Aug 1, 2031 - Aug 31, 2031", "Aug 2, 2031", "PDF",
+                                             "Ready", "download")
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert fake.pressed == [], said
+    assert B.statements(tmp_path) == {} and B.statements(tmp_path, "Manual Review") == {}
+    assert result["manual_review"] == 2
+    assert site.MANY_ROWS in said and site.NO_ROW in said
 
 
 @pytest.mark.parametrize("variant", ["blob", "direct"])
@@ -376,12 +459,15 @@ def _changed_at_the_first_press(monkeypatch, script):
 @pytest.mark.parametrize("change", [
     "(row) => { row.querySelector('button.dl').firstChild.nodeValue = 'Request statement'; }",
     "(row) => { row.children[1].lastChild.textContent = 'Jun 1, 2031 - Jun 30, 2031'; }",
-], ids=["its control relabeled", "another statement drawn in its row"])
+    "(row) => { row.children[1].lastChild.textContent = 'Jul 1, 2031 - Aug 31, 2031'; }",
+], ids=["its control relabeled", "another statement drawn in its row",
+        "a statement ending the same day drawn in its row"])
 def test_a_row_that_changed_between_reading_and_the_press_is_not_pressed(
         business, tmp_path, monkeypatch, capsys, change):
     """August's row, found and read, is changed before the press, its
     Download given another label, or its row given another statement's
-    days. Nothing is pressed for August, and July is taken as before."""
+    days, one that ends on August's last day among them. Nothing is pressed
+    for August, and July is taken as before."""
     fake, context = business
     _changed_at_the_first_press(monkeypatch, (
         "() => (%s)(document.querySelector('button.dl[data-row=\"%s\"]').closest('tr'))"
@@ -390,6 +476,27 @@ def test_a_row_that_changed_between_reading_and_the_press_is_not_pressed(
     assert fake.pressed == [B.ACCOUNT_ID + "4"], said
     assert B.statements(tmp_path) == {"2031-07-31 PayPal Monthly Statement.pdf": B.JULY}
     assert result["manual_review"] == 1 and fake.flags == []
+
+
+def test_a_row_redrawn_with_a_statement_ending_the_same_day_is_not_pressed(
+        business, tmp_path, monkeypatch, capsys):
+    """At the first press, August's row is drawn again with the custom
+    statement in it, its days and its Download. The row still named
+    August's last day, which was all the check at the press asked, and the
+    custom statement was pressed for and filed as August's (review of
+    c880958). The whole choice is made again at the press now, and it no
+    longer comes to that row, so nothing is pressed for either."""
+    fake, context = business
+    _with_custom(fake, B.ACCOUNT_ID + "1")
+    fake.served[B.CUSTOM_ID] = B.CUSTOM_TIES
+    _changed_at_the_first_press(monkeypatch, (
+        "() => { const b = document.querySelector('button.dl[data-row=\"%s\"]');"
+        " b.closest('tr').children[1].lastChild.textContent = 'Jul 1, 2031 - Aug 31, 2031';"
+        " b.dataset.row = '%s'; }" % (B.ACCOUNT_ID + "1", B.CUSTOM_ID)))
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert fake.pressed == [], said
+    assert B.statements(tmp_path) == {}
+    assert result["manual_review"] == 2 and fake.flags == []
 
 
 def test_no_forbidden_control_is_pressed_on_the_page(business, tmp_path, monkeypatch, capsys):

@@ -29,9 +29,10 @@ DAYS = [("2031-08-01", "2031-08-31"), ("2031-07-01", "2031-07-31"), ("2031-06-01
 class _Store:
     def __init__(self, data=None):
         self.data = data or {}
+        self.written = {}
 
-    def update(self, *a, **kw):
-        pass
+    def update(self, key, value, *a, **kw):
+        self.written.setdefault(key, {}).update(value)
 
     def append_rows(self, *a, **kw):
         pass
@@ -64,7 +65,11 @@ class Checked(StrictDelivery):
 class Refused(StrictDelivery):
     """The stand-in, with a delivery that says the statement named other
     days than it was listed under, as the real one says of one it placed
-    when it is not strict."""
+    when it is not strict. `checked` is what it had of its own to check."""
+
+    def __init__(self, *a, checked=("date", "start"), **kw):
+        super().__init__(*a, **kw)
+        self.checked = tuple(checked)
 
     def _fake(self, name):
         fake = super()._fake(name)
@@ -72,7 +77,7 @@ class Refused(StrictDelivery):
         def refused(*args, **kwargs):
             got = fake(*args, **kwargs)
             return delivery.Delivery(got.outcome, got.mechanism,
-                                     identity.Verdict(identity.REFUSED, ("date", "start"), ()))
+                                     identity.Verdict(identity.REFUSED, self.checked, ()))
         refused.__name__ = name
         return refused
 
@@ -169,12 +174,53 @@ def test_what_the_page_saved_is_placed_through_the_same_check(tmp_path, monkeypa
     assert placed["data"][:5] == b"%PDF-"
 
 
-def test_the_check_is_strict_only_when_refuse_wrong_documents_says_so(tmp_path, monkeypatch):
-    spy = Checked().install(monkeypatch)
+def test_with_refuse_wrong_documents_set_a_refused_statement_is_destroyed_by_the_app(
+        tmp_path, monkeypatch, capsys):
+    """The delivery is never strict, so it never destroys one itself, and
+    the app destroys a refused statement that had a day of its own to be
+    checked by."""
+    spy = Refused().install(monkeypatch)
     app, _failures, _pressed = _app(tmp_path, monkeypatch)
     app.config["refuse_wrong_documents"] = True
     app.process(_docs()[:1])
-    assert spy.calls[0].arguments["strict"] is True
+    assert spy.calls[0].arguments["strict"] is False
+    assert not list(tmp_path.glob("*.pdf")) and not list((tmp_path / "review").glob("*.pdf"))
+    assert app.stats["wrong_document"] == 1 and app.stats["manual_review"] == 1
+    assert "The file was destroyed" in " ".join(capsys.readouterr().out.split())
+
+
+def test_a_refused_statement_with_nothing_of_its_own_checked_is_never_destroyed(
+        tmp_path, monkeypatch, capsys):
+    """Its first and last day were both other statements' days too, so
+    nothing of its own was there to count and nothing says it is not this
+    one. With refuse_wrong_documents set it was destroyed. It waits in
+    Manual Review."""
+    Refused(checked=()).install(monkeypatch)
+    app, _failures, _pressed = _app(tmp_path, monkeypatch)
+    app.config["refuse_wrong_documents"] = True
+    app.process(_docs()[:1])
+    assert not list(tmp_path.glob("*.pdf")), "it was filed in the archive"
+    assert len(list((tmp_path / "review").glob("*.pdf"))) == 1
+    assert app.stats["wrong_document"] == 0 and app.stats["manual_review"] == 1
+    said = " ".join(capsys.readouterr().out.split())
+    assert "destroyed" not in said and "put in Manual Review" in said
+
+
+def test_a_refused_statement_that_cannot_be_destroyed_goes_to_review(tmp_path, monkeypatch):
+    Refused().install(monkeypatch)
+    app, _failures, _pressed = _app(tmp_path, monkeypatch)
+    app.config["refuse_wrong_documents"] = True
+    real = Path.unlink
+
+    def held(self, *a, **kw):
+        if self.parent == tmp_path and self.suffix == ".pdf":
+            raise OSError("held by another program")
+        return real(self, *a, **kw)
+    monkeypatch.setattr(Path, "unlink", held)
+    app.process(_docs()[:1])
+    assert not list(tmp_path.glob("*.pdf")), "left in the archive under its name"
+    assert len(list((tmp_path / "review").glob("*.pdf"))) == 1
+    assert app.stats["wrong_document"] == 0 and app.stats["manual_review"] == 1
 
 
 def test_a_statement_naming_other_days_goes_to_review_with_a_note_saying_so(
@@ -192,26 +238,103 @@ def test_a_statement_naming_other_days_goes_to_review_with_a_note_saying_so(
     assert failures and failures[0][1] == "it names other days than it was listed under"
 
 
-def test_a_statement_that_cannot_go_to_review_is_never_left_under_its_name(
+def _held(monkeypatch, tmp_path, move=False, copy=False, remove=False):
+    """Make moving the statement to Manual Review, copying it there and
+    removing it from the archive fail, as each does while a sync client or
+    a virus scanner holds a file."""
+    replace, unlink, copyfile = Path.replace, Path.unlink, app_mod.shutil.copyfile
+
+    def moved(self, target):
+        if move and Path(target).parent == tmp_path / "review":
+            raise OSError("held by another program")
+        return replace(self, target)
+
+    def removed(self, *a, **kw):
+        if remove and self.parent == tmp_path and self.suffix == ".pdf":
+            raise OSError("held by another program")
+        return unlink(self, *a, **kw)
+
+    def copied(source, target, *a, **kw):
+        if copy:
+            Path(target).write_bytes(b"%PDF-")
+            raise OSError("held by another program")
+        return copyfile(source, target, *a, **kw)
+    monkeypatch.setattr(Path, "replace", moved)
+    monkeypatch.setattr(Path, "unlink", removed)
+    monkeypatch.setattr(app_mod.shutil, "copyfile", copied)
+
+
+def _record(app):
+    (only,) = app.progress.written.values()
+    return only
+
+
+def test_a_statement_that_cannot_be_moved_to_review_is_copied_there(
         tmp_path, monkeypatch, capsys):
-    """Moving it to Manual Review failed, as it does while a sync client or
-    a virus scanner holds a file. It used to stay in the archive under the
-    name it would have been filed by."""
+    """Moving it to Manual Review failed. It used to be removed and kept
+    nowhere. It is copied there, then removed from the archive."""
     Refused().install(monkeypatch)
     app, _failures, _pressed = _app(tmp_path, monkeypatch)
-    real = Path.replace
-
-    def held(self, target):
-        if Path(target).parent == tmp_path / "review":
-            raise OSError("held by another program")
-        return real(self, target)
-    monkeypatch.setattr(Path, "replace", held)
+    _held(monkeypatch, tmp_path, move=True)
     app.process(_docs()[:1])
     assert not list(tmp_path.glob("*.pdf")), "left in the archive under its name"
-    assert not list((tmp_path / "review").glob("*.pdf"))
-    assert app.stats["manual_review"] == 1
+    kept = list((tmp_path / "review").glob("*.pdf"))
+    assert len(kept) == 1 and kept[0].read_bytes()[:5] == b"%PDF-"
+    assert _record(app)["pdf_path"] == str(kept[0])
+    said = " ".join(capsys.readouterr().out.split())
+    assert "so it was put in Manual Review" in said
+
+
+def test_a_statement_that_cannot_be_moved_or_copied_is_never_left_under_its_name(
+        tmp_path, monkeypatch, capsys):
+    Refused().install(monkeypatch)
+    app, _failures, _pressed = _app(tmp_path, monkeypatch)
+    _held(monkeypatch, tmp_path, move=True, copy=True)
+    app.process(_docs()[:1])
+    assert not list(tmp_path.glob("*.pdf")), "left in the archive under its name"
+    assert not list((tmp_path / "review").glob("*.pdf")), "a part of a copy was left"
+    assert _record(app)["pdf_path"] == "" and app.stats["manual_review"] == 1
     said = " ".join(capsys.readouterr().out.split())
     assert "could not be moved to Manual Review, so it was not kept" in said
+
+
+@pytest.mark.parametrize("copy", [False, True], ids=["copied", "not copied"])
+def test_a_statement_that_cannot_be_removed_either_is_pointed_at_where_it_is(
+        tmp_path, monkeypatch, capsys, copy):
+    """Removing it failed too. Its record said it was not kept, with the
+    statement still in the archive under the name it would have been filed
+    by. The record points at it there now, and says so."""
+    Refused().install(monkeypatch)
+    app, _failures, _pressed = _app(tmp_path, monkeypatch)
+    _held(monkeypatch, tmp_path, move=True, copy=copy, remove=True)
+    app.process(_docs()[:1])
+    (left,) = list(tmp_path.glob("*.pdf"))
+    record = _record(app)
+    assert record["pdf_path"] == str(left)
+    assert "still there under the name it would have been filed by" in record["notes"]
+    assert ("with a copy in Manual Review" in record["notes"]) is (not copy)
+    said = " ".join(capsys.readouterr().out.split())
+    assert "still there under the name it would have been filed by" in said
+    assert "not kept" not in said
+
+
+def test_two_statements_ending_on_the_same_day_are_told_apart_by_their_first_days(
+        tmp_path, monkeypatch):
+    """Both would be filed by one name. The second used to get " (2)",
+    which names whichever was saved second. It gets the first day it
+    covers, the same name on every run."""
+    Checked().install(monkeypatch)
+    app, _failures, _pressed = _app(tmp_path, monkeypatch)
+    docs = []
+    for first in ("2031-07-01", "2031-06-01"):
+        ref = site.Period(start=first, end="2031-08-31")
+        docs.append(app_mod.Document(title=ref.title(), category="Statement",
+                                     summary="Statement", date=ref.end, href=ref.href()))
+    app.process(docs)
+    names = sorted((p.name for p in tmp_path.glob("*.pdf")), key=len)
+    assert len(names) == 2, names
+    plain, marked = names
+    assert marked == plain[:-len(".pdf")] + " 2031-06-01.pdf", names
 
 
 def test_the_stand_in_refuses_what_the_real_call_would():

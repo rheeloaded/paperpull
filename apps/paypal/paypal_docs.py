@@ -44,6 +44,7 @@ import argparse
 import logging
 import random
 import re
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -70,6 +71,17 @@ DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 # which reads no list of its own. A run that stopped on the way left the
 # list it knows short, or empty, and Resume used to call that complete.
 LISTING_FILE = "last-listing.json"
+
+# Why a business statement waits in Manual Review rather than being filed.
+# The note its record carries, the word its row of the index gets and what
+# its failure file says, for each.
+REFUSED_NOTE = ("It names other days than it was listed under", "Names other days",
+                "it names other days than it was listed under")
+UNCHECKED_NOTE = ("Its days could not be checked in its own text", "Not checked",
+                  "its days could not be checked in its own text")
+TIED_NOTE = ("It names the days of a statement ending on the same day as plainly as its "
+             "own", "Ties another statement",
+             "it names another statement ending the same day as plainly")
 
 
 def ask(prompt: str) -> str:
@@ -511,6 +523,10 @@ class App:
             print("    days it covers it does not know. Each was left alone and is")
             print("    counted as failed, and the file this run writes says what kind")
             print("    of value it was without saying the value.")
+            same = listing.counts.get(site.UNREAD_SAME_DAY, 0)
+            if same:
+                print(f"    {same} of them named no days and was made on the same day as")
+                print("    another that named none, so which is which could not be told.")
         if not listing.whole:
             print("  PayPal said more of the list follows, and this app could not page")
             print("    to it with the list's own next-page control.")
@@ -785,73 +801,143 @@ class App:
         # for a person in Manual Review rather than destroyed, unless
         # refuse_wrong_documents is set, as in every other app that checks.
         # The check can be wrong too, and a destroyed statement is one nobody
-        # can look at, pressed for and destroyed again on every run.
-        strict = bool(self.config.get("refuse_wrong_documents", False))
+        # can look at, pressed for and destroyed again on every run. So the
+        # delivery never destroys one here, and _destroyed decides.
         got = delivery.deliver(
             page, request, out_path,
             is_safe_url=site.is_safe_url, dl_dir=self._dl_dir, rivals=rivals,
-            settle_ms=site.BUSINESS_SETTLE_MS, journal=self.journal, strict=strict)
+            settle_ms=site.BUSINESS_SETTLE_MS, journal=self.journal, strict=False)
         if got.outcome in (delivery.NOTHING, delivery.NOT_A_PDF):
             data = site.taken_from_the_page(page, out_path)
             if data:
                 got = delivery.place(data, out_path, expect=request.expect, rivals=rivals,
-                                     journal=self.journal, strict=strict)
+                                     journal=self.journal, strict=False)
         print("  %s" % got.say())
-        if got.outcome == delivery.WRONG:
-            why = "the statement that came does not name the days it was listed under"
-            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
-            self._write_row(doc, "Wrong document", "Needs Manual Review")
-            self.write_failure("save the document", why)
-            self.stats["manual_review"] += 1
-            self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
-            print("  Nothing was saved for it. The file was destroyed rather")
-            print("  than filed under this statement's name.")
-            return None
         if not got.ok:
             return False
         verdict = got.verdict.outcome if got.verdict is not None else identity.UNCHECKED
+        if verdict == identity.REFUSED:
+            if not self._destroyed(doc, out_path, got.verdict):
+                self._to_review(doc, out_path, REFUSED_NOTE, got.verdict)
+            return None
         if verdict != identity.VERIFIED:
-            self._to_review(doc, out_path, verdict == identity.REFUSED, got.verdict)
+            self._to_review(doc, out_path, UNCHECKED_NOTE, got.verdict)
+            return None
+        if self._ties_one_ending_the_same_day(out_path, request.expect, rivals):
+            self._to_review(doc, out_path, TIED_NOTE, got.verdict)
             return None
         return True
 
-    def _to_review(self, doc: Document, out_path, refused: bool, verdict=None) -> None:
+    def _destroyed(self, doc: Document, out_path, verdict) -> bool:
+        """With refuse_wrong_documents set, a statement whose text names
+        another statement's days better than its own is not kept at all, as
+        in every other app that checks, but only when it had a day of its
+        own to be checked by (Verdict.checked). One whose first and last day
+        are both other statements' days too had nothing of its own to count,
+        so nothing says it is not this one, and it goes to Manual Review even
+        then. True when it was destroyed."""
+        if not self.config.get("refuse_wrong_documents", False):
+            return False
+        if verdict is None or not verdict.checked:
+            return False
+        try:
+            out_path.unlink()
+        except OSError as e:
+            log.info("could not remove the refused statement: %s", e)
+            return False
+        why = "the statement that came does not name the days it was listed under"
+        doc.pdf_path = doc.pdf_filename = ""
+        self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+        self._write_row(doc, "Wrong document", "Needs Manual Review")
+        self.write_failure("save the document", why)
+        self.stats["manual_review"] += 1
+        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+        print("  Nothing was saved for it. The file was destroyed rather")
+        print("  than filed under this statement's name.")
+        return True
+
+    @staticmethod
+    def _ties_one_ending_the_same_day(path, mine, rivals) -> bool:
+        """Whether the saved statement's text names a statement listed as
+        ending on the same day as this one as plainly as this one, the two
+        compared alone (identity.distinguish with the other asked for).
+        Among the whole list a statement's own days can all be shared, a
+        custom statement's first day with July's and its last day with
+        August's, and then nothing of it was counted, so a custom statement
+        naming the first of August among its payments was filed as August's.
+        Compared alone each keeps its first day, and a text naming both first
+        days as plainly is neither's to file."""
+        if mine is None:
+            return False
+        for rival in rivals or ():
+            if rival == mine or getattr(rival, "date", "") != mine.date:
+                continue
+            if identity.distinguish(path, rival, [mine]).outcome == identity.VERIFIED:
+                return True
+        return False
+
+    def _to_review(self, doc: Document, out_path, note, verdict=None) -> None:
         """Keep a business statement for a person to look at, never filed.
-        One that names other days than it was listed under, and one whose
-        days could not be checked, a scan or one known only by the day it
-        was made, each go to Manual Review with a note saying which. One that
-        cannot be moved there is removed, so it is never left in the archive
-        under its name, and a later run takes it again."""
-        why = ("It names other days than it was listed under" if refused
-               else "Its days could not be checked in its own text")
+        One that names other days than it was listed under, one whose days
+        could not be checked, a scan or one known only by the day it was
+        made, and one naming a statement that ends on the same day as plainly
+        as its own each go to Manual Review with a note saying which (`note`,
+        one of the *_NOTE tuples). One that cannot be moved there is copied
+        there and then removed, so it is never left in the archive under its
+        name. When it cannot be removed either, its record points at it where
+        it still is and says so."""
+        why, word, failed = note
         review = unique_path(self.paths.manual_review, out_path.name,
                              self.config["max_path_length"])
         try:
             out_path.replace(review)
+            kept, left = review, False
         except OSError as e:
             log.info("could not move the statement to Manual Review: %s", e)
-            review = None
+            kept = self._copied(out_path, review)
             try:
                 out_path.unlink()
+                left = False
             except OSError as gone:
                 log.info("could not remove it from the archive either: %s", gone)
-        if review is None:
+                left = True
+        if left:
+            doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
+            why += (", and it could not be removed from where it was saved, so it is "
+                    "still there under the name it would have been filed by")
+            if kept is not None:
+                why += ", with a copy in Manual Review"
+        elif kept is None:
             doc.pdf_path = doc.pdf_filename = ""
             why += ", and it could not be moved to Manual Review, so it was not kept"
         else:
-            doc.pdf_path, doc.pdf_filename = str(review), review.name
+            doc.pdf_path, doc.pdf_filename = str(kept), kept.name
         self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
-        self._write_row(doc, "Names other days" if refused else "Not checked",
-                        "Needs Manual Review")
-        self.write_failure("check the saved statement",
-                           "it names other days than it was listed under" if refused
-                           else "its days could not be checked in its own text",
+        self._write_row(doc, word, "Needs Manual Review")
+        self.write_failure("check the saved statement", failed,
                            postmortem={"identity": verdict.report()} if verdict else None)
         self.stats["manual_review"] += 1
-        if review is None:
+        if left:
+            print("  %s. Move it out of that folder yourself." % why)
+        elif kept is None:
             print("  %s. A later run takes it again." % why)
         else:
             print("  %s, so it was put in Manual Review rather than filed." % why)
+
+    @staticmethod
+    def _copied(source, review) -> Optional[Path]:
+        """A copy of the statement in Manual Review, for when it could not be
+        moved there, or None when that failed too, with no part of one left."""
+        try:
+            shutil.copyfile(str(source), str(review))
+            return review
+        except OSError as e:
+            log.info("could not copy the statement to Manual Review: %s", e)
+            try:
+                review.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return None
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one statement. For a personal account the site layer asks
@@ -859,16 +945,19 @@ class App:
         A business statement is pressed for in its own row (_take_business)."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
+        ref = site.business_ref(doc.href)
         # The last of the document id, used only if the name is taken.
         # Two documents on one day used to differ by " (2)", which says
         # nothing about which is which and moves between them when a file
-        # is deleted (#49, and the same complaint on #43).
+        # is deleted (#49, and the same complaint on #43). A business
+        # statement has no id, and two ending on the same day are told apart
+        # by the first day each covers, the same name on every run.
+        mark = (ref.start or ref.created) if ref is not None else (doc.document_id or "")[-6:]
         out_path = unique_path(folder, filename, self.config["max_path_length"],
-                               distinguisher=(doc.document_id or "")[-6:])
+                               distinguisher=mark)
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        ref = site.business_ref(doc.href)
         if ref is not None:
             saved = self._take_business(page, doc, ref, out_path)
             if saved is None:
