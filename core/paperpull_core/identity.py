@@ -77,9 +77,11 @@ MIN_NUMBER = 4
 
 # The facts found only as a number of their own (see on_its_own). A
 # document number is left as it was, since MIN_NUMBER already keeps a
-# short one out, and so is a period, which no app passes and nothing has
-# measured.
-ON_ITS_OWN = ("date", "total")
+# short one out. A period is one too, since July's 7/2031 was found inside
+# the August day 08/17/2031 and 1/2031 inside 12/31/2031, and PayPal's
+# business statements refused a correct August statement for it. So is
+# the first day a statement covers, a date like any other.
+ON_ITS_OWN = ("date", "start", "period", "total")
 
 
 def _squash(text: str) -> str:
@@ -273,12 +275,19 @@ class Identity:
     # reads it.
     label: str = ""
     extra: tuple = field(default_factory=tuple)   # app-supplied strong facts
+    # ISO, the first day a statement covers, for one dated by the last day
+    # of a range of days. Statements of one provider that each carry their
+    # first and last day carry the same kinds of fact whatever their range,
+    # so a neighbour that ends on the same day cannot keep a kind of fact
+    # this one lacks once the day they share stops counting.
+    start: str = ""
 
     def strong(self) -> dict:
         """Each strong fact that is usable, and the ways it might print."""
         out = {}
         for name, variants in (("number", number_variants(self.number)),
                                ("date", date_variants(self.date)),
+                               ("start", date_variants(self.start)),
                                ("period", period_variants(self.period)),
                                ("total", amount_variants(self.total))):
             if variants:
@@ -352,8 +361,9 @@ class Verdict:
 def contains(text: str, variants: Iterable[str], fact: str = "") -> bool:
     """Whether any way of printing a fact appears in the text.
 
-    `fact` is the fact's name. A date or a total counts only as a number
-    of its own (see on_its_own), anything else wherever it appears."""
+    `fact` is the fact's name. A date, a first day, a period or a total
+    counts only as a number of its own (see on_its_own), anything else
+    wherever it appears."""
     if not text:
         return False
     low = text.lower()

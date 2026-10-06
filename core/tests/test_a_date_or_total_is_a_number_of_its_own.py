@@ -142,14 +142,58 @@ def test_a_till_that_prints_a_letter_at_a_time_is_still_read():
     assert set(v.matched) == {"date", "total"}
 
 
-def test_only_a_date_and_a_total_are_held_to_a_number_of_their_own():
+def test_a_document_number_is_still_matched_wherever_it_appears():
     """A document number is matched as it was, and so is anything the
-    caller names nothing for."""
+    caller names nothing for. A date, a first day, a period and a total are
+    held to a number of their own."""
     text = "Reference 90012345678"
     assert I.contains(text, ["12345678"])
     assert I.contains(text, ["12345678"], fact="number")
     assert not I.contains("Sale 11/19/27", ["1/19/27"], fact="date")
     assert I.contains("Sale 11/19/27", ["1/19/27"])
+
+
+# -- a month and a statement's first day, the same way ---------------------------
+#
+# PayPal's business statements name each by its period. Matched anywhere,
+# July's month 7/2031 was found inside the August day 08/17/2031 and 1/2031
+# inside 12/31/2031, so an August statement that listed a payment on the
+# 17th and its opening balance as of July 31 named July better than August,
+# and was refused as July's (review of the business statements, 2026-10).
+
+def test_a_month_is_not_found_inside_a_day_of_another_month():
+    july, january = I.period_variants("2031-07"), I.period_variants("2031-01")
+    assert not I.contains("08/17/2031 Payment received", july, fact="period")
+    assert not I.contains("Ending balance as of 12/31/2031", january, fact="period")
+    assert not I.contains("Reference 117/2031", july, fact="period")
+    for printed in ("Statement for July 2031", "Period 07/2031", "Period 7/2031",
+                    "Month 2031-07", "Jul 2031 activity"):
+        assert I.contains(printed, july, fact="period"), printed
+
+
+def test_a_statements_first_day_is_not_found_inside_a_longer_date():
+    first = I.date_variants("2031-01-19")
+    assert not I.contains("Statement period 11/19/2031 to 12/18/2031", first, fact="start")
+    assert I.contains("Statement period 01/19/2031 to 02/18/2031", first, fact="start")
+    v = verdict(I.Identity(date="2031-02-18", start="2031-01-19"),
+                "Statement period 01/19/2031 to 02/18/2031")
+    assert v.outcome == I.VERIFIED and set(v.matched) == {"date", "start"}
+
+
+def test_an_august_statement_naming_july_in_passing_is_not_taken_for_july():
+    """The review's statement, whole. Its own first and last day, July's
+    closing balance, and a payment on the 17th."""
+    text = ("Statement period 08/01/2031 to 08/31/2031\n"
+            "Beginning balance as of 07/31/2031\n08/17/2031 Payment received" + PAD)
+    august = I.Identity(date="2031-08-31", period="2031-08")
+    july = I.Identity(date="2031-07-31", period="2031-07")
+    assert I.distinguish(None, august, [july], text=text).outcome == I.VERIFIED
+    # With each one's first day as well, which is what PayPal's business
+    # statements carry, July is told apart from it too.
+    august = I.Identity(date="2031-08-31", start="2031-08-01")
+    july = I.Identity(date="2031-07-31", start="2031-07-01")
+    assert I.distinguish(None, august, [july], text=text).outcome == I.VERIFIED
+    assert I.distinguish(None, july, [august], text=text).outcome == I.REFUSED
 
 
 def test_nothing_is_found_in_no_text():
