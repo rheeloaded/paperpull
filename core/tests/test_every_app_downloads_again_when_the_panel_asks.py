@@ -290,7 +290,7 @@ def test_every_app_has_one_command_line_that_runs_pilot_and_run_all(folder):
     assert len(found) == 1, "%s has %d modules that run Pilot and Run All from a command line" \
         % (folder.name, len(found))
     module, parser_fn, cls = found[0]
-    assert parser_fn and cls, "%s: main's parser or the app it builds was not found" % module.name
+    assert parser_fn and cls, "main's parser in %s, or the app it builds, was not found" % module.name
 
 
 @pytest.mark.parametrize("folder", FOLDERS, ids=lambda d: d.name)
@@ -327,7 +327,7 @@ def test_a_document_downloaded_before_is_done_unless_the_panel_asks_again(folder
     app_class = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == cls)
     sites = skip_sites(app_class)
     deciders = sorted({decider for _fn, decider, _g in sites if decider})
-    assert deciders, "%s: no loop asks a method whether a document is done" % folder.name
+    assert deciders, "no loop in %s asks a method whether a document is done" % folder.name
 
     for name in deciders:
         answers = {}
