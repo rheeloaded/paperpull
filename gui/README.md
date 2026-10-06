@@ -104,19 +104,26 @@ in your browser, so glance at the hint under the row before a Run All.
 Downloads are remembered for good, so a document is never fetched twice,
 even after you delete its PDF, say once it is in paperless-ngx. To get such
 files back, tick **Download again what this app already downloaded** under
-Scope, choose a year or a From and To date, and press **Pilot** or **Run
-All**. The panel asks first, then adds `--redownload` to that one run, and
-every document in the range is fetched again, the ones already downloaded
-included.
+Scope, choose a year, or both a From and a To date, and press **Pilot** or
+**Run All**. The panel asks first, then adds `--redownload` to that one run.
+The app goes through every document in the range again, the ones already
+downloaded included, and fetches again each one whose file is gone.
 
-- Nothing is overwritten. Each new copy is saved beside the file already
-  there, under a name of its own.
-- The provider is asked for each document again, so a long range takes as
-  long as the first download did.
-- It needs a year or dates, so a whole history is never fetched again by
-  accident.
-- The box clears once a run starts and is never remembered, so the next
-  Run All is an ordinary one. Resume never downloads again.
+- Nothing is overwritten. A file you still have stays as it is, and the
+  app may save a second copy beside it, under a name of its own.
+- The provider is asked again for each document fetched, so a long range
+  takes as long as the first download did.
+- It needs a year, or both a From and a To date, so a whole history is
+  never fetched again by accident. One date alone is not enough, since it
+  leaves the range open at the other end.
+- The box clears once a Pilot or Run All that uses it starts, and is never
+  remembered, so the next Run All is an ordinary one. Any other button
+  leaves it ticked, and says in the output that it applies only to Pilot
+  and Run All.
+- Resume never downloads again. When a run that downloads again stops
+  partway, the panel says so. Running it again for the same range fetches
+  again what the first run already restored, so choose the part of the
+  range it did not reach.
 - PaperPull Server does not offer it. A run there hands every file it saves
   to Paperless, which would get each of these documents a second time.
 

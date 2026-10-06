@@ -198,8 +198,9 @@ document, not to the file on disk, so you can import everything into
 paperless-ngx, delete the PDFs, and the next run still skips them. It only
 fetches what is genuinely new, and lists it in `new-this-run.txt`. To fetch
 them again anyway, tick **Download again** under Scope in the control panel
-and choose a year or dates, or add `--redownload` to a run from a terminal.
-Nothing is overwritten. Each copy is saved beside whatever is still there.
+and choose a year, or both a From and a To date, or add `--redownload` to a
+run from a terminal. Nothing is overwritten. A file still there stays as it
+is, and the app may save a second copy beside it.
 
 ### Read-only by construction
 
@@ -280,7 +281,7 @@ The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
 person uses day to day, plus a Scope row (one year, or a date range) that
 becomes the same `--year`, `--start-date` and `--end-date` every app takes,
 and a **Download again** box under it that adds `--redownload` to one Pilot
-or Run All in that scope, after asking.
+or Run All scoped to a year or to both ends of a range, after asking.
 
 Each app also has its own README with provider-specific details and quirks.
 (Prefer to set apps up one at a time? `paperpull <app> setup`, or the app's

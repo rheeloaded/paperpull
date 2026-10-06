@@ -33,11 +33,13 @@ fastapi = pytest.importorskip("fastapi")
 uvicorn = pytest.importorskip("uvicorn")
 
 FLAG = "--redownload"
+# The two scopes a run that downloads again may have, a year or both ends of
+# a range. One date alone is open at its other end.
 SCOPES = [({"year": "2025"}, ["--year", "2025"]),
           ({"start": "2025-01-01", "end": "2025-06-30"},
-           ["--start-date", "2025-01-01", "--end-date", "2025-06-30"]),
-          ({"start": "2025-01-01"}, ["--start-date", "2025-01-01"]),
-          ({"end": "2025-06-30"}, ["--end-date", "2025-06-30"])]
+           ["--start-date", "2025-01-01", "--end-date", "2025-06-30"])]
+ONE_END = [{"start": "1990-01-01"}, {"end": "2026-10-06"},
+           {"start": "2025-01-01", "end": ""}, {"start": "", "end": "2025-06-30"}]
 OTHER_ACTIONS = sorted(set(app_module.ACTIONS) - {"pilot", "all"})
 
 
@@ -156,7 +158,7 @@ def test_without_the_box_the_flag_never_appears(started, action, box):
 @pytest.mark.parametrize("value", ["true", "True", "1", "yes", FLAG, 1, 0, None, [], {}, [True]])
 def test_a_value_that_is_not_true_or_false_is_refused(started, key, value):
     status, said = post(again(**{key: value}))
-    assert status == 400, said
+    assert status == 400 and "true or false" in said, said
     assert started == []
 
 
@@ -182,7 +184,10 @@ def test_a_field_the_page_never_sends_is_refused(started, extra):
 @pytest.mark.parametrize("field,value", [("app", 1), ("action", ["all"]), ("account", None),
                                          ("year", 2025), ("start", {"a": 1}), ("end", True)])
 def test_a_text_field_of_another_kind_is_refused(started, field, value):
-    assert post(again(**{field: value}))[0] == 400
+    """By the check of its kind, not by a later check that happens to
+    refuse it too, as an unknown account or action would be."""
+    status, said = post(again(**{field: value}))
+    assert (status, said) == (400, "%s is text" % field)
     assert started == []
 
 
@@ -210,8 +215,32 @@ def test_any_other_action_is_refused(started, action):
 @pytest.mark.parametrize("scope", [{}, {"year": "", "start": "", "end": ""}, {"year": "  "}])
 def test_no_scope_is_refused(started, action, scope):
     status, said = post(again(action, scope))
-    assert status == 400 and "year or dates" in said, said
+    assert status == 400 and "a year, or both a From and a To date" in said, said
     assert started == []
+
+
+@pytest.mark.parametrize("action", ["pilot", "all"])
+@pytest.mark.parametrize("scope", ONE_END)
+def test_one_end_of_a_range_is_refused(started, action, scope):
+    """From 1990 alone, or To today alone, is a whole history."""
+    status, said = post(again(action, scope))
+    assert status == 400 and "a year, or both a From and a To date" in said, said
+    assert started == []
+    # Without the box the same scope is an ordinary run, as it always was.
+    body = dict(again(action, scope), redownload=False)
+    assert post(body)[0] == 200 and len(started) == 1 and FLAG not in started[0]
+
+
+def test_the_apps_are_found_off_the_event_loop(started, monkeypatch):
+    """Finding the apps reads every install's folder. The POST handler is a
+    coroutine, so done there it would hold up every other request, and the
+    GET handler, a plain function, is already run in the threadpool."""
+    seen = []
+    found = app_module.discover_apps
+    monkeypatch.setattr(app_module, "discover_apps",
+                        lambda: seen.append(threading.current_thread()) or found())
+    assert post(again("all"))[0] == 200
+    assert seen and seen[0] is not threading.main_thread(), seen
 
 
 @pytest.mark.parametrize("action", ["pilot", "all"])
@@ -316,13 +345,42 @@ def test_the_box_is_never_remembered():
     assert "addEventListener('pageshow', e => { if (e.persisted) clearAgain(); })" in script
 
 
-def test_the_box_clears_once_a_run_starts():
+def test_the_box_clears_once_a_run_that_uses_it_starts():
     run = function("run")
     asked = run.index("confirm(againQuestion(")
-    cleared = run.index("clearAgain();")
+    cleared = run.index("if (again) clearAgain();")
     assert asked < cleared < run.index("postRun(") and cleared < run.index("new EventSource(")
     # Nothing between the question and the clearing can end the run first.
     assert "return" not in run[run.index("\n", asked):cleared]
+    # And nothing else in a run clears it.
+    assert run.count("clearAgain()") == 1
+
+
+def test_another_button_leaves_it_ticked_and_says_so():
+    """Tick, Login, then Run All used to be an ordinary Run All, since the
+    Login had cleared the box with nothing said."""
+    run = function("run")
+    assert "const ticked = !opts.app && $('again').checked;" in run
+    told = run.index("if (ticked && !again)")
+    said = " ".join(run[told:run.index("\n  }", told)].split())
+    assert "Download again stays ticked. It applies only to Pilot and Run All" in said
+    assert "runs as usual" in said
+
+
+def test_a_run_that_ends_early_says_resume_will_not_download_again():
+    """Resume never downloads again, so it would skip the rest of the range
+    and then call the run finished with no issues."""
+    body = " ".join(page().split())
+    left = re.search(r"const AGAIN_LEFT = (.*?);", body).group(1)
+    for words in ("Resume will not download again",
+                  "Download again for the same range ' + 'fetches again what this run already restored",
+                  "so choose the range that is left"):
+        assert words in left, words
+    run = " ".join(function("run").split())
+    assert "again ? 'stopped before finishing. ' + AGAIN_LEFT" in run
+    assert "(again ? '. ' + AGAIN_LEFT : '')" in run
+    assert "'connection lost' + (again ? '. ' + AGAIN_LEFT : '')" in run
+    assert "if (again && unfinished)" in run
 
 
 def test_it_is_asked_for_only_with_the_box_and_after_the_question():
@@ -335,22 +393,26 @@ def test_it_is_asked_for_only_with_the_box_and_after_the_question():
     assert "/api/run?" in run and "redownload" not in run[run.index("new EventSource("):]
 
 
-def test_no_scope_stops_it_on_the_page_first():
+def test_a_year_or_both_ends_are_needed_on_the_page_first():
     run = function("run")
-    check = run.index("again && !s.year && !s.start && !s.end")
+    check = run.index("again && !againScoped(s)")
     assert check < run.index("confirm(againQuestion(")
-    assert "year or dates" in run[check:run.index("confirm(againQuestion(")]
+    assert "a year, or both a From and a To date" in run[check:run.index("confirm(againQuestion(")]
+    assert "return Boolean(s.year || (s.start && s.end));" in function("againScoped")
 
 
 def test_the_question_says_what_happens():
     question = " ".join(function("againQuestion").split())
-    for words in ("Download again from", "Run All downloads every document",
-                  "Pilot downloads the newest few documents",
-                  "the ones this app already downloaded included",
-                  "Nothing is overwritten.", "Each new copy is saved beside the file you have",
-                  "under a name of its own",
-                  "This asks the provider for each document again"):
+    for words in ("Download again from", "Run All goes through every document",
+                  "Pilot goes through the newest few documents",
+                  "the ones this app already downloaded included, and fetches again each one whose",
+                  "file is gone", "Nothing is overwritten.", "A file you still have stays as it is",
+                  "the app may save ' + 'a second copy beside it, under a name of its own",
+                  "This asks the provider again for each document it fetches"):
         assert words in question, words
+    # True of every app, Target's invoices still on file included, so it
+    # promises no new copy of every document.
+    assert "new copy" not in question and "Each new" not in question
     for scope in ("s.year", "s.start", "s.end"):
         assert scope in question
 

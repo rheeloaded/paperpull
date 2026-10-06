@@ -41,12 +41,11 @@ PANEL = REPO / "gui" / "app.py"
 FOLDERS = sorted(d for d in APPS.iterdir()
                  if d.is_dir() and not d.name.startswith((".", "_")))
 
-# The scope forms the panel sends, as the flags each becomes (gui/app.py,
-# _scope_flags). A run that downloads again always carries one.
+# The scopes a run that downloads again may carry, as the flags each becomes
+# (gui/app.py, _scope_flags and _redownload_ok). It always carries a year or
+# both ends of a range, never one date alone.
 SCOPES = (["--year", "2025"],
-          ["--start-date", "2025-01-01", "--end-date", "2025-06-30"],
-          ["--start-date", "2025-01-01"],
-          ["--end-date", "2025-06-30"])
+          ["--start-date", "2025-01-01", "--end-date", "2025-06-30"])
 
 # Places that count a document as already saved for a reason of their own,
 # not the memory --redownload sets aside, each with why.

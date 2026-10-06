@@ -681,7 +681,7 @@ def test_a_run_on_the_newest_playwright_and_its_own_chromium_says_so_and_passes(
 
 def test_a_suite_that_does_not_use_playwright_is_not_held_to_it(run_with, environments, capsys):
     # Only an environment a version behind has what the panel's suite needs,
-    # and that suite never starts a browser.
+    # and that suite starts a browser only to drive its own page.
     ran = run_with({"gui": "gui", "aafmaa": "app"}, ["panel_ui", "panel"])
     assert rat.main(["--jobs", "1"]) == 0
     out = capsys.readouterr().out

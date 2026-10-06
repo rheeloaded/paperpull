@@ -11,20 +11,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ### Added
 - **Download again, from the panel.** A box under Scope, Download again
-  what this app already downloaded, makes the next Pilot or Run All fetch
-  every document in the chosen year or dates again, the ones already
-  downloaded included, the way `--redownload` does from a terminal.
-  Downloads are remembered for good, so this is how somebody who deleted
-  their PDFs after importing them elsewhere gets them back. Nothing is
-  overwritten. Each new copy is saved beside the file already there, under
-  a name of its own. The box needs a year or dates, asks before the run
-  starts and clears once it has, and is never remembered. The panel adds
-  the flag only to a confirmed, scoped Pilot or Run All asked for in a
-  request body, and refuses it from anywhere else. PaperPull Server does
-  not offer it, since every copy would go to Paperless a second time. A
-  test of every app's own parser and done check makes sure each one takes
-  the flag beside the panel's other flags and fetches a document it
-  downloaded before when asked.
+  what this app already downloaded, makes the next Pilot or Run All go
+  through every document in the chosen range again, the ones already
+  downloaded included, and fetch again each one whose file is gone, the way
+  `--redownload` does from a terminal. Downloads are remembered for good,
+  so this is how somebody who deleted their PDFs after importing them
+  elsewhere gets them back. Nothing is overwritten. A file still there
+  stays as it is, and the app may save a second copy beside it under a
+  name of its own. The box needs a year, or both a From and a To date,
+  since one date alone leaves a whole history open. It asks before the run
+  starts, clears once a Pilot or Run All that uses it has started, and is
+  never remembered. Any other button leaves it ticked and says it applies
+  only to Pilot and Run All. A run that downloads again and stops partway
+  says that Resume will not download again, and that the same range would
+  fetch again what it already restored. The panel adds the flag only to a
+  confirmed, scoped Pilot or Run All asked for in a request body, and
+  refuses it from anywhere else. PaperPull Server does not offer it, since
+  every copy would go to Paperless a second time. A test of every app's
+  own parser and done check makes sure each one takes the flag beside the
+  panel's other flags and fetches a document it downloaded before when
+  asked.
 
 ### Fixed
 - **`./setup-all.command` sets up a checkout on macOS and Linux again.**

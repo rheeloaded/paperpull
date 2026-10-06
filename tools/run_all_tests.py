@@ -46,8 +46,10 @@ scripts, stylesheets and the like, so a document, a fetch or an xhr now
 reads empty. AAFMAA's capture failed on CI because of it and passed
 here. So a suite that uses Playwright and still has to run on an older
 one than another such suite of the same run makes the run fail, and the
-summary names the version they ran on. The panel's suite and the
-server's never start a browser and are not held to it.
+summary names the version they ran on. The server's suite never starts
+a browser and is not held to it. Nor is the panel's, which starts
+Playwright's own Chromium only to drive the panel's own page
+(gui/tests/test_download_again_in_a_browser.py).
 
 Each Playwright is made for one Chromium build and downloads that one,
 while a test that starts Chromium itself, with a debugging port as
@@ -961,8 +963,9 @@ def run(args) -> int:
         if lack:
             under_equipped.append((name, lack))
         work.append((name, d, py))
-        # Only a suite that uses Playwright is held to the newest one. The
-        # panel's suite and the server's never start a browser.
+        # Only a suite that needs Playwright is held to the newest one. The
+        # server's suite never starts a browser, and the panel's starts one
+        # only to drive its own page.
         if "playwright" in NEEDS[kind]:
             counted.append((name, d, py))
     newest, older = older_playwright(counted)

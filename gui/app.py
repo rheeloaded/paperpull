@@ -286,18 +286,19 @@ def _scope_flags(year: str = "", start: str = "", end: str = "") -> list:
     return flags
 
 
-# Download again. Every app takes --redownload, which makes it fetch every
-# document in scope again, the ones it already downloaded included, and save
-# each as a new file beside the one already there, under a name of its own.
-# Nothing is overwritten. Downloads are otherwise remembered for good, so
-# somebody who deleted their PDFs after importing them elsewhere has no
-# other way to get them back.
+# Download again. Every app takes --redownload, which makes it go through
+# every document in scope again, the ones it already downloaded included,
+# and fetch again each one whose file is gone. A file still there is never
+# overwritten. Most apps save a second copy beside it under a name of its
+# own, and Target leaves an invoice still on file as it is. Downloads are
+# otherwise remembered for good, so somebody who deleted their PDFs after
+# importing them elsewhere has no other way to get them back.
 #
 # The panel adds the flag to Pilot and Run All only, only to a run scoped to
-# a year or to dates, so a whole history is never asked for again by
-# accident, and only when the request says the person agreed to the page's
-# question. Both arrive as JSON true in a POST body, never as text, and what
-# reaches the app is this one fixed flag.
+# a year or to both a start and an end date, so a whole history is never
+# asked for again by accident, and only when the request says the person
+# agreed to the page's question. Both arrive as JSON true in a POST body,
+# never as text, and what reaches the app is this one fixed flag.
 REDOWNLOAD_FLAG = "--redownload"
 REDOWNLOAD_ACTIONS = ("pilot", "all")
 
@@ -318,9 +319,13 @@ def _redownload_ok(action: str, scope_flags, redownload, confirmed) -> bool:
                                  "Each copy would go to Paperless a second time.")
     if action not in REDOWNLOAD_ACTIONS:
         raise HTTPException(400, "Download again works with Pilot and Run All only.")
-    if not scope_flags:
-        raise HTTPException(400, "Download again needs a year or dates chosen in Scope, "
-                                 "so a whole history is never asked for again by accident.")
+    # One date alone is open at its other end, and From 1990 or To today is
+    # a whole history, so it takes a year or both ends.
+    chosen = {flag for flag in scope_flags if flag.startswith("--")}
+    if "--year" not in chosen and not {"--start-date", "--end-date"} <= chosen:
+        raise HTTPException(400, "Download again needs a year, or both a From and a To "
+                                 "date, chosen in Scope, so a whole history is never "
+                                 "asked for again by accident.")
     if confirmed is not True:
         raise HTTPException(400, "Download again needs the question on the page answered "
                                  "first.")
@@ -1714,7 +1719,11 @@ async def api_run_body(request: Request):
     asked = _run_request(body)
     scope = _scope_flags(asked["year"], asked["start"], asked["end"])
     again = _redownload_ok(asked["action"], scope, asked["redownload"], asked["confirmed"])
-    return _start_run(asked["app"], asked["account"], asked["action"], scope, again)
+    # In the threadpool, as FastAPI runs the GET handler, since finding the
+    # apps reads every install's folder and would hold up every other
+    # request on the event loop meanwhile.
+    return await to_thread.run_sync(_start_run, asked["app"], asked["account"],
+                                    asked["action"], scope, again)
 
 
 def _start_run(app: str, account: str, action: str, scope_flags, redownload=False):
@@ -2289,9 +2298,9 @@ HTML = r"""<!doctype html>
     <label class="again" id="againrow"><input type="checkbox" id="again" autocomplete="off"
            onchange="onAgain()"> Download again what this app already downloaded</label>
     <p class="hint" id="againhint" style="display:none; margin-top:6px">For the next Pilot or
-       Run All, with a year or dates chosen above. Each document in range is asked for again,
-       and its new copy is saved beside the file you have. Nothing is overwritten. The box
-       clears once a run starts.</p>
+       Run All, with a year, or both a From and a To date, chosen above. Each document in range
+       whose file is gone is fetched again. A file you still have is never overwritten, though
+       the app may save a second copy beside it. The box clears once that run starts.</p>
     <div class="actions" id="actions"></div>
     <button id="stoprec" class="primary" style="display:none;margin-top:8px"
             onclick="stopRecording()">Stop recording</button>
@@ -3051,25 +3060,35 @@ function onScope() {
   try { localStorage.setItem('scope', JSON.stringify(s)); } catch (e) {}
 }
 // Download again. Unlike the scope it is never remembered. It starts clear
-// on every visit and clears itself once a run starts, so a later ordinary
-// Run All never downloads again by surprise.
+// on every visit and clears itself once a run that uses it starts, so a
+// later ordinary Run All never downloads again by surprise.
 function onAgain() { $('againhint').style.display = $('again').checked ? 'block' : 'none'; }
 function clearAgain() { $('again').checked = false; onAgain(); }
 // A page the browser brings back from its back and forward cache keeps
 // what was ticked, and load() does not run again for it.
 window.addEventListener('pageshow', e => { if (e.persisted) clearAgain(); });
+// Only a year, or both ends of a range. One date alone is open at the
+// other end, and From 1990 or To today is a whole history.
+function againScoped(s) { return Boolean(s.year || (s.start && s.end)); }
+// What it does is said so it holds for every app. Each goes through the
+// range again and fetches again what is gone. Most also save a second copy
+// of a file still there, and Target leaves an invoice still on file as it is.
 function againQuestion(action, app, account, s) {
-  const range = s.year ? 'dated ' + s.year
-    : (s.start && s.end) ? 'dated ' + s.start + ' to ' + s.end
-    : s.start ? 'dated ' + s.start + ' or later' : 'dated ' + s.end + ' or earlier';
+  const range = s.year ? 'dated ' + s.year : 'dated ' + s.start + ' to ' + s.end;
   return 'Download again from ' + app + (account === 'primary' ? '' : ', account ' + account) + '?\n\n' +
-    (action === 'pilot' ? 'Pilot downloads the newest few documents ' + range + ' again'
-                        : 'Run All downloads every document ' + range + ' again') +
-    ', the ones this app already downloaded included.\n\n' +
-    'Nothing is overwritten. Each new copy is saved beside the file you have, ' +
-    'under a name of its own.\n\n' +
-    'This asks the provider for each document again, just as the first download did.';
+    (action === 'pilot' ? 'Pilot goes through the newest few documents ' + range + ' again'
+                        : 'Run All goes through every document ' + range + ' again') +
+    ', the ones this app already downloaded included, and fetches again each one whose ' +
+    'file is gone.\n\n' +
+    'Nothing is overwritten. A file you still have stays as it is, and the app may save ' +
+    'a second copy beside it, under a name of its own.\n\n' +
+    'This asks the provider again for each document it fetches, just as the first download did.';
 }
+// Said when a run that downloads again ends before it is through. Resume
+// never downloads again, so it would skip the rest and call the run done,
+// and the same range again would fetch again what this run restored.
+const AGAIN_LEFT = 'Resume will not download again, and Download again for the same range ' +
+  'fetches again what this run already restored, so choose the range that is left';
 // A run that downloads again is asked for in a POST body, so the ticked box
 // and the answer to the question arrive as true and false, never as text in
 // an address. EventSource can only GET, so this reads the same stream with
@@ -3130,15 +3149,23 @@ function run(action, opts) {
   if (s.year === '' && s.start && s.end && s.start > s.end) {
     setStatus('err', 'the From date is after the To date'); return;
   }
-  const again = !opts.app && $('again').checked && (META.redownload_actions || []).includes(action);
-  if (again && !s.year && !s.start && !s.end) {
-    setStatus('err', 'Download again needs a year or dates chosen in Scope first'); return;
+  const ticked = !opts.app && $('again').checked;
+  const again = ticked && (META.redownload_actions || []).includes(action);
+  if (again && !againScoped(s)) {
+    setStatus('err', 'Download again needs a year, or both a From and a To date, chosen in Scope first');
+    return;
   }
   if (again && !confirm(againQuestion(action, app, account, s))) return;
-  clearAgain();
+  if (again) clearAgain();
   const q = new URLSearchParams({ app, account, action });
   if (s.year) q.set('year', s.year); else { if (s.start) q.set('start', s.start); if (s.end) q.set('end', s.end); }
   if (!opts.append) $('console').textContent = '';
+  // Any other button leaves the box ticked for the Pilot or Run All it is
+  // for, and says so where this run's output starts.
+  if (ticked && !again) {
+    $('console').textContent += 'Download again stays ticked. It applies only to Pilot and Run All, ' +
+      'so this ' + ((META.actions || {})[action] || action) + ' runs as usual.\n';
+  }
   $('failnote').style.display = 'none';
   const scoped = s.year ? ` (${s.year})` : (s.start || s.end) ? ` (${s.start || '…'} to ${s.end || '…'})` : '';
   setStatus('run', `running ${action}${again ? ', downloading again,' : ''} on ${app} / ${account}${scoped}`);
@@ -3162,10 +3189,13 @@ function run(action, opts) {
   es.onmessage = e => { con.textContent += e.data + '\n'; con.scrollTop = con.scrollHeight; };
   es.addEventListener('done', e => {
     const code = e.data;
+    const unfinished = code !== '0' || Boolean(result && result.stopped);
     if (code !== '0') {
-      setStatus('err', code === '130' ? 'interrupted, progress saved' : `exited (code ${code}), check output`);
+      setStatus('err', (code === '130' ? 'interrupted, progress saved' : `exited (code ${code}), check output`) +
+                       (again ? '. ' + AGAIN_LEFT : ''));
     } else if (result && result.stopped) {
-      setStatus('warn', 'stopped before finishing, see the output, then press Resume');
+      setStatus('warn', again ? 'stopped before finishing. ' + AGAIN_LEFT
+                              : 'stopped before finishing, see the output, then press Resume');
     } else if (result && result.attention) {
       const details = [];
       if (result.wrong_document) details.push(`${result.wrong_document} refused as the wrong document`);
@@ -3180,6 +3210,11 @@ function run(action, opts) {
     } else {
       setStatus('warn', 'finished, check output (no run summary)');
     }
+    // The app's own last lines may say to press Resume, so this goes below them.
+    if (again && unfinished) {
+      con.textContent += 'This download again ended before it was through. ' + AGAIN_LEFT + '.\n';
+      con.scrollTop = con.scrollHeight;
+    }
     $('stoprec').style.display = 'none';
     recordingApp = null;
     unlockButtons();
@@ -3187,7 +3222,7 @@ function run(action, opts) {
     if (code !== '0' || (result && result.attention)) checkFailure(app);
     if (opts.onDone) opts.onDone(code);
   });
-  es.onerror = () => { if (es) { if (es.refused) con.textContent += es.refused + '\n'; setStatus('err', es.refused || 'connection lost'); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; if (opts.onDone) opts.onDone('lost'); } };
+  es.onerror = () => { if (es) { if (es.refused) con.textContent += es.refused + '\n'; setStatus('err', es.refused || ('connection lost' + (again ? '. ' + AGAIN_LEFT : ''))); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; if (opts.onDone) opts.onDone('lost'); } };
 }
 let failureApp = null;
 async function checkFailure(app) {
