@@ -189,6 +189,9 @@ def short_waits(monkeypatch):
     real = site.scroll_full_page
     monkeypatch.setattr(site, "scroll_full_page",
                         lambda page, rounds=1, delay_ms=50: real(page, rounds, delay_ms))
+    # Each invoice block here is filled from the start or not there at all,
+    # so it is looked for once rather than waited for.
+    monkeypatch.setattr(site, "INVOICE_WAIT_MS", 0, raising=False)
 
 
 def app_for(tmp_path, page):

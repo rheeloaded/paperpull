@@ -249,7 +249,7 @@ collected samples category period error timestamp signed out challenge row table
 pdf links download attrs found title survey pages responses opened from off
 followed bill controls safe headings url status type method post keys query shape
 control tab role text href category summary period date kind has link landed
-discovery trace attempt attempts cards became empty years offered history entries
+discovery trace attempt attempts cards became empty missing years offered history entries
 customer notes isolated isolation answered unanswered reach reached raised render
 rendered renders validate validated validation capture captured capturing archive
 opened deliver delivered fetch fetched list listed menu named neither nor nothing

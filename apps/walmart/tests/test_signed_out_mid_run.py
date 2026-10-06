@@ -266,6 +266,9 @@ def fake_walmart(server, monkeypatch):
     monkeypatch.setattr(site, "ORDERS_WAIT_MS", 800)
     monkeypatch.setattr(site, "SETTLE_MS", 0)
     monkeypatch.setattr(site, "CHALLENGE_WAIT_MS", 1500)
+    # The order page is laid out the way it was before Walmart's own invoice
+    # block came, so it is looked for once rather than waited for.
+    monkeypatch.setattr(site, "INVOICE_WAIT_MS", 0, raising=False)
     # A details address is built on Walmart's own host, and only an address
     # on it is opened. Here that host is this machine.
     real_card = site.card_to_purchase

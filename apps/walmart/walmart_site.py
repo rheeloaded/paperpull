@@ -865,14 +865,49 @@ def find_receipt_iframe(page):
 # the browser. The block is shown for the print instead, and everything
 # beside it is hidden for the print, so the paper holds Walmart's invoice and
 # nothing else, not even a bot check that comes up over the page.
+#
+# The block was looked at once, so an order page that had not filled it yet
+# was printed as it was, with no item on it and no word said, and a
+# tester's 0.43.0 run could not show whether that had happened (#63). It is
+# looked at again for a while now, and taken only when it names this order.
 PRINTED_INVOICE = ".print-portal-root"
 PRINTED_INVOICE_BODY = "[data-testid='print-invoice-layout']"
 
+# How long the block gets to fill, and how often it is looked at meanwhile.
+INVOICE_WAIT_MS = 15000
+INVOICE_LOOK_MS = 500
+
+# What became of the block when the app looked for it. Words from the fixed
+# list in paperpull_core.words, since they go into the run's journal and the
+# failure file a tester attaches.
+INVOICE_FOUND = "found"            # filled, and it names this order
+INVOICE_MISSING = "missing"        # no such block on the page
+INVOICE_EMPTY = "empty"            # the block is there with nothing in it
+INVOICE_UNVERIFIED = "unverified"  # filled, naming neither this order's number nor its total
+INVOICE_UNREAD = "unread"          # the page could not be asked
+
+# The block's text, each piece of text in it on a line of its own, since it
+# is hidden and its text as a whole runs the pieces together. None when the
+# page has no such block.
+_READ_PRINTED_INVOICE_JS = r"""
+([block, body]) => {
+  const invoice = document.querySelector(block + ' ' + body);
+  if (!invoice) return null;
+  const parts = [];
+  const walk = document.createTreeWalker(invoice, NodeFilter.SHOW_TEXT);
+  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    const text = (node.nodeValue || '').trim();
+    if (text) parts.push(text);
+  }
+  return parts.join('\n');
+}
+"""
+
 _SHOW_PRINTED_INVOICE_JS = r"""
 ([block, body]) => {
-  const root = document.querySelector(block);
-  const invoice = root && root.querySelector(body);
-  if (!invoice || !(invoice.textContent || '').trim()) return false;
+  const invoice = document.querySelector(block + ' ' + body);
+  const root = invoice && invoice.closest(block);
+  if (!root || !(invoice.textContent || '').trim()) return false;
   root.setAttribute('data-paperpull-print', 'invoice');
   for (let node = root; node.parentElement && node !== document.body; node = node.parentElement) {
     for (const other of node.parentElement.children) {
@@ -907,26 +942,94 @@ _HIDE_PRINTED_INVOICE_JS = r"""
 """
 
 
-def show_printed_invoice(page, wait_ms: int = 5000) -> bool:
-    """Make the next print of this page Walmart's own invoice, and only it.
+@dataclass
+class InvoiceBlock:
+    """What the order page held of Walmart's own invoice when the app looked
+    for it. A word from the list above and two counts, never its text."""
+    state: str = INVOICE_UNREAD
+    characters: int = 0     # how much text it held
+    item_rows: int = 0      # how many item rows, each with its quantity
 
-    True when the page has the invoice block with something in it. Nothing
-    is pressed, and nothing changes on screen. The block's images, the logo
-    and the barcode, are asked for at once and given `wait_ms` to arrive. A
-    logo still on its way is not worth losing the receipt over, so the wait
-    running out is not a failure. hide_printed_invoice puts the page back."""
+    @property
+    def found(self) -> bool:
+        return self.state == INVOICE_FOUND
+
+    def facts(self) -> dict:
+        """For the journal and the failure file."""
+        return {"state": self.state, "text_characters": self.characters,
+                "item_rows": self.item_rows}
+
+
+def names_this_order(text: str, order_number: str, total: str = "") -> bool:
+    """Whether `text` prints this order's own number, in Walmart's groups
+    of digits or whole, or the order's own total."""
+    digits = re.sub(r"\D", "", order_number or "")
+    if len(digits) >= 10 and (_printed_forms(text, digits)
+                              or re.search(r"(?<!\d)%s(?!\d)" % digits, text or "")):
+        return True
+    return prints_total(text, total)
+
+
+def _invoice_block(text, purchase: Purchase) -> InvoiceBlock:
+    if text is None:
+        return InvoiceBlock(INVOICE_MISSING)
+    text = str(text)
+    if not text.strip():
+        return InvoiceBlock(INVOICE_EMPTY)
+    named = names_this_order(text, purchase.order_number, purchase.total)
+    return InvoiceBlock(INVOICE_FOUND if named else INVOICE_UNVERIFIED,
+                        len(text), item_rows(text))
+
+
+def look_for_printed_invoice(page, purchase: Purchase,
+                             wait_ms: Optional[int] = None) -> InvoiceBlock:
+    """Walmart's own invoice on this order page, looked at every
+    INVOICE_LOOK_MS until it holds this order's number or its total, the
+    number the purchase was listed under. Up to `wait_ms`, INVOICE_WAIT_MS
+    when it is not given, and 0 looks once. Nothing is pressed or changed."""
+    wait_ms = INVOICE_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + max(0, wait_ms) / 1000.0
+    block = InvoiceBlock(INVOICE_UNREAD)
+    while True:
+        try:
+            block = _invoice_block(page.evaluate(
+                _READ_PRINTED_INVOICE_JS, [PRINTED_INVOICE, PRINTED_INVOICE_BODY]), purchase)
+        except Exception:
+            pass    # what it was at the last look that answered, if any did
+        if block.found or time.monotonic() >= deadline:
+            return block
+        try:
+            page.wait_for_timeout(INVOICE_LOOK_MS)
+        except Exception:
+            return block
+
+
+def show_printed_invoice(page, purchase: Purchase, wait_ms: Optional[int] = None,
+                         images_ms: int = 5000) -> InvoiceBlock:
+    """Make the next print of this page Walmart's own invoice, and only it,
+    once look_for_printed_invoice finds it.
+
+    Nothing is pressed, and nothing changes on screen. The block's images,
+    the logo and the barcode, are asked for at once and given `images_ms`
+    to arrive. A logo still on its way is not worth losing the receipt
+    over, so that wait running out is not a failure. hide_printed_invoice
+    puts the page back."""
+    block = look_for_printed_invoice(page, purchase, wait_ms)
+    if not block.found:
+        return block
     try:
         shown = bool(page.evaluate(_SHOW_PRINTED_INVOICE_JS,
                                    [PRINTED_INVOICE, PRINTED_INVOICE_BODY]))
     except Exception:
-        return False
-    if shown:
-        try:
-            page.wait_for_function(_PRINTED_INVOICE_DRAWN_JS, arg=PRINTED_INVOICE,
-                                   timeout=wait_ms)
-        except Exception:
-            pass
-    return shown
+        shown = False
+    if not shown:
+        return InvoiceBlock(INVOICE_UNREAD, block.characters, block.item_rows)
+    try:
+        page.wait_for_function(_PRINTED_INVOICE_DRAWN_JS, arg=PRINTED_INVOICE,
+                               timeout=images_ms)
+    except Exception:
+        pass
+    return block
 
 
 def hide_printed_invoice(page) -> None:
@@ -938,17 +1041,17 @@ def hide_printed_invoice(page) -> None:
 
 
 @contextmanager
-def printing_its_invoice(page):
+def printing_its_invoice(page, purchase: Purchase, wait_ms: Optional[int] = None):
     """Walmart's own invoice shown for the prints made inside the block, and
-    the page put back after them however they end. Yields whether the page
-    had the invoice block. The print itself stays with the caller, where the
-    page was read before it was handed on to be printed."""
-    shown = show_printed_invoice(page)
+    the page put back after them however they end. Yields what became of
+    the invoice (an InvoiceBlock), found when it is what will print. The
+    print itself stays with the caller, where the page was read before it
+    was handed on to be printed."""
+    block = show_printed_invoice(page, purchase, wait_ms)
     try:
-        yield shown
+        yield block
     finally:
-        if shown:
-            hide_printed_invoice(page)
+        hide_printed_invoice(page)
 
 
 # ---------------------------------------------------------------------------
@@ -1036,6 +1139,73 @@ def items_printed(text: str, items) -> Tuple[int, int]:
     return sum(1 for n in names if n in whole), len(names)
 
 
+# A Walmart document counts the order's items beside its subtotal,
+# "Subtotal (2 items)", on screen and on paper, and the summary that prints
+# no item still prints that count. Only beside the subtotal, since a count
+# of what is in the cart can show on any page.
+_ITEMS_COUNTED_RE = re.compile(r"\bsubtotal\s*\(\s*(\d{1,4})\s+items?\s*\)", re.I)
+
+
+def items_counted(text: str) -> int:
+    """How many items `text` says the order has, by the count beside its
+    subtotal, 0 when it gives none."""
+    return max((int(n) for n in _ITEMS_COUNTED_RE.findall(text or "")), default=0)
+
+
+def items_counted_on(page) -> int:
+    """The count beside the order page's subtotal, as the screen shows it."""
+    return items_counted(_page_check.page_text(page, "screen"))
+
+
+# The quantity Walmart prints on each item row of its invoice, as in
+# "Shopped Qty 1". Not from a word's start, since the invoice sets a row's
+# pieces side by side and a PDF's text can read them run together, as
+# "ShoppedQty 1".
+_ITEM_ROW_RE = re.compile(r"(?:qty|quantity)\s*:?\s*\d+", re.I)
+
+
+def item_rows(text: str) -> int:
+    """How many item rows `text` holds, each known by its quantity. A count,
+    never which items."""
+    return len(_ITEM_ROW_RE.findall(text or ""))
+
+
+def items_expected(text: str, items, counted: int = 0) -> int:
+    """How many items the order has by its own account, whichever is most of
+    the items read from its page, the count beside the subtotal there
+    (`counted`), and the count beside the subtotal of `text`."""
+    return max(len(items or []), int(counted or 0), items_counted(text))
+
+
+NONE_OF_ITS_ITEMS = "Prints none of the order's items"
+
+
+def items_left_out(text: str, items, counted: int = 0) -> str:
+    """Why a saved document is not the order's for the items it leaves out,
+    in fixed words, or "" when it prints them or the order has none.
+
+    An item counts as printed by the start of its name as read from the
+    order's page (items_printed). When no name could be looked for, because
+    the page showed none or none long enough, a document still has to print
+    an item row when the order has items by its own account (items_expected).
+    A summary of the order prints its number, its total and its item count
+    and no item, and had the folded list hidden the names as well, the check
+    would have had nothing to look for and passed it as done. A document
+    whose order counts no item and shows none is not asked for one, and one
+    with almost no text is a scan or a blank, which the check judges as it
+    always did."""
+    if len((text or "").strip()) < ITEM_TEXT_MIN:
+        return ""
+    printed, looked_for = items_printed(text, items)
+    if looked_for:
+        return "" if printed else NONE_OF_ITS_ITEMS
+    expected = items_expected(text, items, counted)
+    if expected and not item_rows(text):
+        return "Prints no items, though the order has %d item%s" % (
+            expected, "" if expected == 1 else "s")
+    return ""
+
+
 # Words a Walmart document or a page in its place may carry, from a fixed
 # list. What pdf_facts says of a saved file is only which of these it holds,
 # so the failure file it goes into never carries anything of the person's.
@@ -1045,13 +1215,15 @@ DOCUMENT_WORDS = ("invoice", "receipt", "order", "subtotal", "total", "tax",
                   "something went wrong", "try again", "not available")
 
 
-def pdf_facts(path, purchase: Purchase, page_url: str = "") -> dict:
+def pdf_facts(path, purchase: Purchase, page_url: str = "", counted: int = 0) -> dict:
     """What a saved document that failed its check holds, for the failure
     file a tester attaches. Its size, its pages, how much text it has,
     whether it says Walmart, prints this order's number, a date, an amount
     or the order's own total, how many of the item names read from the
-    order's page it prints, which DOCUMENT_WORDS appear, and whether the
-    page it was printed from was still this order's. Never its words."""
+    order's page it prints, how many items the order has by its own account
+    and how many item rows the document prints, which DOCUMENT_WORDS appear,
+    and whether the page it was printed from was still this order's. Never
+    its words. `counted` is the count beside the order page's subtotal."""
     facts: dict = {}
     try:
         from pypdf import PdfReader
@@ -1073,9 +1245,11 @@ def pdf_facts(path, purchase: Purchase, page_url: str = "") -> dict:
             "prints_an_amount": bool(MONEY_RE.search(text)),
             "total_known": bool(MONEY_RE.search(purchase.total or "")),
             "prints_its_total": prints_total(text, purchase.total),
-            # The way the check itself looks for them (items_printed).
+            # The way the check itself looks for them (items_left_out).
             "item_names_read": len(_item_names(purchase.items)),
             "item_names_printed": printed,
+            "items_expected": items_expected(text, purchase.items, counted),
+            "item_rows_printed": item_rows(text),
             "words": [w for w in DOCUMENT_WORDS if re.search(
                 r"\b" + r"\s+".join(map(re.escape, w.split())) + r"\b", low)],
         })

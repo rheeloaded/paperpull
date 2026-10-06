@@ -69,6 +69,22 @@ NO_DATE = "no date"
 # them and carries on from there (review of #63).
 DATES_LEARNED_PER_RUN = 10
 
+# What a run says when it prints an order page in place of Walmart's own
+# invoice, by what became of the invoice (walmart_site.INVOICE_*). Since late
+# September 2026 such a print leaves the items out, and nothing a run said
+# showed when it had printed one (#63).
+PRINTED_THE_PAGE = {
+    site.INVOICE_MISSING: "Walmart's own invoice never appeared on this order page, "
+                          "so the page itself is printed instead.",
+    site.INVOICE_EMPTY: "Walmart's own invoice stayed empty on this order page, "
+                        "so the page itself is printed instead.",
+    site.INVOICE_UNVERIFIED: "Walmart's own invoice on this order page names neither this "
+                             "order's number nor its total, so the page itself is printed "
+                             "instead.",
+    site.INVOICE_UNREAD: "This order page could not be read for Walmart's own invoice, "
+                         "so the page itself is printed instead.",
+}
+
 
 def ask(prompt: str) -> str:
     """input() that stops cleanly (progress already saved by callers) when
@@ -88,6 +104,9 @@ def ask(prompt: str) -> str:
 class App:
     _journal = None
     _requests = None
+    # What became of Walmart's own invoice at this purchase's last print
+    # (site.InvoiceBlock), None before the first.
+    _block = None
 
     def __init__(self, args):
         self.args = args
@@ -540,8 +559,11 @@ class App:
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
             return True
-        # a review copy counts only if its PDF is still present and valid;
-        # a quarantined / failed one should be retried.
+        # A copy put aside in Manual Review counts as done while its PDF is
+        # still there and opens, and it is not tried again on its own.
+        # Deleting it there is how a person asks for the purchase again, and
+        # process_purchases says so when it skips one. A purchase put aside
+        # with nothing saved, or whose copy is gone, is tried again.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
             return bool(pdf_path and Path(pdf_path).exists()
@@ -595,7 +617,18 @@ class App:
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if done:
-                print("  Already completed and PDF verified - skipping.")
+                rec = self.progress.get(purchase.key) or {}
+                if (rec.get("state") == State.NEEDS_MANUAL_REVIEW.value
+                        and not rec.get("downloaded_ok")):
+                    # A copy put aside counts as done while it is in Manual
+                    # Review. It never passed its check, and this line used
+                    # to say it had, so a run that only skipped the copies an
+                    # earlier version put aside could not be told from one
+                    # that put them there again (#63).
+                    print("  Put aside in Manual Review by an earlier run, so it is skipped. "
+                          "Delete it there to have it fetched again.")
+                else:
+                    print("  Already completed and PDF verified - skipping.")
                 self.stats["skipped_completed"] += 1
                 # Inside the dates when it has one, since the selection
                 # left out every dated purchase outside them.
@@ -795,6 +828,9 @@ class App:
         why = site.not_this_purchase(page, purchase.order_number)
         if why:
             return self._refuse_page(purchase, why)
+        # How many items the order's own page counts, so a document that
+        # prints none is put aside even when no item names could be read.
+        counted = site.items_counted_on(page)
 
         is_online = purchase.purchase_type == ONLINE
         purchase.document_type = "Invoice" if is_online else "Receipt"
@@ -811,7 +847,8 @@ class App:
         purchase.receipt_url = page.url
         try:
             self._capture_document(page, purchase, out_path)
-            ok = self._finish_pdf(page, purchase, out_path, source_page=page)
+            ok = self._finish_pdf(page, purchase, out_path, source_page=page,
+                                  counted=counted)
             if ok:
                 print(f"  {'Online invoice' if is_online else 'Store receipt'} captured.")
             return ok
@@ -844,18 +881,19 @@ class App:
         items, totals and barcode, in a hidden block of the live details
         page, and the primary path prints that block in print media with
         everything else hidden (site.printing_its_invoice), a bot check that
-        comes up over the page in the meantime among it. Until late
-        September 2026 the page's own print style showed the items, and a
-        page without the block is still printed that way. Re-rendering a
-        saved HTML snapshot loses the print stylesheet, so it is only a last
-        resort.
+        comes up over the page in the meantime among it. The block is waited
+        for, up to site.INVOICE_WAIT_MS, and taken only when it names this
+        order. Until late September 2026 the page's own print style showed
+        the items, and a page without the block is still printed that way,
+        and the run says so (_before_the_print). Re-rendering a saved HTML
+        snapshot loses the print stylesheet, so it is only a last resort.
         """
+        self._block = None
         # Primary: print the live page (print media -> receipt only).
         try:
             log.info("Capture path: live page printToPDF (print media)")
-            with site.printing_its_invoice(target_page) as shown:
-                if shown:
-                    log.info("Printing Walmart's own invoice from the order page")
+            with site.printing_its_invoice(target_page, purchase) as block:
+                self._before_the_print(block)
                 receipt_pdf.print_page_to_pdf(target_page, out_path)
             return
         except Exception as e:
@@ -878,7 +916,30 @@ class App:
         log.info("Capture path: plain page print")
         receipt_pdf.print_page_to_pdf(target_page, out_path)
 
-    def _check(self, path: Path, purchase: Purchase, printed_from: str = ""):
+    def _before_the_print(self, block, again: bool = False) -> None:
+        """What became of Walmart's own invoice for the print about to be
+        made, a site.InvoiceBlock. Said on the console when the order page
+        is printed in its place, once a purchase unless the second try finds
+        something else, and written into the run's journal, which a failure
+        file carries. The last one is kept for the facts of a document put
+        aside."""
+        told = (again and self._block is not None and not self._block.found
+                and self._block.state == block.state)
+        self._block = block
+        try:
+            self.journal.result("its own invoice is printed" if block.found
+                                else "the order page is printed",
+                                invoice_block=block.facts())
+        except Exception:
+            pass
+        if block.found:
+            log.info("Printing Walmart's own invoice from the order page")
+        elif not told:
+            print("  " + PRINTED_THE_PAGE.get(block.state,
+                                              PRINTED_THE_PAGE[site.INVOICE_UNREAD]))
+
+    def _check(self, path: Path, purchase: Purchase, printed_from: str = "",
+               counted: int = 0):
         """The check a saved document goes through.
 
         The words it looks for include this order's number the way Walmart
@@ -895,7 +956,11 @@ class App:
         were the order's own and printed none, because Walmart's print style
         had come to hide the item list, and the order's number and total
         passed them. That is how a run saved receipts with no items on them
-        and called them done."""
+        and called them done. When no name could be looked for, a document
+        has to print an item row once the order has items by its own
+        account, its items read, the count beside its page's subtotal
+        (`counted`) or the one beside the document's own
+        (site.items_left_out)."""
         text = receipt_pdf.pdf_text(path)
         tokens = receipt_pdf.expected_tokens_for(purchase)
         if purchase.order_number and purchase.order_number in (printed_from or ""):
@@ -903,30 +968,32 @@ class App:
                                                    purchase.total)
         result = receipt_pdf.validate_pdf(path, self.config["min_pdf_bytes"], tokens)
         if result.ok:
-            printed, looked_for = site.items_printed(text, purchase.items)
-            if looked_for and not printed:
-                return ValidationResult(False, "Prints none of the order's items",
+            why = site.items_left_out(text, purchase.items, counted)
+            if why:
+                return ValidationResult(False, why,
                                         size_bytes=result.size_bytes,
                                         page_count=result.page_count)
         return result
 
     def _finish_pdf(self, page, purchase: Purchase, out_path: Path,
-                    popup=None, source_page=None) -> bool:
+                    popup=None, source_page=None, counted: int = 0) -> bool:
         purchase.pdf_path = str(out_path)
         purchase.pdf_filename = out_path.name
         self._record_state(purchase, State.PDF_SAVED)
 
         printed_from = self._address_of(source_page or page)
-        result = self._check(out_path, purchase, printed_from)
+        result = self._check(out_path, purchase, printed_from, counted)
         if not result.ok:
             log.warning("Validation failed (%s); retrying once", result.reason)
             self.stats["validation_failures"] += 1
             try:
                 retry_page = source_page or page
-                with site.printing_its_invoice(retry_page):
+                # Looked at once more, since the capture already waited for it.
+                with site.printing_its_invoice(retry_page, purchase, wait_ms=0) as block:
+                    self._before_the_print(block, again=True)
                     receipt_pdf.print_page_to_pdf(retry_page, out_path)
                 printed_from = self._address_of(retry_page)
-                result = self._check(out_path, purchase, printed_from)
+                result = self._check(out_path, purchase, printed_from, counted)
             except Exception as e:
                 log.warning("Retry failed: %s", e)
         if not result.ok:
@@ -952,9 +1019,14 @@ class App:
             # nothing to attach, and Diagnose looks at the page later, by
             # which time it may be showing something else (#63).
             try:
-                facts = site.pdf_facts(quarantine, purchase, printed_from)
+                facts = site.pdf_facts(quarantine, purchase, printed_from, counted)
             except Exception:
                 facts = {}
+            # And what became of Walmart's own invoice at the last print,
+            # missing, empty or found, so a summary printed in its place can
+            # be told from an invoice that printed no item.
+            if self._block is not None:
+                facts["invoice_block"] = self._block.facts()
             self.write_failure("check the saved document",
                                "it did not read as this purchase", postmortem=facts)
             return False

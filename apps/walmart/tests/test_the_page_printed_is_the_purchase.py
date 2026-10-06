@@ -200,6 +200,9 @@ def fake_walmart(server, monkeypatch):
     monkeypatch.setattr(site, "ORDERS_WAIT_MS", 3000, raising=False)
     monkeypatch.setattr(site, "SETTLE_MS", 0, raising=False)
     monkeypatch.setattr(site, "CHALLENGE_WAIT_MS", 1500, raising=False)
+    # These pages are laid out the way they were before Walmart's own
+    # invoice block came, so it is looked for once rather than waited for.
+    monkeypatch.setattr(site, "INVOICE_WAIT_MS", 0, raising=False)
     real_scroll = site.scroll_full_page
     monkeypatch.setattr(site, "scroll_full_page",
                         lambda page, rounds=1, delay_ms=0: real_scroll(page, 1, 0))

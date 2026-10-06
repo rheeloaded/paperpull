@@ -30,10 +30,30 @@ the order-details page, the tool never clicks "View receipt details" /
 "Print invoice" (those fire the native print dialog). Since late September
 2026 Walmart keeps the invoice its Print invoice button prints, items
 included, in a hidden block of that page, and the tool prints that block
-with the rest of the page hidden. A saved document that prints none of the
-order's items goes to Manual Review. In-store trips are saved
+with the rest of the page hidden. It waits up to about 15 seconds for the
+block to fill, and takes it only when it names the order by its number or
+its total. When it does not, the order page itself is printed instead,
+which leaves the items out, and the run says so. A saved document that
+prints none of the order's items goes to Manual Review, and so does one that
+prints no item at all when the order's page or the document counts the
+order's items, even if no item name could be read. In-store trips are saved
 as **Receipts**, online orders as **Invoices** (Walmart exposes only an
 invoice for online orders).
+
+## Manual Review and running again
+
+A document that fails its check is moved to `Manual Review\` and its
+purchase is marked *Needs Manual Review*. It counts as done while it is
+there, so later runs skip it and say it was put aside in Manual Review by
+an earlier run. Look at it there, and delete it to have the next run fetch
+that purchase again. `--redownload` fetches everything in scope again, put
+aside or not.
+
+When a document is put aside, the run writes a file to `Diagnostics\` that
+says what the saved document holds, as counts and yes or no, and what
+became of Walmart's own invoice block, whether it was missing, empty or
+found, how much text it held and how many item rows. It carries no text
+from your account, so it can be attached to an issue.
 
 ## Setup (one time)
 

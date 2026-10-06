@@ -176,6 +176,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   "auto" in an app set to use only that Chromium. PaperPull still never
   starts a browser without its sandbox, and every other way a browser can
   fail to open is waited for and explained as before.
+- **Walmart says when it skips a document it put aside, and waits for its
+  own invoice (#63).** A document a run puts aside in Manual Review counts
+  as done while it is there, and later runs skipped it saying "Already
+  completed and PDF verified", so a run that only skipped the summaries an
+  earlier version had put aside could not be told from one that put them
+  there again. A run now says that an earlier run put it aside, and that
+  deleting it from Manual Review has the next run fetch it again. Walmart's
+  own invoice, the one its Print invoice button prints, was looked for
+  once, and when the page had not filled it yet the order page was printed
+  in its place, without its items and without a word. It is now waited
+  for, up to about 15 seconds, and taken only when it names the order by
+  its number or its total. When the order page is printed instead, the run
+  says so, and the file a document put aside leaves in Diagnostics says
+  whether the invoice was missing, empty or found, how much text it held
+  and how many item rows. A document that prints no item at all is now put
+  aside even when no item name could be read from the order's page, once
+  that page or the document counts the order's items. One whose order
+  counts and lists no item is kept as before.
 
 ### Security
 - **Every redirect is checked against the provider's own sites before it
