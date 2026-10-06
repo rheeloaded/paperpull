@@ -362,7 +362,13 @@ def _run_request(body) -> dict:
             raise HTTPException(400, "a run needs its %s" % key)
     return asked
 
-app = FastAPI(title="PaperPull")
+# FastAPI serves /docs, /docs/oauth2-redirect, /redoc and /openapi.json
+# unless it is told not to. /docs and /redoc load their script from
+# cdn.jsdelivr.net, so opening either one ran another site's script as the
+# panel's own page, and a script on the panel's own page can start a run.
+# Nothing in PaperPull uses any of the four, so the panel goes without
+# them, and PaperPull Server with it, since it serves this same app.
+app = FastAPI(title="PaperPull", docs_url=None, redoc_url=None, openapi_url=None)
 
 # PaperPull Server's sign-in, its gate and its browser screen. They do
 # nothing unless PAPERPULL_SERVER=1, which only the server image sets.

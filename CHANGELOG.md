@@ -209,6 +209,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   proxy's for instance, answers once that name is listed in the new
   `PAPERPULL_HOSTS` setting and the container is recreated. Signing out of
   it takes a request from its own page too.
+- **The control panel no longer serves FastAPI's own pages.** FastAPI,
+  which the panel is built on, adds a page at `/docs` and another at
+  `/redoc` that describe the panel's API, and both load their script from
+  cdn.jsdelivr.net. Opening either one ran that site's script as the
+  panel's own page, and a script there can do whatever the panel's page
+  can, starting a run included. Nothing in PaperPull links to these pages
+  or uses them, so the panel is built without them, and without
+  `/docs/oauth2-redirect` and `/openapi.json`, which come with them. All
+  four answer 404, on the desktop and on PaperPull Server.
 
 ## [0.43.0] - 2026-10-05
 
