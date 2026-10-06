@@ -668,7 +668,8 @@ DRIVES = {
                     stub={"_fresh_view_target": lambda *a, **k: "aafmaa-0001",
                           "_clear_leftover_dialog": lambda *a, **k: None,
                           "_answer_view_disclosure": lambda *a, **k: False,
-                          "on_documents_page": lambda *a, **k: True}),
+                          "on_documents_page": lambda *a, **k: True,
+                          "showing_documents_list": lambda *a, **k: True}),
     "wealthfront": Drive(doc={"href": "{base}/zip"}),
 }
 

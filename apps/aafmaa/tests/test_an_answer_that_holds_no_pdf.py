@@ -324,6 +324,7 @@ def press(attached, server, tmp_path):
                                                "5550001-1 Dana Example", out)
             return saved, out
 
+        run.page = page
         yield run
     finally:
         if page is not None:
@@ -380,12 +381,17 @@ def test_a_postback_shown_in_the_tab(press):
     browser shows in the tab. Nothing is changed in the browser. The
     postback's own answer reads as the viewer's page, and the PDF comes in
     the viewer's answer a moment later. The capture stopped at the viewer's
-    page and the document went to manual review."""
+    page and the document went to manual review. Afterward the tab, still
+    at the documents page's address, is put back on the documents list. It
+    was put back only when its address had left /Documents/, so the next
+    document's row was looked for inside the viewer."""
     saved, out = press("postback")
     assert saved is True
     assert out.read_bytes() == STATEMENT
-    assert [s[0] for s in SITE.seen if s[2] == DOCUMENTS_PATH] == ["POST"], SITE.seen
+    assert [(s[0], s[3]) for s in SITE.seen if s[2] == DOCUMENTS_PATH] == [
+        ("POST", "navigate"), ("GET", "navigate")], SITE.seen
     assert not asked_from_outside(), SITE.seen
+    assert press.page.locator("a.view").count() == 1, "the tab is back on the documents list"
 
 
 def test_an_answer_from_another_host_is_never_asked_for_again(press, empty_reads):
@@ -403,15 +409,18 @@ def test_an_answer_from_another_host_is_never_asked_for_again(press, empty_reads
 
 def test_a_postback_is_never_sent_again(press, empty_reads):
     """Every answer reads empty, the postback's and the viewer's both. The
-    postback is never sent a second time, nor its address asked for with a
-    GET it never made, and nothing is filed."""
+    postback is never sent a second time, nor its address asked for from
+    outside the page, and nothing is filed. The tab itself is put back on
+    the documents list by that address, as after any press that left it
+    showing something else."""
     empty_reads.which = lambda r: True
     empty_reads.every = True
     saved, out = press("postback", quick=empty_reads.read)
     assert len(empty_reads.emptied) >= 1
     assert saved is False
     assert not out.exists()
-    assert [s[0] for s in SITE.seen if s[2] == DOCUMENTS_PATH] == ["POST"], SITE.seen
+    assert [(s[0], s[3]) for s in SITE.seen if s[2] == DOCUMENTS_PATH] == [
+        ("POST", "navigate"), ("GET", "navigate")], SITE.seen
     assert not asked_from_outside(), SITE.seen
 
 

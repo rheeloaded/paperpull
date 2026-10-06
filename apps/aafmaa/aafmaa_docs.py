@@ -506,9 +506,10 @@ class App:
         on the site the documents page is opened in a tab of this run's own
         (tabs.on_its_site). Each row is looked for in the documents table
         alone, so a tab of the person's on another page of the site is sent
-        there first."""
+        there first, and so is one at the documents page's address showing
+        something other than its list, such as a PDF a View showed there."""
         return tabs.on_its_site(self, site.is_safe_url, "Armed Forces Mutual",
-                                self._open_documents, ready=site.on_documents_page)
+                                self._open_documents, ready=site.showing_documents_list)
 
     def _open_documents(self, page):
         """Armed Forces Mutual's documents page, opened by its address the way

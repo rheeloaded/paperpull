@@ -45,6 +45,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   PDF the press made without a tab of its own. No provider is known to
   hand a document over this way, and every way a real account has shown
   still worked under 1.63, so this covers what a page could do.
+- **AAFMAA puts its tab back on the documents list when a document showed
+  in it.** After a View, AAFMAA put the tab back on its documents list only
+  when the tab's address had left /Documents/, and before each document it
+  took the tab as ready by its address alone. A View that shows the PDF in
+  the tab itself leaves the tab at the documents page's own address, so the
+  next document was looked for inside the PDF viewer and marked for manual
+  review, and a tab of yours left showing a PDF there sent every document
+  to manual review. A tab now counts as on the documents page only when
+  its list is showing, and is sent back to it otherwise.
 
 ## [0.43.0] - 2026-10-05
 

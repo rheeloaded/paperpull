@@ -16,6 +16,13 @@ app's own, and a tab of theirs on another page of the site is sent to the
 documents page before any row is looked for. A tab of another site is never
 read, clicked or loaded.
 
+A View may also post the page back and answer with the PDF itself, which
+the browser shows in the tab at the documents page's own address. The tab
+was judged to be on the documents page by its address alone, before each
+document and after each press, so it was never put back, and each document
+after it was looked for inside the PDF viewer and marked for manual review.
+A tab is on the documents page only when its list is showing.
+
 The browser is started as a program of its own with a debugging port, the
 way login.bat leaves one open, and the app attaches to it over CDP exactly
 as it does at home. AAFMAA and another site are made-up host names the
@@ -26,9 +33,11 @@ invented.
 import json
 import sys
 import threading
+import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -60,17 +69,27 @@ ROW = """<tr><td>{date}</td><td>{title}</td><td>{policy}</td><td>{insured}</td>
 <td><a class="view" data-n="{n}" href="javascript:__doPostBack('{target}','')">View in Browser</a></td>
 <td><a href="javascript:__doPostBack('{copy}','')">Download a Copy</a></td><td></td></tr>"""
 
+# A View hands its document over as a download, or with view=postback posts
+# the page back, answered with the PDF itself, which the browser shows in
+# the tab at this page's own address.
 DOCUMENTS_PAGE = """<!doctype html><html><head><title>Documents</title></head><body>
 <main><h1>My Documents</h1>
+<form method="post" action="/Documents/default.aspx"><input type="hidden" name="row" id="row"></form>
 <table><tr><th>Date</th><th>Document</th><th>Policy</th><th>Name of Insured</th>
 <th>View in Browser</th><th>Download a Copy</th></tr>
-%s
+%(rows)s
 </table></main>
 <script>
 function __doPostBack() {}
+const VIEW = '%(view)s';
 for (const a of document.querySelectorAll('a.view')) {
   a.addEventListener('click', (e) => {
     e.preventDefault();
+    if (VIEW === 'postback') {
+      document.getElementById('row').value = a.dataset.n;
+      document.forms[0].submit();
+      return;
+    }
     fetch('/doc/' + a.dataset.n).then(r => r.blob()).then(b => {
       const d = document.createElement('a');
       d.href = URL.createObjectURL(b);
@@ -105,6 +124,11 @@ class FakeAafmaa:
     def reset(self):
         # Every request, as (host, path).
         self.seen = []
+        # How a View hands its document over, "download" or "postback",
+        # which the documents page takes in when it is drawn, and the row
+        # each postback asked for, in order.
+        self.view = "download"
+        self.posted = []
 
 
 SITE = FakeAafmaa()
@@ -126,13 +150,19 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         host = (self.headers.get("Host") or "").split(":")[0]
-        path = urlsplit(self.path).path
+        parts = urlsplit(self.path)
+        path = parts.path
         SITE.seen.append((host, path))
-        if host == AAFMAA_HOST and path == "/Documents/default.aspx":
+        shown = parse_qs(parts.query).get("pdf", [""])[0]
+        if host == AAFMAA_HOST and path == "/Documents/default.aspx" and shown in PDFS:
+            # A PDF shown at the documents page's own address, as a View a
+            # person pressed in their own tab leaves it.
+            self._send(PDFS[shown], "application/pdf")
+        elif host == AAFMAA_HOST and path == "/Documents/default.aspx":
             rows = "".join(ROW.format(date=d, title=t, policy=p, insured=i, target=tg, n=n,
                                       copy=tg.replace("lnkViewDocument", "lnkDownloadCopy"))
                            for n, (d, t, p, i, tg) in enumerate(ROWS))
-            self._page(DOCUMENTS_PAGE % rows)
+            self._page(DOCUMENTS_PAGE % {"rows": rows, "view": SITE.view})
         elif host == AAFMAA_HOST and path == "/Home/default.aspx":
             self._page(HOME_PAGE)
         elif host == AAFMAA_HOST and path == "/Messages/default.aspx":
@@ -144,6 +174,18 @@ class _Handler(BaseHTTPRequestHandler):
         elif host == ELSEWHERE_HOST:
             self._page("<!doctype html><html><head><title>Elsewhere</title></head>"
                        "<body><p>Another page</p></body></html>")
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        host = (self.headers.get("Host") or "").split(":")[0]
+        path = urlsplit(self.path).path
+        form = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode("utf-8")
+        SITE.seen.append((host, path))
+        row = parse_qs(form).get("row", [""])[0]
+        SITE.posted.append(row)
+        if host == AAFMAA_HOST and path == "/Documents/default.aspx" and row in PDFS:
+            self._send(PDFS[row], "application/pdf")
         else:
             self.send_error(404)
 
@@ -273,6 +315,21 @@ def discover_with_their_tab(attached, server, tmp_path, capsys):
     return theirs
 
 
+def open_tab_at(cdp_url, address, seconds=15):
+    """A tab the browser opens itself at this address, the way the person's
+    own tab is opened, once the browser lists it there. Its id. A PDF it
+    shows has no title of the page's own to wait for."""
+    made = json.loads(urllib.request.urlopen(urllib.request.Request(
+        "%s/json/new?%s" % (cdp_url, address), method="PUT"), timeout=15).read().decode("utf-8"))
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if any(t.get("id") == made["id"] and t.get("url") == address
+               for t in testkit.tabs_of(cdp_url)):
+            return made["id"]
+        time.sleep(0.1)
+    raise AssertionError("the tab for %s never got there" % address)
+
+
 def on_host(cdp_url, host):
     return [t for t in testkit.tabs_of(cdp_url) if urlsplit(t.get("url") or "").hostname == host]
 
@@ -344,3 +401,51 @@ def test_their_tab_on_the_documents_page_is_used_as_it_always_was(attached, serv
 
     assert downloaded(tmp_path) == discovered(tmp_path), folded(out)
     assert [t["id"] for t in testkit.tabs_of(attached)] == [theirs]
+
+
+# -- a document shown in the tab at the documents page's own address ---------------
+
+def test_documents_shown_in_the_tab_are_each_found_and_downloaded(attached, server, tmp_path,
+                                                                  capsys):
+    """Each View posts the page back and the answer is the PDF itself, which
+    the browser shows in their tab at the documents page's own address. The
+    tab was put back on the documents list only when its address had left
+    /Documents/, so the second document's row was looked for inside the PDF
+    viewer and the document went to manual review. Every document is
+    downloaded in their tab, which ends on the documents list. The page in
+    their tab is drawn by Discover, so it posts back from the start."""
+    SITE.view = "postback"
+    theirs = discover_with_their_tab(attached, server, tmp_path, capsys)
+    SITE.seen.clear()
+
+    out = run(tmp_path, attached, capsys, "--resume")
+
+    assert sorted(SITE.posted) == ["0", "1"], "each View posted the page back, %s" % SITE.posted
+    assert downloaded(tmp_path) == discovered(tmp_path), folded(out)
+    assert not marked(tmp_path), folded(out)
+    tabs = testkit.tabs_of(attached)
+    assert [t["id"] for t in tabs] == [theirs], "their tab was the one used, and no other opened"
+    assert tabs[0].get("title") == "Documents", "their tab ends on the documents list"
+
+
+def test_their_tab_showing_a_pdf_at_the_documents_address_is_sent_to_the_list(attached, server,
+                                                                              tmp_path, capsys):
+    """The person's AAFMAA tab is at the documents page's own address and
+    shows a PDF, as a View they pressed themselves leaves it. Before each
+    document the tab was judged ready by its address alone, so every row was
+    looked for inside the PDF viewer and every document went to manual
+    review. Their tab is sent to the documents list first, and every
+    document is downloaded there."""
+    theirs = discover_with_their_tab(attached, server, tmp_path, capsys)
+    showing = open_tab_at(attached, address(server, AAFMAA_HOST, "/Documents/default.aspx?pdf=0"))
+    testkit.keep_only(attached, {showing})
+    assert showing != theirs
+    SITE.seen.clear()
+
+    out = run(tmp_path, attached, capsys, "--resume")
+
+    assert downloaded(tmp_path) == discovered(tmp_path), folded(out)
+    assert not marked(tmp_path), folded(out)
+    tabs = testkit.tabs_of(attached)
+    assert [t["id"] for t in tabs] == [showing], "their tab was the one used, and no other opened"
+    assert tabs[0].get("title") == "Documents", "their tab ends on the documents list"

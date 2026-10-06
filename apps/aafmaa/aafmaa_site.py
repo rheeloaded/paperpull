@@ -342,6 +342,24 @@ def on_documents_page(page) -> bool:
     return "/documents/" in (page.url or "").lower()
 
 
+def showing_documents_list(page) -> bool:
+    """On /Documents/ AND showing its document list, the rule goto_documents
+    holds every page in front of it to.
+
+    The address alone is not enough. A View postback that answers with the
+    PDF itself leaves the tab at /Documents/default.aspx showing the
+    browser's PDF viewer (measured 2026-10-05, Chromium 153), so a check of
+    the address said the list was there, the tab was not put back, and the
+    next document's row was looked for inside the viewer and not found. A
+    page that cannot be read is not showing the list either."""
+    if not on_documents_page(page):
+        return False
+    try:
+        return page.locator(FALLBACK["doc_row"]).count() > 1
+    except Exception:
+        return False
+
+
 def goto_documents(page) -> bool:
     """Find the document area, without losing a good page you already have.
 
@@ -1077,9 +1095,10 @@ def download_document_row(page, title: str, date_text: str, account: str,
             except Exception:
                 pass
         # a full postback can leave the main frame on the rendered document,
-        # so put the table back before the next row is looked for
+        # at the documents page's own address, so put the table back
+        # whenever the list is not showing before the next row is looked for
         try:
-            if not on_documents_page(page):
+            if not showing_documents_list(page):
                 page.goto(URLS["documents"], wait_until="domcontentloaded",
                           timeout=60000)
                 page.wait_for_timeout(2500)
