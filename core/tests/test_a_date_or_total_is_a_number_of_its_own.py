@@ -135,6 +135,19 @@ def test_a_month_with_its_zero_before_a_day_without_one_is_still_found():
         assert verdict(I.Identity(date="2027-01-05"), printed).outcome == I.VERIFIED, printed
 
 
+@pytest.mark.parametrize("printed", ["Statement period August 01, 2031 to August 31, 2031",
+                                     "Statement period Aug 01, 2031 to Aug 31, 2031"])
+def test_a_day_written_with_its_zero_after_its_months_name_is_found(printed):
+    """August 01, 2031 was never found at all, since its zero stands
+    between the name and the day, and the first of a month is the day a
+    statement's period begins on."""
+    assert I.contains(printed, I.date_variants("2031-08-01"), fact="start"), printed
+    v = verdict(I.Identity(date="2031-08-31", start="2031-08-01"), printed)
+    assert v.outcome == I.VERIFIED and set(v.matched) == {"date", "start"}
+    # The zero is a day's own, so the 10th is not found in the 1st.
+    assert not I.contains(printed, I.date_variants("2031-08-10"), fact="start")
+
+
 def test_a_till_that_prints_a_letter_at_a_time_is_still_read():
     spaced = "T o t a l  1 2 8 4 . 5 5   0 1 / 1 5 / 2 7"
     v = verdict(I.Identity(date="2027-01-15", total="1284.55"), spaced)
@@ -169,6 +182,40 @@ def test_a_month_is_not_found_inside_a_day_of_another_month():
     for printed in ("Statement for July 2031", "Period 07/2031", "Period 7/2031",
                     "Month 2031-07", "Jul 2031 activity"):
         assert I.contains(printed, july, fact="period"), printed
+
+
+@pytest.mark.parametrize("printed", [
+    "Statement made 09/07/2031",
+    "Statement made 9/7/2031",
+    "Payment received 2031-07-15",
+    "Ending balance as of 2031-07-31",
+    "Due 08-07/2031",
+    "Run 2031-07/15",
+])
+def test_a_month_is_not_found_at_either_end_of_a_day(printed):
+    """July's 07/2031 is the end of the September day 09/07/2031, and its
+    2031-07 the front of every ISO day of July. A digit and a slash or a
+    hyphen right before a month, or a slash or a hyphen and a digit right
+    after it, make it part of a day (review of the business statements)."""
+    assert not I.contains(printed, I.period_variants("2031-07"), fact="period"), printed
+
+
+@pytest.mark.parametrize("printed", [
+    "Period 07/2031", "Period: 07/2031.", "Month 2031-07", "July 2031 activity",
+    "Statement 07/2031 - 08/2031", "(07/2031)", "Period 7/2031, page 2",
+])
+def test_a_month_printed_on_its_own_is_still_found(printed):
+    assert I.contains(printed, I.period_variants("2031-07"), fact="period"), printed
+
+
+def test_only_a_month_is_held_to_the_rule_about_a_day_around_it():
+    """A day, a first day and a total are held to on_its_own as they were.
+    A day written as the end of a range, 07/01/2031-07/31/2031, keeps both
+    its days."""
+    text = "Statement period 07/01/2031-07/31/2031"
+    assert I.contains(text, I.date_variants("2031-07-01"), fact="start")
+    assert I.contains(text, I.date_variants("2031-07-31"), fact="date")
+    assert I.contains("Paid 2031-07-15/2", I.date_variants("2031-07-15"), fact="date")
 
 
 def test_a_statements_first_day_is_not_found_inside_a_longer_date():

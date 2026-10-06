@@ -132,6 +132,20 @@ def _on_its_own_source(variant, between=r"\s*") -> str:
 _LOCATOR_BETWEEN = "[\\s\u200b\u00ad]*"
 
 
+def month_on_its_own(variant, text_lower: str) -> bool:
+    """on_its_own for a way of printing a month, with one rule more. A day
+    holds its month's digits, July's 07/2031 at the end of the September
+    day 09/07/2031 and July's 2031-07 at the front of the July day
+    2031-07-15. So a month is not found where a digit and then a slash or
+    a hyphen come right before it, nor where a slash or a hyphen and then a
+    digit come right after it."""
+    source = _on_its_own_source(variant)
+    if not source:
+        return False
+    bounded = r"(?<![0-9][/-])" + source + r"(?![/-][0-9])"
+    return re.search(bounded, text_lower or "") is not None
+
+
 def on_its_own_pattern(variant):
     """The rule on_its_own holds a document's text to, as a pattern for a
     locator.
@@ -165,12 +179,15 @@ def date_variants(iso: str) -> list:
     both January 2nd and February 1st, and a check that matches the wrong
     document is worse than no check.
 
-    Two forms are asked for with a zero as well, because a plain search
+    Some forms are asked for with a zero as well, because a plain search
     found them only by finding the form without it at their end, which a
     date found as a number of its own does not do (see on_its_own). They
     are a day written before its month's name, 05 Jan 2027 beside 5 Jan
     2027, which some statements print, and a month written with its zero
-    before a day written without one, 01/5/2027 beside 1/5/2027."""
+    before a day written without one, 01/5/2027 beside 1/5/2027. A day
+    written with its zero after its month's name, August 01, 2031 or Aug
+    01, 2031, was never found at all, since its zero stands between the
+    name and the day."""
     m = _ISO_DATE.match((iso or "").strip())
     if not m:
         return []
@@ -192,8 +209,10 @@ def date_variants(iso: str) -> list:
         "%02d-%02d-%04d" % (month, day, year),
         "%02d.%02d.%04d" % (month, day, year),
         "%s %d, %04d" % (name, day, year),
+        "%s %02d, %04d" % (name, day, year),
         "%s %d %04d" % (name, day, year),
         "%s %d, %04d" % (short, day, year),
+        "%s %02d, %04d" % (short, day, year),
         "%s. %d, %04d" % (short, day, year),
         "%d %s %04d" % (day, name, year),
         "%02d %s %04d" % (day, name, year),
@@ -362,11 +381,14 @@ def contains(text: str, variants: Iterable[str], fact: str = "") -> bool:
     """Whether any way of printing a fact appears in the text.
 
     `fact` is the fact's name. A date, a first day, a period or a total
-    counts only as a number of its own (see on_its_own), anything else
-    wherever it appears."""
+    counts only as a number of its own (see on_its_own), a period by the
+    one rule more month_on_its_own holds it to, and anything else wherever
+    it appears."""
     if not text:
         return False
     low = text.lower()
+    if fact == "period":
+        return any(month_on_its_own(v, low) for v in variants)
     if fact in ON_ITS_OWN:
         return any(on_its_own(v, low) for v in variants)
     squashed = _squash(low)
