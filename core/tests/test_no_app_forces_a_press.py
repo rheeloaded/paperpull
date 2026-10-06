@@ -169,6 +169,40 @@ def test_nothing_presses_past_playwrights_checks(path):
         "paperpull_core.pressing instead." % (path.relative_to(REPO).as_posix(), found)
 
 
+def _presses_through_pressing(app: Path) -> bool:
+    for path in sorted(app.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id == "pressing" and node.attr in ("click", "check")):
+                return True
+    return False
+
+
+def test_every_app_that_presses_through_pressing_stops_its_run_on_a_stop():
+    """A stop is a SystemExit, so it passes every except Exception on its
+    way out, and an app whose main() did not take it would leave without
+    saying why in its own words or writing its failure file. Every app
+    that presses through paperpull_core.pressing catches pressing.Stop in
+    main() and hands it to pressing.stop_run."""
+    users = []
+    for app in sorted(d for d in (REPO / "apps").iterdir() if d.is_dir()):
+        if not _presses_through_pressing(app):
+            continue
+        users.append(app.name)
+        entry = sorted(app.glob("*_docs.py")) + sorted(app.glob("*_receipts.py"))
+        assert entry, "%s presses through pressing and has no main() to stop in" % app.name
+        tree = ast.parse(entry[0].read_text(encoding="utf-8-sig"))
+        main = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]
+        assert main, "%s has no main()" % app.name
+        handlers = [h for n in ast.walk(main[0]) if isinstance(n, ast.Try) for h in n.handlers
+                    if h.type is not None and ast.unparse(h.type) == "pressing.Stop"]
+        assert handlers, "%s does not catch pressing.Stop in main()" % app.name
+        assert any("pressing.stop_run(app, " in ast.unparse(h) for h in handlers), \
+            "%s catches pressing.Stop without pressing.stop_run" % app.name
+    assert {"amex", "vanguard"} <= set(users), users
+
+
 def test_the_census_finds_every_kind_of_press_it_is_for():
     """The census, on sources made for it. If one of these stops being
     found, the census above passes on nothing."""

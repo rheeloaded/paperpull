@@ -80,10 +80,13 @@ class Stop(SystemExit):
     through the word list."""
 
     def __init__(self, step: str, reason: str, lines: Iterable[str], facts: Optional[dict] = None):
-        super().__init__(0)
+        lines = [str(line) for line in lines]
+        # What a stop no main() takes says on its way out. The app's own
+        # main() catches it and stops the run with SystemExit(0).
+        super().__init__(lines[0] if lines else reason)
         self.step = step
         self.reason = reason
-        self.lines = [str(line) for line in lines]
+        self.lines = lines
         self.facts = dict(facts or {})
 
 
@@ -174,7 +177,8 @@ LOOK_JS = r"""(args) => {
 
   // 1. To the middle of the window, at once rather than smoothly, so what
   // is read next is where it ends up.
-  el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+  try { el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'}); }
+  catch (e) { el.scrollIntoView({block: 'center', inline: 'center'}); }
 
   // 2. The point Playwright presses, the middle of the first of the
   // element's boxes that shows in the window, cut to the window, to a
