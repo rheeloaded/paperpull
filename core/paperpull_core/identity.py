@@ -268,7 +268,7 @@ class Identity:
     total: str = ""       # the amount as the list showed it
     number: str = ""      # order, document or confirmation number
     kind: str = ""        # what it is called. Recorded, never decisive
-    # Words that name this document apart from its neighbours, such as
+    # Words that name this document apart from its neighbors, such as
     # the account a statement belongs to. Useless alone, because every
     # statement of a kind carries the same ones, and decisive against a
     # competing row that carries different ones. Only `distinguish`
@@ -278,7 +278,7 @@ class Identity:
     # ISO, the first day a statement covers, for one dated by the last day
     # of a range of days. Statements of one provider that each carry their
     # first and last day carry the same kinds of fact whatever their range,
-    # so a neighbour that ends on the same day cannot keep a kind of fact
+    # so a neighbor that ends on the same day cannot keep a kind of fact
     # this one lacks once the day they share stops counting.
     start: str = ""
 
@@ -409,7 +409,7 @@ def rivals_for(rows, index: int, *, span: int = 3) -> tuple:
     Not the whole list, and the reason is measurable. A fact a competing
     row shares stops counting, so every extra rival takes evidence out of
     play. Against all sixty four Navy Federal statements at once, sixteen
-    of them ended up placeable by nothing. Against their neighbours, far
+    of them ended up placeable by nothing. Against their neighbors, far
     fewer do.
 
     Three things go wrong in practice and this covers all of them.
