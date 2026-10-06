@@ -564,7 +564,8 @@ def test_the_attempt_file_is_built_from_facts():
     assert got["discovery"]["years"][0]["failed"] == "the browser could not fetch it"
     assert got["date"] == "2026-03-14" and got["responses"] == [{"note": "an entry"}]
     del app._discovery_facts
-    assert app._attempt_report(doc, _Page(), [])["discovery"] == {"note": "no Discover ran in this command"}
+    assert app._attempt_report(doc, _Page(), [])["discovery"] == \
+        {"note": "the list was not read in this command"}
 
 
 class _CenterPage:

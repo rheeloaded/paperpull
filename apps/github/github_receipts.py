@@ -39,6 +39,7 @@ from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import github_site as site
 from paperpull_core.models import (ONLINE, Item, Purchase, State)
+from paperpull_core.words import Fixed, words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -1146,15 +1147,16 @@ class App:
                 print("\nFollowing the newest receipt link ...")
                 info["receipt"] = site.survey_receipt(page, links[0]["href"])
             else:
-                info["receipt"] = {"note": "no receipt link found on the first rows"}
+                info["receipt"] = {"note": Fixed("no receipt link found on the first rows")}
         except Exception as e:
             info["error"] = site.mask_text(str(e))
         out = self.paths.diagnostics / "diagnose-github.json"
-        atomic_write_text(out, site.to_json(info))
+        write_shaped(out, info, words_for('GitHub', site))
         print(f"  Wrote {out}")
-        print("  That is the detailed file, for repairing this provider. It")
-        print("  carries the page's own words, so it stays on this machine")
-        print("  unless you decide to send it.")
+        print("  That is the detailed file, for repairing this provider. Any word")
+        print("  in it that is not on PaperPull's fixed list is written as its")
+        print("  shape, a for a letter and 9 for a digit, so it can be attached")
+        print("  too. Read it through first.")
         h = info.get("history") or {}
         print(f"  History: state={h.get('state') or 'has rows'} rows={h.get('rows')} links={len(h.get('links') or [])}")
         r = info.get("receipt") or {}

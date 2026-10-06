@@ -178,7 +178,9 @@ def test_diagnose_takes_no_screenshot_and_reads_what_vanguard_sends(tmp_path, mo
     assert walks == [1]
     assert info["documents_total"] == 1
     assert info["documents_by_category"] == {"Statement": 1}
-    assert info["samples"][0]["date"] == "2026-08-31"
-    assert info["rendered"] == {"years": ["2026", "2025"]}
+    # Dates and years off the page leave as their shape, which still says
+    # how Vanguard writes them.
+    assert info["samples"][0]["date"] == "9999-99-99"
+    assert info["rendered"] == {"years": ["9999", "9999"]}
     assert "1234567" not in json.dumps(info["documents_by_account"])
     assert not list(app.paths.diagnostics.glob("*.png"))

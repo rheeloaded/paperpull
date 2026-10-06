@@ -43,6 +43,7 @@ import discovercard_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
+from paperpull_core.words import Fixed, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -867,7 +868,6 @@ class App:
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
-        import json as _json
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
@@ -921,8 +921,8 @@ class App:
             # application is the actual defect.
             if site.looks_public_or_error(page) or site.looks_signed_out(page):
                 info["selects_skipped"] = (
-                    "not a signed-in application page (public site, 404, or "
-                    "signed out) - no control on it was read or written")
+                    Fixed("not a signed-in application page (public site, 404, or "
+                          "signed out) - no control on it was read or written"))
                 print("\nThis is not your signed-in Discover statements page")
                 print("(it looks like a public page, a 404, or a signed-out")
                 print("session), so no dropdown or control on it was touched.")
@@ -961,11 +961,14 @@ class App:
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
-        atomic_write_text(out, _json.dumps(info, indent=2))
+        write_shaped(out, info, words_for('Discover', site))
         print(f"Wrote {out}")
-        print("  That is the detailed file, for repairing this provider. It")
-        print("  carries the page's own words, so it stays on this machine")
-        print("  unless you decide to send it.")
+        print("  That is the detailed file, for repairing this provider. Any word")
+        print("  in it that is not on PaperPull's fixed list is written as its")
+        print("  shape, a for a letter and 9 for a digit, so it can be attached")
+        print("  too. Read it through first.")
+        print("  The screenshot beside it shows the page as it is, so it stays")
+        print("  on this machine.")
         print(f"Rows collected (generic scraper): {info.get('collected', '?')}")
         refused = [s for s in info.get("selects", [])
                    if s.get("refused")]

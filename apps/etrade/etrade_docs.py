@@ -51,6 +51,7 @@ import etrade_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
+from paperpull_core.words import Fixed, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -434,10 +435,8 @@ class App:
         docs = site.collect_download_docs(page)
         # Period words, counts and dates only, so a report that says
         # "found just 1" can be attached as it is (#36).
-        import json as _json
         try:
-            atomic_write_text(self.paths.diagnostics / "discovery-trace.json",
-                              _json.dumps({"discovery": site.DISCOVERY_TRACE[:60]}, indent=2))
+            write_shaped(self.paths.diagnostics / "discovery-trace.json", {"discovery": site.DISCOVERY_TRACE[:60]}, words_for('ETRADE', site))
         except Exception as e:
             log.info("could not write the discovery trace: %s", e)
         for r in docs:
@@ -578,14 +577,14 @@ class App:
             out_path.unlink()
             saved = False
         if not saved:
-            import json as _json
             attempt = self.paths.diagnostics / "download-attempt.json"
             # Built from what may leave, since it goes on a public issue.
             # The address is its kind and plain words, and the trace holds
             # fixed words, counts and shapes (#36, review).
-            atomic_write_text(attempt, _json.dumps(
-                {"timestamp": now_iso(), "date": doc.date, "landed_on": site.mask_href(page.url or ""),
-                 "responses": trace[:80]}, indent=2))
+            write_shaped(attempt, {
+                "timestamp": now_iso(), "date": doc.date,
+                "landed_on": site.mask_href(page.url or ""),
+                "responses": trace[:80]}, words_for('ETRADE', site))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -882,11 +881,10 @@ class App:
         shape only. Nothing is downloaded and nothing but a documents link is
         followed."""
         self.stats["mode"] = "diagnose"
-        import json as _json
         page = self.page()
         info = {"timestamp": now_iso(), "unverified": True,
-                "note": "E*TRADE app built without an account. This survey is what "
-                        "the maintainer repairs the site layer against."}
+                "note": Fixed("E*TRADE app built without an account. This survey is what "
+                              "the maintainer repairs the site layer against.")}
         try:
             found = site.goto_documents(page)
             info["documents_page_found"] = found
@@ -924,11 +922,12 @@ class App:
         except Exception as e:
             info["error"] = str(e)[:300]
         out = self.paths.diagnostics / "diagnose-documents.json"
-        atomic_write_text(out, _json.dumps(info, indent=2))
+        write_shaped(out, info, words_for('ETRADE', site))
         print(f"Wrote {out}")
-        print("  That is the detailed file, for repairing this provider. It")
-        print("  carries the page's own words, so it stays on this machine")
-        print("  unless you decide to send it.")
+        print("  That is the detailed file, for repairing this provider. Any word")
+        print("  in it that is not on PaperPull's fixed list is written as its")
+        print("  shape, a for a letter and 9 for a digit, so it can be attached")
+        print("  too. Read it through first.")
         print(f"Documents page found: {info.get('documents_page_found', '?')}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
               f"rows: {info.get('rows_collected', '?')}")

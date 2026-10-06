@@ -24,6 +24,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
   had problems and asked for another run, since the script still checked
   for the browser download it no longer makes. Its banner no longer says
   it downloads Playwright's Chromium either.
+- **A recording no longer keeps a downloaded file's name.** It keeps the
+  file's kind, like `.pdf`, and the shape of the name, every letter
+  written as a and every digit as 9, so it still shows where the name's
+  dates sit. A provider can name a statement after the account it belongs
+  to, and the masking the name went through took out digits and left
+  letters.
+- **Recordings, Diagnose files and failure files keep a word from a page
+  only when it is on a fixed list.** The list holds the words sites use
+  for every customer alike, like Statements, Download or a month, and any
+  other word is written as its shape, whether it is a name on a button, an
+  address, an id in a web address or a field name in the provider's
+  answers. It used to be masking, which removes the kinds of value
+  somebody thought of, digits, emails and amounts, and lets a word
+  through. The detailed file Diagnose writes and the file a failed
+  download writes go through the same list now, since the apps told
+  testers to attach both, so either can be sent. A screenshot Diagnose
+  takes still stays on your machine.
 - **AAFMAA no longer gives up on a document when the first answer to its
   View press holds no PDF.** The capture took the first answer that called
   itself a PDF and, when that answer held none, marked the document for

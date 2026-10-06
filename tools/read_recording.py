@@ -8,15 +8,20 @@ site layer from.
 
     python tools/read_recording.py path/to/recording.json
 
+A recording keeps a word off the page only when it is on PaperPull's fixed
+word list, and writes any other as its shape, a for a letter and 9 for a
+digit, so a link reading "Statement for Zorvex 0400" arrives as "Statement
+for aaaaaa 9999". The lines this prints match such a name by its shape,
+re.compile with that many letters and digits where the shape stands, and
+say so, because a word that was not on the list is usually the account's
+own and a site layer should not depend on it.
+
 It also reads the file the way a tester should before attaching it
-anywhere. Redaction runs inside the app with the account holder's name in
-hand, so it is at its strongest there and this cannot improve on it. What
-this adds is a second pair of eyes over the result, looking for the three
-things redaction is known not to catch. A four or five digit number,
-because the floor is six so that a year survives. A name standing on its
-own, when the app had no owner configured to match it against. Anything
-that still looks like an address or an email, which would mean a value
-arrived by a route redaction never saw.
+anywhere. What it adds is a second pair of eyes over the result, looking
+for what the list is known to let through, a name made of ordinary words
+like June Price, and for anything that is not on the list at all, which
+would mean a value arrived by a route the list never saw or the file was
+written before there was one.
 
 Nothing here contacts the network and nothing is written. It prints.
 """
@@ -30,6 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 
 from paperpull_core.recorder import clean_structure, concerns  # noqa: E402,F401
+from paperpull_core.words import is_shape  # noqa: E402
 
 KIND = "paperpull-recording"
 
@@ -136,7 +142,10 @@ def effects(step: dict) -> list:
             if eff.get("new_tab_off_host") else ""))
     if eff.get("download"):
         got = eff.get("download_name") or ""
-        out.append("a file downloaded%s" % (', called "%s"' % got if got else ""))
+        if got and shaped(got):
+            out.append('a file downloaded, its name shaped "%s"' % got)
+        else:
+            out.append("a file downloaded%s" % (', called "%s"' % got if got else ""))
     if eff.get("printed"):
         out.append("the page asked the browser to print")
     try:
@@ -155,6 +164,61 @@ def _lit(value) -> str:
     return json.dumps(str(value))
 
 
+# A name's runs, letters, digits, spaces and single marks, which is how a
+# shape is read back. A run of a or of 9 is where a word stood that was not
+# on the word list.
+_RUNS = re.compile(r"[^\W\d_]+|\d+|\s+|.", re.S)
+
+
+def shaped(text) -> bool:
+    """Whether a name holds a word that was not on the list."""
+    return any(is_shape(r) for r in _RUNS.findall(str(text or "")))
+
+
+def pattern(text) -> str:
+    """A regular expression for what a shaped name stood for, that many
+    letters or digits where each shape stands and the rest as written."""
+    out = []
+    for r in _RUNS.findall(str(text or "")):
+        if r.isspace():
+            out.append(r"\s+")
+        elif is_shape(r):
+            out.append((r"\d{%d}" if r[0] == "9" else r"[^\W\d_]{%d}") % len(r))
+        else:
+            out.append(re.escape(r))
+    return "^%s$" % "".join(out)
+
+
+def _name(text) -> str:
+    """A name as a literal, or as a pattern when part of it was shaped."""
+    return "re.compile(%s)" % _lit(pattern(text)) if shaped(text) else _lit(text)
+
+
+def _before_shape(text) -> str:
+    """What a shaped value says before its first shape, for a prefix match."""
+    head = []
+    for r in _RUNS.findall(str(text or "")):
+        if is_shape(r):
+            break
+        head.append(r)
+    return "".join(head)
+
+
+def _attribute(attr: str, value) -> str:
+    """A locator by an attribute's value. CSS has no patterns, so a shaped
+    value is matched on the part before its first shape, or not at all."""
+    value = str(value)
+    if not shaped(value):
+        if attr == "id" and _CSS_NAME.match(value):
+            return "page.locator(%s)" % _lit("#" + value)
+        return "page.locator(%s)" % _lit("[%s=%s]" % (attr, json.dumps(value)))
+    head = _before_shape(value)
+    if len(head) >= 3:
+        return "page.locator(%s)" % _lit("[%s^=%s]" % (attr, json.dumps(head)))
+    return ("# the %s is mostly words that are not on the list, %s, so find "
+            "the control another way" % (attr, json.dumps(value)))
+
+
 def locator_code(step: dict) -> str:
     """The Playwright expression for a step's control, or a comment saying
     why there is not one."""
@@ -163,19 +227,15 @@ def locator_code(step: dict) -> str:
     value = loc.get("value") or ""
     if how == "role":
         return "page.get_by_role(%s, name=%s)" % (_lit(loc.get("role") or ""),
-                                                  _lit(loc.get("name") or ""))
+                                                  _name(loc.get("name") or ""))
     if how == "testid":
-        return "page.get_by_test_id(%s)" % _lit(value)
+        return "page.get_by_test_id(%s)" % _name(value)
     if how == "label":
-        return "page.get_by_label(%s)" % _lit(value)
-    if how == "id":
-        if _CSS_NAME.match(str(value)):
-            return "page.locator(%s)" % _lit("#" + str(value))
-        return "page.locator(%s)" % _lit("[id=%s]" % json.dumps(str(value)))
-    if how == "name":
-        return "page.locator(%s)" % _lit("[name=%s]" % json.dumps(str(value)))
+        return "page.get_by_label(%s)" % _name(value)
+    if how in ("id", "name"):
+        return _attribute(how, value)
     if how == "text":
-        return "page.get_by_text(%s)" % _lit(value)
+        return "page.get_by_text(%s)" % _name(value)
     return "# no stable locator, the control was a bare <%s>" % (loc.get("tag") or "?")
 
 
@@ -187,6 +247,10 @@ def step_code(step: dict) -> str:
     action = step.get("action") if isinstance(step, dict) else None
     if action == "select":
         option = step.get("option") or ""
+        if shaped(option):
+            # select_option takes no pattern.
+            return ("%s.select_option(...)  # the option read %s, a shape, so "
+                    "choose it by what it holds" % (base, _lit(option)))
         return "%s.select_option(label=%s)" % (base, _lit(option))
     if action == "check":
         return "%s.%s()" % (base, "check" if step.get("checked") else "uncheck")
@@ -239,6 +303,12 @@ def notes(report: dict) -> list:
         out.append("Some control names came through masked. The real page text "
                    "differs from what is printed here, so match on the part "
                    "that is not masked.")
+    if any(shaped(name_of(s)) or shaped(s.get("option") or "") for s in steps):
+        out.append("Some control names hold words that are not on PaperPull's "
+                   "word list, written as their shape, a for a letter and 9 "
+                   "for a digit. The lines below match those parts by their "
+                   "shape. Loosen them before using them, since a word that "
+                   "was not on the list is usually the account's own.")
     dropped = report.get("dropped") or {}
     if isinstance(dropped, dict):
         if dropped.get("malformed"):
@@ -409,9 +479,10 @@ def render(report: dict) -> str:
             L.extend(_wrap(w))
             L.append("")
     else:
-        L.append("  Nothing here matched the three things redaction is known")
-        L.append("  not to catch. That is not the same as the file being")
-        L.append("  clean, so read it through yourself as well.")
+        L.append("  Nothing here matched what the word list is known to let")
+        L.append("  through, or anything that is not on it. That is not the")
+        L.append("  same as the file being clean, so read it through yourself")
+        L.append("  as well.")
         L.append("")
     return "\n".join(L)
 

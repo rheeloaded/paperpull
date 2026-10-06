@@ -1835,7 +1835,7 @@ def _layout_token(token: str) -> str:
         return "date"
     if _LAYOUT_TIME_RE.match(t):
         return "time"
-    return "word" if re.search(r"[a-z]", t) else "mark"
+    return "word" if re.search(r"[a-z]", t) else "symbol"
 
 
 def receipt_layout(text: str) -> List[str]:
@@ -1856,7 +1856,7 @@ def receipt_layout(text: str) -> List[str]:
                 row += " more"
                 break
             row = (row + " " + word).strip()
-        out.append(row or "mark")
+        out.append(row or "symbol")
     return out
 
 

@@ -53,10 +53,11 @@ contributed to anything, is
    Documents link, and takes no screenshot. It writes two files. The one
    whose name starts with `survey-diagnose-` holds counts and states and
    no text from your account, and that is the one to send.
-   `diagnose-documents.json` beside it is the detailed one. It carries
-   the page's own words, the headings and the names of buttons and
-   links, the months of your statements among them, so it stays on your
-   machine.
+   `diagnose-documents.json` beside it is the detailed one, with the
+   headings and the names of buttons and links. Any word in it that is
+   not on PaperPull's fixed list is written as its shape, a for a letter
+   and 9 for a digit, so it can go with the survey if you are asked for
+   it.
 6. Open each file you will send in Notepad and read it through. The
    recording holds the names of the buttons and links you pressed and
    the shape of the data the page loads, no values. It ends by printing
@@ -68,10 +69,9 @@ contributed to anything, is
 7. Attach `recording.json` and the `survey-diagnose-` file to
    [issue #52](https://github.com/rheeloaded/paperpull/issues/52) with a
    sentence about where you found each kind, and how far back the lists
-   go. Do not attach `diagnose-documents.json`, which carries the page's
-   own words. Do not attach a screenshot of a statement either. A
-   statement carries your card and account numbers, and the recording
-   deliberately does not.
+   go. Do not attach a screenshot of a statement. A statement carries
+   your card and account numbers, and the recording deliberately does
+   not.
 8. When a new build is posted, click **Pilot** and say whether PDFs
    landed in `Statements\`, and whether the card and Savings statements
    came out with the right names and months. A Pilot saves the five
@@ -258,11 +258,12 @@ paperpull applecard pilot         REM once the site layer is confirmed
 - Only `https` addresses on `card.apple.com` are ever read. Not
   `apple.com` as a whole, which would take in the Apple Store.
 - The files you are asked to send, the `survey-diagnose-` file,
-  `failure-*.json` and `download-attempt.json`, are built from a list of
-  what may leave, counts, states, flags and fixed words. The detailed
-  `diagnose-documents.json` masks every run of six or more digits, every
-  amount, every email address and the account holder's name, and stays
-  on your machine.
+  `failure-*.json`, `download-attempt.json` and `recording.json`, are
+  built from a list of what may leave, counts, states, flags and fixed
+  words. The detailed `diagnose-documents.json` goes through the same
+  fixed word list, where any word that is not on it is written as its
+  shape, a for a letter and 9 for a digit, and an amount, an email
+  address and the account holder's name are never kept.
 
 ## Tests
 

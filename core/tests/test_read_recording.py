@@ -227,6 +227,70 @@ def test_a_fill_never_carries_a_value():
     assert ".fill(...)" in rr.step_code(s)
 
 
+# -- a name that holds a shape ---------------------------------------------------
+# A recording keeps a word off the page only when it is on the word list, and
+# writes any other as its shape, a for a letter and 9 for a digit. The line
+# printed for such a name has to match what the shape stood for, not the
+# letter a and the digit 9 themselves.
+
+def _evaluated(code):
+    """The pattern a generated line hands Playwright, compiled."""
+    import re
+    found = re.search(r're\.compile\(("(?:[^"\\]|\\.)*")\)', code)
+    assert found, code
+    return re.compile(json.loads(found.group(1)))
+
+
+def test_a_shaped_name_becomes_a_pattern_that_matches_its_shape():
+    s = step(locator={"how": "role", "role": "link", "name": "Statement for aaaaaa 9999"})
+    code = rr.step_code(s)
+    compile(code, "<test>", "eval")
+    pattern = _evaluated(code)
+    assert pattern.match("Statement for Zorvex 0400"), "an invented name of that shape"
+    assert not pattern.match("Statement for Zorvex 040"), "one digit short is another shape"
+
+
+def test_a_shaped_test_id_and_label_are_patterns_too():
+    for how in ("testid", "label", "text"):
+        code = rr.step_code(step(locator={"how": how, "value": "acct-aa9aaaaaa9aaa"}))
+        compile(code, "<test>", "eval")
+        assert _evaluated(code).match("acct-QZ4XKRWPT7MVN"), how
+
+
+def test_a_shaped_id_is_matched_on_what_comes_before_the_shape():
+    """CSS has no patterns, so the part before the first shape is used."""
+    code = rr.step_code(step(locator={"how": "id", "value": "acct-aa9aaaaaa9aaa"}))
+    assert code == 'page.locator("[id^=\\"acct-\\"]").click()'
+    code = rr.step_code(step(locator={"how": "name", "value": "aa9aaaaaa9aaa"}))
+    assert code.startswith("#"), "nothing before the shape to match on"
+
+
+def test_a_shaped_option_is_not_chosen_by_its_label():
+    s = step(action="select", option="March 9999",
+             locator={"how": "label", "value": "Period"})
+    code = rr.step_code(s)
+    compile(code.split("#")[0].strip(), "<test>", "eval")
+    assert "select_option(label=" not in code and "a shape" in code
+
+
+def test_a_lone_a_is_the_word_and_not_a_shape():
+    s = step(locator={"how": "role", "role": "link", "name": "Pay a bill"})
+    assert rr.step_code(s) == 'page.get_by_role("link", name="Pay a bill").click()'
+    assert not any("their shape" in n for n in rr.notes(report(steps=[s])))
+
+
+def test_shaped_names_are_called_out():
+    s = step(locator={"how": "role", "role": "link", "name": "Statement for aaaaaa"})
+    assert any("their shape" in n for n in rr.notes(report(steps=[s])))
+
+
+def test_a_downloaded_files_shaped_name_says_it_is_a_shape():
+    s = step(effect={"navigated": False, "new_tab": False, "download": True,
+                     "download_name": "aa9aaaaaa9aaa-aaa-99999999999999.pdf",
+                     "requests": 0})
+    assert any("its name shaped" in e for e in rr.effects(s))
+
+
 # -- what the maintainer is told -----------------------------------------------
 
 def test_an_empty_recording_says_why_it_might_be_empty():

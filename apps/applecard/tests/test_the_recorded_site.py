@@ -526,7 +526,8 @@ def test_the_diagnose_file_carries_no_row_text_and_no_dates(browser, tmp_path, m
     page. What it wrote was the row's text with digit runs masked, which
     passes a name straight through, and the first tester attached this
     file to a public issue. The rows are now flags and a category, the
-    documents are counts, and Diagnose says the file stays here."""
+    documents are counts, every word of the file goes through the fixed
+    word list on its way out, and Diagnose says so."""
     import applecard_docs
     page, served = _open(browser)
     page.goto("https://card.apple.com/")
@@ -547,7 +548,7 @@ def test_the_diagnose_file_carries_no_row_text_and_no_dates(browser, tmp_path, m
     assert info["documents_recognized"]["by_kind"] == {"card": 4, "savings": 3, "tax": 2}
     for s in info["samples"]:
         assert set(s) == set(applecard_docs._SAMPLE_FIELDS), s
-    assert "stays on this machine" in said
+    assert "not on PaperPull's fixed list" in said
     assert "survey-" in said
     assert "attach it to the Apple Card issue" not in said
 

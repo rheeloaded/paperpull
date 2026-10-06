@@ -39,6 +39,7 @@ from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import meijer_site as site
 from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
+from paperpull_core.words import Fixed, words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -928,11 +929,11 @@ class App:
         """What the press saw, to Diagnostics/download-attempt.json, for the
         tester to attach. Built only from what press_row_receipt and
         pdf_facts put in the trace, which never carry a receipt's words."""
-        import json as _json
         attempt = self.paths.diagnostics / "download-attempt.json"
-        atomic_write_text(attempt, _json.dumps(
-            {"timestamp": now_iso(), "date": purchase.purchase_date,
-             "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]}, indent=2))
+        write_shaped(attempt, {
+            "timestamp": now_iso(), "date": purchase.purchase_date,
+            "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]},
+            words_for('Meijer', site))
         print(f"  What the page answered is in {attempt}, attach it to the issue.")
 
     def _in_review(self, path) -> bool:
@@ -1442,16 +1443,17 @@ class App:
                 print("\nFollowing the newest receipt link ...")
                 info["receipt"] = site.survey_receipt(page, links[0]["href"])
             else:
-                info["receipt"] = {"note": "no receipt link found on the first rows"}
+                info["receipt"] = {"note": Fixed("no receipt link found on the first rows")}
         except Exception as e:
             info["error"] = site.mask_text(str(e))
         info["json_answers"] = sniffer.stop()
         out = self.paths.diagnostics / "diagnose-meijer.json"
-        atomic_write_text(out, site.to_json(info))
+        write_shaped(out, info, words_for('Meijer', site))
         print(f"  Wrote {out}")
-        print("  That is the detailed file, for repairing this provider. It")
-        print("  carries the page's own words, so it stays on this machine")
-        print("  unless you decide to send it.")
+        print("  That is the detailed file, for repairing this provider. Any word")
+        print("  in it that is not on PaperPull's fixed list is written as its")
+        print("  shape, a for a letter and 9 for a digit, so it can be attached")
+        print("  too. Read it through first.")
         h = info.get("history") or {}
         print(f"  Orders page: state={h.get('state') or 'has rows'} rows={h.get('rows')} links={len(h.get('links') or [])} json answers={len(info['json_answers'])}")
         r = info.get("receipt") or {}

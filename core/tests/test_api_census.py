@@ -74,16 +74,24 @@ def seen(*responses, **kw):
 
 # -- the path, which is structure and an account number in one breath ---------
 
-def test_an_account_number_in_a_path_is_masked():
+def test_an_account_number_in_a_path_leaves_as_its_shape():
     assert A.path_shape(
         "https://api.bank.example/v1/accounts/12345678/documents"
-    ) == "/v1/accounts/#/documents"
+    ) == "/v1/accounts/99999999/documents"
 
 
-def test_a_uuid_and_a_hash_in_a_path_are_masked():
+def test_a_uuid_and_a_hash_in_a_path_leave_as_their_shape():
     assert A.path_shape("https://x/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/o") \
-        == "/app/#/o"
-    assert A.path_shape("https://x/d/9f86d081884c7d659a2feaa0c55ad015") == "/d/#"
+        == "/app/9999aa9a-9a99-9aa9-99a9-a99a9a9aaaaa/o"
+    assert A.path_shape("https://x/d/9f86d081884c7d659a2feaa0c55ad015") \
+        == "/d/9a99a999999a9a999a9aaaa9a99aa999"
+
+
+def test_an_id_made_of_letters_leaves_as_its_shape_too():
+    """What the old rule could not see. It masked a segment that looked
+    like an id, and an id made mostly of letters did not look like one."""
+    shaped = A.path_shape("https://x/merchant/QZXKRWPTKMV4N/statements")
+    assert shaped == "/merchant/aaaaaaaaaaa9a/statements"
 
 
 def test_the_structure_itself_survives():
@@ -93,8 +101,8 @@ def test_the_structure_itself_survives():
         == "/ebusiness/order/v1/orders/graphql"
 
 
-def test_a_segment_long_enough_to_be_a_token_is_masked():
-    assert A.path_shape("https://x/s/" + "a" * 80) == "/s/#"
+def test_a_segment_long_enough_to_be_a_token_is_cut():
+    assert A.path_shape("https://x/s/" + "Qz" * 40) == "/s/" + "a" * 40
 
 
 # -- the query, names and never values ----------------------------------------
@@ -104,8 +112,9 @@ def test_the_names_of_the_parameters_come_out_and_the_values_do_not():
     assert keys == ["page", "token", "year"]
 
 
-def test_a_parameter_named_after_an_account_is_masked_too():
-    assert "#" in A.query_keys("https://x/y?88213344=1")
+def test_a_parameter_named_after_an_account_leaves_as_its_shape_too():
+    assert A.query_keys("https://x/y?88213344=1&QZXKRWPTKMV4N=2") \
+        == ["99999999", "aaaaaaaaaaa9a"]
 
 
 def test_a_url_with_no_query_says_nothing():
@@ -125,9 +134,15 @@ def test_a_body_becomes_its_keys_and_the_types_of_its_values():
                      "total": "number", "next": "null"}
 
 
-def test_an_object_keyed_by_an_account_number_has_its_keys_masked():
+def test_an_object_keyed_by_an_account_number_has_its_keys_shaped():
     """The case where the keys are the values. It exists."""
-    assert A.shape_of({"88213344": {"balance": 1.0}}) == {"#": {"balance": "number"}}
+    assert A.shape_of({"88213344": {"balance": 1.0}}) \
+        == {"99999999": {"balance": "number"}}
+
+
+def test_keys_of_one_shape_stay_apart():
+    """Two accounts are two keys, not one, even when both are a shape."""
+    assert list(A.shape_of({"88213344": 1, "77102233": 2})) == ["99999999", "99999999+"]
 
 
 def test_a_long_list_reports_its_length_and_one_shape():
@@ -203,7 +218,7 @@ def test_only_the_most_recent_are_kept():
     r = seen(*[FakeResponse("https://api.bank.example/v1/p%d" % i)
                for i in range(60)], limit=5)
     assert len(r.seen) == 5
-    assert r.seen[-1]["path"] == "/v1/p59"
+    assert r.seen[-1]["path"] == "/v1/a99"
     assert r.counts["provider"] == 60
 
 
@@ -344,10 +359,12 @@ def test_no_value_from_a_body_comes_out():
         assert canary not in body, canary
 
 
-def test_the_key_names_do_come_out_because_that_is_the_point():
+def test_the_key_names_on_the_list_come_out_because_that_is_the_point():
     """An API that renamed documents to items looks from outside exactly
-    like an account with nothing in it."""
+    like an account with nothing in it. A key that is not a word on the
+    list leaves as its shape, since a key can be a value too."""
     r = seen(FakeResponse("https://api.bank.example/v1/docs", body=CANARY_BODY))
     body = json.dumps(r.report())
-    for kept in ("CANARYKEY", "member", "documents", "amount", "balance"):
+    for kept in ("member", "documents", "amount", "balance"):
         assert kept in body, kept
+    assert "CANARYKEY" not in body

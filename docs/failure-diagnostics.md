@@ -178,11 +178,17 @@ Diagnose writes the same survey on purpose, as
 `Diagnostics/survey-diagnose-<time>.json`, and that is the file to
 attach when a provider needs a first test or a repair rather than
 having failed. The other file Diagnose writes,
-`diagnose-<provider>.json`, is the detailed one. It carries the page's
-title, the URL with its query string, the text of the rows and the
-labels of the controls, and in half the apps a full page screenshot
-sits beside it. That is what a repair is actually read from and it is
-not something to attach anywhere. The panel used to say to attach it.
+`diagnose-<provider>.json`, is the detailed one, with the page's title,
+its address, the rows it found and the labels of its controls. It was
+meant to stay on the tester's machine, and eighteen apps told the
+tester to attach it anyway, with whatever words a page's rows hold, an
+address or a vehicle among them. So it goes through the fixed word list
+in `paperpull_core.words` now, like a recording and like the file a
+failed download writes. A word on the list is kept as the page wrote
+it and any other leaves as its shape, a for a letter and 9 for a
+digit, so the detailed file can be attached too. A screenshot, which
+half the apps take, cannot be built from a list and stays on the
+tester's machine.
 
 ## What this would have cost Costco
 

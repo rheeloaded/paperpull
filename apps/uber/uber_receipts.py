@@ -36,7 +36,6 @@ from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
 
 import argparse
-import json
 import logging
 import random
 import re
@@ -50,6 +49,7 @@ from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import uber_site as site
 from paperpull_core.models import Item, Purchase, State
+from paperpull_core.words import words_for, write_shaped
 
 from storage import (EATS, PURCHASE_TYPES, RIDES, CsvFile, JsonStore,
                      ORDER_HISTORY_COLUMNS, Paths, RECEIPT_INDEX_COLUMNS,
@@ -1386,11 +1386,12 @@ class App:
             info["eats"] = {"error": type(e).__name__}
         self._survey = info
         out = self.paths.diagnostics / "diagnose-uber.json"
-        atomic_write_text(out, json.dumps(info, indent=2))
+        write_shaped(out, info, words_for('Uber', site))
         print(f"  Wrote {out}")
-        print("  That is the detailed file, for repairing this provider. It")
-        print("  names the fields Uber answered with, so it stays on this machine")
-        print("  unless you decide to send it.")
+        print("  That is the detailed file, for repairing this provider. Any word")
+        print("  in it that is not on PaperPull's fixed list is written as its")
+        print("  shape, a for a letter and 9 for a digit, so it can be attached")
+        print("  too. Read it through first.")
         r = info.get("rides") or {}
         print("  Rides, signed in %s, %s trip(s) read, %s paid, %s with a receipt of %s asked"
               % ("yes" if r.get("signed_in") else "no", r.get("trips", 0), r.get("paid", 0),

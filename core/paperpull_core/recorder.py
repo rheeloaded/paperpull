@@ -43,8 +43,13 @@ No cookies, no headers, no storage. This module never calls cookies(),
 storage_state() or anything that reads them, so a recording cannot carry
 a session even by accident.
 
-No page text beyond a control's own label, and everything that does come
-out goes through paperpull_core.redact first.
+No page text beyond a control's own label, and nothing the page says
+leaves as it was unless it is a word on the fixed list in
+paperpull_core.words. Any other word is written as its shape, every
+letter as a and every digit as 9, the name of a file it downloaded, an
+address, a test id and a key in an answer included. Redaction was the
+rule here, and it masks runs of digits, so an account's id made mostly
+of letters in a downloaded file's name went out as it was.
 
 WHERE IT REFUSES TO RUN
 
@@ -69,10 +74,12 @@ import re
 import time
 from typing import Callable, Optional
 
+from .api_census import kind_of as _kind_of
 from .browser import can_ask
 from .failure import SAFE_TAGS as _SAFE_TAGS
 from .failure import _count
-from .redact import redact, safe_query, shape_of
+from .words import (Fixed, shape, shape_name, shape_query, shape_tree,
+                    shape_url, words_for)
 
 # The only thing a typed value is ever recorded as.
 REDACTED = "[REDACTED]"
@@ -88,6 +95,14 @@ _REPEAT_MS = 400
 _NOT_A_CONTROL = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "span", "div",
                   "li", "td", "th", "tr", "section", "article", "main",
                   "header", "footer", "label", "strong", "em", "small"}
+
+# How the capture script can say it found a control, in its order of
+# preference. Anything else the page sends is "unresolved".
+_HOWS = ("role", "testid", "label", "id", "name", "text", "unresolved")
+
+# The methods a request can carry. A page can send any word as a method,
+# and one that is not here is written "other".
+_METHODS = frozenset(("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
 
 _MAX_STEPS = 400
 _MAX_REQUESTS = 300
@@ -601,12 +616,15 @@ class Recorder:
                  is_safe_url: Callable[[str], bool],
                  looks_signed_out: Optional[Callable] = None,
                  is_safe_control: Optional[Callable[[str], bool]] = None,
-                 provider: str = ""):
+                 provider: str = "", words=None):
         self.page = page
         self._is_safe_url = is_safe_url
         self._looks_signed_out = looks_signed_out
         self._is_safe_control = is_safe_control
         self.provider = provider
+        # The app's own words on top of the fixed list, its name and its
+        # site module's, so "PayPal" in an address reads as itself.
+        self.words = frozenset(words) if words is not None else words_for(provider)
         self.steps: list = []
         self.requests: list = []
         self.dropped = {"repeat": 0, "unresolved": 0, "off_host_request": 0,
@@ -794,11 +812,11 @@ class Recorder:
             "i": len(self.steps),
             "action": action,
             "locator": self._clean_locator(loc),
-            "label": redact(label)[:120],
+            "label": shape(label, self.words)[:120],
             "at": _timestamp(record.get("at")),
         }
         if action == "select":
-            step["option"] = redact(str(record.get("option") or ""))[:60]
+            step["option"] = shape(str(record.get("option") or ""), self.words)[:60]
         if action == "select" and not step["option"]:
             step["option"] = ""
         if action == "check":
@@ -835,9 +853,9 @@ class Recorder:
         # costs the shape and never the step.
         try:
             if sum(1 for s in self.steps if "structure" in s) < _SHAPE_MAX_STEPS:
-                shape = clean_structure(record.get("structure"))
-                if shape is not None:
-                    step["structure"] = shape
+                built = clean_structure(record.get("structure"))
+                if built is not None:
+                    step["structure"] = built
             elif record.get("structure") is not None:
                 self.dropped["structure"] = self.dropped.get("structure", 0) + 1
         except Exception:
@@ -866,13 +884,26 @@ class Recorder:
             step["i"] = len(self.steps)
 
     def _clean_locator(self, loc: dict) -> dict:
-        """Every field coerced to a string and cut, because what the page
-        sent is not necessarily what the listener above would send."""
-        out = {"how": str(loc.get("how") or "unresolved")[:20]}
-        for key in ("role", "name", "value", "tag"):
+        """Rebuilt from the lists, because what the page sent is not
+        necessarily what the listener above would send. How it was found
+        and its role and tag are words of ours or "other", and its name or
+        value is shaped like any other words off the page, a test id or an
+        id included, since a site builds those from what it shows."""
+        how = loc.get("how")
+        out = {"how": how if isinstance(how, str) and how in _HOWS else "unresolved"}
+        role = loc.get("role")
+        if role not in (None, "", [], {}):
+            role = str(role).strip().lower()
+            out["role"] = role if role in STRUCTURE_ROLES else "other"
+        for key in ("name", "value"):
             value = loc.get(key)
             if value not in (None, "", [], {}):
-                out[key] = redact(str(value))[:80]
+                out[key] = shape(str(value), self.words)[:80]
+        tag = loc.get("tag")
+        if tag not in (None, "", [], {}):
+            tag = str(tag).strip().lower()
+            out["tag"] = tag if tag in STRUCTURE_TAGS else (
+                "custom" if "-" in tag else "other")
         return out
 
     def _is_repeat(self, step: dict) -> bool:
@@ -917,7 +948,7 @@ class Recorder:
         step = self._current()
         if step is not None:
             step["effect"]["navigated"] = True
-            step["effect"]["landed_on"] = redact(frame.url or "")[:160]
+            step["effect"]["landed_on"] = shape_url(frame.url or "", self.words)[:200]
         self._install()
 
     def _on_new_tab(self, page) -> None:
@@ -987,13 +1018,20 @@ class Recorder:
                 pass
 
     def _on_download(self, download) -> None:
+        """That a step set off a download, and the shape of the file's name.
+
+        The name was kept through redaction, which masks runs of digits,
+        and a provider can name a statement after the account it belongs
+        to, an id of letters and digits that went out as it was. Its kind
+        is the useful part, and where its dates sit, so the shape keeps
+        those and nothing else."""
         step = self._current()
         if step is None:
             return
         step["effect"]["download"] = True
         try:
-            step["effect"]["download_name"] = redact(
-                download.suggested_filename or "")[:80]
+            step["effect"]["download_name"] = shape_name(
+                download.suggested_filename or "", self.words)
         except Exception:
             pass
 
@@ -1013,21 +1051,23 @@ class Recorder:
             step = self._current()
             entry = {
                 "step": step["i"] if step else None,
-                "url": redact(url)[:200],
-                "status": response.status,
-                "type": kind[:40],
+                "url": shape_url(url, self.words, query=False)[:200],
+                "status": _count(response.status),
+                "type": _kind_of(kind),
             }
-            query = safe_query(url)
+            query = shape_query(url, self.words)
             if query:
                 entry["query"] = query[:240]
             try:
-                entry["method"] = response.request.method
+                method = str(response.request.method or "").upper()
+                entry["method"] = method if method in _METHODS else "other"
                 body = response.request.post_data or ""
                 if body.lstrip().startswith("{"):
                     import json as _json
                     parsed = _json.loads(body)
                     if isinstance(parsed, dict):
-                        entry["post_keys"] = sorted(str(k) for k in parsed)[:30]
+                        entry["post_keys"] = sorted(
+                            shape(str(k), self.words)[:40] for k in parsed)[:30]
             except Exception:
                 pass
             if "json" in kind:
@@ -1037,10 +1077,10 @@ class Recorder:
                 except (TypeError, ValueError):
                     size = 0
                 if size > _MAX_BODY_BYTES:
-                    entry["shape"] = "not read, %d bytes" % size
+                    entry["shape"] = "not read, too large"
                 else:
                     try:
-                        entry["shape"] = shape_of(response.json())
+                        entry["shape"] = self._json_shape(response.json())
                     except Exception:
                         entry["shape"] = "unreadable"
             self.requests.append(entry)
@@ -1049,25 +1089,66 @@ class Recorder:
         except Exception:
             pass
 
+    def _json_shape(self, obj, depth: int = 0):
+        """The shape of a JSON answer, never its values. Keys are the
+        signal, a balance is not. A key is shaped like any other word,
+        because an object keyed by account number is a thing that
+        exists."""
+        if depth > 3:
+            return "..."
+        if isinstance(obj, dict):
+            out = {}
+            for k, v in list(obj.items())[:25]:
+                key = shape(str(k), self.words)[:40]
+                while key in out:
+                    key += "+"
+                out[key] = self._json_shape(v, depth + 1)
+            return out
+        if isinstance(obj, list):
+            # Fixed, since the count is ours to say and would otherwise
+            # leave as its shape like any other digits.
+            return [Fixed("list of %d" % len(obj)),
+                    self._json_shape(obj[0], depth + 1) if obj else None]
+        return {bool: "bool", int: "int", float: "float", str: "str",
+                type(None): "NoneType"}.get(type(obj), "other")
+
     # -- the file ----------------------------------------------------------
 
     def report(self) -> dict:
         """Everything worth keeping, and nothing else. Safe to attach to a
-        public issue, which is what it is for."""
-        return {
+        public issue, which is what it is for.
+
+        Every field above is already built from the lists, and the whole of
+        it goes through the same rule once more on the way out, so a field
+        added later cannot carry a page's words by forgetting to. A step's
+        time leaves as whole seconds since the first step, a duration,
+        rather than the clock."""
+        first = next((s["at"] for s in self.steps
+                      if isinstance(s.get("at"), int)), None)
+        steps = []
+        for s in self.steps:
+            out = {k: v for k, v in s.items() if k != "at"}
+            if first is not None and isinstance(s.get("at"), int):
+                out["seconds_in"] = max(0, (s["at"] - first) // 1000)
+            steps.append(out)
+        return shape_tree({
             "kind": "paperpull-recording",
             "provider": self.provider,
-            "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "steps": self.steps,
+            "recorded_at": Fixed(time.strftime("%Y-%m-%dT%H:%M:%S")),
+            "steps": steps,
             "requests": self.requests,
             "dropped": self.dropped,
-            "note": ("Typed values are never captured, only that a field was "
-                     "typed into. No cookies, headers or storage are read. "
-                     "A step's structure is the page's shape around the "
-                     "control, element kinds, attribute names and counts, "
-                     "and never any text or attribute value. "
-                     "Read this through before attaching it anywhere."),
-        }
+            "note": Fixed(
+                "Typed values are never captured, only that a field was "
+                "typed into. No cookies, headers or storage are read. "
+                "A word off the page is kept only when it is on PaperPull's "
+                "fixed list of words, and any other is written as its shape, "
+                "a for a letter and 9 for a digit, in control names, file "
+                "names, addresses and keys alike. A step's structure is the "
+                "page's shape around the control, element kinds, attribute "
+                "names and counts, and never any text or attribute value. "
+                "Read this through before attaching it anywhere."),
+        }, self.words)
 
     def summary(self) -> str:
         """One line for the console and the panel."""
@@ -1143,7 +1224,7 @@ def _strings(obj, path="", found=None, depth=0) -> list:
     return found
 
 
-def _name_shaped(text: str) -> list:
+def _name_shaped(text: str, ours=frozenset()) -> list:
     out = []
     # A name also comes joined into an id, "holder-Invented-Person", since a
     # click inside a marked container is kept by its test id or its id, and
@@ -1156,6 +1237,12 @@ def _name_shaped(text: str) -> list:
             words = [w.lower() for w in hit.split()]
             if hit in out or any(w in _CONTROL_WORDS for w in words):
                 continue
+            # The app's own name, "American Family", is not a person. A
+            # pair of words that are both on the list still is worth a
+            # look, since a name made of ordinary words, June Price, is
+            # the one kind the list lets through.
+            if all(w in ours for w in words):
+                continue
             out.append(hit)
     return out
 
@@ -1167,8 +1254,15 @@ def concerns(report: dict) -> list:
 
     One finding is one sentence however many places it appears. An account
     number in forty rows is one thing to fix, and forty lines saying so is
-    a wall of text that gets skipped."""
+    a wall of text that gets skipped.
+
+    A recording written since the fixed word list cannot hold any of these,
+    since a word off the list leaves as its shape and every digit as a 9.
+    This reads a file a person has had in a text editor, and one written
+    before, so it looks anyway."""
     found: dict = {}
+    ours = words_for(str(report.get("provider") or "")) \
+        if isinstance(report, dict) else frozenset()
 
     def add(key, where, text):
         said.add(key[0])
@@ -1183,31 +1277,30 @@ def concerns(report: dict) -> list:
         said = set()
         if _EMAIL_OR_MAIL.search(text):
             add(("email", text), where,
-                "%s holds something shaped like an email address. Redaction "
-                "removes those, so this one arrived by a route it does not "
-                "cover. Delete it and tell the maintainer where it was.")
+                "%s holds something shaped like an email address. A recording "
+                "writes those as <email>, so this one arrived by a route that "
+                "does not. Delete it and tell the maintainer where it was.")
         if _STREET.search(text):
             add(("street", text), where,
                 "%s holds something shaped like a street address. Delete it.")
         for hit in _SHORT_NUMBER.findall(text):
-            if _A_YEAR.match(hit):
+            if _A_YEAR.match(hit) or set(hit) == {"9"}:
                 continue
             add(("number", hit), where,
-                "%s holds the number " + hit + ". Four and five digit numbers "
-                "are left alone, because a four digit number is usually a "
-                "count or a page. If that one is part of an account number, "
-                "replace it with x's.")
-        for hit in _name_shaped(text):
+                "%s holds the number " + hit + ". A recording writes every "
+                "digit as a 9, so this one was written some other way. If it "
+                "is part of an account number, replace it with x's.")
+        for hit in _name_shaped(text, ours):
             add(("name", hit), where,
                 '%s reads "' + hit + '". If that is a person\'s name rather '
                 "than the name of a button, replace it.")
         # Only when nothing above named the thing. An email is caught by
         # the line above and by this one, and the line above says more.
-        if not said and redact(text) != text:
-            add(("unredacted", text), where,
-                "%s still holds something redaction would remove, which means "
-                "it was written without going through it. Tell the "
-                "maintainer.")
+        if not said and shape(text, ours) != text:
+            add(("unlisted", text), where,
+                "%s holds a word that is not on the fixed list, which means it "
+                "was written without going through it, or before there was "
+                "one. Tell the maintainer.")
 
     out = []
     for where, times, text in found.values():
@@ -1235,6 +1328,10 @@ RECORDING - what this does and does not capture
   It records   the controls you click, by the name you read on them, the
                option you pick in a dropdown, a box you tick, and the
                addresses and shapes of the provider's own answers.
+  It keeps     a word off the page only when it is on PaperPull's fixed
+               list of words. Any other word, a name, an address, an
+               account number, is written as its shape, a for a letter
+               and 9 for a digit.
   It does not  record anything you type. Not the text, not a password,
                not a code. There is no keystroke listener in it at all.
   It does not  read cookies, headers or anything that holds your session.
@@ -1338,11 +1435,11 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
     `site` is the app's own site module, for the two host checks and its
     control guard. Returns the path written, or None if it refused."""
     from .redact import set_private_words
-    from .storage import atomic_write_text
-    import json
+    from .words import write_shaped
     from pathlib import Path
 
     set_private_words([owner] if owner else [])
+    words = words_for(provider, site)
     watching = page_to_watch(page, site.is_safe_url)
     if watching is not page:
         page = watching
@@ -1356,7 +1453,7 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
                    is_safe_url=site.is_safe_url,
                    looks_signed_out=getattr(site, "looks_signed_out", None),
                    is_safe_control=getattr(site, "is_safe_control", None),
-                   provider=provider)
+                   provider=provider, words=words)
     why = rec.refusal()
     if why:
         say("Not recording, because %s." % why)
@@ -1364,13 +1461,13 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
 
     say(_CONSENT)
     if not owner:
-        # The owner's name is what lets redaction remove it from a profile
-        # button or a heading. Without it a greeting is still caught, but a
-        # name standing on its own is not, so say so rather than imply a
-        # cover that is not there.
-        say("No account holder name is set in this app's config, so a name"
-            " shown on its own, on a profile button say, cannot be removed"
-            " for you. Look for one when you read the file.")
+        # A name leaves as its shape because it is not on the word list. A
+        # name that is also a word on it, Bill or May, is told apart only
+        # by being the owner's, so say so rather than imply a cover that is
+        # not there.
+        say("No account holder name is set in this app's config. A name is"
+            " written as its shape anyway, unless it is also an ordinary"
+            " word, like Bill or May. Look for one when you read the file.")
         say("")
     rec.start()
     stop_file = Path(diagnostics_dir) / ".stop-recording"
@@ -1390,7 +1487,7 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
             pass
 
     out = Path(diagnostics_dir) / "recording.json"
-    atomic_write_text(out, json.dumps(report, indent=2))
+    write_shaped(out, report, words)
     say("")
     say("Wrote %s" % out)
     say("  %s" % rec.summary())
@@ -1398,10 +1495,10 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
         say("  Nothing was recorded. If you clicked, the page may have been")
         say("  replaced between starting and clicking. Try again.")
 
-    # The file has already been through redaction. This is the second pair
-    # of eyes over the result, and it runs here rather than only in the
-    # maintainer's tool because the person deciding whether to attach the
-    # file is standing in front of this console, not that one.
+    # The file has already been built from the word list. This is the
+    # second pair of eyes over the result, and it runs here rather than
+    # only in the maintainer's tool because the person deciding whether to
+    # attach the file is standing in front of this console, not that one.
     try:
         worry = concerns(report)
     except Exception:

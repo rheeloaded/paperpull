@@ -79,6 +79,7 @@ class FakePayPal:
     def __init__(self, context):
         self.lands = "business"
         self.list_status = 200
+        self.listing = LIST
         self.loads = 0
         self.routed, self.requested = [], []
         context.on("request", lambda r: self.requested.append(r.url))
@@ -95,7 +96,7 @@ class FakePayPal:
                           body="<!doctype html><html><body><h1>Summary</h1></body></html>")
         elif url == site.LIST_API:
             route.fulfill(status=self.list_status, content_type="application/json",
-                          body=json.dumps(LIST if self.list_status == 200 else {}))
+                          body=json.dumps(self.listing if self.list_status == 200 else {}))
         else:
             route.abort()
 
@@ -298,6 +299,38 @@ def test_diagnose_on_a_personal_account_still_reads_the_list(paypal, tmp_path,
     assert info["documents_page_found"] is True
     assert len(info["documents_recognized"]) == 3 and info["rows_collected"] == 3
     assert fake.loads <= 2, "the statements address was loaded %d times" % fake.loads
+
+
+# Invented, made of letters and digits. A holder's name, an id of letters
+# alone and one of letters and digits, in every place Diagnose reads a word
+# from, the page's title, a heading, a link and its address, a statement's
+# title and a key of the list's answer. The detailed file was meant to stay
+# on the tester's machine, and the app's own words told the tester to
+# attach it.
+NAMED = ("<!doctype html><html><head><title>Statements for Zorvexquill</title></head>"
+         "<body><main><h1>Statements for Zorvexquill</h1>"
+         "<a href='/merchant/QZXKRWPTKMVNB/statements'>Statements for QZ4XKRWPT7MVN</a>"
+         "</main></body></html>")
+NAMED_LIST = {"data": {
+    "statements": [{"year": "2031", "details": [
+        dict(_month("20310201", "February"), title="February QZ4XKRWPT7MVN")]}],
+    "QZXKRWPTKMVNB": {"holder": "Zorvexquill"}}}
+
+
+def test_diagnose_keeps_no_word_off_the_list(paypal, tmp_path, monkeypatch, capsys):
+    fake, context, page = paypal
+    PAGES["named"] = NAMED
+    fake.lands, fake.listing = "named", NAMED_LIST
+    page.goto(SUMMARY)
+    app = _app(tmp_path, monkeypatch, context, "--diagnose")
+    app.cmd_diagnose()
+    text = (app.paths.diagnostics / "diagnose-documents.json").read_text(encoding="utf-8")
+    for canary in ("Zorvexquill", "QZXKRWPTKMVNB", "QZ4XKRWPT7MVN"):
+        assert canary.lower() not in text.lower(), "%s came out" % canary
+    info = json.loads(text)
+    assert info["documents_page_found"] is True and info["rows_collected"] == 1
+    assert "February" in text, "a word on the list should still come through"
+    assert fake.nothing_got_past_the_router()
 
 
 def test_a_personal_account_loads_the_statements_page_once(paypal, tmp_path, monkeypatch):

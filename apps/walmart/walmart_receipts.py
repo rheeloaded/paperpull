@@ -44,6 +44,7 @@ from paperpull_core import browser as browser_launcher
 import walmart_site as site
 from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State,
                                    ValidationResult)
+from paperpull_core.words import words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -1389,7 +1390,6 @@ class App:
     def cmd_diagnose(self):
         """Inspect one purchase per type and record local diagnostics."""
         self.stats["mode"] = "diagnose"
-        import json as _json
         page = self.page()
         if not self.discovery.data:
             self.cmd_discover(quiet=True)
@@ -1434,11 +1434,14 @@ class App:
             except Exception as e:
                 info["error"] = str(e)
             out = self.paths.diagnostics / f"diagnose-{ptype}-{p.order_number}.json"
-            atomic_write_text(out, _json.dumps(info, indent=2))
+            write_shaped(out, info, words_for('Walmart', site))
             print(f"  Wrote {out}")
-            print("  That is the detailed file, for repairing this provider. It")
-            print("  carries the page's own words, so it stays on this machine")
-            print("  unless you decide to send it.")
+            print("  That is the detailed file, for repairing this provider. Any word")
+            print("  in it that is not on PaperPull's fixed list is written as its")
+            print("  shape, a for a letter and 9 for a digit, so it can be attached")
+            print("  too. Read it through first.")
+            print("  The screenshot beside it shows the page as it is, so it stays")
+            print("  on this machine.")
             print(f"  Print-receipt controls found: {info.get('print_receipt_controls', '?')}; "
                   f"receipt section: {info.get('receipt_section_found', '?')}")
 

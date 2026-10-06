@@ -49,6 +49,7 @@ import citi_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
+from paperpull_core.words import Fixed, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -831,11 +832,10 @@ class App:
         digit runs masked, JSON bodies as shape only. Nothing is downloaded
         and nothing is clicked."""
         self.stats["mode"] = "diagnose"
-        import json as _json
         page = self.page()
         info = {"timestamp": now_iso(),
-                "note": "What the Citi statements page and its API look like, "
-                        "so the site layer can be repaired against it."}
+                "note": Fixed("What the Citi statements page and its API look like, "
+                              "so the site layer can be repaired against it.")}
         try:
             found = site.goto_documents(page)
             info["documents_page_found"] = found
@@ -872,11 +872,12 @@ class App:
         except Exception as e:
             info["error"] = str(e)[:300]
         out = self.paths.diagnostics / "diagnose-documents.json"
-        atomic_write_text(out, _json.dumps(info, indent=2))
+        write_shaped(out, info, words_for('Citi', site))
         print(f"Wrote {out}")
-        print("  That is the detailed file, for repairing this provider. It")
-        print("  carries the page's own words, so it stays on this machine")
-        print("  unless you decide to send it.")
+        print("  That is the detailed file, for repairing this provider. Any word")
+        print("  in it that is not on PaperPull's fixed list is written as its")
+        print("  shape, a for a letter and 9 for a digit, so it can be attached")
+        print("  too. Read it through first.")
         print(f"Documents page found: {info.get('documents_page_found', '?')}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
               f"rows: {info.get('rows_collected', '?')}")

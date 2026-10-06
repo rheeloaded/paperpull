@@ -2180,8 +2180,9 @@ HTML = r"""<!doctype html>
          provider's page and writes two files to its Diagnostics folder, downloading nothing.
          The one whose name starts with <b>survey-</b> holds counts and states and no text
          from your account, and that is the one to attach to an issue. The detailed
-         file beside it, and its screenshot, carry the page's own words, so
-         they stay on this machine unless you decide to send them.</p>
+         file beside it keeps a word only when it is on PaperPull's fixed list and
+         writes any other as its shape, so it can go with it. A screenshot, where
+         Diagnose takes one, shows the page as it is and stays on this machine.</p>
       <p class="morehint"><b>Rename preview</b> shows what this app would call the files you
          already have, and changes nothing. <b>Apply renames</b> then renames them where they
          sit. Nothing is downloaded either way, nothing moves between folders, and only files

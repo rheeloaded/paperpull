@@ -264,14 +264,15 @@ class Journal:
             return entry
         if isinstance(raw, dict):
             counts = {}
-            for key, value in raw.items():
-                if key == "__page":
-                    continue
+            # Keyed by the names this side asked about, never by whatever
+            # keys came back, since any script on the page can add some.
+            for name, _sel in self._pairs:
+                value = raw.get(name)
                 if isinstance(value, list) and len(value) == 2:
-                    counts[str(key)[:40]] = {"matched": _count(value[0]),
-                                             "visible": _count(value[1])}
+                    counts[name] = {"matched": _count(value[0]),
+                                    "visible": _count(value[1])}
                 else:
-                    counts[str(key)[:40]] = None
+                    counts[name] = None
             entry["watching"] = counts
             page_bits = raw.get("__page")
             if isinstance(page_bits, list) and len(page_bits) == 4:

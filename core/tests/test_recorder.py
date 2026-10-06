@@ -216,12 +216,15 @@ def test_a_typed_field_records_that_it_was_typed_into_and_not_what():
     assert "hunter2" not in json.dumps(r.report())
 
 
-def test_a_dropdown_keeps_its_option_because_that_is_the_signal():
+def test_a_dropdown_keeps_its_option_words_and_the_shape_of_its_numbers():
+    """A statement picker's options are months and years, which is the
+    signal. The month is a word on the list. The year leaves as its shape,
+    which still says it is a year and where it sits."""
     r, page = rec()
     page.fire({"action": "select", "locator": {"how": "role", "role": "combobox",
                                                "name": "Statement period"},
                "label": "Statement period", "option": "March 2026", "at": 1})
-    assert r.steps[0]["option"] == "March 2026"
+    assert r.steps[0]["option"] == "March 9999"
 
 
 def test_an_option_carrying_something_private_is_still_redacted():
@@ -266,7 +269,7 @@ def test_a_request_is_described_by_names_and_shapes_not_values():
         body={"documents": [{"id": "abc", "balance": 1234.56}], "count": 1},
         method="POST", post='{"accountId": "X1", "year": 2026}'))
     entry = r.requests[0]
-    assert entry["query"] == "acct=...&type=STATEMENT"
+    assert entry["query"] == "acct=99999999&type=STATEMENT"
     assert entry["post_keys"] == ["accountId", "year"]
     assert entry["shape"] == {"documents": ["list of 1", {"id": "str", "balance": "float"}],
                               "count": "int"}
@@ -565,11 +568,11 @@ def _session(tmp_path, monkeypatch, owner):
 
 
 def test_with_no_owner_set_the_person_is_told_what_is_not_covered(tmp_path, monkeypatch):
-    """redact removes the owner's name because the config gives it. With
-    no owner, a name on a profile button is not caught, and saying so
-    beats implying a cover that is not there."""
+    """A name leaves as its shape because it is not on the word list. One
+    that is also an ordinary word is told apart only by being the owner's,
+    and saying so beats implying a cover that is not there."""
     said, _ = _session(tmp_path, monkeypatch, owner="")
-    assert any("cannot be removed for you" in s for s in said)
+    assert any("unless it is also an ordinary" in s for s in said)
 
 
 def test_with_an_owner_set_it_does_not_say_that(tmp_path, monkeypatch):
@@ -624,7 +627,7 @@ def test_a_huge_response_body_is_not_fetched_while_the_person_is_clicking():
     big.headers["content-length"] = str(9_000_000)
     big.json = lambda: (_ for _ in ()).throw(AssertionError("must not read it"))
     page.emit("response", big)
-    assert r.requests[0]["shape"] == "not read, 9000000 bytes"
+    assert r.requests[0]["shape"] == "not read, too large"
 
 
 def test_a_normal_response_body_is_still_read():
@@ -713,11 +716,12 @@ def test_a_person_shaped_name_is_flagged():
     assert any("Alex Morgan" in c for c in concerns(named("Alex Morgan")))
 
 
-def test_something_redaction_would_have_removed_is_flagged():
-    """A value redaction removes should never be in the file. If one is,
-    it got there without going through redaction, which is a bug."""
+def test_something_the_word_list_would_have_shaped_is_flagged():
+    """A word off the list, or a digit, should never be in the file as it
+    was. If one is, it got there without going through the list, which is
+    a bug, or the file was written before there was one."""
     r = named("Balance $1,204.55", "text")
-    assert any("redaction would remove" in c for c in concerns(r))
+    assert any("not on the fixed list" in c for c in concerns(r))
 
 
 def test_a_clean_recording_raises_nothing():
@@ -769,10 +773,12 @@ def test_the_tester_is_told_what_to_look_at_without_a_maintainer_tool(tmp_path):
     class Site:
         is_safe_url = staticmethod(safe)
 
+    # A name made of words on the list is the one kind the list lets
+    # through, and pointing at it is what this check is still for.
     def click_then_stop():
-        page.fire({"action": "click", "at": 1, "label": "Alex Morgan",
+        page.fire({"action": "click", "at": 1, "label": "June Price",
                    "locator": {"how": "role", "role": "button",
-                               "name": "Alex Morgan"}})
+                               "name": "June Price"}})
         (tmp_path / ".stop-recording").write_text("stop", encoding="utf-8")
 
     threading.Timer(0.05, click_then_stop).start()
@@ -781,7 +787,7 @@ def test_the_tester_is_told_what_to_look_at_without_a_maintainer_tool(tmp_path):
 
     printed = " ".join(said)
     assert "Before this file goes anywhere" in printed
-    assert "Alex Morgan" in printed
+    assert "June Price" in printed
     assert json.loads(Path(out).read_text(encoding="utf-8"))["steps"]
 
 

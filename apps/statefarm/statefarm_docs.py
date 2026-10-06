@@ -51,6 +51,7 @@ import statefarm_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
+from paperpull_core.words import Fixed, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -742,10 +743,8 @@ class App:
             out_path.unlink()
             saved = False
         if not saved:
-            import json as _json
             attempt = self.paths.diagnostics / "download-attempt.json"
-            atomic_write_text(attempt, _json.dumps(
-                self._attempt_report(doc, page, trace), indent=2))
+            write_shaped(attempt, self._attempt_report(doc, page, trace), words_for('State Farm', site))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")
@@ -848,7 +847,7 @@ class App:
         return {"timestamp": now_iso(), "date": doc.date,
                 "landed_on": site.url_mask(getattr(page, "url", "") or ""),
                 "discovery": dict(getattr(self, "_discovery_facts", None)
-                                  or {"note": "no Discover ran in this command"}),
+                                  or {"note": Fixed("the list was not read in this command")}),
                 "responses": trace[:80]}
 
     # -- records -----------------------------------------------------------
@@ -1075,11 +1074,10 @@ class App:
         shape only. Nothing is downloaded and nothing but a documents link is
         followed."""
         self.stats["mode"] = "diagnose"
-        import json as _json
         page = self.page()
         info = {"timestamp": now_iso(), "unverified": True,
-                "note": "State Farm app built without an account. This survey is what "
-                        "the maintainer repairs the site layer against."}
+                "note": Fixed("State Farm app built without an account. This survey is what "
+                              "the maintainer repairs the site layer against.")}
         try:
             found = site.goto_documents(page)
             info["documents_page_found"] = found
@@ -1116,11 +1114,12 @@ class App:
         except Exception as e:
             info["error"] = str(e)[:300]
         out = self.paths.diagnostics / "diagnose-documents.json"
-        atomic_write_text(out, _json.dumps(info, indent=2))
+        write_shaped(out, info, words_for('State Farm', site))
         print(f"Wrote {out}")
-        print("  That is the detailed file, for repairing this provider. It")
-        print("  carries the page's own words, so it stays on this machine")
-        print("  unless you decide to send it.")
+        print("  That is the detailed file, for repairing this provider. Any word")
+        print("  in it that is not on PaperPull's fixed list is written as its")
+        print("  shape, a for a letter and 9 for a digit, so it can be attached")
+        print("  too. Read it through first.")
         print(f"Documents page found: {info.get('documents_page_found', '?')}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
               f"rows: {info.get('rows_collected', '?')}")

@@ -25,7 +25,7 @@ delete-safe, part of [PaperPull](../../README.md).
 4. Click **more** under the buttons, then **Diagnose**. It reads the billing page and writes
    `Diagnostics\diagnose-billing.json` in the Verizon Mobile folder. It downloads
    nothing, clicks nothing but a billing link, takes no screenshot, and
-   masks any run of six or more digits.
+   writes any word that is not on PaperPull's fixed list as its shape.
 5. Click **Record**, in the same **more** menu. Go back to the browser window
    and click your way to one document the way you normally would, then come
    back here and click **Stop recording**. It writes

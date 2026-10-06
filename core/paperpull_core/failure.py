@@ -32,6 +32,12 @@ words below, no URL, no console message, no log line. A field that is
 not on the list does not reach the file, so a provider added tomorrow
 cannot widen it by accident.
 
+And on the way to the disk the whole file goes through the fixed word
+list in paperpull_core.words, so a word that is not on it leaves as its
+shape whichever field carried it. A request's path and the keys of an
+answer were kept when they did not look like an id, and an account's id
+made mostly of letters does not.
+
 The one exception is proved rather than assumed. A class is the single
 most diagnostic thing a framework leaks, and `div.modal.fade` was the
 answer to a bug that cost a day. So the class is reduced to whichever
@@ -306,6 +312,9 @@ _PAGE_STATE_JS = r"""
 }
 """
 
+# What _PAGE_STATE_JS counts, by the names it gives them.
+_PAGE_COUNTS = ("buttons", "links", "dialogs", "iframes", "inputs", "passwords")
+
 _COUNT_ERRORS_JS = r"""
 () => {
   if (window.__ppErrorCount !== undefined) return "already";
@@ -381,13 +390,18 @@ def census(page, selectors: Optional[dict]) -> list:
         except Exception as e:
             out.append({"name": "(census)", "evaluation": error_kind(e)})
             got = []
-        for raw in got:
+        if not isinstance(got, list):
+            got = []
+        # One answer per selector, in the order they were asked. The name
+        # is the one this side sent, never the one that came back, since
+        # any script on the page can change what an answer holds.
+        for (name, _sel), raw in zip(pairs, got):
             if not isinstance(raw, dict):
                 continue
-            entry = {"name": str(raw.get("name"))[:40],
-                     "declared_engine": "css"}
+            entry = {"name": name, "declared_engine": "css"}
             if raw.get("evaluation"):
-                entry["evaluation"] = str(raw["evaluation"])[:40]
+                entry["evaluation"] = _enum(raw["evaluation"],
+                                            ("invalid_css_selector",))
             else:
                 entry["matched"] = _count(raw.get("matched"))
                 entry["visible"] = _count(raw.get("visible"))
@@ -413,7 +427,8 @@ def page_state(page) -> dict:
     state["body_text_len"] = _count(raw.get("body_text_len"))
     state["visible_elements"] = _count(raw.get("visible_elements"))
     counts = raw.get("counts") if isinstance(raw.get("counts"), dict) else {}
-    state["counts"] = {k: _count(v) for k, v in list(counts.items())[:12]}
+    # The names the page was asked about, never whatever keys came back.
+    state["counts"] = {k: _count(counts.get(k)) for k in _PAGE_COUNTS}
     big = raw.get("largest_visible")
     state["largest_visible"] = _node(dict(big, on_screen=True)) if isinstance(big, dict) else None
     state["anything_visible"] = state["largest_visible"] is not None
@@ -546,13 +561,18 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
     Returns the path, or None if even this could not be done, which is
     not a reason to fail a run that was failing anyway."""
     from pathlib import Path
+    from .words import Fixed, shape_tree, words_for
     try:
+        version = str(version or "").strip()
         report = {
             "kind": kind,
             "schema": 2,
             "provider": str(provider)[:40],
-            "version": (str(version)[:20] if version else app_version()),
-            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # Ours, a version and a time, which would otherwise leave as
+            # the shape of their digits like anything else.
+            "version": Fixed(version[:20] if _VERSION_RE.match(version)
+                             else app_version()),
+            "at": Fixed(time.strftime("%Y-%m-%dT%H:%M:%S")),
             "command": re.sub(r"[^a-z-]+", "", str(command).lower())[:20] or "run",
             "step": _step(step),
             "reason": _step(reason) if reason else "",
@@ -593,16 +613,21 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
                 report["journal"] = journal.report()
             except Exception:
                 pass
-        report["note"] = note or (
+        report["note"] = Fixed(note or (
             "Written automatically because a step failed. It holds counts "
             "and states and no text from the page, so there is nothing in "
-            "it from your account. Read it through before attaching it.")
+            "it from your account. Read it through before attaching it."))
 
         out = Path(diagnostics_dir) / ("%s-%s-%s.json" % (
             stem, report["command"], time.strftime("%Y%m%d-%H%M%S")))
         out.parent.mkdir(parents=True, exist_ok=True)
         from .storage import atomic_write_text
-        atomic_write_text(out, json.dumps(report, indent=2))
+        # Every field above is built from the lists already. This is the
+        # one rule over all of them on the way out, so a selector's name,
+        # a request's path, a key in an answer or a word an app handed over
+        # leaves as itself only when it is on the word list.
+        atomic_write_text(out, json.dumps(
+            shape_tree(report, words_for(provider)), indent=2))
     except Exception:
         return None
     try:
@@ -744,9 +769,11 @@ def summarize(report: dict) -> list:
 SURVEY_NOTE = (
     "Written because you asked for a survey with Diagnose. It holds counts "
     "and states and no text from the page, so there is nothing in it from "
-    "your account. This is the file to attach to an issue. The other file "
-    "Diagnose writes, and its screenshot, are the detailed ones and they "
-    "stay on this machine.")
+    "your account. This is the file to attach to an issue. The detailed "
+    "file Diagnose writes beside it keeps a word only when it is on "
+    "PaperPull's fixed list and writes any other as its shape, so it can go "
+    "with it. A screenshot, where Diagnose takes one, shows the page as it "
+    "is and stays on this machine.")
 
 
 def write_survey(diagnostics_dir, page=None, selectors=None, provider="",
@@ -754,22 +781,25 @@ def write_survey(diagnostics_dir, page=None, selectors=None, provider="",
                  say=print, **ignored) -> Optional[str]:
     """The same survey as a failure file, asked for on purpose.
 
-    Diagnose already wrote a second file next to this one, holding the
-    page's own title, the URL with its query string, the text of the rows
-    it found and the labels of the controls, and in half the apps a full
-    page screenshot of a signed-in provider. That file is what a repair is
-    actually read from, and it is not something to attach anywhere.
+    Diagnose already wrote a second file next to this one, the detailed
+    one a repair is read from, with the page's title, its address, the
+    rows it found and the labels of its controls. That file was meant to
+    stay on the tester's machine, and eighteen apps told the tester to
+    attach it anyway, with whatever words a page's rows hold, an address
+    or a vehicle among them. So it is built from the fixed word list now
+    too, every word off the list written as its shape, and either can be
+    sent.
 
-    The panel used to point at it anyway, in as many words. So Diagnose now
-    writes this as well, built on the list of what may leave rather than on
-    scrubbing, and this is the one it names.
+    A screenshot, which half the apps take, is a picture of the page and
+    cannot be built from a list, so it is the one thing that stays.
     """
     def told(out):
         return ("  Diagnose wrote a survey that is safe to send:",
                 "    %s" % out,
                 "  It holds counts and states and no text from your account.",
                 "  Read it through, then attach it to this provider's issue.",
-                "  The detailed file beside it stays on this machine.")
+                "  The detailed file beside it can go with it. A screenshot,",
+                "  where Diagnose takes one, stays on this machine.")
 
     return write_failure(
         diagnostics_dir, command="diagnose", step="survey the page",

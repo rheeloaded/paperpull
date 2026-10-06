@@ -28,9 +28,13 @@ schema, the same for every customer, so they carry nothing about whose
 account it is.
 
 Except when they do. An object keyed by account number is a thing that
-exists, and there the keys *are* values. So a key that looks like an
-identifier is masked the same way a path segment is, and no value is
-ever kept, only the name of its type.
+exists, and there the keys *are* values. A key or a path segment used to
+be masked when it looked like an identifier, a long run of digits, a hex
+blob, two digits in a long token. An account's id made mostly of
+letters looks like none of those. So every key and every segment is a
+word on the fixed list in paperpull_core.words or leaves as its shape, a
+for a letter and 9 for a digit, and no value is ever kept, only the name
+of its type.
 
 WHAT NEVER COMES OUT
 
@@ -41,19 +45,8 @@ bank's page is still a record of what somebody was doing.
 """
 from __future__ import annotations
 
-import re
-
 from .failure import _count, _enum
-
-# A path segment or a key that identifies somebody rather than something.
-# A long run of digits, a hex blob, a uuid. Masked, because a path like
-# /accounts/12345678/documents is structure and an account number in one
-# breath, and the structure is the only half worth having.
-_IDENTIFYING = re.compile(
-    r"^(?:\d{4,}"                             # 12345678
-    r"|[0-9a-f]{8,}"                          # a hex blob or a hash
-    r"|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    r"|[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\d[A-Za-z0-9_-]{6,})$", re.I)
+from .words import Fixed, shape
 
 # What a body is, as a word.
 _KINDS = (("json", ("json",)), ("pdf", ("pdf",)), ("html", ("html",)),
@@ -71,21 +64,21 @@ MAX_DEPTH = 4
 
 
 def mask_token(token: str) -> str:
-    """One path segment or key, kept or masked."""
-    token = str(token or "")
-    if len(token) > 60:
-        return "#"
-    return "#" if _IDENTIFYING.match(token) else token
+    """One path segment or key, its words on the list kept and the rest
+    written as their shape. A path like /accounts/12345678/documents is
+    structure and an account number in one breath, and the structure is
+    the only half worth having, so it leaves as /accounts/99999999/documents."""
+    return shape(str(token or ""), collapse=False)[:40]
 
 
 def path_shape(url: str) -> str:
-    """The path, with the parts that name a person taken out."""
-    from urllib.parse import urlsplit
+    """The path, every part of it a word on the list or its shape."""
+    from urllib.parse import unquote, urlsplit
     try:
         path = urlsplit(url or "").path
     except ValueError:
         return ""
-    parts = [mask_token(p) for p in path.split("/") if p]
+    parts = [mask_token(unquote(p)) for p in path.split("/") if p]
     return "/" + "/".join(parts[:12])
 
 
@@ -121,12 +114,19 @@ def shape_of(value, depth: int = 0):
     if isinstance(value, dict):
         out = {}
         for k, v in list(value.items())[:MAX_KEYS]:
-            out[mask_token(k)[:40]] = shape_of(v, depth + 1)
+            key = mask_token(k)
+            # Keys of one shape stay apart, so forty account numbers read
+            # as forty keys rather than one.
+            while key in out:
+                key += "+"
+            out[key] = shape_of(v, depth + 1)
         if len(value) > MAX_KEYS:
-            out["..."] = "%d more key(s)" % (len(value) - MAX_KEYS)
+            out["..."] = Fixed("%d more key(s)" % (len(value) - MAX_KEYS))
         return out
     if isinstance(value, list):
-        return ["%d item(s)" % len(value),
+        # Fixed, since the count is ours to say and would otherwise leave
+        # as the shape of its digits like any other.
+        return [Fixed("%d item(s)" % len(value)),
                 shape_of(value[0], depth + 1) if value else None]
     if value is None:
         return "null"
@@ -227,7 +227,7 @@ class Requests:
         if kind == "json" and self.counts["bodies_read"] < MAX_BODIES:
             if size > MAX_BODY_BYTES:
                 self.counts["too_large"] += 1
-                entry["shape"] = "not read, %d bytes" % _count(size)
+                entry["shape"] = Fixed("not read, %d bytes" % _count(size))
             else:
                 # A round trip to the browser, which is why it is capped.
                 try:

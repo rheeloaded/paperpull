@@ -43,10 +43,11 @@ review and says to download it yourself in the Dashboard.
    `survey-diagnose-<time>.json` is the one to send. It holds counts and
    states and no text from your account. `diagnose-documents.json` is the
    detailed one. It keeps the shape of each list (field names, types and
-   counts, never a value) but also the page's headings and button names,
-   which can include your business name, so it stays on your computer
-   unless you are asked for it. Diagnose downloads nothing, clicks
-   nothing and takes no screenshot.
+   counts, never a value) and the page's headings and button names. Any
+   word in it that is not on PaperPull's fixed list, your business name
+   say, is written as its shape, a for a letter and 9 for a digit, so it
+   can be sent too if you are asked for it. Diagnose downloads nothing,
+   clicks nothing and takes no screenshot.
 5. Click **Record**, in the same **more** menu, then click your way to one
    invoice or tax form download the way you normally would, and come back
    and click **Stop recording**. It writes `Diagnostics\recording.json`,

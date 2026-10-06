@@ -149,29 +149,31 @@ and it ends when you press Enter.
 the step people skip and it is the one that matters, because the file is going
 onto a public issue where anyone can read it.
 
-The app has already removed what it can. Email addresses, dollar amounts,
-anything with six or more digits in a row, the account holder's name where it
-knows it, and the values after the `?` in an address, keeping only the names of
-the settings so a maintainer can see there was a year filter without seeing
-which year. What is left should be page headings, the names of buttons and
-links, and the shapes of the data the site loaded, with no values in them.
-Each step also carries a `structure` block. It is long, and it holds only
-element kinds like `div` and `li`, attribute names like `aria-label`, and
-numbers, so there is nothing in it to edit. If you ever see a word in there
-that came off your page, that is a bug, and say so on the issue instead of
-sending the file.
+The app keeps a word off your page only when it is on PaperPull's fixed list
+of words, the ones every site uses for every customer, like Statements,
+Download, Billing or a month. Any other word is written as its shape, a for
+each letter and 9 for each digit, so a link reading "Statement for Zorvex
+0400" comes out as "Statement for aaaaaa 9999". That goes for the names of
+buttons and links, the options in a dropdown, the name of a file that
+downloaded, the addresses the page went to and the field names in the data
+the site loaded. Email addresses and dollar amounts are written as `<email>`
+and `<amount>`, and the account holder's name, where the app knows it, is
+shaped even when it is also an ordinary word. Each step also carries a
+`structure` block. It is long, and it holds only element kinds like `div`
+and `li`, attribute names like `aria-label`, and numbers, so there is
+nothing in it to edit. If you ever see a word in there that came off your
+page and is not an ordinary word a site would use, that is a bug, and say so
+on the issue instead of sending the file.
 
 **The app points at what to check.** When the recording ends it prints a short
 list of things worth a look, quoting each one so you can find it. That list is
 not a verdict and it is not complete, but it puts you in the right place. The
-first two below are what it looks for, because they are the two things the
-masking cannot do on your behalf. The third one is you.
+first item below is what it looks for, because it is the one thing the word
+list cannot do on your behalf. The second one is you.
 
-- **A four or five digit number.** The masking starts at six digits so that a
-  year stays readable. If you see a short number that is part of an account
-  number, replace it with `xxxx`.
-- **A name.** If the app was not told the account holder's name, a name
-  sitting on a profile button will still be there. Replace it.
+- **A name made of ordinary words.** A name like June Price is two words on
+  the list, so it can come through as it is, on a profile button say, when the
+  app was not told the account holder's name. Replace it.
 - **Anything else you would not want public.** It is your file. Delete any
   line you do not like the look of. A recording with three lines missing is
   still useful. Nobody will ask you why.
@@ -268,9 +270,11 @@ counts, states, and words written by us rather than by the site.
   were visible
 * what the app was doing when it stopped, step by step, and how many times it
   had done each step before that
-* which of the provider's own web addresses answered, with account numbers in
-  them replaced by `#`, and what kind of answer came back
-* the names of the fields in an answer, never the contents of any of them
+* which of the provider's own web addresses answered, with every part of them
+  that is not on PaperPull's fixed list of words written as its shape, a for a
+  letter and 9 for a digit, and what kind of answer came back
+* the names of the fields in an answer, shaped the same way, never the
+  contents of any of them
 * whether the window was still where the app left it
 
 **What is not in it.** No text from the page. No document, no name, no
@@ -293,18 +297,27 @@ This is the whole list. It is worth reading once even if you trust the
 project, because the point of writing it down is that you can check it against
 [the code](https://github.com/rheeloaded/paperpull/blob/main/core/paperpull_core/recorder.py).
 
+**It keeps a word off your page only when it is on a fixed list.** The list
+is in [the code](https://github.com/rheeloaded/paperpull/blob/main/core/paperpull_core/words.py),
+and it holds the words sites use for every customer alike. Any other word is
+written as its shape, a for each letter and 9 for each digit, everywhere in
+the list below. "The link called Statement for Zorvex 0400" is recorded as
+"the link called Statement for aaaaaa 9999".
+
 **It records**
 
-- Each control you click, named the way you read it on the page. "The link
-  called Bill and payment history."
-- Which option you picked in a dropdown.
+- Each control you click, named the way you read it on the page, through the
+  word list. "The link called Bill and payment history."
+- Which option you picked in a dropdown, through the word list.
 - Whether a checkbox ended up ticked.
-- That the page moved, and where to, with everything after the `?` removed.
+- That the page moved, and where to, every part of the address through the
+  word list.
 - That a new tab opened, and whether it was still on the provider's site.
-- That a file downloaded, and what it was called.
+- That a file downloaded, and the shape of its name, its kind (`.pdf`) kept as
+  it is. Not the name itself, which can carry an account's id.
 - The addresses of the provider's own data requests and the **shape** of what
-  came back, meaning the names of the fields and whether each one held a
-  number or some text. Never the contents.
+  came back, meaning the names of the fields, through the word list, and
+  whether each one held a number or some text. Never the contents.
 - The **structure** of the page around each control you used. What kind of
   element it sat in, what was next to it, how many rows a list had, which
   parts were hidden. It reads like `ul 12 children` or

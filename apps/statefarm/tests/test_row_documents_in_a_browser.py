@@ -349,10 +349,12 @@ def test_a_file_address_that_answers_with_a_zip_is_taken_on_the_first_ask(tmp_pa
 
 
 def test_the_request_census_does_not_hear_the_file_address(page, tmp_path):
-    """The census writes each path into the failure file with only
+    """The census wrote each path into the failure file with only
     number-shaped parts masked, so a name in a file address would reach a
     file he is asked to post. It is not listening for that one fetch, and
-    it is listening again for the reload after it."""
+    it is listening again for the reload after it. And since every part of
+    a path is now a word on the fixed list or its shape, a census that did
+    hear the address would keep only its shape."""
     from paperpull_core.api_census import Requests
     census = Requests(page, site.is_safe_url)
     census.start()
@@ -363,12 +365,14 @@ def test_the_request_census_does_not_hear_the_file_address(page, tmp_path):
     assert not [p for p in paths if "Jane_Q_Invented" in p], paths
     assert [p for p in paths if p.startswith("/DocumentCenterUI")], paths
 
-    # The premise, that a census listening would have kept the name.
+    # A census listening hears the address and keeps only its shape.
     heard = Requests(page, site.is_safe_url)
     heard.start()
     site._fetch_with_status(page, "https://edocuments.statefarm.com" + NAMED, ("statefarm.com",))
     page.wait_for_timeout(300)
-    assert [e for e in heard.report()["seen"] if "Jane_Q_Invented" in e["path"]]
+    paths = [e["path"] for e in heard.report()["seen"]]
+    assert [p for p in paths if "/document/aaaa_a_aaaaaaaa/" in p], paths
+    assert not [p for p in paths if "Jane_Q_Invented" in p], paths
 
 
 PDF_ANSWER = ("**/DocumentCenterProxyV1/document/**", lambda r: r.fulfill(

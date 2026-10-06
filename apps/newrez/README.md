@@ -21,7 +21,7 @@ delete-safe, part of [PaperPull](../../README.md).
 4. Click **more** under the buttons, then **Diagnose**. It reads the
    documents page and writes `Diagnostics\diagnose-documents.json` in the
    Newrez folder. It downloads nothing, clicks nothing but a documents
-   link, takes no screenshot, and masks any run of six or more digits. On
+   link, takes no screenshot, and writes any word that is not on PaperPull's fixed list as its shape. On
    the statements page it also chooses each year in the year picker, to
    read that year's list, and does nothing else there.
 5. Click **Record**, in the same **more** menu. Go back to the browser window

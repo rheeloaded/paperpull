@@ -38,8 +38,10 @@ stops and says so, and connecting is yours to do in FedEx.
    holds counts and states and no text from your account.
    `diagnose-documents.json` is the detailed one, with the shape of every
    answer the page received (field names and types, never a value) and
-   the page's headings and button names, which can include your name or
-   business, so it stays on your computer unless you are asked for it.
+   the page's headings and button names. Any word in it that is not on
+   PaperPull's fixed list, your name or your business's say, is written
+   as its shape, a for a letter and 9 for a digit, so it can be sent too
+   if you are asked for it.
    Diagnose downloads nothing, clicks nothing and takes no screenshot.
 5. Click **Record**, in the same **more** menu, then click your way to
    one invoice PDF the way you normally would, and come back and click

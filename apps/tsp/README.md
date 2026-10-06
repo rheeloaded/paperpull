@@ -61,8 +61,9 @@ paperpull tsp all                 REM download every statement in scope
 ```
 
 `diagnose` writes `Diagnostics/diagnose-documents.json`, a survey of the
-page rather than a screenshot. Runs of six or more digits are masked, and
-JSON is recorded as shape only, never values.
+page rather than a screenshot. Any word that is not on PaperPull's fixed
+list is written as its shape, a for a letter and 9 for a digit, and JSON
+is recorded as shape only, never values.
 
 ## What it files
 
