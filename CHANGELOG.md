@@ -36,20 +36,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the run used to stop there. It now goes to the business account's own
   statements page, under Activity and All Reports, by its address, reads
   the list that page gets for itself as it loads, and presses each ready
-  PDF statement's own Download button, found in its row by the dates the
-  row shows. Each statement has to name its first and last day in its own
-  text before it is filed, under the same names a personal account's
-  statements get. One whose dates cannot be checked, or that names another
-  statement's dates better than its own, goes to Manual Review instead,
-  with a note saying which. A CSV and a statement PayPal is still
-  preparing are left alone and counted, a statement whose status, kind of
-  file or dates the app cannot read is left alone and described in the
-  failure file, and nothing that would create, generate, request or
-  schedule a statement or a report is ever pressed. The name PayPal gives
-  a downloaded file carries the account's id and is never kept. Login says
-  Success only once that list has come, and Diagnose on a business account
-  reads the page as well, pressing nothing. Written from one tester's
-  recording and not yet run on a real business account.
+  PDF statement's own Download button, found in the one row that shows its
+  dates and never by where the row sits. A statement is filed only when
+  its own text names its first or last day and names no statement listed
+  near it better, a day two listed statements share counting for neither,
+  under the same names a personal account's statements get. One whose
+  dates cannot be checked, one that names another statement's dates better
+  than its own, and one that names a statement ending on the same day as
+  plainly as its own go to Manual Review instead, with a note saying
+  which. A CSV and a statement PayPal is still preparing are left alone
+  and counted, a statement whose status, kind of file or dates the app
+  cannot read is left alone and described in the failure file, and nothing
+  that would create, generate, request or schedule a statement or a report
+  is ever pressed. The name PayPal gives a downloaded file carries the
+  account's id and is never kept. Login says Success only once that list
+  has come, and Diagnose on a business account reads the page as well,
+  pressing nothing. A personal and a business statement for the same month
+  share one record, so a second PayPal account needs its own setup. Written
+  from one tester's recording and not yet run on a real business account.
 
 ### Fixed
 - **PayPal's Resume no longer reports a clean run when nothing was
@@ -60,6 +64,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   run whose list stopped partway, it carries on with the statements it
   knows, then says the list was not read to its end and stops the same
   way.
+- **The wrong-document check no longer finds a month inside a date.**
+  July's 7/2031 was found inside the August date 08/17/2031, its 07/2031
+  at the end of the September date 09/07/2031, and its 2031-07 at the
+  front of every ISO date in July, so a statement could be taken for
+  another month's. A month now counts only as a number of its own, with no
+  digit and slash or hyphen right before it and no slash or hyphen and
+  digit right after it. A date written with a zero after its month's name,
+  like August 01, 2031, is now found as that date, where before it was
+  not found at all.
 - **`./setup-all.command` sets up a checkout on macOS and Linux again.**
   From 0.19.0 it stopped before setting anything up. Taking the browser
   download out of it left an `if` with nothing but comments inside, which

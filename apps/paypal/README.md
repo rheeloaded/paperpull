@@ -41,16 +41,32 @@ From that list it takes only statements PayPal says are PDFs and ready. A
 CSV and a statement PayPal is still preparing are left alone, and the run
 says how many there were. A statement whose status, kind of file or dates
 the app cannot read is left alone too, counted as failed, and described in
-the failure file the run writes. For each statement it presses that
-statement's own **Download** button, in the row that shows its dates, and
-checks that the PDF names its first and last day before filing it under
-the same names a personal account's statements get, like
-`2026-08-31 PayPal Monthly Statement.pdf`. A PDF whose dates cannot be
-checked, or that names another statement's dates better than its own, is
-put in Manual Review rather than filed, with a note saying which. With
+the failure file the run writes, and so is a second statement that names
+no dates and was made on the same day as one that names none either,
+since which is which cannot be told. For each statement it presses that
+statement's own **Download** button, in the only row that shows its dates,
+and files the PDF only when its text names the statement's first or last
+day and names no statement listed near it better. A day two listed
+statements share counts for neither. Filed statements get the same names
+a personal account's statements get, like
+`2026-08-31 PayPal Monthly Statement.pdf`, and one whose name is already
+taken gets the first day it covers added to it. A PDF whose dates cannot be
+checked, one that names another statement's dates better than its own, and
+one that names a statement ending on the same day as plainly as its own
+are put in Manual Review rather than filed, with a note saying which. With
 `"refuse_wrong_documents": true` in `config.json`, one that names another
-statement's dates is not kept at all. The name PayPal gives a downloaded
+statement's dates better is not kept at all, when it had a day of its own
+to be checked by. One whose first and last day are both other statements'
+days goes to Manual Review even then. The name PayPal gives a downloaded
 file carries the account's id and is never kept.
+
+**One account per setup.** A personal account's statement and a business
+account's statement for the same month are the same record to this app,
+so whichever is saved first stands for both, and the other reads as
+already downloaded. Keep each PayPal account in its own setup. Run
+`paperpull paypal add-account NAME` for the second one, or give it its own
+`config.json` and run it with `--config`, so it gets its own folder,
+records and browser profile.
 
 It never creates, generates, requests or schedules a statement or a
 report, and never presses for a CSV or any other kind of file.
