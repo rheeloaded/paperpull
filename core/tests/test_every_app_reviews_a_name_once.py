@@ -62,10 +62,13 @@ class _Store:
 
 def output_folder(folder: Path):
     """The app's own folders, made from the provider the app just loaded
-    bound, with `folder` as its output folder. The receipts are written in
-    it, and an app may rename only a file it holds."""
+    bound, with `folder` as its output folder, and the folder its receipts
+    are written in here, Manual Review, which every app has. An app may
+    rename only a receipt in a folder of its own."""
     from paperpull_core.storage import Paths
-    return Paths(folder)
+    paths = Paths(folder)
+    paths.manual_review.mkdir(parents=True, exist_ok=True)
+    return paths, paths.manual_review
 
 
 def _row(folder: Path, number: str, name: str) -> dict:
@@ -86,13 +89,13 @@ def test_every_receipt_app_is_covered():
 def test_a_renamed_receipt_is_not_asked_about_again(app, tmp_path, monkeypatch, capsys):
     mod = load(app)
     inst = object.__new__(mod.App)
-    inst.index_csv = _Csv([_row(tmp_path, "ORDER-0001", "2026-05-14 Unsure Receipt.pdf"),
-                           _row(tmp_path, "ORDER-0002", "2026-05-14 Other Receipt.pdf")])
+    inst.paths, held = output_folder(tmp_path)
+    inst.index_csv = _Csv([_row(held, "ORDER-0001", "2026-05-14 Unsure Receipt.pdf"),
+                           _row(held, "ORDER-0002", "2026-05-14 Other Receipt.pdf")])
     inst.order_csv = _Csv([])
     inst.progress = _Store()
     inst.discovery = _Store()
     inst.config = {"max_path_length": 240}
-    inst.paths = output_folder(tmp_path)
 
     answers = iter(["Garden Hose", ""])          # rename the first, keep the second
     monkeypatch.setattr(mod, "ask", lambda prompt: next(answers))
@@ -113,14 +116,14 @@ def test_a_receipt_renamed_before_the_fix_is_not_asked_about_either(app, tmp_pat
     name he fixed. The note every rename leaves is what tells them apart."""
     mod = load(app)
     inst = object.__new__(mod.App)
-    old = _row(tmp_path, "ORDER-0003", "2026-05-14 Gas Station Receipt.pdf")
+    inst.paths, held = output_folder(tmp_path)
+    old = _row(held, "ORDER-0003", "2026-05-14 Gas Station Receipt.pdf")
     old.update({"Processing Status": "Completed", "Notes": "renamed via --review-names"})
     inst.index_csv = _Csv([old])
     inst.order_csv = _Csv([])
     inst.progress = _Store()
     inst.discovery = _Store()
     inst.config = {"max_path_length": 240}
-    inst.paths = output_folder(tmp_path)
     asked = []
     monkeypatch.setattr(mod, "ask", lambda prompt: asked.append(prompt) or "")
     inst.cmd_review_names()

@@ -431,6 +431,11 @@ class RawCard:
     kind: str = ONLINE
 
 
+# The most rows _COLLECT_ROWS_JS hands back. A list that reaches it may draw
+# rows that were not read, so its oldest row is not known from what was read
+# and it is never taken as seen whole (review).
+ROWS_CAP = 400
+
 # Every row inside the frame that holds a money amount, with its links.
 # GUESS at what a row is, so anything list-like is tried, smallest first,
 # and a row that contains another matching row is dropped.
@@ -483,7 +488,7 @@ _COLLECT_ROWS_JS = r"""
   for (const [rows, shown] of [[rowsAmong(withMoney.filter(drawn)), true],
                                [rowsAmong(withMoney.filter(e => !drawn(e))), false]]) {
     for (const r of rows) {
-      if (out.length >= 400) break;
+      if (out.length >= ROWS_CAP) break;
       const links = Array.from(r.querySelectorAll('a')).map(a => ({
         text: (a.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80),
         href: a.getAttribute('href') || '',
@@ -498,7 +503,7 @@ _COLLECT_ROWS_JS = r"""
   }
   return out;
 }
-"""
+""".replace("ROWS_CAP", str(ROWS_CAP))
 
 
 def collect_both_tabs(page, facts: Optional[dict] = None) -> List[RawCard]:
@@ -664,17 +669,28 @@ def show_tab_for(page, purchase_type: str) -> bool:
     return open_tab(page, TAB_IN_STORE_RE if purchase_type == IN_STORE else TAB_ONLINE_RE)
 
 
-def _rows_of_kind(page, purchase_type: str) -> List[str]:
-    """The words of each row of a purchase's kind the page is drawing now,
-    In-Store rows for a store receipt and the others for an online order.
-    None drawn, or a page that could not be read, is no rows."""
+def _collected(page) -> list:
+    """Every row _COLLECT_ROWS_JS hands back, none when the page could not
+    be read."""
     try:
-        raw = page.evaluate(_COLLECT_ROWS_JS, FALLBACK["row"]) or []
+        return page.evaluate(_COLLECT_ROWS_JS, FALLBACK["row"]) or []
     except Exception:
         return []
+
+
+def _of_kind(raw, purchase_type: str) -> List[str]:
+    """The words of each drawn row of a purchase's kind among those the
+    collector handed back, In-Store rows for a store receipt and the others
+    for an online order."""
     in_store = purchase_type == IN_STORE
     return [r.get("text") or "" for r in raw if r.get("shown")
             and bool(IN_STORE_ROW_RE.search(r.get("text") or "")) == in_store]
+
+
+def _rows_of_kind(page, purchase_type: str) -> List[str]:
+    """The words of each row of a purchase's kind the page is drawing now.
+    None drawn, or a page that could not be read, is no rows."""
+    return _of_kind(_collected(page), purchase_type)
 
 
 def rows_showing(page, purchase_type: str) -> int:
@@ -684,16 +700,39 @@ def rows_showing(page, purchase_type: str) -> int:
     return len(_rows_of_kind(page, purchase_type))
 
 
+def rows_capped(page) -> bool:
+    """Whether the collector stopped at ROWS_CAP, so the page may draw rows
+    it did not read. A page that could not be read counts as one that may."""
+    try:
+        raw = page.evaluate(_COLLECT_ROWS_JS, FALLBACK["row"]) or []
+    except Exception:
+        return True
+    return len(raw) >= ROWS_CAP
+
+
 def listed_rows(page, purchase_type: str) -> dict:
     """The rows of a purchase's kind the page is drawing now, how many
     ("rows") and the date of the oldest of them ("oldest", as YYYY-MM-DD).
     The oldest is "" unless every one of them shows a date, since a row
-    whose date could not be read could be the oldest. Nothing is waited
-    for."""
-    texts = _rows_of_kind(page, purchase_type)
+    whose date could not be read could be the oldest, and "" when the
+    collector stopped at ROWS_CAP, since then the last row read is not the
+    list's last. Nothing is waited for."""
+    raw = _collected(page)
+    texts = _of_kind(raw, purchase_type)
     dates = [parse_date(t) for t in texts]
-    oldest = min(dates) if dates and all(dates) else ""
+    whole = len(raw) < ROWS_CAP
+    oldest = min(dates) if whole and dates and all(dates) else ""
     return {"rows": len(texts), "oldest": oldest}
+
+
+def page_visible(page) -> bool:
+    """Whether the browser is showing the page, as the page itself says.
+    A page it is not showing may not draw what scrolling asks of it, and one
+    that could not be asked counts as not showing (review)."""
+    try:
+        return page.evaluate("() => document.visibilityState") == "visible"
+    except Exception:
+        return False
 
 
 # The tab each kind of purchase is listed on, named as the page names it.
@@ -710,23 +749,25 @@ ROWS_STEADY_MS = 3000
 
 
 def settle_rows(page, purchase_type: str, wait_ms: Optional[int] = None,
-                seen: Optional[tuple] = None) -> dict:
+                seen: Optional[tuple] = None, steady_ms: Optional[int] = None) -> dict:
     """Wait until the count of a purchase's rows has stayed the same for
-    ROWS_STEADY_MS, for up to `wait_ms` in all, LIST_WAIT_MS when not given.
-    `seen`, when given, is what reads made already found, the count and the
-    time it was first read, and the wait goes on from there rather than
-    starting over.
+    `steady_ms`, ROWS_STEADY_MS when not given, for up to `wait_ms` in all,
+    LIST_WAIT_MS when not given. `seen`, when given, is what reads made
+    already found, the count and the time it was first read, and the wait
+    goes on from there rather than starting over.
 
     Returns the count ("rows"), whether it changed from the first count
     ("changed"), and whether it stayed the same long enough before the time
     was up ("settled"). A list still changing when the time is up was not
-    seen whole, and is never read as if it had been.
+    seen whole, and is never read as if it had been, and neither is one
+    the collector stopped reading at ROWS_CAP (review).
 
     The count has stayed the same only as long as reads that agree span.
     Time after the last read is never counted, since the page can change in
     it, and a pause in this program right after a read used to end the wait
     on a count nothing had read again (review)."""
     wait_ms = LIST_WAIT_MS if wait_ms is None else wait_ms
+    steady_ms = ROWS_STEADY_MS if steady_ms is None else steady_ms
     deadline = time.monotonic() + wait_ms / 1000.0
     if seen is None or seen[0] is None or seen[1] is None:
         rows = rows_showing(page, purchase_type)
@@ -743,8 +784,8 @@ def settle_rows(page, purchase_type: str, wait_ms: Optional[int] = None,
         now = rows_showing(page, purchase_type)
         if now != rows:
             rows, changed, since = now, True, time.monotonic()
-        elif began - since >= ROWS_STEADY_MS / 1000.0:
-            return {"rows": rows, "changed": changed, "settled": True}
+        elif began - since >= steady_ms / 1000.0:
+            return {"rows": rows, "changed": changed, "settled": not rows_capped(page)}
     return {"rows": rows, "changed": changed, "settled": False}
 
 
@@ -754,61 +795,82 @@ def settle_rows(page, purchase_type: str, wait_ms: Optional[int] = None,
 # be filtered, paged, or cut short while Meijer slows requests (review).
 WHOLE_LIST_MONTHS = 20
 
-# What a control says when it would show more of the list than the list
-# shows, or a narrower part of it. Load more, older, earlier, next or
-# previous pages, page numbers, Show all, and filters, the arrows of a pager
-# included. Nothing the app presses, only what it looks for.
-MORE_CONTROL_RE = re.compile(
-    r"\b(load|show|see|view)\s+(more|all|older|earlier|previous)\b"
-    r"|\bmore\s+(receipts|orders|purchases|results|transactions)\b"
-    r"|^\s*(more|older|earlier|next|previous|prev)\s*$|\bolder\b|\bearlier\b"
-    r"|\bnext\b|\bprevious\b|\bpage\s+\d+\b|^\s*\d{1,3}\s*$|\bfilter|\bdate\s+range\b"
-    r"|\b(last|past)\s+\d+\s+(days?|weeks?|months?|years?)\b"
-    r"|^\s*[<>" + "".join(chr(c) for c in (0x2039, 0x203A, 0x00AB, 0x00BB)) + r"]+\s*$",
-    re.I)
+# The words of a row's own details link, which with its receipt link is the
+# one control a row may show (see allowed_on_the_list).
+ROW_DETAILS_RE = re.compile(r"^\s*(view\s+)?(order\s+)?details\s*$", re.I)
 
-# Every control of the list's main content that shows, and how many of them
-# would show more of the list or a narrower part of it. A choice of what the
-# list shows, a dropdown or a date, counts whatever it says.
-_MORE_CONTROLS_JS = r"""(words) => {
+# Every control the list's main content shows, its words, the name a screen
+# reader hears, and whether it sits in one of the list's rows. A control is
+# anything a person can press or choose, a link, a button, a field or a
+# dropdown, a summary that opens, an element with a control's role, one a
+# keyboard can reach or one that answers a click, and the outermost element
+# the pointer shows as clickable. One inside another is part of it.
+_MORE_CONTROLS_JS = r"""(rowSel) => {
   const root = document.querySelector('main, [role=main], #main') || document.body;
-  const said = new RegExp(words, 'i');
-  const choosing = ['date', 'month', 'week', 'search', 'range'];
-  let found = 0;
+  const money = /\$\s*-?[\d,]+\.\d{2}/;
+  const dated = /\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}/i;
+  const shows = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const found = new Set();
   for (const el of root.querySelectorAll(
-      'a, button, input, select, [role=button], [role=link], [role=combobox], [role=listbox]')) {
-    if (!el.getClientRects().length || getComputedStyle(el).visibility === 'hidden') continue;
-    const tag = el.tagName.toLowerCase();
-    const role = el.getAttribute('role') || '';
-    const type = (el.getAttribute('type') || '').toLowerCase();
-    if (tag === 'select' || role === 'combobox' || role === 'listbox' ||
-        (tag === 'input' && choosing.includes(type))) {
-      found += 1;
-      continue;
-    }
-    const label = [el.innerText, tag === 'input' ? el.value : '', el.getAttribute('aria-label'),
-                   el.getAttribute('title')].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-    if (said.test(label)) found += 1;
+      'a, button, input:not([type=hidden]), select, textarea, summary, [contenteditable=true], ' +
+      '[role=button], [role=link], [role=tab], [role=radio], [role=option], [role=menuitem], ' +
+      '[role=menuitemradio], [role=menuitemcheckbox], [role=checkbox], [role=switch], ' +
+      '[role=combobox], [role=listbox], [role=slider], [role=spinbutton], [role=treeitem], ' +
+      '[onclick], [tabindex]:not([tabindex="-1"])')) {
+    if (shows(el)) found.add(el);
   }
-  return found;
+  for (const el of root.querySelectorAll('*')) {
+    if (found.has(el) || !shows(el) || getComputedStyle(el).cursor !== 'pointer') continue;
+    const up = el.parentElement;
+    if (up && root.contains(up) && getComputedStyle(up).cursor === 'pointer') continue;
+    found.add(el);
+  }
+  const all = Array.from(found);
+  return all.filter(el => !all.some(o => o !== el && o.contains(el))).map(el => {
+    const row = el.closest(rowSel);
+    const words = row && row !== el ? (row.innerText || '') : '';
+    return {text: ((el.tagName === 'INPUT' ? el.value : el.innerText) || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+            label: (el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+            inRow: money.test(words) && dated.test(words)};
+  });
 }"""
 
 
+def allowed_on_the_list(control: dict) -> bool:
+    """Whether a control the list's main content shows is one a list that
+    Meijer shows whole may show. Only the two tabs, by the words each shows,
+    and a row's own receipt or details link are. Every other control may
+    show more of the list or a narrower part of it, a Load more button or a
+    pager, an arrow, a year or a month, All receipts, a filter or a menu,
+    and a list showing one is never taken for all Meijer holds. A list of
+    the words such a control says missed every one that says it another way
+    (review)."""
+    text = " ".join((control.get("text") or "").split())
+    label = " ".join((control.get("label") or "").split())
+    if any(w and (TAB_ONLINE_RE.match(w) or TAB_IN_STORE_RE.match(w)) for w in (text, label)):
+        return True
+    if not control.get("inRow"):
+        return False
+    return is_receipt_control({"text": text, "label": label}) or bool(ROW_DETAILS_RE.match(text or label))
+
+
 def more_controls(page) -> Optional[int]:
-    """How many controls the list's main content shows that would show more
-    of it, or a narrower part of it, than it does now (MORE_CONTROL_RE, and
-    every dropdown or date to choose). None when the page could not be
-    read, which is never taken for none. Nothing is pressed.
+    """How many controls the list's main content shows besides the ones a
+    list Meijer shows whole may show (allowed_on_the_list). None when the
+    page could not be read, which is never taken for none. Nothing is
+    pressed.
 
     A list behind a Load more button, a pager or a remembered filter draws
     only part of what Meijer holds, and the rest used to be read as
     purchases Meijer no longer lists (review)."""
     try:
-        found = page.evaluate(_MORE_CONTROLS_JS, MORE_CONTROL_RE.pattern)
+        controls = page.evaluate(_MORE_CONTROLS_JS, FALLBACK["row"])
     except Exception as e:
         log.info("could not read the list's controls: %s", e)
         return None
-    return found if isinstance(found, int) and not isinstance(found, bool) else None
+    if not isinstance(controls, list):
+        return None
+    return sum(1 for c in controls if not (isinstance(c, dict) and allowed_on_the_list(c)))
 
 
 # The page, and every part of its main content that scrolls, taken to its
@@ -826,14 +888,22 @@ _SCROLL_TO_END_JS = r"""() => {
 }"""
 
 
+# How long the rows have to hold still once the list is scrolled to its end.
+# A list that fetches its older receipts as it is scrolled can take longer
+# than ROWS_STEADY_MS to draw them. The list is scrolled only for a purchase
+# about to be said to have dropped off it, so the wait is seldom paid
+# (review).
+SCROLL_STEADY_MS = 10000
+
+
 def scroll_to_end(page, purchase_type: str) -> dict:
-    """Scroll the list to its end and let its rows settle, as settle_rows
-    answers, "changed" meaning they changed from the count before the
-    scroll. A list that draws more of itself as it is scrolled shows only
-    its first part until then, and the rows it adds can come before the
-    first read after the scroll, so the count is read before it. A page
-    that could not be scrolled is said to have changed, so nothing on it is
-    read as the whole list."""
+    """Scroll the list to its end and let its rows settle for at least
+    SCROLL_STEADY_MS, as settle_rows answers, "changed" meaning they changed
+    from the count before the scroll. A list that draws more of itself as it
+    is scrolled shows only its first part until then, and the rows it adds
+    can come before the first read after the scroll, so the count is read
+    before it. A page that could not be scrolled is said to have changed,
+    so nothing on it is read as the whole list."""
     before = rows_showing(page, purchase_type)
     since = time.monotonic()
     try:
@@ -841,7 +911,9 @@ def scroll_to_end(page, purchase_type: str) -> dict:
     except Exception as e:
         log.info("could not scroll the list: %s", e)
         return {"rows": before, "changed": True, "settled": False}
-    return settle_rows(page, purchase_type, seen=(before, since))
+    steady = max(ROWS_STEADY_MS, SCROLL_STEADY_MS)
+    return settle_rows(page, purchase_type, seen=(before, since), steady_ms=steady,
+                       wait_ms=max(LIST_WAIT_MS, 2 * steady))
 
 
 def says_it_has_none(page, purchase_type: str) -> bool:

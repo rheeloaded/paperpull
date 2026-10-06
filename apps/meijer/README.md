@@ -129,19 +129,30 @@ already on your machine is used and not the bundled one.
   In-Store Receipts tab, and Meijer has not said so. A purchase found by an
   earlier run that is older than every receipt the tab shows is reported
   as no longer listed, with the oldest date the tab still shows, but only
-  when the tab was seen whole. It was opened on that look, its rows
-  stopped changing and drew no more when scrolled to the end, it showed no
-  control for more, older or filtered receipts, its oldest receipt is at
-  least 20 months old, and the run's own discovery read it, so Resume never
-  decides it. That is not a failure. It writes no failure file and counts
-  for no review, and it goes into both CSVs once, so a spend summary still
-  counts it. Later runs skip it, and a run whose discovery finds it on the
-  tab again tries it again. Short of all that, it stays a failure the next
-  run looks for again.
+  when the tab was seen whole. It was opened on that look, on a page the
+  browser was showing, its rows stopped changing and drew no more when
+  scrolled to the end, the page held fewer than 400 rows, the most the app
+  reads from one page, its oldest receipt is at least 20 months old, and
+  the run's own discovery read it, so Resume never decides it. The tab
+  showed no control but the two tabs and each row's own receipt or details
+  link. Any other control on the In-Store Receipts tab, a button,
+  a link, a dropdown, a menu or anything else to press, keeps such
+  purchases failing rather than marked, since it may show more receipts
+  or fewer. A receipt saved before is never marked. A marked purchase is
+  not a failure. It writes no failure file and counts for no review, and
+  it goes into both CSVs once, so a spend summary still counts it. Later
+  runs skip it, and only a run whose discovery finds it on the tab again,
+  or a run that downloads again, tries it again. To ask for one again,
+  tick Download again in the panel and run Run All with a year or dates
+  around its date, or run the app with `--redownload` and a
+  `--start-date` and `--end-date` around it. Short of all that, a
+  purchase stays a failure the next run looks for again.
 - **A row that gives no receipt** is said as what happened, that its row
   is not on the page, that more than one row fits it, that nothing on it
   reads as its receipt, or that pressing it brought no PDF. Each is a
-  failure the next run looks for again, and none goes into the CSVs.
+  failure the next run looks for again. A purchase that fails on every run
+  is never written into the CSVs, so the Order History, and a spend summary
+  built from it, leave it out until its receipt is saved.
   `Diagnostics\download-attempt.json` keeps every such attempt of a run,
   in order.
 - **In-store purchases** are the open question. Meijer shows them as

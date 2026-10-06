@@ -162,9 +162,11 @@ SAVE_JS = ("function saveReceipt(rid) { const a = document.createElement('a');"
 # drawOne is called, which is never by a clock, and with ENDLESS made-up rows
 # newer than any purchase here go on after them. LATER rows come only from
 # the Load more button, which nothing presses, and SCROLLED rows once the
-# page is scrolled to its end.
+# page is scrolled to its end, or with SCROLL_AFTER that many calls of
+# drawOne after that, the way a fetch for older receipts comes late. With
+# HIDDEN the page says the browser is not showing it.
 _LIST_JS = r"""
-let n = 0, scrolledIn = false;
+let n = 0, scrolledIn = false, pending = 0;
 function list() { return document.getElementById('rows'); }
 function made(k) {
   const d = new Date(2026, 7, 31 - k);
@@ -176,6 +178,11 @@ function made(k) {
 }
 function drawOne() {
   if (document.getElementById('store').style.display === 'none') return;
+  if (pending > 0) {
+    pending -= 1;
+    if (pending === 0) list().insertAdjacentHTML('beforeend', SCROLLED.join(''));
+  }
+  if (!GROWS) return;
   if (n < ROWS.length) list().insertAdjacentHTML('beforeend', ROWS[n]);
   else if (ENDLESS) list().insertAdjacentHTML('beforeend', made(n));
   else return;
@@ -188,6 +195,7 @@ function show(which) {
   list().innerHTML = '';
   n = 0;
   scrolledIn = false;
+  pending = 0;
   if (which !== 'store') return;
   if (GROWS) { drawOne(); return; }
   list().innerHTML = ROWS.join('');
@@ -197,13 +205,15 @@ window.addEventListener('scroll', () => {
   if (!SCROLLED.length || scrolledIn) return;
   if (window.innerHeight + window.scrollY < document.documentElement.scrollHeight - 10) return;
   scrolledIn = true;
-  list().insertAdjacentHTML('beforeend', SCROLLED.join(''));
+  if (SCROLL_AFTER) pending = SCROLL_AFTER;
+  else list().insertAdjacentHTML('beforeend', SCROLLED.join(''));
 });
+if (HIDDEN) Object.defineProperty(document, 'visibilityState', {get: () => 'hidden'});
 """
 
 
 def orders_page(receipts, grows=False, endless=False, later=(), scrolled=(), choose=False,
-                tabs=True, online=NO_ONLINE_ORDERS):
+                tabs=True, online=NO_ONLINE_ORDERS, scroll_after=0, hidden=False):
     """The orders page, open on Online Orders, whose In-Store rows are drawn
     when that tab is pressed and taken away when the other one is (see
     _LIST_JS). `choose` puts a remembered choice of period above the list,
@@ -218,10 +228,11 @@ def orders_page(receipts, grows=False, endless=False, later=(), scrolled=(), cho
              "<option>All receipts</option></select></label></div>") if choose else ""
     below = ("<button id='more' onclick='loadMore()'>Load more</button>" if later else "") + \
         ("<div style='height:4000px'></div>" if scrolled else "")
-    head = ("const ROWS = %s, LATER = %s, SCROLLED = %s, GROWS = %s, ENDLESS = %s;"
+    head = ("const ROWS = %s, LATER = %s, SCROLLED = %s, GROWS = %s, ENDLESS = %s,"
+            " SCROLL_AFTER = %d, HIDDEN = %s;"
             % (json.dumps([r.row() for r in receipts]), json.dumps([r.row() for r in later]),
                json.dumps([r.row() for r in scrolled]), "true" if grows else "false",
-               "true" if endless else "false"))
+               "true" if endless else "false", int(scroll_after), "true" if hidden else "false"))
     return ("<!doctype html><html><head><title>Your Orders</title></head><body>%s<main>"
             "<h1>Orders and Receipts</h1><div role='tablist'>"
             "<a role='tab' href='#' onclick=\"show('online');return false\">Online Orders</a>"
@@ -321,7 +332,7 @@ def fake_meijer(server):
     runs is read by several tests. A tab is given half a second to start
     drawing once pressed and three seconds for its rows, a purchase's row is
     looked for twice, and the rows count as settled after a second without
-    a change.
+    a change, or a second and a half once the list is scrolled to its end.
 
     Every failure file the app is asked to write, and every purchase it
     takes to the receipt step, is noted as well."""
@@ -339,6 +350,7 @@ def fake_meijer(server):
         mp.setattr(site, "ROWS_STEADY_MS", 1000, raising=False)
         mp.setattr(site, "ROW_LOOKS", 2, raising=False)
         mp.setattr(site, "TAB_PAUSE_MS", 500, raising=False)
+        mp.setattr(site, "SCROLL_STEADY_MS", 1500, raising=False)
         mp.setattr(app_mod, "_today", lambda: TODAY, raising=False)
         real_failure = app_mod.App.write_failure
         real_save = app_mod.App._save_receipt
@@ -551,7 +563,8 @@ def test_the_file_to_attach_keeps_every_attempt_of_the_run_in_order(history):
     gap, old1, old2 = first["attempts"]
     whole = {"note": "the oldest row the list shows", "rows": 3, "earlier_than_every_row": True,
              "listed_by_discovery": False, "tab_opened": True, "controls_read": True,
-             "more_controls": 0, "back_twenty_months": True, "discovery_read_the_tab": True}
+             "more_controls": 0, "back_twenty_months": True, "discovery_read_the_tab": True,
+             "saved_before": False}
     for a in (old1, old2):
         assert judged(a) == [whole] * 2, a
     assert [n["earlier_than_every_row"] for n in judged(gap)] == [False, False], gap
@@ -825,8 +838,40 @@ def test_a_list_that_draws_more_as_it_is_scrolled_is_never_taken_for_the_whole(
         return
     kept_a_failure(took, C1)
     [attempt] = took["attempts"] or [{}]
+    scrolled = notes_in(attempt, "the rows once scrolled to the end")
+    assert [n["changed"] for n in scrolled] == [True, True], attempt
+
+
+def test_rows_a_scroll_brings_slowly_are_waited_for(attached, known, tmp_path, monkeypatch,
+                                                    growing):
+    """Scrolled to its end, the list fetches an older receipt, which comes
+    only after the app has counted the rows four more times, two seconds at
+    the least, longer than the rows' usual quiet of one. The quiet after a
+    scroll, four seconds here, is longer still, so the new row is seen and
+    the list is not taken for all Meijer holds."""
+    monkeypatch.setattr(site, "SCROLL_STEADY_MS", 4000, raising=False)
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([K1, K2], scrolled=[S1], scroll_after=4)
+    took = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
+    scrolled = notes_in(attempt, "the rows once scrolled to the end")
+    assert [n["changed"] for n in scrolled] == [True, True], attempt
+
+
+def test_a_list_on_a_page_the_browser_is_not_showing_is_never_taken_for_the_whole(
+        attached, known, tmp_path):
+    """The page says the browser is not showing it, and such a page may not
+    draw what scrolling asks of it."""
+    start_from(tmp_path, known)
+    SITE.orders = orders_page([K1, K2], hidden=True)
+    took = run(tmp_path, attached, "--all", "--yes", *ONLY_C1)
+
+    kept_a_failure(took, C1)
+    [attempt] = took["attempts"] or [{}]
     settled = notes_in(attempt, "the rows once they settled")
-    assert [n["more_after_scrolling"] for n in settled] == [True, True], attempt
+    assert [n["page_visible"] for n in settled] == [False, False], attempt
 
 
 def test_a_page_without_the_tab_never_decides_it(attached, known, tmp_path):
@@ -912,9 +957,10 @@ def test_it_has_dropped_off_only_when_every_look_finds_so(attached, tmp_path, mo
 
 # -- reading the list ------------------------------------------------------------------------
 
-def test_the_oldest_date_a_list_shows_is_read_only_when_every_row_shows_one():
-    """A row whose date cannot be read could be the oldest, so then the
-    list is not said to go back to any date."""
+@contextlib.contextmanager
+def a_page():
+    """A page in Playwright's own Chromium, started and stopped here, since
+    no app runs in these tests."""
     pw = pytest.importorskip("playwright.sync_api")
     try:
         driver = pw.sync_playwright().start()
@@ -922,15 +968,119 @@ def test_the_oldest_date_a_list_shows_is_read_only_when_every_row_shows_one():
     except Exception as e:
         pytest.skip("no browser to drive: %s" % e)
     try:
-        pg = browser.new_page()
+        yield browser.new_page()
+    finally:
+        browser.close()
+        driver.stop()
+
+
+def test_the_oldest_date_a_list_shows_is_read_only_when_every_row_shows_one():
+    """A row whose date cannot be read could be the oldest, so then the
+    list is not said to go back to any date."""
+    with a_page() as pg:
         pg.set_content("<main><ul>%s%s</ul></main>" % (R1.row(), R3.row()))
         assert site.listed_rows(pg, "In-Store") == {"rows": 2, "oldest": R3.iso}
         undated = R3.row().replace("05/20/2026", "13/45/2026")
         pg.set_content("<main><ul>%s%s</ul></main>" % (R1.row(), undated))
         assert site.listed_rows(pg, "In-Store") == {"rows": 2, "oldest": ""}
-    finally:
-        browser.close()
-        driver.stop()
+
+
+def many(count):
+    """`count` receipts two days apart, the newest first."""
+    first = date(2026, 9, 30)
+    return [Receipt(date.fromordinal(first.toordinal() - 2 * i).isoformat(),
+                    "$%d.%02d" % (10 + i // 100, i % 100), 2) for i in range(count)]
+
+
+def test_the_oldest_date_is_not_read_off_a_list_longer_than_the_collector_reads():
+    """The collector hands back at most ROWS_CAP rows, so on a longer list
+    the last row it read is not the list's oldest, and no oldest date is
+    read off it. A shorter list still gives its oldest row."""
+    longer, shorter = many(401), many(399)
+    with a_page() as pg:
+        pg.set_content("<main><ul>%s</ul></main>" % "".join(r.row() for r in longer))
+        assert site.listed_rows(pg, "In-Store")["oldest"] == ""
+        assert site.rows_capped(pg) is True
+        pg.set_content("<main><ul>%s</ul></main>" % "".join(r.row() for r in shorter))
+        assert site.listed_rows(pg, "In-Store") == {"rows": 399, "oldest": shorter[-1].iso}
+        assert site.rows_capped(pg) is False
+
+
+class _Capped:
+    """A page that always draws as many rows as the collector reads, on a
+    clock of this test's own, moved only by its waits."""
+
+    def __init__(self, clock):
+        self.clock = clock
+
+    def evaluate(self, script, arg=None):
+        row = {"text": "In-Store: 05/20/2026\n18 Example Road\n$31.90", "shown": True, "links": []}
+        return [dict(row) for _ in range(getattr(site, "ROWS_CAP", 400))]
+
+    def wait_for_timeout(self, ms):
+        self.clock[0] += ms / 1000.0
+
+
+def test_a_list_the_collector_stopped_reading_is_never_taken_as_settled(monkeypatch):
+    """Its count holds still at the cap however long it is watched, since
+    the collector reads no further, so that is no sign the list has stopped
+    drawing."""
+    clock = [0.0]
+    monkeypatch.setattr(site, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    got = site.settle_rows(_Capped(clock), "In-Store", wait_ms=10000)
+    assert got["settled"] is False, got
+
+
+def test_a_list_the_collector_stopped_reading_gives_no_oldest_date():
+    assert site.listed_rows(_Capped([0.0]), "In-Store")["oldest"] == ""
+
+
+# A list's main content, with the two tabs, two rows and what each test adds.
+LIST_PAGE = ("<main><h1>Orders and Receipts</h1><div role='tablist'>"
+             "<a role='tab' href='#'>Online Orders</a><a role='tab' href='#'>In-Store Receipts</a>"
+             "</div><div id='store'><ul>%s%s</ul>%s</div></main>")
+
+# Controls a list of words that say "more" missed (review).
+CONTROLS = {
+    "a load more with a number": "<button>Load 20 more</button>",
+    "a show more with a number": "<a href='#'>Show 10 more</a>",
+    "a plus more": "<button>+ More</button>",
+    "an arrow": "<button>&#8594;</button>",
+    "a year": "<button>2025</button>",
+    "a month": "<button>March</button>",
+    "all receipts": "<a href='#'>All receipts</a>",
+    "a div that answers a click": "<div onclick='void 0'>Earlier receipts</div>",
+    "a div shown as clickable": "<div style='cursor:pointer'>Earlier receipts</div>",
+    "a summary": "<details><summary>Filters</summary><p>Any</p></details>",
+    "a tab of its own": "<div role='tab'>Pickup</div>",
+    "a radio": "<div role='radio' aria-checked='true'>2024</div>",
+    "an option": "<div role='option'>Last year</div>",
+    "a menu item": "<div role='menuitem'>Archive</div>",
+    "a span a keyboard reaches": "<span tabindex='0'>Older</span>",
+    "a dropdown": "<select><option>Last 6 months</option></select>",
+}
+
+
+def test_every_control_but_the_tabs_and_the_rows_own_links_counts():
+    """Any control the list shows may show more of it or a narrower part of
+    it, whatever it says, so each of these counts as one, and so does one on
+    a row that is neither its receipt link nor its details link."""
+    counted = {}
+    with a_page() as pg:
+        for name, control in CONTROLS.items():
+            pg.set_content(LIST_PAGE % (K1.row(), K2.row(), control))
+            counted[name] = site.more_controls(pg)
+        on_a_row = K2.row().replace("</li>", "<button>See all 12 receipts</button></li>")
+        pg.set_content(LIST_PAGE % (K1.row(), on_a_row, ""))
+        counted["a button on a row"] = site.more_controls(pg)
+    assert counted == {name: 1 for name in list(CONTROLS) + ["a button on a row"]}, counted
+
+
+def test_the_tabs_and_the_rows_own_receipt_and_details_links_do_not_count():
+    details = K2.row().replace("</li>", "<a href='/shopping/order-details/1'>View order details</a></li>")
+    with a_page() as pg:
+        pg.set_content(LIST_PAGE % (K1.row(), details, ""))
+        assert site.more_controls(pg) == 0
 
 
 def test_a_pause_right_after_a_read_is_never_counted_as_the_rows_holding_still(monkeypatch):

@@ -211,10 +211,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   failure file, counts for no review, goes into both CSVs once so a spend
   summary still counts it, and is skipped by later runs until a discovery
   finds it on the tab again. That is said only of a tab seen whole. It was
-  opened on that look, its rows stopped changing and drew no more when
-  scrolled to the end, it showed no control for more, older or filtered
-  receipts, its oldest receipt is at least 20 months old, and the run's
-  own discovery read it, so Resume never decides it. A row that gave no
+  opened on that look, on a page the browser was showing, its rows stopped
+  changing and drew no more when scrolled to the end, the page held fewer
+  than 400 rows, it showed no control but the two tabs and each row's own
+  receipt or details link, its oldest receipt is at least 20 months old,
+  and the run's own discovery read it, so Resume never decides it. A
+  purchase whose receipt was saved before is never reported so, and Download
+  again leaves its rows in the CSVs as they are. A row that gave no
   receipt for any other reason now says what happened, that its row is not
   on the page, that more than one row fits it, that nothing on it reads as
   its receipt, or that pressing it brought no PDF, and is a failure the
@@ -226,10 +229,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   has an empty path, which reads as the folder the app runs in. Typing a
   new name for one tried to rename that folder, which on Windows stopped
   the review with an error partway through, and the receipts renamed
-  before it were left out of both CSVs. It now offers only a receipt that
-  is a file inside the app's own folder, a rename that fails leaves that
-  receipt as it was and the review goes on, and the CSVs are written
-  however the review ends.
+  before it were left out of both CSVs. It now offers only a PDF in the
+  app's own Online, In-Store or Manual Review folder, a rename that fails
+  leaves that receipt as it was and the review goes on, and the CSVs are
+  written however the review ends.
 
 ### Security
 - **Every redirect is checked against the provider's own sites before it

@@ -939,6 +939,12 @@ class App:
             found = {"outcome": pressed.get("outcome") or site.NO_PDF}
             if found["outcome"] == site.NOT_ON_THE_PAGE:
                 found.update(self._dropped_off(page, purchase, pressed, shown, trace))
+                if found["dropped"]:
+                    body, whole = self._press_once_scrolled(page, purchase, trace, pressed)
+                    if body:
+                        return body, True, {}
+                    if not whole:
+                        found = {"outcome": pressed.get("outcome") or site.NO_PDF}
             judged.append(bool(found.get("dropped")))
         if found:
             found["dropped"] = all(judged)
@@ -953,11 +959,10 @@ class App:
         stayed the same for a while (site.settle_rows), counted on from the
         press's own looks. A list read while it was still filling left out
         the rows it had not drawn yet, and a purchase among them looked like
-        one Meijer no longer lists. Once the count has stopped, the list is
-        scrolled to its end (site.scroll_to_end), since a list can draw more
-        of itself as it is scrolled. Whenever the count changed, the row is
-        looked for once more, and a list that drew more as it was scrolled
-        was never seen whole, however it ends."""
+        one Meijer no longer lists. Whenever the count changed, the row is
+        looked for once more. A list on a page the browser was not showing
+        was never seen whole either, since a hidden page may not draw what
+        scrolling asks of it (review)."""
         kind = purchase.purchase_type
         settled = site.settle_rows(page, kind, seen=(pressed.get("rows"), pressed.get("since")))
         if settled["changed"]:
@@ -966,19 +971,31 @@ class App:
             if body or pressed.get("outcome") != site.NOT_ON_THE_PAGE:
                 return body
             settled = site.settle_rows(page, kind, seen=(pressed.get("rows"), pressed.get("since")))
-        scrolled = {"changed": False}
-        if settled["settled"] and not settled["changed"]:
-            scrolled = site.scroll_to_end(page, kind)
-            if scrolled["changed"]:
-                pressed.clear()
-                body = site.press_row_receipt(page, purchase, trace, facts=pressed)
-                if body or pressed.get("outcome") != site.NOT_ON_THE_PAGE:
-                    return body
-        whole = bool(settled["settled"] and not settled["changed"] and not scrolled["changed"])
+        visible = site.page_visible(page)
+        whole = bool(settled["settled"] and not settled["changed"] and visible)
         pressed["final"] = whole
         trace.append({"note": "the rows once they settled", "rows": int(settled["rows"]),
-                      "settled": whole, "more_after_scrolling": bool(scrolled["changed"])})
+                      "settled": whole, "page_visible": visible})
         return None
+
+    def _press_once_scrolled(self, page, purchase: Purchase, trace: list, pressed: dict):
+        """The list of a purchase about to be said to have dropped off it,
+        scrolled to its end, as (its receipt's bytes or None, whether the
+        list was seen whole).
+
+        A list can draw more of itself as it is scrolled, by a fetch that can
+        take longer than the rows' usual quiet, so after the scroll the rows
+        have to hold still for site.SCROLL_STEADY_MS. That wait is paid only
+        here, for a purchase every other check would mark (review). When the
+        list drew more, the row is looked for once more, and the list was
+        not seen whole however that ends."""
+        scrolled = site.scroll_to_end(page, purchase.purchase_type)
+        trace.append({"note": "the rows once scrolled to the end", "rows": int(scrolled["rows"]),
+                      "settled": bool(scrolled["settled"]), "changed": bool(scrolled["changed"])})
+        if scrolled["changed"]:
+            pressed.clear()
+            return site.press_row_receipt(page, purchase, trace, facts=pressed), False
+        return None, bool(scrolled["settled"])
 
     def _dropped_off(self, page, purchase: Purchase, pressed: dict, shown: dict,
                      trace: list) -> dict:
@@ -994,14 +1011,19 @@ class App:
         short while Meijer slows requests, and a purchase is said to have
         dropped off only when every one of these holds (review).
 
-        It is a store receipt. Its tab was opened on this look, and the list
-        was seen whole, its rows stopped changing and drew no more when
-        scrolled to its end. No control shows that would show more of it or
-        a narrower part of it, and a control that could not be read counts.
-        Every row of its kind shows a date, the oldest of them is at least
-        WHOLE_LIST_MONTHS old, and the purchase is older still. This run's
-        own discovery read the In-Store rows, so Resume never decides it,
-        and did not find this purchase among them. Anything else stays a
+        It is a store receipt. Its tab was opened on this look, and its rows
+        stopped changing on a page the browser was showing. No control shows
+        but the two tabs and the rows' own receipt or details links
+        (site.allowed_on_the_list), and controls that could not be read count
+        as one that does. Every row of its kind shows a date, the collector
+        read the whole list, the oldest row is at least WHOLE_LIST_MONTHS
+        old, and the purchase is older still. This run's own discovery read
+        the In-Store rows, so Resume never decides it, and did not find this
+        purchase among them. Its receipt was never saved, since a purchase
+        downloaded before and looked for again under --redownload, as the
+        panel's Download again asks, keeps the record and the rows it has
+        (review). Only then is the list scrolled to its end, where it must
+        draw nothing more (_press_once_scrolled). Anything else stays a
         failure the next run looks for again, an online order among them,
         since the Online tab may go on over later pages, which discovery
         reads and a row is never looked for on."""
@@ -1015,13 +1037,14 @@ class App:
         opened = bool(shown.get("opened"))
         read = IN_STORE in self._kinds_read
         listed = purchase.key in self._listed_now
+        saved = bool((self.progress.get(purchase.key) or {}).get("downloaded_ok"))
         trace.append({"note": "the oldest row the list shows", "rows": int(now["rows"]),
                       "earlier_than_every_row": older, "listed_by_discovery": listed,
                       "tab_opened": opened, "controls_read": more is not None,
                       "more_controls": int(more or 0), "back_twenty_months": back,
-                      "discovery_read_the_tab": read})
+                      "discovery_read_the_tab": read, "saved_before": saved})
         dropped = (kind == IN_STORE and opened and bool(pressed.get("final")) and more == 0
-                   and back and read and older and not listed)
+                   and back and read and older and not listed and not saved)
         return {"dropped": dropped, "oldest": oldest}
 
     # What is said of a purchase whose list showed and whose row gave no
@@ -1067,15 +1090,21 @@ class App:
         later runs find. Later runs skip it (_already_done) until a
         discovery finds it on the list again (_listed_again), and if its
         receipt is then saved, these rows give way to the saved receipt's
-        (_forget_unlisted_rows)."""
+        (_forget_unlisted_rows).
+
+        The rows go in before the mark that says they are in. A CSV open in
+        another program refuses them, and with the mark set first the
+        purchase never reached either CSV. A stop between the two leaves a
+        row in twice rather than none (review)."""
         tab = site.TAB_LABELS.get(purchase.purchase_type, purchase.purchase_type)
         written = (self.progress.get(purchase.key) or {}).get(UNLISTED_ROWS)
         self._record_state(purchase, State.NO_LONGER_LISTED,
                            notes=f"Meijer's {tab} tab no longer lists it. Its oldest row "
-                                 f"is from {oldest}.", extra={UNLISTED_ROWS: True})
+                                 f"is from {oldest}.")
         if not written:
             self._write_csv_rows(purchase, receipt_status="No longer listed",
                                  processing_status=State.NO_LONGER_LISTED.value)
+            self.progress.update(purchase.key, {UNLISTED_ROWS: True})
         self.stats["no_longer_listed"] = self.stats.get("no_longer_listed", 0) + 1
         print(f"  Meijer no longer lists this purchase. Its {tab} tab goes back to {oldest}, "
               "and this purchase is older, so there is no row to press. Later runs skip it "
@@ -1495,24 +1524,29 @@ class App:
                 print(f"  {k}: {c} rows")
 
     def _yours_to_rename(self, row) -> bool:
-        """Whether a row of the index names a file this review may rename,
-        one inside this app's own output folder.
+        """Whether a row of the index names a file this review may rename, a
+        PDF in one of the folders this app files receipts in, Online,
+        In-Store or Manual Review.
 
         A row written for a purchase with no receipt has an empty path, which
         reads as the folder the app runs in, and that folder exists. A new
         summary typed for such a row had the app rename its own folder, and
         on Windows stopped with a traceback partway through, its earlier
-        renames on disk and in progress.json and the CSVs left as they were
-        (review)."""
+        renames on disk and in progress.json and the CSVs left as they were.
+        With the output folder set to ".", the folder the app runs in is the
+        output folder itself, so a damaged row naming the app's config.json
+        was inside it (reviews)."""
         text = (row.get("PDF Full Path") or "").strip()
         if not text:
             return False
         try:
             path = Path(text).resolve()
-            root = self.paths.root.resolve()
-        except (OSError, RuntimeError, ValueError):
+            folders = [Path(f).resolve() for f in (
+                self.paths.online, self.paths.instore, self.paths.manual_review)]
+        except (OSError, RuntimeError, ValueError, AttributeError):
             return False
-        return root in path.parents and path.is_file()
+        return (path.suffix.lower() == ".pdf" and path.is_file()
+                and any(folder in path.parents for folder in folders))
 
     def cmd_review_names(self):
         rows = self.index_csv.read_all()
