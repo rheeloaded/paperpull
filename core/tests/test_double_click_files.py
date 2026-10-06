@@ -24,7 +24,6 @@ runs none of it, since setup-all.command did not parse for a month and
 nothing asked. A Mac runs a .command with /bin/bash, which is 3.2, so on
 a Mac that bash reads them as well, and CI does this on macOS and Linux.
 """
-import bisect
 import os
 import re
 import shutil
@@ -184,6 +183,8 @@ def _setup_all_checkout(tmp_path: Path) -> tuple:
     (pip / "__init__.py").write_text("", encoding="utf-8")
     (pip / "__main__.py").write_text(FAKE_PIP, encoding="utf-8")
     env.update(PYTHONPATH=str(tmp_path / "fake"), PYTHONNOUSERSITE="1", PIP_NO_INDEX="1")
+    # The script stops when it finds no Python on PATH, so one is there.
+    env["PATH"] = str(checkout / "gui" / ".venv" / "Scripts") + os.pathsep + env.get("PATH", "")
     return checkout, env
 
 
@@ -312,52 +313,76 @@ def _shell_scripts():
 
 
 def _parse_errors(bash, scripts, folder: Path) -> list:
-    """What bash -n says about each script that does not parse.
+    """What bash -n says about each script that does not parse, or whose
+    here-document runs to the end of the file, which bash -n only warns of.
 
-    A Git bash takes one to nine seconds to start on a busy Windows machine,
-    so one bash reads every script, each the body of a function of its own,
-    after a no-op so that a script of comments alone still parses. When it
-    stops, the script it stopped in is read again on its own, so the message
-    is bash's own about that file. If that one parses alone, an earlier one
-    was left open, and then every script is read on its own."""
+    Each script gets a bash of its own, except on Windows, where Git's bash
+    takes one to nine seconds to start on a busy machine. There one bash
+    reads them all, each the body of a function of its own after a no-op,
+    so that a script of comments alone still parses, and prints them back
+    with --pretty-print, which runs nothing. Every function has to come
+    back, in order, since a quote left open in one script can run into the
+    next and close on a later apostrophe, and the whole would still parse.
+    When they do not, halving the scripts finds the first one that breaks
+    them, and bash reads that one alone, so the message is its own."""
     def alone(n):
         name, text = scripts[n]
         f = folder / ("alone-%d.sh" % n)
         f.write_bytes(text.encode("utf-8"))
         r = subprocess.run([bash, "-n", f.as_posix()], capture_output=True, text=True)
-        return r.stderr.replace(f.as_posix(), name).strip() if r.returncode else ""
+        said = r.stderr.replace(f.as_posix(), name).strip()
+        if r.returncode or "delimited by end-of-file" in said:
+            return said or "bash -n ended %d on %s" % (r.returncode, name)
+        return ""
 
-    parts, starts, line = [], [], 1
-    for n, (_, text) in enumerate(scripts):
-        part = "_script_%d() {\n:\n%s\n\n}\n" % (n, text)
-        parts.append(part)
-        starts.append(line)
-        line += part.count("\n")
-    every = folder / "every-script.sh"
-    every.write_bytes("".join(parts).encode("utf-8"))
-    r = subprocess.run([bash, "-n", every.as_posix()], capture_output=True, text=True)
-    if r.returncode == 0:
+    def first_ones_come_back(n):
+        """Whether the first n scripts come back as n functions, or None
+        from a bash before 5.2, which has no --pretty-print."""
+        f = folder / ("first-%d.sh" % n)
+        f.write_bytes("".join("function _script_%d {\n:\n%s\n\n}\n" % (i, text)
+                              for i, (_, text) in enumerate(scripts[:n])).encode("utf-8"))
+        r = subprocess.run([bash, "--pretty-print", f.as_posix()], capture_output=True, text=True)
+        if r.returncode and "--pretty-print" in r.stderr:
+            return None
+        back = re.findall(r"^(?:function )?_script_(\d+) \(\)", r.stdout, re.M)
+        return r.returncode == 0 and back == [str(i) for i in range(n)]
+
+    every = first_ones_come_back(len(scripts)) if WINDOWS else None
+    if every is None:
+        return [e for e in map(alone, range(len(scripts))) if e]
+    if every:
         return []
-    m = re.search(r"line (\d+):", r.stderr)
-    stopped = bisect.bisect_right(starts, int(m.group(1))) - 1 if m else len(scripts) - 1
-    errors = [alone(stopped)]
-    if not errors[0]:
-        errors = [alone(n) for n in range(len(scripts))]
-    return [e for e in errors if e] or [
-        "bash stopped in %s reading every script at once, though each parses "
-        "alone, and said %s" % (scripts[stopped][0], r.stderr.strip())]
+    # The first `good` scripts come back and the first `bad` do not.
+    good, bad = 0, len(scripts)
+    while bad - good > 1:
+        mid = (good + bad) // 2
+        if first_ones_come_back(mid):
+            good = mid
+        else:
+            bad = mid
+    return [alone(bad - 1) or "%s parses alone but not as the body of a function"
+            % scripts[bad - 1][0]]
 
 
 @pytest.mark.parametrize("bash", _bashes())
 def test_the_parse_check_names_an_if_with_nothing_left_in_it(bash, tmp_path):
     """Among scripts that parse, the check names the one that does not, in
-    bash's own words, and a script of a comment alone parses, as it does
-    for bash -n on its own."""
+    bash's own words, a quote left open is named although a later
+    apostrophe closes it, and a script of a comment alone parses, as it
+    does for bash -n on its own."""
     before = ("before.sh", "#!/bin/sh\necho before\n")
     notes = ("notes.sh", "#!/bin/sh\n# a comment and nothing else\n")
     errors = _parse_errors(bash, [before, ("emptied.command", EMPTIED_IF), notes], tmp_path)
     assert len(errors) == 1, errors
     assert errors[0].startswith("emptied.command: line 5: syntax error"), errors
+
+    open_quote = ("open-quote.command", "#!/usr/bin/env bash\necho 'Run this app's setup first'\n")
+    later = ("later.sh", "#!/bin/sh\n# this app's own check\necho done\n")
+    errors = _parse_errors(bash, [open_quote, later, notes], tmp_path)
+    assert len(errors) == 1, errors
+    assert errors[0].startswith("open-quote.command: line "), errors
+    assert "unexpected EOF while looking for matching" in errors[0], errors
+
     assert _parse_errors(bash, [notes, before], tmp_path) == []
 
 
@@ -372,4 +397,4 @@ def test_every_shell_script_parses(bash, tmp_path):
     assert len(scripts) > 100, len(scripts)
     assert {"setup-all.command", "paperpull", "server/start.sh"} <= names, sorted(names)
     errors = _parse_errors(bash, scripts, tmp_path)
-    assert not errors, "bash cannot read:\n" + "\n".join(errors)
+    assert not errors, "bash cannot read these.\n" + "\n".join(errors)

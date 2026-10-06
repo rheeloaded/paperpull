@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # PaperPull - one-shot setup (macOS / Linux)
 #
-# Creates a virtual environment for every app plus the GUI and installs the
-# shared core into each. This takes a few minutes the first time. No browser
-# is downloaded here. Any Chromium-based browser already installed can be
-# used, and if none is found, login offers the download then.
+# Creates a virtual environment for every app, with the shared core installed
+# in it, and one for the GUI. This takes a few minutes the first time. No
+# browser is downloaded here. Any Chromium-based browser already installed can
+# be used, and if none is found, login offers the download then.
 set -uo pipefail
 cd "$(dirname "$0")"
 

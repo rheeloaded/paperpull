@@ -3,8 +3,8 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 echo ============================================================
 echo  PaperPull - one-shot setup
-echo  Creates a virtual environment for every app + the GUI
-echo  and installs the shared core into each.
+echo  Creates a virtual environment for every app, with the
+echo  shared core installed in it, and one for the GUI.
 echo  This can take a few minutes the first time.
 echo ============================================================
 echo.
