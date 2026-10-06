@@ -67,7 +67,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   next document was looked for inside the PDF viewer and marked for manual
   review, and a tab of yours left showing a PDF there sent every document
   to manual review. A tab now counts as on the documents page only when
-  its list is showing, and is sent back to it otherwise.
+  its list is showing on AAFMAA's own site, and is sent back to it
+  otherwise. AAFMAA's own View is not known to show a PDF in the tab, so
+  no run is known to have met this.
 - **PaperPull looks for Playwright's Chromium where Playwright keeps it.**
   Playwright picks that folder from a few settings, and PaperPull did not
   read them the same way. With PLAYWRIGHT_BROWSERS_PATH=0, Playwright keeps

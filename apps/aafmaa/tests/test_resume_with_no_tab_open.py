@@ -37,6 +37,7 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -317,13 +318,16 @@ def discover_with_their_tab(attached, server, tmp_path, capsys):
 
 def open_tab_at(cdp_url, address, seconds=15):
     """A tab the browser opens itself at this address, the way the person's
-    own tab is opened, once the browser lists it there. Its id. A PDF it
-    shows has no title of the page's own to wait for."""
+    own tab is opened, once it shows what the address answered. Its id. A
+    PDF has no title of the page's own to wait for, and the browser lists
+    the tab at its address with no title at all until the PDF is showing,
+    then names it after the address (measured on Chromium 153), so the tab
+    is taken as there once it is named."""
     made = json.loads(urllib.request.urlopen(urllib.request.Request(
         "%s/json/new?%s" % (cdp_url, address), method="PUT"), timeout=15).read().decode("utf-8"))
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if any(t.get("id") == made["id"] and t.get("url") == address
+        if any(t.get("id") == made["id"] and t.get("url") == address and t.get("title")
                for t in testkit.tabs_of(cdp_url)):
             return made["id"]
         time.sleep(0.1)
@@ -449,3 +453,25 @@ def test_their_tab_showing_a_pdf_at_the_documents_address_is_sent_to_the_list(at
     tabs = testkit.tabs_of(attached)
     assert [t["id"] for t in tabs] == [showing], "their tab was the one used, and no other opened"
     assert tabs[0].get("title") == "Documents", "their tab ends on the documents list"
+
+
+def test_a_page_of_another_host_is_never_read_for_the_documents_list(server):
+    """A tab a press took to another host is not on the documents list,
+    whatever its address says, and nothing on it is read, since no app reads
+    a tab of another site. The same tab on AAFMAA's own host showing its
+    list is."""
+    read = []
+
+    class Tab:
+        def __init__(self, url):
+            self.url = url
+
+        def locator(self, selector):
+            read.append((self.url, selector))
+            return SimpleNamespace(count=lambda: 5)
+
+    elsewhere = Tab(address(server, ELSEWHERE_HOST, "/Documents/statement.pdf"))
+    assert site.showing_documents_list(elsewhere) is False
+    assert not read, "another host's page was read, %s" % read
+    assert site.showing_documents_list(Tab(address(server, AAFMAA_HOST,
+                                                   "/Documents/default.aspx"))) is True

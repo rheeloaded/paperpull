@@ -351,8 +351,10 @@ def showing_documents_list(page) -> bool:
     browser's PDF viewer (measured 2026-10-05, Chromium 153), so a check of
     the address said the list was there, the tab was not put back, and the
     next document's row was looked for inside the viewer and not found. A
-    page that cannot be read is not showing the list either."""
-    if not on_documents_page(page):
+    page that cannot be read is not showing the list either, and a page of
+    another host is not read at all, whatever its address says, since no
+    app reads a tab of another site (tabs.py)."""
+    if not is_safe_url(page.url or "") or not on_documents_page(page):
         return False
     try:
         return page.locator(FALLBACK["doc_row"]).count() > 1
