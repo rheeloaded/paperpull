@@ -37,6 +37,7 @@ from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
@@ -317,6 +318,9 @@ class App:
         return True
 
     def cmd_discover(self, quiet: bool = False) -> int:
+        # A listing that stops on the way, however it stops, is noted as one
+        # that stopped, for Resume (paperpull_core.listing).
+        listing.started(self)
         print("Discovering PG&E documents...")
         page = self.page()
         if not site.goto_documents(page):
@@ -360,6 +364,9 @@ class App:
                                                 "page_number": doc.page_number},
                                       save=False)
         self.discovery.save()
+        # The whole list is in, and only now may a Resume that carries on
+        # from it call the run finished (paperpull_core.listing).
+        listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -602,12 +609,12 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume reads no list of its own. With nothing listed, or after a
+        # run that stopped before it had the whole list, it says so and stops
+        # as a run that stopped, rather than call the run finished
+        # (paperpull_core.listing).
         docs = [d for d in self._select() if not self._already_done(d)]
-        if not docs:
-            print("Nothing to resume - everything in scope is complete.")
-            return
-        print(f"Resuming: {len(docs)} document(s) remaining.")
-        self.process(docs, dry_run=self.args.dry_run)
+        listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run))
 
 
     def cmd_rename(self):

@@ -24,6 +24,7 @@ auth, and the one side effect (a downloaded message is marked read).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
@@ -369,6 +370,9 @@ class App:
 
 
     def cmd_discover(self, quiet: bool = False) -> int:
+        # A listing that stops on the way, however it stops, is noted as one
+        # that stopped, for Resume (paperpull_core.listing).
+        listing.started(self)
         page = self.page()
         if not site.ensure_statements(page):
             self.check_session(page)
@@ -394,6 +398,9 @@ class App:
         for d, occ in zip(raw, _stable_occurrences(raw, self.discovery.data)):
             n_new += self._record_statement_doc(d, occ)
         self.discovery.save()
+        # The whole list is in, and only now may a Resume that carries on
+        # from it call the run finished (paperpull_core.listing).
+        listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
@@ -693,12 +700,12 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume reads no list of its own. With nothing listed, or after a
+        # run that stopped before it had the whole list, it says so and stops
+        # as a run that stopped, rather than call the run finished
+        # (paperpull_core.listing).
         docs = [d for d in self._select() if not self._already_done(d)]
-        if not docs:
-            print("Nothing to resume - everything in scope is complete.")
-            return
-        print(f"Resuming: {len(docs)} document(s) remaining.")
-        self.process(docs, dry_run=self.args.dry_run)
+        listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run))
 
 
     def cmd_rename(self):

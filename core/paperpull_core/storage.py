@@ -185,6 +185,8 @@ class Paths:
             setattr(self, csv_spec.attr, self.root / name)
         self.progress_json = self.root / "progress.json"
         self.discovery_json = self.root / "discovery.json"
+        # Whether the last listing was read to its end (listing.py).
+        self.last_listing = self.root / "last-listing.json"
         self.run_summary = self.root / "run-summary.txt"
 
     def columns_for(self, csv_attr: str):

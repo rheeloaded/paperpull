@@ -29,10 +29,9 @@ external service.
 """
 from __future__ import annotations
 
-import json
-
 from paperpull_core import delivery
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import identity
 from paperpull_core import renaming
 from paperpull_core import tabs
@@ -59,18 +58,13 @@ from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
-                     atomic_write_json, atomic_write_text, build_pdf_filename,
-                     load_config, now_iso, sanitize_component, unique_path)
+                     atomic_write_text, build_pdf_filename, load_config,
+                     now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("paypal_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
-
-# Whether the last run that read PayPal's list read all of it, for Resume,
-# which reads no list of its own. A run that stopped on the way left the
-# list it knows short, or empty, and Resume used to call that complete.
-LISTING_FILE = "last-listing.json"
 
 # Why a business statement waits in Manual Review rather than being filed.
 # The note its record carries, the word its row of the index gets and what
@@ -505,10 +499,10 @@ class App:
         print("   the file it writes in the Diagnostics folder and attach it to the")
         print("   PayPal issue on GitHub.")
 
-    def _say_business_listing(self, listing) -> None:
+    def _say_business_listing(self, found) -> None:
         """What a business account's list held, the statements taken and every
         report left alone, so nothing is skipped without a word."""
-        counts = listing.counts
+        counts = found.counts
         rows = sum(counts.values())
         print(f"\nPayPal's list of business statements held {rows} report(s).")
         print(f"  {counts.get(site.READY, 0)} ready PDF statement(s) this app takes.")
@@ -517,38 +511,19 @@ class App:
         if counts.get(site.NOT_READY):
             print(f"  {counts[site.NOT_READY]} not ready yet. A later run takes each once PayPal")
             print("    has it ready. This app never asks PayPal to prepare one.")
-        unread = len(listing.unread)
+        unread = len(found.unread)
         if unread:
             print(f"  {unread} this app could not read, a status, a kind of file or the")
             print("    days it covers it does not know. Each was left alone and is")
             print("    counted as failed, and the file this run writes says what kind")
             print("    of value it was without saying the value.")
-            same = listing.counts.get(site.UNREAD_SAME_DAY, 0)
+            same = found.counts.get(site.UNREAD_SAME_DAY, 0)
             if same:
                 print(f"    That count includes {same} known only by the day PayPal made them,")
                 print("    the same day as another, so which is which could not be told.")
-        if not listing.whole:
+        if not found.whole:
             print("  PayPal said more of the list follows, and this app could not page")
             print("    to it with the list's own next-page control.")
-
-    def _listing_done(self, whole: bool) -> None:
-        """Note whether this run read PayPal's whole list, for Resume."""
-        try:
-            atomic_write_json(self.paths.root / LISTING_FILE,
-                              {"complete": bool(whole), "at": now_iso()})
-        except OSError as e:
-            log.info("could not note how the list was read: %s", e)
-
-    def _last_listing(self) -> str:
-        """"complete" or "stopped" for the last run that read PayPal's list,
-        "" when none has said, as an install from before this knew."""
-        try:
-            got = json.loads((self.paths.root / LISTING_FILE).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return ""
-        if not isinstance(got, dict) or not isinstance(got.get("complete"), bool):
-            return ""
-        return "complete" if got["complete"] else "stopped"
 
     def _stop_if_cut_short(self) -> None:
         """A run that read only part of PayPal's list did not finish, and must
@@ -563,10 +538,10 @@ class App:
             raise SystemExit(0)
 
     def cmd_discover(self, quiet: bool = False) -> int:
-        # Not whole until this has read all of PayPal's list. Noted first, so
-        # every way out before the end leaves it so, a sign-in page or a
-        # check that stops the run at the console's prompt among them.
-        self._listing_done(False)
+        # A listing that stops on the way, however it stops, is noted as one
+        # that stopped, for Resume (paperpull_core.listing), a sign-in page or
+        # a check that stops the run at the console's prompt among them.
+        listing.started(self)
         page = self.page()
         n_new = 0
         try:
@@ -603,7 +578,11 @@ class App:
                 self.write_failure("read the statements list", "a row could not be read",
                                    postmortem={"rows": sum(docs.counts.values()),
                                                "unread": docs.unread[:20]})
-        self._listing_done(not self._listing_cut_short)
+        # The whole list is in, unless it said more follow and this run could
+        # not page to them, and only then may a Resume that carries on from it
+        # call the run finished (paperpull_core.listing).
+        if not self._listing_cut_short:
+            listing.read_whole(self)
 
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -1140,30 +1119,14 @@ class App:
         """Carry on with the statements the last list held. Resume reads no
         list of its own, so when no run has read PayPal's list to its end,
         or the last one stopped before it did, it says so and leaves as a
-        run that stopped. It used to say everything was complete, and the
-        panel reported a clean run, after a run had stopped on a business
-        account's settings page with nothing listed at all."""
+        run that stopped (paperpull_core.listing). It used to say everything
+        was complete, and the panel reported a clean run, after a run had
+        stopped on a business account's settings page with nothing listed
+        at all."""
         self.stats["mode"] = "resume"
-        listing = self._last_listing()
-        if not self.discovery.data and listing != "complete":
-            print("Nothing to resume. No PayPal statements have been listed yet,")
-            print("because no run has read PayPal's list to its end. Run Pilot or")
-            print("Run All, which read the list first.")
-            raise SystemExit(0)
         docs = [d for d in self._select() if not self._already_done(d)]
-        if not docs and listing != "stopped":
-            print("Nothing to resume - everything in scope is complete.")
-            return
-        if docs:
-            print(f"Resuming: {len(docs)} document(s) remaining.")
-            self.process(docs, dry_run=self.args.dry_run)
-        else:
-            print("Nothing left to resume from the statements listed so far.")
-        if listing == "stopped":
-            print("\nThe last run stopped before it read PayPal's whole list, so there")
-            print("may be statements this app has not seen. Run Pilot or Run All to")
-            print("read the list again.")
-            raise SystemExit(0)
+        listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run),
+                       noun="statements")
 
 
     def cmd_rename(self):

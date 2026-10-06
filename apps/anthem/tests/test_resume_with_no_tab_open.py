@@ -305,13 +305,20 @@ def test_resume_with_no_tab_of_theirs_open_stops_and_says_so(attached, server, t
 
 def test_with_no_eob_left_the_other_lists_stop_too_rather_than_read_as_empty(
         attached, server, tmp_path, capsys):
-    """No EOB is left to resume, so Resume goes straight on to member
-    documents, ID cards and letters, with no Anthem tab of the person's open.
-    It stops there and says the tab is not open. Each list was asked for
-    from a tab that was not on Anthem and came back empty, and the run said
-    there was nothing to download, three times, and finished clean."""
+    """No EOB is left to resume, since every one the last list held is
+    downloaded, so Resume goes straight on to member documents, ID cards and
+    letters, with no Anthem tab of the person's open. It stops there and
+    says the tab is not open. Each list was asked for from a tab that was
+    not on Anthem and came back empty, and the run said there was nothing
+    to download, three times, and finished clean. An empty discovery.json
+    stood for that once, and is now a list nobody has read, which Resume
+    stops on at once (test_no_resume_is_clean_after_a_list_it_did_not_read)."""
     cfg, _keys = seeded(tmp_path, attached)
-    (tmp_path / "out" / "discovery.json").write_text("{}", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    records = json.loads((out_dir / "discovery.json").read_text(encoding="utf-8"))
+    (out_dir / "progress.json").write_text(json.dumps(
+        {k: dict(r, state=State.COMPLETED.value, downloaded_ok=True) for k, r in records.items()}),
+        encoding="utf-8")
     elsewhere = testkit.open_tab(attached, address(server, ELSEWHERE_HOST, "/inbox"), "Inbox")
     testkit.keep_only(attached, {elsewhere})
 

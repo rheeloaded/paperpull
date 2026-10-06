@@ -28,6 +28,7 @@ sent to any external service.
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import capture
 from paperpull_core import renaming
 from paperpull_core import tabs
@@ -424,6 +425,9 @@ class App:
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
+        # A listing that stops on the way, however it stops, is noted as one
+        # that stopped, for Resume (paperpull_core.listing).
+        listing.started(self)
         page = self.page()
         n_new = 0
         # Open the documents page and read the date from every control that
@@ -444,6 +448,9 @@ class App:
         self.discovery.save()
         log.info("documents page: %d documents, %d new", len(docs), n_new)
 
+        # The whole list is in, and only now may a Resume that carries on
+        # from it call the run finished (paperpull_core.listing).
+        listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
@@ -734,19 +741,23 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # With nothing listed, or after a run that stopped before it had the
+        # whole list, Resume says so and stops as a run that stopped, rather
+        # than call the run finished (paperpull_core.listing). It reads the
+        # lists again only once it has something to carry on with.
         docs = [d for d in self._select() if not self._already_done(d)]
-        if not docs:
-            print("Nothing to resume - everything in scope is complete.")
-            return
-        # The download chooses a row by what the lists said, how many
-        # documents each date held and their titles. Those are read by
-        # discovery, and without them a row that does not name its document
-        # is refused. The app says to press Resume after a stopped run, so
-        # Resume reads the lists first, the way Pilot and Run do (#36,
-        # review).
+        listing.resume(self, docs, self._resume_from_the_lists)
+
+    def _resume_from_the_lists(self, _known):
+        """Carry on once the lists are read again. The download chooses a row
+        by what the lists said, how many documents each date held and their
+        titles. Those are read by discovery, and without them a row that does
+        not name its document is refused. The app says to press Resume after
+        a stopped run, so Resume reads the lists first, the way Pilot and Run
+        do (#36, review). Lists read whole here let the run finish clean."""
         self.cmd_discover(quiet=True)
         docs = [d for d in self._select() if not self._already_done(d)]
-        print(f"Resuming: {len(docs)} document(s) remaining.")
+        print(f"The lists, read again, leave {len(docs)} document(s) to take.")
         self.process(docs, dry_run=self.args.dry_run)
 
 

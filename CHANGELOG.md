@@ -64,6 +64,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   run whose list stopped partway, it carries on with the statements it
   knows, then says the list was not read to its end and stops the same
   way.
+- **Resume no longer reports a clean run after a list it did not read
+  whole, in any document app.** PayPal's was fixed first, and every other
+  document app's Resume did the same. Resume reads no list of its own,
+  and after a Discover, Pilot or Run All that stopped while it was
+  listing, at a sign-in, a page that would not open or a browser that had
+  been closed, it said everything in scope was complete and the panel
+  called the run clean, although the run had listed nothing, or only part
+  of the list. Each listing now notes in `last-listing.json`, in the
+  output folder, whether it read the whole list. With nothing listed yet,
+  Resume says so and stops, and after a listing that stopped it says so,
+  carries on with the documents it already knows, and then stops, both as
+  runs that stopped, until Pilot or Run All reads the list again.
+  E*TRADE's Resume, which reads its lists again itself, finishes clean
+  when they come whole. A Resume after a whole listing, or on an install
+  from before this release that has listed documents, finishes as it
+  always did.
 - **The wrong-document check no longer finds a month inside a date.**
   July's 7/2031 was found inside the August date 08/17/2031, its 07/2031
   at the end of the September date 09/07/2031, and its 2031-07 at the

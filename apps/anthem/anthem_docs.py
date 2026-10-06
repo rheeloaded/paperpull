@@ -21,6 +21,7 @@ sent to any external service.
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
@@ -386,6 +387,9 @@ class App:
 
 
     def cmd_discover(self, quiet: bool = False) -> int:
+        # A listing that stops on the way, however it stops, is noted as one
+        # that stopped, for Resume (paperpull_core.listing).
+        listing.started(self)
         page = self.page()
         if not site.ensure_statements(page):
             self.check_session(page)
@@ -403,6 +407,9 @@ class App:
         for d in raw:
             n_new += self._record_statement_doc(d)
         self.discovery.save()
+        # The whole list is in, and only now may a Resume that carries on
+        # from it call the run finished (paperpull_core.listing).
+        listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
@@ -867,6 +874,12 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # The EOBs carry on from the list the last run read, which Resume does
+        # not read again. With nothing listed it says so and stops at once,
+        # and after a run that stopped before it had the whole list it says
+        # so first and stops at its end, rather than call the run finished
+        # (paperpull_core.listing).
+        listing.before_resume(self, "EOBs")
         docs = [d for d in self._select() if not self._already_done(d)]
         if docs:
             print(f"Resuming: {len(docs)} EOB document(s) remaining.")
@@ -881,6 +894,7 @@ class App:
             self.cmd_documents()
             self.cmd_id_cards()
             self.cmd_letters()
+        listing.after_resume(self)
 
 
     def cmd_rename(self):
