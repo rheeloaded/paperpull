@@ -171,6 +171,11 @@ OUTPUT = REPO / "test-output"
 # How long each suite took on a full run. The longest start first, and the
 # parts on CI are balanced by it. A suite not listed counts as a middling one.
 TIMES = REPO / "tools" / "suite_times.json"
+# How long one suite may run before it is stopped as hung. core took 1655 to
+# 1718 seconds of a 1800 second limit in full runs on 2026-10-06, and two
+# lands that day had it stopped at 99% with nothing failed while other
+# sessions ran tests beside them. An hour still stops a hung suite.
+SUITE_LIMIT_S = 3600
 # Set for every suite this runs, so a run started inside one never waits
 # for the lock its own run holds.
 IN_RUN = "PAPERPULL_IN_TEST_RUN"
@@ -511,7 +516,7 @@ def descendants(pid: int) -> list:
     return found
 
 
-def run_suite(d: Path, py: Path, timeout: int = 1800):
+def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S):
     """Run one suite. Its whole output, its exit code, and each failure as
     the plugin wrote it down. A suite that runs out of time is ended with
     everything it started and comes back as a failure that says so."""

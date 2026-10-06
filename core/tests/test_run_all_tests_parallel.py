@@ -144,7 +144,7 @@ def test_one_at_a_time_the_same_suites_fail(fake_run, tmp_path, monkeypatch, cap
 
 def test_one_at_a_time_keeps_the_old_order(fake_run, tmp_path, monkeypatch):
     seen = []
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=1800: (seen.append(d.name) or ("1 passed", 0, [])))
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: (seen.append(d.name) or ("1 passed", 0, [])))
     fake_run({n: tmp_path / n for n in ("core", "gui", "amazon")}, {"amazon": 500, "core": 5})
     assert rat.main(["--jobs", "1"]) == 0
     assert seen == ["core", "gui", "amazon"]
@@ -170,7 +170,7 @@ def test_the_parts_cover_every_suite_once_and_finish_close_together():
 
 def test_a_part_runs_only_its_own_suites(fake_run, tmp_path, monkeypatch, capsys):
     seen = []
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=1800: (seen.append(d.name) or ("1 passed", 0, [])))
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: (seen.append(d.name) or ("1 passed", 0, [])))
     times = {"a": 100, "b": 90, "c": 20, "d": 10}
     fake_run({n: tmp_path / n for n in times}, times)
     assert rat.main(["--shard", "1/2", "--jobs", "1"]) == 0
@@ -524,7 +524,7 @@ def test_a_suite_out_of_time_is_not_the_end_of_the_run(fake_run, tmp_path, monke
                   """)})
     real = rat.run_suite
     monkeypatch.setattr(rat, "run_suite",
-                        lambda d, py, timeout=1800: real(d, py, timeout=3 if d.name == "slow" else timeout))
+                        lambda d, py, timeout=rat.SUITE_LIMIT_S: real(d, py, timeout=3 if d.name == "slow" else timeout))
     assert rat.main(["--jobs", "2"]) == 1
     lines = capsys.readouterr().out.splitlines()
     out = "\n".join(lines)
@@ -598,14 +598,14 @@ def test_a_run_inside_a_test_takes_no_lock(fake_run, tmp_path, monkeypatch):
     def must_not_wait(lock, replace):
         raise AssertionError("a run inside a test waited for the machine's lock")
     monkeypatch.setattr(rat, "take_turn", must_not_wait)
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=1800: ("1 passed", 0, []))
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: ("1 passed", 0, []))
     fake_run({"only": tmp_path / "only"})
     assert os.environ.get("PYTEST_CURRENT_TEST")
     assert rat.main(["--jobs", "2"]) == 0
 
 
 def test_each_run_keeps_its_times_and_writes_them_only_when_asked(fake_run, tmp_path, monkeypatch):
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=1800: ("1 passed", 0, []))
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: ("1 passed", 0, []))
     fake_run({"x": tmp_path / "x", "y": tmp_path / "y"}, {"x": 7})
     assert rat.main(["--jobs", "2"]) == 0
     assert set(json.loads((tmp_path / "test-output" / "times.json").read_text())) == {"x", "y"}

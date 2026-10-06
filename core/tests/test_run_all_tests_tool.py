@@ -640,7 +640,7 @@ def run_with(environments, asked_afresh, tmp_path, monkeypatch):
     def make(suites: dict, names: list, builds=("1234", "1243"), unfinished=()) -> dict:
         ran = {}
 
-        def run_suite(d, py, timeout=1800):
+        def run_suite(d, py, timeout=rat.SUITE_LIMIT_S):
             ran[d.name] = py
             return "1 passed in 0.01s", 0, []
         monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
