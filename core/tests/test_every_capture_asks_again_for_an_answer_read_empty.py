@@ -384,7 +384,12 @@ def press(context, provider, pages, tmp_path, monkeypatch):
     the ones a test names, and once /gate opens each look is whole again, so
     a download the page makes then has the capture's own time to arrive. A
     listener of the test's own, beside the capture's, notes the look at
-    which an answer the capture should leave alone was heard."""
+    which an answer the capture should leave alone was heard. The look at
+    which that answer is let go, or the other tab is let ask for it, lasts
+    until the answer has been heard, 30 seconds at most, so the capture has
+    the rest of its looks after it however slow the machine is. Without
+    that, a full run on a busy machine once heard the other tab's answer
+    only at the 24th of the capture's 25 looks."""
 
     def heard(response):
         if provider.heard_at is None and ("slow=1" in response.url or "-other" in response.url):
@@ -408,6 +413,10 @@ def press(context, provider, pages, tmp_path, monkeypatch):
                                  (provider.let_go_at, "let_go")):
                     if at and provider.looks >= at:
                         setattr(provider, name, True)
+                if provider.looks in (provider.other_at, provider.let_go_at):
+                    give_up = time.monotonic() + 30
+                    while provider.heard_at is None and time.monotonic() < give_up:
+                        own_wait(25)
             quick = provider.kept and not provider.gate_open
             own_wait(max(1, int(ms) // 50) if quick else ms)
 
