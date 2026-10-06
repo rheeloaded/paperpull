@@ -295,7 +295,15 @@ def test_a_window_that_opens_without_a_debugging_port_is_reported(monkeypatch, t
     the flags, so a window opens, the user signs in, and only the NEXT command
     reveals that no port was ever opened. By then the sign-in was spent on a
     browser the tool cannot see."""
-    monkeypatch.setattr(browser, "find_browser", lambda prefer_real=False: (browser.EDGE, "/x/edge"))
+    # The launcher asks browser_candidates, not find_browser, and that reads
+    # the machine through _real_browsers and _bundled_chromium, so the
+    # stand-ins go there. Patching find_browser left this test reading the
+    # browsers on whoever's machine ran it, and on one with none it said no
+    # browser was found and launched nothing. Edge is the only browser here,
+    # so the download offered after it fails is stood in for as well.
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "/x/edge")])
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: [])
+    monkeypatch.setattr(browser, "fetch_bundled_chromium", lambda *a, **k: False)
     monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kw: None)
     monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0: False)
     assert browser.open_signin_browser(tmp_path / "p", "9231", "https://example.test") is None
@@ -334,7 +342,11 @@ def test_a_relative_profile_dir_reaches_the_browser_as_an_absolute_path(tmp_path
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(browser.subprocess, "Popen", FakePopen)
-    monkeypatch.setattr(browser, "find_browser", lambda prefer_real=False: ("Chromium", "chrome"))
+    # browser_candidates is what the launcher asks, as in
+    # test_launch_passes_the_profile_and_port. With find_browser patched
+    # instead, a machine with no browser never reached Popen.
+    monkeypatch.setattr(browser, "browser_candidates",
+                        lambda prefer_real=False, mode=browser.AUTO: [("Chromium", "chrome")])
     monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0: True)
 
     browser.open_signin_browser("./demo-browser-profile", "9222", "https://example.test")
@@ -556,6 +568,9 @@ class _FakeWinreg:
         return self.values[key], 1
 
 
+# The registry is read only on Windows. Elsewhere os.path.expandvars leaves
+# %FAKEROOT% as it is, so the Edge value below is never expanded.
+@pytest.mark.skipif(sys.platform != "win32", reason="the registry is read only on Windows")
 def test_the_registry_is_asked_first_in_the_64_bit_view(monkeypatch, tmp_path):
     """An x64 build running under emulation on an ARM64 machine sees the
     emulated registry view by default, where a native ARM64 Chrome is not
