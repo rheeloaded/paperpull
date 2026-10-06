@@ -8,7 +8,9 @@ review of the AAFMAA capture fix (2026-10-05) had a made-up provider at
 localhost answer a document's address with a 302 to 127.0.0.1, and
 capture.fetch_pdf sent a GET there with the cookies the browser held for it
 and kept the PDF that came back. Every app checked the address it was
-handed, and none checked where a redirect led. Measured in Chromium 153
+handed. Most never checked where a redirect led, and the four that did
+checked only where the redirects ended, after every step had been asked.
+Measured in Chromium 153
 attached over CDP, with Playwright 1.62 and 1.63 alike, max_redirects=0
 hands back the redirect itself and asks nothing more.
 

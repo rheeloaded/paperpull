@@ -36,9 +36,10 @@ log = logging.getLogger("paperpull.redirects")
 # The answers that send a client on to another address.
 REDIRECTS = (301, 302, 303, 307, 308)
 
-# More than any document link was seen to need. M&T, Amazon, FedEx and
-# Stripe kept caps of three or five of their own, and still do.
-HOPS = 5
+# Playwright's own limit, so an app that never set one follows as many
+# redirects on its provider's hosts as it always did. M&T, Amazon, FedEx
+# and Stripe kept caps of three or five of their own, and still do.
+HOPS = 20
 
 
 class TooManyRedirects(Exception):

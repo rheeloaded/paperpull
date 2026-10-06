@@ -270,7 +270,8 @@ open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
   app's own `is_safe_url`, which follows a redirect one step at a time and
   only to the provider's own hosts.
   `core/tests/test_no_request_follows_a_redirect_off_the_allowlist.py`
-  fails any other call.
+  names every other call it can find, so keep the client in a plain name,
+  attribute or parameter where it can follow it.
 - **Short sessions.** Some bank portals expire fast and the SPA keeps showing a
   cached page while download clicks silently no-op. Detect it (a hard reload
   bounces to the login URL) and report it so `--resume` retries after re-login

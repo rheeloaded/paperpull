@@ -63,11 +63,11 @@ The `.gitignore` already blocks all of the following. Do not override it.
     resolves to any other host is refused before the browser goes there. A
     repo-wide test (`core/tests/test_every_app_guard.py`) checks that every
     app has the allowlist and a working guard, and that no broad click is
-    left unguarded. The same holds for a redirect when an app asks for a
-    document with the browser's cookies from outside the page. It is
-    followed only to the provider's own hosts, one step at a time and each
-    checked before it is asked, and an address asked for a second time
-    follows none (`core/tests/test_no_request_follows_a_redirect_off_the_allowlist.py`).
+    left unguarded. When an app asks for a document through Playwright's
+    own client, which carries the browser's cookies, each redirect is
+    checked with the same guard before it is followed, one step at a time,
+    and an address asked for a second time follows none
+    (`core/tests/test_no_request_follows_a_redirect_off_the_allowlist.py`).
 - **You sign in, not the tool.** The tools attach to a browser *you* logged into
   (via Chrome DevTools Protocol). They never handle your password or 2FA.
 - **Local only.** The browser's debugging port and the GUI both listen on

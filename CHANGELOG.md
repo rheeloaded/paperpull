@@ -56,20 +56,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its list is showing, and is sent back to it otherwise.
 
 ### Security
-- **No app follows a redirect off its provider's sites when it asks for a
-  document from outside the page.** Many apps ask for a document through
-  Playwright's own client, which sends every cookie the person's browser
-  holds for the site it asks and follows up to twenty redirects without
-  checking any. Each app checked the address it was handed and none checked
-  where a redirect led, so an address that answered with a redirect to
-  another site sent the browser's cookies for that site there, and the
-  shared capture kept the PDF that came back. Now an address the browser
-  already got its document from is asked again with no redirect followed,
-  and a link asked for the first time follows a redirect only to the
-  provider's own sites, one step at a time, each checked before it is
-  asked. M&T, Amazon, FedEx and Stripe keep their limits of three or five
-  redirects, and M&T still reads a longer chain as a session that has
-  ended.
+- **Every redirect is checked against the provider's own sites before it
+  is followed, when an app asks for a document through Playwright's own
+  client.** That client sends every cookie the person's browser holds for
+  the site it asks, and by itself it follows up to twenty redirects without
+  checking any. Each app checked the address it was handed. Most never
+  checked where a redirect led, and M&T, Amazon, FedEx and Stripe checked
+  only where the redirects ended, after every step had been asked. So an
+  address that answered with a redirect to another site sent the browser's
+  cookies for that site there, and the shared capture kept the PDF that
+  came back. Now an address the browser already got its document from is
+  asked again with no redirect followed, and a link asked for the first
+  time follows a redirect one step at a time, each step checked with the
+  app's own guard before it is asked. M&T, Amazon, FedEx and Stripe keep
+  their limits of three or five redirects, and M&T still reads a longer
+  chain as a session that has ended.
 
 ## [0.43.0] - 2026-10-05
 

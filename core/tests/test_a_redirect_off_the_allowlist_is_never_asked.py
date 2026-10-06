@@ -51,7 +51,7 @@ SENDS = ("get", "post", "put", "patch", "delete", "head", "fetch")
 
 # Every request the server saw. A browser names a Sec-Fetch-Mode on each
 # request it makes, and Playwright's own client names none.
-Asked = namedtuple("Asked", "host path then mode cookie")
+Asked = namedtuple("Asked", "host path then mode cookie query")
 
 # A page whose one control reads a document into a blob, the way a provider's
 # script hands one over, from the address in its own query.
@@ -111,7 +111,7 @@ class _Handler(BaseHTTPRequestHandler):
         query = parse_qs(parts.query)
         then = (query.get("then") or [""])[0]
         SITE.seen.append(Asked(host, parts.path, then, self.headers.get("Sec-Fetch-Mode"),
-                               self.headers.get("Cookie") or ""))
+                               self.headers.get("Cookie") or "", parts.query))
         port = self.server.server_address[1]
         if host == ELSEWHERE:
             if parts.path == "/page":
@@ -323,10 +323,13 @@ def test_an_address_its_guard_refuses_is_never_asked(page, server, redirects):
 
 
 def test_what_is_asked_with_goes_with_the_first_ask_only(page, server, redirects):
+    """Playwright adds `params` to whatever address it asks, so a second ask
+    that carried them again would read then=doc&then=hop. The whole query
+    of each ask is compared, not the first value of it."""
     got = redirects.get(page.context.request, base(server) + "/statement.pdf",
                         guard_for(server), params={"then": "hop"}, timeout=20000)
     assert got.body() == OURS
-    assert [a.then for a in SITE.seen] == ["hop", "doc"]
+    assert [a.query for a in SITE.seen] == ["then=hop", "then=doc"]
 
 
 def test_a_link_fetched_for_the_first_time_follows_only_its_own_hosts(page, server):
