@@ -25,6 +25,10 @@ class State(str, Enum):
     COMPLETED = "Completed"
     NEEDS_MANUAL_REVIEW = "Needs Manual Review"
     NO_RECEIPT_AVAILABLE = "No Receipt Available"
+    # The provider's own list stopped showing the purchase, so there is
+    # nothing left there to fetch its document from. Not a failure, and
+    # tried again once a discovery finds it on the list again.
+    NO_LONGER_LISTED = "No Longer Listed"
     CANCELED = "Canceled"
     FAILED = "Failed"
 

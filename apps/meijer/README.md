@@ -103,10 +103,11 @@ already on your machine is used and not the bundled one.
   keeps its identity by the id in its link, or by a short hash of the row
   when the link has none.
 - **Both tabs are read**, In-Store Receipts and Online Orders, each once
-  its rows show, for up to 30 seconds, and only the rows the page shows.
-  A tab that shows nothing is never taken to be empty. When one tab has
-  rows the run goes on with them and says which tab showed nothing. When
-  neither does, the run stops and asks you to look at the browser window.
+  its rows show, for up to 30 seconds, and once their count has stayed
+  the same for three seconds, and only the rows the page shows. A tab that
+  shows nothing is never taken to be empty. When one tab has rows the run
+  goes on with them and says which tab showed nothing. When neither does,
+  the run stops and asks you to look at the browser window.
 - **The receipt link is the document.** The app fetches the row's receipt
   or order-details link from inside the signed-in page. If the answer is a
   PDF, that is the file. If it is a page, the app opens it, hides
@@ -123,6 +124,21 @@ already on your machine is used and not the bundled one.
   run, and the run goes on to the next purchase. Three of those in a row
   stop the run, so Meijer is not asked again and again while it is not
   answering. Wait a while, then press **Resume**.
+- **Meijer appears to list about two years of store receipts.** That is
+  inferred from one account, whose three oldest receipts had gone from the
+  In-Store Receipts tab, and Meijer has not said so. A purchase found by an
+  earlier run that is older than every receipt the tab shows, once the
+  tab's rows have stopped changing, is reported as no longer listed, with
+  the oldest date the tab still shows. That is not a failure. It writes no
+  failure file, counts for no review and goes into neither CSV. Later runs
+  skip it, and a run whose discovery finds it on the tab again tries it
+  again.
+- **A row that gives no receipt** is said as what happened, that its row
+  is not on the page, that more than one row fits it, that nothing on it
+  reads as its receipt, or that pressing it brought no PDF. Each is a
+  failure the next run looks for again, and none goes into the CSVs.
+  `Diagnostics\download-attempt.json` keeps every such attempt of a run,
+  in order.
 - **In-store purchases** are the open question. Meijer shows them as
   digital receipts under mPerks when the loyalty account is linked, and
   where that list lives is the first thing the Diagnose file will settle.

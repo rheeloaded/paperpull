@@ -66,6 +66,12 @@ def _reason_words(reason: str) -> str:
 
 log = logging.getLogger("meijer_receipts")
 
+# What the file a tester attaches says an attempt came to, beside the
+# press's own outcomes in meijer_site. Words of the fixed list only.
+DROPPED_OFF = "dropped off the list"
+LIST_DID_NOT_LOAD = "the list did not load"
+PUT_ASIDE = "put aside in manual review"
+
 
 def ask(prompt: str) -> str:
     """input() that stops cleanly (progress already saved by callers) when
@@ -89,6 +95,14 @@ class App:
     # many of those end the run (see _list_did_not_load).
     _lists_missed = 0
     LISTS_MISSED_TO_STOP = 3
+    # The purchases this run's discovery found on Meijer's list. None of
+    # them is ever taken for one it no longer lists (see _dropped_off).
+    _listed_now = frozenset()
+    # Every attempt this run wrote down for a tester, in the order they
+    # came, and which purchase of the run is being worked on, as (its place,
+    # how many in all). See _write_attempt.
+    _attempts = None
+    _place = (0, 0)
 
     def __init__(self, args):
         self.args = args
@@ -126,6 +140,7 @@ class App:
             "online_discovered": 0,
             "receipts_downloaded": 0,
             "skipped_completed": 0, "canceled": 0, "no_receipt": 0,
+            "no_longer_listed": 0,
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
             "validation_failures": 0, "dates_processed": [], "new_files": [],
         }
@@ -494,6 +509,11 @@ class App:
         if dropped:
             log.info("Dropped %d undated purchase(s) an earlier version recorded "
                      "and this page no longer shows", dropped)
+        self._listed_now = frozenset(seen_keys)
+        again = self._listed_again(seen_keys)
+        if again:
+            print(f"\n{again} purchase(s) Meijer had stopped listing are on its list "
+                  "again, so this run tries them again.")
         self.discovery.save()
 
         all_recs = list(self.discovery.data.values())
@@ -542,6 +562,26 @@ class App:
             for key in stale:
                 del self.discovery.data[key]
         return len(stale)
+
+    def _listed_again(self, seen_keys) -> int:
+        """Put back every purchase written down as no longer listed that
+        this discovery found on Meijer's list, so that it is tried as any
+        other is. How many there were.
+
+        Finding it on the list is the one thing that says Meijer lists it
+        again. Until then later runs skip it (_already_done)."""
+        again = 0
+        for key in sorted(seen_keys):
+            rec = self.progress.get(key)
+            if not isinstance(rec, dict) or rec.get("state") != State.NO_LONGER_LISTED.value:
+                continue
+            self.progress.update(key, {"state": State.DISCOVERED.value}, save=False)
+            if self.discovery.get(key) is not None:
+                self.discovery.update(key, {"state": State.DISCOVERED.value}, save=False)
+            again += 1
+        if again:
+            self.progress.save()
+        return again
 
     # -- selection ----------------------------------------------------------
 
@@ -598,6 +638,12 @@ class App:
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.CANCELED.value):
             return True
+        # Meijer no longer lists it, so its tab has no row for it to press,
+        # and looking for it took two loads of the orders page every run. A
+        # discovery that finds it on the list again puts it back
+        # (_listed_again).
+        if state == State.NO_LONGER_LISTED.value:
+            return True
         # A copy put aside for review counts as done while it is still in
         # Manual Review, and deleting it is how a person asks for the receipt
         # again (#42). Trying it again on its own every run added a copy a run,
@@ -615,11 +661,20 @@ class App:
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
         page = self.page()
         for i, purchase in enumerate(purchases, 1):
+            self._place = (i, len(purchases))
             print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if self._already_done(purchase):
                 rec = self.progress.get(purchase.key) or {}
+                if (rec.get("state") == State.NO_LONGER_LISTED.value
+                        and not rec.get("downloaded_ok")):
+                    # Not done, and never said to be. There is nothing on the
+                    # list to fetch it from.
+                    print("  Meijer no longer lists it, so it is skipped. A run whose "
+                          "discovery finds it listed again tries it again.")
+                    self.stats["no_longer_listed"] = self.stats.get("no_longer_listed", 0) + 1
+                    continue
                 if (rec.get("state") == State.NEEDS_MANUAL_REVIEW.value
                         and not rec.get("downloaded_ok")):
                     # A copy put aside counts as done while it is in Manual
@@ -734,7 +789,7 @@ class App:
             out_path = unique_path(folder, filename, self.config["max_path_length"],
                                    distinguisher=purchase.order_number)
             trace: list = []
-            body, listed = self._press_its_row(page, purchase, trace)
+            body, listed, found = self._press_its_row(page, purchase, trace)
             if body:
                 purchase.document_type = "Receipt"
                 self._record_state(purchase, State.RECEIPT_LOCATED)
@@ -750,22 +805,16 @@ class App:
                     trace.append({"note": "the receipt was put aside",
                                   "reason": _reason_words(getattr(self, "_last_reason", "")),
                                   "pdf": site.pdf_facts(Path(purchase.pdf_path))})
-                self._write_attempt(page, purchase, trace)
+                self._write_attempt(page, purchase, trace, PUT_ASIDE)
                 return False
-            self._write_attempt(page, purchase, trace)
             if not listed:
+                self._write_attempt(page, purchase, trace, LIST_DID_NOT_LOAD)
                 return self._list_did_not_load(purchase)
-        if not url or not site.is_receipt_address(url):
-            self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                               notes="The order row carries no receipt or details link")
-            self._write_csv_rows(purchase, receipt_status="No receipt link on the row",
-                                 processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                                 notes_extra="No receipt link")
-            self.stats["no_receipt"] += 1
-            self.write_failure('find the receipt', 'there was no receipt to save')
-            self.stats["manual_review"] += 1
-            print("  No receipt or details link on this order's row - marked for manual review.")
-            return False
+            # The list showed and the row gave nothing. This used to say of
+            # every such purchase that its row carried no receipt or details
+            # link, which was never what happened, and to write it into both
+            # CSVs on every run that looked for it again (#42).
+            return self._not_pressed(page, purchase, trace, found)
 
         purchase.document_type = "Receipt"
         folder = self.paths.folder_for(purchase.purchase_type, purchase.document_type)
@@ -821,15 +870,24 @@ class App:
 
     def _press_its_row(self, page, purchase: Purchase, trace: list):
         """The receipt from the purchase's own row, as (its bytes or None,
-        whether its list showed on either look).
+        whether its list showed on either look, what the last look that
+        showed it found).
 
         The orders page is opened on the purchase's tab and its rows are
         waited for before the row is pressed. When that gives nothing the
         page is opened once more, after a pause, and the row looked for
         again. His Run All met a page holding only the list's heading after
         most of the list had been saved, looked once, and wrote the purchase
-        down as a row with no receipt (#42)."""
+        down as a row with no receipt (#42).
+
+        What a look found is what the press found ("outcome"), and for a row
+        that is not on the page, whether the purchase has dropped off
+        Meijer's list ("dropped") and the oldest date the list shows
+        ("oldest"). It has dropped off only when every look that showed the
+        list found so."""
         listed = False
+        found: dict = {}
+        judged = []
         for look in range(2):
             if look:
                 self._delay(2)
@@ -846,10 +904,120 @@ class App:
                 continue
             listed = True
             self._lists_missed = 0
-            body = site.press_row_receipt(page, purchase, trace)
+            pressed: dict = {}
+            body = site.press_row_receipt(page, purchase, trace, facts=pressed)
+            if not body and pressed.get("outcome") == site.NOT_ON_THE_PAGE:
+                body = self._press_once_settled(page, purchase, trace, pressed)
             if body:
-                return body, True
-        return None, listed
+                return body, True, {}
+            found = {"outcome": pressed.get("outcome") or site.NO_PDF}
+            if found["outcome"] == site.NOT_ON_THE_PAGE:
+                found.update(self._dropped_off(page, purchase, pressed, trace))
+            judged.append(bool(found.get("dropped")))
+        if found:
+            found["dropped"] = all(judged)
+        return None, listed, found
+
+    def _press_once_settled(self, page, purchase: Purchase, trace: list, pressed: dict):
+        """The receipt from a row the press did not find, once the list has
+        stopped changing. Its bytes or None, and `pressed` then says what the
+        last press found and whether the list had stopped changing by then
+        without changing again ("final").
+
+        A row is not called missing until the count of the tab's rows has
+        stayed the same for a while (site.settle_rows). A list read while it
+        was still filling left out the rows it had not drawn yet, and a
+        purchase among them looked like one Meijer no longer lists. When the
+        count changed meanwhile, the row is looked for once more, and the
+        list is let settle again."""
+        kind = purchase.purchase_type
+        settled = site.settle_rows(page, kind)
+        if settled["changed"]:
+            pressed.clear()
+            body = site.press_row_receipt(page, purchase, trace, facts=pressed)
+            if body or pressed.get("outcome") != site.NOT_ON_THE_PAGE:
+                return body
+            settled = site.settle_rows(page, kind)
+        stopped = bool(settled["settled"] and not settled["changed"])
+        pressed["final"] = stopped
+        trace.append({"note": "the rows once they settled", "rows": int(settled["rows"]),
+                      "settled": stopped})
+        return None
+
+    def _dropped_off(self, page, purchase: Purchase, pressed: dict, trace: list) -> dict:
+        """Whether a purchase whose row is not on its tab has dropped off
+        Meijer's list, as {"dropped", "oldest"}, the date of the oldest row
+        the list shows.
+
+        It has when it is a store receipt, the list had stopped changing,
+        every row of its kind on it shows a date, the purchase is older than
+        the oldest of them, and this run's discovery did not find it there.
+        Meijer appears to list about two years of store receipts. A tester's
+        three oldest had dropped off, and each was looked for twice on every
+        run and written down as a row with no receipt (#42). A purchase
+        inside the range the list shows is missing from it for some other
+        reason, and stays a failure. So does an online order, since the
+        Online tab may go on over later pages, which discovery reads and a
+        row is never looked for on, and an order older than every row of the
+        first page can be on the next."""
+        now = site.listed_rows(page, purchase.purchase_type)
+        oldest = now["oldest"]
+        older = bool(purchase.purchase_date and oldest and purchase.purchase_date < oldest)
+        final = bool(pressed.get("final"))
+        listed = purchase.key in self._listed_now
+        store = purchase.purchase_type == IN_STORE
+        trace.append({"note": "the oldest row the list shows", "rows": int(now["rows"]),
+                      "earlier_than_every_row": older, "listed_by_discovery": listed})
+        return {"dropped": store and final and older and not listed, "oldest": oldest}
+
+    # What is said of a purchase whose list showed and whose row gave no
+    # receipt, by what the press found.
+    _NOT_PRESSED = {
+        site.NOT_ON_THE_PAGE: "Its row is not on Meijer's {tab} tab, so nothing was pressed.",
+        site.MORE_THAN_ONE_ROW: "More than one row on Meijer's {tab} tab fits this purchase, "
+                                "so none was pressed.",
+        site.NO_RECEIPT_CONTROL: "Its row on Meijer's {tab} tab has nothing that reads as its "
+                                 "receipt, so nothing was pressed.",
+        site.NO_PDF: "Pressing the receipt link on its row brought no PDF.",
+    }
+
+    def _not_pressed(self, page, purchase: Purchase, trace: list, found: dict) -> bool:
+        """A purchase whose list showed and whose row gave no receipt.
+
+        One that has dropped off Meijer's list is written down as no longer
+        listed. Any other is a failure, said as what the press found, and
+        the next run looks for it again. Neither goes into the CSVs, since
+        each would go in again on every run that looked for it, and neither
+        is counted for manual review, where there is nothing to look at."""
+        if found.get("dropped"):
+            self._write_attempt(page, purchase, trace, DROPPED_OFF, say=False)
+            return self._no_longer_listed(purchase, found.get("oldest") or "")
+        outcome = found.get("outcome") or site.NO_PDF
+        tab = site.TAB_LABELS.get(purchase.purchase_type, purchase.purchase_type)
+        said = self._NOT_PRESSED.get(outcome, self._NOT_PRESSED[site.NO_PDF]).format(tab=tab)
+        self._record_state(purchase, State.FAILED, notes=said)
+        self.stats["failed"] += 1
+        print(f"  {said} The next run looks for it again.")
+        self._write_attempt(page, purchase, trace, outcome)
+        self.write_failure("find the receipt", outcome)
+        return False
+
+    def _no_longer_listed(self, purchase: Purchase, oldest: str) -> bool:
+        """Write down a purchase Meijer no longer lists, and say so.
+
+        Nothing failed and nothing was put aside, so no failure file is
+        written and nothing counts for review. Later runs skip it
+        (_already_done) until a discovery finds it on the list again
+        (_listed_again)."""
+        tab = site.TAB_LABELS.get(purchase.purchase_type, purchase.purchase_type)
+        self._record_state(purchase, State.NO_LONGER_LISTED,
+                           notes=f"Meijer's {tab} tab no longer lists it. Its oldest row "
+                                 f"is from {oldest}.")
+        self.stats["no_longer_listed"] = self.stats.get("no_longer_listed", 0) + 1
+        print(f"  Meijer no longer lists this purchase. Its {tab} tab goes back to {oldest}, "
+              "and this purchase is older, so there is no row to press. Later runs skip it "
+              "unless Meijer lists it again.")
+        return False
 
     def _list_did_not_load(self, purchase: Purchase) -> bool:
         """A purchase whose tab showed no rows on either look.
@@ -925,16 +1093,27 @@ class App:
         log.info("Capture path: plain page print")
         receipt_pdf.print_page_to_pdf(target_page, out_path)
 
-    def _write_attempt(self, page, purchase: Purchase, trace: list) -> None:
+    def _write_attempt(self, page, purchase: Purchase, trace: list, outcome: str,
+                       say: bool = True) -> None:
         """What the press saw, to Diagnostics/download-attempt.json, for the
         tester to attach. Built only from what press_row_receipt and
-        pdf_facts put in the trace, which never carry a receipt's words."""
+        pdf_facts put in the trace, which never carry a receipt's words.
+
+        Every attempt of the run is kept, in the order they came, each with
+        its place in the run and what it came to, in words of this app's
+        own. The file used to hold only the last, so a Run All that missed
+        three purchases left a record of one (#42)."""
+        if self._attempts is None:
+            self._attempts = []
+        place, of = self._place
+        self._attempts.append({
+            "place": place, "of": of, "outcome": Fixed(outcome),
+            "timestamp": Fixed(now_iso()), "date": purchase.purchase_date,
+            "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]})
         attempt = self.paths.diagnostics / "download-attempt.json"
-        write_shaped(attempt, {
-            "timestamp": now_iso(), "date": purchase.purchase_date,
-            "landed_on": site.mask_href(page.url or ""), "responses": trace[:60]},
-            words_for('Meijer', site))
-        print(f"  What the page answered is in {attempt}, attach it to the issue.")
+        write_shaped(attempt, {"attempts": self._attempts}, words_for('Meijer', site))
+        if say:
+            print(f"  What the page answered is in {attempt}, attach it to the issue.")
 
     def _in_review(self, path) -> bool:
         try:
@@ -1493,6 +1672,7 @@ class App:
             f"Skipped (already done):    {s['skipped_completed']}",
             f"Canceled purchases:        {s['canceled']}",
             f"No printable receipt:      {s['no_receipt']}",
+            f"No longer listed:          {s.get('no_longer_listed', 0)}",
             f"Needs manual review:       {s['manual_review']}",
             f"Failed:                    {s['failed']}",
             f"Duplicate filenames (#'d): {s['duplicate_filenames']}",

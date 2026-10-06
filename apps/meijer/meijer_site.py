@@ -512,12 +512,19 @@ def collect_both_tabs(page, facts: Optional[dict] = None) -> List[RawCard]:
 
     A tab whose rows never came is not a tab with nothing on it, and
     `facts`, when given, names each one as "unread". Only rows the page
-    draws are read, see collect_cards."""
+    draws are read, see collect_cards.
+
+    Rows that have begun to show are read once their count has stopped
+    changing (settle_rows). A tab can draw its rows a few at a time, and
+    read at its first rows, the ones it had not drawn yet were left for a
+    later run to find."""
     cards: List[RawCard] = []
     seen = set()
     unread = []
     for kind, label in ((IN_STORE, "In-Store Receipts"), (ONLINE, "Online Orders")):
         shown = show_list_for(page, kind, or_none=True)
+        if shown.get("rows"):
+            settle_rows(page, kind)
         if not (shown.get("rows") or shown.get("none")):
             unread.append(label)
         if not (shown.get("opened") or shown.get("rows")):
@@ -650,21 +657,75 @@ def show_tab_for(page, purchase_type: str) -> bool:
     return open_tab(page, TAB_IN_STORE_RE if purchase_type == IN_STORE else TAB_ONLINE_RE)
 
 
+def _rows_of_kind(page, purchase_type: str) -> List[str]:
+    """The words of each row of a purchase's kind the page is drawing now,
+    In-Store rows for a store receipt and the others for an online order.
+    None drawn, or a page that could not be read, is no rows."""
+    try:
+        raw = page.evaluate(_COLLECT_ROWS_JS, FALLBACK["row"]) or []
+    except Exception:
+        return []
+    in_store = purchase_type == IN_STORE
+    return [r.get("text") or "" for r in raw if r.get("shown")
+            and bool(IN_STORE_ROW_RE.search(r.get("text") or "")) == in_store]
+
+
 def rows_showing(page, purchase_type: str) -> int:
     """How many rows of a purchase's kind the page is drawing now, In-Store
     rows for a store receipt and the others for an online order. Nothing is
     waited for."""
-    try:
-        raw = page.evaluate(_COLLECT_ROWS_JS, FALLBACK["row"]) or []
-    except Exception:
-        return 0
-    in_store = purchase_type == IN_STORE
-    return sum(1 for r in raw if r.get("shown")
-               and bool(IN_STORE_ROW_RE.search(r.get("text") or "")) == in_store)
+    return len(_rows_of_kind(page, purchase_type))
 
+
+def listed_rows(page, purchase_type: str) -> dict:
+    """The rows of a purchase's kind the page is drawing now, how many
+    ("rows") and the date of the oldest of them ("oldest", as YYYY-MM-DD).
+    The oldest is "" unless every one of them shows a date, since a row
+    whose date could not be read could be the oldest. Nothing is waited
+    for."""
+    texts = _rows_of_kind(page, purchase_type)
+    dates = [parse_date(t) for t in texts]
+    oldest = min(dates) if dates and all(dates) else ""
+    return {"rows": len(texts), "oldest": oldest}
+
+
+# The tab each kind of purchase is listed on, named as the page names it.
+TAB_LABELS = {IN_STORE: "In-Store Receipts", ONLINE: "Online Orders"}
 
 # How long the orders page is given to show a purchase's tab and its rows.
 LIST_WAIT_MS = 30000
+
+# How long the count of a tab's rows has to stay the same before the list
+# is taken as drawn. A list can draw its rows a few at a time, and read
+# while it is still filling, a row it has not drawn yet looks like a row it
+# does not have.
+ROWS_STEADY_MS = 3000
+
+
+def settle_rows(page, purchase_type: str, wait_ms: Optional[int] = None) -> dict:
+    """Wait until the count of a purchase's rows has stayed the same for
+    ROWS_STEADY_MS, for up to `wait_ms` in all, LIST_WAIT_MS when not given.
+
+    Returns the count ("rows"), whether it changed while this waited
+    ("changed"), and whether it stayed the same long enough before the time
+    was up ("settled"). A list still changing when the time is up was not
+    seen whole, and is never read as if it had been."""
+    wait_ms = LIST_WAIT_MS if wait_ms is None else wait_ms
+    deadline = time.monotonic() + wait_ms / 1000.0
+    rows = rows_showing(page, purchase_type)
+    changed = False
+    since = time.monotonic()
+    while time.monotonic() - since < ROWS_STEADY_MS / 1000.0:
+        if time.monotonic() >= deadline:
+            return {"rows": rows, "changed": changed, "settled": False}
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return {"rows": rows, "changed": changed, "settled": False}
+        now = rows_showing(page, purchase_type)
+        if now != rows:
+            rows, changed, since = now, True, time.monotonic()
+    return {"rows": rows, "changed": changed, "settled": True}
 
 
 def says_it_has_none(page, purchase_type: str) -> bool:
@@ -842,21 +903,41 @@ def fetch_receipt_bytes(page, url: str) -> Optional[bytes]:
     return None
 
 
-def press_row_receipt(page, purchase, trace=None):
+# Why pressing a row's receipt control took nothing, in words of this app's
+# own. Each is also the reason a failure file gives and what the file a
+# tester attaches says of the attempt, so every word of them is on the
+# fixed list in paperpull_core.words.
+NOT_ON_THE_PAGE = "its row is not on the page"
+MORE_THAN_ONE_ROW = "more than one row fits it"
+NO_RECEIPT_CONTROL = "no receipt control on its row"
+NO_PDF = "the press gave no pdf"
+
+# How many times, a second apart, a purchase's row is looked for before it
+# is called missing.
+ROW_LOOKS = 10
+
+
+def press_row_receipt(page, purchase, trace=None, facts=None):
     """Press the row's own receipt control, the PDF icon at its end, and
     take whatever the page produces: a download, a PDF answer, or the
     window it opens (the page warns a pop-up blocker will stop it, so it
-    opens one). Bytes, or None."""
+    opens one). Bytes, or None.
+
+    When it is None, `facts`, when given, says why as "outcome", one of
+    NOT_ON_THE_PAGE, MORE_THAN_ONE_ROW, NO_RECEIPT_CONTROL and NO_PDF. A run
+    used to say of all four that the row carried no receipt link (#42)."""
+    said = facts if facts is not None else {}
     # The tab's rows arrive after the tab is shown, so the row is given a
     # few seconds to appear before it is called missing.
     found = None
     fit: dict = {}
-    for _ in range(10):
+    for _ in range(ROW_LOOKS):
         found = row_controls(page, purchase, fit)
         if found or fit.get("ambiguous"):
             break
         page.wait_for_timeout(1000)
     if not found:
+        said["outcome"] = MORE_THAN_ONE_ROW if fit.get("ambiguous") else NOT_ON_THE_PAGE
         if trace is not None:
             if fit.get("ambiguous"):
                 trace.append({"note": "more than one row fits this purchase, so none was pressed",
@@ -887,6 +968,7 @@ def press_row_receipt(page, purchase, trace=None):
                    if el is not None and c.get("interactive") and c.get("shown", True)
                    and not c.get("holdsControl") and is_receipt_control(c)), None)
     if picked is None:
+        said["outcome"] = NO_RECEIPT_CONTROL
         if trace is not None:
             trace.append({"note": "no control on the row reads as its receipt", "controls": len(cands)})
         return None
@@ -1043,6 +1125,7 @@ def press_row_receipt(page, purchase, trace=None):
             trace.append({"note": "the receipt came from the row's control", "control": mask_text(label)[:40],
                           "how": got.get("how", "")})
         return got["body"]
+    said["outcome"] = NO_PDF
     return None
 
 

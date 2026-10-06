@@ -95,7 +95,7 @@ def _pressing(monkeypatch, *bodies):
     """The row's control, answering with each of `bodies` in turn."""
     presses = []
 
-    def press(page, purchase, trace=None):
+    def press(page, purchase, trace=None, facts=None):
         presses.append(purchase.purchase_date)
         return bodies[min(len(presses), len(bodies)) - 1]
     monkeypatch.setattr(site, "looks_signed_out", lambda page: False)
@@ -225,7 +225,8 @@ def test_the_file_to_attach_says_what_was_put_aside_and_never_its_words(tmp_path
     attempt = app.paths.diagnostics / "download-attempt.json"
     assert str(attempt) in out
     text = attempt.read_text(encoding="utf-8")
-    info = json.loads(text)
+    [info] = json.loads(text)["attempts"]
+    assert info["outcome"] == "put aside in manual review"
     aside = [t for t in info["responses"] if t.get("note") == "the receipt was put aside"]
     assert len(aside) == 1
     assert aside[0]["reason"] == "its words are not this purchase's"

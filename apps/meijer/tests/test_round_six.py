@@ -249,7 +249,9 @@ def test_a_list_that_never_came_is_not_written_down_as_a_row_without_a_receipt(t
     assert app.failures == [("open the purchase list", "the list did not load")]
     assert "The In-Store list did not load" in capsys.readouterr().out
     import json
-    attempt = json.loads((app.paths.diagnostics / "download-attempt.json").read_text(encoding="utf-8"))
+    [attempt] = json.loads((app.paths.diagnostics / "download-attempt.json")
+                           .read_text(encoding="utf-8"))["attempts"]
+    assert attempt["outcome"] == "the list did not load"
     looks = [t for t in attempt["responses"] if t.get("note") == "the purchase's tab"]
     assert looks == [{"note": "the purchase's tab", "opened": False, "rows": 0}] * 2, attempt
 
@@ -303,7 +305,7 @@ def _playing(monkeypatch, page):
     """The site's page steps, answering from `page`."""
     pressed = []
 
-    def press(pg, purchase, trace=None):
+    def press(pg, purchase, trace=None, facts=None):
         pressed.append(purchase.purchase_date)
         if pg.state != "good":
             return None
@@ -368,17 +370,27 @@ def test_misses_that_are_not_in_a_row_never_stop_the_run(tmp_path, monkeypatch):
     assert (app.progress.get(purchases[2].key) or {}).get("downloaded_ok") is True
 
 
-def test_a_list_that_shows_without_the_row_is_recorded_as_before(tmp_path, monkeypatch):
-    """Looked at twice all the same, and written down as it always was, since
-    the list came and the row was not on it. It never counts toward a stop."""
+def test_a_list_that_shows_without_the_row_is_a_failure_looked_for_again(tmp_path, monkeypatch):
+    """Looked at twice all the same, since the list came and the row was not
+    on it. Whether the purchase has dropped off the list cannot be said of a
+    page whose rows could not be read, so it is a failure the next run looks
+    for again. It goes into neither CSV and never counts toward a stop."""
     page = _Page(["good"])
     _playing(monkeypatch, page)
-    monkeypatch.setattr(site, "press_row_receipt", lambda pg, purchase, trace=None: None)
+
+    def not_there(pg, purchase, trace=None, facts=None):
+        facts["outcome"] = site.NOT_ON_THE_PAGE
+    monkeypatch.setattr(site, "press_row_receipt", not_there)
     app = _app(tmp_path)
     p = _purchase()
     assert app._save_receipt(page, p) is False
     assert page.opened == 2
-    assert (app.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
+    rec = app.progress.get(p.key) or {}
+    assert rec.get("state") == State.FAILED.value, rec
+    assert "Its row is not on Meijer's In-Store Receipts tab" in rec.get("notes", "")
+    assert app._already_done(_purchase()) is False
+    assert app.failures == [("find the receipt", "its row is not on the page")]
+    assert app.order_csv.read_all() == [] and app.index_csv.read_all() == []
     assert app._lists_missed == 0
 
 

@@ -200,6 +200,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   aside even when no item name could be read from the order's page, once
   that page or the document counts the order's items. One whose order
   counts and lists no item is kept as before.
+- **Meijer stops looking, run after run, for store receipts its list no
+  longer shows.** Meijer appears to list about two years of store
+  receipts, which is inferred from one account and not confirmed. A
+  purchase an earlier run had found that is now older than every receipt
+  on the In-Store Receipts tab was looked for twice on every run, said its
+  row had no receipt or details link, was counted for manual review, and
+  was written into both CSVs again each time. It is now reported as no
+  longer listed, naming the oldest date the tab still shows, writes no
+  failure file, counts for no review, goes into neither CSV, and is
+  skipped by later runs until a discovery finds it on the tab again. A row
+  that gave no receipt for any other reason now says what happened, that
+  its row is not on the page, that more than one row fits it, that nothing
+  on it reads as its receipt, or that pressing it brought no PDF, and is a
+  failure the next run looks for again without writing it into the CSVs.
+  A tab's rows count as all there only once their count has stopped
+  changing, so a list still drawing its rows is never taken for one that
+  has dropped a purchase, and `download-attempt.json` keeps every attempt
+  of a run in order, where it kept only the last.
 
 ### Security
 - **Every redirect is checked against the provider's own sites before it
