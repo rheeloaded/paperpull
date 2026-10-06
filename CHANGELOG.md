@@ -352,6 +352,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   or uses them, so the panel is built without them, and without
   `/docs/oauth2-redirect` and `/openapi.json`, which come with them. All
   four answer 404, on the desktop and on PaperPull Server.
+- **American Express and Vanguard press a control only when nothing covers
+  it.** Both pressed some controls with force, which turns off Playwright's
+  check that the control itself receives the press, so the press went to
+  whatever was drawn over the control. On a tester's American Express
+  statements page a chat bubble sat over part of the last Download button,
+  and the press opened the chat. The presses after it landed on the chat's
+  suggested replies and opened a window to dispute a charge, a live agent
+  joined, and the run went on to each next document and pressed again there.
+  Now every press brings its control to the middle of the window first and
+  is made only when the control is the thing on top at the point Playwright
+  presses, and Playwright checks once more as it presses. When anything else
+  is on top, nothing is pressed and the run stops, saying what is over the
+  control in words from PaperPull's fixed list and writing the failure file.
+  Close whatever covers it in the browser window, then press Resume or run
+  again. American Express also no longer presses a Download a second time
+  when the file type dialog does not open, or when the dialog's Download
+  brings no download, and no longer goes on to the next document after one.
+  The run stops there. The file type dialog is closed only through its own
+  Cancel or Close, never a button of another dialog or of a chat window. A
+  test now fails on any forced press, any press of the mouse at a point on
+  the page, and any click event sent straight to an element, in every app
+  and the core.
 
 ## [0.43.0] - 2026-10-05
 

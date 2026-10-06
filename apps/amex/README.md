@@ -19,6 +19,24 @@ document action *and* match nothing in a large money / account blocklist
 (`tests/test_doc_types.py`). There is no code path that submits a form or
 confirms a dialog.
 
+## Nothing is pressed under something else
+
+No press is ever forced. Each control is brought to the middle of the
+window first, and pressed only when it is the thing on top at the point
+the press lands. A chat bubble, an offer or a banner sitting over a
+Download button is never pressed in its place. The run stops instead, says
+what is over the button in words from PaperPull's fixed list, and writes a
+failure file, and nothing more is pressed. Close whatever covers it in the
+browser window, then press Resume in the panel or run
+`paperpull amex resume`.
+
+A Download is pressed once. When the file type dialog does not open after
+a row's Download, or the dialog's Download brings no file, the run stops
+there rather than pressing it again or going on to the next document. The
+file type dialog is closed only through its own Cancel or Close, so a
+button of a chat window or of any other dialog is never pressed to close
+it.
+
 ## How it connects
 
 American Express has strong bot detection (Akamai) and 2FA, so the tool does

@@ -53,3 +53,13 @@ rather than fetching its statements to drop them afterwards. Trade confirmations
 letters are sibling apps on the same host and are reachable for a future
 extension; this provider ships with statements, the documents the account
 actually has today.
+
+## Nothing is pressed under something else
+
+No press is ever forced. The download icon, and the button that keeps a
+session going, are brought to the middle of the window first and pressed
+only when they are the thing on top at the point the press lands. When a
+chat window, an offer or a banner sits over one, nothing is pressed, the
+run stops and says what is over it in words from PaperPull's fixed list,
+and a failure file is written. Close whatever covers it in the browser
+window, then press Resume in the panel or run `paperpull vanguard resume`.
