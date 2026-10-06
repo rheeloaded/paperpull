@@ -955,10 +955,15 @@ def collect_download_docs(page, refused: Optional[list] = None) -> List[RawDoc]:
     for _account, listed, docs in found:
         if listed and lists.count(listed) > 1:
             if refused is not None:
-                refused.append("two bills showed the same statements")
+                refused.append(SAME_LIST_REASON)
             continue
         out.extend(docs)
     return out
+
+
+# What the failure file says when two bills showed one list, in words on
+# the word list, so a tester's file says plainly which way the page works.
+SAME_LIST_REASON = "two bills showed the same statement list"
 
 
 def _documents_shown(page, account: str, seen: set, view: Optional[str] = None,
@@ -1146,6 +1151,12 @@ def _numbers_in(text: str) -> list:
     return found
 
 
+# Which number a card labels says which bill it is, its billing account
+# first, since that is what tells two bills apart, and its policy only
+# when it labels no account.
+_KINDS_IN_ORDER = ("account", "policy")
+
+
 def _account_of(levels) -> Tuple[Optional[str], str]:
     """A bill's account part, read from the words its own card shows, and
     what labels it, "account" or "policy". `levels` are the words of each
@@ -1153,19 +1164,18 @@ def _account_of(levels) -> Tuple[Optional[str], str]:
     whose words label a number an account or a policy is the card, so a
     paid bill's card drawn beside this one, with no Bill details of its
     own, is never read as this bill's (review of the Bill details change).
-    Its one such number gives "..." and the number's last four digits, and
-    two different ones give None, since which is the bill's own cannot be
-    told. ("", "") when no element labels one."""
+    Its one account number gives "..." and the number's last four digits,
+    or its one policy number when it labels no account. Two different
+    numbers of the kind used give None and that kind, since which is the
+    bill's own cannot be told. ("", "") when no element labels one."""
     for text in levels or []:
-        numbers: dict = {}
-        for kind, digits in _numbers_in(str(text or "")):
-            if kind:
-                numbers.setdefault(digits, kind)
-        if len(numbers) == 1:
-            digits, kind = numbers.popitem()
-            return "..." + digits[-4:], kind
-        if numbers:
-            return None, ""
+        found = _numbers_in(str(text or ""))
+        for kind in _KINDS_IN_ORDER:
+            numbers = {digits for k, digits in found if k == kind}
+            if len(numbers) == 1:
+                return "..." + numbers.pop()[-4:], kind
+            if numbers:
+                return None, kind
     return "", ""
 
 

@@ -452,8 +452,13 @@ class App:
         log.info("Statements & Documents page: %d documents, %d new", len(docs), n_new)
         if refused:
             # A bill whose statements could not be tied to it was left
-            # alone. The reason is one of the site layer's own sentences.
-            self.write_failure("open each bill", refused[0])
+            # alone. The reasons are the site layer's own sentences, and two
+            # bills that showed one list is the one written first when it
+            # happened, since it says which way the page works. Every
+            # reason is listed beside it.
+            reasons = list(dict.fromkeys(refused))
+            first = site.SAME_LIST_REASON if site.SAME_LIST_REASON in reasons else reasons[0]
+            self.write_failure("open each bill", first, postmortem={"refused": reasons})
         if not docs:
             # Finding nothing is written down too. A Pilot that found nothing
             # finished with no file to send, and the page it read is the

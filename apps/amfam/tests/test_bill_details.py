@@ -93,11 +93,14 @@ def details_button(bill: str) -> str:
             % (bill, bill))
 
 
-def card(bill: str, control: str = None) -> str:
+def card(bill: str, control: str = None, policy: bool = False) -> str:
     """A bill's card on Billing & Payments. `control` is its Bill details,
-    and an empty one draws a card with none, a bill paid in full."""
+    and an empty one draws a card with none, a bill paid in full. With
+    `policy` the card shows its policy number below its account number."""
     heading, account = CARDS[bill]
     number = "<p><span>Billing account</span> <span>%s</span></p>" % account if account else ""
+    if policy:
+        number += "<p><span>%s policy</span> <span>%s</span></p>" % (heading, POLICY[bill])
     if control == "":
         return ("<div class='bill-card' data-cy='billCard'><h2>%s</h2>%s"
                 "<p><span>Paid in full</span></p></div>" % (heading, number))
@@ -225,13 +228,15 @@ AT_MARK = """
 
 
 def billing_page(ways: dict, controls: dict = None, before: str = "", paid: str = "",
-                 more: dict = None, wrong: dict = None, at_mark: str = "") -> str:
+                 more: dict = None, wrong: dict = None, at_mark: str = "",
+                 policies: tuple = ()) -> str:
     """Billing & Payments the way the tester's Diagnose saw it, one card for
     each bill in `ways`, saying how its Bill details opens its statements.
     `controls` replaces a bill's Bill details, `before` is drawn above the
     bills and `paid` first among them. `more` adds a control to a bill's
-    list, `wrong` sends a bill's link to another bill's PDF, and `at_mark`
-    is done as the app marks what shows before a press."""
+    list, `wrong` sends a bill's link to another bill's PDF, `at_mark` is
+    done as the app marks what shows before a press, and the cards of the
+    bills in `policies` show a policy number too."""
     controls = controls or {}
     pdfs = {"%s|%s" % (b, d): b64(pdf(b, d)) for b in CARDS for d in DATES[b]}
     for link, (bill, date) in (wrong or {}).items():
@@ -243,7 +248,7 @@ def billing_page(ways: dict, controls: dict = None, before: str = "", paid: str 
               .replace("__ACCOUNT__", json.dumps({b: CARDS[b][1] for b in CARDS}))
               .replace("__MORE__", json.dumps(more or {}))
               .replace("__AT_MARK__", AT_MARK % at_mark if at_mark else ""))
-    cards = paid + "".join(card(b, controls.get(b)) for b in ways)
+    cards = paid + "".join(card(b, controls.get(b), b in policies) for b in ways)
     return ("<!doctype html><html><head><meta charset='utf-8'><title>Billing &amp; Payments</title></head>"
             "<body><div role='main' id='main'><app-billing class='routed'><div class='page'>"
             "<h1>My bills</h1>%s<div class='bills'>%s</div>"
@@ -534,6 +539,19 @@ def test_a_paid_bills_card_beside_another_never_lends_it_its_number(billing_site
     assert tabs_left(s.page) == []
 
 
+def test_a_card_with_an_account_and_a_policy_is_saved_under_its_account(billing_site, tmp_path):
+    """A's card shows its billing account number and its policy number. The
+    account number is what tells two bills apart, so A is saved under it,
+    where a card labeling two numbers had been left alone."""
+    s = billing_site(billing_page({"A": "route", "B": "route"}, policies=("A",)))
+    app = app_on(s.page, tmp_path)
+    run(app)
+    assert recorded(app) == found("A", "B")
+    assert saved(tmp_path) == expected("A", "B")
+    only_details_and_statements(s)
+    assert tabs_left(s.page) == []
+
+
 def test_a_bill_whose_press_shows_another_bills_details_is_refused(billing_site, tmp_path):
     """B's Bill details shows A's details, A's account and A's statements.
     B is left alone and the run says why, and A is saved."""
@@ -550,13 +568,19 @@ def test_a_bill_whose_press_shows_another_bills_details_is_refused(billing_site,
 def test_two_bills_that_show_the_same_statements_are_both_left_alone(billing_site, tmp_path):
     """B's Bill details shows A's statements under no account at all, so the
     two lists are one and whose they are cannot be told. Neither is kept,
-    the run says why, and D is saved."""
-    s = billing_site(billing_page({"A": "route", "B": "same-as-A", "D": "route"}))
+    and D is saved. N's card shows no number, which is a reason of its own,
+    and still the failure file says first, in plain words, that two bills
+    showed the same statement list, since that says which way the page
+    works, with every reason beside it."""
+    s = billing_site(billing_page({"A": "route", "B": "same-as-A", "N": "route", "D": "route"}))
     app = app_on(s.page, tmp_path)
     run(app)
     assert recorded(app) == found("D")
     assert saved(tmp_path) == expected("D")
-    assert failure_reasons(tmp_path) == ["two bills showed the same statements"]
+    assert failure_reasons(tmp_path) == ["two bills showed the same statement list"]
+    [written] = (tmp_path / "out" / "Diagnostics").glob("failure*.json")
+    said = json.loads(written.read_text(encoding="utf-8"))["extra"]["postmortem"]["refused"]
+    assert said == ["a bill had no account of its own", "two bills showed the same statement list"]
     heard = only_details_and_statements(s)
     assert not statements_of(heard, "A") and not statements_of(heard, "B")
     assert tabs_left(s.page) == []
@@ -627,20 +651,24 @@ def test_a_show_more_whose_words_refuse_is_never_pressed(billing_site, tmp_path)
     (["Bill details", "Claim # 12345678\nAgent phone 608-555-0199\nPolicy 0045498217"],
      ("...8217", "policy")),
     (["Bill details", "Paid from bank account ending 6789\nPolicy 0045498217"], ("...8217", "policy")),
-    (["Bill details", "Billing account 9900123401\nBilling account 9900567802"], (None, "")),
-    (["Bill details", "Billing account 9900123401\nPolicy 0045498217"], (None, "")),
+    (["Bill details", "Billing account 9900123401\nBilling account 9900567802"], (None, "account")),
+    (["Bill details", "Billing account 9900123401\nPolicy 0045498217"], ("...3401", "account")),
+    (["Bill details", "Auto policy 0045498217\nBilling account 9900123401\nHome policy 0099887766"],
+     ("...3401", "account")),
+    (["Bill details", "Auto policy 0045498217\nHome policy 0099887766"], (None, "policy")),
     (["Bill details", "Payment due 10/01/2026 Billing account 9900123401"], ("...3401", "account")),
     (["Bill details", "Amount due $123.45\nDue 10/01/2026\nRef 55554444\n#55556666"], ("", "")),
     (["Bill details", "Auto\nBilling account 9900123401",
       "Home\nBilling account 9900567802\nPaid in full\nAuto\nBilling account 9900123401"],
      ("...3401", "account")),
 ], ids=["account", "label above", "policy beside an autopay bank", "a phone", "a claim and an agent",
-        "a bank", "two accounts", "an account and a policy", "a payment date first", "nothing labeled",
-        "the narrowest card"])
+        "a bank", "two accounts", "an account and a policy", "an account between two policies",
+        "two policies and no account", "a payment date first", "nothing labeled", "the narrowest card"])
 def test_a_bills_account_part_comes_only_from_a_number_its_card_labels(levels, want):
-    """An account or a policy number, never a bank's, a card's, a phone's, a
-    claim's or an agent's, from the narrowest element that labels one, and
-    nothing when that element labels two."""
+    """An account number, or a policy number when the card labels no
+    account, never a bank's, a card's, a phone's, a claim's or an agent's,
+    from the narrowest element that labels one, and nothing when that
+    element labels two different numbers of the kind used."""
     assert site._account_of(levels) == want
 
 

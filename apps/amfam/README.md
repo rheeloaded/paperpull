@@ -109,19 +109,22 @@ paperpull amfam pilot             REM once the site layer is confirmed
   that were not showing before the press count as that bill's. A list
   already showing beside the bills is never read.
 - **Telling bills apart.** Each statement carries the last four digits of
-  the number its bill's card labels an account or a policy, in its file
-  name too, so two bills' statements of the same date are both kept and
-  told apart. The card is the smallest part of the page around the Bill
-  details button that labels such a number, so a paid bill's card beside
-  it never lends it its number, and a number the words tie to a bank,
-  autopay, a card, a payment, a phone, a claim or an agent is never used.
-  A bill is left alone when its card shows two such numbers, when two
-  cards show the same last four digits, when its card shows none and
-  there are several bills, when the page its press opened labels another
-  account or policy, or when its statements are the same list another
-  bill's press showed. A statement whose PDF is byte for byte another
-  bill's statement of the same date is not kept, and waits for manual
-  review. Each of these writes the failure file, saying which. Saving a
+  the billing account number its bill's card labels, or of its policy
+  number when the card labels no account number, in its file name too, so
+  two bills' statements of the same date are both kept and told apart.
+  The card is the smallest part of the page around the Bill details
+  button that labels such a number, so a paid bill's card beside it never
+  lends it its number, and a number the words tie to a bank, autopay, a
+  card, a payment, a phone, a claim or an agent is never used. A bill is
+  left alone when its card shows two different account numbers, or no
+  account number and two different policy numbers, when two cards show
+  the same last four digits, when its card shows none and there are
+  several bills, when the page its press opened labels another account or
+  policy, or when its statements are the same list another bill's press
+  showed. A statement whose PDF is byte for byte another bill's statement
+  of the same date is not kept, and waits for manual review. Each of these
+  writes the failure file with every reason it met, and two bills that
+  showed the same statement list is the one it names first. Saving a
   statement opens its bill's details again first. A page with no Bill
   details is read as it shows, as before.
 - **Downloads.** A row that links straight to a PDF is fetched from inside
