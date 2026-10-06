@@ -13,5 +13,9 @@
   "max_path_length": 240,
   "delay_min_seconds": 2.5,
   "delay_max_seconds": 5.0,
-  "pilot_count": 5
+  "pilot_count": 5,
+  "//refuse": "Off. A business statement that names another statement's days",
+  "//refuse2": "better than its own goes to Manual Review for you to look at.",
+  "//refuse3": "On, such a statement is not kept at all.",
+  "refuse_wrong_documents": false
 }
