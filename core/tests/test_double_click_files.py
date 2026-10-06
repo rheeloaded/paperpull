@@ -10,13 +10,23 @@ packaged app with nothing after it, because older shortcuts to the panel's
 old launcher land on it, and otherwise runs the terminal command. Its exit
 code is the command's, where every run used to report success.
 
+setup-all.bat says all is set when every setup worked, and names the one
+that did not, where every run since 0.19.0 reported a problem.
+
 The batch files run under cmd, on Windows only. The .command runs under
 bash, Git's own on Windows, so the Windows test runner covers both. No
 test here links to a real Python folder. A stand-in Python is a copy of
 the interpreter's own files, pointed at its library by PYTHONHOME, so
 nothing that cleans up a test folder can reach a real install.
+
+Every shell script the repository ships is also read by bash -n, which
+runs none of it, since setup-all.command did not parse for a month and
+nothing asked. A Mac runs a .command with /bin/bash, which is 3.2, so on
+a Mac that bash reads them as well, and CI does this on macOS and Linux.
 """
+import bisect
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -149,6 +159,49 @@ def test_paperpull_bat_in_a_checkout_is_only_the_terminal_command(tmp_path):
     assert r.returncode == 3
 
 
+# -- setup-all.bat -------------------------------------------------------------
+
+# pip in the stand-in venvs. It fails the requirements of the folder named in
+# FAKE_PIP_FAILS_IN and does nothing else, so nothing is ever installed.
+FAKE_PIP = ("import os, sys\n"
+            "failing = os.path.basename(os.getcwd()) == os.environ.get('FAKE_PIP_FAILS_IN')\n"
+            "sys.exit(1 if failing and '-r' in sys.argv else 0)\n")
+
+
+def _setup_all_checkout(tmp_path: Path) -> tuple:
+    """setup-all.bat beside one app and the GUI, each with a venv already
+    there, so it makes none, and a pip that is FAKE_PIP."""
+    checkout = tmp_path / "checkout"
+    for folder in ("apps/demo", "gui"):
+        (checkout / folder).mkdir(parents=True)
+        (checkout / folder / "requirements.txt").write_text("pypdf\n", encoding="utf-8")
+        env = _stand_in_python(checkout / folder / ".venv" / "Scripts")
+    (checkout / "core").mkdir()
+    (checkout / "core" / "pyproject.toml").write_text("", encoding="utf-8")
+    shutil.copy2(REPO / "setup-all.bat", checkout)
+    pip = tmp_path / "fake" / "pip"
+    pip.mkdir(parents=True)
+    (pip / "__init__.py").write_text("", encoding="utf-8")
+    (pip / "__main__.py").write_text(FAKE_PIP, encoding="utf-8")
+    env.update(PYTHONPATH=str(tmp_path / "fake"), PYTHONNOUSERSITE="1", PIP_NO_INDEX="1")
+    return checkout, env
+
+
+@windows_only
+def test_setup_all_bat_says_all_set_when_nothing_failed_and_names_what_did(tmp_path):
+    """From 0.19.0 every run listed playwright-chromium among the setups
+    that had problems and asked for another run, since the script still
+    checked for a browser download it no longer made."""
+    checkout, env = _setup_all_checkout(tmp_path)
+    r = _cmd(checkout / "setup-all.bat", env=env)
+    assert "All set - 1 apps + the GUI are ready." in r.stdout, r.stdout + r.stderr
+    assert "problems" not in r.stdout
+
+    env["FAKE_PIP_FAILS_IN"] = "demo"
+    r = _cmd(checkout / "setup-all.bat", env=env)
+    assert "Some setups had problems: demo(deps)" in r.stdout, r.stdout + r.stderr
+
+
 # -- review_names.command ------------------------------------------------------
 
 def _run_command(script: Path, home: Path, *args):
@@ -206,3 +259,117 @@ def test_review_names_command_says_what_to_do_when_the_app_is_not_found(tmp_path
     assert "was not found in Applications" in r.stdout, r.stdout + r.stderr
     assert "paperpull lowes review-names" in r.stdout
     assert r.returncode == 1
+
+
+# -- every shell script parses -------------------------------------------------
+
+# A first line that hands the file to sh or bash.
+SHELL_FIRST_LINE = re.compile(r"#!\s*(/usr)?/bin/(env\s+)?(ba)?sh\b")
+
+# What removing the browser download left in setup-all.command in 0.19.0, an
+# if with nothing but comments in it, which bash refuses to read.
+EMPTIED_IF = """#!/usr/bin/env bash
+for app in apps/*/; do
+    if [ $first -eq 1 ]; then
+# The browser download is no longer part of setup.
+    fi
+    echo "ok"
+done
+"""
+
+
+def _bashes():
+    """Each bash here that a script could meet. A Mac runs a .command with
+    /bin/bash, which is 3.2, while PATH can find a newer one first."""
+    found = {}
+    for bash in (_bash(), None if WINDOWS else "/bin/bash"):
+        if bash and Path(bash).is_file():
+            found.setdefault(os.path.realpath(bash), bash)
+    return list(found.values())
+
+
+def _shell_scripts():
+    """(path, text) for every tracked file a shell runs, found by its suffix
+    or its first line, so paperpull, which has no suffix, is one of them."""
+    git = shutil.which("git")
+    if not git:
+        pytest.skip("git is not installed")
+    listed = subprocess.run([git, "ls-files", "-z"], cwd=REPO, capture_output=True)
+    if listed.returncode:
+        pytest.skip("not a git checkout")
+    scripts = []
+    for rel in listed.stdout.decode("utf-8").split("\0"):
+        f = REPO / rel
+        if not rel or not f.is_file():
+            continue
+        with f.open("rb") as fh:
+            first = fh.readline(200).decode("utf-8", "replace")
+        if f.suffix in (".command", ".sh") or SHELL_FIRST_LINE.match(first):
+            # Read as text, so the CRLF a Windows checkout can give a file
+            # that git stores with LF does not count against it.
+            scripts.append((rel, f.read_text(encoding="utf-8")))
+    return scripts
+
+
+def _parse_errors(bash, scripts, folder: Path) -> list:
+    """What bash -n says about each script that does not parse.
+
+    A Git bash takes one to nine seconds to start on a busy Windows machine,
+    so one bash reads every script, each the body of a function of its own,
+    after a no-op so that a script of comments alone still parses. When it
+    stops, the script it stopped in is read again on its own, so the message
+    is bash's own about that file. If that one parses alone, an earlier one
+    was left open, and then every script is read on its own."""
+    def alone(n):
+        name, text = scripts[n]
+        f = folder / ("alone-%d.sh" % n)
+        f.write_bytes(text.encode("utf-8"))
+        r = subprocess.run([bash, "-n", f.as_posix()], capture_output=True, text=True)
+        return r.stderr.replace(f.as_posix(), name).strip() if r.returncode else ""
+
+    parts, starts, line = [], [], 1
+    for n, (_, text) in enumerate(scripts):
+        part = "_script_%d() {\n:\n%s\n\n}\n" % (n, text)
+        parts.append(part)
+        starts.append(line)
+        line += part.count("\n")
+    every = folder / "every-script.sh"
+    every.write_bytes("".join(parts).encode("utf-8"))
+    r = subprocess.run([bash, "-n", every.as_posix()], capture_output=True, text=True)
+    if r.returncode == 0:
+        return []
+    m = re.search(r"line (\d+):", r.stderr)
+    stopped = bisect.bisect_right(starts, int(m.group(1))) - 1 if m else len(scripts) - 1
+    errors = [alone(stopped)]
+    if not errors[0]:
+        errors = [alone(n) for n in range(len(scripts))]
+    return [e for e in errors if e] or [
+        "bash stopped in %s reading every script at once, though each parses "
+        "alone, and said %s" % (scripts[stopped][0], r.stderr.strip())]
+
+
+@pytest.mark.parametrize("bash", _bashes())
+def test_the_parse_check_names_an_if_with_nothing_left_in_it(bash, tmp_path):
+    """Among scripts that parse, the check names the one that does not, in
+    bash's own words, and a script of a comment alone parses, as it does
+    for bash -n on its own."""
+    before = ("before.sh", "#!/bin/sh\necho before\n")
+    notes = ("notes.sh", "#!/bin/sh\n# a comment and nothing else\n")
+    errors = _parse_errors(bash, [before, ("emptied.command", EMPTIED_IF), notes], tmp_path)
+    assert len(errors) == 1, errors
+    assert errors[0].startswith("emptied.command: line 5: syntax error"), errors
+    assert _parse_errors(bash, [notes, before], tmp_path) == []
+
+
+@pytest.mark.parametrize("bash", _bashes())
+def test_every_shell_script_parses(bash, tmp_path):
+    """From 0.19.0, setup-all.command held an if with nothing but comments
+    in it. bash reads a whole loop before it runs any of it, so the script
+    printed its header and the Python it found, ended on a syntax error,
+    and set nothing up."""
+    scripts = _shell_scripts()
+    names = {name for name, _ in scripts}
+    assert len(scripts) > 100, len(scripts)
+    assert {"setup-all.command", "paperpull", "server/start.sh"} <= names, sorted(names)
+    errors = _parse_errors(bash, scripts, tmp_path)
+    assert not errors, "bash cannot read:\n" + "\n".join(errors)

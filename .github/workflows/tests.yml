@@ -19,6 +19,8 @@
 # (process groups, fcntl locks, signals) never run. On 2026-10-03 one of
 # them was found ending the runner and every suite the first time a suite
 # ran out of time on macOS or Linux, and nothing here had ever run it.
+# Every shell script is read by bash there as well, by /bin/bash 3.2 on
+# macOS, the bash a Mac runs a .command with.
 name: Tests
 
 on:
@@ -104,6 +106,16 @@ jobs:
         # only means something on POSIX skips itself on Windows, so this is
         # the one place it runs.
         run: python -m pytest core/tests/test_run_all_tests_parallel.py core/tests/test_run_all_tests_tool.py -v -rs
+
+      - name: Check that every shell script parses
+        # The parts have only Git's bash. A Mac runs a .command with
+        # /bin/bash, which is 3.2, so this reads every script with that bash
+        # too, and with the newer one PATH finds. setup-all.command did not
+        # parse from 0.19.0 to 0.43.0 and nothing here asked bash to read it.
+        run: >-
+          python -m pytest -v -rs
+          core/tests/test_double_click_files.py::test_every_shell_script_parses
+          core/tests/test_double_click_files.py::test_the_parse_check_names_an_if_with_nothing_left_in_it
 
   tests:
     # One check for the whole run, under the name the single job had. It

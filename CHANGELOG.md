@@ -10,6 +10,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **`./setup-all.command` sets up a checkout on macOS and Linux again.**
+  From 0.19.0 it stopped before setting anything up. Taking the browser
+  download out of it left an `if` with nothing but comments inside, which
+  bash refuses to read, and since bash reads the whole loop before it runs
+  any of it, the script printed its header and the Python it found, ended
+  on a syntax error, and made no environment and installed nothing. The
+  tests now have bash read every shell script the repository ships, on
+  Windows with Git's bash and in CI on Linux and on macOS, with the bash
+  3.2 a Mac runs them with.
+- **`setup-all.bat` no longer reports a problem when every setup worked.**
+  From 0.19.0 every run listed playwright-chromium among the setups that
+  had problems and asked for another run, since the script still checked
+  for the browser download it no longer makes. Its banner no longer says
+  it downloads Playwright's Chromium either.
 - **AAFMAA no longer gives up on a document when the first answer to its
   View press holds no PDF.** The capture took the first answer that called
   itself a PDF and, when that answer held none, marked the document for

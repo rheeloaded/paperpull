@@ -3,9 +3,8 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 echo ============================================================
 echo  PaperPull - one-shot setup
-echo  Creates a virtual environment for every app + the GUI,
-echo  installs the shared core into each, and downloads
-echo  Playwright's Chromium once (then shared by all of them).
+echo  Creates a virtual environment for every app + the GUI
+echo  and installs the shared core into each.
 echo  This can take a few minutes the first time.
 echo ============================================================
 echo.
@@ -22,7 +21,6 @@ if not defined PYEXE (
 
 set "FAILED="
 set /a COUNT=0
-set "BROWSER_DONE="
 
 rem --- each app ---
 for /d %%A in (apps\*) do (
@@ -47,12 +45,6 @@ for /d %%A in (apps\*) do (
         .venv\Scripts\python.exe -m pip install -q "%%W" || set "FAILED=!FAILED! %%~nxA(core)"
       )
     )
-
-    rem  Chromium is a single shared download - fetch it once, not per app.
-    if not defined BROWSER_DONE (
-rem The browser download is no longer part of setup. login.bat offers it
-rem only if no Chromium-based browser is found on this computer.
-    )
     popd
     set /a COUNT+=1
   )
@@ -69,8 +61,6 @@ if exist ".venv\Scripts\python.exe" (
 .venv\Scripts\python.exe -m pip install -q --upgrade pip
 .venv\Scripts\python.exe -m pip install -q -r requirements.txt || set "FAILED=!FAILED! gui(deps)"
 popd
-
-if not defined BROWSER_DONE set "FAILED=!FAILED! playwright-chromium"
 
 echo.
 if defined FAILED (

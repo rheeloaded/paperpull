@@ -233,7 +233,7 @@ says on its face that it is invented.
 
 ![Quick start](docs/quickstart.gif)
 
-**One-shot setup** (creates a venv for every app + the GUI, installs the browser):
+**One-shot setup**, a venv for every app and the GUI, each app with the shared core.
 
 ```bat
 setup-all.bat        REM Windows

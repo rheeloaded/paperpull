@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # PaperPull - one-shot setup (macOS / Linux)
 #
-# Creates a virtual environment for every app plus the GUI, installs the
-# shared core into each, and downloads Playwright's Chromium once (it is then
-# shared by all of them). This takes a few minutes the first time.
+# Creates a virtual environment for every app plus the GUI and installs the
+# shared core into each. This takes a few minutes the first time. No browser
+# is downloaded here. Any Chromium-based browser already installed can be
+# used, and if none is found, login offers the download then.
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -24,7 +25,6 @@ echo
 # A plain string, not an array: macOS still ships bash 3.2, where
 # ${#arr[@]} on an EMPTY array trips "unbound variable" under set -u.
 failed=""
-first=1
 
 for app in apps/*/; do
     name="$(basename "$app")"
@@ -43,11 +43,6 @@ for app in apps/*/; do
     fi
     if ! "$app/.venv/bin/pip" install -q -e core >/dev/null 2>&1; then
         echo "FAILED (core)"; failed="$failed $name"; continue
-    fi
-    # Chromium is downloaded once and reused by every later app.
-    if [ $first -eq 1 ]; then
-# The browser download is no longer part of setup. login offers it only
-# if no Chromium-based browser is found on this Mac.
     fi
     echo "ok"
 done
