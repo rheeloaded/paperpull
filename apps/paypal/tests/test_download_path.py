@@ -337,6 +337,15 @@ def test_two_statements_ending_on_the_same_day_are_told_apart_by_their_first_day
     assert marked == plain[:-len(".pdf")] + " 2031-06-01.pdf", names
 
 
+def test_the_run_says_how_many_it_could_not_tell_apart_by_the_day_they_were_made(capsys):
+    listing = site.Listing([], counts={site.READY: 1, site.UNREAD_SAME_DAY: 2},
+                           unread=[{"reads_as": site.UNREAD_SAME_DAY}] * 2)
+    app_mod.App._say_business_listing(object.__new__(app_mod.App), listing)
+    said = " ".join(capsys.readouterr().out.split())
+    assert "2 this app could not read" in said
+    assert "That count includes 2 known only by the day PayPal made them" in said
+
+
 def test_the_stand_in_refuses_what_the_real_call_would():
     """If this passed a keyword deliver() does not take, the tests above
     would fail the way 0.34.0 failed on a real account."""

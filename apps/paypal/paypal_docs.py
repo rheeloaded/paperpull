@@ -525,8 +525,8 @@ class App:
             print("    of value it was without saying the value.")
             same = listing.counts.get(site.UNREAD_SAME_DAY, 0)
             if same:
-                print(f"    {same} of them named no days and was made on the same day as")
-                print("    another that named none, so which is which could not be told.")
+                print(f"    That count includes {same} known only by the day PayPal made them,")
+                print("    the same day as another, so which is which could not be told.")
         if not listing.whole:
             print("  PayPal said more of the list follows, and this app could not page")
             print("    to it with the list's own next-page control.")
