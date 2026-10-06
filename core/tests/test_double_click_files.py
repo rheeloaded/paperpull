@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -372,18 +373,31 @@ def test_the_parse_check_names_an_if_with_nothing_left_in_it(bash, tmp_path):
     does for bash -n on its own."""
     before = ("before.sh", "#!/bin/sh\necho before\n")
     notes = ("notes.sh", "#!/bin/sh\n# a comment and nothing else\n")
-    errors = _parse_errors(bash, [before, ("emptied.command", EMPTIED_IF), notes], tmp_path)
+    open_quote = ("open-quote.command", "#!/usr/bin/env bash\necho 'Run this app's setup first'\n")
+    later = ("later.sh", "#!/bin/sh\n# this app's own check\necho done\n")
+    checks = {"emptied": [before, ("emptied.command", EMPTIED_IF), notes],
+              "open-quote": [open_quote, later, notes],
+              "clean": [notes, before]}
+    # The three are read side by side, each in a folder of its own. They
+    # start eight bashes between them, one after another within each, and
+    # one after another all eight took a minute on a Windows machine whose
+    # Git bash took several seconds to start.
+    for name in checks:
+        (tmp_path / name).mkdir()
+    with ThreadPoolExecutor(len(checks)) as pool:
+        said = dict(zip(checks, pool.map(
+            lambda name: _parse_errors(bash, checks[name], tmp_path / name), checks)))
+
+    errors = said["emptied"]
     assert len(errors) == 1, errors
     assert errors[0].startswith("emptied.command: line 5: syntax error"), errors
 
-    open_quote = ("open-quote.command", "#!/usr/bin/env bash\necho 'Run this app's setup first'\n")
-    later = ("later.sh", "#!/bin/sh\n# this app's own check\necho done\n")
-    errors = _parse_errors(bash, [open_quote, later, notes], tmp_path)
+    errors = said["open-quote"]
     assert len(errors) == 1, errors
     assert errors[0].startswith("open-quote.command: line "), errors
     assert "unexpected EOF while looking for matching" in errors[0], errors
 
-    assert _parse_errors(bash, [notes, before], tmp_path) == []
+    assert said["clean"] == []
 
 
 @pytest.mark.parametrize("bash", _bashes())

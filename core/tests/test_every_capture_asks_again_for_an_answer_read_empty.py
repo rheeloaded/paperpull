@@ -376,20 +376,22 @@ def press(context, provider, pages, tmp_path, monkeypatch):
     whose press works the way named, and says whether the capture saved
     anything and where it would have filed it.
 
-    The capture keeps its own one-second looks until the page says it is
-    done, and after that each look is a fiftieth as long, so a capture that
-    waits its whole time does so in a second or two. It counts its looks
-    rather than the clock, so what it does is the same either way. Those
-    looks are counted, the gates open and an answer held back is let go at
-    the ones a test names, and once /gate opens each look is whole again, so
-    a download the page makes then has the capture's own time to arrive. A
-    listener of the test's own, beside the capture's, notes the look at
-    which an answer the capture should leave alone was heard. The look at
-    which that answer is let go, or the other tab is let ask for it, lasts
-    until the answer has been heard, 30 seconds at most, so the capture has
-    the rest of its looks after it however slow the machine is. Without
-    that, a full run on a busy machine once heard the other tab's answer
-    only at the 24th of the capture's 25 looks."""
+    A look the capture starts before the page says it is done lasts until
+    the page says so, its own second at most, and after that each look is a
+    fiftieth as long, so a capture that waits its whole time does so in a
+    second or two. It counts its looks rather than the clock, so what it
+    does is the same either way. Kept whole, the first look of most presses
+    was a second spent after the page was done, a minute of the suite in
+    all. The looks after it are counted, the gates open and an answer held
+    back is let go at the ones a test names, and once /gate opens each look
+    is whole again, so a download the page makes then has the capture's own
+    time to arrive. A listener of the test's own, beside the capture's,
+    notes the look at which an answer the capture should leave alone was
+    heard. The look at which that answer is let go, or the other tab is let
+    ask for it, lasts until the answer has been heard, 30 seconds at most,
+    so the capture has the rest of its looks after it however slow the
+    machine is. Without that, a full run on a busy machine once heard the
+    other tab's answer only at the 24th of the capture's 25 looks."""
 
     def heard(response):
         if provider.heard_at is None and ("slow=1" in response.url or "-other" in response.url):
@@ -407,18 +409,21 @@ def press(context, provider, pages, tmp_path, monkeypatch):
         own_wait = page.wait_for_timeout
 
         def look(ms):
-            if provider.kept:
-                provider.looks += 1
-                for at, name in ((provider.open_at, "gate_open"), (provider.other_at, "other_open"),
-                                 (provider.let_go_at, "let_go")):
-                    if at and provider.looks >= at:
-                        setattr(provider, name, True)
-                if provider.looks in (provider.other_at, provider.let_go_at):
-                    give_up = time.monotonic() + 30
-                    while provider.heard_at is None and time.monotonic() < give_up:
-                        own_wait(25)
-            quick = provider.kept and not provider.gate_open
-            own_wait(max(1, int(ms) // 50) if quick else ms)
+            if not provider.kept:
+                done_by = time.monotonic() + ms / 1000
+                while not provider.kept and time.monotonic() < done_by:
+                    own_wait(25)
+                return
+            provider.looks += 1
+            for at, name in ((provider.open_at, "gate_open"), (provider.other_at, "other_open"),
+                             (provider.let_go_at, "let_go")):
+                if at and provider.looks >= at:
+                    setattr(provider, name, True)
+            if provider.looks in (provider.other_at, provider.let_go_at):
+                give_up = time.monotonic() + 30
+                while provider.heard_at is None and time.monotonic() < give_up:
+                    own_wait(25)
+            own_wait(ms if provider.gate_open else max(1, int(ms) // 50))
 
         page.wait_for_timeout = look
         staging = tmp_path / (".%s-downloads" % app.name)

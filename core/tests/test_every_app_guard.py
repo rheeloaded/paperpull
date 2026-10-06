@@ -9,8 +9,10 @@ Testing this per app let that happen, because each app's tests only ever knew
 about that app. These run across all of them at once, so a new provider cannot
 quietly ship without the same protection.
 """
+import functools
 import importlib
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -145,6 +147,32 @@ def _configured_profile_dir(app):
         return None
 
 
+def _profile_files(app):
+    """The files of a signed-in profile, under each name this app's profile
+    folder can have."""
+    configured = _configured_profile_dir(app)
+    names = {"%s-browser-profile" % app.name}
+    if configured:
+        names.add(configured.strip("./").strip("/"))
+    return ["apps/%s/%s/%s" % (app.name, name, leaf) for name in sorted(names)
+            for leaf in ("Default/Cookies", "Local State",
+                         "Default/Network/Cookies", "Default/Login Data")]
+
+
+@functools.lru_cache(maxsize=1)
+def _gitignored() -> frozenset:
+    """Which of every app's profile files git ignores, asked of one git.
+    A git for each file, 460 of them, took 41 seconds of the core suite on
+    Windows. git names each ignored path as it was given, and only those."""
+    asked = [rel for app in APPS for rel in _profile_files(app)]
+    r = subprocess.run(["git", "check-ignore", "-z", "--stdin"], cwd=REPO,
+                       input="".join(rel + "\0" for rel in asked).encode("utf-8"),
+                       capture_output=True)
+    # 1 is git's answer when it ignores none of them, anything else an error.
+    assert r.returncode in (0, 1), r.stderr.decode("utf-8", "replace")
+    return frozenset(r.stdout.decode("utf-8").split("\0")) - {""}
+
+
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
 def test_a_browser_profile_could_never_be_committed(app):
     """A browser profile holds live session cookies for whatever the user
@@ -156,21 +184,10 @@ def test_a_browser_profile_could_never_be_committed(app):
     provider's author has no reason to know the convention exists, so the
     build checks it instead of trusting them to.
     """
-    import subprocess
-    configured = _configured_profile_dir(app)
-    names = {"%s-browser-profile" % app.name}
-    if configured:
-        names.add(configured.strip("./").strip("/"))
-
-    for name in names:
-        for leaf in ("Default/Cookies", "Local State",
-                     "Default/Network/Cookies", "Default/Login Data"):
-            rel = "apps/%s/%s/%s" % (app.name, name, leaf)
-            r = subprocess.run(["git", "check-ignore", "-q", rel],
-                               cwd=REPO, capture_output=True)
-            assert r.returncode == 0, (
-                "%s is NOT gitignored, so a signed-in profile could be "
-                "committed to a public repo" % rel)
+    for rel in _profile_files(app):
+        assert rel in _gitignored(), (
+            "%s is NOT gitignored, so a signed-in profile could be "
+            "committed to a public repo" % rel)
 
 
 # -- the big download is offered, not assumed -------------------------------

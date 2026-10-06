@@ -38,11 +38,15 @@ def git(where, *args):
     return r.stdout.strip()
 
 
-@pytest.fixture
-def world(tmp_path, monkeypatch):
-    origin = tmp_path / "origin.git"
+@pytest.fixture(scope="module")
+def world_once(tmp_path_factory):
+    """The repository, its origin and its environments, made once for the
+    file. Made afresh for each test, its eight gits came close to a third
+    of the file's time."""
+    root = tmp_path_factory.mktemp("world")
+    origin = root / "origin.git"
     subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
-    main = tmp_path / "main"
+    main = root / "main"
     subprocess.run(["git", "clone", "-q", str(origin), str(main)], check=True, capture_output=True)
     git(main, "config", "user.name", "tester")
     git(main, "config", "user.email", "tester@example.invalid")
@@ -62,6 +66,17 @@ def world(tmp_path, monkeypatch):
     git(main, "commit", "-q", "-m", "base")
     git(main, "branch", "-M", "main")
     git(main, "push", "-q", "-u", "origin", "main")
+    return root
+
+
+@pytest.fixture
+def world(world_once, tmp_path, monkeypatch):
+    """A copy of it for this test alone, the clone pointed at the copy of
+    its origin."""
+    for name in ("origin.git", "main"):
+        shutil.copytree(world_once / name, tmp_path / name, symlinks=True)
+    main = tmp_path / "main"
+    git(main, "remote", "set-url", "origin", str(tmp_path / "origin.git"))
     monkeypatch.chdir(main)
     return main
 
