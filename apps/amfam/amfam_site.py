@@ -415,13 +415,32 @@ def _refused(words: str) -> bool:
                            or AUTH_CONTROL_RE.search(words)))
 
 
+_FOCUS_IN_A_FORM_JS = r"""() => {
+  const a = document.activeElement;
+  return !!(a && a.closest && a.closest('form, input, select, textarea, [contenteditable]'));
+}"""
+
+
+def _focus_in_a_form(page) -> bool:
+    """Whether the focus is in a form's control, where a key would reach it.
+    True when it could not be told."""
+    try:
+        return bool(page.evaluate(_FOCUS_IN_A_FORM_JS))
+    except Exception:
+        return True
+
+
 def dismiss_overlay(page) -> None:
     """Close a cookie banner, a survey prompt or a promo overlay, the things
     that sit over signed-in pages and intercept clicks. Escape first, then
-    only a control that says close or dismiss, never accept."""
+    only a control that says close or dismiss, never accept. Escape is never
+    pressed while the focus is in a form's control, such as the one above a
+    bill's statements, which a key would reach (review of the Bill details
+    change)."""
     try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
+        if not _focus_in_a_form(page):
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(250)
     except Exception:
         pass
     try:
@@ -583,6 +602,19 @@ def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
         page.wait_for_timeout(delay_ms)
     except Exception:
         pass
+
+
+def _scroll_bill_view(page, rounds: int = 4, delay_ms: int = 600) -> None:
+    """Scroll a bill's statements to their end through the page's own
+    scrolling. Never a key and never the wheel there, since End with the
+    select of the form above the list in focus changes what it selects
+    (review of the Bill details change)."""
+    for _ in range(rounds):
+        try:
+            page.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
+        except Exception:
+            return
+        page.wait_for_timeout(delay_ms)
 
 
 def expand_all(page, view: Optional[str] = None) -> bool:
@@ -862,10 +894,17 @@ def _statement_controls(page, new_only: bool = False):
 
     With `new_only`, only a control that shows and was not showing before
     a bill's Bill details was pressed (_mark_shown), so a list already on
-    the page is never read as that bill's."""
+    the page is never read as that bill's.
+
+    Each control is held as the element itself, so the element the guard
+    read is the one pressed, even when the page draws another row above it
+    in between (review of the Bill details change)."""
     ctrls = _bill_controls(page)
     for i in range(ctrls.count()):
-        el = ctrls.nth(i)
+        try:
+            el = ctrls.nth(i).element_handle(timeout=2000)
+        except Exception:
+            continue
         if new_only:
             try:
                 if not el.is_visible() or not el.evaluate(_IS_NEW_JS):
@@ -874,7 +913,7 @@ def _statement_controls(page, new_only: bool = False):
                 continue
         marked = _marked(el)
         try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
+            name = (el.get_attribute("aria-label") or el.inner_text() or "").strip()
             if marked and not name:
                 name = (el.get_attribute("title") or "").strip()
         except Exception:
@@ -925,68 +964,65 @@ def collect_download_docs(page, refused: Optional[list] = None) -> List[RawDoc]:
     shows, since two bills can each have a statement of the same date. A
     page with no Bill details is read as it shows.
 
+    Two bills whose lists look alike, the same dates in rows that show
+    nothing else, are both kept. Their PDFs decide at the download, where
+    one that is byte for byte another bill's statement of the same date
+    sends both copies to manual review (review of the Bill details change).
+
     `refused`, when given, is told in words of ours why a bill's
-    statements were left alone, so the run can write it down."""
+    statements were left alone, every bill skipped included, so the run can
+    write it down."""
     bills = _bills(page)
     if not bills:
         return _documents_shown(page, "", set())
-    # A statement list already showing beside the bills, before any Bill
-    # details is pressed, is never read, since which bill it belongs to
-    # cannot be told. A safe miss (review of the Bill details change).
-    if refused is not None and any(b.safe and b.account is None for b in bills):
-        refused.append("a bill had no account of its own")
+    if refused is not None:
+        if any(not b.safe for b in bills):
+            refused.append(REFUSED_BUTTON)
+        if any(b.safe and b.account is None for b in bills):
+            refused.append(NO_ACCOUNT)
     seen: set = set()
-    found: list = []
+    docs: List[RawDoc] = []
     for account in [b.account for b in bills if b.safe and b.account is not None]:
         said: dict = {}
-        view = _open_bill(page, account, said)
+        view, bill = _open_bill(page, account, said)
+        if view is not None:
+            docs.extend(_documents_shown(page, account, seen, view, bill, said))
         if said.get("refused") and refused is not None:
             refused.append(said["refused"])
-        if view is None:
-            continue
-        listed: list = []
-        docs = _documents_shown(page, account, seen, view, listed)
-        found.append((account, tuple(listed), docs))
-    # Two bills that showed one list, the same statements in the same
-    # order, each showed what could be either bill's or both, so neither is
-    # kept and a later run tries again (review of the Bill details change).
-    lists = [listed for _account, listed, _docs in found]
-    out: List[RawDoc] = []
-    for _account, listed, docs in found:
-        if listed and lists.count(listed) > 1:
-            if refused is not None:
-                refused.append(SAME_LIST_REASON)
-            continue
-        out.extend(docs)
-    return out
-
-
-# What the failure file says when two bills showed one list, in words on
-# the word list, so a tester's file says plainly which way the page works.
-SAME_LIST_REASON = "two bills showed the same statement list"
+    return docs
 
 
 def _documents_shown(page, account: str, seen: set, view: Optional[str] = None,
-                     listed: Optional[list] = None) -> List[RawDoc]:
+                     bill=None, report: Optional[dict] = None) -> List[RawDoc]:
     """The statements and tax documents the page shows now, each carrying
     `account`, the bill's account part, and none whose account part and
-    date are in `seen` already. With `view`, the path a bill's Bill details
-    led to, only what that press brought is read, and nothing once the tab
-    has left it, after a show-more press or by itself. `listed`, when
-    given, is told each statement shown, its date, words, row and link, in
-    the page's order, so two bills' lists can be compared."""
+    date are in `seen` already.
+
+    With `view`, the path `bill`'s Bill details led to, only what that
+    press brought is read, and nothing once the tab has left it, after a
+    show-more press or by itself, or once what the page shows after it was
+    moved through is no longer tied to the bill (_view_refusal). A
+    statement list already showing beside the bills before the press is
+    never read as the bill's, since which bill it belongs to cannot be
+    told, a safe miss. `report` is told why, as for _press_details."""
     docs: List[RawDoc] = []
     stayed = expand_all(page, view)
-    scroll_full_page(page)
-    if view is not None and not (stayed and _on_view(page, view)):
-        return docs
+    if view is None:
+        scroll_full_page(page)
+    else:
+        _scroll_bill_view(page)
+        if not (stayed and _on_view(page, view)):
+            _refuse(report, LEFT_THE_VIEW)
+            return docs
+        refusal = _view_refusal(page, bill) if bill is not None else UNREAD
+        if refusal:
+            _refuse(report, refusal)
+            return docs
     for i, el, name, iso, row_text in _statement_controls(page, new_only=view is not None):
         try:
             href = el.get_attribute("href") or ""
         except Exception:
             href = ""
-        if listed is not None:
-            listed.append((iso, name, row_text, href))
         if (account, iso) in seen:
             continue
         seen.add((account, iso))
@@ -1097,18 +1133,23 @@ _COUNT_NEW_JS = r"""(els) => els.filter(
 # between them allowed, and never a date, an amount or a year, which change
 # from one bill to the next.
 _AMOUNT_RE = re.compile(r"[$]\s?\d[\d,]*(?:\.\d+)?|(?<![\d.,])\d[\d,]*\.\d\d(?!\d)")
-_YEAR_ALONE_RE = re.compile(r"(?<![A-Za-z0-9-])(?:19|20)\d\d(?![A-Za-z0-9-])")
+# A year alone, never the last four digits a mask leaves, ****2019 or
+# ...2019, which were dropped as a year (review of the Bill details change).
+_YEAR_ALONE_RE = re.compile(r"(?<![A-Za-z0-9*.\u2022-])(?:19|20)\d\d(?![A-Za-z0-9-])")
 _NUMBERISH_RE = re.compile(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 # The words before a number that make it an account's or a policy's, and
 # the words that make it never a bill's own, the bank or card autopay draws
-# on, a payment, a phone, a claim or an agent. An autopay bank's "account
-# ending in 6789" was read as the bill's own account (review of the Bill
+# on, a payment, paying, a draft, a withdrawal, a phone, a claim or an
+# agent. An autopay bank's "account ending in 6789" was read as the bill's
+# own account, and so was one after "Paying from" (reviews of the Bill
 # details change).
 _ACCOUNT_WORD_RE = re.compile(r"\b(account|acct)\b", re.I)
 _POLICY_WORD_RE = re.compile(r"\bpolic(y|ies)\b", re.I)
 _NOT_THE_BILLS_RE = re.compile(
     r"\b(bank|banking|auto\s*-?\s*pay|autopay|checking|savings|routing|phone|telephone|tel|call|fax|"
-    r"claims?|agent|cards?|visa|mastercard|payments?|paid|confirmation|reference|ref|transaction)\b", re.I)
+    r"claims?|agent|cards?|visa|mastercard|payments?|paid|pay|pays|paying|drafts?|drafted|drafting|"
+    r"withdraw|withdraws|withdrawn|withdrawing|withdrawals?|confirmation|reference|ref|transaction)\b",
+    re.I)
 
 
 def _label_of(text: str, start: int, after: int) -> str:
@@ -1123,31 +1164,50 @@ def _label_of(text: str, start: int, after: int) -> str:
     return label
 
 
+def _cut(line: str) -> str:
+    """A line with each date, amount and year in it turned into a line
+    break, so the words just before a number end at a value."""
+    for pattern, _kind in DATE_PATTERNS:
+        line = pattern.sub("\n", line)
+    line = MONTH_YEAR_RE.sub("\n", line)
+    line = _AMOUNT_RE.sub("\n", line)
+    return _YEAR_ALONE_RE.sub("\n", line)
+
+
 def _numbers_in(text: str) -> list:
     """Each number of four digits or more the words show, as (what the words
     just before it call it, "account", "policy" or "", its digits). Never a
-    date, an amount or a year, and never a number those words tie to a
-    bank, autopay, a card, a payment, a phone, a claim or an agent. A date,
-    an amount or a year ends the words before it, so "Payment due
-    10/01/2026 Billing account 9900123401" labels the account and not a
-    payment."""
-    for pattern, _kind in DATE_PATTERNS:
-        text = pattern.sub("\n", text)
-    text = MONTH_YEAR_RE.sub("\n", text)
-    text = _AMOUNT_RE.sub("\n", text)
-    text = _YEAR_ALONE_RE.sub("\n", text)
-    found, after = [], 0
-    for m in _NUMBERISH_RE.finditer(text):
-        digits = re.sub(r"\D", "", m.group())
-        if len(digits) < 4:
-            continue
-        label = _label_of(text, m.start(), after)
-        after = m.end()
-        if _NOT_THE_BILLS_RE.search(label):
-            continue
-        kind = ("account" if _ACCOUNT_WORD_RE.search(label)
-                else "policy" if _POLICY_WORD_RE.search(label) else "")
-        found.append((kind, digits))
+    date, an amount or a year.
+
+    A number is never a bill's own when the whole of its line as the page
+    wrote it, or the line above that labels it, ties it to a bank, autopay,
+    a card, a payment, paying, a draft, a withdrawal, a phone, a claim or an
+    agent, wherever on the line those words sit. Cut at its dates first,
+    "Next AutoPay 10/01/2026 from account ending in 6789" read as the bill's
+    own account (review of the Bill details change). Only which of account
+    or policy labels a number is read from the words just before it, back
+    to a date, an amount or a year."""
+    lines = str(text or "").split("\n")
+    found = []
+    for n, line in enumerate(lines):
+        cut = _cut(line)
+        after = 0
+        for m in _NUMBERISH_RE.finditer(cut):
+            digits = re.sub(r"\D", "", m.group())
+            if len(digits) < 4:
+                continue
+            label = _label_of(cut, m.start(), after)
+            after = m.end()
+            above = ""
+            if n and not cut[:m.start()].strip():
+                # The number begins its line, and the line above labels it.
+                above = lines[n - 1]
+                label = _cut(above).split("\n")[-1][-40:]
+            if _NOT_THE_BILLS_RE.search(line) or _NOT_THE_BILLS_RE.search(above):
+                continue
+            kind = ("account" if _ACCOUNT_WORD_RE.search(label)
+                    else "policy" if _POLICY_WORD_RE.search(label) else "")
+            found.append((kind, digits))
     return found
 
 
@@ -1272,19 +1332,24 @@ def _address_words(url: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", " ", raw).strip()
 
 
-def _bill_view_allowed(page) -> bool:
-    """Whether the tab may be read for a bill's statements. On My Account's
-    own host and signed in, at an address none of whose words the guard
+def _address_allowed(url: str) -> bool:
+    """Whether an address may hold a bill's statements. On My Account's own
+    host, with no word in its path, query or fragment that the guard
     refuses, so /billing/autopay, and any payment, autopay or settings
-    route, is never read."""
-    url = page.url or ""
+    route, never does."""
     try:
-        here, home = urlsplit(url), urlsplit(BILLING_URL)
+        here, home = urlsplit(url or ""), urlsplit(BILLING_URL)
     except ValueError:
         return False
-    if not is_safe_url(url) or here.netloc != home.netloc or looks_signed_out(page):
+    if not is_safe_url(url or "") or here.netloc != home.netloc:
         return False
     return not _refused(_address_words(url))
+
+
+def _bill_view_allowed(page) -> bool:
+    """Whether the tab may be read for a bill's statements, signed in at an
+    address that may hold them (_address_allowed)."""
+    return _address_allowed(page.url or "") and not looks_signed_out(page)
 
 
 def _on_view(page, view: Optional[str]) -> bool:
@@ -1355,14 +1420,77 @@ def _view_refusal(page, bill) -> Optional[str]:
     except Exception:
         found = None
     if not isinstance(found, dict):
-        return "the statements could not be read"
+        return UNREAD
     if found.get("beside"):
-        return "the statements showed beside another bill"
+        return BESIDE_ANOTHER
     if bill.part and bill.kind:
         for kind, digits in _numbers_in(str(found.get("text") or "")):
             if kind == bill.kind and digits[-4:] != bill.part[-4:]:
-                return "a bill showed another account"
+                return ANOTHER_ACCOUNT
     return None
+
+
+# Why a bill was left alone, written into the failure file in words of
+# ours, every one of them on the word list, so a tester's file says it
+# whole. Every way a bill is skipped has one (review of the Bill details
+# change).
+REFUSED_BUTTON = "a bill details button was refused"
+NO_ACCOUNT = "a bill had no account of its own"
+NOT_LOADED = "the billing page did not load"
+NOT_FOUND = "the bill was not found again"
+LINK_REFUSED = "the bill details link named a refused address"
+UNREAD_BUTTON = "the bill details could not be read"
+WRONG_PLACE = "another control sits where the press would land"
+CHANGED = "the bill details changed before the press"
+UNREAD = "the statements could not be read"
+PRESS_FAILED = "the bill details press failed"
+NEW_TAB = "the bill details opened a new tab"
+ADDRESS_REFUSED = "the bill details landed on a refused address"
+NOTHING_SHOWN = "no statement showed"
+NEVER_SETTLED = "the statements never settled"
+LEFT_THE_VIEW = "the tab left the statements"
+BESIDE_ANOTHER = "the statements showed beside another bill"
+ANOTHER_ACCOUNT = "a bill showed another account"
+
+
+def _refuse(report: Optional[dict], reason: str) -> None:
+    """Note why a bill is left alone, where its caller reads it."""
+    log.info("a bill is left alone, %s", reason)
+    if report is not None:
+        report["refused"] = reason
+
+
+# How long a Bill details press is given to land, in ms. One that cannot
+# land at once is not tried for long (review of the Bill details change).
+_DETAILS_CLICK_MS = 1500
+
+
+def _tabs_it_opened(page, before, wait_ms: int = 2000) -> list:
+    """The tabs this page opened since `before` was taken, waiting up to
+    `wait_ms` for one the page asked for that Playwright has not heard of
+    yet. Never a tab the person opened, which a run attached to their own
+    browser would otherwise close (review of the Bill details change)."""
+    ctx = page.context
+
+    def mine() -> list:
+        out = []
+        for tab in ctx.pages:
+            if tab in before:
+                continue
+            try:
+                if tab.opener() == page:
+                    out.append(tab)
+            except Exception:
+                continue
+        return out
+
+    deadline = time.monotonic() + wait_ms / 1000.0
+    while len(mine()) < (blob_capture.tabs_asked(page) or 0) and time.monotonic() < deadline:
+        try:
+            ctx.wait_for_event("page", timeout=200)
+        except Exception:
+            pass
+    return mine()
 
 
 def _press_details(page, bill, report: Optional[dict] = None) -> Optional[str]:
@@ -1371,21 +1499,33 @@ def _press_details(page, bill, report: Optional[dict] = None) -> Optional[str]:
     view they show at, Billing & Payments itself or the one route the press
     led to, or None.
 
-    A control the guard refused, one with another control where the press
-    would land, or one that no longer reads as it did when the bills were
-    listed, is not pressed. A press that leads off My Account or to an
-    address whose words the guard refuses, such as /billing/autopay, that
-    shows no statement, or whose statements are not tied to this bill
+    A control the guard refused, a link to an address the guard refuses,
+    one with another control where the press would land, or one that no
+    longer reads as it did when the bills were listed, is not pressed. A
+    press that opens a new tab, leads off My Account or to an address whose
+    words the guard refuses, such as /billing/autopay, shows no statement,
+    never settles, or brings statements not tied to this bill
     (_view_refusal), gives None, and the tab is loaded at Billing &
     Payments again. Only statements that were not showing before the press
-    count. A tab the press opened is closed. `report`, when given, is told
-    where the press led, how many statements showed, how many seconds they
-    took and why they were refused, for Diagnose and for the run."""
+    count. Only a tab this page opened is closed, never another of the
+    person's. `report`, when given, is told where the press led, how many
+    statements showed, how many seconds they took and why the bill was
+    left alone, for Diagnose and for the run."""
     if not bill.safe:
-        return None
+        return _refuse(report, REFUSED_BUTTON)
     el = bill.el
-    ctx = page.context
-    before = set(ctx.pages)
+    # A Bill details that is a link, to another page or to a part of this
+    # one, is pressed only toward an address that may hold a bill's
+    # statements (review of the Bill details change).
+    try:
+        href = (el.get_attribute("href") or "").strip()
+    except Exception:
+        return _refuse(report, UNREAD_BUTTON)
+    if href and not href.lower().startswith("javascript"):
+        from urllib.parse import urljoin
+        if not _address_allowed(urljoin(page.url or BILLING_URL, href)):
+            return _refuse(report, LINK_REFUSED)
+    before = set(page.context.pages)
     lands = False
     for attempt in range(2):
         if attempt:
@@ -1402,28 +1542,25 @@ def _press_details(page, bill, report: Optional[dict] = None) -> Optional[str]:
         if lands:
             break
     if not lands:
-        log.info("another control sits where the Bill details press would land")
-        return None
+        return _refuse(report, WRONG_PLACE)
     if not _mark_shown(page):
-        return None
+        return _refuse(report, UNREAD)
     try:
         el.evaluate("(e) => { window.__paperpullPressed = e; return true; }")
     except Exception:
-        return None
+        return _refuse(report, UNREAD_BUTTON)
     # The element itself, read once more as it is about to be pressed.
     if not _still_the_bill(bill):
-        log.info("the Bill details control no longer reads as it did, so it is not pressed")
-        return None
+        return _refuse(report, CHANGED)
     blob_capture.arm(page)
-    armed_at = set(ctx.pages)
     started = time.monotonic()
-    view = None
+    view, opened = None, None
     try:
         try:
-            el.click(timeout=8000)
+            el.click(timeout=_DETAILS_CLICK_MS)
         except Exception as e:
             log.info("the Bill details press failed with %s", e)
-            return None
+            return _refuse(report, PRESS_FAILED)
         if report is not None:
             report["pressed"] = True
         while True:
@@ -1433,49 +1570,65 @@ def _press_details(page, bill, report: Optional[dict] = None) -> Optional[str]:
                 break
             page.wait_for_timeout(250)
         appeared = time.monotonic() - started
-        if allowed and shown:
-            shown = _settle_list(page) or 0
+        steady = _settle_list(page) if allowed and shown else shown
         here = urlsplit(page.url or "").path
-        refusal = _view_refusal(page, bill) if allowed and shown else None
+        refusal = _view_refusal(page, bill) if allowed and steady else None
         # Where the statements were read is where the tab still is, checked
         # once they have been read.
         allowed = allowed and _on_view(page, here)
+        opened = _tabs_it_opened(page, before)
         if report is not None:
             report["address"] = redact(page.url or "")
-            report["statement_links"] = shown
+            report["statement_links"] = steady or 0
             report["seconds_until_links"] = int(round(appeared)) if shown else None
-            if refusal:
-                report["refused"] = refusal
-        if not allowed:
-            log.info("Bill details led somewhere the guard refuses, so nothing there is read")
+        if opened:
+            _refuse(report, NEW_TAB)
+        elif not allowed:
+            _refuse(report, ADDRESS_REFUSED)
         elif not shown:
-            log.info("no statement showed and held still within %d s of Bill details", _LIST_SECONDS)
+            _refuse(report, NOTHING_SHOWN)
+        elif steady is None or not steady:
+            _refuse(report, NEVER_SETTLED)
         elif refusal:
-            log.info("the statements Bill details brought are left alone, %s", refusal)
+            _refuse(report, refusal)
         else:
             view = here
         return view
     finally:
-        blob_capture.close_new_tabs(page, before, armed_at)
+        for tab in opened if opened is not None else _tabs_it_opened(page, before, 500):
+            try:
+                tab.close()
+            except Exception:
+                pass
         if view is None:
             _leave_the_press(page)
 
 
-def _open_bill(page, account: str, report: Optional[dict] = None) -> Optional[str]:
+def _open_bill(page, account: str, report: Optional[dict] = None) -> tuple:
     """Open the details of the bill whose own card shows `account`, from
     Billing & Payments loaded afresh, so nothing an earlier press opened is
-    still showing. The path its statements show at, or None when the page
-    did not load, no single bill shows that account part, its control is
-    refused or its statements are not tied to it. `report` as for
-    _press_details."""
+    still showing. (the path its statements show at, the bill pressed), or
+    (None, None) when the page did not load, no single bill shows that
+    account part, its control is refused or its statements are not tied to
+    it. `report` as for _press_details."""
     if not _load_billing(page):
-        return None
+        _refuse(report, NOT_LOADED)
+        return None, None
     bills = _bills(page)
     mine = [b for b in bills if b.account == account and b.safe]
     if len(mine) != 1:
-        log.info("no single bill that passes the guard shows that account part")
-        return None
-    return _press_details(page, mine[0], report)
+        _refuse(report, NOT_FOUND)
+        return None, None
+    view = _press_details(page, mine[0], report)
+    return (view, mine[0]) if view is not None else (None, None)
+
+
+def lists_bills_without(page, account: str) -> bool:
+    """Whether Billing & Payments lists bills and none of them is the one
+    that `account` names. A document found with no account part, before the
+    page listed its bills, has no bill to open there."""
+    bills = _bills(page)
+    return bool(bills) and not any(b.account == account for b in bills)
 
 
 def survey_bills(page) -> list:
@@ -1484,7 +1637,10 @@ def survey_bills(page) -> list:
     where it led, how many statements showed and how many seconds they
     took are noted, with whether the bill's account part could be read and
     its card's words. Nothing on the statements is pressed and nothing is
-    saved."""
+    saved. A bill is found again by its account part and what labels it,
+    the way a run finds it, never by its place among the bills, and one
+    that cannot be found again that way is not pressed (review of the Bill
+    details change)."""
     out: list = []
     if not _load_billing(page):
         return out
@@ -1494,12 +1650,16 @@ def survey_bills(page) -> list:
                  "pressed": False, "card": " | ".join(bill.card.splitlines())[:200]}
         out.append(entry)
         if not bill.safe:
+            _refuse(entry, REFUSED_BUTTON)
             continue
         if n and not _load_billing(page):
+            _refuse(entry, NOT_LOADED)
             continue
-        again = _bills(page)
-        if len(again) == len(listed) and again[n].safe:
-            _press_details(page, again[n], entry)
+        again = [b for b in _bills(page) if b.safe and (b.part, b.kind) == (bill.part, bill.kind)]
+        if len(again) != 1:
+            _refuse(entry, NOT_FOUND)
+            continue
+        _press_details(page, again[0], entry)
     return out
 
 
@@ -1722,21 +1882,26 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     if not goto_documents(page):
         log.info("could not open the documents page for %s", iso_date)
         return False
-    view = None
+    view, bill = None, None
     if account or _bills(page):
-        view = _open_bill(page, account)
+        view, bill = _open_bill(page, account)
         if view is None:
             log.info("could not open the details of the bill for %s", iso_date)
             return False
     stayed = expand_all(page, view)
     if view is not None:
-        # The bill's statements only, where its press showed them, and once
-        # their count holds still, the way discovery read them.
+        # The bill's statements only, where its press showed them, once
+        # their count holds still and while what the page shows is still
+        # tied to the bill, the way discovery read them.
         if not (stayed and _on_view(page, view)):
             log.info("the tab left the bill's statements before %s was found", iso_date)
             return False
         if _settle_list(page) is None:
             log.info("the bill's statements never held still")
+            return False
+        refusal = _view_refusal(page, bill)
+        if refusal:
+            log.info("the bill's statements are left alone, %s", refusal)
             return False
 
     el, label = _control_for(page, iso_date, new_only=view is not None)

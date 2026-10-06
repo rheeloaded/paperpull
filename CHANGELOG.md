@@ -247,12 +247,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   number its bill's card labels, or of its policy number when the card
   labels no account number, in its file name too, so two bills'
   statements of the same date are both saved and told apart. A bill is
-  left alone when it cannot be told from another bill, when the page its
-  press opened names another account, or when its press showed the same
-  list as another bill's, and a PDF that is byte for byte another bill's
-  statement of the same date is not kept. Each of these writes the failure
-  file, and two bills that showed the same statement list is the reason
-  it names first. Diagnose also presses each Bill details that passes the
+  left alone when it cannot be told from another bill or when the page
+  its press opened names another account, and each bill left alone writes
+  the failure file. When a bill's statement is byte for byte another
+  bill's statement of the same date, both copies go to Manual Review,
+  neither deleted. Diagnose also presses each Bill details that passes the
   guard and notes where it led, how many statements showed and how long
   they took. This has not yet been confirmed on a real account.
 

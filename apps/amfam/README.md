@@ -22,9 +22,13 @@ part of [PaperPull](../../README.md).
    leave the window open.
 4. Click **more** under the buttons, then **Diagnose**. It reads the
    documents page and writes `Diagnostics\diagnose-documents.json` in the
-   American Family folder. It downloads nothing, clicks nothing but a
-   documents link and each bill's Bill details, takes no screenshot, and
-   masks any run of six or more digits.
+   American Family folder. It downloads nothing and takes no screenshot.
+   All it presses are Escape and End, a button that closes or dismisses
+   something drawn over the page, a link or button whose whole words name a
+   documents page, a Show more or the like on the billing page or a bill's
+   statements, and each bill's Bill details, twice, once to read what it
+   shows and once to time it. Every word it writes that is not on
+   PaperPull's fixed list is written as its shape.
 5. Click **Record**, in the same **more** menu. Go back to the browser window
    and click your way to one document the way you normally would, then come
    back here and click **Stop recording**. It writes
@@ -101,32 +105,44 @@ paperpull amfam pilot             REM once the site layer is confirmed
   page loaded afresh, and the app waits up to about twenty seconds for
   that bill's statements, and then until their count holds still for a
   second. It is pressed only when its whole words are Bill details, every
-  word it shows or announces passes the guard, it holds no other control
-  and the press would land on it, all read again on that very button just
-  before it is pressed. The statements are read only on Billing & Payments
-  or the page that press led to, never where that address names a
-  payment, autopay or a setting, as /billing/autopay does, and only those
-  that were not showing before the press count as that bill's. A list
-  already showing beside the bills is never read.
+  word it shows or announces passes the guard, it holds no other control,
+  the press would land on it and, when it is a link, its address passes
+  the guard too, all read again on that very button just before it is
+  pressed, and a press that does not land within a second and a half is
+  given up. A press that opens a new tab is refused, and that tab is
+  closed, never another of yours. The statements are read only on
+  Billing & Payments or the page that press led to, never where its
+  address names a payment, autopay or a setting, as /billing/autopay
+  does, and only those that were not showing before the press count as
+  that bill's. They are checked again after the app has scrolled through
+  them, which it does there without a key, so the form above them is
+  never changed. A list already showing beside the bills is never read.
+  Each statement is pressed on the very link that was read.
 - **Telling bills apart.** Each statement carries the last four digits of
   the billing account number its bill's card labels, or of its policy
   number when the card labels no account number, in its file name too, so
   two bills' statements of the same date are both kept and told apart.
   The card is the smallest part of the page around the Bill details
   button that labels such a number, so a paid bill's card beside it never
-  lends it its number, and a number the words tie to a bank, autopay, a
-  card, a payment, a phone, a claim or an agent is never used. A bill is
-  left alone when its card shows two different account numbers, or no
-  account number and two different policy numbers, when two cards show
-  the same last four digits, when its card shows none and there are
-  several bills, when the page its press opened labels another account or
-  policy, or when its statements are the same list another bill's press
-  showed. A statement whose PDF is byte for byte another bill's statement
-  of the same date is not kept, and waits for manual review. Each of these
-  writes the failure file with every reason it met, and two bills that
-  showed the same statement list is the one it names first. Saving a
-  statement opens its bill's details again first. A page with no Bill
-  details is read as it shows, as before.
+  lends it its number, and a number whose line ties it anywhere to a bank,
+  autopay, a card, a payment, paying, a draft, a withdrawal, a phone, a
+  claim or an agent is never used. A bill is left alone when its card
+  shows two different account numbers, or no account number and two
+  different policy numbers, when two cards show the same last four digits,
+  when its card shows none and there are several bills, or when the page
+  its press opened labels another account or policy. Two bills whose
+  lists look alike are both read, since two bills can bill on the same day
+  of the month. Their PDFs decide. When a bill's statement is byte for
+  byte another bill's statement of the same date, both copies go to
+  `Manual Review` and neither is deleted or counted as downloaded, and
+  when they differ both are kept. Every bill left alone writes the failure
+  file, with every reason the run met. Saving a statement opens its
+  bill's details again first, and a document found before the page listed
+  bills, with no bill of its own, is left as it is. A page with no Bill
+  details is read as it shows, as before. Two things are known and left
+  as they are. An account number written in groups, 9900 1234 01, is read
+  by its first group, and a policy number written nearer the Bill details
+  button than the card's account number is used in its place.
 - **Downloads.** A row that links straight to a PDF is fetched from inside
   the page with the session's own cookies. Otherwise the row's control is
   clicked, once it has passed the guard, and whatever the site does, a
@@ -140,9 +156,10 @@ paperpull amfam pilot             REM once the site layer is confirmed
   autopay, files or reports a claim, changes coverage, adds a vehicle or a
   driver, starts a quote, cancels or renews, or edits a setting. A control
   must also look like a document action before it can be clicked. These
-  are all it presses. Escape, and a button whose whole words close or
-  dismiss something, such as Close, Dismiss, No thanks or Not now, or a
-  close mark alone. Each bill's Bill details. A control whose whole words
+  are all it presses. Escape, and End on Billing & Payments but never on a
+  bill's statements. A button whose whole words close or dismiss
+  something, such as Close, Dismiss, No thanks or Not now, or a close mark
+  alone. Each bill's Bill details. A control whose whole words
   are Show, Load, View or See and then more, all or older, with bills or
   statements after them or not, or Older or Previous bills or statements,
   on Billing & Payments or a bill's own statements. A statement's own

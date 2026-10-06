@@ -451,14 +451,10 @@ class App:
         self.discovery.save()
         log.info("Statements & Documents page: %d documents, %d new", len(docs), n_new)
         if refused:
-            # A bill whose statements could not be tied to it was left
-            # alone. The reasons are the site layer's own sentences, and two
-            # bills that showed one list is the one written first when it
-            # happened, since it says which way the page works. Every
-            # reason is listed beside it.
+            # A bill was left alone. The reasons are the site layer's own
+            # sentences, the first named and every one listed beside it.
             reasons = list(dict.fromkeys(refused))
-            first = site.SAME_LIST_REASON if site.SAME_LIST_REASON in reasons else reasons[0]
-            self.write_failure("open each bill", first, postmortem={"refused": reasons})
+            self.write_failure("open each bill", reasons[0], postmortem={"refused": reasons})
         if not docs:
             # Finding nothing is written down too. A Pilot that found nothing
             # finished with no file to send, and the page it read is the
@@ -588,6 +584,13 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
+        # A document found with no account part, before the page listed its
+        # bills, has no bill of its own to open now. It is left as it is,
+        # rather than failed as a capture on every run (review of the Bill
+        # details change).
+        if not doc.account and site.lists_bills_without(page, ""):
+            print("  Found before Billing & Payments listed bills, so it is left as it is.")
+            return
         trace: list = []
         saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
                                    title=doc.title, trace=trace, account=doc.account)
@@ -628,23 +631,32 @@ class App:
             out_path = opened.pdf
             log.info("Opened the ZIP for %s", doc.title)
 
-        # The same bytes as another bill's statement of this date is that
-        # statement, whichever bill's page showed it, and never this bill's
-        # own. It is taken off the disk, where its copy under the other
-        # bill's name stays, and the record waits for the next run (review
-        # of the Bill details change).
+        # The same bytes as another bill's statement of this date could be
+        # either bill's, whichever page showed it, so neither copy is
+        # trusted. Both go to Manual Review and neither is deleted, since
+        # which one is wrong cannot be told, and the earlier one is no longer
+        # counted as downloaded (review of the Bill details change). Two
+        # bills whose PDFs differ are two bills, and both are kept.
         digest = hashlib.sha256(out_path.read_bytes()).hexdigest()
-        if any(isinstance(r, dict) and r.get("pdf_sha256") == digest and r.get("date") == doc.date
-               and (r.get("account") or "") != (doc.account or "")
-               for r in self.progress.data.values()):
-            out_path.unlink()
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
-                         notes="The same PDF as another bill's statement of this date")
+        twins = [key for key, r in self.progress.data.items()
+                 if isinstance(r, dict) and r.get("pdf_sha256") == digest and r.get("date") == doc.date
+                 and (r.get("account") or "") != (doc.account or "")]
+        if twins:
+            for key in twins:
+                self._distrust(key)
+            quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                     self.config["max_path_length"])
+            try:
+                out_path.replace(quarantine)
+            except OSError:
+                quarantine = out_path
+            doc.pdf_path, doc.pdf_filename, doc.pdf_sha256 = str(quarantine), quarantine.name, digest
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=self.SAME_PDF)
             self._write_row(doc, "Same PDF as another bill's", "Needs Manual Review")
             self.write_failure("open each bill", "two bills gave the same statement")
             self.stats["manual_review"] += 1
             print("  !! This is the same PDF as another bill's statement of this date.")
-            print("     It was not kept, and the document is marked for manual review.")
+            print("     Both copies are in Manual Review, for a person to tell apart.")
             return
         doc.pdf_sha256 = digest
 
@@ -688,6 +700,33 @@ class App:
         print(f"  Saved: {out_path.name}")
 
     # -- records -----------------------------------------------------------
+
+    SAME_PDF = "The same PDF as another bill's statement of this date"
+
+    def _distrust(self, key: str) -> None:
+        """Another bill's statement whose PDF is byte for byte the one just
+        taken is no longer trusted either. Its file goes to Manual Review
+        beside the new one, never deleted, and its record is marked for
+        manual review and no longer counted as downloaded, so neither copy
+        stands as either bill's (review of the Bill details change)."""
+        rec = dict(self.progress.get(key) or {})
+        path = Path(rec.get("pdf_path") or "")
+        if rec.get("pdf_path") and path.exists() and path.parent != self.paths.manual_review:
+            moved = unique_path(self.paths.manual_review, path.name, self.config["max_path_length"])
+            try:
+                path.replace(moved)
+                rec["pdf_path"], rec["pdf_filename"] = str(moved), moved.name
+            except OSError:
+                pass
+        notes = rec.get("notes") or ""
+        rec.update(state=State.NEEDS_MANUAL_REVIEW.value, downloaded_ok=False,
+                   notes=(notes + "; " if notes else "") + self.SAME_PDF)
+        self.progress.update(key, rec)
+        self.discovery.update(key, {"state": State.NEEDS_MANUAL_REVIEW.value})
+        try:
+            self._write_row(Document.from_dict(rec), "Same PDF as another bill's", "Needs Manual Review")
+        except Exception:
+            pass
 
     def _record(self, doc: Document, state: State, notes: str = ""):
         doc.state = state.value
@@ -908,9 +947,12 @@ class App:
     def cmd_diagnose(self):
         """Survey the Statements & Documents page and write a file a tester can attach to
         the GitHub issue. No screenshot, digit runs masked, JSON bodies as
-        shape only. Nothing is downloaded and nothing but a documents link is
-        followed. Each bill's Bill details that passes the guard is pressed,
-        to see where it leads and what it shows."""
+        shape only. Nothing is downloaded. All it presses are Escape and End,
+        a button that closes or dismisses something drawn over the page, a
+        link or button whose whole words name a documents page, a show-more
+        control on the billing page or a bill's statements, and each bill's
+        Bill details that passes the guard, twice, once to read what it
+        shows and once to time it."""
         self.stats["mode"] = "diagnose"
         words = words_for('American Family', site)
         page = self.page()
