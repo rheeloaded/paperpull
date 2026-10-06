@@ -19,6 +19,7 @@ the browsers live, which is what BROWSERS below records.
 from __future__ import annotations
 
 import glob
+import importlib.util
 import os
 import re
 import subprocess
@@ -38,20 +39,73 @@ VIVALDI = "Vivaldi"
 OPERA = "Opera"
 
 
-def _playwright_root() -> Path:
-    """Where Playwright keeps its downloaded browsers."""
-    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
-    if override and override not in ("0", "1"):
-        return Path(override)
-    if sys.platform == "win32":
-        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ms-playwright"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / "ms-playwright"
-    return Path.home() / ".cache" / "ms-playwright"
+def _from_env(name: str) -> Optional[str]:
+    """A setting read the way Playwright reads one, the variable itself and
+    then the two names npm gives it. A variable that is set, even to
+    nothing, is the answer, and npm's names are not read then."""
+    for key in (name, "npm_config_" + name.lower(), "npm_package_config_" + name.lower()):
+        value = os.environ.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _playwright_package() -> Optional[Path]:
+    """The folder of the Playwright this Python would import, found without
+    importing it, or None when there is none."""
+    try:
+        spec = importlib.util.find_spec("playwright")
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    return Path(spec.submodule_search_locations[0])
+
+
+def _playwright_root() -> Optional[Path]:
+    """Where Playwright keeps the browsers it downloads, by Playwright's own
+    rules, which have not changed since 1.9 (registryDirectory and
+    computeDefaultCacheDirectory in its driver). None when they name the
+    folder of a Playwright this Python does not have.
+
+    PLAYWRIGHT_BROWSERS_PATH=0 is a folder inside Playwright's own package,
+    driver/package/.local-browsers in its Python package. Any other value is
+    the folder itself, 1 included, since no release of Playwright ever read
+    1 another way. Without it, Linux keeps them under XDG_CACHE_HOME when
+    that is set, and Windows under AppData/Local in the home folder when
+    LOCALAPPDATA is not. A relative folder is found from INIT_CWD, or else
+    from the folder this runs in, as Playwright finds it.
+
+    Until 2026-10-05 XDG_CACHE_HOME went unread, and 0 and 1 counted as no
+    setting at all, so on such a machine the Chromium Playwright had
+    downloaded was never found, and the download offered in its place went
+    where it would not be found either. browsers_folder in
+    tools/run_all_tests.py has the same rules, and
+    core/tests/test_run_all_tests_tool.py holds the two together.
+    """
+    override = _from_env("PLAYWRIGHT_BROWSERS_PATH")
+    if override == "0":
+        package = _playwright_package()
+        if package is None:
+            return None
+        root = package / "driver" / "package" / ".local-browsers"
+    elif override:
+        root = Path(override)
+    elif sys.platform == "win32":
+        root = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "ms-playwright"
+    elif sys.platform == "darwin":
+        root = Path.home() / "Library" / "Caches" / "ms-playwright"
+    else:
+        root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ms-playwright"
+    if not root.is_absolute():
+        root = Path(os.path.abspath(os.path.join(_from_env("INIT_CWD") or os.getcwd(), root)))
+    return root
 
 
 def _bundled_chromium() -> List[str]:
     root = _playwright_root()
+    if root is None:
+        return []
     if sys.platform == "win32":
         patterns = ["chromium-*/chrome-win64/chrome.exe", "chromium-*/chrome-win/chrome.exe"]
     elif sys.platform == "darwin":

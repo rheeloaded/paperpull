@@ -68,6 +68,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   review, and a tab of yours left showing a PDF there sent every document
   to manual review. A tab now counts as on the documents page only when
   its list is showing, and is sent back to it otherwise.
+- **PaperPull looks for Playwright's Chromium where Playwright keeps it.**
+  Playwright picks that folder from a few settings, and PaperPull did not
+  read them the same way. On Linux with XDG_CACHE_HOME set, Playwright
+  keeps its browsers under that folder. With PLAYWRIGHT_BROWSERS_PATH=0 it
+  keeps them inside its own package, and 1 is an ordinary folder name to
+  it, while PaperPull took both to mean the usual folder. On such a machine
+  an app set to use only that Chromium found none, the others opened
+  another installed browser instead, and when there was no browser at all,
+  the download PaperPull offered landed where it did not look, so it said
+  the download had not finished. PaperPull now follows Playwright's own
+  rules, which also cover a relative folder, the names npm gives these
+  settings, and a Windows session without LOCALAPPDATA. PaperPull Server
+  uses a Chrome of its own and was not affected.
 
 ### Security
 - **Every redirect is checked against the provider's own sites before it

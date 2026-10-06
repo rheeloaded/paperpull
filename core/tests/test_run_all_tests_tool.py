@@ -16,10 +16,12 @@ They also check that every suite runs on the newest Playwright the
 machine holds, as CI and the packaged app do, and that a run where one
 could not is refused.
 """
+import functools
 import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -431,6 +433,13 @@ def test_a_failing_suite_in_a_run_prints_its_frames_and_keeps_its_output(one_sui
 CHROMIUM_FOR = {"1.62.0": "1234", "1.63.0": "1243", "1.64.0": "1250"}
 
 
+@functools.lru_cache(maxsize=None)
+def _site(py: Path) -> Path:
+    """Where an environment keeps its packages."""
+    return Path(subprocess.run([str(py), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                               check=True, capture_output=True, text=True, timeout=300).stdout.strip())
+
+
 def _environment(folder: Path, packages: dict) -> Path:
     """An environment at folder/.venv holding each package named, empty
     but for its version, and nothing else. A Playwright also says which
@@ -438,8 +447,7 @@ def _environment(folder: Path, packages: dict) -> Path:
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(folder / ".venv")],
                    check=True, capture_output=True, timeout=300)
     py = rat.venv_python(folder)
-    site = Path(subprocess.run([str(py), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
-                               check=True, capture_output=True, text=True, timeout=300).stdout.strip())
+    site = _site(py)
     for name, version in packages.items():
         (site / name).mkdir(parents=True)
         (site / name / "__init__.py").write_text("", encoding="utf-8")
@@ -459,8 +467,8 @@ def _environment(folder: Path, packages: dict) -> Path:
 # The panel's holds what CI and the packaged app hold. An app's own is a
 # version behind, and so is the only one that can read a workbook, and the
 # only one with what the panel's suite needs. One has a browser and nothing
-# to read a PDF with, one has the newest Playwright and no pytest, and one
-# has everything the core suite needs but Playwright.
+# to read a PDF with, one has the newest Playwright and no pytest, one has
+# everything the core suite needs but Playwright, and one has all of it.
 HOLDING = {
     "panel": {"pytest": "9.1.1", "playwright": "1.63.0", "pypdf": "6.19.0"},
     "app": {"pytest": "9.1.1", "playwright": "1.62.0", "pypdf": "6.16.1"},
@@ -470,6 +478,8 @@ HOLDING = {
     "browser_only": {"pytest": "9.1.1", "playwright": "1.63.0"},
     "no_pytest": {"playwright": "1.64.0", "pypdf": "6.20.0"},
     "no_browser": {"pytest": "9.1.1", "pypdf": "6.19.0", "openpyxl": "3.1.5", "pdfplumber": "0.11.10"},
+    "everything": {"pytest": "9.1.1", "playwright": "1.63.0", "pypdf": "6.19.0",
+                   "openpyxl": "3.1.5", "pdfplumber": "0.11.10"},
 }
 
 
@@ -537,17 +547,75 @@ def test_a_newer_playwright_is_a_higher_number_not_a_later_string():
     assert rat.version_key(None) == rat.version_key("unknown") == ()
 
 
-@pytest.mark.parametrize("override", [None, "browsers of its own"])
-def test_the_runner_looks_for_chromium_where_the_core_does(override, tmp_path, monkeypatch):
-    """Two places that must agree. A test that starts Chromium itself finds
-    it through the core's browser module, and the runner looks for the
-    newest Playwright's own build there."""
+# Where a test that starts Chromium itself finds it. The core's browser
+# module looks where Playwright keeps its browsers, by Playwright's own
+# rules, and the runner looks for the newest Playwright's own build in the
+# same place for each suite. Until 2026-10-05 both read neither
+# XDG_CACHE_HOME, INIT_CWD nor npm's names for a setting, and took
+# PLAYWRIGHT_BROWSERS_PATH=0 and =1 as no setting at all, so the runner
+# could refuse a run whose Chromium was where Playwright keeps it.
+
+SETTINGS = ("PLAYWRIGHT_BROWSERS_PATH", "npm_config_playwright_browsers_path",
+            "npm_package_config_playwright_browsers_path", "INIT_CWD", "npm_config_init_cwd",
+            "npm_package_config_init_cwd", "XDG_CACHE_HOME", "LOCALAPPDATA")
+
+
+@pytest.fixture(scope="module")
+def a_playwright_package(tmp_path_factory):
+    """A Playwright package of the module's own, a folder with an empty
+    __init__.py, and where the runner hears it is from an interpreter that
+    would import it. Asked once, since starting an interpreter can take
+    seconds."""
+    site = tmp_path_factory.mktemp("site")
+    (site / "playwright").mkdir()
+    (site / "playwright" / "__init__.py").write_text("", encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("PYTHONPATH", str(site))
+        mp.setattr(rat, "_ASKED", {})
+        package = rat.asked(Path(sys.executable))["package"]
+    return site, package
+
+
+@pytest.mark.parametrize("platform, settings, expected", [
+    ("linux", {}, "{home}/.cache/ms-playwright"),
+    ("linux", {"XDG_CACHE_HOME": "{tmp}/cache"}, "{tmp}/cache/ms-playwright"),
+    ("darwin", {"XDG_CACHE_HOME": "{tmp}/cache"}, "{home}/Library/Caches/ms-playwright"),
+    ("win32", {"LOCALAPPDATA": "{tmp}/local"}, "{tmp}/local/ms-playwright"),
+    ("win32", {}, "{home}/AppData/Local/ms-playwright"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "{tmp}/own"}, "{tmp}/own"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "0"}, "{package}/driver/package/.local-browsers"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "1"}, "{tmp}/1"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "rel", "INIT_CWD": "{tmp}/project"}, "{tmp}/project/rel"),
+    ("linux", {"npm_config_playwright_browsers_path": "{tmp}/npm"}, "{tmp}/npm"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "", "npm_config_playwright_browsers_path": "{tmp}/npm"},
+     "{home}/.cache/ms-playwright"),
+], ids=["linux", "linux under XDG_CACHE_HOME", "macos", "windows", "windows without LOCALAPPDATA",
+        "a folder", "0 inside the package", "1 is a folder", "a relative folder from INIT_CWD",
+        "npm's name for it", "set to nothing is set"])
+def test_the_runner_looks_for_chromium_where_the_core_does(platform, settings, expected, a_playwright_package,
+                                                          tmp_path, monkeypatch):
+    """Two places that must agree, and with Playwright. A test that starts
+    Chromium itself finds it through the core's browser module, and the
+    runner looks for the newest Playwright's own build where the Playwright
+    a suite runs on keeps it, asking that interpreter where its Playwright
+    is. A Playwright package of the module's own stands in for this
+    Python's and for the interpreter the runner asks."""
     from paperpull_core import browser
-    if override:
-        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / override))
-    else:
-        monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
-    assert rat.browsers_folder() == browser._playwright_root()
+    site, package = a_playwright_package
+    assert Path(package) == site / "playwright"
+    monkeypatch.delitem(sys.modules, "playwright", raising=False)
+    monkeypatch.syspath_prepend(str(site))
+    for name in SETTINGS:
+        monkeypatch.delenv(name, raising=False)
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "platform", platform)
+    fill = {"tmp": tmp_path, "home": home, "package": package}
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value.format(**fill))
+    assert rat.browsers_folder(package, os.getcwd()) == browser._playwright_root() == Path(expected.format(**fill))
 
 
 @pytest.fixture
@@ -635,6 +703,102 @@ def test_a_run_without_the_newest_playwrights_own_chromium_is_refused(run_with, 
     assert "\nPLAYWRIGHT 1.63.0'S OWN CHROMIUM, BUILD 1243, IS NOT INSTALLED HERE.\n" in out, out
     assert "\n%s, while CI and the packaged app run 1243. Install it with\n" % here in out, out
     assert "all suites passed" not in out
+
+
+def _usual_folder(tmp_path, monkeypatch) -> Path:
+    """Nothing set that Playwright reads, and the folder it then keeps its
+    browsers in made one of the test's own."""
+    for name in SETTINGS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    if sys.platform == "win32":
+        return tmp_path / "local" / "ms-playwright"
+    if sys.platform == "darwin":
+        return tmp_path / "home" / "Library" / "Caches" / "ms-playwright"
+    return tmp_path / "home" / ".cache" / "ms-playwright"
+
+
+@pytest.fixture
+def kept_inside():
+    """Puts finished Chromium builds where an environment's Playwright keeps
+    them when PLAYWRIGHT_BROWSERS_PATH is 0, inside its own package, and
+    takes them out after the test, since the module shares the environments."""
+    made = []
+
+    def keep(py: Path, *builds) -> Path:
+        made.append(_site(py) / "playwright" / "driver" / "package" / ".local-browsers")
+        return _installed(made[-1], *builds)
+    yield keep
+    for folder in made:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+@pytest.mark.parametrize("kept_in, passes", [("its package", True), ("the usual folder", False)])
+def test_with_browsers_path_0_the_runner_looks_inside_playwright(kept_in, passes, run_with, environments,
+                                                                  kept_inside, tmp_path, monkeypatch, capsys):
+    """PLAYWRIGHT_BROWSERS_PATH=0 keeps each Playwright's browsers inside its
+    own package. The runner looked in the usual folder instead, so it refused
+    a run whose Chromium was where Playwright keeps it, and passed one where
+    a test that starts Chromium itself would find none."""
+    run_with({"aafmaa": "app"}, ["panel"], builds=())
+    usual = _usual_folder(tmp_path, monkeypatch)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "0")
+    if kept_in == "its package":
+        kept_inside(environments["panel"][1], "1243")
+    else:
+        _installed(usual, "1243")
+    assert rat.main(["--jobs", "1"]) == (0 if passes else 1)
+    out = capsys.readouterr().out
+    if passes:
+        assert "\nand its own Chromium, build 1243, for the tests that start one themselves\n" in out, out
+    else:
+        assert ("\nbut its own Chromium, build 1243, is not installed, so the tests that start one "
+                "themselves have none to take\n") in out, out
+
+
+def test_with_browsers_path_0_a_suite_without_playwright_is_not_held_to_it(run_with, environments, kept_inside,
+                                                                             tmp_path, monkeypatch, capsys):
+    """Its environment has no Playwright, so there is no package to keep a
+    build in, and its tests cannot start Chromium through one. It is named
+    among the suites missing something, and the run is not refused over a
+    Chromium it could not have used."""
+    ran = run_with({"core": "core", "aafmaa": "app"}, ["panel", "no_browser"], builds=())
+    _usual_folder(tmp_path, monkeypatch)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "0")
+    kept_inside(environments["panel"][1], "1243")
+    assert rat.main(["--jobs", "1"]) == 0
+    assert ran == {"core": environments["no_browser"][1], "aafmaa": environments["panel"][1]}
+    assert "\nand its own Chromium, build 1243, for the tests that start one themselves\n" in \
+        capsys.readouterr().out
+
+
+@pytest.mark.parametrize("setting", ["0", "browsers"], ids=["0", "a relative folder"])
+def test_every_suite_needs_the_build_where_it_looks(setting, run_with, environments, kept_inside, tmp_path,
+                                                   monkeypatch, capsys):
+    """Two suites can look in two folders. With PLAYWRIGHT_BROWSERS_PATH=0
+    each Playwright keeps its own browsers, and a relative folder is found
+    from where each suite runs. Only one environment here has what the core
+    suite needs, so the two suites run on two environments holding the same
+    Playwright, and the build has to be where each suite looks."""
+    on = {"aafmaa": environments["panel"][1], "core": environments["everything"][1]}
+    ran = run_with({"aafmaa": "app", "core": "core"}, ["panel", "everything"], builds=())
+    _usual_folder(tmp_path, monkeypatch)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", setting)
+
+    def install(suite):
+        if setting == "0":
+            kept_inside(on[suite], "1243")
+        else:
+            _installed(tmp_path / suite / setting, "1243")
+    install("aafmaa")
+    assert rat.main(["--jobs", "1"]) == 1
+    assert ran == on
+    assert "\nbut its own Chromium, build 1243, is not installed, " in capsys.readouterr().out
+    install("core")
+    assert rat.main(["--jobs", "1"]) == 0
+    assert "\nand its own Chromium, build 1243, for the tests " in capsys.readouterr().out
 
 
 def test_an_environment_that_could_not_be_asked_is_named(run_with, tmp_path, capsys):

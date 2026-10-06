@@ -14,15 +14,111 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from paperpull_core import browser
 
 
-def test_playwright_root_per_platform(monkeypatch):
-    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
-    monkeypatch.setattr(sys, "platform", "darwin")
-    assert browser._playwright_root() == Path.home() / "Library/Caches/ms-playwright"
+# -- where Playwright keeps its browsers ---------------------------------------
+#
+# By Playwright's own rules, unchanged since 1.9 (registryDirectory and
+# computeDefaultCacheDirectory in its driver). Every row that Windows can
+# show is what Playwright 1.63's own install --dry-run printed there on
+# 2026-10-05, and the Linux rows follow its driver, checked against this
+# module in WSL. Until then XDG_CACHE_HOME went unread and
+# PLAYWRIGHT_BROWSERS_PATH=0 and =1 counted as no setting, so on such a
+# machine the Chromium Playwright had downloaded was never found.
+
+SETTINGS = ("PLAYWRIGHT_BROWSERS_PATH", "npm_config_playwright_browsers_path",
+            "npm_package_config_playwright_browsers_path", "INIT_CWD", "npm_config_init_cwd",
+            "npm_package_config_init_cwd", "XDG_CACHE_HOME", "LOCALAPPDATA")
+
+
+@pytest.fixture
+def nothing_set(monkeypatch, tmp_path):
+    """None of the settings Playwright reads, a home folder of the test's
+    own and a folder of its own to run in, so no folder found is one of the
+    machine's. Hands back the home folder."""
+    for name in SETTINGS:
+        monkeypatch.delenv(name, raising=False)
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.chdir(tmp_path)
+    return home
+
+
+@pytest.mark.parametrize("platform, settings, expected", [
+    ("linux", {}, "{home}/.cache/ms-playwright"),
+    ("linux", {"XDG_CACHE_HOME": "{tmp}/cache"}, "{tmp}/cache/ms-playwright"),
+    ("linux", {"XDG_CACHE_HOME": ""}, "{home}/.cache/ms-playwright"),
+    ("linux", {"XDG_CACHE_HOME": "cache"}, "{tmp}/cache/ms-playwright"),
+    ("darwin", {"XDG_CACHE_HOME": "{tmp}/cache"}, "{home}/Library/Caches/ms-playwright"),
+    ("win32", {"LOCALAPPDATA": "{tmp}/local", "XDG_CACHE_HOME": "{tmp}/cache"}, "{tmp}/local/ms-playwright"),
+    ("win32", {}, "{home}/AppData/Local/ms-playwright"),
+    ("win32", {"LOCALAPPDATA": ""}, "{home}/AppData/Local/ms-playwright"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "{tmp}/own"}, "{tmp}/own"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "1"}, "{tmp}/1"),
+    ("win32", {"PLAYWRIGHT_BROWSERS_PATH": "1", "LOCALAPPDATA": "{tmp}/local"}, "{tmp}/1"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "rel/browsers"}, "{tmp}/rel/browsers"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "rel", "INIT_CWD": "{tmp}/project"}, "{tmp}/project/rel"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "1", "npm_config_init_cwd": "{tmp}/project"}, "{tmp}/project/1"),
+    ("linux", {"npm_config_playwright_browsers_path": "{tmp}/npm"}, "{tmp}/npm"),
+    ("linux", {"npm_package_config_playwright_browsers_path": "{tmp}/package"}, "{tmp}/package"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "", "npm_config_playwright_browsers_path": "{tmp}/npm"},
+     "{home}/.cache/ms-playwright"),
+], ids=["linux", "linux under XDG_CACHE_HOME", "linux with XDG_CACHE_HOME empty",
+        "linux with XDG_CACHE_HOME relative", "macos never reads XDG_CACHE_HOME",
+        "windows never reads XDG_CACHE_HOME", "windows without LOCALAPPDATA",
+        "windows with LOCALAPPDATA empty", "a folder", "1 is a folder", "1 is a folder on windows",
+        "a relative folder", "a relative folder from INIT_CWD", "a relative folder from npm's INIT_CWD",
+        "npm's name for it", "npm's package name for it", "set to nothing is set"])
+def test_the_browsers_folder_is_the_one_playwright_uses(platform, settings, expected, nothing_set,
+                                                       tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", platform)
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value.format(tmp=tmp_path, home=nothing_set))
+    assert browser._playwright_root() == Path(expected.format(tmp=tmp_path, home=nothing_set))
+
+
+def test_linux_finds_the_chromium_kept_under_xdg_cache_home(nothing_set, tmp_path, monkeypatch):
+    """XDG_CACHE_HOME moves the whole cache, and what Playwright downloads
+    moves with it."""
     monkeypatch.setattr(sys, "platform", "linux")
-    assert browser._playwright_root() == Path.home() / ".cache/ms-playwright"
-    monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setenv("LOCALAPPDATA", str(Path.home() / "AppData/Local"))
-    assert browser._playwright_root().name == "ms-playwright"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    exe = tmp_path / "cache" / "ms-playwright" / "chromium-1243" / "chrome-linux" / "chrome"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert browser._bundled_chromium() == [str(exe)]
+
+
+def _a_playwright_package(tmp_path, monkeypatch) -> Path:
+    """A Playwright package of the test's own, a folder with an empty
+    __init__.py, and the one this Python would import."""
+    site = tmp_path / "site"
+    (site / "playwright").mkdir(parents=True)
+    (site / "playwright" / "__init__.py").write_text("", encoding="utf-8")
+    monkeypatch.delitem(sys.modules, "playwright", raising=False)
+    monkeypatch.syspath_prepend(str(site))
+    return site / "playwright"
+
+
+def test_0_is_the_folder_inside_playwrights_own_package(nothing_set, tmp_path, monkeypatch):
+    """Playwright's driver keeps them beside its package.json, at
+    driver/package in its Python package, and a Chromium there is found."""
+    package = _a_playwright_package(tmp_path, monkeypatch)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "0")
+    own = package / "driver" / "package" / ".local-browsers"
+    exe = own / "chromium-1243" / "chrome-linux" / "chrome"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert browser._playwright_root() == own
+    assert browser._bundled_chromium() == [str(exe)]
+
+
+def test_0_without_playwright_names_no_folder(nothing_set, monkeypatch):
+    """There is no package to keep them in, so there is nothing to find,
+    and the usual folder is not looked in instead."""
+    monkeypatch.setitem(sys.modules, "playwright", None)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "0")
+    assert browser._playwright_root() is None
+    assert browser._bundled_chromium() == []
 
 
 def test_playwright_browsers_path_override_wins(monkeypatch, tmp_path):

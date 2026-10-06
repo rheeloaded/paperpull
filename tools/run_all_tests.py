@@ -215,24 +215,25 @@ _ASKED: dict = {}
 ASK_WITHIN = 300
 
 # What an interpreter is asked, once. The modules it can import, the
-# version of the Playwright it holds, and the Chromium build that
-# Playwright was made for, each None when there is none to say.
+# version of the Playwright it holds, the Chromium build that Playwright
+# was made for, and the folder that Playwright is in, each None when there
+# is none to say.
 ASK = """
 import importlib.metadata, importlib.util, json, os, sys
 found = [m for m in sys.argv[1:] if importlib.util.find_spec(m) is not None]
-version = chromium = None
+version = chromium = package = None
 if "playwright" in found:
     try:
         version = importlib.metadata.version("playwright")
     except Exception:
         version = "unknown"
     try:
-        where = importlib.util.find_spec("playwright").submodule_search_locations[0]
-        with open(os.path.join(where, "driver", "package", "browsers.json"), encoding="utf-8") as f:
+        package = importlib.util.find_spec("playwright").submodule_search_locations[0]
+        with open(os.path.join(package, "driver", "package", "browsers.json"), encoding="utf-8") as f:
             chromium = next(str(b["revision"]) for b in json.load(f)["browsers"] if b["name"] == "chromium")
     except Exception:
         chromium = None
-print(json.dumps({"found": found, "playwright": version, "chromium": chromium}))
+print(json.dumps({"found": found, "playwright": version, "chromium": chromium, "package": package}))
 """
 
 
@@ -245,14 +246,15 @@ def venv_python(d: Path):
 
 
 def asked(py: Path) -> dict:
-    """What this interpreter can import, which Playwright it holds and the
-    Chromium build that was made for, asked once each, with this checkout's
-    core on its path as its suite will have it. Asked from the checkout's
-    root, so the folder a run was started from adds nothing. When it cannot
-    say, nothing at all, and why, in words that name no place."""
+    """What this interpreter can import, which Playwright it holds, the
+    Chromium build that was made for and the folder that Playwright is in,
+    asked once each, with this checkout's core on its path as its suite
+    will have it. Asked from the checkout's root, so the folder a run was
+    started from adds nothing. When it cannot say, nothing at all, and why,
+    in words that name no place."""
     key = str(py)
     if key not in _ASKED:
-        answer = {"found": [], "playwright": None, "chromium": None, "failed": None}
+        answer = {"found": [], "playwright": None, "chromium": None, "package": None, "failed": None}
         try:
             r = subprocess.run([str(py), "-c", ASK, *WHY], capture_output=True, text=True,
                                cwd=str(REPO), env=with_this_core(PLUGINS), timeout=ASK_WITHIN)
@@ -264,9 +266,11 @@ def asked(py: Path) -> dict:
             try:
                 said = json.loads(r.stdout.strip().splitlines()[-1])
                 version, chromium = said.get("playwright"), said.get("chromium")
+                package = said.get("package")
                 answer.update(found=[str(m) for m in said.get("found") or []],
                               playwright=None if version is None else str(version),
-                              chromium=None if chromium is None else str(chromium))
+                              chromium=None if chromium is None else str(chromium),
+                              package=None if package is None else str(package))
             except (ValueError, IndexError, AttributeError, TypeError):
                 answer["failed"] = "gave no answer that could be read, and ended with code %s" % r.returncode
         _ASKED[key] = answer
@@ -353,24 +357,47 @@ def older_playwright(work: list):
                     if v is not None and version_key(v) != version_key(newest)]
 
 
-def browsers_folder() -> Path:
-    """Where the browsers Playwright downloads are kept, found the way the
-    core's browser module finds them for a test that starts Chromium itself."""
-    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
-    if override and override not in ("0", "1"):
-        return Path(override)
-    if sys.platform == "win32":
-        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ms-playwright"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / "ms-playwright"
-    return Path.home() / ".cache" / "ms-playwright"
+def from_env(name: str):
+    """A setting read the way Playwright reads one, the variable itself and
+    then the two names npm gives it. A variable that is set, even to
+    nothing, is the answer, and npm's names are not read then."""
+    for key in (name, "npm_config_" + name.lower(), "npm_package_config_" + name.lower()):
+        value = os.environ.get(key)
+        if value is not None:
+            return value
+    return None
 
 
-def chromium_builds() -> list:
-    """The full Chromium builds Playwright finished installing here, newest
-    first. A test that starts Chromium itself takes the first."""
+def browsers_folder(package=None, cwd=None):
+    """Where the Playwright in the folder `package` keeps the browsers it
+    downloads, when it is used from the folder `cwd`, by Playwright's own
+    rules. They are the rules the core's browser module follows to find
+    Chromium for a test that starts one itself (_playwright_root), and a
+    test holds the two together. None when PLAYWRIGHT_BROWSERS_PATH is 0,
+    a folder inside Playwright's own package, and there is no package."""
+    override = from_env("PLAYWRIGHT_BROWSERS_PATH")
+    if override == "0":
+        if not package:
+            return None
+        folder = Path(package) / "driver" / "package" / ".local-browsers"
+    elif override:
+        folder = Path(override)
+    elif sys.platform == "win32":
+        folder = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "ms-playwright"
+    elif sys.platform == "darwin":
+        folder = Path.home() / "Library" / "Caches" / "ms-playwright"
+    else:
+        folder = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ms-playwright"
+    if not folder.is_absolute():
+        folder = Path(os.path.abspath(os.path.join(from_env("INIT_CWD") or cwd or os.getcwd(), folder)))
+    return folder
+
+
+def chromium_builds(folder) -> list:
+    """The full Chromium builds Playwright finished installing in folder,
+    newest first. A test that starts Chromium itself takes the first."""
     out = []
-    for p in browsers_folder().glob("chromium-*"):
+    for p in (Path(folder).glob("chromium-*") if folder else []):
         m = re.fullmatch(r"chromium-(\d+)", p.name)
         if m and (p / "INSTALLATION_COMPLETE").is_file():
             out.append(int(m.group(1)))
@@ -916,7 +943,18 @@ def run(args) -> int:
             counted.append((name, d, py))
     newest, older = older_playwright(counted)
     build = own_chromium(newest, counted)
-    builds = chromium_builds() if build else []
+    builds = []
+    if build:
+        # A suite's tests look where the Playwright it runs on keeps browsers,
+        # from the folder the suite runs in. That is one folder for the whole
+        # run, unless PLAYWRIGHT_BROWSERS_PATH is 0, when every Playwright
+        # keeps its own, or a relative folder, which each suite finds from
+        # where it runs. A folder without the build speaks for the run.
+        for folder in dict.fromkeys(browsers_folder(asked(py)["package"], d)
+                                    for _name, d, py in counted if playwright_of(py)):
+            builds = chromium_builds(folder)
+            if int(build) not in builds:
+                break
     if jobs > 1 and len(work) > 1:
         print("%d suites, %d at a time, longest first" % (len(work), min(jobs, len(work))), flush=True)
 
