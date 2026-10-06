@@ -398,3 +398,19 @@ def test_every_shell_script_parses(bash, tmp_path):
     assert {"setup-all.command", "paperpull", "server/start.sh"} <= names, sorted(names)
     errors = _parse_errors(bash, scripts, tmp_path)
     assert not errors, "bash cannot read these.\n" + "\n".join(errors)
+
+
+def test_every_shell_script_checks_out_with_unix_line_endings():
+    """A Windows clone gives a text file CRLF unless .gitattributes pins
+    it, and a script with CRLF does not start on macOS or Linux, or in WSL
+    on that clone. paperpull has no suffix, so the *.command and *.sh lines
+    missed it, and in WSL it said env could not find bash with a carriage
+    return on the end."""
+    names = [name for name, _ in _shell_scripts()]
+    assert "paperpull" in names, names
+    r = subprocess.run([shutil.which("git"), "check-attr", "-z", "eol", "--", *names],
+                       cwd=REPO, capture_output=True, text=True)
+    fields = r.stdout.split("\0")
+    eol = dict(zip(fields[0::3], fields[2::3]))
+    unpinned = [name for name in names if eol.get(name) != "lf"]
+    assert not unpinned, "pin these to LF in .gitattributes, " + ", ".join(unpinned)

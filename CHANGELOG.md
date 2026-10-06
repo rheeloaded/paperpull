@@ -24,6 +24,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   had problems and asked for another run, since the script still checked
   for the browser download it no longer makes. Its banner no longer says
   it downloads Playwright's Chromium either.
+- **`./paperpull` runs in WSL from a Windows clone.** `.gitattributes`
+  kept every `.command` and `.sh` file at Unix line endings but missed the
+  terminal command, which has no suffix, so a Windows clone gave it CRLF,
+  and in WSL it stopped before doing anything, since `env` looked for a
+  `bash` with a carriage return on the end. A test now checks that every
+  shell script, found by its first line as well as its name, checks out
+  with Unix line endings.
 - **A recording no longer keeps a downloaded file's name.** It keeps the
   file's kind, like `.pdf`, and the shape of the name, every letter
   written as a and every digit as 9, so it still shows where the name's
