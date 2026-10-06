@@ -221,6 +221,27 @@ def test_the_new_tabs_a_page_asks_for_are_counted(page):
     assert blob_capture.tabs_asked(page) == 0, "arming again counts afresh"
 
 
+def test_every_link_a_page_saved_through_is_said_named_or_not(page):
+    """A page saves a document through a link with a download mark, with a
+    name given or with none. Where each link pointed is what says where the
+    document is, here a blob of the page's own. A link with no download mark
+    saves nothing and is not one."""
+    _tabs_page(page)
+    assert blob_capture.saved_links(page) is None, "a page never armed cannot say"
+    assert blob_capture.arm(page)
+    with page.expect_download():
+        page.click("#save")
+    with page.expect_download():
+        page.click("#bare")
+    with page.context.expect_page():
+        page.click("#link")
+    links = blob_capture.saved_links(page)
+    assert len(links) == 2, links
+    assert all(link.startswith("blob:%s/" % HOST) for link in links), links
+    assert blob_capture.arm(page)
+    assert blob_capture.saved_links(page) == [], "arming again forgets the links"
+
+
 def test_a_window_the_page_already_had_is_no_new_tab(page):
     """A name sends window.open back to a window the page opened before, or
     to a frame of the page, and neither is a new tab to wait for."""

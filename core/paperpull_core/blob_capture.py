@@ -76,7 +76,8 @@ HOOK_JS = r"""() => {
   const clicked = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
     try {
-      if (this.download) window.__paperpullNames.push({href: this.href, name: String(this.download)});
+      // A download mark with no name given is still one.
+      if (this.hasAttribute('download')) window.__paperpullNames.push({href: this.href, name: String(this.download)});
       if (this.target === '_blank') {
         window.__paperpullOpened.push(String(this.href || ''));
         // A link that saves what it points at opens no tab, a bare download
@@ -168,6 +169,27 @@ def take(page, urls: Optional[list] = None, opened: bool = False) -> Optional[Tu
     if data[:5] != b"%PDF-":
         return None
     return data, str(got.get("name") or "")
+
+
+# The addresses of the links with a download mark the page clicked since it
+# was armed, oldest first, or null when this window was never armed.
+SAVED_JS = r"""() => Array.isArray(window.__paperpullNames)
+  ? window.__paperpullNames.map((n) => String((n && n.href) || '')) : null"""
+
+
+def saved_links(page) -> Optional[list]:
+    """The addresses of the links with a download mark the page clicked since
+    it was armed, oldest first, or None when the page cannot say, one never
+    armed or one that has moved on since. A page saves a document it built
+    or fetched this way, and the address says where that document is, a
+    blob of the page's own or an address of the site's. The name the page
+    gave the file is not here, since a provider can name a statement after
+    the account it belongs to."""
+    try:
+        got = page.evaluate(SAVED_JS)
+    except Exception:
+        return None
+    return [str(h) for h in got] if isinstance(got, list) else None
 
 
 def tabs_asked(page) -> Optional[int]:
