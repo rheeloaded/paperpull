@@ -1175,10 +1175,10 @@ def items_counted_on(page) -> int:
     return items_counted(_page_check.page_text(page, "screen"))
 
 
-# The quantity Walmart prints on each item row of its invoice, as in
-# "Shopped Qty 1". Not from a word's start, since the invoice sets a row's
-# pieces side by side and a PDF's text can read them run together, as
-# "ShoppedQty 1".
+# The quantity Walmart prints on each item row of its invoice, a Qty label
+# and a count. Not from a word's start, since the invoice sets a row's
+# pieces side by side and a PDF's text can read the label run together
+# with the word printed before it.
 _ITEM_ROW_RE = re.compile(r"(?:qty|quantity)\s*:?\s*\d+", re.I)
 
 
