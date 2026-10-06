@@ -330,17 +330,22 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
     which is only discoverable by launching it, so the caller works down this
     list until one actually answers.
     """
-    real = _real_browsers()
     found = _bundled_chromium()
     # Only the newest bundled build. Playwright leaves older ones behind, and
     # retrying the same browser at a different revision opens a second window
     # to fail the same way, since the usual cause is the port rather than the
     # build.
     bundled = [(CHROMIUM, p) for p in found[:1]]
+    if mode == BUNDLED:
+        # Their own browsers are not even looked for. Until 2026-10-06 they
+        # were looked up first and the answer thrown away, so every launch of
+        # the bundled copy searched the machine for the browsers installed on
+        # it (on Windows the registry, Program Files and the person's own
+        # AppData), and so did every test that takes its Chromium from here.
+        return bundled
+    real = _real_browsers()
     if mode == INSTALLED:
         return real
-    if mode == BUNDLED:
-        return bundled
     # With a bundled copy already present it stays first unless an app asks for
     # a real browser. Reordering that would move existing users onto a
     # different browser, and a profile built by one is not guaranteed to open

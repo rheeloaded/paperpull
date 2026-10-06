@@ -133,6 +133,10 @@ def test_mac_chromium_is_found_inside_the_app_bundle(monkeypatch, tmp_path):
     """macOS ships Chromium inside a .app, not as a bare executable."""
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    # find_browser looks for the browsers installed as well, and with nothing
+    # standing in for them it looked in the Applications folders of whichever
+    # machine ran this.
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [])
     exe = tmp_path / "chromium-1234/chrome-mac/Chromium.app/Contents/MacOS/Chromium"
     exe.parent.mkdir(parents=True)
     exe.write_text("#!/bin/sh\n")
@@ -601,6 +605,20 @@ def test_installed_mode_never_reaches_for_the_bundled_copy(monkeypatch):
     monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
     monkeypatch.setattr(browser, "_bundled_chromium", lambda: ["bundled"])
     assert browser.browser_candidates(mode=browser.INSTALLED) == [(browser.EDGE, "edge")]
+    assert browser.browser_candidates(mode=browser.BUNDLED) == [(browser.CHROMIUM, "bundled")]
+
+
+def test_bundled_mode_never_looks_for_their_own_browsers(monkeypatch):
+    """Only the Playwright build is wanted, so nothing of the person's own is
+    looked up. It used to be, and the answer thrown away, which read the
+    registry and the folders browsers install into on every launch of the
+    bundled copy and in every test that starts its browser from
+    browser_candidates(mode=BUNDLED), 46 test files on 2026-10-06."""
+    def looked(*a, **k):
+        raise AssertionError("their own browsers were looked for")
+    monkeypatch.setattr(browser, "_real_browsers", looked)
+    monkeypatch.setattr(browser, "_registry_browsers", looked)
+    monkeypatch.setattr(browser, "_bundled_chromium", lambda: ["bundled"])
     assert browser.browser_candidates(mode=browser.BUNDLED) == [(browser.CHROMIUM, "bundled")]
 
 
