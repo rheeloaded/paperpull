@@ -37,10 +37,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   statements page, under Activity and All Reports, by its address, reads
   the list that page gets for itself as it loads, and presses each ready
   PDF statement's own Download button, found in its row by the dates the
-  row shows. Each statement has to name those dates in its own text before
-  it is filed, under the same names a personal account's statements get.
-  One whose dates cannot be checked goes to Manual Review, and one that
-  names other dates is not kept. A CSV and a statement PayPal is still
+  row shows. Each statement has to name its first and last day in its own
+  text before it is filed, under the same names a personal account's
+  statements get. One whose dates cannot be checked, or that names another
+  statement's dates better than its own, goes to Manual Review instead,
+  with a note saying which. A CSV and a statement PayPal is still
   preparing are left alone and counted, a statement whose status, kind of
   file or dates the app cannot read is left alone and described in the
   failure file, and nothing that would create, generate, request or

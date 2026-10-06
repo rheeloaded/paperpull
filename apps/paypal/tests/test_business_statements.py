@@ -54,6 +54,8 @@ class FakeBusiness(B.Business):
 
     def __init__(self, context, variant="blob"):
         super().__init__(variant)
+        # The statements address answers a sign-in page while this is set.
+        self.signed_out = False
         self.routed, self.requested = [], []
         context.on("request", lambda r: self.requested.append(r.url))
         context.route("**/*", self._answer)
@@ -66,6 +68,11 @@ class FakeBusiness(B.Business):
         path = parts.path
         if parts.hostname != "www.paypal.com":
             route.abort()
+        elif url == B.STATEMENTS and self.signed_out:
+            route.fulfill(status=200, content_type="text/html", body=_moved_to(
+                "/signin?returnUri=%2Fmyaccount%2Fstatements%2Fmonthly",
+                "<form><input type='email' name='login_email'>"
+                "<input type='password' name='login_password'></form>"))
         elif url == B.STATEMENTS:
             route.fulfill(status=200, content_type="text/html", body=_moved_to(
                 B.SETTINGS, "<main><h1>Account access</h1><a href='/businessmanage/users'>"
@@ -148,14 +155,14 @@ def _attach(monkeypatch, context, answer=None):
     monkeypatch.setattr(paypal_docs.browser_launcher, "ask_or_none", lambda prompt: answer)
 
 
-def _run(monkeypatch, context, tmp_path, *flags, capsys):
-    """One command through main, as the panel runs it. Its output, folded,
-    its run result line, and the code it stopped with, None when it did
-    not stop."""
+def _run(monkeypatch, context, tmp_path, *flags, capsys, cfg=None):
+    """One command through main, as the panel runs it, with any settings
+    in `cfg` added to the config. Its output, folded, its run result line,
+    and the code it stopped with, None when it did not stop."""
     _attach(monkeypatch, context)
     stopped = None
     try:
-        paypal_docs.main(list(flags) + ["--config", str(B.config(tmp_path))])
+        paypal_docs.main(list(flags) + ["--config", str(B.config(tmp_path, **(cfg or {})))])
     except SystemExit as e:
         stopped = e.code
     out = capsys.readouterr().out
@@ -197,17 +204,95 @@ def test_a_second_run_takes_nothing_twice(business, tmp_path, monkeypatch, capsy
     assert "Already downloaded" in said
 
 
-def test_a_statement_whose_text_names_other_days_is_refused(business, tmp_path,
-                                                            monkeypatch, capsys):
-    """August's row hands over July's statement. It is destroyed rather than
-    filed under August's name, and the run says a wrong document came."""
+def test_a_statement_whose_text_names_other_days_goes_to_review_not_the_archive(
+        business, tmp_path, monkeypatch, capsys):
+    """August's row hands over July's statement. It is never filed under
+    August's name, and it is not destroyed either, since the check can be
+    wrong too. It waits in Manual Review with a note saying which it was."""
     fake, context = business
     fake.served[B.ACCOUNT_ID + "1"] = B.JULY
     said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
     saved = B.statements(tmp_path)
     assert "2031-08-31 PayPal Monthly Statement.pdf" not in saved
     assert saved.get("2031-07-31 PayPal Monthly Statement.pdf") == B.JULY
+    assert B.statements(tmp_path, "Manual Review") == {
+        "2031-08-31 PayPal Monthly Statement.pdf": B.JULY}
+    assert result["manual_review"] == 1 and result["wrong_document"] == 0
+    assert "It names other days than it was listed under" in said
+    assert "could not be checked" not in said
+
+
+def test_with_refuse_wrong_documents_set_such_a_statement_is_not_kept(
+        business, tmp_path, monkeypatch, capsys):
+    fake, context = business
+    fake.served[B.ACCOUNT_ID + "1"] = B.JULY
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys,
+                           cfg={"refuse_wrong_documents": True})
+    assert "2031-08-31 PayPal Monthly Statement.pdf" not in B.statements(tmp_path)
+    assert B.statements(tmp_path, "Manual Review") == {}
     assert result["wrong_document"] == 1
+
+
+# -- a correct statement is never destroyed --------------------------------------------
+#
+# Each statement here names its own first and last day, the day the period
+# before it closed, transactions inside it and a payment due after it, as a
+# real statement does (business_pages.statement). An August statement that
+# named July's closing day and a payment on the 17th was taken for July's
+# and destroyed, and so was a custom statement over July and August, since
+# July's month was found inside 08/17/2031 and a statement ending on the
+# same day as a monthly one kept no fact of its own (review of 69dbec7).
+
+def _with_custom(fake, *also):
+    """The list holding the custom statement over July and August, and the
+    statements named, by their ids."""
+    fake.pages = [[r for r in B.ROWS if r["id"] in also] + [B.CUSTOM_ROW]]
+    fake.shown[B.CUSTOM_ID] = B.CUSTOM_SHOWN
+    fake.served[B.CUSTOM_ID] = B.CUSTOM
+
+
+def test_a_correct_monthly_statement_naming_the_days_around_it_is_filed(
+        business, tmp_path, monkeypatch, capsys):
+    fake, context = business
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert B.statements(tmp_path) == B.FILED, said
+    assert B.statements(tmp_path, "Manual Review") == {}
+    assert not result["manual_review"] and not result["wrong_document"]
+
+
+def test_a_correct_custom_statement_is_filed(business, tmp_path, monkeypatch, capsys):
+    """July's statement is listed beside it, and the custom statement names
+    July's last day among its own transactions."""
+    fake, context = business
+    _with_custom(fake, B.ACCOUNT_ID + "4")
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert B.statements(tmp_path) == {
+        B.CUSTOM_FILED: B.CUSTOM, "2031-07-31 PayPal Monthly Statement.pdf": B.JULY}, said
+    assert not result["manual_review"] and not result["wrong_document"]
+
+
+def test_a_monthly_and_a_custom_statement_ending_the_same_day_are_both_filed(
+        business, tmp_path, monkeypatch, capsys):
+    fake, context = business
+    _with_custom(fake, B.ACCOUNT_ID + "1")
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert B.statements(tmp_path) == {
+        B.CUSTOM_FILED: B.CUSTOM, "2031-08-31 PayPal Monthly Statement.pdf": B.AUGUST}, said
+    assert not result["manual_review"] and not result["wrong_document"]
+
+
+def test_with_both_months_and_the_custom_listed_nothing_is_destroyed(
+        business, tmp_path, monkeypatch, capsys):
+    """The custom statement's first day is July's and its last day August's,
+    so nothing of its own is left to tell it by, and the July day among its
+    transactions reads as July's. It waits in Manual Review, and both
+    monthly statements are filed."""
+    fake, context = business
+    _with_custom(fake, B.ACCOUNT_ID + "1", B.ACCOUNT_ID + "4")
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert B.statements(tmp_path) == B.FILED, said
+    assert B.statements(tmp_path, "Manual Review") == {B.CUSTOM_FILED: B.CUSTOM}
+    assert result["manual_review"] == 1 and not result["wrong_document"]
 
 
 def test_a_row_is_found_by_its_days_whatever_order_the_table_draws(business, tmp_path,
@@ -255,24 +340,56 @@ MAKES_A_REPORT = ["Create statement", "Generate statement", "Request statement",
 @pytest.mark.parametrize("label", MAKES_A_REPORT)
 def test_the_guard_refuses_a_control_that_makes_a_report_or_another_kind_of_file(label):
     assert not site.is_safe_control(label), label
-    reads = getattr(site, "reads_as_download", None)
+    reads = getattr(site, "is_download_control", None)
     assert reads is None or not reads([label], {"shows": label, "named": []}), label
 
 
 def test_the_guard_still_passes_a_statements_download():
     for label in ("Download", "Download PDF", "Download statement"):
         assert site.is_safe_control(label), label
-        assert site.reads_as_download([label], {"shows": label, "named": ["download"]}), label
+        assert site.is_download_control([label], {"shows": label, "named": ["download"]}), label
 
 
 def test_a_download_control_is_one_only_when_both_readings_say_so():
-    assert not site.reads_as_download(["Download"], None), "a control that would not answer"
-    assert not site.reads_as_download([], {"shows": "Download", "named": []})
-    assert not site.reads_as_download(["Download"], {"shows": "Download CSV", "named": []})
-    assert not site.reads_as_download(["Download"], {"shows": "Download",
+    assert not site.is_download_control(["Download"], None), "a control that would not answer"
+    assert not site.is_download_control([], {"shows": "Download", "named": []})
+    assert not site.is_download_control(["Download"], {"shows": "Download CSV", "named": []})
+    assert not site.is_download_control(["Download"], {"shows": "Download",
                                                      "named": ["Request statement"]})
-    assert not site.reads_as_download(["Download", "Generate"], {"shows": "Download",
+    assert not site.is_download_control(["Download", "Generate"], {"shows": "Download",
                                                                  "named": []})
+
+
+def _changed_at_the_first_press(monkeypatch, script):
+    """Run `script` in the page as the first press is armed, after the app
+    has found the row and read its control and before it presses."""
+    real, done = site.blob_capture.arm, []
+
+    def arm(page):
+        if not done:
+            done.append(True)
+            page.evaluate(script)
+        return real(page)
+    monkeypatch.setattr(site.blob_capture, "arm", arm)
+
+
+@pytest.mark.parametrize("change", [
+    "(row) => { row.querySelector('button.dl').firstChild.nodeValue = 'Request statement'; }",
+    "(row) => { row.children[1].lastChild.textContent = 'Jun 1, 2031 - Jun 30, 2031'; }",
+], ids=["its control relabeled", "another statement drawn in its row"])
+def test_a_row_that_changed_between_reading_and_the_press_is_not_pressed(
+        business, tmp_path, monkeypatch, capsys, change):
+    """August's row, found and read, is changed before the press, its
+    Download given another label, or its row given another statement's
+    days. Nothing is pressed for August, and July is taken as before."""
+    fake, context = business
+    _changed_at_the_first_press(monkeypatch, (
+        "() => (%s)(document.querySelector('button.dl[data-row=\"%s\"]').closest('tr'))"
+        % (change, B.ACCOUNT_ID + "1")))
+    said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    assert fake.pressed == [B.ACCOUNT_ID + "4"], said
+    assert B.statements(tmp_path) == {"2031-07-31 PayPal Monthly Statement.pdf": B.JULY}
+    assert result["manual_review"] == 1 and fake.flags == []
 
 
 def test_no_forbidden_control_is_pressed_on_the_page(business, tmp_path, monkeypatch, capsys):
@@ -309,6 +426,25 @@ def test_a_row_whose_status_cannot_be_read_is_refused_and_written_down(
     assert [u["reads_as"] for u in unread] == ["unread status"]
     for canary in B.CANARIES:
         assert canary.lower() not in text.lower()
+
+
+def test_a_business_runs_failure_file_counts_the_business_pages_own_selectors(
+        business, tmp_path, monkeypatch, capsys):
+    """The journal and the failure file counted the personal statements
+    page's selectors on the business page, and said the rows matched
+    nothing and the selector was wrong."""
+    fake, context = business
+    odd = B.ACCOUNT_ID + "5"
+    fake.pages = [B.ROWS + [B.row(odd, "Jun 1, 2031 - Jun 30, 2031", status=B.HOLDER)]]
+    fake.shown[odd] = B.shown("Jun 1, 2031 - Jun 30, 2031", "Jul 2, 2031", "PDF", B.HOLDER,
+                              "download")
+    said, _result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    files = sorted((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    report = json.loads(files[0].read_text(encoding="utf-8"))
+    counted = {e["name"]: e for e in report["selectors"]}
+    assert set(counted) == {"doc_row", "download_control", "page_ready"}, sorted(counted)
+    assert all(e.get("matched") for e in counted.values()), counted
+    assert "matched nothing" not in said
 
 
 # -- a list of more than one page ---------------------------------------------------
@@ -391,6 +527,24 @@ def test_resume_after_a_run_whose_list_stopped_says_so_too(business, tmp_path,
     _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
     fake.reports_page = False
     _run(monkeypatch, context, tmp_path, "--pilot", capsys=capsys)
+    said, result, stopped = _run(monkeypatch, context, tmp_path, "--resume", capsys=capsys)
+    assert "everything in scope is complete" not in said
+    assert "stopped before it read PayPal's whole list" in said
+    assert stopped == 0 and result["stopped"] == 1
+
+
+def test_resume_after_a_pilot_stopped_at_a_sign_in_page_is_not_reported_clean(
+        business, tmp_path, monkeypatch, capsys):
+    """Run All read the whole list. The Pilot after it met a sign-in page
+    with nobody at the console to answer, the panel's most common stop, and
+    left by the session check's own stop, past every place a stopped list
+    was noted. Resume said everything was complete from Run All's note."""
+    fake, context = business
+    _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
+    fake.signed_out = True
+    said, result, stopped = _run(monkeypatch, context, tmp_path, "--pilot", capsys=capsys)
+    assert stopped == 0 and result["stopped"] == 1 and "signed you out" in said
+    fake.signed_out = False
     said, result, stopped = _run(monkeypatch, context, tmp_path, "--resume", capsys=capsys)
     assert "everything in scope is complete" not in said
     assert "stopped before it read PayPal's whole list" in said

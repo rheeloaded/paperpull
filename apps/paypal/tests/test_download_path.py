@@ -61,6 +61,22 @@ class Checked(StrictDelivery):
         return checked
 
 
+class Refused(StrictDelivery):
+    """The stand-in, with a delivery that says the statement named other
+    days than it was listed under, as the real one says of one it placed
+    when it is not strict."""
+
+    def _fake(self, name):
+        fake = super()._fake(name)
+
+        def refused(*args, **kwargs):
+            got = fake(*args, **kwargs)
+            return delivery.Delivery(got.outcome, got.mechanism,
+                                     identity.Verdict(identity.REFUSED, ("date", "start"), ()))
+        refused.__name__ = name
+        return refused
+
+
 def _docs():
     out = []
     for first, last in DAYS:
@@ -113,7 +129,7 @@ def test_a_run_reaches_the_capture_with_arguments_it_accepts(tmp_path, monkeypat
     assert len(app.stats["new_files"]) == 3 and not failures
     first = spy.calls[0].arguments
     assert first["rivals"], "the rows it could be confused with never arrived"
-    assert first["strict"] is True
+    assert first["strict"] is False, "a refusal would destroy a statement the check got wrong"
     assert first["settle_ms"] == site.BUSINESS_SETTLE_MS
     assert first["is_safe_url"] is site.is_safe_url
     assert first["request"].close_new_tabs is True
@@ -149,8 +165,53 @@ def test_what_the_page_saved_is_placed_through_the_same_check(tmp_path, monkeypa
     app.process(_docs()[:1])
     assert [c.name for c in spy.calls] == ["deliver", "place"]
     placed = spy.calls[1].arguments
-    assert placed["strict"] is True and placed["expect"] == site.Period(*DAYS[0]).identity()
+    assert placed["strict"] is False and placed["expect"] == site.Period(*DAYS[0]).identity()
     assert placed["data"][:5] == b"%PDF-"
+
+
+def test_the_check_is_strict_only_when_refuse_wrong_documents_says_so(tmp_path, monkeypatch):
+    spy = Checked().install(monkeypatch)
+    app, _failures, _pressed = _app(tmp_path, monkeypatch)
+    app.config["refuse_wrong_documents"] = True
+    app.process(_docs()[:1])
+    assert spy.calls[0].arguments["strict"] is True
+
+
+def test_a_statement_naming_other_days_goes_to_review_with_a_note_saying_so(
+        tmp_path, monkeypatch, capsys):
+    spy = Refused().install(monkeypatch)
+    app, failures, _pressed = _app(tmp_path, monkeypatch)
+    app.process(_docs()[:1])
+    assert spy.calls[0].arguments["strict"] is False
+    assert app.stats["manual_review"] == 1 and not app.stats["new_files"]
+    assert not list(tmp_path.glob("*.pdf")), "it was filed in the archive"
+    assert len(list((tmp_path / "review").glob("*.pdf"))) == 1
+    said = " ".join(capsys.readouterr().out.split())
+    assert "It names other days than it was listed under, so it was put in Manual Review" in said
+    assert "could not be checked" not in said
+    assert failures and failures[0][1] == "it names other days than it was listed under"
+
+
+def test_a_statement_that_cannot_go_to_review_is_never_left_under_its_name(
+        tmp_path, monkeypatch, capsys):
+    """Moving it to Manual Review failed, as it does while a sync client or
+    a virus scanner holds a file. It used to stay in the archive under the
+    name it would have been filed by."""
+    Refused().install(monkeypatch)
+    app, _failures, _pressed = _app(tmp_path, monkeypatch)
+    real = Path.replace
+
+    def held(self, target):
+        if Path(target).parent == tmp_path / "review":
+            raise OSError("held by another program")
+        return real(self, target)
+    monkeypatch.setattr(Path, "replace", held)
+    app.process(_docs()[:1])
+    assert not list(tmp_path.glob("*.pdf")), "left in the archive under its name"
+    assert not list((tmp_path / "review").glob("*.pdf"))
+    assert app.stats["manual_review"] == 1
+    said = " ".join(capsys.readouterr().out.split())
+    assert "could not be moved to Manual Review, so it was not kept" in said
 
 
 def test_the_stand_in_refuses_what_the_real_call_would():

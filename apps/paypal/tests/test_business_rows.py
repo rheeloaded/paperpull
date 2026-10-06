@@ -119,13 +119,23 @@ def test_a_record_holds_a_statements_days_and_never_its_id():
         assert site.business_ref(other) is None, other
 
 
-def test_a_month_is_titled_and_checked_as_a_month():
-    period = site.Period(*AUGUST)
-    assert period.title() == "Monthly Statement - August 2031"
-    assert period.identity().date == "2031-08-31" and period.identity().period == "2031-08"
+def test_a_month_is_titled_as_a_month_and_any_other_range_by_its_days():
+    assert site.Period(*AUGUST).title() == "Monthly Statement - August 2031"
     odd = site.Period("2031-08-05", "2031-09-04")
     assert odd.title() == "Statement - 2031-08-05 to 2031-09-04"
-    assert odd.identity().period == "", "a period across two months names neither"
+
+
+@pytest.mark.parametrize("days", [AUGUST, ("2031-07-01", "2031-08-31"),
+                                  ("2031-08-05", "2031-08-20"), ("2031-08-31", "2031-08-31")])
+def test_every_statement_is_checked_by_its_first_and_last_day_whatever_its_range(days):
+    """The same two kinds of fact for a month and for any other range. A
+    month that carried its month as well, beside a custom statement ending
+    on the same day that carried only that day, kept its month once the
+    shared day stopped counting, and the custom statement was refused when
+    its text mentioned the month (review of 69dbec7)."""
+    checked = site.Period(*days).identity()
+    assert (checked.date, checked.start, checked.period) == (days[1], days[0], "")
+    assert set(checked.strong()) == {"date", "start"}
 
 
 def test_a_rows_words_name_its_days_only_as_dates_of_their_own():

@@ -582,6 +582,17 @@ BUSINESS_SETTLE_MS = 30000
 
 # A row of the drawn list.
 ROW_SELECTOR = "table tbody tr"
+
+# What the business statements page looks like, for the journal and a
+# failure file on a business account's run, in place of FALLBACK, which
+# describes the personal statements page. Judged against this page those
+# said the rows matched nothing and the selector was wrong. A next-page
+# control is left out, since a list of one page has none.
+BUSINESS_FALLBACK = {
+    "doc_row": ROW_SELECTOR,
+    "download_control": "table tbody tr button",
+    "page_ready": "table",
+}
 # Where the list's own next-page control would be, in the table's footer or
 # a region marked as pagination. Whether one of these pages forward at all
 # is decided by its label alone (controls.is_next_control).
@@ -779,13 +790,17 @@ class Period:
         return f"{REPORTS_PATH}#created={self.created}"
 
     def identity(self) -> Optional[Identity]:
-        """What the statement's own text has to name, its last day and its
-        month when it covers one month. None for a statement known only by
-        the day it was made, since nothing says a statement prints that."""
+        """What the statement's own text is checked against, its first day
+        and its last, the same two kinds of fact for every statement
+        whatever days it covers. A month for a monthly one and nothing for a
+        custom one meant a monthly ending on the same day kept its month
+        once the shared day stopped counting, and a custom statement that
+        mentioned that month was taken for the monthly. None for a statement
+        known only by the day it was made, since nothing says a statement
+        prints that."""
         if not self.start:
             return None
-        month = self.end[:7] if self.start[:7] == self.end[:7] else ""
-        return Identity(date=self.end, period=month, kind="statement")
+        return Identity(date=self.end, start=self.start, kind="statement")
 
     def named_in(self, text: str) -> int:
         """How plainly a row's words name these days. 2 for the month or
@@ -1256,7 +1271,7 @@ def read_twice(el) -> Tuple[list, Optional[dict]]:
     return old, careful if isinstance(careful, dict) else None
 
 
-def reads_as_download(old, careful) -> bool:
+def is_download_control(old, careful) -> bool:
     """Whether a control is a statement's Download control by both of its
     readings. Read the old way, every label it carries passes the guard and
     one says Download. Read with care, what it shows says Download and
@@ -1310,8 +1325,9 @@ def statement_request(page, ref: Period, view: Reports,
     only when it is the statement's own place in the answer the table was
     drawn from. A row naming a kind of file other than a PDF is never it.
     In that row, the one control whose two readings both call it Download
-    (reads_as_download) is the one pressed, once it has been read again at
-    the moment of the press and still passes is_safe_control."""
+    (is_download_control, which holds every label to is_safe_control) is
+    the one pressed, once the row and the control have both been read again
+    at the moment of the press."""
     index = _index_in(view.drawn, ref)
     while index < 0:
         if view.more is not True or len(view.pages) >= REPORTS_MAX_PAGES \
@@ -1338,7 +1354,7 @@ def statement_request(page, ref: Period, view: Reports,
     except Exception:
         count = 0
     found = [controls.nth(j) for j in range(count)
-             if reads_as_download(*read_twice(controls.nth(j)))]
+             if is_download_control(*read_twice(controls.nth(j)))]
     if len(found) != 1:
         return None, (NO_CONTROL if not found else MANY_CONTROLS)
     control = found[0]
@@ -1346,13 +1362,13 @@ def statement_request(page, ref: Period, view: Reports,
     def press():
         # Armed first, so a PDF the page builds for this press is kept.
         blob_capture.arm(page)
-        old, careful = read_twice(control)
-        # Read again at the moment of the press. A row drawn again since it
-        # was found can hold another statement in the same place.
-        if not ref.named_in(_row_text(row)) or not reads_as_download(old, careful):
-            raise RuntimeError("the row no longer reads as this statement's")
-        if not all(is_safe_control(label) for label in old):
-            raise RuntimeError("the control is not one the guard passes")
+        # Both read again at the moment of the press. A row drawn again
+        # since it was found can hold another statement in the same place,
+        # and a control can be given another label.
+        if not ref.named_in(_row_text(row)):
+            raise RuntimeError("the row no longer shows this statement's days")
+        if not is_download_control(*read_twice(control)):
+            raise RuntimeError("the control no longer reads as its Download")
         control.click(timeout=8000)
 
     return DocumentRequest(trigger=press, expect=ref.identity(), rivals=tuple(rivals),
@@ -1526,7 +1542,7 @@ def _control_survey(el) -> dict:
             "shows": (careful or {}).get("shows", "")[:60] if careful else None,
             "named": ((careful or {}).get("named") or [])[:4] if careful else None,
             "safe": [is_safe_control(label) for label in old[:3]],
-            "download": reads_as_download(old, careful)}
+            "download": is_download_control(old, careful)}
 
 
 def _ready_row_survey(page, view: Reports) -> dict:

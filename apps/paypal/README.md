@@ -43,12 +43,14 @@ says how many there were. A statement whose status, kind of file or dates
 the app cannot read is left alone too, counted as failed, and described in
 the failure file the run writes. For each statement it presses that
 statement's own **Download** button, in the row that shows its dates, and
-checks that the PDF names those dates before filing it under the same
-names a personal account's statements get, like
+checks that the PDF names its first and last day before filing it under
+the same names a personal account's statements get, like
 `2026-08-31 PayPal Monthly Statement.pdf`. A PDF whose dates cannot be
-checked is put in Manual Review rather than filed, and one that names
-other dates is not kept at all. The name PayPal gives a downloaded file
-carries the account's id and is never kept.
+checked, or that names another statement's dates better than its own, is
+put in Manual Review rather than filed, with a note saying which. With
+`"refuse_wrong_documents": true` in `config.json`, one that names another
+statement's dates is not kept at all. The name PayPal gives a downloaded
+file carries the account's id and is never kept.
 
 It never creates, generates, requests or schedules a statement or a
 report, and never presses for a CSV or any other kind of file.

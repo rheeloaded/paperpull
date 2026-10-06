@@ -38,16 +38,37 @@ HOLDER = "Zorvexquill"
 CANARIES = (ACCOUNT_ID, OTHER_ID, HOLDER)
 
 
-def statement(month: str, year: int, last: int) -> bytes:
-    return text_pdf(["PayPal", "Monthly account statement",
-                     "%s 1, %d - %s %d, %d" % (month, year, month, last, year),
-                     "Balance summary", "Activity for the period"])
+def statement(first: str, last: str, before: str, moved: tuple, due: str,
+               kind: str = "Monthly account statement") -> bytes:
+    """A statement's text the way a real one carries dates, its own first
+    and last day, the day the period before it closed, a few transactions
+    inside it and a payment due after it. Each date is MM/DD/YYYY, and
+    every one but the first and the last is another statement's to find."""
+    return text_pdf(["PayPal", kind,
+                     "Statement period %s to %s" % (first, last),
+                     "Beginning balance as of %s" % before]
+                    + ["%s %s" % pair for pair in moved]
+                    + ["Ending balance as of %s" % last, "Payment due %s" % due])
 
 
-AUGUST = statement("August", 2031, 31)
-JULY = statement("July", 2031, 31)
-JUNE = statement("June", 2031, 30)
-MAY = statement("May", 2031, 31)
+AUGUST = statement("08/01/2031", "08/31/2031", "07/31/2031",
+                   (("08/03/2031", "Payment received"), ("08/17/2031", "Transfer to bank"),
+                    ("08/29/2031", "Fee")), "09/25/2031")
+JULY = statement("07/01/2031", "07/31/2031", "06/30/2031",
+                 (("07/03/2031", "Payment received"), ("07/17/2031", "Transfer to bank"),
+                  ("07/29/2031", "Fee")), "08/25/2031")
+JUNE = statement("06/01/2031", "06/30/2031", "05/31/2031",
+                 (("06/03/2031", "Payment received"), ("06/17/2031", "Transfer to bank")),
+                 "07/25/2031")
+MAY = statement("05/01/2031", "05/31/2031", "04/30/2031",
+                (("05/03/2031", "Payment received"), ("05/17/2031", "Transfer to bank")),
+                "06/25/2031")
+# A statement asked for over two months, July and August. Its text names
+# July's last day among its transactions and August's last day as its own.
+CUSTOM = statement("07/01/2031", "08/31/2031", "06/30/2031",
+                   (("07/17/2031", "Transfer to bank"), ("07/31/2031", "Payment received"),
+                    ("08/12/2031", "Fee")), "09/25/2031",
+                   kind="Custom account statement")
 
 
 def row(rid, duration, status="COMPLETED", kind="PDF", created="2031-09-02T10:15:00Z"):
@@ -80,6 +101,12 @@ SHOWN = {
                             "download"),
 }
 SERVED = {ACCOUNT_ID + "1": AUGUST, ACCOUNT_ID + "4": JULY}
+# A custom statement over July and August, ready, its row as the list and
+# the table give it.
+CUSTOM_ID = OTHER_ID + "7"
+CUSTOM_ROW = row(CUSTOM_ID, "Jul 1, 2031 - Aug 31, 2031", created="2031-09-03T10:00:00Z")
+CUSTOM_SHOWN = shown("Jul 1, 2031 - Aug 31, 2031", "Sep 3, 2031", "PDF", "Ready", "download")
+CUSTOM_FILED = "2031-08-31 PayPal Statement.pdf"
 # The name a download is given, shaped like the tester's, an account's id
 # and two stamps of the period.
 SAVED_NAME = ACCOUNT_ID + "-MSR-20310801000000-20310831235959.PDF"
@@ -239,9 +266,11 @@ def result_of(out: str):
     return found[-1] if found else None
 
 
-def statements(tmp_path) -> dict:
-    folder = tmp_path / "out" / "Statements"
-    return {p.name: p.read_bytes() for p in sorted(folder.glob("*.pdf"))} if folder.is_dir() else {}
+def statements(tmp_path, folder: str = "Statements") -> dict:
+    """The PDFs a run left in one of its folders, by name. The archive's
+    Statements folder unless another is named, Manual Review say."""
+    where = tmp_path / "out" / folder
+    return {p.name: p.read_bytes() for p in sorted(where.glob("*.pdf"))} if where.is_dir() else {}
 
 
 def everything_written(root: Path) -> str:

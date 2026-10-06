@@ -547,22 +547,23 @@ class App:
             raise SystemExit(0)
 
     def cmd_discover(self, quiet: bool = False) -> int:
+        # Not whole until this has read all of PayPal's list. Noted first, so
+        # every way out before the end leaves it so, a sign-in page or a
+        # check that stops the run at the console's prompt among them.
+        self._listing_done(False)
         page = self.page()
         n_new = 0
         try:
             docs = self._read_statements(page)
         except site.SentElsewhere as e:
-            self._listing_done(False)
             self._say_sent_elsewhere(e, stopping=True)
             raise SystemExit(0)
         except site.ReportsUnread as e:
-            self._listing_done(False)
             self._business = True
             self._say_reports_unread(e, stopping=True)
             self.write_failure("read the statements list", "the list never arrived")
             raise SystemExit(0)
         except site.SessionExpired as e:
-            self._listing_done(False)
             # Once, and in words. It used to leave as a traceback.
             print(f"\n!! PayPal did not hand over the statements list ({e}).")
             print("   Nothing was downloaded. If the browser window asks you to sign")
@@ -680,6 +681,10 @@ class App:
             if dry_run:
                 print(f"  DRY RUN - would save: {filename}")
                 continue
+            # A business statement is known by its record, so its page is the
+            # one opened for it, whatever the last run's was, and its page's
+            # selectors are the ones the journal counts.
+            self._business = site.business_ref(doc.href) is not None
             # Which document the run is on, so a failure file says how far
             # it got and whether it ever reached a second one.
             try:
@@ -688,9 +693,6 @@ class App:
             except Exception:
                 pass
             try:
-                # A business statement is known by its record, so its page is
-                # the one opened for it, whatever the last run's was.
-                self._business = site.business_ref(doc.href) is not None
                 page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
@@ -779,15 +781,21 @@ class App:
             print(f"  Nothing was pressed for this statement, because {why}.")
             print("  It is marked for manual review, and a later run tries it again.")
             return None
+        # A statement that names other days than it was listed under is kept
+        # for a person in Manual Review rather than destroyed, unless
+        # refuse_wrong_documents is set, as in every other app that checks.
+        # The check can be wrong too, and a destroyed statement is one nobody
+        # can look at, pressed for and destroyed again on every run.
+        strict = bool(self.config.get("refuse_wrong_documents", False))
         got = delivery.deliver(
             page, request, out_path,
             is_safe_url=site.is_safe_url, dl_dir=self._dl_dir, rivals=rivals,
-            settle_ms=site.BUSINESS_SETTLE_MS, journal=self.journal, strict=True)
+            settle_ms=site.BUSINESS_SETTLE_MS, journal=self.journal, strict=strict)
         if got.outcome in (delivery.NOTHING, delivery.NOT_A_PDF):
             data = site.taken_from_the_page(page, out_path)
             if data:
                 got = delivery.place(data, out_path, expect=request.expect, rivals=rivals,
-                                     journal=self.journal, strict=True)
+                                     journal=self.journal, strict=strict)
         print("  %s" % got.say())
         if got.outcome == delivery.WRONG:
             why = "the statement that came does not name the days it was listed under"
@@ -803,24 +811,47 @@ class App:
             return False
         verdict = got.verdict.outcome if got.verdict is not None else identity.UNCHECKED
         if verdict != identity.VERIFIED:
-            # Kept, never filed. A statement whose text could not be checked
-            # against its days, a scan or one known only by the day it was
-            # made, goes to Manual Review for a person to look at.
-            review = unique_path(self.paths.manual_review, out_path.name,
-                                 self.config["max_path_length"])
-            try:
-                out_path.replace(review)
-            except OSError:
-                review = out_path
-            doc.pdf_path, doc.pdf_filename = str(review), review.name
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
-                         notes="Its days could not be checked in its own text")
-            self._write_row(doc, "Not checked", "Needs Manual Review")
-            self.stats["manual_review"] += 1
-            print("  Its days could not be checked in its own text, so it was put in")
-            print("  Manual Review rather than filed.")
+            self._to_review(doc, out_path, verdict == identity.REFUSED, got.verdict)
             return None
         return True
+
+    def _to_review(self, doc: Document, out_path, refused: bool, verdict=None) -> None:
+        """Keep a business statement for a person to look at, never filed.
+        One that names other days than it was listed under, and one whose
+        days could not be checked, a scan or one known only by the day it
+        was made, each go to Manual Review with a note saying which. One that
+        cannot be moved there is removed, so it is never left in the archive
+        under its name, and a later run takes it again."""
+        why = ("It names other days than it was listed under" if refused
+               else "Its days could not be checked in its own text")
+        review = unique_path(self.paths.manual_review, out_path.name,
+                             self.config["max_path_length"])
+        try:
+            out_path.replace(review)
+        except OSError as e:
+            log.info("could not move the statement to Manual Review: %s", e)
+            review = None
+            try:
+                out_path.unlink()
+            except OSError as gone:
+                log.info("could not remove it from the archive either: %s", gone)
+        if review is None:
+            doc.pdf_path = doc.pdf_filename = ""
+            why += ", and it could not be moved to Manual Review, so it was not kept"
+        else:
+            doc.pdf_path, doc.pdf_filename = str(review), review.name
+        self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+        self._write_row(doc, "Names other days" if refused else "Not checked",
+                        "Needs Manual Review")
+        self.write_failure("check the saved statement",
+                           "it names other days than it was listed under" if refused
+                           else "its days could not be checked in its own text",
+                           postmortem={"identity": verdict.report()} if verdict else None)
+        self.stats["manual_review"] += 1
+        if review is None:
+            print("  %s. A later run takes it again." % why)
+        else:
+            print("  %s, so it was put in Manual Review rather than filed." % why)
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one statement. For a personal account the site layer asks
@@ -1097,9 +1128,17 @@ class App:
         declares, since choosing between them is a decision nobody can
         make before the first failure."""
         if self._journal is None:
-            self._journal = Journal(getattr(self, "_work_page", None),
-                                    getattr(site, "FALLBACK", None))
+            self._journal = Journal(getattr(self, "_work_page", None), self._selectors())
         return self._journal
+
+    def _selectors(self):
+        """The selectors the journal and a failure file count. The business
+        statements page's on a business account's run, since judged against
+        that page the personal statements page's matched nothing and the
+        file said they were wrong."""
+        if getattr(self, "_business", False):
+            return site.BUSINESS_FALLBACK
+        return getattr(site, "FALLBACK", None)
 
     def write_failure(self, step: str, reason: str, text: str = "",
                       postmortem: dict = None) -> None:
@@ -1128,7 +1167,8 @@ class App:
             command=self.stats.get("mode") or "run",
             step=step, reason=reason,
             page=getattr(self, "_work_page", None),
-            selectors=getattr(site, "FALLBACK", None),
+            selectors=getattr(site, "FALLBACK", None) if not getattr(self, "_business", False)
+            else site.BUSINESS_FALLBACK,
             journal=self._journal,
             requests=self._requests,
             provider='PayPal', text=text, extra=extra)
@@ -1163,7 +1203,7 @@ class App:
         failure.write_survey(
             self.paths.diagnostics,
             page=getattr(self, "_work_page", None),
-            selectors=getattr(site, "FALLBACK", None),
+            selectors=self._selectors(),
             journal=self._journal,
             requests=self._requests,
             provider='PayPal')
@@ -1191,6 +1231,9 @@ class App:
             info["challenge"] = site.detect_security_challenge(page)
             business = not found and site.is_business_page(page.url or "")
             info["business_account"] = business
+            # So the survey written beside this counts the business page's
+            # own selectors.
+            self._business = business
             info["survey"] = site.survey(page)
             if found:
                 site.expand_all(page)
