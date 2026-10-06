@@ -220,7 +220,7 @@ def test_launch_passes_the_profile_and_port(monkeypatch, tmp_path):
                         lambda prefer_real=False, mode=browser.AUTO: [("Chromium", "/x/c")])
     monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kw: seen.update(args=args))
     # no real browser starts here, so stand in for the port coming up
-    monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0: True)
+    monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0, alive=None: True)
     profile = tmp_path / "profile"
     assert browser.open_signin_browser(profile, "9231", "https://example.test") == "Chromium"
     assert profile.is_dir()          # created for the user
@@ -576,7 +576,7 @@ def test_a_relative_profile_dir_reaches_the_browser_as_an_absolute_path(tmp_path
     # instead, a machine with no browser never reached Popen.
     monkeypatch.setattr(browser, "browser_candidates",
                         lambda prefer_real=False, mode=browser.AUTO: [("Chromium", "chrome")])
-    monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0: True)
+    monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0, alive=None: True)
 
     browser.open_signin_browser("./demo-browser-profile", "9222", "https://example.test")
 
@@ -628,7 +628,7 @@ def test_a_browser_that_will_not_open_a_port_is_passed_over(monkeypatch, tmp_pat
     the next candidate is tried rather than giving up."""
     tried = []
 
-    def fake_launch(exe, name, profile_dir, port, url, explain_failure=True):
+    def fake_launch(exe, name, profile_dir, port, url, explain_failure=True, mode=browser.AUTO):
         tried.append(name)
         return name if name == browser.CHROMIUM else None
 
@@ -740,7 +740,7 @@ def test_a_fallback_browser_gets_its_own_profile_folder(monkeypatch, tmp_path):
     monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "edge")])
     monkeypatch.setattr(browser, "_bundled_chromium", lambda: ["bundled"])
     monkeypatch.setattr(browser, "_launch",
-                        lambda exe, name, prof, port, url, explain_failure=True:
+                        lambda exe, name, prof, port, url, explain_failure=True, mode=browser.AUTO:
                         seen.append((name, str(prof))) or None)
     browser.open_signin_browser(tmp_path / "app-browser-profile", "9222",
                                 "https://x.test", prefer_real=True)

@@ -121,6 +121,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   choose puts this Chromium ahead of your own browser only where a build
   sits in chrome-linux, as it did before. Windows, macOS and PaperPull
   Server were not affected.
+- **On Ubuntu 23.10 and later, signing in says why the Chromium that
+  Playwright downloads did not open.** Those releases keep that Chromium
+  from the user namespaces its sandbox needs, so it closes as soon as it
+  starts. Login waited twenty seconds, then said a window had opened
+  without a debugging port and to close any other copy of the browser,
+  though no window had opened. It now says at once that Chromium closed
+  because it could not start its sandbox, and what to do instead, which is
+  to install Google Chrome or Microsoft Edge, to close every window of
+  your own browser when that one was tried first, or to set "browser" to
+  "auto" in an app set to use only that Chromium. PaperPull still never
+  starts a browser without its sandbox, and every other way a browser can
+  fail to open is waited for and explained as before.
 
 ### Security
 - **Every redirect is checked against the provider's own sites before it

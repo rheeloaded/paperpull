@@ -563,7 +563,7 @@ def open_signin_browser(profile_dir, port: str, url: str,
             print("No browser this tool can drive is available.")
         return None
 
-    opened = _try_each(candidates, profile_dir, port, url)
+    opened = _try_each(candidates, profile_dir, port, url, mode=mode)
     if opened:
         return opened
 
@@ -579,12 +579,13 @@ def open_signin_browser(profile_dir, port: str, url: str,
             fresh = [c for c in browser_candidates(prefer_real=prefer_real, mode=mode)
                      if c not in candidates]
             if fresh:
-                return _try_each(fresh, profile_dir, port, url, fallback=True)
+                return _try_each(fresh, profile_dir, port, url, fallback=True, mode=mode)
     return None
 
 
-def _try_each(candidates, profile_dir, port, url, fallback: bool = False):
-    """Launch each in turn until a debugging port answers."""
+def _try_each(candidates, profile_dir, port, url, fallback: bool = False, mode: str = AUTO):
+    """Launch each in turn until a debugging port answers. mode is the app's
+    browser setting, which the last one tried needs to say what to do."""
     for index, (name, exe) in enumerate(candidates):
         last = index == len(candidates) - 1
         # The FIRST candidate keeps the configured profile folder, so an
@@ -596,7 +597,7 @@ def _try_each(candidates, profile_dir, port, url, fallback: bool = False):
         if fallback or index > 0:
             target = target.with_name(
                 target.name + "-" + re.sub(r"[^a-z0-9]+", "", name.lower()))
-        opened = _launch(exe, name, target, port, url, explain_failure=last)
+        opened = _launch(exe, name, target, port, url, explain_failure=last, mode=mode)
         if opened:
             return opened
         if not last:
@@ -605,7 +606,7 @@ def _try_each(candidates, profile_dir, port, url, fallback: bool = False):
 
 
 def _launch(exe: str, name: str, profile_dir, port: str,
-            url: str, explain_failure: bool = True) -> Optional[str]:
+            url: str, explain_failure: bool = True, mode: str = AUTO) -> Optional[str]:
     """One attempt. Returns the browser name if its debugging port answered."""
     # Resolved to an ABSOLUTE path before the browser ever sees it. A config
     # carries this as "./x-browser-profile", and a relative --user-data-dir is
@@ -629,14 +630,25 @@ def _launch(exe: str, name: str, profile_dir, port: str,
     if sys.platform == "win32":
         detach["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
                                    | subprocess.DETACHED_PROCESS)
+    # The bundled Chromium on Linux writes why it would not start, and on
+    # Ubuntu 23.10 and later that is the one place that says its sandbox was
+    # refused. So what it writes goes to a file with no name that only this
+    # process reads, and only to look for that line (_say_sandbox_refused).
+    # Nothing of it is shown or kept. A Chromium that starts goes on writing
+    # there until it closes, and the file goes with it. Their own browsers,
+    # and the bundled one on every other system, still write to nowhere.
+    said = None
+    if name == CHROMIUM and sys.platform not in ("win32", "darwin"):
+        said = _startup_log()
     try:
-        subprocess.Popen([exe, f"--user-data-dir={profile_path}",
-                          f"--remote-debugging-port={port}", "--no-first-run",
-                          "--no-default-browser-check", url],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True,
-                         **detach)
+        proc = subprocess.Popen([exe, f"--user-data-dir={profile_path}",
+                                 f"--remote-debugging-port={port}", "--no-first-run",
+                                 "--no-default-browser-check", url],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL if said is None else said,
+                                start_new_session=True, **detach)
     except OSError as e:
+        _close_quietly(said)
         # This function's answer is a browser name or None, and the caller
         # tries the next candidate on None. Letting the launch raise instead
         # ended the whole sign-in step with a traceback while another browser
@@ -653,7 +665,29 @@ def _launch(exe: str, name: str, profile_dir, port: str,
     # debugging port was ever opened - by which point the sign-in was spent on
     # the wrong browser. So the port is confirmed here, where it can still be
     # explained.
-    if not wait_for_debug_port(port):
+    try:
+        if said is None:
+            answered = wait_for_debug_port(port)
+        else:
+            # Only a bundled Chromium that has ended saying its sandbox was
+            # refused is given up on before the wait is out. Until 2026-10-06
+            # it was waited for the whole twenty seconds and then said to have
+            # opened a window. A first process that ends for any other reason
+            # can still lead to the port, since it may have handed the address
+            # to a copy already running. Chromium 138 and later started as
+            # administrator on Windows even relaunch themselves and open the
+            # port from the relaunched copy a second later (crbug 435410220),
+            # so no other browser and no other system ends the wait early.
+            def refused():
+                return proc.poll() is not None and _NO_SANDBOX in _read_quietly(said)
+            answered = wait_for_debug_port(port, alive=lambda: not refused())
+            if not answered and refused():
+                _say_sandbox_refused(port, explain_failure, mode)
+                return None
+    finally:
+        _close_quietly(said)
+
+    if not answered:
         print(f"\nThe window opened, but no debugging port answered on {port}.")
         if name in (EDGE, CHROME):
             print(f"That usually means {name} was already running, so it handed")
@@ -674,7 +708,75 @@ def _launch(exe: str, name: str, profile_dir, port: str,
     return name
 
 
-def wait_for_debug_port(port: str, timeout: float = 20.0) -> bool:
+# What Chromium writes before it stops when it cannot start its sandbox, the
+# words Playwright's own driver looks for in a failed start.
+_NO_SANDBOX = "No usable sandbox"
+
+
+def _say_sandbox_refused(port: str, explain_failure: bool, mode: str) -> None:
+    """What to tell somebody whose bundled Chromium ended, before any window,
+    saying its sandbox was refused. Until 2026-10-06 they waited twenty
+    seconds and were told a window had opened and to close other copies of
+    the browser."""
+    print("\nChromium closed right after it started, before a debugging port")
+    print("answered on %s." % port)
+    print("It could not start its sandbox, as happens on Ubuntu 23.10 and later,")
+    print("which keep the Chromium that Playwright downloads from the user")
+    print("namespaces its sandbox needs. This tool never starts a browser")
+    print("without its sandbox.")
+    if not explain_failure:
+        return
+    print()
+    if mode == BUNDLED:
+        # Their own browsers are never looked for in this mode, so the advice
+        # does not look for them either.
+        print('This app\'s settings have "browser": "bundled", which allows only')
+        print('that Chromium. Set it to "auto", install Google Chrome or Microsoft')
+        print("Edge if neither is on this computer, and run this again.")
+        return
+    theirs = _real_browsers()
+    if theirs:
+        # The bundled one is tried last only after their own, so their own
+        # was tried first and opened no port.
+        print("Close every %s window, then run this again," % theirs[0][0])
+        print("so that this tool can use %s instead." % theirs[0][0])
+    else:
+        print("Install Google Chrome or Microsoft Edge and run this again. This")
+        print("tool then uses it, in a profile of its own.")
+
+
+def _startup_log():
+    """A file with no name for what a browser writes while it starts, or None
+    when none can be made. On Linux the name is gone as soon as the file
+    exists, so the file is gone once this process and the browser have both
+    closed it."""
+    import tempfile
+    try:
+        return tempfile.TemporaryFile()
+    except OSError:
+        return None
+
+
+def _read_quietly(said) -> str:
+    """The start of what was written to a _startup_log file, or nothing."""
+    if said is None:
+        return ""
+    try:
+        said.seek(0)
+        return said.read(1 << 16).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return ""
+
+
+def _close_quietly(said) -> None:
+    if said is not None:
+        try:
+            said.close()
+        except OSError:
+            pass
+
+
+def wait_for_debug_port(port: str, timeout: float = 20.0, alive=None) -> bool:
     """True once DevTools answers on the browser's debugging port.
 
     Checked on 127.0.0.1 rather than "localhost": the browser binds IPv4 only,
@@ -685,6 +787,9 @@ def wait_for_debug_port(port: str, timeout: float = 20.0) -> bool:
     the protocol is up, and an attach in that gap fails with a message that
     blames the wrong thing. So readiness is the endpoint the attach itself
     will use, answering with the websocket address it will connect to.
+
+    alive, when given, is asked between looks, and the wait ends as soon as
+    it says the browser has ended, since a browser that ended opens no port.
     """
     import json
     import time
@@ -702,5 +807,7 @@ def wait_for_debug_port(port: str, timeout: float = 20.0) -> bool:
                 return True
         except (OSError, ValueError):
             pass
+        if alive is not None and not alive():
+            return False
         time.sleep(0.5)
     return False
