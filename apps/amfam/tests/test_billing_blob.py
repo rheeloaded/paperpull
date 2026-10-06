@@ -727,7 +727,7 @@ def test_a_billing_page_with_nothing_to_take_writes_the_failure_file(monkeypatch
     app.write_failure = lambda step, reason, *a, **k: written.append((step, reason))
     app.discovery = type("D", (), {"data": {}, "save": lambda self: None})()
     monkeypatch.setattr(amfam_docs.site, "goto_documents", lambda page: True)
-    monkeypatch.setattr(amfam_docs.site, "collect_download_docs", lambda page: [])
+    monkeypatch.setattr(amfam_docs.site, "collect_download_docs", lambda page, **kw: [])
     app.cmd_discover(quiet=True)
     assert written == [("find the statements", "the billing page showed no statement to take")]
 

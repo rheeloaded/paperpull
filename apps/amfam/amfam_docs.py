@@ -36,6 +36,7 @@ from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
 
 import argparse
+import hashlib
 import logging
 import random
 import re
@@ -98,6 +99,10 @@ class Document:
         self.pdf_path = kw.get("pdf_path", "")
         self.pdf_size = kw.get("pdf_size", "")
         self.pdf_pages = kw.get("pdf_pages", "")
+        # What the saved PDF's bytes hash to, so another bill's statement
+        # of the same date with the same bytes is known for what it is even
+        # once this file has been deleted.
+        self.pdf_sha256 = kw.get("pdf_sha256", "")
         self.notes = kw.get("notes", "")
         self.discovered_at = kw.get("discovered_at", now_iso())
 
@@ -439,11 +444,16 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        refused: list = []
+        docs = site.collect_download_docs(page, refused=refused)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
         log.info("Statements & Documents page: %d documents, %d new", len(docs), n_new)
+        if refused:
+            # A bill whose statements could not be tied to it was left
+            # alone. The reason is one of the site layer's own sentences.
+            self.write_failure("open each bill", refused[0])
         if not docs:
             # Finding nothing is written down too. A Pilot that found nothing
             # finished with no file to send, and the page it read is the
@@ -612,6 +622,26 @@ class App:
                 return
             out_path = opened.pdf
             log.info("Opened the ZIP for %s", doc.title)
+
+        # The same bytes as another bill's statement of this date is that
+        # statement, whichever bill's page showed it, and never this bill's
+        # own. It is taken off the disk, where its copy under the other
+        # bill's name stays, and the record waits for the next run (review
+        # of the Bill details change).
+        digest = hashlib.sha256(out_path.read_bytes()).hexdigest()
+        if any(isinstance(r, dict) and r.get("pdf_sha256") == digest and r.get("date") == doc.date
+               and (r.get("account") or "") != (doc.account or "")
+               for r in self.progress.data.values()):
+            out_path.unlink()
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="The same PDF as another bill's statement of this date")
+            self._write_row(doc, "Same PDF as another bill's", "Needs Manual Review")
+            self.write_failure("open each bill", "two bills gave the same statement")
+            self.stats["manual_review"] += 1
+            print("  !! This is the same PDF as another bill's statement of this date.")
+            print("     It was not kept, and the document is marked for manual review.")
+            return
+        doc.pdf_sha256 = digest
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         self._record(doc, State.PDF_SAVED)

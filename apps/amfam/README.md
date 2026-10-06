@@ -99,19 +99,31 @@ paperpull amfam pilot             REM once the site layer is confirmed
   with a Bill details button, and a bill's statements show only once it
   is pressed. So each bill's Bill details is pressed in turn, from the
   page loaded afresh, and the app waits up to about twenty seconds for
-  that bill's statements. It is pressed only when its whole words are Bill
-  details, every word it shows or announces passes the guard, it holds no
-  other control and the press would land on it. The statements are read
-  only on Billing & Payments or the page that press led to, never where
-  that address names a payment, autopay or a setting, as
-  /billing/autopay does, and only those that were not showing before the
-  press count as that bill's. Each one carries the last four digits of
-  the number its bill's card shows, in its file name too, so two bills'
-  statements of the same date are both kept and told apart. Bills whose
-  cards show the same last four digits, or no number when there are
-  several bills, are left alone. Saving a statement opens its bill's
-  details again first. A page with no Bill details is read as it shows,
-  as before.
+  that bill's statements, and then until their count holds still for a
+  second. It is pressed only when its whole words are Bill details, every
+  word it shows or announces passes the guard, it holds no other control
+  and the press would land on it, all read again on that very button just
+  before it is pressed. The statements are read only on Billing & Payments
+  or the page that press led to, never where that address names a
+  payment, autopay or a setting, as /billing/autopay does, and only those
+  that were not showing before the press count as that bill's. A list
+  already showing beside the bills is never read.
+- **Telling bills apart.** Each statement carries the last four digits of
+  the number its bill's card labels an account or a policy, in its file
+  name too, so two bills' statements of the same date are both kept and
+  told apart. The card is the smallest part of the page around the Bill
+  details button that labels such a number, so a paid bill's card beside
+  it never lends it its number, and a number the words tie to a bank,
+  autopay, a card, a payment, a phone, a claim or an agent is never used.
+  A bill is left alone when its card shows two such numbers, when two
+  cards show the same last four digits, when its card shows none and
+  there are several bills, when the page its press opened labels another
+  account or policy, or when its statements are the same list another
+  bill's press showed. A statement whose PDF is byte for byte another
+  bill's statement of the same date is not kept, and waits for manual
+  review. Each of these writes the failure file, saying which. Saving a
+  statement opens its bill's details again first. A page with no Bill
+  details is read as it shows, as before.
 - **Downloads.** A row that links straight to a PDF is fetched from inside
   the page with the session's own cookies. Otherwise the row's control is
   clicked, once it has passed the guard, and whatever the site does, a
@@ -124,7 +136,20 @@ paperpull amfam pilot             REM once the site layer is confirmed
 - **Read-only.** `FORBIDDEN_CONTROL_RE` blocks anything that pays, sets up
   autopay, files or reports a claim, changes coverage, adds a vehicle or a
   driver, starts a quote, cancels or renews, or edits a setting. A control
-  must also look like a document action before it can be clicked.
+  must also look like a document action before it can be clicked. These
+  are all it presses. Escape, and a button whose whole words close or
+  dismiss something, such as Close, Dismiss, No thanks or Not now, or a
+  close mark alone. Each bill's Bill details. A control whose whole words
+  are Show, Load, View or See and then more, all or older, with bills or
+  statements after them or not, or Older or Previous bills or statements,
+  on Billing & Payments or a bill's own statements. A statement's own
+  control, the link American Family marks statementPDF or one whose whole
+  words name a statement, such as View bill or Download statement. And a
+  Download, Save, PDF, Open PDF or Print control that a statement's own
+  press shows, the way some sites ask for a second step. Diagnose also
+  follows a link or button whose whole words name a documents page. Every
+  control passes the guard first, and the form above a bill's statements
+  is never touched.
 
 ## Scope
 
