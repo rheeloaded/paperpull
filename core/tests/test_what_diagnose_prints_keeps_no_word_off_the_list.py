@@ -378,8 +378,14 @@ class Scope:
         return " ".join(str(v) for v in out)
 
 
-def leaks(text) -> bool:
-    low = str(text).lower()
+def leaks(text, root=None) -> bool:
+    """Whether a part of the canary came out. The app's folders here are a
+    temporary folder pytest numbers, which is taken out first, since its
+    number could hold the canary's digits one day."""
+    text = str(text)
+    if root is not None:
+        text = text.replace(str(root), "<folder>")
+    low = text.lower()
     return any(part in low for part in PARTS)
 
 
@@ -417,7 +423,7 @@ def test_every_line_diagnose_prints_keeps_no_word_off_the_list(app, tmp_path):
             wrong.append("line %d, %s" % (line, why))
             continue
         tried += 1
-        if leaks(text):
+        if leaks(text, tmp_path):
             shown = text.replace(str(tmp_path), "<folder>").strip()
             wrong.append("line %d prints %r" % (line, shown[:110]))
     assert tried, "%s prints nothing from Diagnose, so nothing was tried" % app.name
@@ -464,7 +470,7 @@ def test_every_file_diagnose_writes_is_named_by_the_app(app, tmp_path):
                 continue
             tried += 1
             path = scope.evaluate(node, node.lineno)
-            if leaks(path):
+            if leaks(path, tmp_path):
                 wrong.append("line %d, %s" % (node.lineno, ast.unparse(node)[:90]))
     assert tried, "%s makes no path for Diagnose, so nothing was tried" % app.name
     assert not wrong, "%s names a Diagnose file after what a page said\n  %s" % (
@@ -509,7 +515,8 @@ def census_of(tmp_path, name_part, line, helper_line="len(info)"):
     app.mkdir(exist_ok=True)
     tree = ast.parse(LOOKS % (name_part, line, helper_line))
     said = list(what_diagnose_prints(app, tree, tmp_path))
-    return [(text, why) for _, text, why in said]
+    return [(None if text is None else text.replace(str(tmp_path), "<folder>"), why)
+            for _, text, why in said]
 
 
 @pytest.mark.parametrize("line", [
