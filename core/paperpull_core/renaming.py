@@ -673,7 +673,9 @@ def held_receipt(row: dict, paths) -> Optional[Path]:
     A row can also name the output folder itself, a file reached by
     climbing out of it through "..", a file somewhere else, one no longer
     on disk, or, with the output folder set to the app's own folder, the
-    app's config file. None of those is a receipt this app holds."""
+    app's config file. None of those is a receipt this app holds, and
+    neither is a link, which a rename would move in place of the receipt
+    it leads to."""
     text = (row.get("PDF Full Path") or "").strip()
     if not text:
         return None
@@ -681,10 +683,20 @@ def held_receipt(row: dict, paths) -> Optional[Path]:
         path = Path(text).resolve()
         folders = [Path(folder).resolve() for folder in paths.filing_folders()]
         held = (path.suffix.lower() == ".pdf" and path.is_file()
+                and not Path(text).is_symlink()
                 and any(folder in path.parents for folder in folders))
     except (OSError, RuntimeError, ValueError):
         return None
     return Path(text) if held else None
+
+
+def _write_down(app, rows: List[dict], order_rows: List[dict], backup: bool) -> None:
+    """Both CSVs as the review now has them, the order history even when
+    the index could not be written."""
+    try:
+        app.index_csv.rewrite(rows, backup=backup)
+    finally:
+        app.order_csv.rewrite(order_rows, backup=backup)
 
 
 def review_names(app, ask, words: ReviewWords = WORDS,
@@ -698,29 +710,37 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     built from, for an app that knows more than its progress record holds.
     Without it the progress record is used.
 
-    Only a receipt the app holds is offered (held_receipt). A rename that
-    fails is said, that receipt keeps its name, and the review goes on.
-    Each rename is written to progress.json as it happens, and the CSVs
-    are written however the review ends, a quit, a console that went away,
-    Ctrl+C or an error, so they name the files as they are on disk."""
+    Only a receipt the app holds is offered (held_receipt), each file once.
+    A rename that fails is said, that receipt keeps its name, and the
+    review goes on. Each rename is written to progress.json and to both
+    CSVs as it happens, so they name the files as they are on disk however
+    the review ends. Closing the console window ends the process at once,
+    with nothing run after it, so writing at the end would not be enough."""
     rows = app.index_csv.read_all()
     # A row somebody already renamed is left out, even one renamed before
     # its confidence was marked High as well (#47).
-    review = []
+    review, offered, left_out = [], set(), 0
     for r in rows:
         unsure = (r.get("Classification Confidence") == "Low"
                   or "Review" in (r.get("Processing Status") or ""))
-        if unsure and REVIEWED not in (r.get("Notes") or ""):
-            path = held_receipt(r, app.paths)
-            if path is not None:
-                review.append((r, path))
+        if not unsure or REVIEWED in (r.get("Notes") or ""):
+            continue
+        path = held_receipt(r, app.paths)
+        if path is None:
+            left_out += 1
+        elif str(path) not in offered:
+            offered.add(str(path))
+            review.append((r, path))
+    if left_out:
+        print(f"{left_out} row(s) marked for review have no receipt PDF in this "
+              "app's folders to rename, so they are left out.")
     if not review:
         print("No receipts need name review.")
         return
     print(f"{len(review)} receipt(s) need review. Enter a new summary, "
           "press Enter to keep, or 'q' to stop.\n")
     order_rows = app.order_csv.read_all()
-    changed = False
+    written = pending = False
     try:
         for r, old_path in review:
             key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
@@ -750,16 +770,25 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                 print(f"    It could not be renamed ({type(e).__name__}), so it keeps "
                       "its name.\n")
                 continue
-            changed = True
+            pending = True
+            number = r.get("Order or Receipt Number")
             old_filename = r.get("PDF Filename")
-            r["PDF Filename"] = new_path.name
-            r["PDF Full Path"] = str(new_path)
-            r["Purchase Summary"] = new_summary
-            r["Processing Status"] = "Completed"
-            r["Classification Confidence"] = "High"
-            r["Notes"] = (r.get("Notes", "") + "; " + REVIEWED).strip("; ")
+            # Every index row naming this file follows it. Target once wrote
+            # two for most invoice orders, and the one not renamed named a
+            # file that was gone.
+            for row in rows:
+                text = (row.get("PDF Full Path") or "").strip()
+                if not text or str(Path(text)) != str(old_path):
+                    continue
+                row["PDF Filename"] = new_path.name
+                row["PDF Full Path"] = str(new_path)
+                if row.get("Order or Receipt Number") == number:
+                    row["Purchase Summary"] = new_summary
+                    row["Processing Status"] = "Completed"
+                    row["Classification Confidence"] = "High"
+                    row["Notes"] = (row.get("Notes", "") + "; " + REVIEWED).strip("; ")
             for orow in order_rows:
-                if (orow.get("Order or Receipt Number") == r.get("Order or Receipt Number")
+                if (orow.get("Order or Receipt Number") == number
                         and orow.get("PDF Filename") == old_filename):
                     orow["PDF Filename"] = new_path.name
                     orow["Purchase Summary"] = new_summary
@@ -768,9 +797,15 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                 "summary": new_summary, "pdf_filename": new_path.name,
                 "pdf_path": str(new_path), "confidence": "High",
                 "state": State.COMPLETED.value})
+            pending = False
+            _write_down(app, rows, order_rows, backup=not written)
+            written = True
             print(f"{words.renamed}{new_path.name}\n")
     finally:
-        if changed:
-            app.index_csv.rewrite(rows)
-            app.order_csv.rewrite(order_rows)
+        # A rename whose rows were not written down yet, because something
+        # between the two went wrong.
+        if pending:
+            _write_down(app, rows, order_rows, backup=not written)
+            written = True
+        if written:
             print("CSV files and progress.json updated.")

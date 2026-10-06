@@ -14,12 +14,14 @@ since the folder is in use, and so does any other system, since the new
 name is inside the old, so the review stopped with a traceback partway
 through. The receipts renamed before it were renamed on disk and in
 progress.json, while the CSVs, written only at the end, still named the old
-files.
+files. Closing the console window partway, which ends the process with
+nothing run after it, left every rename of that review out of them.
 
 These run each app's own review_names over an output folder on disk, with
 the typing stood in for. Every name, number and answer is invented.
 """
 import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -153,15 +155,18 @@ def test_a_receipt_renamed_before_the_fix_is_not_asked_about_either(app, tmp_pat
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
 def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, capsys):
-    """Of eleven rows the run was unsure of, three name a receipt in a
-    folder the app files receipts in, and only those are offered. The rest
-    name no file, the folder the app runs in, the output folder itself, a
-    receipt reached by climbing out of it, one somewhere else, one no longer
-    on disk, the app's own config file in an output folder set to the app's
-    folder, and a PDF in Logs. The second receipt offered cannot be
-    renamed, which is said, and the review goes on to its end with the CSVs
-    naming every file as it now is. Every question is answered with a new
-    name, so a row offered by mistake would be renamed, and it would show."""
+    """Of thirteen rows, three name a receipt in a folder the app files
+    receipts in, and each is offered once, though a second row the run was
+    unsure of names the first. Eight are left out, and the review says so.
+    They name no file, the folder the app runs in, the output folder
+    itself, a receipt reached by climbing out of it, one somewhere else,
+    one no longer on disk, the app's own config file in an output folder
+    set to the app's folder, and a PDF in Logs. The second receipt offered
+    cannot be renamed, which is said, and the review goes on to its end.
+    Every row naming a renamed file follows it, a finished one included,
+    and the CSVs and progress.json name every file as it now is. Every
+    question is answered with a new name, so a row offered by mistake would
+    be renamed, and it would show."""
     mod = load(app)
     here = tmp_path / "here"                     # the folder the app runs in
     receipt(here, "2026-05-14 Here Receipt.pdf")
@@ -178,7 +183,10 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
     config = out / "config.json"
     config.write_text('{"owner": "Dana Example"}', encoding="utf-8")
     logged = receipt(inst.paths.logs, "2026-05-14 Logged Receipt.pdf")
+    finished = index_row("ORDER-0011", last, status="Completed")
+    finished["Classification Confidence"] = "High"
     rows = [index_row("ORDER-0001", first),
+            index_row("ORDER-0001", first),      # a second row for the one file
             index_row("ORDER-0002", "", status="Needs Manual Review"),
             index_row("ORDER-0003", "."),
             index_row("ORDER-0004", out),
@@ -189,7 +197,8 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
             index_row("ORDER-0008", config),
             index_row("ORDER-0009", logged),
             index_row("ORDER-0010", locked),
-            index_row("ORDER-0011", last)]
+            index_row("ORDER-0011", last),
+            finished]
     inst.index_csv.append_rows(rows)
     inst.order_csv.append_rows([order_row(r["Order or Receipt Number"], r["PDF Filename"])
                                 for r in rows])
@@ -215,6 +224,8 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
 
     said = " ".join(capsys.readouterr().out.split())
     assert len(asked) == 3, "only the three receipts the app holds are offered, %s" % said
+    assert ("8 row(s) marked for review have no receipt PDF in this app's folders to "
+            "rename, so they are left out." in said), said
     assert {"here": everything_under(here), "elsewhere": everything_under(elsewhere)} == before
     assert {p: p.read_bytes() for p in kept} == kept
     assert "It could not be renamed (PermissionError), so it keeps its name." in said, said
@@ -223,23 +234,50 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
     assert len(garden) == len(lamp) == 1 and not first.exists() and not last.exists(), said
     names = [r["PDF Filename"] for r in rows]
     paths = [r["PDF Full Path"] for r in rows]
-    names[0], names[-1] = garden[0].name, lamp[0].name
-    paths[0], paths[-1] = str(garden[0]), str(lamp[0])
+    for i, now in ((0, garden[0]), (1, garden[0]), (11, lamp[0]), (12, lamp[0])):
+        names[i], paths[i] = now.name, str(now)
     index = inst.index_csv.read_all()
     assert [r["PDF Filename"] for r in index] == names
     assert [r["PDF Full Path"] for r in index] == paths
     assert [r["PDF Filename"] for r in inst.order_csv.read_all()] == names
+    assert [i for i, r in enumerate(index) if "renamed via --review-names" in r["Notes"]] \
+        == [0, 1, 11, 12]
+    progress = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))
+    assert {key: record["pdf_filename"] for key, record in progress.items()} \
+        == {"Online:ORDER-0001": garden[0].name, "Online:ORDER-0011": lamp[0].name}
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+def test_a_link_to_a_receipt_is_not_offered(app, tmp_path, monkeypatch):
+    """A row naming a link, outside the app's folders, to a receipt inside
+    them. A rename would move the link, which is not the app's to move."""
+    mod = load(app)
+    inst = app_in(mod, tmp_path / "out")
+    held = receipt(inst.paths.folder_for("Online"), "2026-05-14 Held Receipt.pdf")
+    link = tmp_path / "elsewhere" / "2026-05-14 Linked Receipt.pdf"
+    link.parent.mkdir()
+    try:
+        link.symlink_to(held)
+    except (OSError, NotImplementedError):
+        pytest.skip("this system does not let a test make a link")
+    inst.index_csv.append_rows([index_row("ORDER-0001", link)])
+    asked = []
+    monkeypatch.setattr(mod, "ask", lambda prompt: asked.append(prompt) or "Garden Hose")
+    inst.cmd_review_names()
+    assert asked == [] and link.is_symlink() and held.is_file()
 
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
 @pytest.mark.parametrize("stop, ends", [(EOFError, SystemExit),
                                         (KeyboardInterrupt, KeyboardInterrupt)],
                          ids=["console gone", "ctrl c"])
-def test_a_review_cut_short_still_writes_down_what_it_renamed(app, stop, ends, tmp_path,
-                                                               monkeypatch):
+def test_a_review_cut_short_has_written_down_what_it_renamed(app, stop, ends, tmp_path,
+                                                              monkeypatch):
     """The console goes away at the second question, which the app's own ask
-    answers by stopping, or the person presses Ctrl+C there. The first
-    receipt is renamed on disk, and both CSVs name it as it now is."""
+    answers by stopping, or the person presses Ctrl+C there. Closing the
+    console window there instead ends the process with nothing run after
+    it, so both CSVs already name the first receipt as it now is when the
+    second question is asked, and still do once the review has stopped."""
     mod = load(app)
     inst = app_in(mod, tmp_path / "out")
     filed = inst.paths.folder_for("Online")
@@ -250,10 +288,16 @@ def test_a_review_cut_short_still_writes_down_what_it_renamed(app, stop, ends, t
     inst.order_csv.append_rows([order_row("ORDER-0001", first.name),
                                 order_row("ORDER-0002", second.name)])
     typed = iter(["Garden Hose"])
+    on_disk = []
+
+    def written_down():
+        return ([r["PDF Filename"] for r in inst.index_csv.read_all()],
+                [r["PDF Filename"] for r in inst.order_csv.read_all()])
 
     def console(prompt=""):
         for line in typed:
             return line
+        on_disk.append(written_down())          # what a closed window would leave
         raise stop
     monkeypatch.setattr("builtins.input", console)
 
@@ -262,5 +306,6 @@ def test_a_review_cut_short_still_writes_down_what_it_renamed(app, stop, ends, t
 
     garden = [p.name for p in filed.iterdir() if "Garden Hose" in p.name]
     assert len(garden) == 1 and not first.exists() and second.is_file()
-    assert [r["PDF Filename"] for r in inst.index_csv.read_all()] == [garden[0], second.name]
-    assert [r["PDF Filename"] for r in inst.order_csv.read_all()] == [garden[0], second.name]
+    now = ([garden[0], second.name], [garden[0], second.name])
+    assert on_disk == [now], "written down before the second question"
+    assert written_down() == now

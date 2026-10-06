@@ -115,22 +115,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
   list read again by its first Resume. A Resume after a whole listing, or
   on an install from before this release that has listed purchases,
   finishes as it always did.
-- **Review Names renames only a receipt the app holds, and no longer stops
-  partway with an error.** It offered every receipt marked for review, and
-  a purchase recorded with no receipt file, one with no printable receipt
-  for instance, has an empty path, which reads as the folder the app runs
-  in. Typing a new name for one had the app try to rename that folder.
-  Windows refuses, since the folder is in use, and so do macOS and Linux,
-  so the review stopped with an error, and the receipts renamed before it
-  kept their new names on disk and in progress.json while both CSVs still
-  named the old files. A row naming a file outside the app's folders would
-  have been renamed as well. Now only a PDF in a folder the app files
-  receipts in is offered, Manual Review included, a rename that fails is
-  said and leaves that receipt as it was while the review goes on, and the
-  CSVs are written however the review ends, a quit, Ctrl+C or a console
-  that closed. A receipt whose file is gone is not offered either, where a
-  new name for it used to change the CSVs alone. Every receipt app now runs
-  the same Review Names, so this holds in all fourteen.
+- **Review Names renames only a receipt the app holds, and the CSVs keep up
+  with every rename.** It offered every receipt marked for review, and a
+  purchase recorded with no receipt file, one with no printable receipt for
+  instance, has an empty path, which reads as the folder the app runs in.
+  Typing a new name for one had the app try to rename that folder. Windows
+  refuses, since the folder is in use, and so do macOS and Linux, so the
+  review stopped with an error, and the receipts renamed before it kept
+  their new names on disk and in progress.json while both CSVs still named
+  the old files. Closing the console window partway did the same to every
+  rename of that review, since the CSVs were written only at the end. A row
+  naming a file outside the app's folders would have been renamed as well.
+  Now only a PDF in a folder the app files receipts in is offered, Manual
+  Review included, each file once, and the review says how many rows it
+  left out. A rename that fails is said and leaves that receipt as it was
+  while the review goes on. Each rename goes into both CSVs as it happens,
+  so they name the files as they are on disk however the review ends, and
+  into every index row naming the file, since Target archives from before
+  0.42.0 hold two for most invoice orders. A receipt whose file is gone is
+  not offered either, where a new name for it used to change the CSVs
+  alone. Every receipt app now runs the same Review Names, so this holds in
+  all fourteen.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

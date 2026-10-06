@@ -511,9 +511,10 @@ class CsvFile:
         with open(self.path, "r", encoding="utf-8-sig", newline="") as f:
             return list(csv.DictReader(f))
 
-    def rewrite(self, rows: List[dict]) -> None:
-        """Backup then atomically rewrite the whole file."""
-        if self.backups_dir is not None:
+    def rewrite(self, rows: List[dict], backup: bool = True) -> None:
+        """Backup then atomically rewrite the whole file. A command that
+        writes the same file again and again backs it up the first time."""
+        if backup and self.backups_dir is not None:
             backup_file(self.path, self.backups_dir)
         import io
         buf = io.StringIO()
