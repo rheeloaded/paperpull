@@ -78,10 +78,11 @@ def test_the_browsers_folder_is_the_one_playwright_uses(platform, settings, expe
 
 def test_linux_finds_the_chromium_kept_under_xdg_cache_home(nothing_set, tmp_path, monkeypatch):
     """XDG_CACHE_HOME moves the whole cache, and what Playwright downloads
-    moves with it."""
+    moves with it. The build is laid out as Playwright 1.62 lays out its
+    own on an ARM machine, in chrome-linux, a folder name looked for here."""
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    exe = tmp_path / "cache" / "ms-playwright" / "chromium-1243" / "chrome-linux" / "chrome"
+    exe = tmp_path / "cache" / "ms-playwright" / "chromium-1234" / "chrome-linux" / "chrome"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
     assert browser._bundled_chromium() == [str(exe)]
@@ -100,12 +101,13 @@ def _a_playwright_package(tmp_path, monkeypatch) -> Path:
 
 def test_0_is_the_folder_inside_playwrights_own_package(nothing_set, tmp_path, monkeypatch):
     """Playwright's driver keeps them beside its package.json, at
-    driver/package in its Python package, and a Chromium there is found."""
+    driver/package in its Python package, and a Chromium there is found,
+    here laid out as Playwright 1.63 lays out its own on Windows."""
     package = _a_playwright_package(tmp_path, monkeypatch)
-    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "0")
     own = package / "driver" / "package" / ".local-browsers"
-    exe = own / "chromium-1243" / "chrome-linux" / "chrome"
+    exe = own / "chromium-1243" / "chrome-win64" / "chrome.exe"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
     assert browser._playwright_root() == own

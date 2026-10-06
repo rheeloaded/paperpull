@@ -576,22 +576,35 @@ def a_playwright_package(tmp_path_factory):
     return site, package
 
 
+# The rows test_browser.py holds the core to, and the one for 0, which
+# needs the package the runner hears of.
 @pytest.mark.parametrize("platform, settings, expected", [
     ("linux", {}, "{home}/.cache/ms-playwright"),
     ("linux", {"XDG_CACHE_HOME": "{tmp}/cache"}, "{tmp}/cache/ms-playwright"),
+    ("linux", {"XDG_CACHE_HOME": ""}, "{home}/.cache/ms-playwright"),
+    ("linux", {"XDG_CACHE_HOME": "cache"}, "{tmp}/cache/ms-playwright"),
     ("darwin", {"XDG_CACHE_HOME": "{tmp}/cache"}, "{home}/Library/Caches/ms-playwright"),
-    ("win32", {"LOCALAPPDATA": "{tmp}/local"}, "{tmp}/local/ms-playwright"),
+    ("win32", {"LOCALAPPDATA": "{tmp}/local", "XDG_CACHE_HOME": "{tmp}/cache"}, "{tmp}/local/ms-playwright"),
     ("win32", {}, "{home}/AppData/Local/ms-playwright"),
+    ("win32", {"LOCALAPPDATA": ""}, "{home}/AppData/Local/ms-playwright"),
     ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "{tmp}/own"}, "{tmp}/own"),
     ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "0"}, "{package}/driver/package/.local-browsers"),
     ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "1"}, "{tmp}/1"),
+    ("win32", {"PLAYWRIGHT_BROWSERS_PATH": "1", "LOCALAPPDATA": "{tmp}/local"}, "{tmp}/1"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "rel/browsers"}, "{tmp}/rel/browsers"),
     ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "rel", "INIT_CWD": "{tmp}/project"}, "{tmp}/project/rel"),
+    ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "1", "npm_config_init_cwd": "{tmp}/project"}, "{tmp}/project/1"),
     ("linux", {"npm_config_playwright_browsers_path": "{tmp}/npm"}, "{tmp}/npm"),
+    ("linux", {"npm_package_config_playwright_browsers_path": "{tmp}/package"}, "{tmp}/package"),
     ("linux", {"PLAYWRIGHT_BROWSERS_PATH": "", "npm_config_playwright_browsers_path": "{tmp}/npm"},
      "{home}/.cache/ms-playwright"),
-], ids=["linux", "linux under XDG_CACHE_HOME", "macos", "windows", "windows without LOCALAPPDATA",
-        "a folder", "0 inside the package", "1 is a folder", "a relative folder from INIT_CWD",
-        "npm's name for it", "set to nothing is set"])
+], ids=["linux", "linux under XDG_CACHE_HOME", "linux with XDG_CACHE_HOME empty",
+        "linux with XDG_CACHE_HOME relative", "macos never reads XDG_CACHE_HOME",
+        "windows never reads XDG_CACHE_HOME", "windows without LOCALAPPDATA",
+        "windows with LOCALAPPDATA empty", "a folder", "0 inside the package", "1 is a folder",
+        "1 is a folder on windows", "a relative folder", "a relative folder from INIT_CWD",
+        "a relative folder from npm's INIT_CWD", "npm's name for it", "npm's package name for it",
+        "set to nothing is set"])
 def test_the_runner_looks_for_chromium_where_the_core_does(platform, settings, expected, a_playwright_package,
                                                           tmp_path, monkeypatch):
     """Two places that must agree, and with Playwright. A test that starts
@@ -702,6 +715,7 @@ def test_a_run_without_the_newest_playwrights_own_chromium_is_refused(run_with, 
             "themselves %s\n" % take) in out, out
     assert "\nPLAYWRIGHT 1.63.0'S OWN CHROMIUM, BUILD 1243, IS NOT INSTALLED HERE.\n" in out, out
     assert "\n%s, while CI and the packaged app run 1243. Install it with\n" % here in out, out
+    assert "each suite looks in a folder of" not in out, "one folder serves every suite here"
     assert "all suites passed" not in out
 
 
@@ -756,6 +770,7 @@ def test_with_browsers_path_0_the_runner_looks_inside_playwright(kept_in, passes
     else:
         assert ("\nbut its own Chromium, build 1243, is not installed, so the tests that start one "
                 "themselves have none to take\n") in out, out
+        assert re.search(r"\n   aafmaa +<elsewhere>/python(\.exe)?, from <elsewhere>/aafmaa\n", out), out
 
 
 def test_with_browsers_path_0_a_suite_without_playwright_is_not_held_to_it(run_with, environments, kept_inside,
@@ -795,7 +810,13 @@ def test_every_suite_needs_the_build_where_it_looks(setting, run_with, environme
     install("aafmaa")
     assert rat.main(["--jobs", "1"]) == 1
     assert ran == on
-    assert "\nbut its own Chromium, build 1243, is not installed, " in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "\nbut its own Chromium, build 1243, is not installed, " in out, out
+    # No one install serves both, so the suite without it is named, with the
+    # environment and the folder to run the install with.
+    assert "\nWith PLAYWRIGHT_BROWSERS_PATH set as it is, each suite looks in a folder of\n" in out, out
+    assert re.search(r"\n   core +<elsewhere>/python(\.exe)?, from <elsewhere>/core\n", out), out
+    assert "\n   aafmaa " not in out, out
     install("core")
     assert rat.main(["--jobs", "1"]) == 0
     assert "\nand its own Chromium, build 1243, for the tests " in capsys.readouterr().out

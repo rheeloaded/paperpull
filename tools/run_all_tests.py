@@ -943,18 +943,23 @@ def run(args) -> int:
             counted.append((name, d, py))
     newest, older = older_playwright(counted)
     build = own_chromium(newest, counted)
-    builds = []
+    builds, lacking, own_folders = [], [], False
     if build:
         # A suite's tests look where the Playwright it runs on keeps browsers,
         # from the folder the suite runs in. That is one folder for the whole
         # run, unless PLAYWRIGHT_BROWSERS_PATH is 0, when every Playwright
         # keeps its own, or a relative folder, which each suite finds from
-        # where it runs. A folder without the build speaks for the run.
-        for folder in dict.fromkeys(browsers_folder(asked(py)["package"], d)
-                                    for _name, d, py in counted if playwright_of(py)):
-            builds = chromium_builds(folder)
-            if int(build) not in builds:
-                break
+        # where it runs. A folder without the build speaks for the run, and
+        # when the folder changes with the suite, each suite missing it is
+        # named, since no one install then serves them all.
+        folder_of = {name: browsers_folder(asked(py)["package"], d)
+                     for name, d, py in counted if playwright_of(py)}
+        held = {folder: chromium_builds(folder) for folder in dict.fromkeys(folder_of.values())}
+        lacking = [(name, d, py) for name, d, py in counted
+                   if name in folder_of and int(build) not in held[folder_of[name]]]
+        builds = held[folder_of[lacking[0][0]]] if lacking else next(iter(held.values()), [])
+        # Asked for two made-up suites, it differs only when it is each suite's own.
+        own_folders = browsers_folder("one", "one") != browsers_folder("other", "other")
     if jobs > 1 and len(work) > 1:
         print("%d suites, %d at a time, longest first" % (len(work), min(jobs, len(work))), flush=True)
 
@@ -1069,6 +1074,12 @@ def run(args) -> int:
               + ", while CI and the packaged app run %s. Install it with" % build)
         print("   python -m playwright install chromium")
         print("in an environment holding Playwright %s." % newest)
+        if own_folders:
+            print("With PLAYWRIGHT_BROWSERS_PATH set as it is, each suite looks in a folder of")
+            print("its own, and these lack it. Run the install with each one's environment,")
+            print("from each one's folder.")
+            for name, d, py in lacking:
+                print("   %-16s %s, from %s" % (name, printable_place(py, REPO, []), printable_place(d, REPO, [])))
         refused = True
     if refused or broken:
         return 1
