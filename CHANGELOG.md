@@ -48,6 +48,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
   download writes go through the same list now, since the apps told
   testers to attach both, so either can be sent. A screenshot Diagnose
   takes still stays on your machine.
+- **What Diagnose prints keeps a word from a page only when it is on the
+  same list.** The files went through the list and the lines Diagnose
+  prints did not, although the panel shows them and they are as easy to
+  copy into an issue as a file is to attach. Twenty-four apps printed the
+  date of each sample document and twenty-three its title too, as the page
+  wrote them. PG&E printed the page's address and title and the labels of
+  its controls, Capital One the page's headings and its accounts, Ally,
+  Chase, Discover and U.S. Bank the label of a dropdown, the addresses the
+  page asked for and values from the provider's answers, and eight receipt
+  apps an order number. Every value a Diagnose line prints now goes
+  through the list first, so a word that is not on it is written as its
+  shape, while a count or a yes or no prints as it did. Amazon, Best Buy,
+  eBay, Gap, Home Depot, Lowe's, Target and Walmart also no longer name a
+  purchase's Diagnose files after its order number, since a file attached
+  to an issue shows its name.
 - **AAFMAA no longer gives up on a document when the first answer to its
   View press holds no PDF.** The capture took the first answer that called
   itself a PDF and, when that answer held none, marked the document for

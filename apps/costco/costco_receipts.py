@@ -44,7 +44,7 @@ from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import costco_site as site
 from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
-from paperpull_core.words import Fixed, words_for, write_shaped
+from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -1234,6 +1234,7 @@ class App:
         of two digits or more and every email masked. This is the file a
         tester attaches to the issue. No screenshot is taken."""
         self.stats["mode"] = "diagnose"
+        words = words_for('Costco', site)
         page = self.page()
         site.set_private_words([self.config.get("owner", "")])
         info = {"timestamp": now_iso(), "app": "costco", "history": {}, "receipt": {}}
@@ -1264,16 +1265,18 @@ class App:
         except Exception as e:
             info["error"] = site.mask_text(str(e))
         out = self.paths.diagnostics / "diagnose-costco.json"
-        write_shaped(out, info, words_for('Costco', site))
+        write_shaped(out, info, words)
         print(f"  Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
         print("  shape, a for a letter and 9 for a digit, so it can be attached")
         print("  too. Read it through first.")
         h = info.get("history") or {}
-        print(f"  History: state={h.get('state') or 'has purchases'} api={h.get('api')}")
+        print(f"  History: state={shape_tree(h.get('state') or 'has purchases', words)} "
+              f"api={shape_tree(h.get('api'), words)}")
         r = info.get("receipt") or {}
-        print(f"  Receipt page: rendered={r.get('rendered')} failed={r.get('failed')} lines={len(r.get('lines') or [])}")
+        print(f"  Receipt page: rendered={shape_tree(r.get('rendered'), words)} "
+              f"failed={shape_tree(r.get('failed'), words)} lines={len(r.get('lines') or [])}")
         # It used to end by saying to attach this file, which carries the
         # page's own words, straight after saying it stays here. The
         # survey written next is the one to send.

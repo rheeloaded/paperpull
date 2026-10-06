@@ -48,7 +48,7 @@ from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import apple_site as site
 from paperpull_core.models import Item, Purchase, State
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape_tree, words_for, write_shaped
 
 from storage import (APP_STORE, APPLE_STORE, PURCHASE_TYPES, CsvFile, JsonStore,
                      ORDER_HISTORY_COLUMNS, Paths, RECEIPT_INDEX_COLUMNS,
@@ -1732,6 +1732,7 @@ class App:
         send. Downloads nothing and presses nothing, and no screenshot is
         taken."""
         self.stats["mode"] = "diagnose"
+        words = words_for('Apple', site)
         info = {"timestamp": now_iso(), "app": "apple"}
         try:
             info["app_store"] = self._survey_app_store()
@@ -1743,7 +1744,7 @@ class App:
             info["apple_store"] = {"error": type(e).__name__}
         self._survey = info
         out = self.paths.diagnostics / "diagnose-apple.json"
-        write_shaped(out, info, words_for('Apple', site))
+        write_shaped(out, info, words)
         print(f"  Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
@@ -1752,14 +1753,16 @@ class App:
         a = info.get("app_store") or {}
         print("  App Store, signed in %s, %s member(s), %s purchase(s) read, %s paid, "
               "%s free, %s pending"
-              % ("yes" if a.get("signed_in") else "no", a.get("members", 0),
-                 a.get("purchases", 0), a.get("paid", 0), a.get("free", 0),
-                 a.get("pending", 0)))
+              % tuple(shape_tree(v, words) for v in (
+                  "yes" if a.get("signed_in") else "no", a.get("members", 0),
+                  a.get("purchases", 0), a.get("paid", 0), a.get("free", 0),
+                  a.get("pending", 0))))
         s = info.get("apple_store") or {}
         print("  Apple Store, signed in %s, %s order(s) listed, %s with an invoice, "
               "%s canceled"
-              % ("yes" if s.get("signed_in") else "no", s.get("orders", 0),
-                 s.get("with_invoice", 0), s.get("canceled", 0)))
+              % tuple(shape_tree(v, words) for v in (
+                  "yes" if s.get("signed_in") else "no", s.get("orders", 0),
+                  s.get("with_invoice", 0), s.get("canceled", 0))))
 
     def _survey_app_store(self) -> dict:
         """Report a Problem in counts. Reads only."""

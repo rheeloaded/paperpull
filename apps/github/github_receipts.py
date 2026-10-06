@@ -39,7 +39,7 @@ from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import github_site as site
 from paperpull_core.models import (ONLINE, Item, Purchase, State)
-from paperpull_core.words import Fixed, words_for, write_shaped
+from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -1129,6 +1129,7 @@ class App:
         two digits or more, every email and every @handle masked. This is
         the file a tester attaches to the issue. No screenshot is taken."""
         self.stats["mode"] = "diagnose"
+        words = words_for('GitHub', site)
         page = self.page()
         site.set_private_words([self.config.get("owner", "")])
         info = {"timestamp": now_iso(), "app": "github", "history": {}, "receipt": {}}
@@ -1151,16 +1152,17 @@ class App:
         except Exception as e:
             info["error"] = site.mask_text(str(e))
         out = self.paths.diagnostics / "diagnose-github.json"
-        write_shaped(out, info, words_for('GitHub', site))
+        write_shaped(out, info, words)
         print(f"  Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
         print("  shape, a for a letter and 9 for a digit, so it can be attached")
         print("  too. Read it through first.")
         h = info.get("history") or {}
-        print(f"  History: state={h.get('state') or 'has rows'} rows={h.get('rows')} links={len(h.get('links') or [])}")
+        print(f"  History: state={shape_tree(h.get('state') or 'has rows', words)} "
+              f"rows={shape_tree(h.get('rows'), words)} links={len(h.get('links') or [])}")
         r = info.get("receipt") or {}
-        print(f"  Receipt link: {r.get('kind') or r.get('note')}")
+        print(f"  Receipt link: {shape_tree(r.get('kind') or r.get('note'), words)}")
         print("  Nothing in the file identifies you. Attach it to the GitHub issue.")
 
 

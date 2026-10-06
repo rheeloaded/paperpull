@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: E402  binds this provider's AppSpec
 import newrez_site as site  # noqa: E402
+from paperpull_core.words import Fixed, shape_tree  # noqa: E402
 
 LOAN = "1234567"
 MONTHLY = f"https://servicing.newrez.com/servicing/{LOAN}/statements/monthly"
@@ -709,6 +710,10 @@ def test_the_discovery_line_is_numbers_and_fixed_words_only():
             "yearly": {"picker": "Make a payment"},
             "Statement for March": {"picker": "found"}}
     assert site.year_walk_lines(junk) == ["Year picker on the monthly page walked 1 year, 2024 gave 7"]
+    # Diagnose prints each line through the word list, which keeps a
+    # sentence of ours whole, years and counts included
+    for line in site.year_walk_lines(WALK):
+        assert isinstance(line, Fixed) and shape_tree(line) == line
     # what goes to the journal, and so to the failure file, has places and no years
     facts = site.year_walk_facts(WALK)
     assert facts["monthly"]["walked"] == [[1, 9, "shown"], [2, 12, "shown"], [3, 7, "shown"],

@@ -49,7 +49,7 @@ from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import uber_site as site
 from paperpull_core.models import Item, Purchase, State
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape_tree, words_for, write_shaped
 
 from storage import (EATS, PURCHASE_TYPES, RIDES, CsvFile, JsonStore,
                      ORDER_HISTORY_COLUMNS, Paths, RECEIPT_INDEX_COLUMNS,
@@ -1375,6 +1375,7 @@ class App:
         send. Downloads nothing and presses nothing, and no screenshot is
         taken."""
         self.stats["mode"] = "diagnose"
+        words = words_for('Uber', site)
         info = {"timestamp": now_iso(), "app": "uber"}
         try:
             info["rides"] = self._survey_rides()
@@ -1386,7 +1387,7 @@ class App:
             info["eats"] = {"error": type(e).__name__}
         self._survey = info
         out = self.paths.diagnostics / "diagnose-uber.json"
-        write_shaped(out, info, words_for('Uber', site))
+        write_shaped(out, info, words)
         print(f"  Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
@@ -1394,12 +1395,14 @@ class App:
         print("  too. Read it through first.")
         r = info.get("rides") or {}
         print("  Rides, signed in %s, %s trip(s) read, %s paid, %s with a receipt of %s asked"
-              % ("yes" if r.get("signed_in") else "no", r.get("trips", 0), r.get("paid", 0),
-                 r.get("with_pdf", 0), r.get("receipts_asked", 0)))
+              % tuple(shape_tree(v, words) for v in (
+                  "yes" if r.get("signed_in") else "no", r.get("trips", 0), r.get("paid", 0),
+                  r.get("with_pdf", 0), r.get("receipts_asked", 0))))
         e = info.get("eats") or {}
         print("  Uber Eats, signed in %s, %s order(s) read, %s paid, %s with a receipt of %s asked"
-              % ("yes" if e.get("signed_in") else "no", e.get("orders", 0), e.get("paid", 0),
-                 e.get("with_pdf", 0), e.get("receipts_asked", 0)))
+              % tuple(shape_tree(v, words) for v in (
+                  "yes" if e.get("signed_in") else "no", e.get("orders", 0), e.get("paid", 0),
+                  e.get("with_pdf", 0), e.get("receipts_asked", 0))))
 
     def _survey_rides(self) -> dict:
         """The trips in counts, the list and a few receipts. Reads only."""

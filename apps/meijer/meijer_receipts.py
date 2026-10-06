@@ -39,7 +39,7 @@ from paperpull_core import classification, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import meijer_site as site
 from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
-from paperpull_core.words import Fixed, words_for, write_shaped
+from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -1403,6 +1403,7 @@ class App:
         two digits or more, every email and every @handle masked. This is
         the file a tester attaches to the issue. No screenshot is taken."""
         self.stats["mode"] = "diagnose"
+        words = words_for('Meijer', site)
         page = self.page()
         site.set_private_words([self.config.get("owner", "")])
         info = {"timestamp": now_iso(), "app": "meijer", "history": {}, "receipt": {}, "json_answers": []}
@@ -1448,16 +1449,18 @@ class App:
             info["error"] = site.mask_text(str(e))
         info["json_answers"] = sniffer.stop()
         out = self.paths.diagnostics / "diagnose-meijer.json"
-        write_shaped(out, info, words_for('Meijer', site))
+        write_shaped(out, info, words)
         print(f"  Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
         print("  shape, a for a letter and 9 for a digit, so it can be attached")
         print("  too. Read it through first.")
         h = info.get("history") or {}
-        print(f"  Orders page: state={h.get('state') or 'has rows'} rows={h.get('rows')} links={len(h.get('links') or [])} json answers={len(info['json_answers'])}")
+        print(f"  Orders page: state={shape_tree(h.get('state') or 'has rows', words)} "
+              f"rows={shape_tree(h.get('rows'), words)} links={len(h.get('links') or [])} "
+              f"json answers={len(info['json_answers'])}")
         r = info.get("receipt") or {}
-        print(f"  Receipt link: {r.get('kind') or r.get('note')}")
+        print(f"  Receipt link: {shape_tree(r.get('kind') or r.get('note'), words)}")
         print("  Nothing in the file identifies you. Attach it to the Meijer issue.")
 
 

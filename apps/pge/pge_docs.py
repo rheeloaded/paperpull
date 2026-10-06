@@ -42,7 +42,7 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape, shape_tree, shape_url, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -737,11 +737,12 @@ class App:
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
+        words = words_for('PG&E', site)
         print("Dumping page structure...")
         page = self.page()
         found = site.goto_documents(page)
-        print(f"Current URL: {page.url}")
-        print(f"Page title: {page.title()}")
+        print(f"Current URL: {shape_url(page.url, words)}")
+        print(f"Page title: {shape(page.title(), words)}")
 
         info = {
             "url": page.url,
@@ -790,7 +791,7 @@ class App:
             info["screenshot_error"] = str(e)
 
         out = self.paths.diagnostics / "diagnose-documents.json"
-        write_shaped(out, info, words_for('PG&E', site))
+        write_shaped(out, info, words)
         print(f"Wrote diagnostic report: {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
@@ -798,12 +799,13 @@ class App:
         print("  too. Read it through first.")
         print("  The screenshot beside it shows the page as it is, so it stays")
         print("  on this machine.")
-        print(f"Counts: {info['row_counts']}")
-        print(f"Statements collected: {info['collected']}")
+        print(f"Counts: {shape_tree(info['row_counts'], words)}")
+        print(f"Statements collected: {shape_tree(info['collected'], words)}")
         if controls:
             print("Found clickable controls:")
             for c in controls[:10]:
-                print(f"  [{'SAFE' if c['safe'] else 'BLOCK'}] {c['role']}: {c['text']}")
+                print(f"  [{'SAFE' if c['safe'] else 'BLOCK'}] {shape(c['role'], words)}: "
+                      f"{shape(c['text'], words)}")
 
     # -- summary -----------------------------------------------------------
 

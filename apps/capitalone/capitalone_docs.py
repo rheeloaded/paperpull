@@ -25,7 +25,7 @@ from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import stable_occurrences as _stable_occurrences
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -817,6 +817,7 @@ class App:
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
+        words = words_for('Capital One', site)
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
@@ -858,7 +859,7 @@ class App:
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
-        write_shaped(out, info, words_for('Capital One', site))
+        write_shaped(out, info, words)
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
@@ -866,15 +867,15 @@ class App:
         print("  too. Read it through first.")
         print("  The screenshot beside it shows the page as it is, so it stays")
         print("  on this machine.")
-        print(f"Documents page found: {info.get('documents_page_found')}")
-        print(f"Documents (API): {info.get('documents_total')}  "
-              f"{info.get('documents_by_category')}")
-        print(f"Accounts: {info.get('documents_by_account')}")
+        print(f"Documents page found: {shape_tree(info.get('documents_page_found'), words)}")
+        print(f"Documents (API): {shape_tree(info.get('documents_total'), words)}  "
+              f"{shape_tree(info.get('documents_by_category'), words)}")
+        print(f"Accounts: {shape_tree(info.get('documents_by_account'), words)}")
         r = info.get("rendered") or {}
-        print(f"Rendered: headings={r.get('headings')} "
-              f"rows on screen={r.get('rows_on_screen')}")
+        print(f"Rendered: headings={shape_tree(r.get('headings'), words)} "
+              f"rows on screen={shape_tree(r.get('rows_on_screen'), words)}")
         if info.get("error"):
-            print(f"Error: {info['error']}")
+            print(f"Error: {shape(info['error'], words)}")
 
 
     def cmd_record(self):

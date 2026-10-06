@@ -51,7 +51,7 @@ import sba_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
-from paperpull_core.words import Fixed, words_for, write_shaped
+from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -864,6 +864,7 @@ class App:
         shape only. Nothing is downloaded and nothing but a documents link is
         followed."""
         self.stats["mode"] = "diagnose"
+        words = words_for('SBA', site)
         page = self.page()
         info = {"timestamp": now_iso(), "unverified": True,
                 "note": Fixed("SBA app built without an account. This survey is what "
@@ -904,15 +905,15 @@ class App:
         except Exception as e:
             info["error"] = str(e)[:300]
         out = self.paths.diagnostics / "diagnose-documents.json"
-        write_shaped(out, info, words_for('SBA', site))
+        write_shaped(out, info, words)
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
         print("  shape, a for a letter and 9 for a digit, so it can be attached")
         print("  too. Read it through first.")
-        print(f"Documents page found: {info.get('documents_page_found', '?')}, "
+        print(f"Documents page found: {shape_tree(info.get('documents_page_found', '?'), words)}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
-              f"rows: {info.get('rows_collected', '?')}")
+              f"rows: {shape_tree(info.get('rows_collected', '?'), words)}")
         print("Look through that file for anything you would not want public,")
         print("then attach it to the SBA issue on GitHub. No screenshot was taken.")
 

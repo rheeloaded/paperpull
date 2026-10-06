@@ -44,7 +44,7 @@ from paperpull_core import browser as browser_launcher
 import walmart_site as site
 from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State,
                                    ValidationResult)
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape, shape_tree, words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, title_case,
                      unique_path)
@@ -1390,6 +1390,7 @@ class App:
     def cmd_diagnose(self):
         """Inspect one purchase per type and record local diagnostics."""
         self.stats["mode"] = "diagnose"
+        words = words_for('Walmart', site)
         page = self.page()
         if not self.discovery.data:
             self.cmd_discover(quiet=True)
@@ -1403,7 +1404,7 @@ class App:
                 print(f"No {ptype} purchase available to diagnose.")
                 continue
             p = candidates[0]
-            print(f"\nDiagnosing {ptype} purchase #{p.order_number} ...")
+            print(f"\nDiagnosing {ptype} purchase #{shape(p.order_number, words)} ...")
             info = {"purchase": p.key, "timestamp": now_iso()}
             try:
                 site.goto_details(page, p)
@@ -1428,13 +1429,13 @@ class App:
                 info["invoice_controls"] = len(site.find_invoice_controls(page))
                 info["iframe_receipt"] = site.find_receipt_iframe(page) is not None
                 info["items_extracted"] = [i.name for i in site.extract_items(page)][:20]
-                shot = self.paths.diagnostics / f"diagnose-{ptype}-{p.order_number}.png"
+                shot = self.paths.diagnostics / f"diagnose-{ptype}.png"
                 page.screenshot(path=str(shot), full_page=True)
                 info["screenshot"] = str(shot)
             except Exception as e:
                 info["error"] = str(e)
-            out = self.paths.diagnostics / f"diagnose-{ptype}-{p.order_number}.json"
-            write_shaped(out, info, words_for('Walmart', site))
+            out = self.paths.diagnostics / f"diagnose-{ptype}.json"
+            write_shaped(out, info, words)
             print(f"  Wrote {out}")
             print("  That is the detailed file, for repairing this provider. Any word")
             print("  in it that is not on PaperPull's fixed list is written as its")
@@ -1442,8 +1443,9 @@ class App:
             print("  too. Read it through first.")
             print("  The screenshot beside it shows the page as it is, so it stays")
             print("  on this machine.")
-            print(f"  Print-receipt controls found: {info.get('print_receipt_controls', '?')}; "
-                  f"receipt section: {info.get('receipt_section_found', '?')}")
+            print(f"  Print-receipt controls found: "
+                  f"{shape_tree(info.get('print_receipt_controls', '?'), words)}; "
+                  f"receipt section: {shape_tree(info.get('receipt_section_found', '?'), words)}")
 
     # -- run summary --------------------------------------------------------
 

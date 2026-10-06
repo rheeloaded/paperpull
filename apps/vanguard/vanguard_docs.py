@@ -25,7 +25,7 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -870,6 +870,7 @@ class App:
         screenshot taken, since a picture of a brokerage page carries every
         balance and account number on it."""
         self.stats["mode"] = "diagnose"
+        words = words_for('Vanguard', site)
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
@@ -900,19 +901,20 @@ class App:
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
-        write_shaped(out, info, words_for('Vanguard', site))
+        write_shaped(out, info, words)
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
         print("  shape, a for a letter and 9 for a digit, so it can be attached")
         print("  too. Read it through first.")
-        print(f"Documents page found: {info.get('documents_page_found')}")
+        print(f"Documents page found: {shape_tree(info.get('documents_page_found'), words)}")
         print(f"Accounts: {len(info.get('documents_by_account') or {})}")
-        print(f"Documents (API): {info.get('documents_total')}  "
-              f"{info.get('documents_by_category')}")
-        print(f"Years on the picker: {(info.get('rendered') or {}).get('years')}")
+        print(f"Documents (API): {shape_tree(info.get('documents_total'), words)}  "
+              f"{shape_tree(info.get('documents_by_category'), words)}")
+        print(f"Years on the picker: "
+              f"{shape_tree((info.get('rendered') or {}).get('years'), words)}")
         if info.get("error"):
-            print(f"Error: {info['error']}")
+            print(f"Error: {shape(info['error'], words)}")
 
     def cmd_record(self):
         """Record the path a person takes to a document, so this app can be

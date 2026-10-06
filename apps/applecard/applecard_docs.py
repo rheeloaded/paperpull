@@ -55,7 +55,7 @@ import applecard_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
-from paperpull_core.words import Fixed, words_for, write_shaped
+from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -986,6 +986,7 @@ class App:
         rows and documents it read as flags and counts. Nothing is
         downloaded and nothing but a section link is followed."""
         self.stats["mode"] = "diagnose"
+        words = words_for('Apple Card', site)
         page = self.page()
         info = {"timestamp": now_iso(), "unverified": True,
                 "note": Fixed("Apple Card app built without an account. This survey is what "
@@ -1029,7 +1030,7 @@ class App:
         except Exception as e:
             info["error"] = str(e)[:300]
         out = self.paths.diagnostics / "diagnose-documents.json"
-        write_shaped(out, info, words_for('Apple Card', site))
+        write_shaped(out, info, words)
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
@@ -1037,9 +1038,9 @@ class App:
         print("  too. Read it through first. The survey file beside it, whose")
         print("  name starts with survey-, is the one to send first.")
         recognized = info.get("documents_recognized") or {}
-        print(f"Documents page found: {info.get('documents_page_found', '?')}, "
+        print(f"Documents page found: {shape_tree(info.get('documents_page_found', '?'), words)}, "
               f"documents recognized: {sum(recognized.get('by_kind', {}).values())}, "
-              f"rows: {info.get('rows_collected', '?')}")
+              f"rows: {shape_tree(info.get('rows_collected', '?'), words)}")
         print("No screenshot was taken.")
 
     # -- summary -----------------------------------------------------------

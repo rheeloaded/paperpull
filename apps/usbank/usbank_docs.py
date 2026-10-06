@@ -24,7 +24,7 @@ import usbank_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape, shape_tree, shape_url, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -806,6 +806,7 @@ class App:
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
+        words = words_for('U.S. Bank', site)
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
@@ -897,7 +898,7 @@ class App:
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
-        write_shaped(out, info, words_for('U.S. Bank', site))
+        write_shaped(out, info, words)
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
@@ -905,34 +906,37 @@ class App:
         print("  too. Read it through first.")
         print("  The screenshot beside it shows the page as it is, so it stays")
         print("  on this machine.")
-        print(f"Rows collected: {info.get('collected', '?')}")
+        print(f"Rows collected: {shape_tree(info.get('collected', '?'), words)}")
         refused = [s for s in info.get("selects", [])
                    if s.get("refused_as_money_control")]
         if refused:
             print(f"Dropdowns refused as money controls: {len(refused)}")
             for s in refused[:4]:
-                print(f"  refused: {s['identity'][:70]}")
+                print(f"  refused: {shape(s['identity'][:70], words)}")
         if info.get("account_options"):
             print(f"Account picker:  {len(info['account_options'])} options")
         if info.get("cards"):
             print(f"Cards seen:      {len(info['cards'])}")
         if info.get("year_options"):
-            print(f"Year picker:     {', '.join(info['year_options'])}")
+            print(f"Year picker:     {', '.join(shape(o, words) for o in info['year_options'])}")
         api = info.get("api_candidates")
         if isinstance(api, list) and api:
             print(f"JSON endpoints seen ({len(api)}):")
             for a in api[:6]:
-                print(f"  {a['status']}  {a['url']}")
+                print(f"  {shape_tree(a['status'], words)}  {shape_url(a['url'], words)}")
         sapi = info.get("statements_api")
         if isinstance(sapi, dict):
-            print(f"\nAPI records captured (year on screen): {sapi.get('api_records')}"
-                  f"   rows shown: {sapi.get('rows_shown')}")
+            print(f"\nAPI records captured (year on screen): "
+                  f"{shape_tree(sapi.get('api_records'), words)}"
+                  f"   rows shown: {shape_tree(sapi.get('rows_shown'), words)}")
             print("Fields present on those records:")
             for k, v in (sapi.get("fields") or {}).items():
-                print(f"  {k:16} present={v['present']:4} empty={v['empty']:4}  "
-                      f"e.g. {', '.join(str(x) for x in v['distinct_sample'][:3])[:60]}")
+                print(f"  {shape(k, words):16} present={shape_tree(v['present'], words)!s:>4} "
+                      f"empty={shape_tree(v['empty'], words)!s:>4}  e.g. "
+                      f"{shape(', '.join(str(x) for x in v['distinct_sample'][:3])[:60], words)}")
         for s in info.get("samples", [])[:5]:
-            print(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}")
+            print(shape(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}",
+                        words, collapse=False))
 
 
     def cmd_record(self):

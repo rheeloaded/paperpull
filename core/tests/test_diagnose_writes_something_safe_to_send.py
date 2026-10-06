@@ -109,14 +109,33 @@ def test_every_file_written_for_a_tester_goes_through_the_word_list(app):
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
 def test_every_shaped_write_names_the_app_by_its_source(app):
     """The app's own words come from what its source calls it, the name it
-    gives the survey and its site module, and from nothing a page said."""
+    gives the survey and its site module, and from nothing a page said.
+    Diagnose sets them once, as words, for its file and for what it
+    prints, and words is then bound to that and to nothing else."""
     tree = ast.parse(entry_of(app).read_text(encoding="utf-8"))
     provider = next(ast.unparse(k.value) for n in _calls(tree, "failure.write_survey")
                     for k in n.keywords if k.arg == "provider")
-    for call in _calls(tree, "write_shaped"):
-        assert len(call.args) == 3, ast.unparse(call)[:80]
-        assert ast.unparse(call.args[2]) == "words_for(%s, site)" % provider, \
-            ast.unparse(call)[:100]
+    expected = "words_for(%s, site)" % provider
+    checked = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for call in _calls(fn, "write_shaped"):
+            checked.add(id(call))
+            assert len(call.args) == 3, ast.unparse(call)[:80]
+            words = call.args[2]
+            if isinstance(words, ast.Name):
+                bound = [n for n in ast.walk(fn) if isinstance(n, ast.Name)
+                         and n.id == words.id and isinstance(n.ctx, ast.Store)]
+                set_to = [ast.unparse(n.value) for n in ast.walk(fn)
+                          if isinstance(n, ast.Assign) and len(n.targets) == 1
+                          and isinstance(n.targets[0], ast.Name) and n.targets[0].id == words.id]
+                assert len(bound) == 1 and set_to == [expected], \
+                    "%s %s, %s" % (app.name, fn.name, ast.unparse(call)[:100])
+            else:
+                assert ast.unparse(words) == expected, ast.unparse(call)[:100]
+    assert checked == {id(c) for c in _calls(tree, "write_shaped")}, \
+        "%s writes a shaped file outside any function" % app.name
 
 
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)

@@ -48,7 +48,7 @@ import fairfaxwater_site as site
 import storage
 from paperpull_core.models import State
 from paperpull_core.keys import stable_occurrences as _stable_occurrences
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -863,6 +863,7 @@ class App:
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
+        words = words_for('Fairfax Water', site)
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
@@ -889,7 +890,7 @@ class App:
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
-        write_shaped(out, info, words_for('Fairfax Water', site))
+        write_shaped(out, info, words)
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
@@ -898,9 +899,10 @@ class App:
         sv = info.get("survey") or {}
         print(f"Pages surveyed: {len(sv.get('pages', []))}   "
               f"JSON/PDF responses seen: {len(sv.get('responses', []))}")
-        print(f"Rows collected: {info.get('collected', '?')}")
+        print(f"Rows collected: {shape_tree(info.get('collected', '?'), words)}")
         for s in info.get("samples", [])[:5]:
-            print(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}")
+            print(shape(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}",
+                        words, collapse=False))
 
     # -- summary -----------------------------------------------------------
 

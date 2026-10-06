@@ -59,6 +59,7 @@ from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import human_date as _human_date
+from paperpull_core.words import Fixed
 # re-exported: this app's docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
@@ -1288,7 +1289,8 @@ def year_walk_lines(walk) -> List[str]:
     each gave. Built from numbers and the fixed words above only, so
     nothing off the page can reach them (#38). They name the years, so
     they go to the console and never to the journal, which carries
-    year_walk_facts instead."""
+    year_walk_facts instead. Each is Fixed, so the word list Diagnose
+    prints through keeps it whole."""
     lines: List[str] = []
     if not isinstance(walk, dict):
         return lines
@@ -1326,7 +1328,7 @@ def year_walk_lines(walk) -> List[str]:
         elif state == "not on a statements page":
             lines.append("The %s page was not a signed-in statements page, so no year picker "
                          "was looked for" % name)
-    return lines
+    return [Fixed(line) for line in lines]
 
 
 # How long capture waits for the rows once a statements page is open.

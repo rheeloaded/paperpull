@@ -43,7 +43,7 @@ import aafmaa_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -919,6 +919,7 @@ class App:
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
+        words = words_for('AAFMAA', site)
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
@@ -1010,7 +1011,7 @@ class App:
             # "1". WebForms nests tables inside tables for layout, so a <tr>
             # can own six cells or six hundred depending which one it is.
             try:
-                shape = page.evaluate(r"""() => [...document.querySelectorAll('tr')]
+                table_shape = page.evaluate(r"""() => [...document.querySelectorAll('tr')]
                     .slice(0, 60).map((tr, i) => ({
                         i,
                         own_td: [...tr.children].filter(c => c.tagName === 'TD').length,
@@ -1018,7 +1019,7 @@ class App:
                         links: tr.querySelectorAll('a').length,
                         text: (tr.innerText || '').replace(/\s+/g, ' ').slice(0, 70),
                     }))""") or []
-                info["table_shape"] = shape
+                info["table_shape"] = table_shape
             except Exception as e:
                 info["table_shape"] = f"ERR {e}"
 
@@ -1037,7 +1038,7 @@ class App:
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
-        write_shaped(out, info, words_for('AAFMAA', site))
+        write_shaped(out, info, words)
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")
@@ -1045,9 +1046,10 @@ class App:
         print("  too. Read it through first.")
         print("  The screenshot beside it shows the page as it is, so it stays")
         print("  on this machine.")
-        print(f"Rows collected: {info.get('collected', '?')}")
+        print(f"Rows collected: {shape_tree(info.get('collected', '?'), words)}")
         for s in info.get("samples", [])[:5]:
-            print(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}")
+            print(shape(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}",
+                        words, collapse=False))
 
     # -- summary -----------------------------------------------------------
 
