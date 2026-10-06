@@ -92,7 +92,8 @@ the default is a quarter of the processors, at most six, or
 PAPERPULL_TEST_JOBS when it is set. Each suite is still its own pytest
 process with its own interpreter, and no test binds a fixed port, so they
 do not meet. A suite that runs past its time limit is a failing suite,
-never the end of the whole run.
+never the end of the whole run. The limit is twice what the suite took on
+a full run (tools/suite_times.json), and never less than half an hour.
 
 On macOS and Linux every suite is in the runner's process group, so Ctrl+C,
 a closed terminal or a kill of the run's group reaches every suite as it
@@ -171,11 +172,15 @@ OUTPUT = REPO / "test-output"
 # How long each suite took on a full run. The longest start first, and the
 # parts on CI are balanced by it. A suite not listed counts as a middling one.
 TIMES = REPO / "tools" / "suite_times.json"
-# How long one suite may run before it is stopped as hung. core took 1655 to
-# 1718 seconds of a 1800 second limit in full runs on 2026-10-06, and two
-# lands that day had it stopped at 99% with nothing failed while other
-# sessions ran tests beside them. An hour still stops a hung suite.
-SUITE_LIMIT_S = 3600
+# How long a suite may run before it is stopped as hung, LIMIT_TIMES as
+# long as it took on a full run, as tools/suite_times.json has it, and never
+# less than SUITE_LIMIT_S. Every suite once had the same 1800 seconds, and
+# core took 1655 to 1718 of them in full runs on 2026-10-06. Two lands that
+# day had it stopped at 99% with nothing failed while other sessions ran
+# tests beside them. An hour for every suite, which came next, let a small
+# suite that hung hold a run up for that hour.
+SUITE_LIMIT_S = 1800
+LIMIT_TIMES = 2
 # Set for every suite this runs, so a run started inside one never waits
 # for the lock its own run holds.
 IN_RUN = "PAPERPULL_IN_TEST_RUN"
@@ -742,6 +747,12 @@ def expected(name: str, times: dict) -> float:
     return known[len(known) // 2] if known else 60.0
 
 
+def limit_of(name: str, times: dict) -> int:
+    """How long the suite may run before it is stopped as hung. A suite not
+    listed gets SUITE_LIMIT_S, as every suite once did."""
+    return int(max(SUITE_LIMIT_S, LIMIT_TIMES * times.get(name, 0)))
+
+
 def longest_first(names: list, times: dict) -> list:
     return sorted(names, key=lambda n: (-expected(n, times), n))
 
@@ -998,7 +1009,7 @@ def run(args) -> int:
     def one(item):
         name, d, py = item
         started = time.time()
-        out, returncode, failures = run_suite(d, py)
+        out, returncode, failures = run_suite(d, py, timeout=limit_of(name, times))
         return name, out, returncode, failures, time.time() - started
 
     def report(name, out, returncode, failures, seconds):

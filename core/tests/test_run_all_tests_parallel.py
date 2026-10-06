@@ -184,6 +184,24 @@ def test_a_bad_part_is_refused():
             rat.parse_shard(bad)
 
 
+def test_a_suite_may_run_twice_its_time_and_never_less_than_half_an_hour():
+    """core outgrew a limit that was the same for every suite, so each has
+    its own. A short suite, or one with no time yet, has the floor."""
+    times = {"core": 1500, "gui": 23}
+    assert rat.limit_of("core", times) == 3000
+    assert rat.limit_of("gui", times) == rat.SUITE_LIMIT_S == 1800
+    assert rat.limit_of("a_new_app", times) == rat.SUITE_LIMIT_S
+
+
+def test_each_suite_is_run_with_its_own_limit(fake_run, tmp_path, monkeypatch):
+    given = {}
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: (
+        given.__setitem__(d.name, timeout) or ("1 passed", 0, [])))
+    fake_run({n: tmp_path / n for n in ("long", "short", "new")}, {"long": 1500, "short": 5})
+    assert rat.main(["--jobs", "2"]) == 0
+    assert given == {"long": 3000, "short": 1800, "new": 1800}
+
+
 # The suite's one test starts a process of its own, as a test that opens a
 # browser does, says which processes are its pytest and that one, then sleeps
 # for ten minutes, longer than anything here waits for it, so only the runner
