@@ -233,6 +233,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   app's own Online, In-Store or Manual Review folder, a rename that fails
   leaves that receipt as it was and the review goes on, and the CSVs are
   written however the review ends.
+- **American Family opens each bill's details to find its statements.** A
+  Pilot on 0.43.0 opened Billing & Payments, found no statement and saved
+  nothing. That page lists each bill with a Bill details button and no
+  statement of its own, and the app never pressed it. Now each bill's Bill
+  details is pressed in turn, only when its whole words are Bill details
+  and every word it shows or announces passes the guard, and the app waits
+  up to about twenty seconds for that bill's statements. They are read only
+  on Billing & Payments or the page that press led to, never where that
+  address names a payment, autopay or a setting, and only the ones the
+  press brought count as that bill's. Each statement carries the last four
+  digits of the number its bill's card shows, in its file name too, so two
+  bills' statements of the same date are both saved and told apart, and
+  bills whose cards cannot be told apart are left alone. Diagnose also
+  presses each Bill details that passes the guard and notes where it led,
+  how many statements showed and how long they took. This has not yet been
+  confirmed on a real account.
 
 ### Security
 - **Every redirect is checked against the provider's own sites before it

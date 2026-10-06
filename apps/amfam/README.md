@@ -23,8 +23,8 @@ part of [PaperPull](../../README.md).
 4. Click **more** under the buttons, then **Diagnose**. It reads the
    documents page and writes `Diagnostics\diagnose-documents.json` in the
    American Family folder. It downloads nothing, clicks nothing but a
-   documents link, takes no screenshot, and masks any run of six or more
-   digits.
+   documents link and each bill's Bill details, takes no screenshot, and
+   masks any run of six or more digits.
 5. Click **Record**, in the same **more** menu. Go back to the browser window
    and click your way to one document the way you normally would, then come
    back here and click **Stop recording**. It writes
@@ -95,6 +95,23 @@ paperpull amfam pilot             REM once the site layer is confirmed
   Anything that changes how statements arrive, online, by mail, by text,
   paperless, reminders or renewals, is refused. A billing page with
   nothing to take writes the failure file.
+- **Each bill's details.** Billing & Payments lists each of your bills
+  with a Bill details button, and a bill's statements show only once it
+  is pressed. So each bill's Bill details is pressed in turn, from the
+  page loaded afresh, and the app waits up to about twenty seconds for
+  that bill's statements. It is pressed only when its whole words are Bill
+  details, every word it shows or announces passes the guard, it holds no
+  other control and the press would land on it. The statements are read
+  only on Billing & Payments or the page that press led to, never where
+  that address names a payment, autopay or a setting, as
+  /billing/autopay does, and only those that were not showing before the
+  press count as that bill's. Each one carries the last four digits of
+  the number its bill's card shows, in its file name too, so two bills'
+  statements of the same date are both kept and told apart. Bills whose
+  cards show the same last four digits, or no number when there are
+  several bills, are left alone. Saving a statement opens its bill's
+  details again first. A page with no Bill details is read as it shows,
+  as before.
 - **Downloads.** A row that links straight to a PDF is fetched from inside
   the page with the session's own cookies. Otherwise the row's control is
   clicked, once it has passed the guard, and whatever the site does, a

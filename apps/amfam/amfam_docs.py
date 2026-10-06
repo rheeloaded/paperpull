@@ -414,8 +414,13 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+        # The account part of the bill it was found under, in its key and
+        # its name, since two bills can each have a statement of one date.
+        acct = (getattr(r, "account", "") or "").strip()
+        doc = Document(title=title, category=category,
+                       summary=f"{summary} {acct}" if acct else summary,
+                       date=date, confidence=confidence, source_url=source_url,
+                       account=acct)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -570,7 +575,7 @@ class App:
             site.goto_documents(page)
         trace: list = []
         saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                   title=doc.title, trace=trace)
+                                   title=doc.title, trace=trace, account=doc.account)
         # A capture that failed must not leave a convincing empty file behind.
         # A ZIP the capture took stays, for the branch below that opens it.
         if out_path.exists() and not (saved and receipt_pdf.is_zip(out_path)) and (
@@ -869,7 +874,8 @@ class App:
         """Survey the Statements & Documents page and write a file a tester can attach to
         the GitHub issue. No screenshot, digit runs masked, JSON bodies as
         shape only. Nothing is downloaded and nothing but a documents link is
-        followed."""
+        followed. Each bill's Bill details that passes the guard is pressed,
+        to see where it leads and what it shows."""
         self.stats["mode"] = "diagnose"
         words = words_for('American Family', site)
         page = self.page()
@@ -897,7 +903,8 @@ class App:
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
             found_docs = site.collect_download_docs(page) if found else []
-            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_pdf_link": bool(b.href)}
+            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_pdf_link": bool(b.href),
+                                             "bill": bool(b.account)}
                                             for b in found_docs[:40]]
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)
@@ -909,6 +916,11 @@ class App:
                     "title": d.title[:90], "href": (d.href or "")[:100],
                     "text": (d.text or "").replace("\n", " | ")[:160],
                     "category": cat, "summary": summ, "date": date, "period": period})
+            # Each bill's Bill details that passes the guard, pressed from
+            # Billing & Payments loaded afresh. Where it led, how many
+            # statements showed and how many seconds they took, written as
+            # their shapes like the rest of this file.
+            info["bills"] = site.survey_bills(page) if found else []
         except Exception as e:
             info["error"] = str(e)[:300]
         out = self.paths.diagnostics / "diagnose-documents.json"
