@@ -31,8 +31,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
   own parser and done check makes sure each one takes the flag beside the
   panel's other flags and fetches a document it downloaded before when
   asked.
+- **PayPal reads a business account's statements.** Asked for its
+  statements, PayPal sends a business account to its settings page, and
+  the run used to stop there. It now goes to the business account's own
+  statements page, under Activity and All Reports, by its address, reads
+  the list that page gets for itself as it loads, and presses each ready
+  PDF statement's own Download button, found in its row by the dates the
+  row shows. Each statement has to name those dates in its own text before
+  it is filed, under the same names a personal account's statements get.
+  One whose dates cannot be checked goes to Manual Review, and one that
+  names other dates is not kept. A CSV and a statement PayPal is still
+  preparing are left alone and counted, a statement whose status, kind of
+  file or dates the app cannot read is left alone and described in the
+  failure file, and nothing that would create, generate, request or
+  schedule a statement or a report is ever pressed. The name PayPal gives
+  a downloaded file carries the account's id and is never kept. Login says
+  Success only once that list has come, and Diagnose on a business account
+  reads the page as well, pressing nothing. Written from one tester's
+  recording and not yet run on a real business account.
 
 ### Fixed
+- **PayPal's Resume no longer reports a clean run when nothing was
+  listed.** After a run stopped before PayPal's list was read, as one on a
+  business account's settings page did, Resume said everything in scope
+  was complete and the panel called the run clean. Now it says no
+  statements have been listed yet and stops as a run that stopped. After a
+  run whose list stopped partway, it carries on with the statements it
+  knows, then says the list was not read to its end and stops the same
+  way.
 - **`./setup-all.command` sets up a checkout on macOS and Linux again.**
   From 0.19.0 it stopped before setting anything up. Taking the browser
   download out of it left an `if` with nothing but comments inside, which

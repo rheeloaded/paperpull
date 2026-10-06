@@ -30,29 +30,38 @@ NOT COVERED
   Custom date-range statements are a request PayPal prepares, and are
   never submitted. Statements older than three years are not online.
 
-  Business accounts. Asked for the statements address, PayPal sent a
-  tester's business account to /businessmanage/account/accountAccess, its
-  settings page (#61). PayPal's public help sends people to
-  /reports/accountStatements for monthly statements instead, where a month
-  is requested and prepared before it can be downloaded. Nobody has
-  recorded that page or its requests, so none of it is built. Landing on
-  any other PayPal page that is not a sign-in page or a security check
-  raises SentElsewhere, and the run stops once and names the page. It used
-  to call the page a sign-in page and load the statements address four
-  times.
+  Landing on any other PayPal page that is not a sign-in page or a
+  security check raises SentElsewhere, and the run stops once and names the
+  page. It used to call the page a sign-in page and load the statements
+  address four times.
+
+BUSINESS ACCOUNTS
+  Asked for the statements address, PayPal sends a business account to its
+  settings page, /businessmanage/account/accountAccess (#61). Its
+  statements are under Activity, All Reports and then Statements, at
+  /reports/accountStatements, which this app loads by its address. See the
+  business section below for what one tester's recording showed of that
+  page and what it did not.
 
 SAFETY (this account moves money):
-  Strictly READ-ONLY. This module makes the two requests above and nothing
-  else. It never sends or requests money, transfers a balance, applies
-  for credit, saves an offer, donates, or edits any setting, and it clicks
-  nothing at all. FORBIDDEN_CONTROL_RE and SAFE_DOC_CONTROL_RE are kept so
-  the repo-wide guard tests cover this app the same as every other, and
+  Strictly READ-ONLY. For a personal account this module makes the two
+  requests above and nothing else, and it clicks nothing. For a business
+  account it loads the statements page, reads the answer the page itself
+  gets for its list, and presses only a statement row's own Download
+  control, read twice and passed by is_safe_control, and the list's own
+  next-page control. It never asks for the list itself, never requests,
+  creates or schedules a report or a statement, and a CSV or any other
+  kind of file is never pressed for. It never sends or requests money,
+  transfers a balance, applies for credit, saves an offer, donates, or
+  edits any setting. FORBIDDEN_CONTROL_RE and SAFE_DOC_CONTROL_RE are kept
+  so the repo-wide guard tests cover this app the same as every other, and
   --diagnose uses them to grade the page's controls.
 """
 from __future__ import annotations
 
 import base64
 import calendar
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -60,7 +69,12 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
+from paperpull_core import blob_capture
+from paperpull_core import capture
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import click_next_page, control_labels, is_next_control
+from paperpull_core.delivery import DOWNLOAD, DocumentRequest
+from paperpull_core.identity import Identity, date_variants, on_its_own, period_variants
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -98,12 +112,19 @@ LOGIN_URL_MARKERS = ["/signin", "/signout", "/login", "/authflow", "/checkpoint"
 BUSINESS_PATHS = ("/businessmanage/",)
 
 # ---------------------------------------------------------------------------
-# HARD SAFETY GUARD. Tuned for a wallet that moves money. This app clicks
-# nothing, so the guard grades controls for --diagnose and satisfies the
-# repo-wide guard tests.
+# HARD SAFETY GUARD. Tuned for a wallet that moves money. For a personal
+# account this app clicks nothing, and for a business account it presses a
+# statement row's Download control and the list's next-page control, each
+# only once this guard has passed it.
+#
+# The reports page that holds a business account's statements is also
+# where a report is asked for. A statement or report a control would
+# create, generate, prepare, schedule, request, get or run is never pressed
+# for, and neither is a file in any kind other than a PDF. "Statement" alone
+# used to let "Create statement" through.
 # ---------------------------------------------------------------------------
 FORBIDDEN_CONTROL_RE = re.compile(
-    r"(\bsend\b|request\s+money|\brequest\b|transfer|withdraw|deposit|add\s+money|"
+    r"(\bsend\b|request\s+money|\brequest|transfer|withdraw|deposit|add\s+money|"
     r"\bpay\b|payment|pay\s+in\s+4|checkout|\bbuy\b|\bsell\b|crypto|"
     r"donate|charit|fundrais|reload\s+phone|xoom|"
     r"\bapply\b|credit\s+card|cashback|\bcards?\b|\bbanks?\b|link\s+a|"
@@ -111,6 +132,10 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"enable|disable|change\b|edit\b|update\b|modify|manage\b|set\s+up|"
     r"delete|remove|cancel|close\s+account|dispute|report\s+a\s+problem|"
     r"custom\s+statement|file\s+taxes|"
+    r"\bcreat|\bgenerat|\bprepar|\bschedul|\bget\b|\brun\b|\bnew\b|\bexport|"
+    r"\bcustom|\bretry|\bresend|\bregenerat|"
+    r"\bcsv\b|\bxlsx?\b|\bexcel\b|\btxt\b|\btext\s+file|tab[\s-]*delimited|"
+    r"\bqif\b|\bqbo\b|\bofx\b|\biif\b|quicken|quickbooks|\bxml\b|\bjson\b|"
     r"password|passkey|\bpin\b|profile\b|settings|preferences|security|"
     r"notifications?\b|log\s*out|sign\s*out|"
     r"confirm|submit|save\b|agree|accept|authorize|\bchat\b|contact\s+us|"
@@ -284,12 +309,15 @@ class SentElsewhere(RuntimeError):
     account's settings is the one seen (#61). Loading the statements
     address again lands there again, and signing in changes nothing, so
     the run stops and names the page. `where` is its address as
-    page_named() gives it, and `business` says it is a business account's."""
+    page_named() gives it, and `business` says it is a business account's.
+    `reports` says the business statements page was tried as well and did
+    not open."""
 
-    def __init__(self, where: str, business: bool = False):
+    def __init__(self, where: str, business: bool = False, reports: bool = False):
         super().__init__("PayPal opened %s instead of the statements page" % where)
         self.where = where
         self.business = business
+        self.reports = reports
 
 
 # One part of an address that is a plain word, "businessmanage" or
@@ -439,6 +467,9 @@ class RawDoc:
     text: str = ""
     row_index: int = -1
     kind: str = "statement"
+    # The days a business statement covers, as the CSV's Period column
+    # shows them. Empty for a personal account's month.
+    period: str = ""
 
 
 def _listed(page) -> List[RawDoc]:
@@ -451,10 +482,15 @@ def collect_download_docs(page) -> List[RawDoc]:
     """Every monthly statement the site lists. `href` is the download
     address, built back from the month so nothing else rides along.
 
-    The statements page is loaded once here. Another PayPal page that is
-    not a sign-in page or a security check raises SentElsewhere. A sign-in
-    page, a check, or a page off paypal.com raises SessionExpired."""
+    The statements page is loaded once here. When it lands on a business
+    account's settings page, the business statements page is loaded by its
+    address instead and its own list is read (business_statements). Another
+    PayPal page that is not a sign-in page or a security check raises
+    SentElsewhere. A sign-in page, a check, or a page off paypal.com raises
+    SessionExpired."""
     if not goto_documents(page, fresh=True):
+        if is_business_page(page.url or ""):
+            return business_statements(page, landed=page.url or "")
         where = landed_elsewhere(page)
         if where:
             raise SentElsewhere(where, business=is_business_page(page.url or ""))
@@ -500,6 +536,863 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
         return False
     out_path.write_bytes(body)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Business accounts
+#
+# RECORDED on one tester's business account (Record, 0.43.0). Asked for the
+# statements address, PayPal sends a business account to its settings
+# page. Its statements are under Activity, All Reports and then the
+# Statements card, at /reports/accountStatements. As that page loads it
+# asks for its own list, a POST to /reports/apis/rux/reports/list, and the
+# answer is a list of one object holding "reports" and "hasMore". That
+# account had forty-one reports, each carrying id, createdOn, duration,
+# fileFormat, action, type and reportStatus, and the page drew a table row
+# of six cells for each, the last holding a Download button. Pressed, the
+# page's own script added a hidden link with a download mark and clicked
+# it a fifth of a second later, and the browser downloaded the statement
+# under a name holding what looks like the account's id and two stamps of
+# fourteen digits. Nothing of PayPal's was asked for or waited on between.
+#
+# NOT KNOWN. A recording keeps no values, so what a status, a kind of file
+# or a period looks like is not known, nor whether the link's address was
+# the file's own or a blob the page built, nor whether the list's request
+# carries a header the page adds. So the answer the page gets for its list
+# is read as the page loads and this app never asks for the list itself. A
+# row is taken only when its fileFormat reads as PDF, its reportStatus as
+# ready and its duration as days this app can name, and anything it cannot
+# read is refused and written down. The statement comes from the press a
+# person would make, taken by the core's delivery and checked for its
+# period in its own text. The downloaded file's own name is never kept,
+# since it holds the account's id, and a report's id is never read.
+# ---------------------------------------------------------------------------
+REPORTS_PATH = "/reports/accountStatements"
+REPORTS_PAGE = BASE + REPORTS_PATH
+REPORTS_LIST_PATH = "/reports/apis/rux/reports/list"
+# How long the business statements page has to hand over its list, and the
+# moment more it is given once the list came, for the table to be drawn.
+REPORTS_WAIT_MS = 30000
+REPORTS_SETTLE_MS = 1500
+# Pages of the list read at most, one press on its next-page control each.
+REPORTS_MAX_PAGES = 20
+# How long a press has for its statement to arrive. The tester's came in a
+# fifth of a second.
+BUSINESS_SETTLE_MS = 30000
+
+# A row of the drawn list.
+ROW_SELECTOR = "table tbody tr"
+# Where the list's own next-page control would be, in the table's footer or
+# a region marked as pagination. Whether one of these pages forward at all
+# is decided by its label alone (controls.is_next_control).
+NEXT_PAGE_SELECTOR = ("table tfoot button, table tfoot a, table tfoot [role='button'], "
+                      "[aria-label*='pagination' i] button, [aria-label*='pagination' i] a")
+
+# A control that downloads one statement, matched whole. The tester's said
+# Download.
+DOWNLOAD_LABEL_RE = re.compile(r"^download(?:\s+(?:pdf|statement|report|file))?$", re.I)
+
+# The words a row's status is read by. A status naming any word of the
+# second set is not ready, whatever else it says, so NOT_READY is never
+# read as ready. A status naming neither is one this app cannot read.
+READY_WORDS = frozenset((
+    "ready", "available", "complete", "completed", "success", "successful", "succeeded",
+    "done", "generated", "finished", "downloadable"))
+NOT_READY_WORDS = frozenset((
+    "not", "pending", "progress", "processing", "queued", "requested", "request",
+    "submitted", "scheduled", "generating", "preparing", "waiting", "running", "initiated",
+    "failed", "failure", "fail", "error", "errors", "expired", "cancelled", "canceled",
+    "unavailable", "rejected", "deleted", "incomplete"))
+# A kind of file other than a PDF, named in a row or a report's fileFormat.
+OTHER_KIND_RE = re.compile(r"\b(csv|xlsx?|excel|txt|tab[\s-]*delimited|qif|qbo|ofx|iif|"
+                           r"quicken|quickbooks|xml|json)\b", re.I)
+
+# What a report of the list is read as.
+READY = "ready"
+NOT_READY = "not ready"
+OTHER_TYPE = "other type"
+UNREAD_TYPE = "unread type"
+UNREAD_STATUS = "unread status"
+UNREAD_PERIOD = "unread period"
+
+# Why a statement was not pressed for, in words of this app's own.
+NOT_LISTED = "the list does not hold it as ready"
+NO_ROWS = "no rows were shown"
+NO_ROW = "no row names its period"
+MANY_ROWS = "more than one row names its period"
+NO_CONTROL = "its row has no download control"
+MANY_CONTROLS = "its row has more than one download control"
+
+# The keys a duration may name its first and last day by.
+_START_KEYS = frozenset(("start", "startdate", "startdatetime", "starttime", "from",
+                         "fromdate", "begin", "begindate", "periodstart"))
+_END_KEYS = frozenset(("end", "enddate", "enddatetime", "endtime", "to", "todate",
+                       "until", "periodend"))
+
+_MON = (r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)")
+# A day, written any of the ways a list or a table might write one. ISO with
+# or without a time after it, eight digits or a fourteen digit stamp,
+# month/day/year, "Aug 31, 2026" and "31 Aug 2026".
+_DAY_RE = re.compile(
+    r"(?<!\d)(?P<iy>\d{4})-(?P<im>\d{2})-(?P<id>\d{2})(?!\d)"
+    r"|(?<!\d)(?P<sy>\d{4})(?P<sm>\d{2})(?P<sd>\d{2})(?:\d{6})?(?!\d)"
+    r"|(?<![\d/])(?P<um>\d{1,2})/(?P<ud>\d{1,2})/(?P<uy>\d{4})(?![\d/])"
+    r"|(?<![a-z])(?P<nm>" + _MON + r")\.?\s+(?P<nd>\d{1,2}),?\s+(?P<ny>\d{4})(?!\d)"
+    r"|(?<!\d)(?P<dd>\d{1,2})\s+(?P<dm>" + _MON + r")\.?,?\s+(?P<dy>\d{4})(?!\d)",
+    re.I)
+# A month with its year and no day, "August 2026", "2026-08" or "08/2026".
+_MONTH_ONLY_RE = re.compile(
+    r"(?<![a-z])(?P<nm>" + _MON + r")\.?,?\s+(?P<ny>\d{4})(?!\d)"
+    r"|(?<![\d-])(?P<iy>\d{4})-(?P<im>\d{2})(?![\d-])"
+    r"|(?<![\d/])(?P<um>\d{1,2})/(?P<uy>\d{4})(?![\d/])",
+    re.I)
+
+
+def _day(year, month, day) -> Optional[str]:
+    """YYYY-MM-DD for a day that exists in this century, or None."""
+    try:
+        y, m, d = int(year), int(month), int(day)
+    except (TypeError, ValueError):
+        return None
+    if not 2000 <= y <= 2100:
+        return None
+    return _checked_date("%04d-%02d-%02d" % (y, m, d), None)
+
+
+def days_in(text) -> List[str]:
+    """Every day a string names, as YYYY-MM-DD, in the order it names them.
+    Empty when any of them is a day that does not exist, since a value
+    holding one is not read past."""
+    out = []
+    for m in _DAY_RE.finditer(str(text or "")):
+        g = m.groupdict()
+        if g["iy"]:
+            day = _day(g["iy"], g["im"], g["id"])
+        elif g["sy"]:
+            day = _day(g["sy"], g["sm"], g["sd"])
+        elif g["uy"]:
+            day = _day(g["uy"], g["um"], g["ud"])
+        elif g["ny"]:
+            day = _day(g["ny"], _MONTHS[g["nm"][:3].lower()], g["nd"])
+        else:
+            day = _day(g["dy"], _MONTHS[g["dm"][:3].lower()], g["dd"])
+        if day is None:
+            return []
+        out.append(day)
+    return out
+
+
+def month_in(text) -> Optional[Tuple[int, int]]:
+    """(year, month) when a string names one month with its year and no
+    day, and None for anything else."""
+    found = set()
+    for m in _MONTH_ONLY_RE.finditer(str(text or "")):
+        g = m.groupdict()
+        if g["ny"]:
+            year, month = int(g["ny"]), _MONTHS[g["nm"][:3].lower()]
+        elif g["iy"]:
+            year, month = int(g["iy"]), int(g["im"])
+        else:
+            year, month = int(g["uy"]), int(g["um"])
+        if not (2000 <= year <= 2100 and 1 <= month <= 12):
+            return None
+        found.add((year, month))
+    return found.pop() if len(found) == 1 else None
+
+
+def _holds_digits(value) -> bool:
+    """Whether a value has a digit in it anywhere, which is what a date or a
+    count has and a word like Monthly does not."""
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        return any(c.isdigit() for c in value)
+    if isinstance(value, dict):
+        return any(_holds_digits(v) for v in list(value.values())[:20])
+    if isinstance(value, (list, tuple)):
+        return any(_holds_digits(v) for v in list(value)[:20])
+    return True
+
+
+def _days_of(value, depth: int = 0) -> List[str]:
+    """The days a value of the list's answer names. A string is read for its
+    dates. An object is read for one start and one end, by their keys, and
+    a list of two for one day each. A number names none, since a count of
+    milliseconds says a day only in a time zone the answer does not give."""
+    if isinstance(value, str):
+        return days_in(value)
+    pair = []
+    if depth == 0 and isinstance(value, dict):
+        starts = [v for k, v in value.items() if str(k).lower() in _START_KEYS]
+        ends = [v for k, v in value.items() if str(k).lower() in _END_KEYS]
+        if len(starts) == 1 and len(ends) == 1:
+            pair = [starts[0], ends[0]]
+    elif depth == 0 and isinstance(value, (list, tuple)) and len(value) == 2:
+        pair = list(value)
+    if pair:
+        first, last = _days_of(pair[0], 1), _days_of(pair[1], 1)
+        if len(first) == 1 and len(last) == 1:
+            return [first[0], last[0]]
+    return []
+
+
+@dataclass(frozen=True)
+class Period:
+    """The days one business statement covers, its first and its last, or
+    only the day PayPal made it when the list names no period for it."""
+    start: str = ""
+    end: str = ""
+    created: str = ""
+
+    @property
+    def date(self) -> str:
+        """The day the statement is filed under, its last."""
+        return self.end or self.created
+
+    def month(self) -> Optional[Tuple[int, int]]:
+        """(year, month) when the days are one whole calendar month."""
+        if not (self.start and self.end) or self.start[8:] != "01":
+            return None
+        year, month = int(self.start[:4]), int(self.start[5:7])
+        return (year, month) if self.end == month_end(year, month) else None
+
+    def title(self) -> str:
+        got = self.month()
+        if got:
+            return f"Monthly Statement - {_MONTH_NAMES[got[1] - 1]} {got[0]}"
+        if self.start:
+            return f"Statement - {self.start} to {self.end}"
+        return f"Statement - created {self.created}"
+
+    def covers(self) -> str:
+        """The days, as the CSV's Period column shows them."""
+        return f"{self.start} to {self.end}" if self.start else f"created {self.created}"
+
+    def href(self) -> str:
+        """What a record keeps to find this statement again. The page and the
+        days, never the report's id, which can carry the account's."""
+        if self.start:
+            return f"{REPORTS_PATH}#period={self.start}..{self.end}"
+        return f"{REPORTS_PATH}#created={self.created}"
+
+    def identity(self) -> Optional[Identity]:
+        """What the statement's own text has to name, its last day and its
+        month when it covers one month. None for a statement known only by
+        the day it was made, since nothing says a statement prints that."""
+        if not self.start:
+            return None
+        month = self.end[:7] if self.start[:7] == self.end[:7] else ""
+        return Identity(date=self.end, period=month, kind="statement")
+
+    def named_in(self, text: str) -> int:
+        """How plainly a row's words name these days. 2 for the month or
+        for the first day and the last, 1 for the last day alone, 0 for
+        neither. Each is found only as a date of its own, so the 1st is not
+        found inside the 11th. A month is looked for written with its name
+        or as 08/2026, never as 2026-08, which is how every ISO day of that
+        month begins."""
+        low = (text or "").lower()
+
+        def has(variants):
+            return any(on_its_own(v, low) for v in variants)
+
+        if not self.start:
+            return 2 if has(date_variants(self.created)) else 0
+        got = self.month()
+        if got and has([v for v in period_variants("%04d-%02d" % got) if "-" not in v]):
+            return 2
+        last = has(date_variants(self.end))
+        if last and has(date_variants(self.start)):
+            return 2
+        return 1 if last else 0
+
+
+_REF_RE = re.compile(r"^" + re.escape(REPORTS_PATH) + r"#(?:period=(\d{4}-\d{2}-\d{2})\.\."
+                     r"(\d{4}-\d{2}-\d{2})|created=(\d{4}-\d{2}-\d{2}))$")
+
+
+def business_ref(href: str) -> Optional[Period]:
+    """The days a record's link names when it is one of this app's business
+    statements (Period.href), and None for anything else, a personal
+    account's download address included."""
+    m = _REF_RE.match(href or "")
+    if not m:
+        return None
+    if m.group(3):
+        made = _checked_date(m.group(3), None)
+        return Period(created=made) if made else None
+    first, last = _checked_date(m.group(1), None), _checked_date(m.group(2), None)
+    return Period(start=first, end=last) if first and last and first <= last else None
+
+
+def _words_of(value, depth: int = 0) -> str:
+    """A value of the list's answer as lowercase words of letters, or ""
+    when it holds none. A word joined to the next by a capital is two.
+    An object or a list is read for its strings, one level down."""
+    if isinstance(value, str):
+        spaced = re.sub(r"([a-z])([A-Z])", r"\1 \2", value)
+        return " ".join(re.findall(r"[a-z]+", spaced.lower()))
+    if depth == 0 and isinstance(value, dict):
+        parts = [_words_of(v, 1) for v in list(value.values())[:10]]
+    elif depth == 0 and isinstance(value, (list, tuple)):
+        parts = [_words_of(v, 1) for v in list(value)[:10]]
+    else:
+        return ""
+    return " ".join(p for p in parts if p)
+
+
+def type_of(row: dict) -> str:
+    """"pdf" when a report's fileFormat says PDF and no other kind of file,
+    "other" when it says anything else, and "" when it says nothing."""
+    words = _words_of(row.get("fileFormat"))
+    if not words:
+        return ""
+    return "pdf" if "pdf" in words.split() and not OTHER_KIND_RE.search(words) else "other"
+
+
+def status_of(row: dict) -> str:
+    """READY or NOT_READY by a report's reportStatus, or "" when it names
+    neither, a status this app cannot read."""
+    words = set(_words_of(row.get("reportStatus")).split())
+    if words & NOT_READY_WORDS:
+        return NOT_READY
+    if words & READY_WORDS:
+        return READY
+    return ""
+
+
+def period_of(row: dict) -> Optional[Period]:
+    """The days a report covers, by its duration. When the duration names no
+    day at all, the day PayPal made it, by its createdOn. None when either
+    holds something this app cannot read, which is refused rather than
+    guessed past."""
+    duration = row.get("duration")
+    if _holds_digits(duration):
+        days = _days_of(duration)
+        if len(days) == 2 and days[0] <= days[1]:
+            return Period(start=days[0], end=days[1])
+        if not days and isinstance(duration, str):
+            got = month_in(duration)
+            if got:
+                return Period(start="%04d-%02d-01" % got, end=month_end(*got))
+        return None
+    made = _days_of(row.get("createdOn"))
+    return Period(created=made[0]) if len(made) == 1 else None
+
+
+def read_row(row) -> Tuple[str, Optional[Period]]:
+    """What a report of the list is, and its days when it is a ready PDF
+    statement. Its kind of file is read first, so a CSV is left alone
+    whatever its status, then its status, then its days."""
+    if not isinstance(row, dict):
+        return UNREAD_TYPE, None
+    kind = type_of(row)
+    if not kind:
+        return UNREAD_TYPE, None
+    if kind != "pdf":
+        return OTHER_TYPE, None
+    status = status_of(row)
+    if not status:
+        return UNREAD_STATUS, None
+    if status != READY:
+        return NOT_READY, None
+    period = period_of(row)
+    if period is None:
+        return UNREAD_PERIOD, None
+    return READY, period
+
+
+def row_facts(row: dict, verdict: str) -> dict:
+    """What a refused report may say in a failure file. What it was read as,
+    its status and its kind of file as lowercase words, and whether its
+    duration held a date. Never its id and never its days."""
+    return {"reads_as": verdict,
+            "status": _words_of(row.get("reportStatus"))[:40],
+            "type": _words_of(row.get("fileFormat"))[:40],
+            "period": "named" if _holds_digits(row.get("duration")) else "none"}
+
+
+class ReportsUnread(RuntimeError):
+    """The business statements page opened, and the list its page gets as it
+    loads never came, or came in a shape this app does not read. `where` is
+    the page as page_named() gives it and `seen` how many answers came."""
+
+    def __init__(self, where: str, seen: int = 0):
+        super().__init__("PayPal's business statements page did not hand over its list")
+        self.where = where
+        self.seen = seen
+
+
+def is_list_answer(url: str, method: str = "") -> bool:
+    """Whether an answer is the business statements page's own list, a POST
+    to that one address on www.paypal.com."""
+    try:
+        u = urlparse(url or "")
+    except ValueError:
+        return False
+    return (is_safe_url(url) and u.hostname == "www.paypal.com"
+            and u.path == REPORTS_LIST_PATH and str(method or "").upper() == "POST")
+
+
+def reports_in(answer) -> Optional[Tuple[list, Optional[bool]]]:
+    """The reports one list answer holds and whether PayPal says more
+    follow, or None for an answer of another shape. The tester's answer was
+    a list of one object holding both. hasMore is None when it is not a
+    plain yes or no."""
+    if isinstance(answer, list) and len(answer) == 1:
+        answer = answer[0]
+    if not isinstance(answer, dict):
+        return None
+    reports = answer.get("reports")
+    if not isinstance(reports, list) or not all(isinstance(r, dict) for r in reports):
+        return None
+    more = answer.get("hasMore")
+    return reports, (more if isinstance(more, bool) else None)
+
+
+def _fingerprint(value) -> str:
+    try:
+        return json.dumps(value, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+class _ListAnswers:
+    """The page's own answers to its list request while this is attached,
+    each as (status, body), the body None when it could not be read as
+    JSON. Nothing is asked for here. Guarded whole, since it runs inside
+    Playwright's event loop."""
+
+    def __init__(self, page):
+        self.page = page
+        self.got: list = []
+        try:
+            page.on("response", self._answered)
+        except Exception:
+            pass
+
+    def _answered(self, response):
+        try:
+            if not is_list_answer(response.url, response.request.method):
+                return
+            body = None
+            kind = ((response.headers or {}).get("content-type") or "").lower()
+            if response.status == 200 and "json" in kind:
+                try:
+                    body = response.json()
+                except Exception:
+                    body = None
+            self.got.append((response.status, body))
+        except Exception:
+            pass
+
+    def stop(self) -> None:
+        try:
+            self.page.remove_listener("response", self._answered)
+        except Exception:
+            pass
+
+
+class Reports:
+    """What the business statements page answered for its list while this
+    app watched, in one tab. `pages` holds each answer it could read as
+    (reports, has_more), the last being the list the tab draws now. `seen`
+    counts every answer and `unread` those it could not read. `forward`
+    counts the presses on the list's next-page control."""
+
+    def __init__(self, tab):
+        self.tab = tab
+        self.pages: list = []
+        self.first = None
+        self.seen = 0
+        self.unread = 0
+        self.forward = 0
+
+    @property
+    def listed(self) -> bool:
+        return bool(self.pages)
+
+    @property
+    def drawn(self) -> list:
+        return self.pages[-1][0] if self.pages else []
+
+    @property
+    def more(self) -> Optional[bool]:
+        return self.pages[-1][1] if self.pages else None
+
+    @property
+    def whole(self) -> bool:
+        """Every page of the list was read, the last saying no more follow."""
+        return bool(self.pages) and self.more is False
+
+    def take(self, got) -> int:
+        """Add the answers a listener kept, and say how many were new pages.
+        An answer the same as the one before it is the page asking again,
+        not another page."""
+        added = 0
+        for status, body in got:
+            self.seen += 1
+            read = reports_in(body) if status == 200 else None
+            if read is None:
+                self.unread += 1
+                continue
+            if self.first is None:
+                self.first = body
+            if self.pages and _fingerprint(self.pages[-1][0]) == _fingerprint(read[0]):
+                self.pages[-1] = read
+                continue
+            self.pages.append(read)
+            added += 1
+        return added
+
+
+def on_reports(page) -> bool:
+    """Whether the tab shows the business statements page, signed in."""
+    url = page.url or ""
+    try:
+        u = urlparse(url)
+    except ValueError:
+        return False
+    return (is_safe_url(url) and u.hostname == "www.paypal.com"
+            and u.path.rstrip("/") == REPORTS_PATH and not looks_signed_out(page))
+
+
+def _pause(page, ms: int) -> bool:
+    """A wait inside Playwright, so the answers it is listening for are
+    heard. False when the tab will not wait, a closed one."""
+    try:
+        page.wait_for_timeout(ms)
+        return True
+    except Exception:
+        return False
+
+
+def _wait_for_list(page, listening, wait_ms: int) -> bool:
+    """Wait until the page's own list answer has come, then a moment more
+    for the table. False at a sign-in page, a security check, a page other
+    than the business statements page, or the time limit."""
+    waited, step = 0, 500
+    while waited < wait_ms:
+        if listening.got:
+            _pause(page, REPORTS_SETTLE_MS)
+            return True
+        if waited % 2000 == 0 and (not on_reports(page) or detect_security_challenge(page)):
+            return bool(listening.got)
+        if not _pause(page, step):
+            break
+        waited += step
+    return bool(listening.got)
+
+
+def open_reports(page, wait_ms: Optional[int] = None) -> Reports:
+    """Load the business statements page by its address, never through its
+    menus, and keep the answer the page itself gets for its list. The list
+    is never asked for here. A session is proven by that list, so this
+    waits for it, and stops waiting at a sign-in page or a security check."""
+    view = Reports(page)
+    listening = _ListAnswers(page)
+    try:
+        try:
+            page.goto(REPORTS_PAGE, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            log.info("goto business statements failed: %s", e)
+        _wait_for_list(page, listening, REPORTS_WAIT_MS if wait_ms is None else wait_ms)
+    finally:
+        listening.stop()
+    view.take(listening.got)
+    return view
+
+
+def next_reports_page(page) -> bool:
+    """Page the business statements list forward once, by the control whose
+    label says it pages forward and nothing else (controls.click_next_page).
+    False when there is none, and nothing else is ever pressed for it."""
+    return click_next_page(page, NEXT_PAGE_SELECTOR, settle_ms=500)
+
+
+def more_reports(page, view: Reports) -> bool:
+    """The list's next page, by its own next-page control, added to `view`.
+    False when there is no such control or no new page came."""
+    listening = _ListAnswers(page)
+    try:
+        if not next_reports_page(page):
+            return False
+        view.forward += 1
+        _wait_for_list(page, listening, REPORTS_WAIT_MS)
+    finally:
+        listening.stop()
+    return view.take(listening.got) > 0
+
+
+class Listing(list):
+    """A business account's statements, each a RawDoc, and what was left
+    out. `whole` says every page of the list was read, `counts` how many
+    reports were read as each kind (read_row), and `unread` the facts of
+    each report refused because this app could not read it (row_facts).
+    `view` is the list as the tab was left showing it."""
+
+    def __init__(self, docs=(), whole=True, counts=None, unread=(), view=None):
+        super().__init__(docs)
+        self.whole = whole
+        self.counts = dict(counts or {})
+        self.unread = list(unread)
+        self.view = view
+
+
+def listing_of(view: Reports) -> Listing:
+    """The statements every page of the list read holds, newest first, each
+    once."""
+    rows, taken, docs, unread = set(), set(), [], []
+    counts = {k: 0 for k in (READY, NOT_READY, OTHER_TYPE, UNREAD_TYPE, UNREAD_STATUS,
+                             UNREAD_PERIOD)}
+    for reports, _more in view.pages:
+        for row in reports:
+            mark = _fingerprint(row)
+            if mark in rows:
+                continue
+            rows.add(mark)
+            verdict, period = read_row(row)
+            counts[verdict] += 1
+            if verdict == READY:
+                if period.href() in taken:
+                    continue
+                taken.add(period.href())
+                docs.append(RawDoc(title=period.title(), date_text=period.date,
+                                   href=period.href(), text="PayPal " + period.title(),
+                                   period=period.covers()))
+            elif verdict.startswith("unread"):
+                unread.append(row_facts(row, verdict))
+    docs.sort(key=lambda d: d.date_text, reverse=True)
+    return Listing(docs, whole=view.whole, counts=counts, unread=unread, view=view)
+
+
+def why_unlisted(page, view: Reports, landed: str = "") -> Exception:
+    """Why the business statements list did not come, as the exception a run
+    stops on. `landed` is the address the statements address landed on
+    before, said when the business statements page did not open at all."""
+    if looks_signed_out(page):
+        return SessionExpired("PayPal showed a sign-in page")
+    if detect_security_challenge(page):
+        return SessionExpired("PayPal showed a security check")
+    if on_reports(page):
+        return ReportsUnread(page_named(page.url or ""), seen=view.seen)
+    url = page.url or ""
+    if not is_safe_url(url) and landed:
+        # The page did not open at all, and the tab shows the browser's
+        # own error. Where PayPal had sent it is what can be said.
+        url = landed
+    if is_safe_url(url):
+        return SentElsewhere(page_named(url), business=is_business_page(url), reports=True)
+    return SessionExpired("the PayPal business statements page did not open")
+
+
+def business_statements(page, landed: str = "") -> Listing:
+    """A business account's statements, from the answer its statements page
+    gets for its list, every page of it, each later page by the list's own
+    next-page control. Raises why_unlisted's exception when no list came."""
+    view = open_reports(page)
+    if not view.listed:
+        raise why_unlisted(page, view, landed)
+    while view.more is True and len(view.pages) < REPORTS_MAX_PAGES:
+        if not more_reports(page, view):
+            break
+    return listing_of(view)
+
+
+def _index_in(reports, ref: Period) -> int:
+    """Where the ready statement `ref` names is in one page of the list, or
+    -1 when it is not there as a ready PDF."""
+    for i, row in enumerate(reports):
+        verdict, period = read_row(row)
+        if verdict == READY and period == ref:
+            return i
+    return -1
+
+
+# The words of each row of the drawn list in order, read the way a person
+# sees them.
+ROWS_JS = r"""(sel) => [...document.querySelectorAll(sel)].map(
+  (tr) => (tr.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 600))"""
+
+# A control read with care. What it shows, its words as a person sees them,
+# and every name it answers to, its own and those of anything inside it.
+CAREFUL_JS = r"""(el) => {
+  const tidy = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+  const named = [];
+  const add = (v) => { v = tidy(v); if (v) named.push(v); };
+  add(el.getAttribute('aria-label'));
+  add(el.getAttribute('title'));
+  const by = el.getAttribute('aria-labelledby');
+  if (by) for (const id of by.split(/\s+/)) {
+    const n = document.getElementById(id);
+    if (n) add(n.innerText || n.textContent);
+  }
+  for (const inner of el.querySelectorAll('[aria-label], [title], img[alt]')) {
+    add(inner.getAttribute('aria-label'));
+    add(inner.getAttribute('title'));
+    add(inner.getAttribute('alt'));
+  }
+  return {shows: tidy(el.innerText), named};
+}"""
+
+
+def _forbidden(label: str) -> bool:
+    return bool(FORBIDDEN_CONTROL_RE.search(label) or SETTINGS_CONTROL_RE.search(label)
+                or AUTH_CONTROL_RE.search(label))
+
+
+def read_twice(el) -> Tuple[list, Optional[dict]]:
+    """A control's labels read the old way, each label it carries
+    (controls.control_labels), and read with care (CAREFUL_JS), None when it
+    would not answer."""
+    old = control_labels(el)
+    try:
+        careful = el.evaluate(CAREFUL_JS)
+    except Exception:
+        careful = None
+    return old, careful if isinstance(careful, dict) else None
+
+
+def reads_as_download(old, careful) -> bool:
+    """Whether a control is a statement's Download control by both of its
+    readings. Read the old way, every label it carries passes the guard and
+    one says Download. Read with care, what it shows says Download and
+    passes the guard, and no name it answers to, its own or an icon's
+    inside it, is one the guard forbids. A control that will not answer
+    either way is not one."""
+    if not old or careful is None:
+        return False
+    if not all(is_safe_control(label) for label in old):
+        return False
+    if not any(DOWNLOAD_LABEL_RE.match(label) for label in old):
+        return False
+    shows = str(careful.get("shows") or "")
+    if not (DOWNLOAD_LABEL_RE.match(shows) and is_safe_control(shows)):
+        return False
+    return not any(_forbidden(str(name)) for name in careful.get("named") or [])
+
+
+def _drawn_rows(page) -> List[str]:
+    try:
+        rows = page.evaluate(ROWS_JS, ROW_SELECTOR)
+    except Exception:
+        return []
+    return [str(r or "") for r in rows] if isinstance(rows, list) else []
+
+
+def _row_text(row) -> str:
+    try:
+        return row.evaluate("(tr) => (tr.innerText || '').replace(/\\s+/g, ' ').trim()") or ""
+    except Exception:
+        return ""
+
+
+def _table_drawn(page, wait_ms: int = 10000) -> bool:
+    try:
+        page.locator(ROW_SELECTOR).first.wait_for(state="attached", timeout=wait_ms)
+        return True
+    except Exception:
+        return False
+
+
+def statement_request(page, ref: Period, view: Reports,
+                      rivals=()) -> Tuple[Optional[DocumentRequest], str]:
+    """Everything up to the press, for the business statement `ref` names,
+    or None and why not, in words of this app's own.
+
+    The statement is found in the list's answer, a later page of it pressed
+    for when it is not on this one. Then its row in the drawn table, by the
+    days its words name and never by its position alone. A row's position
+    decides only between rows whose words name the statement equally, and
+    only when it is the statement's own place in the answer the table was
+    drawn from. A row naming a kind of file other than a PDF is never it.
+    In that row, the one control whose two readings both call it Download
+    (reads_as_download) is the one pressed, once it has been read again at
+    the moment of the press and still passes is_safe_control."""
+    index = _index_in(view.drawn, ref)
+    while index < 0:
+        if view.more is not True or len(view.pages) >= REPORTS_MAX_PAGES \
+                or not more_reports(page, view):
+            return None, NOT_LISTED
+        index = _index_in(view.drawn, ref)
+    if not _table_drawn(page):
+        return None, NO_ROWS
+    rows = _drawn_rows(page)
+    named = [i for i, words in enumerate(rows)
+             if ref.named_in(words) and not OTHER_KIND_RE.search(words)]
+    if len(named) > 1:
+        plain = [i for i in named if ref.named_in(rows[i]) >= 2]
+        if len(plain) == 1:
+            named = plain
+        elif index in named:
+            named = [index]
+    if len(named) != 1:
+        return None, (NO_ROW if not named else MANY_ROWS)
+    row = page.locator("table tbody tr").nth(named[0])
+    controls = row.locator("button, a[href], [role='button'], [role='link']")
+    try:
+        count = min(controls.count(), 12)
+    except Exception:
+        count = 0
+    found = [controls.nth(j) for j in range(count)
+             if reads_as_download(*read_twice(controls.nth(j)))]
+    if len(found) != 1:
+        return None, (NO_CONTROL if not found else MANY_CONTROLS)
+    control = found[0]
+
+    def press():
+        # Armed first, so a PDF the page builds for this press is kept.
+        blob_capture.arm(page)
+        old, careful = read_twice(control)
+        # Read again at the moment of the press. A row drawn again since it
+        # was found can hold another statement in the same place.
+        if not ref.named_in(_row_text(row)) or not reads_as_download(old, careful):
+            raise RuntimeError("the row no longer reads as this statement's")
+        if not all(is_safe_control(label) for label in old):
+            raise RuntimeError("the control is not one the guard passes")
+        control.click(timeout=8000)
+
+    return DocumentRequest(trigger=press, expect=ref.identity(), rivals=tuple(rivals),
+                           close_new_tabs=True, hints=(DOWNLOAD,)), ""
+
+
+def taken_from_the_page(page, out_path) -> Optional[bytes]:
+    """The statement a press handed over, read from the page, for when no
+    download arrived. Only when the page clicked exactly one link with a
+    download mark since the press was armed. A blob it made is read from
+    the page's own memory (blob_capture), and an address of its own on
+    www.paypal.com is asked for once more from inside the page, a GET that
+    follows no redirect (capture.ask_again). Only a PDF is kept, and never
+    the name the page gave it, which holds the account's id."""
+    links = blob_capture.saved_links(page) or []
+    if len(set(links)) != 1:
+        return None
+    href = links[0]
+    if href.startswith("blob:"):
+        kept = blob_capture.take(page, urls=[href])
+        return kept[0] if kept else None
+    try:
+        host = urlparse(href).hostname
+    except ValueError:
+        return None
+    if not (is_safe_url(href) and host == "www.paypal.com"):
+        return None
+    held = Path(out_path).parent / (Path(out_path).name + ".asking")
+    try:
+        if capture.ask_again(page, [("GET", href)], held, is_safe_url):
+            data = held.read_bytes()
+            return data if data[:5] == b"%PDF-" else None
+    except OSError as e:
+        log.info("could not read what was asked for again: %s", e)
+    finally:
+        try:
+            held.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -555,6 +1448,156 @@ def survey(page, dwell_ms: int = 2000, max_follow: int = 0) -> dict:
     except Exception as e:
         report["error"] = str(e)[:200]
     return report
+
+
+def _value_shape(value):
+    """A value of the list's answer the way Diagnose keeps it, a string as
+    it is and an object's strings by key, so the file it is written to
+    shapes every word off the list and every digit. A number is said to be
+    one and nothing more."""
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return value[:80]
+    if isinstance(value, dict):
+        return {str(k)[:40]: _value_shape(v) if not isinstance(v, (dict, list)) else "nested"
+                for k, v in list(value.items())[:10]}
+    if isinstance(value, list):
+        return [_value_shape(v) if not isinstance(v, (dict, list)) else "nested"
+                for v in value[:4]]
+    return type(value).__name__
+
+
+def _row_survey(row) -> dict:
+    """One report of the list as Diagnose keeps it. What it reads as, its
+    status, kind of file, type and action as words, and its duration and
+    createdOn as they are written. Never its id."""
+    verdict, _period = read_row(row)
+    row = row if isinstance(row, dict) else {}
+    return {"reads_as": verdict,
+            "status": _words_of(row.get("reportStatus")),
+            "type": _words_of(row.get("fileFormat")),
+            "kind": _words_of(row.get("type")),
+            "action": _words_of(row.get("action")),
+            "period": _value_shape(row.get("duration")),
+            "created": _value_shape(row.get("createdOn"))}
+
+
+# The drawn list's shape, and every link with a download mark on the page,
+# by its address alone.
+TABLE_JS = r"""(sel) => {
+  const rows = [...document.querySelectorAll(sel)];
+  return {tables: document.querySelectorAll('table').length,
+          rows: rows.length,
+          cells: rows.slice(0, 5).map((tr) => tr.children.length),
+          links: [...document.querySelectorAll('a[download]')].slice(0, 5)
+                   .map((a) => a.getAttribute('href') || '')};
+}"""
+
+
+def link_kind(href: str) -> dict:
+    """What a link's address is, a blob of the page's own, a data address,
+    an address of a site or one relative to the page, and its path when it
+    has one. Never its query and never the name the link gives its file."""
+    href = str(href or "")
+    if not href:
+        return {"kind": "none"}
+    for kind in ("blob", "data"):
+        if href.startswith(kind + ":"):
+            return {"kind": kind}
+    try:
+        u = urlparse(href)
+    except ValueError:
+        return {"kind": "other"}
+    if u.scheme in ("http", "https"):
+        return {"kind": u.scheme, "on_paypal": is_safe_url(href), "path": u.path[:120]}
+    if href.startswith("/"):
+        return {"kind": "relative", "path": u.path[:120]}
+    return {"kind": "other"}
+
+
+def _control_survey(el) -> dict:
+    old, careful = read_twice(el)
+    return {"labels": old[:3],
+            "shows": (careful or {}).get("shows", "")[:60] if careful else None,
+            "named": ((careful or {}).get("named") or [])[:4] if careful else None,
+            "safe": [is_safe_control(label) for label in old[:3]],
+            "download": reads_as_download(old, careful)}
+
+
+def _ready_row_survey(page, view: Reports) -> dict:
+    """For the first statement the list holds as ready, how many drawn rows
+    name its days, what the first of those rows says, and what each control
+    in it reads as, both ways. Nothing is pressed."""
+    ref = None
+    for row in view.drawn:
+        verdict, period = read_row(row)
+        if verdict == READY:
+            ref = period
+            break
+    if ref is None:
+        return {"found": False}
+    rows = _drawn_rows(page)
+    named = [i for i, words in enumerate(rows) if ref.named_in(words)]
+    out = {"found": True, "monthly": ref.month() is not None, "rows_naming_it": len(named),
+           "position": _index_in(view.drawn, ref)}
+    if not named:
+        return out
+    out["row"] = rows[named[0]][:300]
+    controls = page.locator(ROW_SELECTOR).nth(named[0]).locator(
+        "button, a[href], [role='button'], [role='link']")
+    try:
+        count = min(controls.count(), 12)
+    except Exception:
+        count = 0
+    out["controls"] = [_control_survey(controls.nth(j)) for j in range(count)]
+    return out
+
+
+def survey_business(page) -> dict:
+    """The business statements page and what its list answers, for Diagnose,
+    without pressing anything. The page is loaded by its address and its own
+    list answer read as it loads. Kept are the answer's keys and types, how
+    many reports came and whether more follow, each report's status, kind
+    of file and days as written, how the drawn table is laid out, whether
+    the page holds a link with a download mark and what kind of address it
+    has, and for one ready statement what its Download control reads as,
+    both ways. Never a report's id, and never a file's name. The file this
+    goes into shapes every word off PaperPull's list and every digit."""
+    view = open_reports(page)
+    out = {"landed": page_named(page.url or ""), "on_statements_page": on_reports(page),
+           "signed_out": looks_signed_out(page),
+           "challenge": bool(detect_security_challenge(page)),
+           "answers": view.seen, "answers_unread": view.unread, "listed": view.listed}
+    if view.listed:
+        out["answer"] = _shape(view.first)
+        out["has_more"] = "unknown" if view.more is None else view.more
+        out["rows"] = len(view.drawn)
+        out["row_keys"] = sorted({str(k)[:40] for r in view.drawn for k in r})[:30]
+        out["rows_read"] = [_row_survey(r) for r in view.drawn[:60]]
+        out["counts"] = listing_of(view).counts
+    try:
+        table = page.evaluate(TABLE_JS, ROW_SELECTOR)
+    except Exception:
+        table = {}
+    table = table if isinstance(table, dict) else {}
+    out["table"] = {"tables": table.get("tables", 0), "rows": table.get("rows", 0),
+                    "cells": table.get("cells", []),
+                    "links": [link_kind(h) for h in table.get("links", [])]}
+    try:
+        nexts = page.locator(NEXT_PAGE_SELECTOR)
+        out["table"]["next_controls"] = [
+            {"labels": control_labels(nexts.nth(i))[:2],
+             "pages_forward": any(is_next_control(x) for x in control_labels(nexts.nth(i)))}
+            for i in range(min(nexts.count(), 6))]
+    except Exception:
+        out["table"]["next_controls"] = []
+    out["ready_row"] = _ready_row_survey(page, view)
+    return out
 
 
 def collect_documents(page) -> List[RawDoc]:

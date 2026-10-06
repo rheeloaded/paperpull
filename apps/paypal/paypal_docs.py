@@ -2,9 +2,11 @@
 
 Reads the monthly statements list on the signed-in PayPal Statements &
 Taxes page, through the same endpoint the page uses, called from inside
-the page, and saves each month's statement PDF. Nothing on the page is
-clicked. The site layer, paypal_site.py, holds every fact about
-paypal.com.
+the page, and saves each month's statement PDF. Nothing on that page is
+clicked. A business account's statements are read from its own
+statements page instead, from the list that page gets for itself, and
+each is taken by pressing its row's Download control. The site layer,
+paypal_site.py, holds every fact about paypal.com.
 
 Usage:
     python paypal_docs.py --login       verify connection to your browser
@@ -27,7 +29,11 @@ external service.
 """
 from __future__ import annotations
 
+import json
+
+from paperpull_core import delivery
 from paperpull_core import failure
+from paperpull_core import identity
 from paperpull_core import renaming
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
@@ -52,13 +58,18 @@ from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
-                     atomic_write_text, build_pdf_filename, load_config,
-                     now_iso, sanitize_component, unique_path)
+                     atomic_write_json, atomic_write_text, build_pdf_filename,
+                     load_config, now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("paypal_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
+
+# Whether the last run that read PayPal's list read all of it, for Resume,
+# which reads no list of its own. A run that stopped on the way left the
+# list it knows short, or empty, and Resume used to call that complete.
+LISTING_FILE = "last-listing.json"
 
 
 def ask(prompt: str) -> str:
@@ -168,6 +179,15 @@ class App:
         self._context = None
         self._work_page = None
         self._cdp_mode = False
+        # A business account's statements are on another page of PayPal's
+        # and are taken by a press (paypal_site, business section). Whether
+        # the run is on one, the list that page last answered in the tab,
+        # why it did not come when it did not, and whether a list said more
+        # follow and this run could not read them.
+        self._business = False
+        self._reports = None
+        self._unlisted = None
+        self._listing_cut_short = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -238,8 +258,10 @@ class App:
             self._work_page = dom[0] if dom else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        # The PDF arrives as bytes from an in-page fetch. No download event,
-        # no CDP download directory.
+        # A personal account's PDF arrives as bytes from an in-page fetch. A
+        # business statement's comes from a press, as a download Playwright
+        # keeps where it keeps its own, or as a blob of the page's. The
+        # browser is never pointed at a folder.
         self._dl_dir = None
         self.requests
         return self._work_page
@@ -314,7 +336,7 @@ class App:
     def cmd_login(self):
         print("Checking the connection to your signed-in PayPal browser...\n")
         page = self.page()
-        ok = site.goto_documents(page)
+        ok = self._open_statements(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
@@ -323,7 +345,14 @@ class App:
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
             print("Success: connected and signed in to PayPal.")
+            if self._business:
+                print("It is a business account, and the list of its statements came")
+                print("from Activity, All Reports, Statements.")
             print("Keep that browser window OPEN, then run:  paperpull paypal pilot")
+        elif isinstance(self._unlisted, site.ReportsUnread):
+            self._say_reports_unread(self._unlisted)
+        elif isinstance(self._unlisted, site.SentElsewhere):
+            self._say_sent_elsewhere(self._unlisted)
         else:
             where = site.landed_elsewhere(page)
             if where:
@@ -336,6 +365,25 @@ class App:
                 print("Connected, but I could not open the PayPal statements page.")
                 print("Open Settings, Statements & Taxes in that browser yourself, then run --diagnose.")
         self.close()
+
+    def _open_statements(self, page) -> bool:
+        """Whether the statements were seen. A personal account's statements
+        page, or for a business account the list its own statements page
+        gets as it loads, which is what proves its session (the list, never
+        the absence of a sign-in page). When a business account's list did
+        not come, why not is kept in _unlisted."""
+        self._unlisted = None
+        if site.goto_documents(page):
+            return True
+        if not site.is_business_page(page.url or ""):
+            return False
+        self._business = True
+        landed = page.url or ""
+        view = site.open_reports(page)
+        self._reports = view
+        if not view.listed:
+            self._unlisted = site.why_unlisted(page, view, landed)
+        return view.listed
 
     def _in_scope(self, doc: Document) -> bool:
         a = self.args
@@ -380,7 +428,8 @@ class App:
         full_summary = f"{acct} {summary}".strip() if acct else summary
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, source_url=source_url,
-                       account=acct, href=r.href or "")
+                       account=acct, href=r.href or "",
+                       period=getattr(r, "period", "") or "")
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -413,10 +462,12 @@ class App:
         print(f"\n!! PayPal opened {e.where} instead of the statements page.")
         if e.business:
             print("   That is a business account's settings page, not a sign-in page,")
-            print("   so signing in again would not change it. This app has only been")
-            print("   shown where a personal account keeps its monthly statements.")
+            print("   so signing in again would not change it.")
         else:
             print("   That is not a sign-in page, and not a page this app knows.")
+        if getattr(e, "reports", False):
+            print("   A business account keeps its statements under Activity, All")
+            print("   Reports, and that page did not open with its list either.")
         if stopping:
             print("   So the run stops here rather than load it again. Nothing was")
             print("   downloaded.")
@@ -429,25 +480,113 @@ class App:
         print("   from a terminal. Read the file it writes in the Diagnostics")
         print("   folder, then attach it to the PayPal issue on GitHub.")
 
+    def _say_reports_unread(self, e, stopping: bool = False) -> None:
+        """A business account's statements page opened and its list never
+        came. Said once, with no traceback."""
+        print(f"\n!! PayPal's business statements page ({e.where}) opened, and the")
+        print("   list it gets for itself never arrived, or came in a shape this")
+        print("   app does not read. This app reads that list as the page loads and")
+        print("   never asks for it itself.")
+        if stopping:
+            print("   So the run stops here. Nothing was downloaded.")
+        print("   Run Diagnose, which reads that page and presses nothing, then read")
+        print("   the file it writes in the Diagnostics folder and attach it to the")
+        print("   PayPal issue on GitHub.")
+
+    def _say_business_listing(self, listing) -> None:
+        """What a business account's list held, the statements taken and every
+        report left alone, so nothing is skipped without a word."""
+        counts = listing.counts
+        rows = sum(counts.values())
+        print(f"\nPayPal's list of business statements held {rows} report(s).")
+        print(f"  {counts.get(site.READY, 0)} ready PDF statement(s) this app takes.")
+        if counts.get(site.OTHER_TYPE):
+            print(f"  {counts[site.OTHER_TYPE]} in another kind of file, like CSV, left alone.")
+        if counts.get(site.NOT_READY):
+            print(f"  {counts[site.NOT_READY]} not ready yet. A later run takes each once PayPal")
+            print("    has it ready. This app never asks PayPal to prepare one.")
+        unread = len(listing.unread)
+        if unread:
+            print(f"  {unread} this app could not read, a status, a kind of file or the")
+            print("    days it covers it does not know. Each was left alone and is")
+            print("    counted as failed, and the file this run writes says what kind")
+            print("    of value it was without saying the value.")
+        if not listing.whole:
+            print("  PayPal said more of the list follows, and this app could not page")
+            print("    to it with the list's own next-page control.")
+
+    def _listing_done(self, whole: bool) -> None:
+        """Note whether this run read PayPal's whole list, for Resume."""
+        try:
+            atomic_write_json(self.paths.root / LISTING_FILE,
+                              {"complete": bool(whole), "at": now_iso()})
+        except OSError as e:
+            log.info("could not note how the list was read: %s", e)
+
+    def _last_listing(self) -> str:
+        """"complete" or "stopped" for the last run that read PayPal's list,
+        "" when none has said, as an install from before this knew."""
+        try:
+            got = json.loads((self.paths.root / LISTING_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        if not isinstance(got, dict) or not isinstance(got.get("complete"), bool):
+            return ""
+        return "complete" if got["complete"] else "stopped"
+
+    def _stop_if_cut_short(self) -> None:
+        """A run that read only part of PayPal's list did not finish, and must
+        not read as a clean one. Once it has used what came, it leaves on
+        SystemExit the way a run leaves on a sign-out, which the panel
+        reports as a run that stopped."""
+        if self._listing_cut_short:
+            print("\nPayPal's list said more statements follow, and this app could not")
+            print("page to them, so this run stops here rather than finish. Everything")
+            print("it saved is kept. Run Diagnose and attach the file it writes to the")
+            print("PayPal issue on GitHub.")
+            raise SystemExit(0)
+
     def cmd_discover(self, quiet: bool = False) -> int:
         page = self.page()
         n_new = 0
         try:
             docs = self._read_statements(page)
         except site.SentElsewhere as e:
+            self._listing_done(False)
             self._say_sent_elsewhere(e, stopping=True)
             raise SystemExit(0)
+        except site.ReportsUnread as e:
+            self._listing_done(False)
+            self._business = True
+            self._say_reports_unread(e, stopping=True)
+            self.write_failure("read the statements list", "the list never arrived")
+            raise SystemExit(0)
         except site.SessionExpired as e:
+            self._listing_done(False)
             # Once, and in words. It used to leave as a traceback.
             print(f"\n!! PayPal did not hand over the statements list ({e}).")
             print("   Nothing was downloaded. If the browser window asks you to sign")
             print("   in, sign in there and run this again. If it stops here again,")
             print("   run Diagnose and attach its file to the PayPal issue on GitHub.")
             raise SystemExit(0)
+        business = isinstance(docs, site.Listing)
         for r in docs:
-            n_new += self._record_rawdoc(r, site.BILLING_URL)
+            n_new += self._record_rawdoc(r, site.REPORTS_PAGE if business else site.BILLING_URL)
         self.discovery.save()
         log.info("Monthly statements: %d statements, %d new", len(docs), n_new)
+        if business:
+            self._business = True
+            self._reports = docs.view
+            self._listing_cut_short = not docs.whole
+            self._say_business_listing(docs)
+            if docs.unread:
+                # Refused rather than guessed past, and written down, so the
+                # run does not finish clean with a statement it never read.
+                self.stats["failed"] += len(docs.unread)
+                self.write_failure("read the statements list", "a row could not be read",
+                                   postmortem={"rows": sum(docs.counts.values()),
+                                               "unread": docs.unread[:20]})
+        self._listing_done(not self._listing_cut_short)
 
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -517,7 +656,14 @@ class App:
 
     def _open_documents(self, page):
         """PayPal's documents page, opened by its address the way discovery
-        opens it."""
+        opens it. For a business statement that is the business statements
+        page, whose list is kept for the press that follows."""
+        if self._business:
+            self._reports = site.open_reports(page)
+            if not self._reports.listed:
+                self.check_session(page)
+                self._reports = site.open_reports(page)
+            return
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
@@ -542,6 +688,9 @@ class App:
             except Exception:
                 pass
             try:
+                # A business statement is known by its record, so its page is
+                # the one opened for it, whatever the last run's was.
+                self._business = site.business_ref(doc.href) is not None
                 page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
@@ -554,15 +703,129 @@ class App:
                 # finished clean, with nothing to look at (review of #61).
                 print("Stopped. Everything downloaded so far is saved.")
                 raise SystemExit(0)
+            except (site.ReportsUnread, site.SentElsewhere) as e:
+                # The business statements list did not come, so none of the
+                # rest can be found either. Said once, and a stop.
+                if isinstance(e, site.ReportsUnread):
+                    self._say_reports_unread(e)
+                else:
+                    self._say_sent_elsewhere(e)
+                self.write_failure("read the statements list", "the list never arrived")
+                print("Stopped. Everything downloaded so far is saved.")
+                raise SystemExit(0)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
 
+    def _business_view(self, page):
+        """The business statements list as the tab draws it now. What the last
+        load heard is used while the tab still shows that page and has not
+        been paged forward since, a list that never came included, so a
+        page that did not answer is not loaded once more for nothing. The
+        page is loaded again otherwise."""
+        view = self._reports
+        if view is not None and view.tab is page and view.forward == 0 \
+                and site.on_reports(page):
+            return view
+        self._reports = site.open_reports(page)
+        return self._reports
+
+    def _business_rivals(self, ref) -> tuple:
+        """The business statements listed beside this one, the ones a wrong
+        document would most likely be, so its check compares the rows it
+        could be confused with (identity.rivals_for)."""
+        mine = ref.identity()
+        if mine is None:
+            return ()
+        listed = []
+        for rec in self.discovery.data.values():
+            other = site.business_ref((rec or {}).get("href", ""))
+            known = other.identity() if other is not None else None
+            if known is not None and known not in listed:
+                listed.append(known)
+        listed.sort(key=lambda known: known.date)
+        if mine not in listed:
+            return ()
+        return identity.rivals_for(listed, listed.index(mine))
+
+    def _take_business(self, page, doc: Document, ref, out_path) -> Optional[bool]:
+        """One business statement, pressed for in its own row and taken by the
+        core's delivery, which arms every way a document can arrive before
+        the press and checks it names the statement's days before it is
+        put in place. A blob or an address the page saved it through is the
+        way in only when nothing arrived (site.taken_from_the_page). True
+        when it was saved and its days were found in its text, False when
+        nothing usable came, and None when it is already recorded, a wrong
+        document refused or a statement kept for review."""
+        view = self._business_view(page)
+        if not view.listed:
+            why = site.why_unlisted(page, view)
+            if isinstance(why, site.SessionExpired):
+                print("\n  !! PayPal showed a sign-in page or a check instead of the")
+                print("     business statements. Sign in again in the open browser,")
+                print("     then press Resume to carry on.")
+                self._record(doc, State.DISCOVERED, notes="Session expired before download")
+            raise why
+        rivals = self._business_rivals(ref)
+        request, why = site.statement_request(page, ref, view, rivals=rivals)
+        if request is None:
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="Not pressed for, because %s" % why)
+            self._write_row(doc, "Not pressed for", "Needs Manual Review")
+            self.write_failure("find the statement row", why)
+            self.stats["manual_review"] += 1
+            print(f"  Nothing was pressed for this statement, because {why}.")
+            print("  It is marked for manual review, and a later run tries it again.")
+            return None
+        got = delivery.deliver(
+            page, request, out_path,
+            is_safe_url=site.is_safe_url, dl_dir=self._dl_dir, rivals=rivals,
+            settle_ms=site.BUSINESS_SETTLE_MS, journal=self.journal, strict=True)
+        if got.outcome in (delivery.NOTHING, delivery.NOT_A_PDF):
+            data = site.taken_from_the_page(page, out_path)
+            if data:
+                got = delivery.place(data, out_path, expect=request.expect, rivals=rivals,
+                                     journal=self.journal, strict=True)
+        print("  %s" % got.say())
+        if got.outcome == delivery.WRONG:
+            why = "the statement that came does not name the days it was listed under"
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+            self._write_row(doc, "Wrong document", "Needs Manual Review")
+            self.write_failure("save the document", why)
+            self.stats["manual_review"] += 1
+            self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+            print("  Nothing was saved for it. The file was destroyed rather")
+            print("  than filed under this statement's name.")
+            return None
+        if not got.ok:
+            return False
+        verdict = got.verdict.outcome if got.verdict is not None else identity.UNCHECKED
+        if verdict != identity.VERIFIED:
+            # Kept, never filed. A statement whose text could not be checked
+            # against its days, a scan or one known only by the day it was
+            # made, goes to Manual Review for a person to look at.
+            review = unique_path(self.paths.manual_review, out_path.name,
+                                 self.config["max_path_length"])
+            try:
+                out_path.replace(review)
+            except OSError:
+                review = out_path
+            doc.pdf_path, doc.pdf_filename = str(review), review.name
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="Its days could not be checked in its own text")
+            self._write_row(doc, "Not checked", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print("  Its days could not be checked in its own text, so it was put in")
+            print("  Manual Review rather than filed.")
+            return None
+        return True
+
     def download_one(self, page, doc: Document, filename: str):
-        """Save one statement. The site layer asks for the PDF from
-        inside the signed-in page and hands back the bytes."""
+        """Save one statement. For a personal account the site layer asks
+        for the PDF from inside the signed-in page and hands back the bytes.
+        A business statement is pressed for in its own row (_take_business)."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
@@ -574,21 +837,27 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        if not site.goto_documents(page):
-            self.check_session(page)
-            site.goto_documents(page)
-        try:
-            saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                       href=doc.href, title=doc.title)
-        except site.SessionExpired:
-            # Stop the whole run. Continuing would file every remaining
-            # statement as "manual review" and finish looking successful
-            # while having saved nothing.
-            print("\n  !! PayPal answered with a sign-in page instead of a statement.")
-            print("     Your session has expired. Sign in again in the open")
-            print("     browser, then run:  paperpull paypal resume")
-            self._record(doc, State.DISCOVERED, notes="Session expired before download")
-            raise
+        ref = site.business_ref(doc.href)
+        if ref is not None:
+            saved = self._take_business(page, doc, ref, out_path)
+            if saved is None:
+                return
+        else:
+            if not site.goto_documents(page):
+                self.check_session(page)
+                site.goto_documents(page)
+            try:
+                saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
+                                           href=doc.href, title=doc.title)
+            except site.SessionExpired:
+                # Stop the whole run. Continuing would file every remaining
+                # statement as "manual review" and finish looking successful
+                # while having saved nothing.
+                print("\n  !! PayPal answered with a sign-in page instead of a statement.")
+                print("     Your session has expired. Sign in again in the open")
+                print("     browser, then run:  paperpull paypal resume")
+                self._record(doc, State.DISCOVERED, notes="Session expired before download")
+                raise
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):
@@ -697,10 +966,12 @@ class App:
         docs = self._select(limit=self.config.get("pilot_count", 5))
         if not docs:
             print("\nNo documents in scope to pilot. Run --diagnose.")
+            self._stop_if_cut_short()
             return
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
         self._pilot_report(docs)
+        self._stop_if_cut_short()
 
     def _pilot_report(self, docs: List[Document]):
         print("\n" + "=" * 70)
@@ -740,15 +1011,36 @@ class App:
         docs = self._select()
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
     def cmd_resume(self):
+        """Carry on with the statements the last list held. Resume reads no
+        list of its own, so when no run has read PayPal's list to its end,
+        or the last one stopped before it did, it says so and leaves as a
+        run that stopped. It used to say everything was complete, and the
+        panel reported a clean run, after a run had stopped on a business
+        account's settings page with nothing listed at all."""
         self.stats["mode"] = "resume"
+        listing = self._last_listing()
+        if not self.discovery.data and listing != "complete":
+            print("Nothing to resume. No PayPal statements have been listed yet,")
+            print("because no run has read PayPal's list to its end. Run Pilot or")
+            print("Run All, which read the list first.")
+            raise SystemExit(0)
         docs = [d for d in self._select() if not self._already_done(d)]
-        if not docs:
+        if not docs and listing != "stopped":
             print("Nothing to resume - everything in scope is complete.")
             return
-        print(f"Resuming: {len(docs)} document(s) remaining.")
-        self.process(docs, dry_run=self.args.dry_run)
+        if docs:
+            print(f"Resuming: {len(docs)} document(s) remaining.")
+            self.process(docs, dry_run=self.args.dry_run)
+        else:
+            print("Nothing left to resume from the statements listed so far.")
+        if listing == "stopped":
+            print("\nThe last run stopped before it read PayPal's whole list, so there")
+            print("may be statements this app has not seen. Run Pilot or Run All to")
+            print("read the list again.")
+            raise SystemExit(0)
 
 
     def cmd_rename(self):
@@ -880,7 +1172,11 @@ class App:
         """Survey the statements page and what the list holds, and
         write a file a person can attach to a GitHub issue. No screenshot,
         digit runs masked, JSON bodies as shape only. Nothing is downloaded
-        and nothing is clicked."""
+        and nothing is clicked. For a business account the business
+        statements page is surveyed as well (site.survey_business), its list
+        answer as shapes, each report's status, kind of file and days as
+        written, and one ready statement's Download control as it reads,
+        without pressing it."""
         self.stats["mode"] = "diagnose"
         words = words_for('PayPal', site)
         page = self.page()
@@ -893,6 +1189,8 @@ class App:
             info["landed_on"] = site.redact(page.url)
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
+            business = not found and site.is_business_page(page.url or "")
+            info["business_account"] = business
             info["survey"] = site.survey(page)
             if found:
                 site.expand_all(page)
@@ -920,6 +1218,9 @@ class App:
                     "title": d.title[:90], "href": (d.href or "")[:100],
                     "text": (d.text or "").replace("\n", " | ")[:160],
                     "category": cat, "summary": summ, "date": date, "period": period})
+            if business:
+                # Last, so the tab is left on the business statements page.
+                info["business"] = site.survey_business(page)
         except Exception as e:
             info["error"] = str(e)[:300]
         out = self.paths.diagnostics / "diagnose-documents.json"
@@ -932,6 +1233,13 @@ class App:
         print(f"Documents page found: {shape_tree(info.get('documents_page_found', '?'), words)}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
               f"rows: {shape_tree(info.get('rows_collected', '?'), words)}")
+        found_business = info.get("business") or {}
+        if found_business:
+            if found_business.get("listed"):
+                print(f"The business statements list came, with "
+                      f"{shape_tree(found_business.get('rows', 0), words)} report(s) in it.")
+            else:
+                print("The business statements list did not come.")
         print("Look through that file for anything you would not want public,")
         print("then attach it to the PayPal issue on GitHub. No screenshot was taken.")
 
