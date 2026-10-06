@@ -60,6 +60,7 @@ def own_folders(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPERPULL_CONFIG", str(tmp_path / "config"))
     monkeypatch.delenv("PAPERPULL_PASSWORD", raising=False)
     monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
+    monkeypatch.delenv("PAPERPULL_HOSTS", raising=False)
     server_mode._SESSIONS.clear()
     server_mode._FAILS.clear()
     server_mode._SETUP["code"] = None
@@ -258,6 +259,86 @@ def test_another_sites_request_is_refused_even_signed_in(base, on_server):
                headers={"Origin": "http://" + host, "Sec-Fetch-Site": "same-origin"})[0] == 200
     assert ask(base + "/login", "POST", {"password": PASSWORD},
                headers={"Origin": "http://elsewhere.example"})[0] == 403
+
+
+def test_signing_out_takes_a_request_from_the_panels_own_page(base, on_server):
+    """Ending a session is a change like any other, so a request that names
+    no page of the panel's, Origin null among them, leaves it signed in."""
+    session = signed_in(base)
+    status, _, _ = ask(base + "/logout", "POST", {}, session=session, headers={"Origin": "null"})
+    assert status == 403 and ask(base + "/", session=session)[0] == 200
+    status, _, _ = ask(base + "/logout", "POST", {}, session=session, headers={"Origin": base})
+    assert status == 303 and ask(base + "/", session=session)[0] == 303
+
+
+# -- the names it answers to ---------------------------------------------------------
+
+def test_the_server_answers_to_its_addresses_and_to_home_network_names():
+    for name in ("192.168.50.20", "10.0.0.5", "172.17.0.2", "fd00::5", "::1", "127.0.0.1",
+                 "localhost", "nas", "nas.local", "nas.lan", "nas.home", "nas.home.arpa",
+                 "nas.internal", "nas.localdomain"):
+        assert server_mode.host_allowed(name), name
+
+
+def test_a_name_a_website_could_give_is_refused_until_it_is_listed(monkeypatch):
+    """A website can point a name of its own at the server, a browser on
+    the home network then takes that site's page for the panel's own, and
+    the sign-in page would answer it. A VPN's or a reverse proxy's name is
+    listed in PAPERPULL_HOSTS, written any way a person might paste it. So
+    is a router's name under a real top-level domain, such as fritz.box,
+    since .box can be registered."""
+    for name in ("rebind.example", "paperpull.example.com", "nas.tail1234.ts.net",
+                 "nas.local.example.com", "nas.fritz.box", ""):
+        assert not server_mode.host_allowed(name), name
+    monkeypatch.setenv("PAPERPULL_HOSTS", "paperpull.example.com, https://NAS.tail1234.ts.net:443/")
+    assert server_mode.host_allowed("paperpull.example.com")
+    assert server_mode.host_allowed("nas.tail1234.ts.net")
+    assert not server_mode.host_allowed("rebind.example")
+
+
+def test_a_page_that_points_its_own_name_at_the_server_is_refused(base, on_server):
+    session = signed_in(base)
+    port = base.rsplit(":", 1)[1]
+    elsewhere = {"Host": "rebind.example:" + port}
+    status, _, said = ask(base + "/api/apps", headers=elsewhere, session=session)
+    assert status == 400 and "rebind.example" in said and "PAPERPULL_HOSTS" in said
+    status, _, _ = ask(base + "/login", "POST", {"password": PASSWORD}, headers=elsewhere)
+    assert status == 400 and not server_mode._FAILS, "no password was even tried"
+    assert ask(base + "/api/apps", session=session)[0] == 200
+    assert ask(base + "/api/apps", session=session, headers={"Host": "nas.local:" + port})[0] == 200
+
+
+def test_a_name_listed_in_paperpull_hosts_is_answered(base, on_server, monkeypatch):
+    session = signed_in(base)
+    by_proxy = {"Host": "paperpull.example.com:" + base.rsplit(":", 1)[1]}
+    assert ask(base + "/api/apps", session=session, headers=by_proxy)[0] == 400
+    monkeypatch.setenv("PAPERPULL_HOSTS", "paperpull.example.com")
+    assert ask(base + "/api/apps", session=session, headers=by_proxy)[0] == 200
+
+
+def test_off_the_server_the_panel_answers_only_at_its_own_address(base):
+    port = base.rsplit(":", 1)[1]
+    status, _, said = ask(base + "/", headers={"Host": "rebind.example:" + port})
+    assert status == 400 and "http://127.0.0.1:%s" % port in said
+    assert ask(base + "/api/apps", headers={"Host": "192.168.1.20:" + port})[0] == 400
+    assert ask(base + "/", headers={"Host": "localhost:" + port})[0] == 200
+
+
+def test_no_other_site_may_show_the_panel_in_a_frame(base, on_server, tmp_path, monkeypatch):
+    """Every answer says so, a refusal included. The one page that may be
+    framed, by the panel's own Browser Screen alone, is noVNC's."""
+    (tmp_path / "novnc").mkdir()
+    (tmp_path / "novnc" / "vnc.html").write_text("<title>noVNC</title>", encoding="utf-8")
+    monkeypatch.setenv("PAPERPULL_NOVNC", str(tmp_path / "novnc"))
+    session = signed_in(base)
+    for path, headers in (("/", {}), ("/screen", {}), ("/api/apps", {}), ("/login", {}),
+                          ("/api/apps", {"Host": "rebind.example"})):
+        _, answer, _ = ask(base + path, session=session, headers=headers)
+        assert answer["X-Frame-Options"] == "DENY", path
+        assert answer["Content-Security-Policy"] == "frame-ancestors 'none'", path
+    _, answer, _ = ask(base + "/screen/novnc/vnc.html", session=session)
+    assert answer["X-Frame-Options"] == "SAMEORIGIN"
+    assert answer["Content-Security-Policy"] == "frame-ancestors 'self'"
 
 
 def test_what_only_means_something_on_a_desktop_is_not_offered(base, on_server):

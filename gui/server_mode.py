@@ -20,6 +20,11 @@ WHAT IT ADDS
   cannot send. Wrong passwords from one address make it wait, longer each
   time.
 
+  Its own names. It answers only a request made to its address or to a
+  name that exists only on a home network, and to the names listed in
+  PAPERPULL_HOSTS, so that a website cannot borrow a browser on the home
+  network by pointing a name of its own at the server.
+
   The browser screen, at /screen. The providers' sign-in windows open on the
   container's virtual screen, and noVNC shows it in the page. Its connection
   runs through the panel to the screen sharing server, which listens inside
@@ -32,8 +37,10 @@ import asyncio
 import hashlib
 import hmac
 import html
+import ipaddress
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -251,18 +258,77 @@ def _cookie(headers: dict, name: str) -> str:
 
 
 def same_origin(headers: dict) -> bool:
-    """Whether a request came from the panel's own page. Sec-Fetch-Site says
-    so plainly in every current browser, and Origin and Referer, when sent,
-    have to name the very address the request was made to."""
+    """Whether a request came from the panel's own page, on the desktop and
+    on the server alike. Sec-Fetch-Site says so plainly in every current
+    browser, and Origin and Referer, when sent, have to name the very
+    address the request was made to. An Origin of null, which a browser
+    sends for a page that keeps its address to itself, names no address,
+    and neither does an empty one, so both are refused."""
     site = (headers.get("sec-fetch-site") or "").lower()
     if site and site not in ("same-origin", "none"):
         return False
     host = (headers.get("host") or "").lower()
-    for name in ("origin", "referer"):
-        value = headers.get(name)
-        if value and (urlsplit(value).netloc or "").lower() != host:
-            return False
+    origin = headers.get("origin")
+    if origin is not None and (origin.strip().lower() in ("", "null")
+                               or (urlsplit(origin.strip()).netloc or "").lower() != host):
+        return False
+    referer = headers.get("referer")
+    if referer and (urlsplit(referer.strip()).netloc or "").lower() != host:
+        return False
     return True
+
+
+# -- the names it answers to -----------------------------------------------------------
+#
+# A website can point a name of its own at the server's address (DNS
+# rebinding), and a browser on the home network then takes that site's page
+# for the panel's own. A session cookie never goes to that name, but the
+# sign-in page would answer it, so the server answers only to names a
+# website cannot give. An address is one, since nobody can point it
+# anywhere else, and so is a name that exists only on a home network, nas
+# or nas.local. Any other name, a VPN's or a reverse proxy's, is one the
+# person lists in PAPERPULL_HOSTS.
+
+LOCAL_SUFFIXES = (".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain")
+
+
+def listed_names() -> set:
+    """The names in PAPERPULL_HOSTS, separated by commas or spaces, each
+    taken without a scheme, a path or a port, so a whole address pasted in
+    works too."""
+    names = set()
+    for item in re.split(r"[\s,]+", (os.environ.get("PAPERPULL_HOSTS") or "").lower()):
+        item = item.split("//", 1)[-1].split("/", 1)[0]
+        if item.startswith("["):
+            item = item[1:item.find("]")] if "]" in item else ""
+        elif item.count(":") == 1:
+            item = item.split(":", 1)[0]
+        if item:
+            names.add(item)
+    return names
+
+
+def host_allowed(name: str) -> bool:
+    """Whether the server answers to a name, given without its port."""
+    if not name:
+        return False
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    return "." not in name or name.endswith(LOCAL_SUFFIXES) or name in listed_names()
+
+
+def not_its_name(name: str) -> str:
+    """What a request made to another name is told. The person who reached
+    the server by a name of their own reads how to add it."""
+    if not name:
+        return "This PaperPull Server answers only to its own address and names.\n"
+    return ("This PaperPull Server was asked for as %s, which is not one of its names, so it "
+            "did not answer. If that is how you reach it, add %s to PAPERPULL_HOSTS in "
+            "compose.yaml, then recreate the container, since a restart keeps the settings "
+            "it started with.\n" % (name, name))
 
 
 def signed_in(scope) -> bool:
@@ -490,6 +556,8 @@ def install(app) -> None:
     @app.post("/logout", include_in_schema=False)
     def logout(request: Request):
         only_on_the_server()
+        if not same_origin(dict(request.headers)):
+            return refused(login_body("That request did not come from this page."), 403)
         end_session(request.cookies.get(SESSION_COOKIE, ""))
         answer = RedirectResponse("/login", status_code=303)
         answer.delete_cookie(SESSION_COOKIE, path="/")

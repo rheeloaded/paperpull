@@ -74,8 +74,10 @@ The `.gitignore` already blocks all of the following. Do not override it.
   `127.0.0.1` (localhost), nothing is exposed to your network. Note that while
   the signed-in browser is open, any program running **on your own machine**
   could attach to that debugging port, so close the browser window when you're
-  done downloading. The GUI additionally refuses any request whose `Origin`/
-  `Referer` is not localhost, so another website you have open cannot drive it.
+  done downloading. The panel answers only a request its own page sent to
+  `127.0.0.1` or `localhost`, so another website you have open cannot drive
+  it, not even one that points a name of its own at your computer, and no
+  other site may show the panel inside a page of its own.
 - **Delete-safe.** A sticky `downloaded_ok` marker means deleting the PDFs after
   you import them elsewhere will not cause re-downloads.
 

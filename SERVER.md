@@ -79,6 +79,12 @@ Google.
    ```bash
    docker logs paperpull
    ```
+   The panel answers to the server's address and to a name that exists
+   only on a home network, one without a dot such as `nas`, or one ending
+   in `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or
+   `.localdomain`. To reach it
+   by any other name, a VPN's or a reverse proxy's, list that name in
+   `PAPERPULL_HOSTS` in `compose.yaml`, more than one separated by commas.
 5. **Add your providers** from the panel. Each one gets a folder in the data
    folder.
 6. **Sign in.** Pick a provider and press Login. Its sign-in window opens on
@@ -184,6 +190,12 @@ docker exec paperpull python /opt/paperpull/server/selftest.py
   the Chrome it has.
 - **The panel does not load.** Check that nothing else uses port 8765 on the
   server, or publish the panel on another port in `compose.yaml`.
+- **The panel says it was asked for by a name that is not one of its
+  names.** It answers only to the names in step 4 of the setup, so that a
+  website cannot reach it through your browser by pointing a name of its
+  own at your server. Add the name you use to `PAPERPULL_HOSTS` in
+  `compose.yaml`, then recreate the container, with `docker compose up -d`
+  or from your NAS's Docker app, as when updating.
 
 ## What is in the image
 

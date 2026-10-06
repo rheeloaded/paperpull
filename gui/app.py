@@ -33,13 +33,13 @@ import time
 from typing import Optional
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import run_result
 
 from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from starlette.datastructures import MutableHeaders
 
 # PaperPull targets Python 3.11+ (README, and core/pyproject.toml's
 # requires-python). Nothing here declared that, so a reader - or a scanner -
@@ -370,13 +370,47 @@ import server_mode  # noqa: E402
 
 server_mode.install(app)
 
-# The panel runs the apps' commands, so its API must only answer requests that
-# originate from the panel page itself (served on localhost). A CSRF attempt
-# driven by another website carries an Origin/Referer whose host is that site;
-# same-origin requests from the panel carry a localhost host or no such header
-# at all. There is no CORS middleware, so cross-origin JS can't read responses
-# either - this closes the remaining "trigger a run" vector.
-_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]", ""}
+# The panel runs the apps' commands, so it answers only what its own page
+# asked for. A request has to pass three checks.
+#
+#   The Host header names one of the addresses the panel is served on. A
+#   website can point a name of its own at 127.0.0.1 (DNS rebinding), and the
+#   browser then takes that site's page for the panel's own, so every check
+#   after this one sees a request from the panel's page. Only the name the
+#   request was made to tells the two apart.
+#
+#   Sec-Fetch-Site, which every current browser sends and no page can set,
+#   says same-origin or none.
+#
+#   Origin and Referer, when sent, name the very address the request was
+#   made to.
+#
+# There is no CORS middleware, so another site's script cannot read an answer
+# either, and no page of another site may show the panel in a frame of its
+# own (NotInAFrame).
+
+# The names the desktop panel is served on. Every launcher binds 127.0.0.1
+# and opens http://127.0.0.1 at its port, and localhost is this computer by
+# its other name.
+_OWN_NAMES = {"127.0.0.1", "localhost", "::1"}
+_HOST_RE = re.compile(r"^(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(:[0-9]{1,5})?$")
+
+
+def _host_name(value) -> str:
+    """The name in a Host header, in lower case and without its port, or ""
+    when the header is not a plain name or address."""
+    m = _HOST_RE.match((value or "").strip().lower())
+    return m.group(1).strip("[]") if m else ""
+
+
+def _host_allowed(value) -> bool:
+    """Whether a request was made to one of the panel's own addresses.
+    PaperPull Server is reached by the NAS's address and names, so it keeps
+    a list of its own (server_mode.host_allowed)."""
+    name = _host_name(value)
+    if server_mode.enabled():
+        return server_mode.host_allowed(name)
+    return name in _OWN_NAMES
 
 
 def _same_origin_only(request: Request) -> None:
@@ -396,24 +430,92 @@ def _same_origin_only(request: Request) -> None:
     those are allowed through, because the header being missing is not
     the same as it saying cross-site.
 
-    On PaperPull Server the panel is reached by the NAS's own address, so
-    there Origin and Referer have to name the address the request was
-    made to, rather than this computer (server_mode.same_origin).
+    None of that tells the panel's page from a page that pointed a name of
+    its own at this computer, since the browser takes the two for one
+    origin. The Host header does, so it has to be one of the panel's own
+    addresses, and Origin and Referer have to name that very address, the
+    port included, on the desktop and on PaperPull Server alike
+    (server_mode.same_origin). An Origin of null, which a browser sends for
+    a page that keeps its address to itself, and an empty one name no
+    address at all, so both are refused, where the empty host they parse
+    to used to pass for this computer.
     """
-    if server_mode.enabled():
-        if not server_mode.same_origin({k.lower(): v for k, v in request.headers.items()}):
-            raise HTTPException(403, "cross-origin request refused")
-        return
-    site = (request.headers.get("sec-fetch-site") or "").lower()
-    if site and site not in ("same-origin", "none"):
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    if not (_host_allowed(headers.get("host")) and server_mode.same_origin(headers)):
         raise HTTPException(403, "cross-origin request refused")
-    for header in ("origin", "referer"):
-        value = request.headers.get(header)
-        if not value:
-            continue
-        host = (urlsplit(value).hostname or "").lower()
-        if host not in _LOCAL_HOSTS:
-            raise HTTPException(403, "cross-origin request refused")
+
+
+class OwnAddressOnly:
+    """Every request, to a page, a file or the Browser Screen alike, has to
+    be made to one of the panel's own addresses, and any other is refused
+    before the rest of the panel sees it. _same_origin_only asks again for
+    the API, so neither check depends on the other being in place."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        hosts = [v.decode("latin-1") for k, v in scope.get("headers") or [] if k.lower() == b"host"]
+        if len(hosts) == 1 and _host_allowed(hosts[0]):
+            return await self.app(scope, receive, send)
+        if scope["type"] == "websocket":
+            await receive()
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        said = _not_its_address(hosts[0] if len(hosts) == 1 else "", scope).encode("utf-8")
+        await send({"type": "http.response.start", "status": 400,
+                    "headers": [(b"content-type", b"text/plain; charset=utf-8"),
+                                (b"content-length", str(len(said)).encode()),
+                                (b"cache-control", b"no-store")]})
+        await send({"type": "http.response.body", "body": said})
+
+
+def _not_its_address(host: str, scope) -> str:
+    """What a request made to another address is told, which says what the
+    right one is and nothing about the person."""
+    if server_mode.enabled():
+        return server_mode.not_its_name(_host_name(host))
+    server = scope.get("server") or ()
+    port = ":%d" % server[1] if len(server) > 1 and isinstance(server[1], int) else ""
+    return ("This is PaperPull's control panel. It answers only at http://127.0.0.1%s "
+            "and http://localhost%s, on this computer.\n" % (port, port))
+
+
+class NotInAFrame:
+    """No page of another site may show the panel inside one of its own,
+    where a click it asks for could land on Run All instead. Every answer
+    the panel makes says so, X-Frame-Options for older browsers and
+    frame-ancestors for the rest, in a policy of its own beside any the
+    answer already carries. noVNC's page alone may be framed by a page of
+    the panel's own, since the Browser Screen of PaperPull Server is that
+    page in a frame."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        own = scope.get("path", "").startswith("/screen/novnc/")
+
+        async def framed(message):
+            if message["type"] == "http.response.start":
+                message.setdefault("headers", [])
+                headers = MutableHeaders(scope=message)
+                headers["X-Frame-Options"] = "SAMEORIGIN" if own else "DENY"
+                headers.append("Content-Security-Policy",
+                               "frame-ancestors 'self'" if own else "frame-ancestors 'none'")
+            await send(message)
+
+        await self.app(scope, receive, framed)
+
+
+# Added after the server's sign-in gate, so these two come first, the frame
+# headers outermost of the panel's own, so that a refusal carries them too.
+app.add_middleware(OwnAddressOnly)
+app.add_middleware(NotInAFrame)
 
 
 def _desktop_only() -> None:

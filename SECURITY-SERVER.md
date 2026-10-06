@@ -29,6 +29,12 @@ See "Design safety" in [SECURITY.md](SECURITY.md).
   an hour.
 - **Requests from other sites are refused,** even from a browser that is
   signed in, by checking that a request came from the panel's own page.
+  The panel also answers only to its own names, the server's address, a
+  home network name such as `nas` or `nas.local` and the names you list in
+  `PAPERPULL_HOSTS`, see step 4 in [SERVER.md](SERVER.md), so a website
+  cannot reach it through your browser by pointing a name of its own at
+  your server. And no other site may show the panel inside a page of its
+  own.
 - **A forgotten password** is removed with
   `docker exec paperpull python /opt/paperpull/server/reset_password.py`,
   which signs everyone out.
@@ -47,7 +53,8 @@ password manager.
   Tailscale, into your home network.
 - **HTTPS.** On your home network the panel speaks plain HTTP, like most
   things on a NAS. If its traffic crosses a network you do not trust, put it
-  behind a reverse proxy that adds HTTPS.
+  behind a reverse proxy that adds HTTPS, and list the name the proxy is
+  reached by in `PAPERPULL_HOSTS`.
 - **Rented servers** are not recommended, see "Where to run it" in
   [SERVER.md](SERVER.md).
 

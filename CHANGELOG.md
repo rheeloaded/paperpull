@@ -193,6 +193,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   app's own guard before it is asked. M&T, Amazon, FedEx and Stripe keep
   their limits of three or five redirects, and M&T still reads a longer
   chain as a session that has ended.
+- **The control panel answers only its own page, at its own address.** A
+  website you had open could point a name of its own at 127.0.0.1, and its
+  page then counted as the panel's own in your browser. The panel never
+  read the address a request was made to, so a GET from that page with no
+  Referer started a run, and an Origin of null, which a page can arrange to
+  send, passed for this computer. The panel now answers only at 127.0.0.1
+  and localhost, takes an Origin or Referer only when it names the very
+  address the request went to, port included, and refuses an Origin that
+  is null or empty. Every answer also says that no other site may show the
+  panel inside a page of its own, so a site cannot frame it to borrow a
+  click on Run All. PaperPull Server answers to its address and to a home
+  network name such as nas or nas.local, with the endings it knows listed
+  in SERVER.md. A server reached by any other name, a VPN's or a reverse
+  proxy's for instance, answers once that name is listed in the new
+  `PAPERPULL_HOSTS` setting and the container is recreated. Signing out of
+  it takes a request from its own page too.
 
 ## [0.43.0] - 2026-10-05
 

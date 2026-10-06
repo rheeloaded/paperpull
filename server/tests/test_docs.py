@@ -84,6 +84,19 @@ def test_what_the_security_page_says_about_waiting_matches_the_panel():
     assert "A session lasts 14 days" in text and panel_setting("SESSION_SECONDS") == 14 * 86400
 
 
+def test_the_names_the_setup_says_the_panel_answers_to_are_the_panels():
+    """A name the page promises and the panel refuses locks a person out of
+    their own server, and one the panel takes that the page leaves out is a
+    name nobody checked."""
+    text = " ".join((REPO / "SERVER.md").read_text(encoding="utf-8").split())
+    said = text[text.index("The panel answers to the server's address"):]
+    said = said[:said.index("separated by commas")]
+    assert set(re.findall(r"`(\.[a-z.]+)`", said)) == set(panel_setting("LOCAL_SUFFIXES"))
+    assert "one without a dot such as `nas`" in said and "`PAPERPULL_HOSTS`" in said
+    compose = (SERVER / "compose.yaml").read_text(encoding="utf-8")
+    assert '# PAPERPULL_HOSTS: "' in compose
+
+
 @pytest.mark.parametrize("page, server_page", [
     ("PRIVACY.md", "PRIVACY-SERVER.md"),
     ("SECURITY.md", "SECURITY-SERVER.md"),
