@@ -13,6 +13,10 @@ the same dialog the account before used. Until then the dialog holds the old
 list, hidden or showing depending on the case. The card's heading names no
 card, as his did, and carries a balance, which a key must not keep. Every
 date, name and number is invented.
+
+A test can hold an account's first list until the app has looked at the page
+a given number of times, so the list lands between two of the app's own looks
+and not where a clock puts it.
 """
 import json
 import sys
@@ -81,7 +85,8 @@ VENDOR = """<!doctype html><html><body>
 const LISTS = {0: MEMBER_JSON, 1: CARD_JSON};
 const SHOW_AT_ONCE = SHOW_JSON;
 const SAME_AGAIN = SAME_JSON;
-const DRAW_MS = 500, NEXT_MS = 400;
+const HELD = HELD_JSON;
+const DRAW_MS = DRAW_JSON, NEXT_MS = 400;
 let panel = 0, pageNo = 0, asked = 0;
 window.__pressed = [];
 for (const h of document.querySelectorAll('h2.head')) {
@@ -124,12 +129,18 @@ for (const a of document.querySelectorAll('a.hist')) {
     const mine = ++asked;
     // The dialog the account before used, with its list still in it.
     if (SHOW_AT_ONCE) document.getElementById('dlg').style.display = '';
-    setTimeout(() => {
+    const answer = () => {
       if (mine !== asked) return;
       panel = Number(a.dataset.panel); pageNo = 0;
       draw();
       document.getElementById('dlg').style.display = '';
-    }, DRAW_MS);
+    };
+    // An account's first list a test holds is drawn when the test says so,
+    // and a list asked for with no wait is drawn by the press itself.
+    const held = HELD.indexOf(Number(a.dataset.panel));
+    if (held >= 0) { HELD.splice(held, 1); window.__held = answer; }
+    else if (DRAW_MS === 0) answer();
+    else setTimeout(answer, DRAW_MS);
   });
 }
 document.getElementById('next').addEventListener('click', () => {
@@ -141,9 +152,10 @@ document.getElementById('close').addEventListener('click', () => {
 </script></body></html>"""
 
 
-def _vendor_html(show_at_once=False, same_again=False):
+def _vendor_html(show_at_once=False, same_again=False, held=(), draw_ms=500):
     return (VENDOR.replace("MEMBER_JSON", json.dumps(MEMBER)).replace("CARD_JSON", json.dumps(CARD))
-            .replace("SHOW_JSON", json.dumps(show_at_once)).replace("SAME_JSON", json.dumps(same_again)))
+            .replace("SHOW_JSON", json.dumps(show_at_once)).replace("SAME_JSON", json.dumps(same_again))
+            .replace("HELD_JSON", json.dumps(list(held))).replace("DRAW_JSON", json.dumps(draw_ms)))
 
 
 def _drive(monkeypatch, **kw):
@@ -161,9 +173,39 @@ def _drive(monkeypatch, **kw):
     return driver, browser, pg
 
 
-@pytest.fixture(params=[False, True], ids=["old list hidden", "old list showing"])
+def _draw_after_look(monkeypatch, k):
+    """The list the page holds is drawn right after the app's k-th look at
+    the dated list since the press, before its next look. The app's own
+    look opens the gate, so no clock says where the list lands. Returns
+    what each of those looks looked for."""
+    real = site._listed_labels
+    looks: list = []
+
+    def look(page, fresh_only=False):
+        got = real(page, fresh_only=fresh_only)
+        if page.evaluate("() => !!window.__held"):
+            looks.append("drawn after the press" if fresh_only else "showing")
+            if len(looks) == k:
+                page.evaluate("() => { const answer = window.__held; window.__held = null; answer(); }")
+        return got
+    monkeypatch.setattr(site, "_listed_labels", look)
+    return looks
+
+
+# The first account's list drawn right after the app's first look found
+# none, before its next look. Full runs under load did this twice on
+# 2026-10-06, and the list the press drew was said to show without being
+# drawn again.
+BETWEEN_LOOKS = "first list drawn between two looks"
+
+
+@pytest.fixture(params=["old list hidden", "old list showing"])
 def vendor(request, monkeypatch):
-    driver, browser, pg = _drive(monkeypatch, show_at_once=request.param)
+    if request.param == BETWEEN_LOOKS:
+        driver, browser, pg = _drive(monkeypatch, show_at_once=True, held=[0])
+        _draw_after_look(monkeypatch, 1)
+    else:
+        driver, browser, pg = _drive(monkeypatch, show_at_once=request.param == "old list showing")
     yield pg
     browser.close()
     driver.stop()
@@ -173,6 +215,7 @@ def _dates(docs, account):
     return [d.date_text for d in docs if d.account == account]
 
 
+@pytest.mark.parametrize("vendor", ["old list hidden", "old list showing", BETWEEN_LOOKS], indirect=True)
 def test_each_account_is_read_from_its_own_list(vendor):
     """His Discover. The second account's history was read before its own
     list arrived, and got the first account's dates. It is read from the list
@@ -217,6 +260,66 @@ def test_a_card_statement_is_saved_after_discovery_read_both(vendor, tmp_path):
     assert vendor.evaluate("window.__pressed") == ["08/20/25"]
     [searched] = [t for t in trace if t.get("note") == "the panel's statement history was searched"]
     assert searched["panel"] == 1 and searched["pages"] == 2 and searched["found"], searched
+
+
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_a_list_drawn_between_any_two_looks_is_said_to_be_drawn(monkeypatch, k):
+    """The app looked for a list drawn after the press and then at what
+    showed, so a list drawn between those two looks was taken as one that
+    showed without being drawn again, and its first page was read with
+    every dated control showing. The list comes right after the app's
+    k-th look here, wherever that falls, and is said to be drawn."""
+    driver, browser, pg = _drive(monkeypatch, show_at_once=True, held=[0])
+    try:
+        looks = _draw_after_look(monkeypatch, k)
+        member = site.history_panels(pg)[0]
+        facts: dict = {}
+        assert site.open_panel_history(pg, member, [], facts=facts), facts
+        assert len(looks) == k, looks
+        assert facts["list"] == site.DRAWN, (facts, looks)
+        assert site._last_read(pg) == {"panel": 0, "labels": MEMBER[:12]}
+    finally:
+        browser.close()
+        driver.stop()
+
+
+def test_a_look_that_could_not_be_read_says_nothing(monkeypatch):
+    """A label read can run out of time on a loaded machine. When one did
+    in the look for a list drawn after the press, that look came back
+    empty, and the list the press drew was taken as one that showed
+    without being drawn again. The press draws the list itself here, so it
+    is there for every look, and the first two looks for a list drawn after
+    the press each have a label read run out of time."""
+    from playwright.sync_api import Locator, TimeoutError as PlaywrightTimeout
+    driver, browser, pg = _drive(monkeypatch, show_at_once=True, draw_ms=0)
+    try:
+        real_look, real_text = site._listed_labels, Locator.inner_text
+        state = {"drawn_look": False, "ran_out": 0}
+
+        def look(page, fresh_only=False):
+            state["drawn_look"] = fresh_only
+            try:
+                return real_look(page, fresh_only=fresh_only)
+            finally:
+                state["drawn_look"] = False
+
+        def inner_text(self, *args, **kwargs):
+            if state["drawn_look"] and state["ran_out"] < 2:
+                state["ran_out"] += 1
+                state["drawn_look"] = False
+                raise PlaywrightTimeout("Timeout 500ms exceeded, as a read on a loaded machine can")
+            return real_text(self, *args, **kwargs)
+        monkeypatch.setattr(site, "_listed_labels", look)
+        monkeypatch.setattr(Locator, "inner_text", inner_text)
+        member = site.history_panels(pg)[0]
+        facts: dict = {}
+        assert site.open_panel_history(pg, member, [], facts=facts), facts
+        assert state["ran_out"] == 2
+        assert facts["list"] == site.DRAWN, facts
+        assert site._last_read(pg) == {"panel": 0, "labels": MEMBER[:12]}
+    finally:
+        browser.close()
+        driver.stop()
 
 
 def test_a_member_statement_after_a_card_one_comes_from_the_members_list(monkeypatch, tmp_path):

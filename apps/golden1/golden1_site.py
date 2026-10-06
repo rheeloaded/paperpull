@@ -1144,8 +1144,11 @@ def _fresh(page):
     return page.locator(":not([%s])" % _SEEN_ATTR)
 
 
-def _labels_of(loc) -> List[str]:
-    """Each control's label, its aria-label or else its words, in order."""
+def _labels_of(loc) -> Optional[List[str]]:
+    """Each control's label, its aria-label or else its words, in order,
+    or None when one could not be read. A read can run out of time on a
+    loaded machine, which says nothing of what the page holds, so it is
+    never taken for a page with no list."""
     out = []
     try:
         for i in range(loc.count()):
@@ -1153,13 +1156,13 @@ def _labels_of(loc) -> List[str]:
             out.append((el.get_attribute("aria-label", timeout=500)
                         or el.inner_text(timeout=500) or "").strip())
     except Exception:
-        return []
+        return None
     return out
 
 
-def _listed_labels(page, fresh_only: bool = False) -> List[str]:
+def _listed_labels(page, fresh_only: bool = False) -> Optional[List[str]]:
     """The labels of the dated statements showing, only those drawn since
-    the last mark when `fresh_only`.
+    the last mark when `fresh_only`, or None when they could not be read.
 
     Only a control that shows is counted. controls_named falls back to
     every control whose words match when none matches by its accessible
@@ -1172,7 +1175,7 @@ def _listed_labels(page, fresh_only: bool = False) -> List[str]:
         if fresh_only:
             loc = loc.and_(_fresh(page))
     except Exception:
-        return []
+        return None
     return _labels_of(loc)
 
 
@@ -1201,7 +1204,7 @@ def _last_read(page) -> Optional[dict]:
     return {"panel": got.get("panel"), "labels": [x for x in got["labels"] if isinstance(x, str)]}
 
 
-def _wait_for_new_list(page, panel, not_like: List[str], stale: List[str],
+def _wait_for_new_list(page, panel, not_like: Optional[List[str]], stale: Optional[List[str]],
                        shown_at_once: bool = False) -> Tuple[str, List[str]]:
     """Wait for the dated list a press brought. Returns how it came, one of
     the fixed phrases above, and its labels.
@@ -1217,7 +1220,17 @@ def _wait_for_new_list(page, panel, not_like: List[str], stale: List[str],
     only when it is not `stale`, the page NEXT was pressed on or the list
     last read from another account, which is what a dialog opened again
     shows before its new list arrives (#35). `panel` is kept with whatever
-    list is taken."""
+    list is taken.
+
+    A list showing is taken at once only when a look for a list drawn after
+    the press, taken after the look at what shows, finds none. The page can
+    draw its list between two looks. A list drawn after the look for a
+    drawn list and before the look at what shows was said to show without
+    being drawn again, in the trace and in what Discover prints, and its
+    first page was read with every dated control showing, not only those
+    the press drew. Full test runs under load did that to the first account
+    twice on 2026-10-06. A look in the wait that could not be read says
+    nothing either way, and the next look decides."""
     not_like = list(not_like or [])
     same: List[str] = []
     for _ in range(max(1, HISTORY_WAIT_MS // _POLL_MS)):
@@ -1237,6 +1250,9 @@ def _wait_for_new_list(page, panel, not_like: List[str], stale: List[str],
             if shown:
                 page.wait_for_timeout(_POLL_MS)
                 shown = _listed_labels(page) or shown
+                # Drawn after the press since, or not read, so not taken yet.
+                if _listed_labels(page, fresh_only=True) != []:
+                    continue
                 _remember_list(page, panel, shown)
                 return SHOWN, shown
     if same:
