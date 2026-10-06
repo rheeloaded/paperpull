@@ -74,10 +74,12 @@ DATES_LEARNED_PER_RUN = 10
 # September 2026 such a print leaves the items out, and nothing a run said
 # showed when it had printed one (#63).
 PRINTED_THE_PAGE = {
-    site.INVOICE_MISSING: "Walmart's own invoice never appeared on this order page, "
+    site.INVOICE_MISSING: "Walmart's own invoice is not on this order page, "
                           "so the page itself is printed instead.",
     site.INVOICE_EMPTY: "Walmart's own invoice stayed empty on this order page, "
                         "so the page itself is printed instead.",
+    site.INVOICE_ANOTHER: "Walmart's own invoice on this order page names another order, "
+                          "so the page itself is printed instead.",
     site.INVOICE_UNVERIFIED: "Walmart's own invoice on this order page names neither this "
                              "order's number nor its total, so the page itself is printed "
                              "instead.",
@@ -571,6 +573,27 @@ class App:
                             Path(pdf_path), self.config["min_pdf_bytes"]).ok)
         return False
 
+    def _put_aside(self, purchase: Purchase) -> dict:
+        """The record of a purchase an earlier run put aside for review, or
+        {}. One that was saved and only marked for review for its name was
+        kept, and is done like any other."""
+        rec = self.progress.get(purchase.key) or {}
+        if rec.get("state") == State.NEEDS_MANUAL_REVIEW.value and not rec.get("downloaded_ok"):
+            return rec
+        return {}
+
+    def _put_aside_said(self, rec: dict) -> str:
+        """What a run says when it skips a copy an earlier run put aside, and
+        where the copy is. It is moved to Manual Review, and stays where it was
+        saved when that move fails."""
+        copy = Path(rec.get("pdf_path", ""))
+        if copy.parent.name == self.paths.manual_review.name:
+            return ("Put aside in Manual Review by an earlier run, so it is skipped. "
+                    "Delete it there to have it fetched again.")
+        return ("Put aside by an earlier run, though its copy stayed in %s as %s, so it "
+                "is skipped. Delete it there to have it fetched again."
+                % (copy.parent.name, copy.name))
+
     # -- processing core ----------------------------------------------------
 
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False,
@@ -617,16 +640,14 @@ class App:
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if done:
-                rec = self.progress.get(purchase.key) or {}
-                if (rec.get("state") == State.NEEDS_MANUAL_REVIEW.value
-                        and not rec.get("downloaded_ok")):
+                aside = self._put_aside(purchase)
+                if aside:
                     # A copy put aside counts as done while it is in Manual
                     # Review. It never passed its check, and this line used
                     # to say it had, so a run that only skipped the copies an
                     # earlier version put aside could not be told from one
                     # that put them there again (#63).
-                    print("  Put aside in Manual Review by an earlier run, so it is skipped. "
-                          "Delete it there to have it fetched again.")
+                    print("  " + self._put_aside_said(aside))
                 else:
                     print("  Already completed and PDF verified - skipping.")
                 self.stats["skipped_completed"] += 1
@@ -795,7 +816,16 @@ class App:
         invoice' (those fire window.print -> native dialog) and we do NOT gate
         on detecting those buttons, which lazy-load unreliably. Document type
         follows the purchase type: In-store -> Receipt, Online -> Invoice.
+
+        Walmart's own invoice is waited for first (site.look_for_printed_invoice),
+        and only then is the page looked at for a sign-in, a bot check and
+        whose page it is, so that the page those looks pass is the page that
+        is printed. Waited for after them, a bot check or a sign-in page that
+        came up meanwhile was printed in the purchase's place, and the copy
+        put aside counted as done instead of the person being asked.
         """
+        site.scroll_full_page(page)  # force lazy content (items, totals) to render
+        site.look_for_printed_invoice(page, purchase)
         if site.looks_signed_out(page):
             print("  Walmart is asking you to verify your sign-in.")
             print("  Complete it in the browser window (passkey/password/code).")
@@ -806,8 +836,8 @@ class App:
                                    notes="Could not pass re-authentication")
                 self.stats["manual_review"] += 1
                 return False
-
-        site.scroll_full_page(page)  # force lazy content (items, totals) to render
+            site.scroll_full_page(page)
+            site.look_for_printed_invoice(page, purchase)
 
         # Walmart's bot check can come up over an order page that opened
         # clean, and a print taken then carried "Robot or human?" under the
@@ -819,6 +849,7 @@ class App:
             self.check_session(page)
             site.goto_details(page, purchase)
             site.scroll_full_page(page)
+            site.look_for_printed_invoice(page, purchase)
 
         # The page has to be this purchase's before it is printed. The order
         # list names its purchases' dates, totals and items, and the check
@@ -881,12 +912,13 @@ class App:
         items, totals and barcode, in a hidden block of the live details
         page, and the primary path prints that block in print media with
         everything else hidden (site.printing_its_invoice), a bot check that
-        comes up over the page in the meantime among it. The block is waited
-        for, up to site.INVOICE_WAIT_MS, and taken only when it names this
-        order. Until late September 2026 the page's own print style showed
-        the items, and a page without the block is still printed that way,
-        and the run says so (_before_the_print). Re-rendering a saved HTML
-        snapshot loses the print stylesheet, so it is only a last resort.
+        comes up over the page in the meantime among it. The block was
+        waited for before the page was checked (_save_receipt), so it is
+        looked at once here, and taken only when it names this order. Until
+        late September 2026 the page's own print style showed the items, and
+        a page without the block is still printed that way, and the run says
+        so (_before_the_print). Re-rendering a saved HTML snapshot loses the
+        print stylesheet, so it is only a last resort.
         """
         self._block = None
         # Primary: print the live page (print media -> receipt only).
@@ -988,8 +1020,8 @@ class App:
             self.stats["validation_failures"] += 1
             try:
                 retry_page = source_page or page
-                # Looked at once more, since the capture already waited for it.
-                with site.printing_its_invoice(retry_page, purchase, wait_ms=0) as block:
+                # Looked at once more, since the run already waited for it.
+                with site.printing_its_invoice(retry_page, purchase) as block:
                     self._before_the_print(block, again=True)
                     receipt_pdf.print_page_to_pdf(retry_page, out_path)
                 printed_from = self._address_of(retry_page)
@@ -1246,17 +1278,43 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
-        pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
-                if isinstance(r, dict) and r.get("order_number")]
-        pend = [p for p in pend if not self._already_done(p)]
+        known = [Purchase.from_dict(r) for r in self.discovery.data.values()
+                 if isinstance(r, dict) and r.get("order_number")]
+        pend, aside = [], []
+        for p in known:
+            if not self._already_done(p):
+                pend.append(p)
+            elif self._put_aside(p):
+                aside.append(p)
         pend.sort(key=lambda p: p.purchase_date or "0000", reverse=True)
         if self.args.max_purchases:
             pend = pend[:self.args.max_purchases]
+        # Copies put aside count as done, and Resume used to leave them out
+        # and then call every purchase complete.
+        if aside:
+            self._say_put_aside(aside)
         if not pend:
-            print("Nothing to resume - all discovered purchases are complete.")
+            print("Nothing else to resume." if aside else
+                  "Nothing to resume - all discovered purchases are complete.")
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
+
+    def _say_put_aside(self, aside: List[Purchase]) -> None:
+        """How many purchases an earlier run put aside, which a run skips, how
+        to have them fetched again, and where each one's copy is."""
+        n = len(aside)
+        if n == 1:
+            print("1 purchase put aside by an earlier run is skipped. Delete its copy "
+                  "to have it fetched again.")
+        else:
+            print(f"{n} purchases put aside by an earlier run are skipped. Delete a "
+                  "purchase's copy to have it fetched again.")
+        for p in aside:
+            rec = self._put_aside(p)
+            copy = Path(rec.get("pdf_path", ""))
+            print(f"  {p.purchase_type} {rec.get('purchase_date') or p.purchase_date or '(date unknown)'} "
+                  f"#{p.order_number}, its copy in {copy.parent.name} as {copy.name}")
 
 
     def cmd_rename(self):

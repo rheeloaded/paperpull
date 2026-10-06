@@ -151,9 +151,6 @@ def short_waits(monkeypatch):
     scroll before a print is kept short."""
     monkeypatch.setattr(site, "is_safe_url",
                         lambda url: (url or "").startswith("https://orders.example.invalid/"))
-    # These pages are laid out the way they were before Walmart's own
-    # invoice block came, so it is looked for once rather than waited for.
-    monkeypatch.setattr(site, "INVOICE_WAIT_MS", 0, raising=False)
     real = site.scroll_full_page
     monkeypatch.setattr(site, "scroll_full_page",
                         lambda page, rounds=1, delay_ms=50: real(page, rounds, delay_ms))

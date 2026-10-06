@@ -9,16 +9,20 @@ had happened.
 A copy put aside counts as done while it is in Manual Review, and the run
 skipped it saying "Already completed and PDF verified", so a run that only
 skipped the copies an earlier version put aside read the same as one that
-put them there again. It says now that an earlier run put it aside, and
-that deleting it there has the next run fetch it again.
+put them there again. It says now that an earlier run put it aside, where
+the copy is, and that deleting it has the next run fetch it again, and
+Resume says how many it skips that way.
 
 Or the run did print, and Walmart's own invoice, the block its Print
 invoice button prints, was not filled the one time the app looked, so the
 order page was printed in its place without a word. The block is waited
-for now, up to about fifteen seconds, and taken only when it names this
-order by its number or its total. When the page is printed instead the run
-says so, and the journal and the failure file say whether the block was
-missing, empty or found, how much text it held and how many item rows.
+for now while Walmart's portal is there and empty, up to about fifteen
+seconds, and before the page is looked at for a sign-in, a bot check and
+whose page it is, so that what those looks pass is what is printed. It is
+taken only when the order numbers it prints are this order's, or by this
+order's total when it prints none. When the page is printed instead the
+run says so, and the journal and the failure file say what became of the
+block, how much text it held and how many item rows.
 
 And when no item name could be read from the page, a summary printing the
 order's number and total passed as done. A document whose order has items
@@ -38,7 +42,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import pytest
 
@@ -50,7 +54,7 @@ import walmart_site as site
 from paperpull_core import browser as browser_launcher
 from paperpull_core import receipt_pdf
 from paperpull_core import testkit
-from paperpull_core.models import IN_STORE, ONLINE, Item
+from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 
 # Fifteen digits, as an online order's key is, printed as seven, a dash and
 # eight.
@@ -73,10 +77,12 @@ PUT_ASIDE = ("Put aside in Manual Review by an earlier run, so it is skipped. "
              "Delete it there to have it fetched again.")
 DONE = "Already completed and PDF verified - skipping."
 PRINTED_INSTEAD = {
-    "missing": "Walmart's own invoice never appeared on this order page, "
+    "missing": "Walmart's own invoice is not on this order page, "
                "so the page itself is printed instead.",
     "empty": "Walmart's own invoice stayed empty on this order page, "
              "so the page itself is printed instead.",
+    "another": "Walmart's own invoice on this order page names another order, "
+               "so the page itself is printed instead.",
     "unverified": "Walmart's own invoice on this order page names neither this "
                   "order's number nor its total, so the page itself is printed instead.",
 }
@@ -90,6 +96,12 @@ LISTED = """<!doctype html><html><head><title>Purchase History</title></head><bo
   <a href="#" data-automation-id="view-order-details-link-%s">View details</a>
 </div>
 </body></html>""" % ORDER
+
+SIGN_IN = """<!doctype html><html><head><title>Sign in or create your account</title></head>
+<body><h1>Sign in or create your account</h1>
+<form><label>Email address <input type="email"></label>
+<label>Password <input type="password"></label>
+<button type="button">Sign in</button></form></body></html>"""
 
 # The order page as Walmart lays it out now, as test_a_receipt_prints_its_items
 # measured it. The item list starts folded, and the print style hides it
@@ -158,10 +170,9 @@ def invoice_inside(printed=PRINTED, items=ITEMS, prices=PRICES, date="Sep 14, 20
 BLOCK = ('<div class="print-portal-root" aria-hidden="true" style="display: none;">'
          '<div data-testid="print-invoice-layout">%s</div></div>')
 
-# A block that fills two seconds after the app has read the page and found
-# it to be this order's, which is when the app goes on to print it. Tied to
-# that step rather than to the page's load, since the app reads a page for
-# a few seconds before it prints, and a block filled by then would come
+# A block that fills two seconds after the app first looks at it. Tied to
+# that look rather than to the page's load, since the app reads a page for
+# a few seconds before it looks, and a block filled by then would come
 # before even one look. Once the run has printed the page the block is left
 # as it was, as though the run had gone on, so a run that printed before the
 # block filled is not saved by the look its second try makes.
@@ -184,15 +195,37 @@ function fill() {
 }
 </script>""" % invoice_inside()
 
-INVOICES = {
-    "filled": BLOCK % invoice_inside(),
-    "late": LATE,
-    "missing": "",
-    "empty": BLOCK % "",
-    "another": BLOCK % invoice_inside(printed=OTHER_PRINTED, items=OTHER_ITEMS,
+# A portal that never fills, on a page that half a second into the app's wait
+# for it turns into Walmart's bot check, laid over everything with its own
+# words, or goes to the sign-in page, once.
+SPRINGING = BLOCK % "" + """
+<script>
+(function wait() {
+  fetch('/spring', {cache: 'no-store'}).then(r => r.text()).then(t => {
+    if (t === 'bot check') {
+      const box = document.createElement('div');
+      box.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#fff';
+      box.innerHTML = '<h2>Robot or human?</h2><p>Activate and hold the button to confirm '
+        + 'that you are human. Thank You!</p><button>PRESS &amp; HOLD</button>';
+      document.body.appendChild(box);
+    } else if (t === 'sign-out') {
+      location.reload();
+    } else {
+      setTimeout(wait, 100);
+    }
+  }, () => setTimeout(wait, 100));
+})();
+</script>"""
+
+
+def invoice_html(kind, other_total="$21.24"):
+    if kind == "filled":
+        return BLOCK % invoice_inside()
+    if kind == "another":
+        return BLOCK % invoice_inside(printed=OTHER_PRINTED, items=OTHER_ITEMS,
                                       prices=OTHER_PRICES, date="Aug 2, 2026",
-                                      subtotal="$19.85", taxes="$1.39", total="$21.24"),
-}
+                                      subtotal="$19.85", taxes="$1.39", total=other_total)
+    return {"late": LATE, "springing": SPRINGING, "missing": "", "empty": BLOCK % ""}[kind]
 
 
 SUBTOTALS = {True: "Subtotal (2 items)",
@@ -201,7 +234,7 @@ SUBTOTALS = {True: "Subtotal (2 items)",
              False: "Subtotal"}
 
 
-def order_page(invoice="missing", names=True, counted=True):
+def order_page(invoice="missing", names=True, counted=True, other_total="$21.24"):
     """`names` is whether the folded list's item names can be read, and
     `counted` whether the page counts the order's items beside its subtotal,
     True, False, or "screen" for a count its print leaves out."""
@@ -209,7 +242,7 @@ def order_page(invoice="missing", names=True, counted=True):
                    "header": "2 items" if counted else "",
                    "tiles": TILES if names else "",
                    "subtotal": SUBTOTALS[counted],
-                   "invoice": INVOICES[invoice]}
+                   "invoice": invoice_html(invoice, other_total)}
 
 
 class FakeWalmart:
@@ -217,14 +250,28 @@ class FakeWalmart:
 
     def __init__(self):
         self.page = order_page()
-        self.seen = []
-        self.gate = threading.Event()       # the app has read the page and checked it
+        self.signed_in = True
+        self.event = ""                     # "bot check" or "sign-out", sprung once
+        self.sprung = False
+        self.served = 0                     # the order's page answered, a redirect left out
+        self.looks = 0                      # the app's looks at the invoice block
+        self.gate = threading.Event()       # the app has looked at the block
         self.printed = threading.Event()    # the app has printed something
         self.filled = threading.Event()     # the late block filled
         self.at = {}
+        self._lock = threading.Lock()
 
-    def opened(self) -> int:
-        return self.seen.count("/orders/" + ORDER)
+    def spring(self) -> str:
+        """The page's turn, half a second after the app first looked at the
+        block, and only once."""
+        with self._lock:
+            looked = self.at.get("looked")
+            if self.event and not self.sprung and looked and time.monotonic() - looked >= 0.5:
+                self.sprung = True
+                if self.event == "sign-out":
+                    self.signed_in = False
+                return self.event
+            return "none"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -241,14 +288,27 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _to_sign_in(self):
+        # Where Walmart sends a signed-out visitor, with the way back.
+        self.send_response(302)
+        self.send_header("Location", "/account/login?returnUrl=" + quote(self.path, safe=""))
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def do_GET(self):
         state = self.server.walmart
         path = urlsplit(self.path).path
-        state.seen.append(path)
         if path == "/orders":
             self._answer(LISTED)
         elif path == "/orders/" + ORDER:
-            self._answer(state.page)
+            if not state.signed_in:
+                self._to_sign_in()
+            else:
+                state.served += 1
+                self._answer(state.page)
+        elif path == "/account/login":
+            self._answer(SIGN_IN)
         elif path == "/gate":
             self._answer("open" if state.gate.is_set() else "wait", "text/plain")
         elif path == "/may-fill":
@@ -257,6 +317,8 @@ class _Handler(BaseHTTPRequestHandler):
             state.at.setdefault("filled", time.monotonic())
             state.filled.set()
             self._answer("ok", "text/plain")
+        elif path == "/spring":
+            self._answer(state.spring(), "text/plain")
         else:
             self.send_error(404)
 
@@ -294,8 +356,11 @@ def attached(browser_exe, tmp_path_factory):
 @pytest.fixture()
 def walmart(monkeypatch):
     """A made-up Walmart of this test's own, every address the app opens
-    pointed at it, and every wait short. When the app has read and checked
-    the order page, and when it prints, is written down as it happens."""
+    pointed at it, and every wait short. The app's looks at the invoice
+    block are counted where the browser is asked, so whatever the code that
+    looks is called, and when it first looked and when it printed are
+    written down as they happen."""
+    from playwright.sync_api import Page
     state = FakeWalmart()
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     httpd.walmart = state
@@ -320,15 +385,16 @@ def walmart(monkeypatch):
     monkeypatch.setattr(site, "is_safe_url", lambda url: (url or "").startswith(server + "/"))
     monkeypatch.setattr(browser_launcher, "ask_or_none", lambda prompt: "")
 
-    real_check = site.not_this_purchase
+    real_evaluate = Page.evaluate
 
-    def checked(page, number):
-        why = real_check(page, number)
-        state.at.setdefault("checked", time.monotonic())
-        state.gate.set()
-        return why
+    def evaluate(page, expression, arg=None):
+        if isinstance(arg, (list, tuple)) and site.PRINTED_INVOICE_BODY in arg:
+            state.looks += 1
+            state.at.setdefault("looked", time.monotonic())
+            state.gate.set()
+        return real_evaluate(page, expression, arg)
 
-    monkeypatch.setattr(site, "not_this_purchase", checked)
+    monkeypatch.setattr(Page, "evaluate", evaluate)
     real_print = receipt_pdf.print_page_to_pdf
 
     def printing(page, out_path, *args, **kwargs):
@@ -347,6 +413,25 @@ def walmart(monkeypatch):
 def short_wait(monkeypatch, ms):
     """The invoice waited for this long rather than its fifteen seconds."""
     monkeypatch.setattr(site, "INVOICE_WAIT_MS", ms, raising=False)
+
+
+def answering(monkeypatch, walmart, limit=5):
+    """Somebody at the console, who presses Enter at every question and has
+    signed in again by the time they press it at a sign-in. Past `limit`
+    questions they give up with Ctrl+C, so a loop that asks forever fails
+    here rather than hanging the suite."""
+    asked = []
+
+    def answer(prompt):
+        asked.append(prompt)
+        if len(asked) > limit:
+            raise KeyboardInterrupt
+        if "signed in again" in prompt:
+            walmart.signed_in = True
+        return ""
+
+    monkeypatch.setattr(browser_launcher, "ask_or_none", answer)
+    return asked
 
 
 def pilot(tmp_path, cdp_url, capsys):
@@ -399,6 +484,10 @@ def failure_file(tmp_path):
     return raw, json.loads(raw)
 
 
+def printed(capsys):
+    return " ".join(capsys.readouterr().out.split())
+
+
 # Every value the pages carry, none of which may reach a failure file.
 VALUES = (ORDER, PRINTED, OTHER_PRINTED, "Garden Kneeler", "Watering Can", "Desk Fan",
           "Extension Cord", "21.45", "22.74", "15.12", "21.24")
@@ -407,13 +496,12 @@ VALUES = (ORDER, PRINTED, OTHER_PRINTED, "Garden Kneeler", "Watering Can", "Desk
 # -- a copy put aside says so when it is skipped -------------------------------------------
 
 def test_a_copy_put_aside_is_skipped_saying_so_and_fetched_again_once_deleted(
-        attached, walmart, tmp_path, capsys, monkeypatch):
+        attached, walmart, tmp_path, capsys):
     """The first run prints the order page, its items folded away, and puts
     the summary aside. By the second Walmart shows its own invoice, and the
     copy is skipped, saying it was put aside rather than that it passed.
     Deleted, the next run fetches the order's own invoice, items and all,
     and the run after that has a purchase really done."""
-    short_wait(monkeypatch, 0)
     pilot(tmp_path, attached, capsys)
     first = record(tmp_path)
     put_aside(first, tmp_path)
@@ -421,25 +509,119 @@ def test_a_copy_put_aside_is_skipped_saying_so_and_fetched_again_once_deleted(
     held = copy.read_bytes()
 
     walmart.page = order_page("filled")
-    opened = walmart.opened()
+    served = walmart.served
     out = pilot(tmp_path, attached, capsys)
     assert PUT_ASIDE in out, out
     assert DONE not in out, out
-    assert walmart.opened() == opened, "its order page is not opened again"
+    assert walmart.served == served, "its order page is not opened again"
     assert copy.read_bytes() == held, "left where it is"
     assert record(tmp_path)["state"] == "Needs Manual Review"
 
     copy.unlink()
     out = pilot(tmp_path, attached, capsys)
     assert PUT_ASIDE not in out, out
-    assert walmart.opened() == opened + 1
+    assert walmart.served == served + 1
     kept_with_its_items(record(tmp_path), tmp_path)
 
     out = pilot(tmp_path, attached, capsys)
     assert DONE in out and PUT_ASIDE not in out, out
 
 
-# -- Walmart's own invoice is waited for ---------------------------------------------------
+def a_run(tmp_path):
+    """The app as main builds it, with nothing opened, for what it says
+    of the purchases it already has."""
+    return testkit.receipt_app(app_mod, tmp_path)
+
+
+def a_copy(folder, name="2026-09-14 Walmart Garden Invoice.pdf"):
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_bytes(testkit.text_pdf(["Invoice", "Sep 14, 2026 order", "Order# " + PRINTED]))
+    return path
+
+
+THE_ORDER = Purchase(purchase_type=ONLINE, order_number=ORDER, purchase_date="2026-09-14")
+
+
+def test_a_document_kept_and_marked_for_its_name_is_called_done(tmp_path, capsys):
+    """Saved, and marked for review only because its name was a guess. It is
+    in Invoices, done, and is not to be deleted from Manual Review, where it
+    is not."""
+    app = a_run(tmp_path)
+    app.page = lambda: None
+    copy = a_copy(app.paths.invoices)
+    app.progress.data[THE_ORDER.key] = {
+        "state": "Needs Manual Review", "downloaded_ok": True, "pdf_path": str(copy),
+        "pdf_filename": copy.name, "notes": "Low classification confidence"}
+    app.process_purchases([THE_ORDER])
+
+    out = printed(capsys)
+    assert DONE in out and "Put aside" not in out, out
+
+
+def test_a_copy_left_where_it_was_saved_is_named_where_it_is(tmp_path, capsys):
+    """Moving a copy that fails its check into Manual Review can itself fail,
+    and then the copy stays where it was saved. The skip says where."""
+    app = a_run(tmp_path)
+    app.page = lambda: None
+    copy = a_copy(app.paths.invoices)
+    app.progress.data[THE_ORDER.key] = {
+        "state": "Needs Manual Review", "pdf_path": str(copy), "pdf_filename": copy.name}
+    app.process_purchases([THE_ORDER])
+
+    out = printed(capsys)
+    assert ("Put aside by an earlier run, though its copy stayed in Invoices as "
+            "2026-09-14 Walmart Garden Invoice.pdf, so it is skipped. Delete it there "
+            "to have it fetched again.") in out, out
+    assert "in Manual Review" not in out, out
+    assert copy.exists(), "left where it is"
+
+
+ANOTHER_ORDER = Purchase(purchase_type=ONLINE, order_number="100000000000079",
+                         purchase_date="2026-08-02")
+
+
+def test_resume_says_how_many_were_put_aside_and_how_to_fetch_them_again(tmp_path, capsys):
+    """It left them out and then said every purchase was complete."""
+    app = a_run(tmp_path)
+    aside = a_copy(app.paths.manual_review)
+    kept = a_copy(app.paths.invoices, "2026-08-02 Walmart Office Invoice.pdf")
+    for p in (THE_ORDER, ANOTHER_ORDER):
+        app.discovery.data[p.key] = p.to_dict()
+    app.progress.data[THE_ORDER.key] = {
+        "state": "Needs Manual Review", "purchase_date": "2026-09-14",
+        "pdf_path": str(aside), "pdf_filename": aside.name}
+    app.progress.data[ANOTHER_ORDER.key] = {
+        "state": "Completed", "downloaded_ok": True, "pdf_path": str(kept)}
+    app.cmd_resume()
+
+    out = printed(capsys)
+    assert "all discovered purchases are complete" not in out, out
+    assert ("1 purchase put aside by an earlier run is skipped. Delete its copy to have "
+            "it fetched again.") in out, out
+    assert ("Online 2026-09-14 #%s, its copy in Manual Review as %s" % (ORDER, aside.name)) in out
+    assert "Nothing else to resume." in out, out
+
+
+def test_resume_takes_the_rest_and_still_says_what_it_skips(tmp_path, capsys, monkeypatch):
+    app = a_run(tmp_path)
+    aside = a_copy(app.paths.manual_review)
+    for p in (THE_ORDER, ANOTHER_ORDER):
+        app.discovery.data[p.key] = p.to_dict()
+    app.progress.data[THE_ORDER.key] = {
+        "state": "Needs Manual Review", "pdf_path": str(aside), "pdf_filename": aside.name}
+    taken = []
+    monkeypatch.setattr(app, "process_purchases",
+                        lambda pend, dry_run=False: taken.extend(p.key for p in pend))
+    app.cmd_resume()
+
+    out = printed(capsys)
+    assert taken == [ANOTHER_ORDER.key], taken
+    assert "1 purchase put aside by an earlier run is skipped." in out, out
+    assert "Resuming: 1 incomplete purchase(s)." in out, out
+
+
+# -- Walmart's own invoice is waited for, before the page is looked at -------------------------
 
 def test_an_invoice_that_fills_two_seconds_late_is_waited_for_and_printed(
         attached, walmart, tmp_path, capsys):
@@ -450,26 +632,65 @@ def test_an_invoice_that_fills_two_seconds_late_is_waited_for_and_printed(
 
     kept_with_its_items(record(tmp_path), tmp_path)
     assert walmart.filled.is_set(), "the block really did fill late"
-    assert walmart.at["filled"] - walmart.at["checked"] >= 1.9, walmart.at
-    assert walmart.at["filled"] < walmart.at["printed"], "printed only once it had filled"
+    assert walmart.at["filled"] - walmart.at["looked"] >= 1.9, walmart.at
     for said in PRINTED_INSTEAD.values():
         assert said not in out, out
 
 
+@pytest.mark.parametrize("event", ["bot check", "sign-out"])
+def test_a_bot_check_or_a_sign_in_inside_the_wait_is_asked_about(
+        attached, walmart, tmp_path, capsys, monkeypatch, event):
+    """Half a second into the wait for Walmart's own invoice, the page turns
+    into Walmart's bot check, or goes to the sign-in page. The run waited
+    after it had looked at the page for those, so it printed the bot check
+    or the sign-in page in the order's place, and put that copy aside, where
+    it counted as done. It waits before it looks now, and the person is
+    asked, as for a page that came up that way."""
+    short_wait(monkeypatch, 2500)
+    walmart.page = order_page("springing")
+    walmart.event = event
+    asked = answering(monkeypatch, walmart)
+    out = pilot(tmp_path, attached, capsys)
+
+    assert walmart.sprung, "the page really did turn"
+    assert len(asked) == 1, asked
+    if event == "bot check":
+        assert "looks normal again" in asked[0], asked
+        assert "Security challenge detected: 'robot or human'" in out, out
+    else:
+        assert "signed in again" in asked[0], asked
+        assert "Walmart is asking you to verify your sign-in." in out, out
+    assert walmart.served == 2, "the order's page is opened again after the answer"
+    for path in saved(tmp_path):
+        words = pdf_text(path).lower()
+        assert "robot or human" not in words and "create your account" not in words, words
+    rec = record(tmp_path)
+    put_aside(rec, tmp_path)
+    assert PRINTED in pdf_text(rec["pdf_path"]), "the summary of the order's own page"
+
+
 @pytest.mark.parametrize("how", ["missing", "empty"])
-def test_an_invoice_that_never_fills_is_said_and_written_down(
+def test_an_invoice_that_never_comes_is_said_and_written_down(
         attached, walmart, tmp_path, capsys, monkeypatch, how):
     """The page is printed in its place, which since late September leaves
-    the items out, and the run says so in one sentence. The journal and the
-    failure file say what became of the block, as a word from the fixed
-    list and two counts, and nothing of the order's."""
-    short_wait(monkeypatch, 1500)
+    the items out, and the run says so in one sentence. An empty portal is
+    waited for, and a page with no portal at all is looked at, not waited
+    on, since four hundred orders at fifteen seconds each is a hundred
+    minutes. The journal and the failure file say what became of the block,
+    as a word from the fixed list and two counts, and nothing of the
+    order's."""
+    if how == "empty":
+        short_wait(monkeypatch, 1500)
     walmart.page = order_page(how)
     out = pilot(tmp_path, attached, capsys)
 
     assert PRINTED_INSTEAD[how] in out, out
     assert out.count(PRINTED_INSTEAD[how]) == 1, "said once, though the print is tried twice"
-    assert walmart.at["printed"] - walmart.at["checked"] >= 1.4, "looked for, not glanced at"
+    if how == "empty":
+        assert walmart.at["printed"] - walmart.at["looked"] >= 1.4, "waited for, not glanced at"
+    else:
+        # Before the page is checked, at the print and at the print's second try.
+        assert walmart.looks <= 3, walmart.looks
     rec = record(tmp_path)
     put_aside(rec, tmp_path)
     assert "none of the order's items" in rec["notes"], rec
@@ -484,22 +705,24 @@ def test_an_invoice_that_never_fills_is_said_and_written_down(
         assert value not in raw, value
 
 
+@pytest.mark.parametrize("total", ["$21.24", "$22.74"],
+                         ids=["a total of its own", "this order's total"])
 def test_another_orders_invoice_is_not_printed_as_this_ones(
-        attached, walmart, tmp_path, capsys, monkeypatch):
-    """The block is filled, with another order's number, items and total.
-    It is not this order's invoice, so it is not printed in its place, and
-    what was there is written down without a word of it."""
-    short_wait(monkeypatch, 1500)
-    walmart.page = order_page("another")
+        attached, walmart, tmp_path, capsys, total):
+    """The block is filled, with another order's number and items, and its
+    own total or this order's, since two orders can cost the same. It is not
+    this order's invoice, so it is not printed in its place, and what was
+    there is written down without a word of it."""
+    walmart.page = order_page("another", other_total=total)
     out = pilot(tmp_path, attached, capsys)
 
-    assert PRINTED_INSTEAD["unverified"] in out, out
+    assert PRINTED_INSTEAD["another"] in out, out
     put_aside(record(tmp_path), tmp_path)
     for path in saved(tmp_path):
         assert OTHER_ITEMS[0] not in pdf_text(path), "the other order's invoice was printed"
     raw, report = failure_file(tmp_path)
     block = report["extra"]["postmortem"]["invoice_block"]
-    assert block["state"] == "unverified" and block["item_rows"] == 2, block
+    assert block["state"] == "another" and block["item_rows"] == 2, block
     assert block["text_characters"] > 100, block
     for value in VALUES:
         assert value not in raw, value
@@ -509,11 +732,10 @@ def test_another_orders_invoice_is_not_printed_as_this_ones(
 
 @pytest.mark.parametrize("counted", [True, "screen"], ids=["counted in print", "on screen only"])
 def test_a_summary_whose_item_names_were_not_read_is_put_aside(
-        attached, walmart, tmp_path, capsys, monkeypatch, counted):
+        attached, walmart, tmp_path, capsys, counted):
     """The folded list gave the app no name to look for, and the page counts
     two items, on the summary as well or only on screen. It printed the
     order's number and total and passed as done."""
-    short_wait(monkeypatch, 0)
     walmart.page = order_page("missing", names=False, counted=counted)
     out = pilot(tmp_path, attached, capsys)
 
@@ -541,11 +763,10 @@ def test_an_invoice_whose_item_names_were_not_read_is_kept(attached, walmart, tm
 
 
 def test_an_order_that_counts_no_items_and_lists_none_is_kept_as_before(
-        attached, walmart, tmp_path, capsys, monkeypatch):
+        attached, walmart, tmp_path, capsys):
     """A document with no items by its nature is not asked for one. Nothing
     on the page counts or names an item, and its print names the order by
     its number and total, as it always had to."""
-    short_wait(monkeypatch, 0)
     walmart.page = order_page("missing", names=False, counted=False)
     pilot(tmp_path, attached, capsys)
 
@@ -556,21 +777,43 @@ def test_an_order_that_counts_no_items_and_lists_none_is_kept_as_before(
     assert PRINTED in pdf_text(path)
 
 
+# -- what is said of the invoice at the print and at its second try ----------------------------
+
+def test_the_second_try_says_what_it_found_when_it_is_something_else(tmp_path, capsys):
+    """Said once a purchase, unless the second try finds the invoice another
+    way than the first did."""
+    app = a_run(tmp_path)
+    app._before_the_print(site.InvoiceBlock("empty"))
+    app._before_the_print(site.InvoiceBlock("missing"), again=True)
+    out = printed(capsys)
+    assert PRINTED_INSTEAD["empty"] in out and PRINTED_INSTEAD["missing"] in out, out
+
+    app._before_the_print(site.InvoiceBlock("missing"))
+    app._before_the_print(site.InvoiceBlock("missing"), again=True)
+    assert printed(capsys).count(PRINTED_INSTEAD["missing"]) == 1
+
+
 # -- which invoice is this order's --------------------------------------------------------------
 
-@pytest.mark.parametrize("text, named", [
-    # Its number as Walmart prints it, and whole.
-    ("Invoice\nSep 14, 2026 order\nOrder# 1000000-00000071\nQty 1", True),
-    ("Invoice\nOrder 100000000000071\nQty 1", True),
-    # Its total, with no number at all.
-    ("Invoice\nSep 14, 2026 order\nQty 1\nTotal\n$22.74", True),
-    # Another order's number and total, and a longer number holding this one.
-    ("Invoice\nOrder# 1000000-00000083\nTotal\n$21.24", False),
-    ("Invoice\nOrder# 91000000-00000071\nTotal\n$21.24", False),
-    ("Invoice\nOrder# 1000000-000000711\nTotal\n$21.24", False),
+@pytest.mark.parametrize("text, whose", [
+    # Its number as Walmart prints it, with its total or without, and whole.
+    ("Invoice\nSep 14, 2026 order\nOrder# 1000000-00000071\nQty 1\nTotal\n$22.74", "found"),
+    ("Invoice\nOrder# 1000000-00000071\nQty 1", "found"),
+    ("Invoice\nOrder 100000000000071\nQty 1", "found"),
+    # No number at all, and its total.
+    ("Invoice\nSep 14, 2026 order\nQty 1\nTotal\n$22.74", "found"),
+    # Another order's number, whatever its total, beside this one's or alone.
+    ("Invoice\nOrder# 1000000-00000083\nTotal\n$22.74", "another"),
+    ("Invoice\nOrder# 1000000-00000083\nTotal\n$21.24", "another"),
+    ("Invoice\nOrder# 1000000-00000071\nOrder# 1000000-00000083\nTotal\n$22.74", "another"),
+    # A longer number holding this one is another number.
+    ("Invoice\nOrder# 91000000-00000071\nTotal\n$21.24", "another"),
+    ("Invoice\nOrder# 1000000-000000711\nTotal\n$21.24", "another"),
+    # No number, and not its total.
+    ("Invoice\nSep 14, 2026 order\nQty 1\nTotal\n$21.24", "unverified"),
 ])
-def test_which_invoice_names_this_order(text, named):
-    assert site.names_this_order(text, ORDER, "$22.74") is named
+def test_whose_invoice_a_filled_block_is(text, whose):
+    assert site.whose_invoice(text, ORDER, "$22.74") == whose
 
 
 # -- how the order's items are counted and found on paper ------------------------------------

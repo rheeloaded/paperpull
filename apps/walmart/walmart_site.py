@@ -869,11 +869,15 @@ def find_receipt_iframe(page):
 # The block was looked at once, so an order page that had not filled it yet
 # was printed as it was, with no item on it and no word said, and a
 # tester's 0.43.0 run could not show whether that had happened (#63). It is
-# looked at again for a while now, and taken only when it names this order.
+# waited for now while Walmart's portal is on the page and empty, before
+# the page is looked at for a sign-in, a bot check and whose page it is
+# (look_for_printed_invoice), and taken only when it names this order.
 PRINTED_INVOICE = ".print-portal-root"
 PRINTED_INVOICE_BODY = "[data-testid='print-invoice-layout']"
 
-# How long the block gets to fill, and how often it is looked at meanwhile.
+# How long the block gets to fill while the portal is there and empty, and
+# how often it is looked at meanwhile. A page with no portal at all is
+# looked at once, as is a block that is filled.
 INVOICE_WAIT_MS = 15000
 INVOICE_LOOK_MS = 500
 
@@ -881,18 +885,20 @@ INVOICE_LOOK_MS = 500
 # list in paperpull_core.words, since they go into the run's journal and the
 # failure file a tester attaches.
 INVOICE_FOUND = "found"            # filled, and it names this order
-INVOICE_MISSING = "missing"        # no such block on the page
-INVOICE_EMPTY = "empty"            # the block is there with nothing in it
-INVOICE_UNVERIFIED = "unverified"  # filled, naming neither this order's number nor its total
+INVOICE_MISSING = "missing"        # no portal on the page at all
+INVOICE_EMPTY = "empty"            # the portal is there with no invoice in it
+INVOICE_ANOTHER = "another"        # filled, and it names another order's number
+INVOICE_UNVERIFIED = "unverified"  # filled, naming no order number and not this order's total
 INVOICE_UNREAD = "unread"          # the page could not be asked
 
 # The block's text, each piece of text in it on a line of its own, since it
 # is hidden and its text as a whole runs the pieces together. None when the
-# page has no such block.
+# page has no portal, and "" when the portal holds no invoice or an empty one.
 _READ_PRINTED_INVOICE_JS = r"""
 ([block, body]) => {
+  if (!document.querySelector(block)) return null;
   const invoice = document.querySelector(block + ' ' + body);
-  if (!invoice) return null;
+  if (!invoice) return '';
   const parts = [];
   const walk = document.createTreeWalker(invoice, NodeFilter.SHOW_TEXT);
   for (let node = walk.nextNode(); node; node = walk.nextNode()) {
@@ -960,14 +966,24 @@ class InvoiceBlock:
                 "item_rows": self.item_rows}
 
 
-def names_this_order(text: str, order_number: str, total: str = "") -> bool:
-    """Whether `text` prints this order's own number, in Walmart's groups
-    of digits or whole, or the order's own total."""
+def whose_invoice(text: str, order_number: str, total: str = "") -> str:
+    """Whose invoice a filled block is, INVOICE_FOUND for this order's.
+
+    By the number it prints after "Order#" or "TC#", as the page check reads
+    the page's own, and every such number has to be this order's, the one
+    it was listed under. One that is not makes it INVOICE_ANOTHER, whatever
+    total it prints, since another order can cost the same. A block that
+    prints no such number is this order's when it prints this order's number
+    in Walmart's groups of digits or whole, or else its total, and
+    INVOICE_UNVERIFIED when it prints neither."""
+    shown = PAGE_NUMBER_RE.findall(text or "")
+    if shown:
+        return INVOICE_ANOTHER if _page_check.names_only(shown, order_number) else INVOICE_FOUND
     digits = re.sub(r"\D", "", order_number or "")
     if len(digits) >= 10 and (_printed_forms(text, digits)
                               or re.search(r"(?<!\d)%s(?!\d)" % digits, text or "")):
-        return True
-    return prints_total(text, total)
+        return INVOICE_FOUND
+    return INVOICE_FOUND if prints_total(text, total) else INVOICE_UNVERIFIED
 
 
 def _invoice_block(text, purchase: Purchase) -> InvoiceBlock:
@@ -976,17 +992,18 @@ def _invoice_block(text, purchase: Purchase) -> InvoiceBlock:
     text = str(text)
     if not text.strip():
         return InvoiceBlock(INVOICE_EMPTY)
-    named = names_this_order(text, purchase.order_number, purchase.total)
-    return InvoiceBlock(INVOICE_FOUND if named else INVOICE_UNVERIFIED,
+    return InvoiceBlock(whose_invoice(text, purchase.order_number, purchase.total),
                         len(text), item_rows(text))
 
 
 def look_for_printed_invoice(page, purchase: Purchase,
                              wait_ms: Optional[int] = None) -> InvoiceBlock:
     """Walmart's own invoice on this order page, looked at every
-    INVOICE_LOOK_MS until it holds this order's number or its total, the
-    number the purchase was listed under. Up to `wait_ms`, INVOICE_WAIT_MS
-    when it is not given, and 0 looks once. Nothing is pressed or changed."""
+    INVOICE_LOOK_MS while the portal is there and empty, up to `wait_ms`,
+    INVOICE_WAIT_MS when it is not given. Anything else is taken at once,
+    a filled block, whoever's it is, and a page with no portal, so a run
+    over pages without one does not wait at every order. 0 looks once.
+    Nothing is pressed or changed."""
     wait_ms = INVOICE_WAIT_MS if wait_ms is None else wait_ms
     deadline = time.monotonic() + max(0, wait_ms) / 1000.0
     block = InvoiceBlock(INVOICE_UNREAD)
@@ -996,7 +1013,7 @@ def look_for_printed_invoice(page, purchase: Purchase,
                 _READ_PRINTED_INVOICE_JS, [PRINTED_INVOICE, PRINTED_INVOICE_BODY]), purchase)
         except Exception:
             pass    # what it was at the last look that answered, if any did
-        if block.found or time.monotonic() >= deadline:
+        if block.state != INVOICE_EMPTY or time.monotonic() >= deadline:
             return block
         try:
             page.wait_for_timeout(INVOICE_LOOK_MS)
@@ -1004,10 +1021,11 @@ def look_for_printed_invoice(page, purchase: Purchase,
             return block
 
 
-def show_printed_invoice(page, purchase: Purchase, wait_ms: Optional[int] = None,
+def show_printed_invoice(page, purchase: Purchase, wait_ms: int = 0,
                          images_ms: int = 5000) -> InvoiceBlock:
     """Make the next print of this page Walmart's own invoice, and only it,
-    once look_for_printed_invoice finds it.
+    when look_for_printed_invoice finds it, at one look unless `wait_ms`
+    says otherwise, since the run waits for it before it looks at the page.
 
     Nothing is pressed, and nothing changes on screen. The block's images,
     the logo and the barcode, are asked for at once and given `images_ms`
@@ -1041,7 +1059,7 @@ def hide_printed_invoice(page) -> None:
 
 
 @contextmanager
-def printing_its_invoice(page, purchase: Purchase, wait_ms: Optional[int] = None):
+def printing_its_invoice(page, purchase: Purchase, wait_ms: int = 0):
     """Walmart's own invoice shown for the prints made inside the block, and
     the page put back after them however they end. Yields what became of
     the invoice (an InvoiceBlock), found when it is what will print. The
