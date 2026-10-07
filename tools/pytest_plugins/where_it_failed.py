@@ -180,9 +180,10 @@ _followed = set()
 
 
 def _the_named_file(path) -> bool:
-    """Whether path is the file PAPERPULL_OUTCOMES_OF names. Compared as
-    files, so how either path is spelled does not matter, and only once
-    the names match, which is cheap enough to ask of every test."""
+    """Whether path is the file PAPERPULL_OUTCOMES_OF names. The names of
+    the two files are compared first, which is cheap enough to ask of
+    every test, and then the files themselves, so how either path spells
+    the folders on the way does not matter."""
     named = os.environ.get(OUTCOMES_OF)
     if not named or not path:
         return False

@@ -536,13 +536,17 @@ def test_each_way_a_canary_test_can_end_is_counted():
                + [_record(1)])
     counts = rat.canary_counts(records)
     assert counts == {"tests": 6, "passed": 1, "failed": 2, "skipped": 1, "never ran": 1, "did not finish": 1}
-    assert rat.canary_refusal(True, counts, True, False)[:2] == [
+    assert rat.canary_refusal(REPO / "core", counts, False)[:2] == [
         "THE PRIVACY CANARY DID NOT PASS.",
         "Of the 6 tests in core/tests/test_failure_canary.py, 1 passed, 2 failed, 1 was skipped, "
         "1 never ran and 1 did not finish."]
+    some = rat.canary_counts(ended("a", setup="passed", call="passed", teardown="passed") + ended("e"))
+    assert rat.canary_refusal(REPO / "core", some, False)[:2] == [
+        "ONLY PART OF THE PRIVACY CANARY RAN.",
+        "Of the 2 tests in core/tests/test_failure_canary.py, 1 passed and 1 never ran."]
     every = rat.canary_counts(ended("a", setup="passed", call="passed", teardown="passed"))
-    assert rat.canary_refusal(True, every, True, False) == []
-    assert rat.canary_refusal(False, None, False, False) == [], "a run without the core is not refused"
+    assert rat.canary_refusal(REPO / "core", every, False) == []
+    assert rat.canary_refusal(None, None, False) == [], "a run without the core is not refused"
 
 
 def test_a_part_without_the_core_says_which_part_runs_the_canary(one_suite, capsys):
@@ -576,16 +580,21 @@ def test_the_part_holding_the_core_refuses_to_pass_without_the_canary(one_suite,
     assert "the privacy canary runs in part 1 of 2" in capsys.readouterr().out
 
 
-def test_every_run_holds_the_core_suite_and_its_canary():
-    """A run without the core suite is not refused, since it never held
-    the canary. So the runner's own list of suites always has it, quick or
-    whole, with the canary in it, and one of CI's four parts holds it."""
+def test_every_run_holds_the_canary_and_ci_runs_every_part():
+    """A run without the canary's suite is not refused, since it never held
+    the canary. So the runner's own list of suites always has that suite,
+    quick or whole, with the canary in its folder, and CI's matrix runs
+    every part the suites are split into. A part left out of the matrix
+    could be the one holding the canary, and the job named tests would
+    pass with the canary run nowhere."""
     for quick in (False, True):
-        core = [d for name, d, kind in rat.suites(quick) if name == rat.CANARY_SUITE]
-        assert core == [REPO / "core"], quick
-        assert (core[0] / rat.CANARY_FILE).is_file()
-    names = [name for name, _d, _kind in rat.suites(False)]
-    assert rat.canary_part(names, rat.load_times(), 4) in (1, 2, 3, 4)
+        folders = [d for name, d, _kind in rat.suites(quick) if name == rat.CANARY_SUITE]
+        assert folders == [REPO / "core"], quick
+        assert (folders[0] / rat.CANARY_FILE).is_file()
+    workflow = (REPO / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    parts = int(re.search(r"--shard \$\{\{ matrix\.part \}\}/(\d+) ", workflow).group(1))
+    matrix = re.search(r"^ +part: \[([\d, ]+)\]$", workflow, re.M).group(1)
+    assert sorted(int(k) for k in matrix.split(",")) == list(range(1, parts + 1))
 
 
 def test_a_failing_suite_in_a_run_prints_its_frames_and_keeps_its_output(one_suite, capsys, tmp_path):

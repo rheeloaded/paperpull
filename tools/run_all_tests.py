@@ -238,8 +238,10 @@ WHY = {
     "fastapi": "the control panel",
 }
 CANARY = "test_failure_canary"
-# Where the canary is, in the core suite's folder. A run that holds the core
-# suite passes only when every test collected there ran and passed.
+# The suite that runs the canary, and the canary's file in that suite's
+# folder. A run that holds the suite passes only when every test collected
+# there ran and passed. Should the canary move to another suite, as a split
+# of the core suite once planned, this names that suite.
 CANARY_SUITE = "core"
 CANARY_FILE = "tests/%s.py" % CANARY
 _ASKED: dict = {}
@@ -783,22 +785,25 @@ def canary_counts(records: list) -> dict:
     return counts
 
 
-def canary_refusal(held: bool, counts, there: bool, skipped: bool) -> list:
-    """What to print when a run that holds the core suite did not see every
-    test of the canary pass, or when a skip names the canary anywhere.
-    Nothing when neither is so. Counts and words of this file only, since
-    somebody may paste it into a public issue."""
+def canary_refusal(folder, counts, skipped: bool) -> list:
+    """What to print when a run that holds the canary's suite, whose folder
+    is folder, did not see every test of the canary pass, or when a skip
+    names the canary anywhere. folder is None when the run does not hold
+    that suite. Nothing when neither is so. Counts and words of this file
+    only, since somebody may paste it into a public issue."""
     counts = counts or canary_counts([])
     ran = 0 < counts["passed"] == counts["tests"]
-    if not skipped and (ran or not held):
+    if not skipped and (ran or folder is None):
         return []
-    place = CANARY_SUITE + "/" + CANARY_FILE
-    partly = bool(counts["failed"]) or 0 < counts["passed"] < counts["tests"]
-    lines = ["THE PRIVACY CANARY DID %s." % ("NOT PASS" if partly else "NOT RUN")]
-    if held and not counts["tests"]:
-        lines.append(("The core suite ran none of the tests in %s." if there
-                      else "%s is missing, so none of its tests ran.") % place)
-    elif held and not ran:
+    lines = ["THE PRIVACY CANARY DID NOT PASS." if counts["failed"]
+             else "ONLY PART OF THE PRIVACY CANARY RAN." if 0 < counts["passed"] < counts["tests"]
+             else "THE PRIVACY CANARY DID NOT RUN."]
+    place = "%s/%s" % (Path(folder).name, CANARY_FILE) if folder is not None else ""
+    if folder is not None and not counts["tests"]:
+        lines.append("The %s suite ran none of the tests in %s." % (CANARY_SUITE, place)
+                     if (Path(folder) / CANARY_FILE).is_file()
+                     else "%s is missing, so none of its tests ran." % place)
+    elif folder is not None and not ran:
         said = ["%d passed" % counts["passed"]] + [
             "%d %s" % (counts[k], k if k != "skipped" else "was skipped" if counts[k] == 1 else "were skipped")
             for k in ("failed", "skipped", "never ran", "did not finish") if counts[k]]
@@ -813,8 +818,8 @@ def canary_refusal(held: bool, counts, there: bool, skipped: bool) -> list:
 
 
 def canary_part(names: list, times: dict, n: int):
-    """Which of n parts of a run holds the core suite, and so the canary.
-    None when no part does."""
+    """Which of n parts of a run holds the canary's suite. None when no
+    part does."""
     return next((k for k in range(1, n + 1) if CANARY_SUITE in shard_of(names, times, k, n)), None)
 
 
@@ -1199,9 +1204,8 @@ def run(args) -> int:
     # canary pass. Not being skipped is not enough, since a canary that was
     # deleted, renamed or deselected, or a core that collected nothing, has
     # no skip to show.
-    held = [d for name, d, _kind in plan if name == CANARY_SUITE]
-    told = canary_refusal(bool(held), canary, bool(held) and (held[0] / CANARY_FILE).is_file(),
-                          any(CANARY in ln for ln in skip_lines))
+    canary_folder = next((d for name, d, _kind in plan if name == CANARY_SUITE), None)
+    told = canary_refusal(canary_folder, canary, any(CANARY in ln for ln in skip_lines))
     if told:
         print("\n" + "\n".join(told))
         refused = True
@@ -1228,7 +1232,7 @@ def run(args) -> int:
         refused = True
     if refused or broken:
         return 1
-    if held:
+    if canary_folder is not None:
         print("\nall suites passed, privacy canary included")
         return 0
     # A part of a CI run without the core says which part runs the canary,
@@ -1237,7 +1241,7 @@ def run(args) -> int:
     home = canary_part([name for name, _d, _kind in suites(args.quick)], times, parts) if parts else None
     if home:
         print("\nall suites passed, and the privacy canary runs in part %d of %d, "
-              "which holds the core suite" % (home, parts))
+              "which holds the %s suite" % (home, parts, CANARY_SUITE))
     else:
         print("\nall suites passed, and the privacy canary was not among them")
     return 0
