@@ -55,7 +55,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Fifty-three providers are supported today, all built on the same pattern.
+Fifty-four providers are supported today, all built on the same pattern.
 Seven more, Wells Fargo, SBA, Verizon Mobile,
 Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -104,6 +104,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
+| [`nelnet`](apps/nelnet) | Nelnet | Student loan statements, 1098-E, notices | **Contributed by [@tylerverry](https://github.com/tylerverry), 47 documents in one full run.** The inbox list, paged and read from the page, each statement taken from its own Download button. The 1098-E is the Tax Info page printed after its own year's button is pressed |
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every document, three years of statements through the statements page's year picker and the 1098s ([#38](https://github.com/rheeloaded/paperpull/issues/38)) |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked; three years are online |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
@@ -584,7 +585,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **sixty-one** apps pass their tests, the fifty-three that are
+- ✅ All **sixty-two** apps pass their tests, the fifty-four that are
   supported, the one with a known issue and the seven still waiting for a
   tester, 15,171 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
@@ -661,7 +662,8 @@ found a bug and diagnosed it to the line.
   health insurer.
 - [@appchamp](https://github.com/appchamp), the PG&E app.
 - [@tylerverry](https://github.com/tylerverry), the Vanguard app, built
-  and run against five accounts back to 2020.
+  and run against five accounts back to 2020, and the Nelnet app, run
+  against a student loan account back to 2019.
 - [@marecabo](https://github.com/marecabo), Amazon's legal invoice PDFs on
   the German store.
 - [@watling777](https://github.com/watling777), the tester behind AT&T,

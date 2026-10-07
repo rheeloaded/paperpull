@@ -9,6 +9,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Nelnet, the 62nd app, student loan statements, the 1098-E and notices
+  (#69).** The billing statements and notices in Inbox & Statements, read
+  from the page's own list while it is paged, each saved by pressing its
+  own row's Download button once its label passes the guard, and the
+  1098-E from Tax Info, printed from the page after its button is pressed,
+  since the form is not a file. Notices are named by their own subject.
+  Contributed by tylerverry, whose full run saved all 47 documents, 41
+  statements back to 2019, the 1098-E and 5 notices, every one a valid
+  PDF, and whose second run downloaded nothing. Before merging, the 1098-E
+  pressed was made the one for the form's own tax year, since an older
+  year's form asked for again would have been the current one saved under
+  the older year, an inbox notice that names the form is taken from its
+  own row rather than Tax Info, and a page of the list that cannot be
+  reached stops the listing, where it used to end it as though the list
+  were whole.
+
 ### Fixed
 - **A run whose documents page would not open no longer finishes clean.**
   In twenty document apps, when Discover could not open the documents
