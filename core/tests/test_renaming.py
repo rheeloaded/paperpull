@@ -412,20 +412,50 @@ SPELLINGS = [
 @pytest.mark.parametrize("spelled", SPELLINGS)
 def test_a_record_with_its_file_spelled_another_way_is_still_its_files(tmp_path, monkeypatch,
                                                                          by_account, spelled):
+    """And the record follows its file, so the next Rename has nothing to
+    do. A record left with the old spelling named the file back from its
+    row on the next Rename and forward again on the one after."""
     monkeypatch.chdir(tmp_path)
     (row1, rec1), (row2, rec2) = _bill(tmp_path, "1111"), _bill(tmp_path, "2222")
     rec1["pdf_path"] = spelled(tmp_path / rec1["pdf_filename"])
     app = _App(tmp_path, [row1, row2], progress={KEY % "1111": rec1, KEY % "2222": rec2})
+    renamed = {"1111": "2026-09-12 Testco 1111 Billing Statement 1111.pdf",
+               "2222": "2026-09-12 Testco 2222 Billing Statement 2222.pdf"}
     renaming.run_for(app, apply_changes=True, say=lambda *a: None)
-    assert _names(tmp_path) == {
-        "1111": "2026-09-12 Testco 1111 Billing Statement 1111.pdf",
-        "2222": "2026-09-12 Testco 2222 Billing Statement 2222.pdf"}
+    assert _names(tmp_path) == renamed
+    assert app.progress.data[KEY % "1111"]["pdf_path"] == str(tmp_path / renamed["1111"])
+    said = []
+    renaming.run_for(app, apply_changes=True, say=said.append)
+    assert _names(tmp_path) == renamed
+    assert "already named" in " ".join(said), said
 
 
 def test_where_case_is_ignored_one_file_has_one_spelling(tmp_path):
     a = renaming._same_file(str(tmp_path / "Statements" / "A Bill.pdf"))
     b = renaming._same_file(str(tmp_path / "STATEMENTS" / "a bill.PDF"))
     assert (a == b) == (os.name == "nt" or sys.platform == "darwin")
+
+
+def test_a_bill_taken_again_beside_one_that_failed_keeps_its_own_account(tmp_path,
+                                                                           by_account):
+    """Download again took a second copy of the first bill, so its record
+    names that copy, and failed on the second bill, so that record names
+    no file. Neither record is lent by date and title, since the first
+    copy would have been named for the other bill."""
+    (row1, rec1), (row2, rec2) = _bill(tmp_path, "1111"), _bill(tmp_path, "2222")
+    again = tmp_path / "2026-09-12 Testco Billing Statement 1111 (2).pdf"
+    again.write_bytes(b"%PDF- again 1111")
+    rec1.update(pdf_path=str(again), pdf_filename=again.name)
+    row1_again = dict(row1, **{"PDF Filename": again.name, "PDF Full Path": str(again)})
+    app = _App(tmp_path, [row1, row2, row1_again],
+               progress={KEY % "1111": rec1, KEY % "2222": _listed(rec2)})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    names = sorted(p.name for p in tmp_path.glob("*.pdf"))
+    assert names == ["2026-09-12 Testco 1111 Billing Statement 1111.pdf",
+                     "2026-09-12 Testco Billing Statement 1111.pdf",
+                     "2026-09-12 Testco Billing Statement 2222.pdf"], names
+    assert (tmp_path / "2026-09-12 Testco 1111 Billing Statement 1111.pdf").read_bytes() == (
+        b"%PDF- again 1111")
 
 
 def test_a_file_two_bills_records_name_is_named_from_its_row(tmp_path, by_account):

@@ -150,6 +150,10 @@ class Home:
             "owner": "Dana Example", "output_dir": str(tmp_path / "out"),
             "profile_dir": str(tmp_path / "profile"), "cdp_url": "http://127.0.0.1:9",
             "delay_min_seconds": 0, "delay_max_seconds": 0, "default_start_date": "",
+            # Room enough that no name is cut short. A deep temporary folder
+            # cuts a download's name where Rename's plan does not, which is
+            # a question of its own and not this one.
+            "max_path_length": 1000,
         })
         for key in ("filename_pattern", "filename_pattern_receipts",
                     "filename_pattern_statements"):
@@ -231,7 +235,7 @@ def two_documents(home: Home, with_ids: bool = False):
     return pair if pair[0].key != pair[1].key else None
 
 
-def downloaded(app, doc) -> Path:
+def downloaded(app, doc, body: bytes = b"") -> Path:
     """One listed document then downloaded, written down by the app's own
     code, with a file named the way its download names one."""
     if app.discovery.get(doc.key) is None:
@@ -242,7 +246,7 @@ def downloaded(app, doc) -> Path:
     path = core_storage.unique_path(app.paths.folder_for(doc.category), name,
                                     app.config["max_path_length"],
                                     distinguisher=(getattr(doc, "document_id", "") or "")[-6:])
-    path.write_bytes(body_of(doc.account))
+    path.write_bytes(body or body_of(doc.account))
     doc.pdf_path, doc.pdf_filename = str(path), path.name
     doc.downloaded_ok = True
     app._record(doc, State.COMPLETED)
@@ -411,3 +415,39 @@ def test_a_pattern_change_keeps_each_bill_in_its_own_file_name(home):
     said = home.rename("--apply")
     assert RENAMED_BOTH in said, said[-1500:]
     each_file_is_its_own(home, said, "account", ACCOUNTS)
+
+
+@pytest.mark.parametrize("home", [REPO / "apps" / n for n in TITLED], ids=list(TITLED),
+                         indirect=True)
+def test_a_bill_taken_again_beside_one_that_failed_keeps_its_own_account(home):
+    """Download again took a second copy of the first bill beside its first,
+    and the second bill's capture failed, each written down by the app's own
+    code as its run writes them, from what discovery listed. The first
+    bill's record then names its new copy and the second bill's names no
+    file, and Rename offered the first copy the second bill's account."""
+    listed_and_downloaded(home)
+    app = home.build()
+    listed = {r["account"]: home.mod.Document.from_dict(r) for r in app.discovery.data.values()}
+    again = body_of(ACCOUNTS[0]).replace(b"%%EOF", b"taken again\n%%EOF")
+    downloaded(app, listed[ACCOUNTS[0]], body=again)
+    failed = listed[ACCOUNTS[1]]
+    app._record(failed, State.NEEDS_MANUAL_REVIEW, notes="Could not capture the document PDF")
+    app._write_row(failed, "Capture failed", State.NEEDS_MANUAL_REVIEW.value)
+    saved(app)
+    bills = {body_of(ACCOUNTS[0]): ACCOUNTS, again: ACCOUNTS,
+             body_of(ACCOUNTS[1]): tuple(reversed(ACCOUNTS))}
+
+    before = {body: p.name for body, p in home.files().items()}
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    home.set_pattern(PATTERN)
+    said = home.rename("--apply")
+    after = {body: p.name for body, p in home.files().items()}
+    assert sorted(after) == sorted(before) == sorted(bills), said[-1500:]
+    for body, (own, other) in bills.items():
+        assert other not in after[body], (
+            "%s named a file of %s %r\n%s" % (home.app.name, own, after[body], said[-1500:]))
+    # The new copy is named for its own record, so it carries the account
+    # twice, from the pattern's account field and from the summary.
+    assert after[again].count(ACCOUNTS[0]) == 2, after[again]
+    assert home.browser.asked == 0, "Rename reached for a browser"

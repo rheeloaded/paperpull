@@ -241,10 +241,11 @@ def update_rows(rows: Iterable[dict], result: Result, *,
     and the order history both.
     """
     touched = 0
+    moved = _moved(result)
     for row in rows:
         old_path = (row.get(path_key) or "").strip()
         old_name = (row.get(name_key) or "").strip()
-        new_path = result.mapping.get(old_path)
+        new_path = moved(old_path)
         new_name = result.names.get(old_name)
         if not new_path and not new_name:
             continue
@@ -268,11 +269,12 @@ def update_progress(progress, result: Result, *,
     second download. Renaming a file must not disturb it.
     """
     touched = 0
+    moved = _moved(result)
     data = getattr(progress, "data", None) or {}
     for key, rec in list(data.items()):
         if not isinstance(rec, dict):
             continue
-        new_path = result.mapping.get((rec.get(path_field) or "").strip())
+        new_path = moved((rec.get(path_field) or "").strip())
         new_name = result.names.get((rec.get(filename_field) or "").strip())
         if not new_path and not new_name:
             continue
@@ -287,6 +289,26 @@ def update_progress(progress, result: Result, *,
     if touched:
         progress.save()
     return touched
+
+
+def _moved(result: Result):
+    """Where a recorded path's file went, by the path as the rename wrote
+    it or by any other spelling of the same file. Rename finds a record by
+    its file however its path is written (_same_file), and a record left
+    with its old spelling would no longer name the file it was found by,
+    so the next rename would name the file from its row and the one after
+    from its record again."""
+    by_file = {}
+    for old, new in result.mapping.items():
+        where = _same_file(old)
+        if where:
+            by_file[where] = new
+
+    def find(raw: str) -> Optional[str]:
+        if not raw:
+            return None
+        return result.mapping.get(raw) or by_file.get(_same_file(raw))
+    return find
 
 
 # ---------------------------------------------------------------------------
@@ -446,10 +468,10 @@ class _Known:
     of one day were merged here into one record, the later one, and Rename
     offered to give the first bill's file the second bill's account and a
     " (2)" (the release review of 0.44.0). A row whose file no record names
-    is matched by its order number, or by its date and title among the
-    documents whose records name no file, and only when one document
-    answers. Any other row is named from the row alone, a name that leaves
-    out what a record would have added, and never one that says another
+    is matched by its order number, or by its date and title when one
+    document alone has them and no record of that date and title names a
+    file. Any other row is named from the row alone, a name that leaves out
+    what a record would have added, and never one that says another
     document's."""
 
     def __init__(self, app):
@@ -501,12 +523,15 @@ class _Known:
                 named = [n for n in named if n in self._by_key.get(key, ())]
             return self.records[named[0]] if len(named) == 1 else {}
         # An order number names one purchase, whichever of its files a row
-        # is. A date and a title are asked only of documents whose records
-        # name no file. One whose file is known and is not this row's may be
-        # another bill's, and nothing here tells that from an older copy of
-        # this one.
-        found = [n for n in self._by_key.get(key, ())
-                 if key[0] == "order" or n not in self._named]
+        # is. A date and a title name a document only when one document has
+        # them and no record of that date and title names a file. A record
+        # naming another file may be another bill's or a newer copy of this
+        # one, and a record naming none may be another bill's while this
+        # row's own record names its newer copy, as after Download again
+        # took a second copy of one bill and failed on the other's.
+        found = list(self._by_key.get(key, ()))
+        if key[0] != "order" and any(n in self._named for n in found):
+            return {}
         return self.records[found[0]] if len(found) == 1 else {}
 
 

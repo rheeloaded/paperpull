@@ -59,16 +59,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and the index kept each bill's own summary, but the file names said the
   wrong account. Citi titles each card's statement the same way, so two
   cards' statements of one day did the same. Now a file is matched to the
-  record that names that very file, and by its date and title only when no
-  record names it and one document alone has that date and title. A file
-  that still cannot be placed is named from its own index row, which can
-  leave out what a record would add but never puts in another document's.
+  record that names that very file. Its date and title are asked only
+  when no record names the file, and then only when a single document has
+  that date and title and names no file of its own. A file that still
+  cannot be placed is named from its own index row, which can leave out
+  what a record would add but never puts in another document's. The index
+  and the run state follow a renamed file however its path was written.
   AAFMAA, Ally, Anthem, Capital One, Chase, Discover, FedEx, M&T Bank,
   myPay, Navy Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard
-  keep a statement under the provider's own document id when it has one,
-  and Rename never found those records at all, so a naming pattern's
-  account or number never reached a file they had already downloaded. Now
-  it does.
+  keep an id from the provider's page in a statement's record when there
+  is one. Rename looked such a record up by that id, which an index row
+  does not carry, so it never found one, and a naming pattern's account or
+  number never reached a file those apps had already downloaded. Now it
+  does.
 
 ## [0.44.0] - 2026-10-07
 
