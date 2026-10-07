@@ -817,7 +817,17 @@ class App:
             return False
         verdict = got.verdict.outcome if got.verdict is not None else identity.UNCHECKED
         if verdict == identity.REFUSED:
-            if not self._destroyed(doc, out_path, got.verdict):
+            if self._destroyed(out_path, got.verdict):
+                why = "the statement that came does not name the days it was listed under"
+                doc.pdf_path = doc.pdf_filename = ""
+                self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+                self._write_row(doc, "Wrong document", "Needs Manual Review")
+                self.write_failure("save the document", why)
+                self.stats["manual_review"] += 1
+                self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+                print("  Nothing was saved for it. The file was destroyed rather")
+                print("  than filed under this statement's name.")
+            else:
                 self._to_review(doc, out_path, REFUSED_NOTE, got.verdict)
             return None
         if verdict != identity.VERIFIED:
@@ -828,14 +838,15 @@ class App:
             return None
         return True
 
-    def _destroyed(self, doc: Document, out_path, verdict) -> bool:
+    def _destroyed(self, out_path, verdict) -> bool:
         """With refuse_wrong_documents set, a statement whose text names
         another statement's days better than its own is not kept at all, as
         in every other app that checks, but only when it had a day of its
         own to be checked by (Verdict.checked). One whose first and last day
         are both other statements' days too had nothing of its own to count,
         so nothing says it is not this one, and it goes to Manual Review even
-        then. True when it was destroyed."""
+        then. True when it was removed. Nothing is written down here, since
+        the caller writes the statement down once, whichever way it went."""
         if not self.config.get("refuse_wrong_documents", False):
             return False
         if verdict is None or not verdict.checked:
@@ -845,15 +856,6 @@ class App:
         except OSError as e:
             log.info("could not remove the refused statement: %s", e)
             return False
-        why = "the statement that came does not name the days it was listed under"
-        doc.pdf_path = doc.pdf_filename = ""
-        self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
-        self._write_row(doc, "Wrong document", "Needs Manual Review")
-        self.write_failure("save the document", why)
-        self.stats["manual_review"] += 1
-        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
-        print("  Nothing was saved for it. The file was destroyed rather")
-        print("  than filed under this statement's name.")
         return True
 
     @staticmethod
@@ -951,10 +953,11 @@ class App:
         # nothing about which is which and moves between them when a file
         # is deleted (#49, and the same complaint on #43). A business
         # statement has no id, and two ending on the same day are told apart
-        # by the first day each covers, the same name on every run.
-        mark = (ref.start or ref.created) if ref is not None else (doc.document_id or "")[-6:]
+        # by the first day each covers, read from its own record's link, the
+        # same name on every run.
         out_path = unique_path(folder, filename, self.config["max_path_length"],
-                               distinguisher=mark)
+                               distinguisher=(ref.start or ref.created) if ref is not None
+                               else (doc.document_id or "")[-6:])
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
