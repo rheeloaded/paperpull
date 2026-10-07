@@ -1402,3 +1402,75 @@ def test_an_apps_own_rule_tells_its_files_apart(tmp_path):
     said = []
     renaming.run_for(app, apply_changes=False, say=said.append)
     assert "Monthly Statement (2).pdf" in " ".join(said), said
+
+
+# -- an old copy Download again left, which no record names --------------------
+
+STATEMENT = "2026-09-12 Testco Monthly Statement"
+
+
+def _beside(tmp_path, old_names, current, others=()):
+    """The first statement, the files `old_names` no record names, and the
+    second statement's copy `current`, which its record names. `others` are
+    more records of that day, naming no file."""
+    row1, rec1 = _statement(tmp_path, STATEMENT + ".pdf", b"1111", document_id="DOC1111")
+    rows = [row1] + [_statement(tmp_path, name, b"old %d" % i)[0]
+                     for i, name in enumerate(old_names)]
+    row2, rec2 = _statement(tmp_path, current, b"2222", document_id="DOC2222")
+    progress = {"id:DOC1111": rec1, "id:DOC2222": rec2}
+    for i, (title, document_id) in enumerate(others):
+        progress["id:other%d" % i] = {"date": "2026-09-12", "title": title,
+                                      "summary": "Monthly Statement",
+                                      "document_id": document_id}
+    return rows + [row2], progress
+
+
+def _preview(app):
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append)
+    return " ".join(said)
+
+
+def test_every_old_copy_download_again_left_keeps_what_told_it_apart(tmp_path):
+    """Two Download agains left "... OC2222.pdf" and "... OC2222 (2).pdf",
+    and the record names the third. No record names the old two, so they
+    were offered " (2)" and " (3)" under the pattern they were saved by."""
+    rows, progress = _beside(tmp_path, [STATEMENT + " OC2222.pdf",
+                                        STATEMENT + " OC2222 (2).pdf"],
+                             STATEMENT + " OC2222 (3).pdf")
+    said = _preview(_App(tmp_path, rows, progress=progress))
+    assert "already named" in said, said
+
+
+def test_an_old_copy_keeps_the_ending_its_download_wrote_after_a_later_listing(tmp_path):
+    """Capital One, Schwab and Vanguard write an id a later listing gives
+    over the one in discovery. The ending is read from the record as its
+    download wrote it down."""
+    rows, progress = _beside(tmp_path, [STATEMENT + " OC2222.pdf"],
+                             STATEMENT + " OC2222 (2).pdf")
+    app = _App(tmp_path, rows, progress=progress,
+               discovery={"id:DOC2222": dict(progress["id:DOC2222"], document_id="DOC9999",
+                                             pdf_path="", pdf_filename="")})
+    said = _preview(app)
+    assert "already named" in said, said
+
+
+@pytest.mark.parametrize("old, others", [
+    pytest.param(STATEMENT + " NOC2222.pdf", (), id="an ending running into the name"),
+    pytest.param(STATEMENT + " OC3333.pdf",
+                 [("Statement - September 12, 2026", "DOC3333")],
+                 id="the ending of a document of another title"),
+    pytest.param(STATEMENT + " B 2222.pdf",
+                 [("Monthly Statement - September 12, 2026", "B 2222"),
+                  ("Monthly Statement - September 12, 2026", "2222")],
+                 id="two endings of its date and title"),
+])
+def test_an_ending_no_one_document_of_its_date_and_title_gives_is_not_kept(tmp_path, old,
+                                                                            others):
+    """Only an ending that one document of the row's date and title would
+    give is kept, and only whole. Anything else is told apart by " (2)", as
+    before."""
+    rows, progress = _beside(tmp_path, [old], STATEMENT + " OC2222.pdf", others)
+    said = _preview(_App(tmp_path, rows, progress=progress))
+    assert "1 file(s) would be renamed" in said, said
+    assert "%s -> %s (2).pdf" % (old, STATEMENT) in " ".join(said.split()), said

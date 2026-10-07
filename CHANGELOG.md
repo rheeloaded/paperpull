@@ -133,6 +133,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
   AAFMAA never fills. Rename tells a file apart the way its download does,
   so it offers a file already saved with "cument" in its name the name a
   download gives it today, in a preview first, as for any other rename.
+- **Rename no longer offers " (2)" to the old copy Download again leaves.**
+  Download again saves the statement it takes again beside its first
+  copy, as "2026-09-12 Chase Monthly Statement OC2222 (2).pdf", and the
+  statement's record names the new copy from then on. No record names the
+  old copy, and with two statements of that day and title Rename cannot
+  tell whose it is, so it told the old copy apart by nothing, and a
+  preview offered to rename "2026-09-12 Chase Monthly Statement
+  OC2222.pdf" to "2026-09-12 Chase Monthly Statement (2).pdf". The old copy
+  now keeps the end of the id in its name when that is what exactly one
+  statement of its date and title would add, and is still named from its
+  own row, never for that statement. After a pattern change it carries
+  that ending into its new name, and the new copy follows it with " (2)",
+  as downloads into an empty folder would name them. It happened in the
+  apps that tell a second statement apart by an id, and for PayPal's
+  business statements, told apart by their first day.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a

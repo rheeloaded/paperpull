@@ -51,7 +51,8 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from .models import State
-from .storage import build_pdf_filename, fitted_name, title_case, unique_path
+from .storage import (build_pdf_filename, fitted_name, sanitize_component, title_case,
+                      unique_path)
 
 
 @dataclass
@@ -738,7 +739,13 @@ def run_for(app, apply_changes: bool = False, say=print,
         if number:
             return number
         record = current.record_for(row, saved=True)
-        return rule(record) if record else ""
+        if record:
+            return rule(record)
+        # Whose file it is cannot be told. Download again leaves the old copy
+        # of a document so, "... OC2222.pdf" beside the "... OC2222 (2).pdf"
+        # its record now names, and with nothing added it was offered
+        # "... (2).pdf" under the very pattern it was saved by.
+        return current.told_apart_in_its_name(row, rule) if record == {} else ""
 
     changes = plan(primary_rows, build_name, folders=app.paths.filing_folders(),
                    distinguisher=distinguisher,
@@ -813,6 +820,10 @@ def _record_key(row: dict):
 
 
 _PART = re.compile(r"\((\d+) of (\d+)\)\.pdf$", re.IGNORECASE)
+
+# The " (2)" unique_path puts after a name, and after what told it apart, when
+# both are taken.
+_NUMBERED = re.compile(r" \(\d+\)$")
 
 
 def _part_of(row: dict):
@@ -970,6 +981,31 @@ class _Known:
         if key[0] != "order" and any(n in self._named for n in found):
             return {}
         return self._view(found[0], saved) if len(found) == 1 else {}
+
+    def told_apart_in_its_name(self, row: dict, rule: Callable[[dict], str]) -> str:
+        """What the file of a row whose record cannot be told was told apart
+        by, when its name already says so, and "" otherwise.
+
+        Each document of the row's date and title is asked what its download
+        adds to a name (`rule`), and the answer is the one of those the
+        file's name ends with, as unique_path writes it, with or without a
+        " (n)" after. Two different ones, or none, give "".
+
+        A name never says whose file it is, and this does not ask it to. The
+        file is still named from its row alone, never for any of these
+        documents. Only what tells it apart is read, and only an ending the
+        name already has, so a rename keeps that ending and can add nothing
+        the name did not say."""
+        raw = (row.get("PDF Full Path") or "").strip() or (row.get("PDF Filename") or "")
+        stem = Path(raw.strip()).stem
+        stem = _NUMBERED.sub("", stem).lower()
+        ends = set()
+        for name in self._by_key.get(_record_key(row), ()):
+            told = str(rule(self._view(name, True)) or "").strip()
+            token = sanitize_component(told).strip(" .") if told else ""
+            if token and stem.endswith(" " + token.lower()):
+                ends.add(token)
+        return ends.pop() if len(ends) == 1 else ""
 
     def _view(self, name: str, saved: bool) -> dict:
         """The record under the app's key `name`, as record_for gives it."""
