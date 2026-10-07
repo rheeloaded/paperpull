@@ -34,6 +34,7 @@ Each press found has to be in REVIEWED, and each entry there still found,
 so the list says what the code does.
 """
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -65,6 +66,7 @@ PRESSES = (
     ("click()", re.compile(r"\.\s*click\s*\(\s*\)")),
     ("click()", re.compile(r"""\[\s*(['"`])click\1\s*\]\s*\(""")),
     ("click.call()", re.compile(r"\.\s*click\s*\.\s*(?:call|apply|bind)\s*\(")),
+    ("submit.call()", re.compile(r"\.\s*(?:submit|requestSubmit)\s*\.\s*(?:call|apply|bind)\s*\(")),
     ("submit()", re.compile(r"\.\s*(?:submit|requestSubmit)\s*\(")),
     ("onclick()", re.compile(r"\.\s*onclick\s*\(")),
     ("an event built by hand", re.compile(r"\binit(?:Mouse|Pointer|Touch|Keyboard|UI)?Event\s*\(")),
@@ -129,10 +131,13 @@ def is_test(path: Path) -> bool:
 def sources():
     out = []
     for root in ROOTS:
-        for path in sorted((REPO / root).rglob("*.py")):
-            if not is_test(path):
-                out.append(path)
-    return out
+        for folder, dirs, files in os.walk(REPO / root):
+            # Pruned as the walk goes, so a linked environment is never
+            # entered, which was most of the census's time.
+            dirs[:] = sorted(d for d in dirs if d != "tests" and not d.startswith((".", "__")))
+            out.extend(Path(folder) / f for f in files
+                       if f.endswith(".py") and not f.startswith("test_") and f != "conftest.py")
+    return sorted(p for p in out if not is_test(p))
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +175,10 @@ class Module:
         self.text = path.read_text(encoding="utf-8-sig")
         self.tree = ast.parse(self.text)
         self.parent = {}
+        self.functions = {}
         for node in ast.walk(self.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self.functions.setdefault(node.name, []).append(node)
             for child in ast.iter_child_nodes(node):
                 self.parent[child] = node
         # Names bound at module level, to every value they are given.
@@ -187,10 +195,6 @@ class Module:
                 for alias in node.names:
                     self.imports[alias.asname or alias.name.split(".")[0]] = \
                         self._import(alias.name, None)
-        self.functions = {}
-        for node in ast.walk(self.tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                self.functions.setdefault(node.name, []).append(node)
 
     def _import(self, module: str, name):
         """Where an import leads, as (file, name), or None when it leads
@@ -725,6 +729,7 @@ def test_every_kind_of_press_is_found_in_javascript():
         "(el) => { el.scrollIntoView(); el.click (); return true; }": ["click()"],
         "el => el['click']()": ["click()"],
         "el => HTMLElement.prototype.click.call(el)": ["click.call()"],
+        "f => HTMLFormElement.prototype.submit.call(f)": ["submit.call()"],
         "el => el.closest('form').submit()": ["submit()"],
         "f => f.requestSubmit(f.querySelector('button'))": ["submit()"],
         "el => el.onclick(new Event('x'))": ["onclick()"],

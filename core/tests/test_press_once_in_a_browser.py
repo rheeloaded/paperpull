@@ -313,8 +313,11 @@ def test_a_load_the_press_began_is_taken_for_the_press(show, unstable):
     Playwright answers no read of a loading tab, and the press is not made
     again."""
     page = show(BUTTON % "")
-    unstable(lambda _el: page.evaluate("() => { setTimeout(() => { location.href = '/hold'; }, 0); }")
-             or page.wait_for_timeout(300))
+
+    def begin_a_load(_el):
+        with page.expect_request(lambda r: r.url.endswith("/hold")):
+            page.evaluate("() => { setTimeout(() => { location.href = '/hold'; }, 0); }")
+    unstable(begin_a_load)
     got = press(page)
     page.site.let_go.set()
     assert got.how == pressing.MADE

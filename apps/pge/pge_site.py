@@ -29,8 +29,10 @@ Reading labels switched on code that had never run for him, and a
 review before release found four things in it. The press was forced,
 which sends the mouse to whatever sits on top of the link, so a dialog
 left over the row would have taken the click. It is an ordinary click
-now, and when something covers the link the link's own click is used,
-which reaches the approved element and nothing else. The guard judged
+now. When something covered the link, the link's own click was used,
+which reached the approved element and nothing else, but under a dialog
+nobody had read, so now nothing is pressed then and the run stops
+(paperpull_core.pressing.press_once). The guard judged
 the first label it found and never the aria-label behind visible text,
 so it judges every label now. The page picker clicked its option first
 with no limit on the wait, and a click that could not land skipped the
