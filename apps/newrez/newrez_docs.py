@@ -226,6 +226,7 @@ class _DatedByStatement:
                     by_title.setdefault(rec["title"], {}).update(
                         {k: v for k, v in rec.items() if v not in (None, "")})
         rows = app.index_csv.read_all()
+        folders = app.paths.filing_folders()
         copies = {}
         for row in rows:
             rec = by_title.get((row.get("Document Title") or "").strip())
@@ -233,7 +234,9 @@ class _DatedByStatement:
                 continue
             date = (row.get("Document Date") or "").strip()
             path = (row.get("PDF Full Path") or "").strip()
-            if date == rec["date"] and path and Path(path).exists():
+            # Only a statement the app holds is read. A row naming a file
+            # anywhere else is one the rename leaves alone, and so is its date.
+            if date == rec["date"] and renaming.held_document(path, folders) is not None:
                 text = read_text(Path(path))
                 printed = site.printed_statement_date(text, date)
                 if printed:

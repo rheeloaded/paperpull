@@ -101,7 +101,11 @@ def held_document(text: str, folders) -> Optional[Path]:
     or, with the output folder set to the app's own folder, the app's
     config file. None of those is a document this app holds, and neither
     is a file no longer on disk, one that is not a PDF, or a link, which a
-    rename would move in place of the file it leads to."""
+    rename would move in place of the file it leads to.
+
+    A PDF still under the name it was written to beside its place, which
+    ends ".pdf.delivering", is one the app holds. Robinhood records a tax
+    form so when moving it into place fails, for Rename to finish."""
     return _held(text, _real(folders))
 
 
@@ -126,7 +130,7 @@ def _held(text: str, real_folders: List[Path]) -> Optional[Path]:
         return None
     try:
         path = Path(text).resolve()
-        held = (path.suffix.lower() == ".pdf" and path.is_file()
+        held = (path.name.lower().endswith((".pdf", ".pdf.delivering")) and path.is_file()
                 and not Path(text).is_symlink()
                 and not set(path.parents).isdisjoint(real_folders))
     except (OSError, RuntimeError, ValueError):
@@ -317,20 +321,28 @@ def update_rows(rows: Iterable[dict], result: Result, *,
     this would report every file on disk as missing. Any CSV carrying
     either column is worth passing, which on a receipt app is the index
     and the order history both.
+
+    A row that names its file by its path follows that file alone. Matched
+    by name as well, a row Rename left alone took the new name of another
+    file that had the same old one, and of two files of one name in two
+    folders each row took whichever new name came last. A row with a name
+    and no path, as in the order history, follows the name.
     """
     touched = 0
     moved = _moved(result)
     for row in rows:
         old_path = (row.get(path_key) or "").strip()
-        old_name = (row.get(name_key) or "").strip()
-        new_path = moved(old_path)
-        new_name = result.names.get(old_name)
-        if not new_path and not new_name:
-            continue
-        if new_path and path_key in row:
+        if old_path:
+            new_path = moved(old_path)
+            if not new_path:
+                continue
             row[path_key] = new_path
-            new_name = new_name or Path(new_path).name
-        if new_name and name_key in row:
+            new_name = Path(new_path).name
+        else:
+            new_name = result.names.get((row.get(name_key) or "").strip())
+            if not new_name:
+                continue
+        if name_key in row:
             row[name_key] = new_name
         if note and "Notes" in row:
             row["Notes"] = ((row.get("Notes") or "") + "; " + note).strip("; ")
@@ -344,7 +356,8 @@ def update_progress(progress, result: Result, *,
     """The same for the run state, whose key is never touched.
 
     The key is the purchase or document identity, which is what stops a
-    second download. Renaming a file must not disturb it.
+    second download. Renaming a file must not disturb it. A record that
+    names its file by its path follows that file alone, as a row does.
     """
     touched = 0
     moved = _moved(result)
@@ -352,16 +365,17 @@ def update_progress(progress, result: Result, *,
     for key, rec in list(data.items()):
         if not isinstance(rec, dict):
             continue
-        new_path = moved((rec.get(path_field) or "").strip())
-        new_name = result.names.get((rec.get(filename_field) or "").strip())
-        if not new_path and not new_name:
-            continue
-        patch = {}
-        if new_path:
-            patch[path_field] = new_path
-            new_name = new_name or Path(new_path).name
-        if new_name:
-            patch[filename_field] = new_name
+        recorded = (rec.get(path_field) or "").strip()
+        if recorded:
+            new_path = moved(recorded)
+            if not new_path:
+                continue
+            patch = {path_field: new_path, filename_field: Path(new_path).name}
+        else:
+            new_name = result.names.get((rec.get(filename_field) or "").strip())
+            if not new_name:
+                continue
+            patch = {filename_field: new_name}
         progress.update(key, patch, save=False)
         touched += 1
     if touched:

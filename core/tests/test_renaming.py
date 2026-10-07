@@ -139,6 +139,62 @@ def test_only_a_pdf_in_a_folder_the_app_files_in_is_renamed(tmp_path, monkeypatc
     assert after == before
 
 
+def test_a_pdf_left_under_the_name_it_was_delivered_to_is_finished(tmp_path):
+    """Robinhood records a tax form under the name it was written to beside
+    its place, ".pdf.delivering", when moving it into place fails, for
+    Rename to finish."""
+    filed = tmp_path / "Tax Documents"
+    filed.mkdir()
+    staged = row(filed, "2021-12-31 Testco Form.pdf.delivering", order="A1")
+    result = renaming.apply(renaming.plan([staged], by_order, folders=[filed]))
+    assert result.renamed == 1
+    assert sorted(p.name for p in filed.iterdir()) == ["2026-09-23 Testco A1 Receipt.pdf"]
+
+
+def test_a_row_left_alone_keeps_its_name_when_a_file_renamed_had_it(tmp_path):
+    """An index copied from another folder, a row and a record there naming
+    a file of the same name as one renamed here. They name a file nobody
+    renamed, so they keep the name it still has."""
+    filed, elsewhere = tmp_path / "Statements", tmp_path / "elsewhere"
+    filed.mkdir()
+    elsewhere.mkdir()
+    held = row(filed, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
+    other = row(elsewhere, "2026-09-23 Testco Widget Receipt.pdf", order="A2")
+    store = _Store({"A1": {"pdf_path": held[PATH], "pdf_filename": held[NAME]},
+                    "A2": {"pdf_path": other[PATH], "pdf_filename": other[NAME]}})
+    rows = [held, dict(other)]
+    result = renaming.apply(renaming.plan(rows, by_order, folders=[filed]))
+    assert result.renamed == 1
+    assert renaming.update_rows(rows, result, note="renamed") == 1
+    assert renaming.update_progress(store, result) == 1
+    assert rows[1] == other
+    assert store.data["A2"] == {"pdf_path": other[PATH], "pdf_filename": other[NAME]}
+    assert rows[0][NAME] == store.data["A1"]["pdf_filename"] == "2026-09-23 Testco A1 Receipt.pdf"
+
+
+def test_two_files_of_one_name_in_two_folders_each_keep_their_own_new_name(tmp_path):
+    """An online and an in-store receipt of one day and one summary. Each row
+    and each record names its own file afterwards, where both used to take
+    whichever new name came last."""
+    online, instore = tmp_path / "Online", tmp_path / "In-Store"
+    online.mkdir()
+    instore.mkdir()
+    a = row(online, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
+    b = row(instore, "2026-09-23 Testco Widget Receipt.pdf", order="A2")
+    store = _Store({"A1": {"pdf_path": a[PATH], "pdf_filename": a[NAME]},
+                    "A2": {"pdf_path": b[PATH], "pdf_filename": b[NAME]}})
+    rows = [a, b]
+    result = renaming.apply(renaming.plan(rows, by_order, folders=[online, instore]))
+    assert result.renamed == 2
+    renaming.update_rows(rows, result)
+    renaming.update_progress(store, result)
+    for r in rows:
+        assert Path(r[PATH]).name == r[NAME] and Path(r[PATH]).is_file(), r
+    assert [Path(r[PATH]).parent for r in rows] == [online, instore]
+    for rec in store.data.values():
+        assert Path(rec["pdf_path"]).name == rec["pdf_filename"], rec
+
+
 def test_the_plan_says_how_many_rows_it_left_alone(tmp_path):
     """Said once, after the files to be renamed, so a person whose index
     names files somewhere else learns why they were not offered."""

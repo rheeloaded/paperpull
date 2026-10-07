@@ -414,3 +414,27 @@ def test_rename_under_a_naming_pattern_still_finds_the_record(tmp_path, monkeypa
     assert _names(app.paths.folder_for("Statement")) == ["2026-08-06 Newrez Statement.pdf"]
     app.cmd_rename()
     assert _names(app.paths.folder_for("Statement")) == ["2026-08-06 Newrez Statement.pdf"]
+
+
+def test_rename_leaves_alone_a_row_naming_a_statement_it_does_not_hold(tmp_path, monkeypatch):
+    """An index copied from another folder names the statements there. The
+    one this app holds is brought to its printed date, and the row naming
+    the copy elsewhere, of the same title, date and file name, is left as it
+    is. Its file is not read for a date and its row takes nothing of the
+    rename."""
+    app = _app(tmp_path / "out", monkeypatch, apply=True)
+    august = _statement()
+    held = _saved_before(app, august, AUGUST)
+    outside = tmp_path / "elsewhere" / held.name
+    _text_pdf(outside, AUGUST)
+    copied = {"Document Date": august.date, "Category": august.category,
+              "Document Summary": august.summary, "Document Title": august.title,
+              "PDF Filename": outside.name, "PDF Full Path": str(outside),
+              "Processing Status": "Completed"}
+    app.index_csv.append_rows([copied])
+    app.cmd_rename()
+    assert _names(app.paths.folder_for("Statement")) == ["2026-08-06 Newrez Account Statement.pdf"]
+    rows = app.index_csv.read_all()
+    assert rows[0]["Document Date"] == "2026-08-06"
+    assert {k: rows[1][k] for k in copied} == copied
+    assert outside.is_file()

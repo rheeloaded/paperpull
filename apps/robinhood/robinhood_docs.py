@@ -203,13 +203,16 @@ class _DatedTaxForms:
                 elif store is app.progress:
                     undated.setdefault(title, []).append(rec)
         rows = app.index_csv.read_all()
+        folders = app.paths.filing_folders()
         copies = {}
         for row in rows:
             if ((row.get("Category") or "").strip() != doc_types.TAX
                     or (row.get("Document Date") or "").strip()):
                 continue
+            # Only a form the app holds is read. A row naming a file anywhere
+            # else is one the rename leaves alone, and so is its date.
             path = (row.get("PDF Full Path") or "").strip()
-            if not path or not Path(path).exists():
+            if renaming.held_document(path, folders) is None:
                 continue
             year = site.printed_tax_year(read_text(Path(path)))
             if not year:

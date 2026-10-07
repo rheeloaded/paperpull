@@ -47,6 +47,7 @@ FORM_2022 = ["Robinhood Securities LLC", "2022 1099-DIV Dividends and Distributi
              "2022 1099-B Proceeds From Broker and Barter Exchange Transactions",
              "Date prepared 02/14/2023"]
 FORM_2021 = ["Robinhood Securities LLC", "2021 1099-DIV", "Tax Year 2021"]
+FORM_2004 = ["Robinhood Securities LLC", "2004 1099-DIV", "Tax Year 2004"]
 
 
 def _text_pdf(path: Path, lines) -> None:
@@ -418,3 +419,50 @@ def test_rename_dates_each_row_only_by_its_own_file(tmp_path):
     assert sorted(r["Document Date"] for r in app.index_csv.read_all()) == ["", "2022-12-31"]
     assert [n for n in _names(app) if n.startswith("2022")] == [
         "2022-12-31 Robinhood Consolidated 1099 Tax Form.pdf"]
+
+
+def test_a_form_left_under_the_name_it_was_delivered_to_is_finished_by_rename(tmp_path,
+                                                                             monkeypatch):
+    """Moving a form into place failed, a scanner holding it open for
+    instance, so it was recorded under the name it was written to beside
+    its place, for Rename to finish. Rename puts it in place."""
+    app = _app(tmp_path)
+    _fake_download(monkeypatch, FORM_2004)
+    real_replace = Path.replace
+
+    def held_open(self, target):
+        if self.name.endswith(".delivering"):
+            raise PermissionError(32, "The file is being used by another process")
+        return real_replace(self, target)
+    monkeypatch.setattr(Path, "replace", held_open)
+    doc = _listed("2004")
+    app.download_one(_Page(), doc, storage.build_pdf_filename(doc.date, doc.summary, ""))
+    monkeypatch.setattr(Path, "replace", real_replace)
+    staged = "2004-12-31 Robinhood Consolidated 1099 Tax Form.pdf.delivering"
+    assert _everything(app) == [staged]
+    assert app.index_csv.read_all()[0]["PDF Filename"] == staged
+
+    app.args.apply = True
+    app.cmd_rename()
+    assert _everything(app) == ["2004-12-31 Robinhood Consolidated 1099 Tax Form.pdf"]
+    row = app.index_csv.read_all()[0]
+    assert row["PDF Filename"] == "2004-12-31 Robinhood Consolidated 1099 Tax Form.pdf"
+    assert app.progress.get(doc.key)["pdf_path"] == row["PDF Full Path"]
+
+
+def test_rename_leaves_alone_the_date_of_a_row_it_does_not_hold(tmp_path):
+    """An index copied from another folder can name a form there, which is
+    not this app's to read. The form the app holds is dated and renamed,
+    and the other row keeps no date, as it had."""
+    app = _app(tmp_path / "out", apply=True)
+    _saved_undated(app, lines=FORM_2004)
+    outside = tmp_path / "elsewhere" / "Another 1099.pdf"
+    _text_pdf(outside, FORM_2004)
+    copied = {"Category": doc_types.TAX, "Document Date": "", "Period": "",
+              "Document Title": "Another Form", "Document Summary": "Another Form",
+              "PDF Filename": outside.name, "PDF Full Path": str(outside)}
+    app.index_csv.append_rows([copied])
+    app.cmd_rename()
+    assert _names(app) == ["2004-12-31 Robinhood Consolidated 1099 Tax Form.pdf"]
+    assert {k: app.index_csv.read_all()[1][k] for k in copied} == copied
+    assert outside.is_file()

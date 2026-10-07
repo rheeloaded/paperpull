@@ -5,8 +5,8 @@ today (paperpull_core.renaming). It planned every row whose path was on
 disk, whatever was there. A row naming the output folder itself, a folder
 the app files documents in, a file outside the app's folders, one reached
 by climbing out of them through "..", the app's own config file in an
-output folder set to the app's own folder, a file in Logs or Diagnostics,
-or a file that is not a PDF, was renamed to a document's name by
+output folder set to the app's own folder, a file in Logs, Diagnostics or
+Backups, or a file that is not a PDF, was renamed to a document's name by
 --apply, and the panel's Apply renames runs that with no preview first. A
 row naming "." had it try to rename the folder it runs in. No app writes
 such a row itself. An index copied along with its output folder to a new
@@ -203,6 +203,7 @@ def an_archive(home: Home, here: Path, elsewhere: Path):
         home.cfg,                                                    # the app's own config
         pdf(app.paths.logs / "logged.pdf", "logged"),
         pdf(app.paths.diagnostics / "diagnosed.pdf", "diagnosed"),
+        pdf(app.paths.backups / "backed up.pdf", "backed up"),
         filed / "notes.txt",                                         # not a PDF
         ".",                                                         # the folder it runs in
         home.out,                                                    # the output folder itself

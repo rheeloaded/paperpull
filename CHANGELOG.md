@@ -157,20 +157,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
   naming the output folder itself, a folder the app files documents in, a
   file outside the app's folders, one reached by climbing out of them
   through "..", the app's own config file in an output folder set to the
-  app's own folder, a file in Logs or Diagnostics, or a file that is not a
-  PDF was renamed to a document's name by `--apply`, which the panel's
-  Apply renames runs with no preview first. A folder the app files
+  app's own folder, a file in Logs, Diagnostics or Backups, or a file that
+  is not a PDF was renamed to a document's name by `--apply`, which the
+  panel's Apply renames runs with no preview first. A folder the app files
   documents in was renamed with every document in it, and on a Mac or
   Linux, where a file open inside does not stop it, so was the output
   folder itself. No app writes such a row itself, but an index copied with
   its output folder to a new place names the files in the old one, and an
   index edited by hand can name anything. Rename now renames only a PDF in
-  a folder the app files documents in, Manual Review included, leaves
-  every other row and what it names as they are, and says how many rows it
-  left alone. Every app renames through the same code, so this holds in
-  all 61, and Anthem's ID cards, letters, plan documents and
-  authorizations, which it files by name rather than by routing, are still
-  renamed.
+  a folder the app files documents in, Manual Review included, and says
+  how many rows it left alone. Those rows and their records in
+  progress.json keep what they say. One naming a file with the same name
+  as a file renamed used to take its new name, and Robinhood and Newrez
+  could date one from the file it names. Every app renames through the
+  same code, so this holds in all 61. Anthem's ID cards, letters, plan
+  documents and authorizations, which it files by name rather than by
+  routing, are still renamed, and so is a Robinhood tax form left under
+  the name it was written to beside its place. Two files of one name in
+  two folders, an online and an in-store receipt of one day and one
+  summary for instance, now keep their own new names in the index and in
+  progress.json, where both took whichever came last.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never
