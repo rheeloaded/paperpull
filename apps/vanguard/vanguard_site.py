@@ -472,12 +472,55 @@ _ROW_JS = r"""(needle) => {
     if (t.includes(needle.account) && t.includes(needle.dateText)) {
       for (const el of row.querySelectorAll('[title], [role=button]')) {
         const title = el.getAttribute('title') || '';
-        if (/pdf download/i.test(title)) return true;
+        if (/pdf download/i.test(title) && el.getClientRects().length) return true;     // drawn, not just in the page's text
       }
     }
   }
   return false;
 }"""
+
+
+# The statements table shows the first rows of a year and keeps the older ones
+# behind a "Show More" control. Pressed only when the row asked for is not
+# there, one press at a time, each judged by the guard like every other control.
+SHOW_MORE_RE = re.compile(r"^\s*show\s+more\s*$", re.I)
+SHOW_MORE_PRESSES = 30
+
+
+def show_more(page) -> bool:
+    """Press one visible "Show More" control, if the guard allows its label.
+    True when one was pressed, so the table may now hold more rows."""
+    for role in ("button", "link"):
+        try:
+            loc = page.get_by_role(role, name=SHOW_MORE_RE)
+            if loc.count() == 0 or not loc.first.is_visible():
+                continue
+            label = loc.first.inner_text(timeout=1000) or ""
+            if not is_safe_control(label):
+                continue
+            pressing.click(page, loc.first, css="button, a, [role=button], [role=link]",
+                           what="the control that shows more statements", words=_words(),
+                           step="show more of the list")
+            page.wait_for_timeout(1600)
+            return True
+        except pressing.Stop:
+            raise
+        except Exception:
+            continue
+    return False
+
+
+def row_is_shown(page, needle: dict) -> bool:
+    """Whether the row for this (account, date) is on the page, pressing
+    "Show More" for older rows until it is, or nothing is left to show."""
+    if page.evaluate(_ROW_JS, needle):
+        return True
+    for _ in range(SHOW_MORE_PRESSES):
+        if not show_more(page):
+            return False
+        if page.evaluate(_ROW_JS, needle):
+            return True
+    return False
 
 
 def _mdy(iso: str) -> str:
@@ -560,14 +603,15 @@ def download_document(page, account_id: str, charitable: bool,
     if not needle["account"]:
         log.info("no account number in title %r", (title or "")[:60])
         return False
-    if not page.evaluate(_ROW_JS, needle):
+    if not row_is_shown(page, needle):
         # The row for this (account, date) is not on the current year's
-        # table — select the statement's year and re-check.
+        # table, even after showing more — select the statement's year and
+        # re-check.
         if not select_year(page, (date or "")[:4]):
             log.info("could not select year %s", (date or "")[:4])
             return False
         page.wait_for_timeout(2500)
-        if not page.evaluate(_ROW_JS, needle):
+        if not row_is_shown(page, needle):
             log.info("no row for account %s on %s",
                      needle["account"], needle["dateText"])
             return False
