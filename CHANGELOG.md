@@ -86,9 +86,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   row, which can leave out what a record would add but never puts in
   another document's. The index and the run state follow a renamed file
   however its path was written.
-  AAFMAA, Ally, Anthem, Capital One, Chase, Discover, FedEx, M&T Bank,
-  myPay, Navy Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard
-  keep an id from the provider's page in a statement's record when there
+  Ally, Anthem, Capital One, Chase, Discover, FedEx, M&T Bank, myPay,
+  Navy Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard keep an
+  id from the provider's page in a statement's record when there
   is one. Rename looked such a record up by that id, which an index row
   does not carry, so it never found one, and a naming pattern's account or
   number never reached a file those apps had already downloaded. Now it
@@ -127,12 +127,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   carries the policy, so under the default pattern two files wanting one
   name are two documents of one policy and day, and the second is told
   apart by " (2)". The policy number tells two policies apart under a
-  pattern that leaves the summary and account out. AAFMAA's records no
-  longer keep the control's name, so {number} is empty for AAFMAA, as the
-  File names page says for a field a provider never fills. Rename tells a
-  file apart the way its download does, so it offers each file already
-  saved with "cument" in its name the name a download gives it today, in
-  a preview first, as for any other rename.
+  pattern that leaves the summary and account out. AAFMAA's records drop
+  the control's name the next time the app starts, so {number} is empty
+  for AAFMAA from then on, and the File names page counts it as a field
+  AAFMAA never fills. Rename tells a file apart the way its download does,
+  so it offers a file already saved with "cument" in its name the name a
+  download gives it today, in a preview first, as for any other rename.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a

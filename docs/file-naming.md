@@ -52,7 +52,7 @@ number or a document id, **kind** is the document type or category, and
 
 | app | records | date | kind | summary | title | number | account | period | total | store | purchase type | fulfillment |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| aafmaa | 60 | 100% | 100% | 100% | 100% | 100% | 100% | 0% |  |  |  |  |
+| aafmaa | 60 | 100% | 100% | 100% | 100% | 0% | 100% | 0% |  |  |  |  |
 | adp | 22 | 100% | 100% | 100% | 100% | 0% | 0% | 0% |  |  |  |  |
 | affirm | 2 | 100% | 100% | 100% | 100% | 0% | 100% | 0% |  |  |  |  |
 | ally |  | yes | yes | yes | yes | yes | yes | yes |  |  |  |  |
@@ -113,8 +113,10 @@ number or a document id, **kind** is the document type or category, and
   here are online.
 * **Statements know little beyond the basics.** An account is filled
   where a provider holds several (Chase, Citi, Navy Federal, Fidelity,
-  NetBenefits, USAA at 81 percent). A document number exists in four apps
-  only, AAFMAA, M&T, myPay and USAA. A period is almost never filled, 7
+  NetBenefits, USAA at 81 percent). A document number exists in three apps
+  only, M&T, myPay and USAA. AAFMAA's showed 100 percent when this was
+  measured, but it was the name of a control on the page, not a number,
+  and AAFMAA no longer keeps it. A period is almost never filled, 7
   percent in Wealthfront and nothing anywhere else.
 * **That is why the first-that-has-a-value choice matters.** A statements
   pattern that wants a number has to fall back to something, or it names
