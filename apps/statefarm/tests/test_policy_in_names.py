@@ -17,6 +17,7 @@ import pytest
 import storage  # noqa: F401  binds the AppSpec
 from paperpull_core import doc_types, renaming
 from paperpull_core.models import State
+from paperpull_core.storage import Paths
 import statefarm_docs
 import statefarm_site as site
 
@@ -124,6 +125,7 @@ def test_a_file_saved_under_the_old_name_is_renamed_not_downloaded_again(tmp_pat
     rec.update(state=State.COMPLETED.value, downloaded_ok=True, pdf_filename=saved.name,
                pdf_path=str(saved))
     app = _bare_app({old.key: rec})
+    app.paths = Paths(tmp_path)              # its Statements folder is the one above
 
     assert _record(app, "Renewal Notice - Auto", "2026-07-22") is app.discovery.data[old.key]
     assert list(app.discovery.data) == [old.key], "the same document, not a second one"

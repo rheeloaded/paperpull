@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import storage  # noqa: F401  binds this provider's AppSpec
 from paperpull_core import doc_types, renaming
 from paperpull_core.models import State
-from paperpull_core.storage import CsvFile, JsonStore
+from paperpull_core.storage import CsvFile, JsonStore, Paths
 
 import golden1_docs
 import golden1_site as site
@@ -213,6 +213,8 @@ def make_app(tmp_path):
     app.progress.load()
     app.index_csv = CsvFile(tmp_path / "index.csv", storage.DOCUMENT_INDEX_COLUMNS,
                             tmp_path / "backups")
+    # Statements and Manual Review here, which is where these tests file.
+    app.paths = Paths(tmp_path)
     app._listed_keys = set()
     app._carried = []
     return app

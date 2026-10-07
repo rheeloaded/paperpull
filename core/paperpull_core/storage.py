@@ -20,13 +20,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
-from .spec import RECEIPT
+from .spec import INFRASTRUCTURE_FOLDERS, RECEIPT
 
 # ---------------------------------------------------------------------------
 # Paths / configuration
 # ---------------------------------------------------------------------------
 
 _SPEC = None
+
+# Logs, Diagnostics and Backups, which every app has and which hold a run's
+# own records and never a document. Manual Review, the fourth folder every
+# app has, is where a document is put aside.
+_RECORD_FOLDERS = {folder.attr for folder in INFRASTRUCTURE_FOLDERS} - {"manual_review"}
 
 
 def bind(spec) -> None:
@@ -241,12 +246,13 @@ class Paths:
         return self._ready(getattr(self, attr))
 
     def filing_folders(self) -> List[Path]:
-        """Every folder a document is filed in, the ones routing reaches and
-        Manual Review, where a file that failed its check is put aside.
-        Logs, Diagnostics and Backups hold no documents."""
-        sp = self._spec
-        attrs = dict.fromkeys([*sp.routes.values(), sp.default_route, "manual_review"])
-        return [getattr(self, attr) for attr in attrs if attr and hasattr(self, attr)]
+        """Every folder a document is filed in, every folder the app
+        declares but Logs, Diagnostics and Backups, which hold a run's own
+        records. That is the ones routing reaches, the ones an app files in
+        by name, as Anthem does its ID cards and letters, and Manual Review,
+        where a file that failed its check is put aside."""
+        return [getattr(self, folder.attr) for folder in self._spec.folders
+                if folder.attr not in _RECORD_FOLDERS]
 
 
 # ---------------------------------------------------------------------------

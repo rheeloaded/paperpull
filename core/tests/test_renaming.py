@@ -38,23 +38,23 @@ def by_order(r):
 
 def test_a_file_already_named_right_is_left_alone(tmp_path):
     r = row(tmp_path, "2026-09-23 Testco A1 Receipt.pdf", order="A1")
-    [change] = renaming.plan([r], by_order)
+    [change] = renaming.plan([r], by_order, folders=[tmp_path])
     assert not change.renaming
     assert change.reason == "already named that"
 
 
 def test_running_it_twice_does_nothing_the_second_time(tmp_path):
     rows = [row(tmp_path, "2026-09-23 Testco Widget Receipt.pdf", order="A1")]
-    renaming.apply(renaming.plan(rows, by_order))
+    renaming.apply(renaming.plan(rows, by_order, folders=[tmp_path]))
     renaming.update_rows(rows, renaming.Result())
     rows[0][PATH] = str(tmp_path / "2026-09-23 Testco A1 Receipt.pdf")
     rows[0][NAME] = "2026-09-23 Testco A1 Receipt.pdf"
-    assert not any(c.renaming for c in renaming.plan(rows, by_order))
+    assert not any(c.renaming for c in renaming.plan(rows, by_order, folders=[tmp_path]))
 
 
 def test_a_record_whose_file_is_gone_is_reported_not_renamed(tmp_path):
     r = {PATH: str(tmp_path / "deleted.pdf"), NAME: "deleted.pdf", "order": "A1"}
-    [change] = renaming.plan([r], by_order)
+    [change] = renaming.plan([r], by_order, folders=[tmp_path])
     assert not change.renaming
     assert "not on disk" in change.reason
 
@@ -66,7 +66,7 @@ def test_a_row_too_thin_to_name_does_not_stop_the_rest(tmp_path):
     def build(r):
         return by_order(r)                    # raises KeyError on the second
 
-    changes = renaming.plan([good, bad], build)
+    changes = renaming.plan([good, bad], build, folders=[tmp_path])
     assert changes[0].renaming
     assert not changes[1].renaming and "could not work out a name" in changes[1].reason
 
@@ -75,7 +75,7 @@ def test_a_row_too_thin_to_name_does_not_stop_the_rest(tmp_path):
 
 def test_the_file_is_renamed_and_nothing_else_moves(tmp_path):
     r = row(tmp_path, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
-    result = renaming.apply(renaming.plan([r], by_order))
+    result = renaming.apply(renaming.plan([r], by_order, folders=[tmp_path]))
     assert result.renamed == 1
     assert (tmp_path / "2026-09-23 Testco A1 Receipt.pdf").exists()
     assert not (tmp_path / "2026-09-23 Testco Widget Receipt.pdf").exists()
@@ -89,7 +89,7 @@ def test_two_files_that_want_each_others_names_both_land(tmp_path):
     b = row(tmp_path, "2026-09-23 Testco A1 Receipt.pdf", order="A2")
     (tmp_path / a[NAME]).write_bytes(b"%PDF-A")
     (tmp_path / b[NAME]).write_bytes(b"%PDF-B")
-    result = renaming.apply(renaming.plan([a, b], by_order))
+    result = renaming.apply(renaming.plan([a, b], by_order, folders=[tmp_path]))
     assert result.renamed == 2
     assert (tmp_path / "2026-09-23 Testco A1 Receipt.pdf").read_bytes() == b"%PDF-A"
     assert (tmp_path / "2026-09-23 Testco A2 Receipt.pdf").read_bytes() == b"%PDF-B"
@@ -99,21 +99,95 @@ def test_two_files_that_want_each_others_names_both_land(tmp_path):
 def test_a_file_that_is_not_in_the_ledger_is_never_touched(tmp_path):
     (tmp_path / "somebody elses file.pdf").write_bytes(b"%PDF-")
     r = row(tmp_path, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
-    renaming.apply(renaming.plan([r], by_order))
+    renaming.apply(renaming.plan([r], by_order, folders=[tmp_path]))
     assert (tmp_path / "somebody elses file.pdf").exists()
+
+
+def test_only_a_pdf_in_a_folder_the_app_files_in_is_renamed(tmp_path, monkeypatch):
+    """A ledger can name anything. Of nine rows, the one naming a PDF in the
+    folder the app files documents in is renamed. Six name that folder, the
+    folder holding it, a file outside it, one reached by climbing out of it
+    through "..", a file in it that is not a PDF, and ".", and each is left
+    out as one the app does not hold, nothing of it touched. One names a
+    file no longer on disk and one names nothing, which are left out as
+    before."""
+    filed, elsewhere, here = tmp_path / "Statements", tmp_path / "elsewhere", tmp_path / "here"
+    for folder in (filed, elsewhere, here):
+        folder.mkdir()
+    monkeypatch.chdir(here)
+    held = row(filed, "held.pdf", order="A1")
+    outside = row(elsewhere, "outside.pdf", order="A2")
+    rows = [held, outside,
+            {PATH: str(filed / ".." / "elsewhere" / "outside.pdf"), NAME: "outside.pdf",
+             "order": "A3"},
+            {PATH: str(filed), NAME: filed.name, "order": "A4"},
+            {PATH: str(tmp_path), NAME: tmp_path.name, "order": "A5"},
+            row(filed, "notes.txt", order="A6"),
+            {PATH: ".", NAME: "", "order": "A7"},
+            {PATH: str(filed / "gone.pdf"), NAME: "gone.pdf", "order": "A8"},
+            {PATH: "", NAME: "", "order": "A9"}]
+    before = {p: p.read_bytes() if p.is_file() else None for p in tmp_path.rglob("*")}
+
+    changes = renaming.plan(rows, by_order, folders=[filed])
+
+    assert [c.reason for c in changes] == ["", *[renaming.NOT_HELD] * 6,
+                                           "not on disk, so only the record would change"]
+    result = renaming.apply(changes)
+    assert result.renamed == 1
+    after = {p: p.read_bytes() if p.is_file() else None for p in tmp_path.rglob("*")}
+    assert after.pop(filed / "2026-09-23 Testco A1 Receipt.pdf") == before.pop(filed / "held.pdf")
+    assert after == before
+
+
+def test_the_plan_says_how_many_rows_it_left_alone(tmp_path):
+    """Said once, after the files to be renamed, so a person whose index
+    names files somewhere else learns why they were not offered."""
+    filed = tmp_path / "Statements"
+    filed.mkdir()
+    rows = [row(filed, "held.pdf", order="A1"), row(tmp_path, "outside.pdf", order="A2"),
+            row(tmp_path, "also outside.pdf", order="A3")]
+    said = []
+    renaming.describe(renaming.plan(rows, by_order, folders=[filed]), say=said.append)
+    assert said == ["1 file(s) would be renamed.", "  held.pdf",
+                    "    -> 2026-09-23 Testco A1 Receipt.pdf",
+                    "2 row(s) of the index name something other than a PDF in this app's "
+                    "folders, so they are left alone."]
+    said.clear()
+    renaming.describe(renaming.plan(rows[1:], by_order, folders=[filed]), say=said.append)
+    assert said == ["Every file is already named the way this app names them.",
+                    "2 row(s) of the index name something other than a PDF in this app's "
+                    "folders, so they are left alone."]
+
+
+def test_a_link_in_a_folder_the_app_files_in_is_not_renamed(tmp_path):
+    """A rename would move the link and leave the file it leads to as it
+    was, and the app made neither."""
+    filed = tmp_path / "Statements"
+    filed.mkdir()
+    target = row(filed, "held.pdf", order="A1")
+    link = filed / "linked.pdf"
+    try:
+        link.symlink_to(Path(target[PATH]))
+    except (OSError, NotImplementedError):
+        import pytest
+        pytest.skip("this system does not let a test make a link")
+    changes = renaming.plan([{PATH: str(link), NAME: link.name, "order": "A2"}], by_order,
+                            folders=[filed])
+    assert [c.reason for c in changes] == [renaming.NOT_HELD]
+    assert renaming.held_document(target[PATH], [filed]) == Path(target[PATH])
 
 
 def test_two_records_wanting_one_name_do_not_become_one_file(tmp_path):
     a = row(tmp_path, "first.pdf", order="A1")
     b = row(tmp_path, "second.pdf", order="A1")   # the same name, somehow
-    result = renaming.apply(renaming.plan([a, b], by_order))
+    result = renaming.apply(renaming.plan([a, b], by_order, folders=[tmp_path]))
     assert result.renamed == 2
     assert len(list(tmp_path.iterdir())) == 2, "neither file was written over"
 
 
 def test_nothing_happens_until_apply_is_called(tmp_path):
     r = row(tmp_path, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
-    renaming.plan([r], by_order)
+    renaming.plan([r], by_order, folders=[tmp_path])
     assert (tmp_path / "2026-09-23 Testco Widget Receipt.pdf").exists()
 
 
@@ -123,7 +197,7 @@ def test_the_index_is_pointed_at_the_file_as_it_is_now_called(tmp_path):
     """Verify reads the full path out of the index, so a rename that
     skipped this would report every file on disk as missing."""
     r = row(tmp_path, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
-    result = renaming.apply(renaming.plan([r], by_order))
+    result = renaming.apply(renaming.plan([r], by_order, folders=[tmp_path]))
     assert renaming.update_rows([r], result, note="renamed") == 1
     assert r[NAME] == "2026-09-23 Testco A1 Receipt.pdf"
     assert Path(r[PATH]).exists()
@@ -135,7 +209,7 @@ def test_a_second_csv_carrying_only_the_name_is_updated_too(tmp_path):
     that one has no full path column."""
     r = row(tmp_path, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
     history = {NAME: "2026-09-23 Testco Widget Receipt.pdf", "Notes": ""}
-    result = renaming.apply(renaming.plan([r], by_order))
+    result = renaming.apply(renaming.plan([r], by_order, folders=[tmp_path]))
     assert renaming.update_rows([history], result) == 1
     assert history[NAME] == "2026-09-23 Testco A1 Receipt.pdf"
 
@@ -146,7 +220,7 @@ def test_the_run_state_follows_and_its_key_never_changes(tmp_path):
     r = row(tmp_path, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
     store.update("Online:A1", {"pdf_filename": r[NAME], "pdf_path": r[PATH],
                                "downloaded_ok": True})
-    result = renaming.apply(renaming.plan([r], by_order))
+    result = renaming.apply(renaming.plan([r], by_order, folders=[tmp_path]))
     assert renaming.update_progress(store, result) == 1
     rec = store.get("Online:A1")
     assert rec["pdf_filename"] == "2026-09-23 Testco A1 Receipt.pdf"
@@ -174,11 +248,22 @@ class _Store:
         pass
 
 
+class _Paths:
+    """The one folder the stand-in app files in."""
+
+    def __init__(self, folder):
+        self.folder = folder
+
+    def filing_folders(self):
+        return [self.folder]
+
+
 class _App:
     """Enough of an app for run_for, with the two ledgers it reads."""
 
     def __init__(self, tmp_path, rows, discovery=None, progress=None):
         self.config = {"max_path_length": 240}
+        self.paths = _Paths(tmp_path)
         self.index_csv = _Csv(tmp_path / "index.csv", rows)
         self.order_csv = None
         self.discovery = _Store(discovery or {})
@@ -312,7 +397,7 @@ def test_a_file_already_told_apart_by_its_number_stays_put(tmp_path):
     first = row(tmp_path, "2022-08-10 Testco Return.pdf", order="A1")
     second = row(tmp_path, "2022-08-10 Testco Return A2.pdf", order="A2")
     changes = renaming.plan([first, second], lambda r: "2022-08-10 Testco Return.pdf",
-                            distinguisher=lambda r: r["order"])
+                            folders=[tmp_path], distinguisher=lambda r: r["order"])
     assert [c.renaming for c in changes] == [False, False], [(c.old_name, c.new_name, c.reason) for c in changes]
 
 

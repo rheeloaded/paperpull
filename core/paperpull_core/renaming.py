@@ -28,6 +28,10 @@ THE RULES
 * Only a file the ledger knows about is ever touched. Nothing scans a
   folder and renames what it finds, so a file somebody put there by hand
   is not this program's business.
+* And only a document the app holds, a PDF in a folder it files documents
+  in (held_document). A ledger can name anything, the output folder
+  itself, a file somewhere else, the app's own config, and none of those
+  is the app's to rename.
 * Nothing is ever overwritten. A target that exists gets the same
   treatment any new download gets.
 * A file that is already correctly named is left alone, so running this
@@ -78,7 +82,60 @@ class Result:
     spellings: dict = field(default_factory=dict) # another spelling -> old path str
 
 
+# Why a row naming something on disk is left out of a rename, when that
+# something is not a document the app holds (held_document).
+NOT_HELD = "not a PDF in a folder this app files documents in"
+
+
+def held_document(text: str, folders) -> Optional[Path]:
+    """The file a row's path names, when it is a PDF in one of `folders`,
+    the folders the app files documents in (Paths.filing_folders), and
+    None for anything else.
+
+    An app writes its own index, but an index can name anything. An empty
+    path reads as the folder the app runs in, which exists. An index copied
+    with its output folder to a new place names the files in the old one,
+    and one edited by hand names whatever was typed. So a row can name the
+    output folder itself, a folder the app files in, a file reached by
+    climbing out of them through "..", a file somewhere else, one in Logs,
+    or, with the output folder set to the app's own folder, the app's
+    config file. None of those is a document this app holds, and neither
+    is a file no longer on disk, one that is not a PDF, or a link, which a
+    rename would move in place of the file it leads to."""
+    return _held(text, _real(folders))
+
+
+def _real(folders) -> List[Path]:
+    """Each folder where it really is, with links and ".." followed, as a
+    file's path is before it is compared with them. Once for a whole plan,
+    since finding that out takes the file system a while on Windows. A
+    folder that cannot be read that way holds nothing here."""
+    real = []
+    for folder in folders:
+        try:
+            real.append(Path(folder).resolve())
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return real
+
+
+def _held(text: str, real_folders: List[Path]) -> Optional[Path]:
+    """held_document, with the folders already found where they really are."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        path = Path(text).resolve()
+        held = (path.suffix.lower() == ".pdf" and path.is_file()
+                and not Path(text).is_symlink()
+                and not set(path.parents).isdisjoint(real_folders))
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return Path(text) if held else None
+
+
 def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
+         folders: Iterable[Path],
          distinguisher: Optional[Callable[[dict], str]] = None,
          path_key: str = "PDF Full Path",
          name_key: str = "PDF Filename",
@@ -90,12 +147,19 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
     scheme that becomes configurable later changes there and nothing
     here has to know about it.
 
+    `folders` are the folders the app files documents in
+    (Paths.filing_folders). A row naming anything on disk that is not a PDF
+    in one of them is left out with the reason NOT_HELD, so no ledger can
+    have a rename touch a folder, the app's config or a file it does not
+    hold.
+
     `distinguisher` is handed the same row and returns whatever tells it
     from another file wanting the same name, an order number usually.
     Without it a file called "... Receipt (2)" is renamed to "(3)", which
     is the same complaint one number worse, since the name it wants is
     held by the file it collided with in the first place.
     """
+    inside = _real(folders)
     changes: List[Change] = []
     wanted = []                       # (row, old_path, desired name)
 
@@ -105,6 +169,9 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
         if not raw and not old_name:
             continue
         old_path = Path(raw) if raw else Path(old_name)
+        if raw and old_path.exists() and _held(raw, inside) is None:
+            changes.append(Change(row, old_path, old_name, reason=NOT_HELD))
+            continue
         try:
             new_name = (build_name(row) or "").strip()
         except Exception as e:                       # a row too thin to name
@@ -167,18 +234,24 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
 
 
 def describe(changes: Iterable[Change], say=print, limit: int = 0) -> None:
-    """The plan, in the order a person would read it."""
+    """The plan, in the order a person would read it, and how many rows
+    name something the app does not hold, which it leaves alone."""
+    changes = list(changes)
     moving = [c for c in changes if c.renaming]
     if not moving:
         say("Every file is already named the way this app names them.")
-        return
-    say("%d file(s) would be renamed." % len(moving))
-    shown = moving if limit <= 0 else moving[:limit]
-    for c in shown:
-        say("  %s" % c.old_name)
-        say("    -> %s" % c.new_name)
-    if len(shown) < len(moving):
-        say("  ... and %d more." % (len(moving) - len(shown)))
+    else:
+        say("%d file(s) would be renamed." % len(moving))
+        shown = moving if limit <= 0 else moving[:limit]
+        for c in shown:
+            say("  %s" % c.old_name)
+            say("    -> %s" % c.new_name)
+        if len(shown) < len(moving):
+            say("  ... and %d more." % (len(moving) - len(shown)))
+    left = sum(1 for c in changes if c.reason == NOT_HELD)
+    if left:
+        say("%d row(s) of the index name something other than a PDF in this app's "
+            "folders, so they are left alone." % left)
 
 
 def apply(changes: Iterable[Change], say=print) -> Result:
@@ -392,7 +465,7 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
                                   _first(row, _TYPE_KEYS), part=_part_of(row),
                                   record=record)
 
-    changes = plan(primary_rows, build_name,
+    changes = plan(primary_rows, build_name, folders=app.paths.filing_folders(),
                    distinguisher=lambda row: _first(row, _ID_KEYS),
                    max_path_length=app.config.get("max_path_length", 240))
     describe(changes, say=say, limit=0 if apply_changes else 20)
@@ -664,30 +737,13 @@ PLAIN_WORDS = ReviewWords(current="    Current file  ", items="    Items  ",
 
 def held_receipt(row: dict, paths) -> Optional[Path]:
     """The receipt a row of the index names, when it is a PDF in a folder
-    the app files receipts in, and None for anything else.
+    the app files receipts in, and None for anything else (held_document).
 
     A row written for a purchase with no receipt has an empty path, which
     reads as the folder the app runs in, and that folder exists. A new name
     typed for such a row had the app rename the folder it runs in, which no
-    system allows, and the review stopped with a traceback partway through.
-    A row can also name the output folder itself, a file reached by
-    climbing out of it through "..", a file somewhere else, one no longer
-    on disk, or, with the output folder set to the app's own folder, the
-    app's config file. None of those is a receipt this app holds, and
-    neither is a link, which a rename would move in place of the receipt
-    it leads to."""
-    text = (row.get("PDF Full Path") or "").strip()
-    if not text:
-        return None
-    try:
-        path = Path(text).resolve()
-        folders = [Path(folder).resolve() for folder in paths.filing_folders()]
-        held = (path.suffix.lower() == ".pdf" and path.is_file()
-                and not Path(text).is_symlink()
-                and any(folder in path.parents for folder in folders))
-    except (OSError, RuntimeError, ValueError):
-        return None
-    return Path(text) if held else None
+    system allows, and the review stopped with a traceback partway through."""
+    return held_document(row.get("PDF Full Path"), paths.filing_folders())
 
 
 def _write_down(app, rows: List[dict], order_rows: List[dict], backup: bool) -> None:

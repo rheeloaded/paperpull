@@ -215,6 +215,8 @@ class _DatedByStatement:
         read_text = read_text or receipt_pdf.pdf_text
         self.config = app.config
         self.progress = app.progress
+        # The folders the app files in, the only place a rename may touch.
+        self.paths = app.paths
         self.doubts: list = []
         months = _statement_months(app.progress, app.discovery)
         by_title: dict = {}

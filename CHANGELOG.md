@@ -151,6 +151,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and marks the receipt Completed only when that record says it was saved.
   This holds in all fourteen receipt apps. In Uber, which names every
   receipt itself, receipts put aside are the only ones the review offers.
+- **Rename renames only a document its app holds.** Rename gives each file
+  an app's index names the name the app would give it today, and it
+  renamed whatever a row named as long as something was there. A row
+  naming the output folder itself, a folder the app files documents in, a
+  file outside the app's folders, one reached by climbing out of them
+  through "..", the app's own config file in an output folder set to the
+  app's own folder, a file in Logs or Diagnostics, or a file that is not a
+  PDF was renamed to a document's name by `--apply`, which the panel's
+  Apply renames runs with no preview first. A folder the app files
+  documents in was renamed with every document in it, and on a Mac or
+  Linux, where a file open inside does not stop it, so was the output
+  folder itself. No app writes such a row itself, but an index copied with
+  its output folder to a new place names the files in the old one, and an
+  index edited by hand can name anything. Rename now renames only a PDF in
+  a folder the app files documents in, Manual Review included, leaves
+  every other row and what it names as they are, and says how many rows it
+  left alone. Every app renames through the same code, so this holds in
+  all 61, and Anthem's ID cards, letters, plan documents and
+  authorizations, which it files by name rather than by routing, are still
+  renamed.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never
