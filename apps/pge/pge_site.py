@@ -118,9 +118,9 @@ from __future__ import annotations
 
 import base64
 import html as _html
-import itertools
 import logging
 import re
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -136,8 +136,17 @@ from paperpull_core.controls import control_labels as _control_labels
 from paperpull_core.controls import is_next_control as _core_is_next
 from paperpull_core.ready import (count_reaches, count_settles, network_idle,
                                   new_source, ready, sources_of)
+from paperpull_core import pressing
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("pge_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("PG&E", sys.modules[__name__])
+
 
 # The run's journal, handed over by the orchestrator. None when nobody
 # set one, and ready() is happy with None, so a journal is never the
@@ -551,23 +560,22 @@ def goto_page_number(page, target_page: int) -> bool:
         if opt is None:
             log.info("no option for page %d in the picker", target_page)
         else:
-            clicked = True
-            try:
-                opt.click(timeout=3000)
-            except Exception as e:
-                clicked = False
+            # Pressed once. The option's own click through the page follows
+            # only when Playwright's press raised before it reached the page,
+            # nothing covered the option, and it still reads as this page's
+            # number and is the thing on top (pressing.press_once). An option
+            # whose plain click the page swallowed was pressed a second time
+            # through the page, and a covered one was pressed under whatever
+            # covered it, and neither is now. The picker is asked by value
+            # once more below.
+            outcome = pressing.press_once(
+                page, opt, what="the option for page %d" % target_page, words=_words(),
+                guard=lambda now: is_page_option(now, target_page)
+                and not FORBIDDEN_CONTROL_RE.search(all_labels(opt)),
+                timeout=3000, brought=lambda: _rows_signature(page) != before)
+            if outcome.error is not None:
                 log.info("the option for page %d would not take a click (%s)",
-                         target_page, type(e).__name__)
-            if clicked and _wait_for_page_change(page, before, target_page, 8):
-                return True
-            # A Lightning option can swallow a plain click, and one that is
-            # hidden or covered cannot take one at all. Once more through
-            # the option's own click, which reaches that element and no
-            # other, then the picker is given up on.
-            try:
-                opt.evaluate("el => el.click()")
-            except Exception:
-                pass
+                         target_page, type(outcome.error).__name__)
             if _wait_for_page_change(page, before, target_page, 8):
                 return True
             log.info("page %d did not show after the jump (picker reads %s, rows %s)",
@@ -1836,79 +1844,51 @@ def _press_once(page, link, arrived, seconds: float = 6.0, said: Optional[dict] 
     on somebody's account is not something to repeat on a guess.
 
     So the tab is listened for before the press, which catches a late
-    one as well as a prompt one, and the element's own click is tried
-    only when the first press raised, which is the one case where it
-    did not happen. arrived() says whether a download or a response
-    came instead, so the wait ends as soon as anything does.
+    one as well as a prompt one. arrived() says whether a download or a
+    response came instead, so the wait ends as soon as anything does.
 
     The press is never forced. A forced click goes to whatever sits on
     top at the link's position, and a review before release showed a
     dialog over the row taking it, a button reading Enroll that no guard
-    had looked at. An ordinary click lands only on the link, and when
-    something covers it the link's own click is used, which reaches the
-    approved element and no other (#33, round eight).
+    had looked at. An ordinary click lands only on the link.
 
-    Playwright's click can also raise after the click arrived, when the
-    press starts a slow page load and the click waits on it. The link's
-    own click after that would be a second press. So the link is asked,
-    before the press, to note a click reaching it, and the own click runs
-    only when the link says for certain that none did. When the link
-    cannot be asked at all, nothing is pressed again (second review of
-    round eight).
+    When the ordinary click raises, the link's own click through the page
+    is made at most once, by paperpull_core.pressing.press_once, and only
+    when Playwright says nothing covered the link and its press never
+    reached the page, nothing came, and the link still passes the guard
+    and is the thing on top. The link's own click used to be made when
+    something covered the link too, since it reaches that element and no
+    other, and so it pressed a link a dialog sat over. Something over the
+    link now stops the run, and so does a press that raised and may have
+    been made. The link heard its own presses here before, and the core
+    listens the same way now.
 
     `said`, when given, records whether the press landed, whether the
     link's own click was the one that did it, and whether the click
     raised after it had landed, for the journal."""
     popups = []
-    heard = []
     if said is None:
         said = {}
     said.update(landed=False, own_click=False, late_error=False)
-    word = "paperpull heard press %d" % next(_PRESS_COUNT)
 
-    # Functions of their own, since Playwright cannot wrap a list's
-    # append as a listener.
+    # A function of its own, since Playwright cannot wrap a list's append
+    # as a listener.
     def heard_tab(tab):
         popups.append(tab)
 
-    def heard_word(msg):
-        try:
-            if msg.text == word:
-                heard.append(True)
-        except Exception:
-            pass
-
     page.on("popup", heard_tab)
-    page.on("console", heard_word)
     try:
-        try:
-            listening = bool(link.evaluate(_HEAR_PRESS_JS, word))
-        except Exception:
-            listening = False
-        try:
-            link.click(timeout=4000)
-            said["landed"] = True
-        except Exception as e:
-            # The error names whatever covered the link, and that is page
-            # text, so only its kind is said.
-            reached = _press_reached(link, heard) if listening else None
-            if reached:
-                said["landed"] = said["late_error"] = True
-                log.info("the press reached the link and then raised (%s), "
-                         "so it is not pressed again", type(e).__name__)
-            elif reached is False:
-                log.info("the press did not land on the link (%s), so the link's own click",
-                         type(e).__name__)
-                try:
-                    link.evaluate("el => el.click()")
-                    said["landed"] = said["own_click"] = True
-                except Exception as e2:
-                    log.info("the link's own click did not land either (%s)", type(e2).__name__)
-                    return None
-            else:
-                log.info("the press raised (%s) and the link could not say whether it "
-                         "arrived, so it is not pressed again", type(e).__name__)
-                return None
+        outcome = pressing.press_once(
+            page, link, what="the bill's PDF control", words=_words(),
+            guard=lambda _now: is_safe_control(all_labels(link)), timeout=4000,
+            brought=lambda: bool(popups or arrived()))
+        if outcome.page_error is not None:
+            log.info("the link's own click did not land either (%s)",
+                     type(outcome.page_error).__name__)
+            return None
+        said["landed"] = True
+        said["own_click"] = outcome.how == pressing.THROUGH_THE_PAGE
+        said["late_error"] = outcome.how == pressing.MADE
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             try:
@@ -1919,37 +1899,10 @@ def _press_once(page, link, arrived, seconds: float = 6.0, said: Optional[dict] 
             page.wait_for_timeout(300)
         return popups[0] if popups else None
     finally:
-        for event, fn in (("popup", heard_tab), ("console", heard_word)):
-            try:
-                page.remove_listener(event, fn)
-            except Exception:
-                pass
-
-
-_PRESS_COUNT = itertools.count(1)
-
-# Set on the link before the press. The flag is read back when the click
-# raises, and the console line is heard even when the page has already
-# started to leave, which is when the flag can no longer be read.
-_HEAR_PRESS_JS = r"""(el, word) => {
-  el.__paperpullPressed = false;
-  el.addEventListener('click', () => {
-    el.__paperpullPressed = true;
-    try { console.debug(word); } catch (e) {}
-  }, {capture: true, once: true});
-  return true;
-}"""
-
-
-def _press_reached(link, heard) -> Optional[bool]:
-    """Whether the press reached the link. True or False when the link can
-    say, None when it cannot be asked."""
-    if heard:
-        return True
-    try:
-        return bool(link.evaluate("el => el.__paperpullPressed === true"))
-    except Exception:
-        return None
+        try:
+            page.remove_listener("popup", heard_tab)
+        except Exception:
+            pass
 
 
 def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:

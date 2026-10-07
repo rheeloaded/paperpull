@@ -55,12 +55,26 @@ presses.
 
 What covered a control is said only through the word list in
 paperpull_core.words, never as the page wrote it.
+
+Some apps press with Playwright's own click and, when it raises, press the
+element once more through the page, el.click() run inside it. That press
+goes to the element whatever is drawn over it, a hidden one included, and
+when Playwright's press had already reached the page before it raised,
+it is a second press. press_once makes both presses for them. The one
+through the page is made only when Playwright says nothing covered the
+control, its press never reached it and nothing it should bring came, the
+control still has its words and the app's own guard still passes them,
+and it is the thing on top in the middle of the window. When any of that
+cannot be told, nothing is pressed and the run stops. It is never made
+twice.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import logging
-from typing import Iterable, Optional
+import os
+from typing import Callable, Iterable, NamedTuple, Optional
 
 from .words import shape
 
@@ -117,6 +131,16 @@ class NotPressed(Stop):
 
 class NoAnswer(Stop):
     """A press was made and what it should bring did not come."""
+
+
+class Unsure(Stop):
+    """A press raised, and whether it reached the page could not be told,
+    so it was not made again."""
+
+
+class Changed(Stop):
+    """The control was no longer the one that was checked, so it was not
+    pressed again."""
 
 
 AGAIN = "Look at the browser window, then press Resume here, or run this again."
@@ -387,6 +411,22 @@ def _in_own_world(page, js: str, args: dict) -> Optional[dict]:
     return value if isinstance(value, dict) else None
 
 
+def _box(locator) -> Optional[dict]:
+    """The box Playwright reports for a locator or an element handle, or
+    None. A Locator takes a timeout and an ElementHandle does not, and
+    asking one the other's way raises TypeError."""
+    try:
+        return locator.bounding_box(timeout=5000)
+    except TypeError:
+        pass
+    except Exception:
+        return None
+    try:
+        return locator.bounding_box()
+    except Exception:
+        return None
+
+
 def look(page, locator, css: str, labels: bool = False) -> dict:
     """What sits on top of the control once it is in the middle of the
     window, as a dict whose "state" is "inside", "label", "covered" or
@@ -398,10 +438,7 @@ def look(page, locator, css: str, labels: bool = False) -> dict:
     scrolled or pressed then."""
     seen = {"state": "unread", "why": "no box"}
     for _ in range(3):
-        try:
-            box = locator.bounding_box(timeout=5000)
-        except Exception:
-            box = None
+        box = _box(locator)
         if not box:
             return {"state": "unread", "why": "no box"}
         seen = _in_own_world(page, LOOK_JS, {"css": css, "box": box, "labels": bool(labels)})
@@ -656,3 +693,407 @@ def check(page, locator, *, css: str, what: str, words, step: str = "choose an o
             "%s was pressed and did not read as chosen afterwards, so nothing more "
             "is pressed." % (what[:1].upper() + what[1:]),
             AGAIN], after_a_press=True)
+
+
+# ---------------------------------------------------------------------------
+# Playwright's press, and once, only when it is safe, a press through the page
+# ---------------------------------------------------------------------------
+
+# What press_once says happened, for the app's own trace.
+PRESSED = "pressed"
+MADE = "made"
+THROUGH_THE_PAGE = "through the page"
+
+
+class Pressed(NamedTuple):
+    """How press_once pressed. `how` is PRESSED when Playwright's own press
+    went through, MADE when it raised once it had reached the page, so that
+    nothing was pressed again, and THROUGH_THE_PAGE when the control was
+    pressed once through the page instead. `error` is what Playwright's
+    press raised, None when it went through, and `page_error` what the
+    press through the page raised, after which nothing more was pressed."""
+    how: str
+    error: Optional[BaseException] = None
+    page_error: Optional[BaseException] = None
+
+
+# A control's words the way controls.control_labels reads them, its text,
+# its aria-label and its title, each tidied, and the same words only once.
+_WORDS_OF_JS = r"""const wordsOf = (el) => {
+    const out = [];
+    for (const s of [el.innerText, el.getAttribute('aria-label'), el.getAttribute('title')]) {
+      const t = String(s || '').trim().replace(/\s+/g, ' ');
+      if (t && !out.includes(t)) out.push(t);
+    }
+    return out;
+  };"""
+
+# Run in the page just before Playwright presses. The control's words and
+# its kind for a selector, and from then on an ear at the window, ahead of
+# the page's own listeners on the control, for a press the browser itself
+# sends (isTrusted) along a path through the control. Such a press is
+# noted on the control, and said on the console in the word given, which
+# is heard even once the page has begun to leave. The ear takes itself
+# away after two minutes, or when the control is listened for again,
+# since taking it away from here would mean asking a page that may be
+# loading, and Playwright answers no read of such a page until it is done.
+_HEAR_JS = r"""(el, word) => {
+  %s
+  const kinds = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'touchstart', 'touchend'];
+  const ear = (e) => {
+    if (!e.isTrusted) return;
+    let path = [];
+    try { path = e.composedPath(); } catch (x) {}
+    if (!path.includes(el)) return;
+    el.__paperpullHeard = true;
+    try { console.debug(word); } catch (x) {}
+  };
+  if (typeof el.__paperpullDeaf === 'function') el.__paperpullDeaf();
+  el.__paperpullHeard = false;
+  for (const k of kinds) window.addEventListener(k, ear, true);
+  const deaf = () => { for (const k of kinds) window.removeEventListener(k, ear, true); };
+  el.__paperpullDeaf = deaf;
+  setTimeout(deaf, 120000);
+  return {words: wordsOf(el), css: CSS.escape(el.localName || '')};
+}""" % _WORDS_OF_JS
+
+_HEARD_JS = "el => el.__paperpullHeard === true"
+
+_WORDS_JS = r"""el => {
+  %s
+  return wordsOf(el);
+}""" % _WORDS_OF_JS
+
+# The press through the page, made only while the control is on the page
+# and has the words it had before Playwright pressed, read and pressed in
+# one step so nothing can change in between.
+_PRESS_JS = r"""(el, want) => {
+  %s
+  if (!el.isConnected) return 'gone';
+  const now = wordsOf(el);
+  if (now.length !== want.length || now.some((w, i) => w !== want[i])) return 'changed';
+  el.click();
+  return 'pressed';
+}""" % _WORDS_OF_JS
+
+_PRESS_COUNT = itertools.count(1)
+
+
+def playwrights_word(error) -> str:
+    """What Playwright's own account of a press that raised says, in one of
+    our words. "made" once it says the press was done, "covered" when it
+    names something that intercepts the press, "unsure" when it began the
+    press and says neither, or when there is no account at all, "off" when
+    it says the control is not enabled, and "not made" otherwise.
+
+    Only these phrases are looked for, the way _press looks for its own.
+    The account also quotes the page, and whatever the page wrote can only
+    make this answer one that presses nothing more."""
+    text = str(error or "")
+    if "click action done" in text:
+        return "made"
+    if "intercepts pointer events" in text:
+        return "covered"
+    if "performing click action" in text or "Call log:" not in text:
+        return "unsure"
+    if "element is not enabled" in text:
+        return "off"
+    return "not made"
+
+
+def _handle(el):
+    """The element `el` is, as an element handle, so every read and the
+    press through the page reach that one element and no other. A Locator
+    finds it again each time it is used, and a list drawn anew could give
+    another row's control. None when it cannot be found as one."""
+    find = getattr(el, "element_handle", None)
+    if not callable(find):
+        return el
+    try:
+        return find(timeout=3000)
+    except Exception:
+        return None
+
+
+def _ask(handle, js: str, arg=None):
+    """What `js` answers about the element, in the page's own world, or
+    None when the page could not be asked."""
+    if handle is None:
+        return None
+    try:
+        return handle.evaluate(js, arg)
+    except Exception:
+        return None
+
+
+def _folder_moved(dl_dir, before) -> bool:
+    """A file in the download folder that was not there before the press,
+    one still being written included, or one written again since."""
+    from .capture import arrived
+    if not dl_dir or before is None:
+        return False
+    try:
+        names = set(os.listdir(dl_dir))
+    except OSError:
+        return False
+    return bool(names - set(before)) or bool(arrived(dl_dir, before))
+
+
+def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
+               check: Optional[Callable[[], str]] = None,
+               brought: Optional[Callable[[], bool]] = None, dl_dir=None,
+               timeout: Optional[int] = None, step: str = "press a control") -> Pressed:
+    """Press `el` once with Playwright's own unforced click, and when that
+    raises, once through the page, the element's own click run inside it,
+    only when that is safe, or stop the run.
+
+    The press through the page is made only when all of this holds, checked
+    in this order, and a stop says which did not.
+
+      1. Playwright's account of its press says neither that the press was
+         done, nor that something intercepts it, nor that it began the press
+         without saying how that ended, nor that the control is not enabled,
+         and there is an account. A press it says was done is never made
+         again (MADE). Each of the others stops the run.
+      2. Nothing came that a press brings. No tab opened, no download
+         began, the tab began loading nothing new and stands at the same
+         address, no file came into `dl_dir`, and the app's own `brought`
+         says nothing it should bring came. Anything of that, and nothing
+         is pressed again (MADE).
+      3. The control did not hear a press. Before Playwright pressed, the
+         page was asked to note a press the browser itself sends along a
+         path through the control, so one Playwright made, or the person
+         made, is known, and is never made again (MADE). When that could
+         not be asked, or not read afterwards, the run stops.
+      4. The app's own `guard` passes the control's words read now, joined
+         the way controls.control_label joins them, and the app's own
+         `check`, when given, says nothing. Otherwise the run stops.
+      5. The control is in the middle of the window with nothing over it,
+         read the way click reads it (look, judge). Otherwise the run stops.
+      6. In the same step as the press, the control is still on the page
+         and has the words it had before Playwright pressed. Otherwise the
+         run stops.
+
+    What a press brings is looked at before the page is read again, since
+    Playwright answers no read of a tab that is loading until the load ends,
+    and a press that began one has been made.
+
+    The listening, the reads of the control's words and the press through
+    the page run in the page's own world, as the press through the page
+    always did, so this is for a page that lets a script run there. Where
+    a page replaces its eval, as American Express does, nothing can be
+    listened to, and a press of Playwright's that raises stops the run.
+    What is on top is read in this module's own world, as for click.
+
+    `what` names the control in the run's own words, and `words` is the
+    app's word list, for saying what covered it. `check` returns the app's
+    own fixed words for why the control is no longer the one it checked,
+    or "" while it still is. `timeout` is Playwright's time for its press,
+    PRESS_MS when not given. Every read is made on the one element `el` is
+    when this begins."""
+    from .failure import error_kind
+    word = "paperpull heard press %d" % next(_PRESS_COUNT)
+    heard: list = []
+    came: list = []
+
+    def on_console(msg):
+        try:
+            if msg.text == word:
+                heard.append(True)
+        except Exception:
+            pass
+
+    def on_arrival(_thing):
+        came.append(True)
+
+    def on_request(request):
+        try:
+            if request.is_navigation_request():
+                came.append(True)
+        except Exception:
+            came.append(True)
+
+    handle = _handle(el)
+    own_handle = handle is not None and handle is not el
+    try:
+        tabs_before = set(page.context.pages)
+    except Exception:
+        tabs_before = None
+    try:
+        address_before = page.url or ""
+    except Exception:
+        address_before = None
+    folder_before = None
+    if dl_dir:
+        from .capture import snapshot
+        folder_before = snapshot(dl_dir)
+    armed = _ask(handle, _HEAR_JS, word)
+    before = armed.get("words") if isinstance(armed, dict) else None
+    css = str(armed.get("css") or "") if isinstance(armed, dict) else ""
+    listening = []
+    for event, fn in (("console", on_console), ("download", on_arrival), ("popup", on_arrival),
+                      ("request", on_request)):
+        try:
+            page.on(event, fn)
+            listening.append((event, fn))
+        except Exception:
+            pass
+    named = what[:1].upper() + what[1:]
+    try:
+        try:
+            el.click(timeout=timeout or PRESS_MS)
+            return Pressed(PRESSED)
+        except Exception as e:
+            first = e
+        kind = error_kind(first)
+        said = playwrights_word(first)
+        if said == "made":
+            log.info("the press on %s raised once it was made (%s), so it is not made again",
+                     what, kind)
+            return Pressed(MADE, first)
+        if said != "not made":
+            _stop_loading(page)
+        if said == "covered":
+            _covered_while_pressed(page, handle, css, what, words, step, kind)
+        if said == "unsure":
+            log.info("the press on %s raised and whether it was made is not known (%s)",
+                     what, kind)
+            raise Unsure(step, "whether the press was made is not known", [
+                "Pressing %s raised before Playwright said whether the press was made, "
+                "so it is not pressed again." % what,
+                "Pressing it a second time could do twice what it does once, so the run "
+                "stops here.",
+                AGAIN], {"verdict": "unsure", "error": kind}, after_a_press=True)
+        if said == "off":
+            log.info("%s is not enabled on the page, so it is not pressed through the page", what)
+            raise NotPressed(step, "the control is turned off", [
+                "%s is turned off on the page, so it was not pressed through the page "
+                "either." % named,
+                AGAIN], {"verdict": "off", "error": kind}, after_a_press=True)
+
+        # 2. Whatever a press brings, from what was heard while Playwright
+        # pressed and before the page is read again.
+        moved = bool(came)
+        try:
+            moved = moved or (tabs_before is not None
+                              and bool([p for p in page.context.pages if p not in tabs_before]))
+            moved = moved or address_before is None or (page.url or "") != address_before
+            moved = moved or _folder_moved(dl_dir, folder_before)
+            moved = moved or bool(came) or bool(brought is not None and brought())
+        except Exception:
+            moved = True
+        if moved:
+            log.info("something came after the press on %s raised (%s), so it is not made "
+                     "again", what, kind)
+            return Pressed(MADE, first)
+
+        # 3. Whether the control heard a press, Playwright's or the person's.
+        noted = _ask(handle, _HEARD_JS)
+        if heard or came or noted is True:
+            log.info("%s heard the press that raised (%s), so it is not made again", what, kind)
+            return Pressed(MADE, first)
+        if before is None or noted is None:
+            _stop_loading(page)
+            log.info("whether a press reached %s could not be read (%s)", what, kind)
+            raise Unsure(step, "whether the press reached the control is not known", [
+                "Pressing %s raised, and whether the press reached it could not be "
+                "read, so it is not pressed again." % what,
+                AGAIN], {"verdict": "unheard", "error": kind}, after_a_press=True)
+
+        # 4. The app's own guard on the words the control has now, and its
+        # own check.
+        now = _ask(handle, _WORDS_JS)
+        why = ""
+        if not isinstance(now, list) or not now:
+            why = "its words could not be read"
+        else:
+            try:
+                passes = bool(guard(" | ".join(str(w) for w in now)))
+            except Exception:
+                passes = False
+            if not passes:
+                why = "the guard refuses its words"
+            elif check is not None:
+                try:
+                    why = str(check() or "")
+                except Exception:
+                    why = "its words could not be read"
+        if why:
+            _changed(page, what, step, kind, why)
+
+        # 5. Shows, in the middle of the window, with nothing over it. A
+        # stop here comes after Playwright's press was tried, like the rest.
+        seen = look(page, handle, css) if css else {"state": "unread", "why": "not read"}
+        try:
+            judge(seen, what, words, step)
+        except Stop as stop:
+            stop.after_a_press = True
+            raise
+
+        # 6. Pressed through the page, with its words read in the same step.
+        try:
+            done = handle.evaluate(_PRESS_JS, before)
+        except Exception as e2:
+            log.info("the press through the page on %s raised (%s), so nothing more is "
+                     "pressed", what, error_kind(e2))
+            return Pressed(THROUGH_THE_PAGE, first, e2)
+        if done != "pressed":
+            _changed(page, what, step, kind,
+                     "it left the page" if done == "gone" else "its words changed")
+        log.info("%s was pressed through the page once, after Playwright's press raised (%s)",
+                 what, kind)
+        return Pressed(THROUGH_THE_PAGE, first)
+    finally:
+        for event, fn in listening:
+            try:
+                page.remove_listener(event, fn)
+            except Exception:
+                pass
+        if own_handle:
+            try:
+                handle.dispose()
+            except Exception:
+                pass
+
+
+# Why a control was not pressed through the page, in press_once's words.
+_CHANGED = frozenset(("its words could not be read", "the guard refuses its words",
+                      "it left the page", "its words changed"))
+
+
+def _changed(page, what: str, step: str, kind: str, why: str) -> None:
+    """Stop the run, the control no longer the one that was checked. `why`
+    is press_once's own words or the app's check's, which are fixed words
+    of the app's own as well, and only press_once's go into the file."""
+    _stop_loading(page)
+    log.info("%s was not pressed through the page, %s", what, why)
+    raise Changed(step, "the control changed", [
+        "%s was not pressed through the page once Playwright's press raised, because "
+        "it is no longer the control that was checked." % (what[:1].upper() + what[1:]),
+        AGAIN], {"verdict": "changed", "why": why if why in _CHANGED else "the app's check",
+                 "error": kind}, after_a_press=True)
+
+
+def _covered_while_pressed(page, handle, css: str, what: str, words, step: str,
+                           kind: str) -> None:
+    """Stop the run, Playwright having said something intercepts its press.
+    What covers the control now is read the way click reads it, to say it,
+    and when nothing does any more the stop says what Playwright said."""
+    seen = look(page, handle, css) if css else {"state": "unread"}
+    facts = {"verdict": "covered", "error": kind}
+    if seen.get("state") == "covered":
+        cover = described(seen, words)
+        lines = covering_lines(what, cover)
+        facts.update({"over_it": cover["widget"], "topmost": cover["top"],
+                      "fixed": cover["pinned"]})
+    else:
+        lines = [
+            "Something on the page was over %s while Playwright pressed it, so nothing "
+            "was pressed." % what,
+            "A chat window, an offer or a banner is the usual thing. Close it in the "
+            "browser window yourself, then press Resume here, or run this again."]
+    lines[0] = lines[0][:-1] + ", and it is not pressed through the page either."
+    log.info("refused to press %s through the page, Playwright says something covered it (%s)",
+             what, kind)
+    raise Covered(step, "something on the page was over the control", lines, facts,
+                  after_a_press=True)

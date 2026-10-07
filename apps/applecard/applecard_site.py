@@ -75,6 +75,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -109,8 +110,17 @@ from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
+from paperpull_core import pressing
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("applecard_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("Apple Card", sys.modules[__name__])
+
 
 BASE = "https://card.apple.com"
 
@@ -1344,6 +1354,7 @@ _TRACE_WORDS = frozenset(KINDS) | frozenset({
     "no control carried this document's date", "more than one control carried this document's date",
     "a control's name could not be read",
     "clicked", "click failed", "clicked through the DOM instead", "DOM click failed too",
+    "the press reached the page although it raised, so it was not made again",
     "after the click", "second step clicked", "second step click failed",
     "pressed again", "the second press failed",
     "the page made the document itself", "another apple host",
@@ -1689,21 +1700,27 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             el.scroll_into_view_if_needed(timeout=4000)
         except Exception:
             pass
-        try:
-            el.click(timeout=8000)
-            if trace is not None:
+        # Playwright's own press, and through the page only when nothing
+        # covered the control, its press never reached the page and nothing
+        # it should bring came. What cannot be told stops the run, and the
+        # control is never pressed twice (pressing.press_once).
+        outcome = pressing.press_once(
+            page, el, what="the control for this statement", words=_words(),
+            guard=is_safe_control, dl_dir=dl_dir,
+            brought=lambda: bool(downloads or got or refused or (_control_texts(page) - controls_before)))
+        if trace is not None:
+            if outcome.error is None:
                 trace.append({"note": "clicked", "control": _label_mask(label)})
-        except Exception as e:
-            if trace is not None:
+            else:
                 trace.append({"note": "click failed", "control": _label_mask(label),
-                              "error": _click_failure(e)})
-            try:
-                el.evaluate("el => el.click()")
-                if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead", "control": _label_mask(label)})
-            except Exception as e2:
-                if trace is not None:
-                    trace.append({"note": "DOM click failed too", "error": _click_failure(e2)})
+                              "error": _click_failure(outcome.error)})
+            if outcome.how == pressing.MADE:
+                trace.append({"note": "the press reached the page although it raised, "
+                                      "so it was not made again", "control": _label_mask(label)})
+            elif outcome.how == pressing.THROUGH_THE_PAGE and outcome.page_error is None:
+                trace.append({"note": "clicked through the DOM instead", "control": _label_mask(label)})
+            elif outcome.how == pressing.THROUGH_THE_PAGE:
+                trace.append({"note": "DOM click failed too", "error": _click_failure(outcome.page_error)})
         if wait_for_pdf(PRESS_WAIT_SECONDS):
             return True
         if refused:
@@ -1734,7 +1751,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             if _take_same_tab(page, start_url, out_path, trace) or \
                     _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
                 return True
-        elif not appeared and (page.url or "") == start_url and _press_again(el, label, trace):
+        elif not appeared and (page.url or "") == start_url and outcome.how == pressing.PRESSED \
+                and _press_again(el, label, trace):
             if wait_for_pdf(AGAIN_WAIT_SECONDS):
                 return True
             if refused:

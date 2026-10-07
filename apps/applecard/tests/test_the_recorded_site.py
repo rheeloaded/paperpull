@@ -53,6 +53,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import applecard_site as site
+from paperpull_core import pressing
 
 
 APP = r"""<!doctype html>
@@ -808,6 +809,29 @@ def test_a_press_the_page_answered_is_not_made_again(browser, tmp_path):
                                   title="Apple Card Statement - February 2031", trace=trace)
     assert page.evaluate("window.presses") == 1
     assert not any(t.get("note") == "pressed again" for t in trace), trace
+
+
+def test_a_press_that_raised_once_it_was_made_is_not_made_again(browser, tmp_path, monkeypatch):
+    """A first press that brought nothing is made once more, above. One
+    that Playwright made and then raised on is not, since a press through
+    the page may already have followed it, and a second press could do
+    twice what one does (pressing.press_once). Here the list is the one
+    whose first press brings nothing."""
+    page, served = _open(browser, deaf=True)
+    page.goto("https://card.apple.com/")
+
+    def landed_and_raised(page_, el, **kwargs):
+        el.click()
+        return pressing.Pressed(pressing.MADE, TimeoutError("click action done"))
+
+    monkeypatch.setattr(site.pressing, "press_once", landed_and_raised)
+    trace = []
+    assert not site.download_bill(page, None, "2031-02-28", tmp_path / "card.pdf",
+                                  title="Apple Card Statement - February 2031", trace=trace)
+    assert page.evaluate("window.presses") == 1
+    assert not any(t.get("note") == "pressed again" for t in trace), trace
+    assert {"note": "the press reached the page although it raised, so it was not made again",
+            "control": "a document button"} in site.attempt_record(trace)
 
 
 def test_the_second_press_is_caught_in_the_folder_too(browser, tmp_path):

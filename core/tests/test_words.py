@@ -367,12 +367,33 @@ def test_every_word_a_press_writes_into_a_failure_file_comes_through():
     """paperpull_core.pressing names the step, the reason and the facts of
     every stop it raises, and an app writes them into the failure file. A
     word of them missing from the list would leave as its shape, as
-    "covers" first did."""
+    "covers" first did, and as "covered" did for press_once's verdict.
+    Every stop class the module defines is read, and every word a fact
+    holds, value and key."""
     from paperpull_core import pressing
+
+    def given(value):
+        """The words a fact is given as it stands, a string or either
+        string an if-else chooses between."""
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            return [value.value]
+        if isinstance(value, ast.IfExp):
+            return given(value.body) + given(value.orelse)
+        return []
+
     tree = ast.parse((CORE / "paperpull_core" / "pressing.py").read_text(encoding="utf-8"))
-    stops = {"Stop", "Covered", "Unread", "NotPressed", "NoAnswer", "no_answer"}
-    found = set(pressing._WHY)
+    stops = {"Stop", "no_answer"} | {
+        n.name for n in tree.body if isinstance(n, ast.ClassDef)
+        and any(ast.unparse(b) in ("Stop", "SystemExit") for b in n.bases)}
+    assert {"Covered", "Unread", "NotPressed", "NoAnswer", "Unsure", "Changed"} <= stops
+    found = set(pressing._WHY) | set(pressing._CHANGED)
     for node in ast.walk(tree):
+        # A dict of facts, laid into a stop where it is built or kept in a
+        # name first.
+        if isinstance(node, ast.Dict) and any(isinstance(k, ast.Constant) and k.value in (
+                "verdict", "over_it", "why", "error") for k in node.keys):
+            found.update(k.value for k in node.keys if isinstance(k, ast.Constant))
+            found.update(s for v in node.values for s in given(v))
         if isinstance(node, ast.Call):
             name = getattr(node.func, "attr", None) or getattr(node.func, "id", "")
             if name in stops:
@@ -381,6 +402,7 @@ def test_every_word_a_press_writes_into_a_failure_file_comes_through():
                 facts = node.args[3] if len(node.args) > 3 else None
                 if isinstance(facts, ast.Dict):
                     found.update(k.value for k in facts.keys if isinstance(k, ast.Constant))
+                    found.update(s for v in facts.values for s in given(v))
         if isinstance(node, ast.FunctionDef):
             pos = node.args.args
             pairs = list(zip(pos[len(pos) - len(node.args.defaults):], node.args.defaults))

@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import pge_site as site
+from paperpull_core import pressing
 
 
 @pytest.fixture()
@@ -134,19 +135,58 @@ COVER_ON_OPEN = """() => {
 }"""
 
 
-def test_an_option_under_a_dialog_is_reached_by_its_own_click_never_the_dialog(page):
-    """An option that cannot take a click gets its own click, which reaches
-    that element and nothing else. The draft waited thirty seconds on the
-    click and gave up."""
+def test_an_option_under_a_dialog_is_not_pressed_and_the_run_stops(page):
+    """An option that could not take a click was given its own click, which
+    reached that element and nothing else, but under a dialog nobody had
+    read. Neither the option nor the dialog is pressed now, and the run
+    stops for the person to close the dialog. The draft waited thirty
+    seconds on the click and gave up."""
     _picker(page, hears_value=False)
     page.evaluate(COVER_ON_OPEN)
     t0 = time.monotonic()
-    assert site.goto_page_number(page, 2) is True
+    with pytest.raises(pressing.Covered):
+        site.goto_page_number(page, 2)
     took = time.monotonic() - t0
-    assert _first_date(page) == "11/05/2030"
+    assert _first_date(page) == "01/05/2031"
     assert page.evaluate("window.promo") == 0, "the dialog took the click"
-    assert page.evaluate("window.optionClicks") == 1
+    assert page.evaluate("window.optionClicks") == 0, "the option was pressed under the dialog"
     assert took < 25, "the jump took %.1fs" % took
+
+
+# An option whose own handler is still busy when the press's time runs out.
+BUSY_OPTION = """<script>
+  document.querySelector("lightning-base-combobox-item[data-value='2']")
+    .addEventListener('click', () => { const t = Date.now(); while (Date.now() - t < 5000) {} });
+</script>"""
+
+
+def test_an_option_whose_press_landed_and_raised_is_not_pressed_again(page):
+    """Playwright's press timed out while the option's handler ran, so its
+    account never says how the press ended. The option's own click used to
+    follow, a second press of it. The run stops instead."""
+    _picker(page, hears_value=False, extra=BUSY_OPTION)
+    with pytest.raises(pressing.Unsure):
+        site.goto_page_number(page, 2)
+    assert page.evaluate("window.optionClicks") == 1
+
+
+# An option whose page lets its first click go by.
+SWALLOWS_ONE = """<script>
+  window.swallowed = 0;
+  document.querySelector("lightning-base-combobox-item[data-value='2']")
+    .addEventListener('click', e => { if (!window.swallowed++) e.stopImmediatePropagation(); });
+</script>"""
+
+
+def test_an_option_whose_click_the_page_let_go_by_is_not_pressed_twice(page):
+    """Playwright's press went through and the rows did not move. The
+    option's own click used to be made then, a second press. The picker is
+    asked by value once more and the jump is given up, so the walk can go
+    on by the Next button."""
+    _picker(page, hears_value=False, extra=SWALLOWS_ONE)
+    assert site.goto_page_number(page, 2) is False
+    assert page.evaluate("window.swallowed") == 1
+    assert _first_date(page) == "01/05/2031"
 
 
 # A parent that only hears the picker's value once the picker has been

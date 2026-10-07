@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import newrez_site as site
+from paperpull_core import pressing
 
 LOAN = "1234567"
 MONTHLY = f"https://servicing.newrez.com/servicing/{LOAN}/statements/monthly"
@@ -314,7 +315,6 @@ def _before_the_press(monkeypatch, do) -> None:
 JUNE = "[aria-label='Statement for June 2026']"
 RENAME = "document.querySelectorAll(sel).forEach(a => a.setAttribute('aria-label', 'Statement for May 2026'))"
 JUNE_BECOMES_MAY = "sel => " + RENAME
-JUNE_BECOMES_MAY_SOON = "sel => setTimeout(() => " + RENAME + ", 700)"
 
 
 def test_a_row_drawn_while_an_earlier_download_is_waited_on_does_not_move_the_press(
@@ -420,24 +420,60 @@ def test_a_row_reused_for_another_month_before_the_press_is_not_pressed(
 COVER = "<div style='position:fixed;left:0;top:0;width:100%;height:100%;z-index:9'></div>"
 
 
-def test_a_press_through_the_page_is_made_only_on_the_approved_row(browser_any_host, tmp_path,
-                                                                  monkeypatch):
-    """When the ordinary press cannot reach the control, something lying
-    over it say, the control is pressed through the page instead. Its row
-    changed while the ordinary press was trying, and that press used to go
-    through anyway."""
-    monkeypatch.setattr(site, "CLICK_TIMEOUT_MS", 2000)
+def test_a_control_under_a_cover_is_not_pressed_and_the_run_stops(browser_any_host, tmp_path,
+                                                                 monkeypatch):
+    """When the ordinary press could not reach the control, something lying
+    over it say, the control was pressed through the page instead, under
+    whatever lay over it. Nothing is pressed now, and the run stops for the
+    person to close what covers it (pressing.press_once)."""
+    monkeypatch.setattr(site, "CLICK_TIMEOUT_MS", 1000)
     page, state = browser_any_host
     state["page"] = _list("July 2026", "June 2026", extra=COVER)
     page.goto(MONTHLY)
-    # after the name is read again, while the ordinary press is still trying
-    _before_the_press(monkeypatch, lambda p: p.evaluate(JUNE_BECOMES_MAY_SOON, JUNE))
+    with pytest.raises(pressing.Covered):
+        site.download_bill(page, None, "2026-06-30", tmp_path / "s.pdf",
+                           title="Mortgage Statement - June 30, 2026", trace=[])
+    assert _pressed(page) == []
+
+
+# Playwright's account of a press that timed out before it began.
+NOT_BEGUN = ('ElementHandle.click: Timeout 8000ms exceeded.\nCall log:\n'
+             '  - attempting click action\n'
+             '    2 × waiting for element to be visible, enabled and stable\n'
+             '      - element is not stable\n')
+
+
+def _press_never_begins(monkeypatch, first=None):
+    """Playwright's press, replaced by one that does `first` and then times
+    out before it began, the way it does for a control that never holds
+    still."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+
+    def click(self, *args, **kwargs):
+        if first is not None:
+            first()
+        raise sync_api.TimeoutError(NOT_BEGUN)
+    monkeypatch.setattr(sync_api.ElementHandle, "click", click)
+    monkeypatch.setattr(sync_api.Locator, "click", click)
+
+
+def test_a_press_through_the_page_is_made_only_on_the_approved_row(browser_any_host, tmp_path,
+                                                                  monkeypatch):
+    """When the ordinary press does not begin, the control may be pressed
+    through the page instead. Its row changed while the ordinary press was
+    trying, and that press used to go through anyway. The row's name and
+    date are read again before it, nothing is pressed, and the run stops."""
+    page, state = browser_any_host
+    state["page"] = _list("July 2026", "June 2026")
+    page.goto(MONTHLY)
+    _press_never_begins(monkeypatch, lambda: page.evaluate(JUNE_BECOMES_MAY, JUNE))
     trace = []
-    site.download_bill(page, None, "2026-06-30", tmp_path / "s.pdf",
-                       title="Mortgage Statement - June 30, 2026", trace=trace)
+    with pytest.raises(pressing.Changed):
+        site.download_bill(page, None, "2026-06-30", tmp_path / "s.pdf",
+                           title="Mortgage Statement - June 30, 2026", trace=trace)
     assert _pressed(page) == []
     facts = site.capture_facts(trace)
-    assert "click failed" in facts["steps"] and "row changed before the page click" in facts["steps"]
+    assert "row changed before the page click" in facts["steps"]
     assert facts["click"]["why"] == "its name changed"
 
 
@@ -445,9 +481,8 @@ def test_the_press_through_the_page_reads_the_name_in_the_same_step(browser_any_
                                                                     monkeypatch):
     """The name is read once more inside the page, in the same step as the
     press, so a change in the moment after the last reading is caught too."""
-    monkeypatch.setattr(site, "CLICK_TIMEOUT_MS", 1000)
     page, state = browser_any_host
-    state["page"] = _list("July 2026", "June 2026", extra=COVER)
+    state["page"] = _list("July 2026", "June 2026")
     page.goto(MONTHLY)
     real = site._still_the_one
     readings = []
@@ -461,12 +496,13 @@ def test_the_press_through_the_page_reads_the_name_in_the_same_step(browser_any_
         return why
 
     monkeypatch.setattr(site, "_still_the_one", read_then_changed)
-    trace = []
-    site.download_bill(page, None, "2026-06-30", tmp_path / "s.pdf",
-                       title="Mortgage Statement - June 30, 2026", trace=trace)
+    _press_never_begins(monkeypatch)
+    with pytest.raises(pressing.Changed) as stop:
+        site.download_bill(page, None, "2026-06-30", tmp_path / "s.pdf",
+                           title="Mortgage Statement - June 30, 2026", trace=[])
     assert readings == ["", "", ""]
     assert _pressed(page) == []
-    assert "row changed before the page click" in site.capture_facts(trace)["steps"]
+    assert stop.value.facts["why"] == "its words changed"
 
 
 def test_another_tab_keeping_a_call_open_does_not_keep_the_capture_waiting(browser_any_host, tmp_path,

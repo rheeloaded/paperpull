@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import pressing
 from paperpull_core import capture
 from paperpull_core import renaming
 from paperpull_core import tabs
@@ -1009,7 +1010,7 @@ class App:
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None) -> None:
+                      postmortem: dict = None, extra: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
         Written without anybody having to know to ask for it, because a
@@ -1018,10 +1019,16 @@ class App:
 
         One per run. A run where thirty documents fail for one reason
         does not need thirty files, and the first is taken while the page
-        is still sitting on the thing that broke."""
+        is still sitting on the thing that broke.
+
+        `extra` holds only our own words, counts, yes or no, and words that
+        went through the word list, such as what covered a control."""
         if self.stats.get("failure_files"):
             return
-        extra = {"postmortem": postmortem} if postmortem else None
+        extra = dict(extra or {})
+        if postmortem:
+            extra["postmortem"] = postmortem
+        extra = extra or None
         # A checkpoint at the moment it gave up. It is also what makes the
         # journal when nothing had written to it yet, and every tester file
         # sent in on 2026-09-25 came back without one for that reason.
@@ -1255,6 +1262,10 @@ def main(argv=None):
         else:
             build_parser().print_help()
             return 0
+    except pressing.Stop as stop:
+        # A press it would not make stops the run here, with the reason said
+        # and the failure file written.
+        pressing.stop_run(app, stop)
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
         return 130

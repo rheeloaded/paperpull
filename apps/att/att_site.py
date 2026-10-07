@@ -104,6 +104,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple
@@ -136,8 +137,17 @@ from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
+from paperpull_core import pressing
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("att_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("AT&T", sys.modules[__name__])
+
 
 BASE = "https://www.att.com"
 # Read off the signed-in site's own navigation in the first survey
@@ -1867,25 +1877,31 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             el.scroll_into_view_if_needed(timeout=4000)
         except Exception:
             pass
-        try:
-            el.click(timeout=8000)
-            if pressed is not None:
-                pressed.append(label)
-            if trace is not None:
+        # Playwright's own press, and through the page only when nothing
+        # covered the control, its press never reached the page and nothing
+        # it should bring came. What cannot be told stops the run, and the
+        # control is never pressed twice (pressing.press_once).
+        outcome = pressing.press_once(
+            page, el, what="the control for this bill", words=_words(),
+            guard=is_safe_control, dl_dir=dl_dir,
+            brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
+        if outcome.error is not None:
+            log.info("click on %r failed: %s", label, str(outcome.error)[:120])
+        if pressed is not None and outcome.page_error is None:
+            pressed.append(label)
+        if trace is not None:
+            if outcome.error is None:
                 trace.append({"note": "clicked", "control": redact(label)[:60]})
-        except Exception as e:
-            log.info("click on %r failed: %s", label, str(e)[:120])
-            if trace is not None:
-                trace.append({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
-            try:
-                el.evaluate("el => el.click()")
-                if pressed is not None:
-                    pressed.append(label)
-                if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
-            except Exception as e2:
-                if trace is not None:
-                    trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
+            else:
+                trace.append({"note": "click failed", "control": redact(label)[:60],
+                              "error": str(outcome.error)[:160]})
+            if outcome.how == pressing.MADE:
+                trace.append({"note": "the press reached the page although it raised, "
+                                      "so it was not made again", "control": redact(label)[:60]})
+            elif outcome.how == pressing.THROUGH_THE_PAGE and outcome.page_error is None:
+                trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
+            elif outcome.how == pressing.THROUGH_THE_PAGE:
+                trace.append({"note": "DOM click failed too", "error": str(outcome.page_error)[:160]})
         if wait_for_pdf(12):
             return True
         # What did the click change? A menu or a dialog with the real

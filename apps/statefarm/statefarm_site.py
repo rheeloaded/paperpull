@@ -39,6 +39,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import sys
 import time
 import unicodedata
 from contextlib import contextmanager
@@ -77,8 +78,17 @@ from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
+from paperpull_core import pressing
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("statefarm_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("State Farm", sys.modules[__name__])
+
 
 BASE = "https://my.statefarm.com"
 # Read off the first survey (#37, 2026-09-20). Sign-in lands on My
@@ -2569,32 +2579,39 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 trace.append({"note": "the control changed before it was pressed, so nothing was pressed",
                               "why": why})
             return False
-        try:
-            el.click(timeout=8000)
-            if trace is not None:
-                trace.append({"note": "clicked", "control": _label_mask(label, own)})
-        except Exception as e:
-            if trace is not None:
-                trace.append({"note": "click failed", "control": _label_mask(label, own),
-                              "why": _click_failure(e)})
+        def check_again() -> str:
             # A press can wait eight seconds before it fails, and the page
             # can move in that time, so the control is checked again before
-            # it is pressed through the page instead (#37).
-            why = check() if check is not None else ""
-            if why:
-                if trace is not None:
-                    trace.append({"note": "the control changed while the press waited, "
-                                          "so it was not pressed through the page",
-                                  "why": why})
-                return False
-            try:
-                el.evaluate("el => el.click()")
-                if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead",
-                                  "control": _label_mask(label, own)})
-            except Exception as e2:
-                if trace is not None:
-                    trace.append({"note": "DOM click failed too", "why": _click_failure(e2)})
+            # it is pressed through the page instead (#37). A control that
+            # changed stops the run there (pressing.press_once).
+            why_now = check() if check is not None else ""
+            if why_now and trace is not None:
+                trace.append({"note": "the control changed while the press waited, "
+                                      "so it was not pressed through the page",
+                              "why": why_now})
+            return why_now
+
+        # Playwright's own press, and through the page only when nothing
+        # covered the control, its press never reached the page and nothing
+        # it should bring came. What cannot be told stops the run, and the
+        # control is never pressed twice (pressing.press_once).
+        outcome = pressing.press_once(
+            page, el, what="the control for this document", words=_words(),
+            guard=is_safe_control, check=check_again, dl_dir=dl_dir,
+            brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
+        if trace is not None:
+            if outcome.error is None:
+                trace.append({"note": "clicked", "control": _label_mask(label, own)})
+            else:
+                trace.append({"note": "click failed", "control": _label_mask(label, own),
+                              "why": _click_failure(outcome.error)})
+            if outcome.how == pressing.MADE:
+                trace.append({"note": "the press reached the page although it raised, "
+                                      "so it was not made again", "control": _label_mask(label, own)})
+            elif outcome.how == pressing.THROUGH_THE_PAGE and outcome.page_error is None:
+                trace.append({"note": "clicked through the DOM instead", "control": _label_mask(label, own)})
+            elif outcome.how == pressing.THROUGH_THE_PAGE:
+                trace.append({"note": "DOM click failed too", "why": _click_failure(outcome.page_error)})
         if wait_for_pdf(10):
             return True
         if _take_same_tab(page, start_url, out_path, trace):

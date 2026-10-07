@@ -23,7 +23,8 @@ window, presses only when it is the thing on top there, and presses
 unforced so Playwright checks once more.
 
 It reads Python and never JavaScript, so a press a page script makes is
-not read here. el.click() inside an evaluate is one, and it passes this.
+not read here. el.click() inside an evaluate is one, and
+test_no_app_presses_through_page_script reads those.
 
 Read from the syntax tree, never by searching the text, so a force
 argument of something that is not a press (prime_session, a token
@@ -180,7 +181,8 @@ def _presses_through_pressing(app: Path) -> bool:
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         for node in ast.walk(tree):
             if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
-                    and node.value.id == "pressing" and node.attr in ("click", "check")):
+                    and node.value.id == "pressing"
+                    and node.attr in ("click", "check", "press_once")):
                 return True
     return False
 
@@ -206,7 +208,9 @@ def test_every_app_that_presses_through_pressing_stops_its_run_on_a_stop():
         assert handlers, "%s does not catch pressing.Stop in main()" % app.name
         assert any("pressing.stop_run(app, " in ast.unparse(h) for h in handlers), \
             "%s catches pressing.Stop without pressing.stop_run" % app.name
-    assert {"amex", "vanguard"} <= set(users), users
+    assert {"amex", "vanguard", "adp", "amfam", "applecard", "att", "etrade", "golden1",
+            "newrez", "pge", "sba", "smud", "statefarm", "verizonmobile",
+            "wellsfargo"} <= set(users), users
 
 
 def test_the_census_finds_every_kind_of_press_it_is_for():

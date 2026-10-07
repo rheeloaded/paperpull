@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,8 +80,17 @@ from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
+from paperpull_core import pressing
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("newrez_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("Newrez", sys.modules[__name__])
+
 
 BASE = "https://myaccount.newrez.com"
 # From the first survey (#38, 2026-09-20). Sign-in lands on /dashboard,
@@ -1367,6 +1377,8 @@ _CAPTURE_STEPS = {
     "click failed": "click failed",
     "clicked through the DOM instead": "clicked through the page",
     "DOM click failed too": "page click failed too",
+    "the press reached the page although it raised, so it was not made again":
+        "click reached the page and raised",
     "the tab moved": "the tab moved",
     "after the click": "looked after the click",
     "second step clicked": "second step clicked",
@@ -1760,12 +1772,6 @@ def _new_pdfs(dl_dir, before: set) -> list:
 # is still on the page, read in one call so they describe one moment.
 _NAME_AND_ROW_JS = ("el => [(el.getAttribute('aria-label') || el.innerText || '').trim(), ("
                     + _ROW_OF_JS + ")(el), el.isConnected]")
-# The press through the page, made only if the control still has the name
-# the guard approved, checked and pressed in one step so nothing can move
-# in between.
-_DOM_CLICK_IF_SAME_JS = ("(el, want) => { const n = (el.getAttribute('aria-label') || el.innerText"
-                         " || '').trim(); if (!el.isConnected || n !== want) return false;"
-                         " el.click(); return true; }")
 
 
 def _still_the_one(el, iso: str, label: str) -> str:
@@ -2168,27 +2174,39 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             log.info("the control for %r changed before it was pressed, so nothing was pressed", label)
             return False
         clicked_at[0] = _clock()
-        try:
-            el.click(timeout=CLICK_TIMEOUT_MS)
-            if trace is not None:
-                trace.append({"note": "clicked", "control": redact(label)[:60]})
-        except Exception as e:
-            if trace is not None:
-                trace.append({"note": "click failed", "control": redact(label)[:60], "error": str(e)[:160]})
+
+        def check_again() -> str:
             # The ordinary press can take seconds to give up, so the name and
             # the date are read again before pressing through the page, and
-            # the name once more in the same step as the press.
-            why = check() if check is not None else ""
-            try:
-                if why:
-                    _note(trace, "the row changed, so it was not pressed through the DOM", why=why)
-                elif el.evaluate(_DOM_CLICK_IF_SAME_JS, label) is False:
-                    _note(trace, "the row changed, so it was not pressed through the DOM")
-                elif trace is not None:
-                    trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
-            except Exception as e2:
-                if trace is not None:
-                    trace.append({"note": "DOM click failed too", "error": str(e2)[:160]})
+            # its words once more in the same step as the press. A row that
+            # changed stops the run there (pressing.press_once).
+            why_now = check() if check is not None else ""
+            if why_now:
+                _note(trace, "the row changed, so it was not pressed through the DOM", why=why_now)
+            return why_now
+
+        # Playwright's own press, and through the page only when nothing
+        # covered the control, its press never reached the page and nothing
+        # it should bring came. What cannot be told stops the run, and the
+        # control is never pressed twice (pressing.press_once).
+        outcome = pressing.press_once(
+            page, el, what="the control for this document", words=_words(),
+            guard=is_safe_control, check=check_again, dl_dir=dl_dir, timeout=CLICK_TIMEOUT_MS,
+            brought=lambda: bool(downloads or got or on_its_way()
+                                 or (_control_texts(page) - controls_before)))
+        if trace is not None:
+            if outcome.error is None:
+                trace.append({"note": "clicked", "control": redact(label)[:60]})
+            else:
+                trace.append({"note": "click failed", "control": redact(label)[:60],
+                              "error": str(outcome.error)[:160]})
+            if outcome.how == pressing.MADE:
+                _note(trace, "the press reached the page although it raised, so it was not made again",
+                      control=redact(label)[:60])
+            elif outcome.how == pressing.THROUGH_THE_PAGE and outcome.page_error is None:
+                trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
+            elif outcome.how == pressing.THROUGH_THE_PAGE:
+                trace.append({"note": "DOM click failed too", "error": str(outcome.page_error)[:160]})
         how = wait_for_pdf(FIRST_WAIT_S)
         if how:
             return ended(how, "first wait")

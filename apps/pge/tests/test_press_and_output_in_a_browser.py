@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import pge_site as site
+from paperpull_core import pressing
 
 HISTORY = "https://myaccount.pge.com/myaccount/s/bill-and-payment-history"
 _PDF = b"%PDF-1.4\n" + b"1 0 obj << >> endobj\n" * 40
@@ -110,19 +111,37 @@ def _download(page, tmp_path, date="2031-04-17"):
 
 def test_a_dialog_over_the_row_never_takes_the_press(page, tmp_path, caplog):
     """The review's case. The draft pressed with force, so the mouse went
-    to the dialog's button, a control no guard had read. The link's own
-    click reaches the link and nothing else."""
+    to the dialog's button, a control no guard had read. Round eight gave
+    the link its own click through the page instead, which reached the link
+    under a dialog nobody had read. Now neither is pressed and the run
+    stops, for the person to close the dialog."""
+    caplog.set_level(logging.INFO, logger="paperpull")
     caplog.set_level(logging.INFO, logger="pge_docs.site")
     page.set_content(ROW % "View Bill PDF" + ON_PRESS % ASK_SALESFORCE
                      + DIALOG_OVER_THE_ROW)
-    ok, out, j = _download(page, tmp_path)
+    with pytest.raises(pressing.Covered) as stop:
+        _download(page, tmp_path)
     assert page.evaluate("window.promo") == 0, "the dialog's button took the press"
-    assert page.evaluate("window.presses") == 1
-    assert ok is True and out.read_bytes() == _PDF
-    pressed = _results(j, "pressed the pdf control")
-    assert pressed and pressed[0]["landed"] is True and pressed[0]["own_click"] is True
-    # the error that says what covered the link is page text, and stays out
+    assert page.evaluate("window.presses") == 0, "the link was pressed under the dialog"
+    assert not (tmp_path / "bill.pdf").exists()
+    # What covered the link is page text. No log line carries any of it,
+    # and what the stop says of it goes through the word list, its digits
+    # written as shapes.
     assert "Enroll" not in caplog.text and "55 12" not in caplog.text
+    told = " ".join(stop.value.lines) + json.dumps(stop.value.facts)
+    assert "55 12" not in told and "99 99" in told
+
+
+def test_a_press_that_landed_and_raised_is_not_made_again(page, tmp_path):
+    """The link's own handler is still busy when the press's time runs out,
+    so Playwright never says how the press ended. It had landed, and the
+    link's own click used to follow it, a second press. The run stops
+    instead."""
+    page.set_content(ROW % "View Bill PDF" + ON_PRESS % (
+        "const t = Date.now(); while (Date.now() - t < 6000) {}"))
+    with pytest.raises(pressing.Unsure):
+        _download(page, tmp_path)
+    assert page.evaluate("window.presses") == 1
 
 
 def test_an_uncovered_link_takes_an_ordinary_click(page, tmp_path):
@@ -134,6 +153,9 @@ def test_an_uncovered_link_takes_an_ordinary_click(page, tmp_path):
 
 
 def test_a_press_that_lands_nowhere_says_so_and_nothing_else(caplog):
+    """Something covered the link, the link could not be read, and nothing
+    is pressed. What covered it is page text and stays out of every line."""
+    caplog.set_level(logging.INFO, logger="paperpull")
     caplog.set_level(logging.INFO, logger="pge_docs.site")
 
     class _Gone:
@@ -154,9 +176,11 @@ def test_a_press_that_lands_nowhere_says_so_and_nothing_else(caplog):
             pass
 
     said = {}
-    assert site._press_once(_Page(), _Gone(), lambda: False, seconds=0.1, said=said) is None
+    with pytest.raises(pressing.Covered) as stop:
+        site._press_once(_Page(), _Gone(), lambda: False, seconds=0.1, said=said)
     assert said == {"landed": False, "own_click": False, "late_error": False}
-    assert "55 12" not in caplog.text and "Enroll" not in caplog.text
+    told = caplog.text + " ".join(stop.value.lines) + json.dumps(stop.value.facts)
+    assert "55 12" not in told and "Enroll" not in told
 
 
 # -- the guard judges every label ---------------------------------------------

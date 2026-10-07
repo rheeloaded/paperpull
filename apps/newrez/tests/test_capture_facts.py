@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import storage  # noqa: E402,F401  binds this provider's AppSpec
 import newrez_docs  # noqa: E402
 import newrez_site as site  # noqa: E402
+from paperpull_core import pressing  # noqa: E402
 
 LOAN = "1234567"
 MONTHLY = f"https://servicing.newrez.com/servicing/{LOAN}/statements/monthly"
@@ -599,10 +600,19 @@ def test_a_leftover_the_browser_kept_is_waited_on_once(tmp_path, clock, monkeypa
     assert site.capture_facts(trace)["steps"][0] == "clicked"
 
 
+# Playwright's account of a press that timed out before it began.
+NOT_BEGUN = ('Locator.click: Timeout 8000ms exceeded.\nCall log:\n'
+             '  - attempting click action\n'
+             '    2 × waiting for element to be visible, enabled and stable\n'
+             '      - element is not stable\n')
+
+
 def test_a_row_that_changes_while_the_press_is_tried_is_not_pressed_through_the_page(tmp_path, clock):
     """A control named only "View" takes its date from its row. The
     ordinary press could not reach it, and while it tried, the row became
-    July's. The press through the page is not made."""
+    July's. The press through the page is not made, and the run stops
+    (pressing.press_once). The control answers each script press_once
+    runs in the page the way a page would."""
 
     class _Stuck(_El):
         def __init__(self):
@@ -612,18 +622,25 @@ def test_a_row_that_changes_while_the_press_is_tried_is_not_pressed_through_the_
 
         def click(self, timeout=0):
             self.row = "July 2026"
-            raise TimeoutError("something lies over it")
+            raise TimeoutError(NOT_BEGUN)
 
         def evaluate(self, js, arg=None):
-            if arg is None:
-                return [self.label, self.row, True]
-            self.through_the_page += 1
-            return True
+            if js == pressing._HEAR_JS:
+                return {"words": [self.label], "css": "a"}
+            if js == pressing._HEARD_JS:
+                return False
+            if js == pressing._WORDS_JS:
+                return [self.label]
+            if js == pressing._PRESS_JS:
+                self.through_the_page += 1
+                return "pressed"
+            return [self.label, self.row, True]
 
     el = _Stuck()
     trace = []
-    assert site._catch_pdf(_Page(clock), el, "View", tmp_path / "s.pdf", trace, tmp_path,
-                           check=lambda: site._still_the_one(el, "2026-08-31", "View")) is False
+    with pytest.raises(pressing.Changed):
+        site._catch_pdf(_Page(clock), el, "View", tmp_path / "s.pdf", trace, tmp_path,
+                        check=lambda: site._still_the_one(el, "2026-08-31", "View"))
     assert el.through_the_page == 0
     [refused] = [t for t in trace if t.get("note") == "the row changed, so it was not pressed through the DOM"]
     assert refused["why"] == "it no longer carries this date"

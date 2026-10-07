@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import statefarm_site as site
+from paperpull_core import pressing
 
 CENTER = "https://edocuments.statefarm.com/DocumentCenterUI/"
 
@@ -595,7 +596,10 @@ def test_a_document_control_that_changed_before_the_press_is_not_pressed(tmp_pat
 
 def test_a_failed_press_is_not_made_through_the_page_once_the_control_changed(page, tmp_path):
     """A press can wait eight seconds before it fails, and then the control
-    is pressed through the page. It is checked again first."""
+    may be pressed through the page. It is checked again first, and when it
+    changed nothing is pressed and the run stops (pressing.press_once). The
+    control answers each script press_once runs in the page the way a page
+    would."""
     pressed = []
 
     class _Control:
@@ -603,17 +607,23 @@ def test_a_failed_press_is_not_made_through_the_page_once_the_control_changed(pa
             pass
 
         def click(self, timeout=None):
-            raise Exception("Timeout 8000ms exceeded.")
+            raise Exception(NOT_BEGUN)
 
-        def evaluate(self, js):
+        def evaluate(self, js, arg=None):
+            if js == pressing._HEAR_JS:
+                return {"words": ["Renewal Notice"], "css": "a"}
+            if js == pressing._HEARD_JS:
+                return False
+            if js == pressing._WORDS_JS:
+                return ["Renewal Notice"]
             pressed.append(js)
     answers = iter(["", "its name changed"])
     trace = []
-    assert not site._catch_pdf(page, _Control(), "Renewal Notice", tmp_path / "doc.pdf", trace,
-                               None, check=lambda: next(answers, "its name changed"))
+    with pytest.raises(pressing.Changed):
+        site._catch_pdf(page, _Control(), "Renewal Notice", tmp_path / "doc.pdf", trace,
+                        None, check=lambda: next(answers, "its name changed"))
     assert not pressed, "nothing was pressed through the page"
     assert trace == [
-        {"note": "click failed", "control": "another control", "why": "timed out"},
         {"note": "the control changed while the press waited, so it was not pressed through the page",
          "why": "its name changed"}], trace
 
@@ -1471,13 +1481,12 @@ def test_a_document_no_longer_tied_to_the_row_that_was_pressed_is_not_pressed(pa
             "why": why} in trace, trace
 
 
-def test_a_document_whose_row_changed_while_its_press_waited_is_not_pressed_through_the_page(
-        page, tmp_path, monkeypatch):
-    """A press can wait eight seconds before it fails, and the document is
-    then pressed through the page. Here something covers the document, so
-    its press waits and fails, and three seconds into that wait the row that
-    was pressed is given another date. The document is tied to its row again
-    before it is pressed through the page, and it is not pressed."""
+def test_a_covered_document_is_not_pressed_and_the_run_stops(page, tmp_path, monkeypatch):
+    """Something covers the document, so its press waits and fails. It was
+    then pressed through the page, under whatever covered it. Nothing is
+    pressed now, and the run stops for the person to close what covers it
+    (pressing.press_once)."""
+    monkeypatch.setattr(pressing, "PRESS_MS", 1000)
     real = site._snapshot
     done = []
 
@@ -1486,17 +1495,54 @@ def test_a_document_whose_row_changed_while_its_press_waited_is_not_pressed_thro
             done.append(1)
             page.evaluate(
                 "document.body.insertAdjacentHTML('beforeend', "
-                "\"<div style='position:fixed;inset:0;z-index:9'></div>\");"
-                "setTimeout(() => { %s.querySelector('.when').textContent = '06/09/2026'; }, 3000);"
-                % _RECEIPT_ROW)
+                "\"<div style='position:fixed;inset:0;z-index:9'></div>\")")
         return real(dl_dir)
     monkeypatch.setattr(site, "_snapshot", covering)
     out = tmp_path / "doc.pdf"
     trace = []
-    assert not site.download_bill(page, None, D_RECEIPT, out,
-                                  title="Payment Receipt - Billing/Payments", trace=trace), trace
+    with pytest.raises(pressing.Covered):
+        site.download_bill(page, None, D_RECEIPT, out,
+                           title="Payment Receipt - Billing/Payments", trace=trace)
     assert not out.exists() and len(page.context.pages) == 1
-    assert [t["control"] for t in trace if t.get("note") == "click failed"] == ["Payment Receipt - ..."], trace
+    assert not [t for t in trace if t.get("note") == "clicked through the DOM instead"], trace
+
+
+# Playwright's account of a press that timed out before it began.
+NOT_BEGUN = ('Locator.click: Timeout 8000ms exceeded.\nCall log:\n'
+             '  - attempting click action\n'
+             '    2 × waiting for element to be visible, enabled and stable\n'
+             '      - element is not stable\n')
+
+
+def test_a_document_whose_row_changed_while_its_press_waited_is_not_pressed_through_the_page(
+        page, tmp_path, monkeypatch):
+    """A press can wait eight seconds before it fails, and the document may
+    then be pressed through the page. Here the document's press times out
+    before it began, and meanwhile the row that was pressed is given another
+    date. The document is tied to its row again before it would be pressed
+    through the page, it is not pressed, and the run stops."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    real = {"Locator": sync_api.Locator.click, "ElementHandle": sync_api.ElementHandle.click}
+    presses = []
+
+    def press(kind):
+        def click(self, *args, **kwargs):
+            presses.append(kind)
+            if len(presses) == 1:
+                # the row's View Documents
+                return real[kind](self, *args, **kwargs)
+            page.evaluate("%s.querySelector('.when').textContent = '06/09/2026'" % _RECEIPT_ROW)
+            raise sync_api.TimeoutError(NOT_BEGUN)
+        return click
+    monkeypatch.setattr(sync_api.Locator, "click", press("Locator"))
+    monkeypatch.setattr(sync_api.ElementHandle, "click", press("ElementHandle"))
+    out = tmp_path / "doc.pdf"
+    trace = []
+    with pytest.raises(pressing.Changed):
+        site.download_bill(page, None, D_RECEIPT, out,
+                           title="Payment Receipt - Billing/Payments", trace=trace)
+    assert len(presses) == 2
+    assert not out.exists() and len(page.context.pages) == 1
     assert {"note": "the control changed while the press waited, so it was not pressed through the page",
             "why": "the row's control no longer carries this date"} in trace, trace
     assert not [t for t in trace if t.get("note") == "clicked through the DOM instead"], trace

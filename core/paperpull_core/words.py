@@ -285,6 +285,7 @@ answering carries census clickable crowded decides embedded false fits hold land
 listened mechanism reads refuses sits stand sure trying unlabeled unrecognized viewers
 walk word side stayed proxy flight gal gallon gallons regular plus diesel unleaded
 approved minus symbol
+covered unheard
 v1 v2 v3 v4 v5 v6 v7 v8 v9 1xx 2xx 3xx 4xx 5xx
 """
 

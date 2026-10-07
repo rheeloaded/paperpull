@@ -150,6 +150,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -185,8 +186,17 @@ from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
+from paperpull_core import pressing
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("etrade_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("ETRADE", sys.modules[__name__])
+
 
 BASE = "https://us.etrade.com"
 # From the first survey (#36, 2026-09-20). The Documents page is
@@ -2066,20 +2076,27 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             el.scroll_into_view_if_needed(timeout=4000)
         except Exception:
             pass
-        try:
-            el.click(timeout=8000)
-            if trace is not None:
+        # Playwright's own press, and through the page only when nothing
+        # covered the control, its press never reached the page and nothing
+        # it should bring came. What cannot be told stops the run, and the
+        # control is never pressed twice (pressing.press_once).
+        outcome = pressing.press_once(
+            page, el, what="the control for this document", words=_words(),
+            guard=is_safe_control, dl_dir=dl_dir,
+            brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
+        if trace is not None:
+            if outcome.error is None:
                 trace.append({"note": "clicked"})
-        except Exception as e:
-            if trace is not None:
-                trace.append({"note": "click failed", "error": type(e).__name__})
-            try:
-                el.evaluate("el => el.click()")
-                if trace is not None:
-                    trace.append({"note": "clicked through the DOM instead"})
-            except Exception as e2:
-                if trace is not None:
-                    trace.append({"note": "DOM click failed too", "error": type(e2).__name__})
+            else:
+                trace.append({"note": "click failed",
+                              "error": type(outcome.error).__name__})
+            if outcome.how == pressing.MADE:
+                trace.append({"note": "the press reached the page although it raised, "
+                                      "so it was not made again"})
+            elif outcome.how == pressing.THROUGH_THE_PAGE and outcome.page_error is None:
+                trace.append({"note": "clicked through the DOM instead"})
+            elif outcome.how == pressing.THROUGH_THE_PAGE:
+                trace.append({"note": "DOM click failed too", "error": type(outcome.page_error).__name__})
         if wait_for_pdf(10):
             return True
         if _take_same_tab(page, start_url, out_path, trace):
