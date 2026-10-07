@@ -24,6 +24,18 @@ nothing at all about that promise.
 So this refuses to report success while the canary has not run, and it
 prints every other skip at the end where it can be seen.
 
+Not being skipped is not the same as having run. Until 2026-10-07 a run
+refused only a skip that named the canary, and said "privacy canary
+included" whenever it passed. On 2026-10-06 all four parts of the CI run
+of 290b9f74 ended with that line while only the part holding the core
+suite had run the canary, and a canary deleted, renamed or deselected, or
+a core suite that collected nothing, would have read the same. pytest
+runs each suite quietly, so its output names no test that passed. So the
+plugin now writes down how each test of core/tests/test_failure_canary.py
+ended, a run that holds the core suite passes only when every test
+collected there ran and passed, and a part on CI without the core suite
+says which part runs the canary.
+
 WHICH INTERPRETER RUNS WHAT
 
 Each suite runs with the environment holding the newest Playwright that
@@ -129,7 +141,8 @@ relative to the checkout or to the library that holds it, never as a path
 on the machine, so no home folder or user name appears. Line numbers,
 function names and exception types come from source code. pytest's own
 wrapper around an import error is named without its message, which holds
-the module's full path.
+the module's full path. What it says about the canary is counts and
+words of its own.
 
 The exception's message is the one piece of free text, and it can hold
 only what the test held. So no test may read anything of the person
@@ -167,6 +180,8 @@ REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "tools" / "pytest_plugins"
 WHERE = "where_it_failed"
 WHERE_FILE = "PAPERPULL_WHERE_IT_FAILED"
+# The test file whose every test the plugin writes down, passed or not.
+OUTCOMES_OF = "PAPERPULL_OUTCOMES_OF"
 # A failing suite's whole output, one file per suite, from the latest run.
 OUTPUT = REPO / "test-output"
 # How long each suite took on a full run. The longest start first, and the
@@ -223,6 +238,10 @@ WHY = {
     "fastapi": "the control panel",
 }
 CANARY = "test_failure_canary"
+# Where the canary is, in the core suite's folder. A run that holds the core
+# suite passes only when every test collected there ran and passed.
+CANARY_SUITE = "core"
+CANARY_FILE = "tests/%s.py" % CANARY
 _ASKED: dict = {}
 ASK_WITHIN = 300
 
@@ -522,13 +541,16 @@ def descendants(pid: int) -> list:
 
 
 def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S):
-    """Run one suite. Its whole output, its exit code, and each failure as
-    the plugin wrote it down. A suite that runs out of time is ended with
-    everything it started and comes back as a failure that says so."""
+    """Run one suite. Its whole output, its exit code, and what the plugin
+    wrote down, each failure and how each test of the suite's own canary
+    file ended, which only the core suite has. A suite that runs out of
+    time is ended with everything it started and comes back as a failure
+    that says so."""
     fd, record = tempfile.mkstemp(prefix="paperpull-where-", suffix=".jsonl")
     os.close(fd)
     env = with_this_core(PLUGINS)
     env[WHERE_FILE] = record
+    env[OUTCOMES_OF] = str(d / CANARY_FILE)
     env[IN_RUN] = "1"
     try:
         # Left in the runner's process group, so Ctrl+C, a closed terminal or
@@ -553,13 +575,13 @@ def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S):
         finally:
             with _RUNNING_LOCK:
                 _RUNNING.discard(proc)
-        failures = read_failures(record)
+        records = read_records(record)
     finally:
         try:
             os.remove(record)
         except OSError:
             pass
-    return (out or "") + (err or ""), code, failures
+    return (out or "") + (err or ""), code, records
 
 
 def stop_everything() -> None:
@@ -569,7 +591,9 @@ def stop_everything() -> None:
         stop_tree(proc.pid)
 
 
-def read_failures(path) -> list:
+def read_records(path) -> list:
+    """Each line the plugin wrote that can be read, a failure or a line
+    about how a test of the canary's file ended."""
     out = []
     try:
         with open(path, encoding="utf-8") as f:
@@ -639,7 +663,10 @@ def where_it_failed(output: str, failures: list, root: Path = REPO) -> list:
     """What to print about a failing suite. Each failure with every frame
     of its traceback and the exception that ended it, as the plugin wrote
     them down, then any failure that raised nothing, from pytest's own
-    summary. With no record at all, pytest's failure lines, as before."""
+    summary. With no record at all, pytest's failure lines, as before.
+    What the plugin wrote about how each canary test ended is no failure
+    and is left out here."""
+    failures = [rec for rec in failures if "outcome_of" not in rec]
     lines = output.splitlines()
     if not failures:
         said = [ln.rstrip()[:WIDTH] for ln in lines if ln.startswith(("FAILED ", "ERROR ", "E   "))]
@@ -721,6 +748,74 @@ def clear_old_output(folder=None) -> None:
             p.unlink()
         except OSError:
             pass
+
+
+# -- the privacy canary ------------------------------------------------------
+
+def canary_counts(records: list) -> dict:
+    """How the canary's tests ended, as the plugin wrote it down, in counts.
+    Every test collected, and of those, how many passed their setup, the
+    test itself and their teardown, how many failed one of them, how many
+    were skipped, how many never ran, as a deselected one does, and how
+    many started and did not finish."""
+    phases = {}
+    for rec in records:
+        name = rec.get("outcome_of") if isinstance(rec, dict) else None
+        if not isinstance(name, str):
+            continue
+        ended = phases.setdefault(name, {})
+        if rec.get("when") != "collected":
+            ended[str(rec.get("when"))] = rec.get("outcome")
+    counts = {"tests": len(phases), "passed": 0, "failed": 0, "skipped": 0,
+              "never ran": 0, "did not finish": 0}
+    for ended in phases.values():
+        outcomes = set(ended.values())
+        if "failed" in outcomes:
+            counts["failed"] += 1
+        elif "skipped" in outcomes:
+            counts["skipped"] += 1
+        elif not ended:
+            counts["never ran"] += 1
+        elif outcomes == {"passed"} and set(ended) == {"setup", "call", "teardown"}:
+            counts["passed"] += 1
+        else:
+            counts["did not finish"] += 1
+    return counts
+
+
+def canary_refusal(held: bool, counts, there: bool, skipped: bool) -> list:
+    """What to print when a run that holds the core suite did not see every
+    test of the canary pass, or when a skip names the canary anywhere.
+    Nothing when neither is so. Counts and words of this file only, since
+    somebody may paste it into a public issue."""
+    counts = counts or canary_counts([])
+    ran = 0 < counts["passed"] == counts["tests"]
+    if not skipped and (ran or not held):
+        return []
+    place = CANARY_SUITE + "/" + CANARY_FILE
+    partly = bool(counts["failed"]) or 0 < counts["passed"] < counts["tests"]
+    lines = ["THE PRIVACY CANARY DID %s." % ("NOT PASS" if partly else "NOT RUN")]
+    if held and not counts["tests"]:
+        lines.append(("The core suite ran none of the tests in %s." if there
+                      else "%s is missing, so none of its tests ran.") % place)
+    elif held and not ran:
+        said = ["%d passed" % counts["passed"]] + [
+            "%d %s" % (counts[k], k if k != "skipped" else "was skipped" if counts[k] == 1 else "were skipped")
+            for k in ("failed", "skipped", "never ran", "did not finish") if counts[k]]
+        lines.append("Of the %d test%s in %s, %s." % (
+            counts["tests"], "" if counts["tests"] == 1 else "s", place,
+            said[0] if len(said) == 1 else ", ".join(said[:-1]) + " and " + said[-1]))
+    lines += ["It is the only test holding the promise that a failure file",
+              "carries no page content, so this run proves nothing about it."]
+    if skipped:
+        lines.append("   pip install playwright && python -m playwright install chromium")
+    return lines
+
+
+def canary_part(names: list, times: dict, n: int):
+    """Which of n parts of a run holds the core suite, and so the canary.
+    None when no part does."""
+    return next((k for k in range(1, n + 1) if CANARY_SUITE in shard_of(names, times, k, n)), None)
 
 
 # -- how many at once, in which order, which part ----------------------------
@@ -960,6 +1055,7 @@ def run(args) -> int:
     passed = failed = skipped = 0
     broken, under_equipped, skip_lines = [], [], []
     took = {}
+    canary = None       # how the canary's tests ended, once the core suite has
     t0 = time.time()
     clear_old_output()
 
@@ -1009,12 +1105,14 @@ def run(args) -> int:
     def one(item):
         name, d, py = item
         started = time.time()
-        out, returncode, failures = run_suite(d, py, timeout=limit_of(name, times))
-        return name, out, returncode, failures, time.time() - started
+        out, returncode, records = run_suite(d, py, timeout=limit_of(name, times))
+        return name, out, returncode, records, time.time() - started
 
-    def report(name, out, returncode, failures, seconds):
-        nonlocal passed, failed, skipped
+    def report(name, out, returncode, records, seconds):
+        nonlocal passed, failed, skipped, canary
         took[name] = round(seconds)
+        if name == CANARY_SUITE:
+            canary = canary_counts(records)
         lines = [ln for ln in out.strip().splitlines() if ln.strip()]
         summary = lines[-1] if lines else "no output"
         for n, kindword in re.findall(r"(\d+) (passed|failed|skipped|error)", summary):
@@ -1035,7 +1133,7 @@ def run(args) -> int:
             # timing test or a real break without rerunning it by hand, and
             # one that gave only the assertion could not say which of two
             # visits to the same page had failed.
-            for ln in where_it_failed(out, failures):
+            for ln in where_it_failed(out, records):
                 print("       " + ln, flush=True)
             keep_whole_output(name, out)
 
@@ -1097,11 +1195,15 @@ def run(args) -> int:
     keep_times(took, write=args.write_times and not args.quick and not args.shard)
 
     refused = False
-    if any(CANARY in ln for ln in skip_lines):
-        print("\nTHE PRIVACY CANARY DID NOT RUN.")
-        print("It is the only test holding the promise that a failure file")
-        print("carries no page content, so this run proves nothing about it.")
-        print("   pip install playwright && python -m playwright install chromium")
+    # A run that holds the core suite has to have seen every test of the
+    # canary pass. Not being skipped is not enough, since a canary that was
+    # deleted, renamed or deselected, or a core that collected nothing, has
+    # no skip to show.
+    held = [d for name, d, _kind in plan if name == CANARY_SUITE]
+    told = canary_refusal(bool(held), canary, bool(held) and (held[0] / CANARY_FILE).is_file(),
+                          any(CANARY in ln for ln in skip_lines))
+    if told:
+        print("\n" + "\n".join(told))
         refused = True
     if older:
         print("\nNOT EVERY SUITE RAN ON PLAYWRIGHT %s." % newest)
@@ -1126,7 +1228,18 @@ def run(args) -> int:
         refused = True
     if refused or broken:
         return 1
-    print("\nall suites passed, privacy canary included")
+    if held:
+        print("\nall suites passed, privacy canary included")
+        return 0
+    # A part of a CI run without the core says which part runs the canary,
+    # since each part's log ended "privacy canary included" until 2026-10-07.
+    parts = parse_shard(args.shard)[1] if args.shard else 0
+    home = canary_part([name for name, _d, _kind in suites(args.quick)], times, parts) if parts else None
+    if home:
+        print("\nall suites passed, and the privacy canary runs in part %d of %d, "
+              "which holds the core suite" % (home, parts))
+    else:
+        print("\nall suites passed, and the privacy canary was not among them")
     return 0
 
 

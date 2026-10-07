@@ -9,6 +9,13 @@ from the order. So this takes them from the exception itself, the way
 pytest holds it, and writes one JSON line per failure to the file named
 by PAPERPULL_WHERE_IT_FAILED.
 
+It writes down how the tests of one file ended as well, the file named by
+PAPERPULL_OUTCOMES_OF, a line for each test as it is collected and a line
+for each phase of it as that phase ends, passed, failed or skipped. The
+runner names the privacy canary there. pytest runs each suite quietly, so
+its output names no test that passed, and until 2026-10-07 the runner
+took a canary that was not skipped for a canary that had run.
+
 It records facts and decides nothing. Which of them may be printed, and
 in what form, is the runner's choice, made in one place.
 
@@ -24,6 +31,8 @@ import sys
 import sysconfig
 
 ENV = "PAPERPULL_WHERE_IT_FAILED"
+# The one test file whose every test is written down, not only a failure.
+OUTCOMES_OF = "PAPERPULL_OUTCOMES_OF"
 
 # Bounds, so one runaway failure cannot fill the disk or the summary. A
 # recursion error has a thousand frames, and the ends are what matter.
@@ -138,6 +147,11 @@ def _as_summarized(node, nodeid: str) -> str:
         return nodeid
 
 
+def _append(path: str, record: dict) -> None:
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+
 def pytest_exception_interact(node, call, report):
     """Called by pytest for a failure that raised, in collection, setup,
     the test itself or teardown. Not for a skip or an expected failure."""
@@ -148,7 +162,7 @@ def pytest_exception_interact(node, call, report):
         exc = call.excinfo.value if call.excinfo is not None else None
         if exc is None:
             return
-        record = {
+        _append(path, {
             "nodeid": report.nodeid,
             # The same test as pytest's summary line names it, relative to
             # the folder the suite ran in, which is not the checkout's root.
@@ -156,8 +170,54 @@ def pytest_exception_interact(node, call, report):
             "when": getattr(report, "when", None) or "collect",
             "errors": _errors(exc, _own_dirs()),
             "libraries": _libraries(),
-        }
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
+        })
+    except Exception:
+        pass
+
+
+# The node id of each test of the named file collected so far.
+_followed = set()
+
+
+def _the_named_file(path) -> bool:
+    """Whether path is the file PAPERPULL_OUTCOMES_OF names. Compared as
+    files, so how either path is spelled does not matter, and only once
+    the names match, which is cheap enough to ask of every test."""
+    named = os.environ.get(OUTCOMES_OF)
+    if not named or not path:
+        return False
+    if os.path.normcase(os.path.basename(str(path))) != os.path.normcase(os.path.basename(named)):
+        return False
+    try:
+        return os.path.samefile(str(path), named)
+    except OSError:
+        return False
+
+
+def pytest_itemcollected(item):
+    """Each test of the named file, as it is collected. One that is then
+    deselected, or never runs for any other reason, is written down as
+    collected and nothing more."""
+    path = os.environ.get(ENV)
+    if not path:
+        return
+    try:
+        if _the_named_file(getattr(item, "path", None)):
+            _followed.add(item.nodeid)
+            _append(path, {"outcome_of": item.nodeid, "when": "collected"})
+    except Exception:
+        pass
+
+
+def pytest_runtest_logreport(report):
+    """How each phase of a test of the named file ended, its setup, the
+    test itself and its teardown."""
+    path = os.environ.get(ENV)
+    if not path:
+        return
+    try:
+        if report.nodeid in _followed:
+            _append(path, {"outcome_of": report.nodeid, "when": report.when,
+                           "outcome": report.outcome})
     except Exception:
         pass

@@ -10,7 +10,9 @@ These feed the runner real failing suites, run by pytest with the plugin
 that writes down each failure, and check that every frame of each
 traceback comes out, in a form that names no folder of the machine it ran
 on, that the whole output is kept, and that the run still refuses to pass
-without the privacy canary.
+without the privacy canary. Not only a skipped canary. A run that holds
+the core suite passes only when every test of the canary ran and passed,
+and a part of a CI run without the core suite says which part runs it.
 
 They also check that every suite runs on the newest Playwright the
 machine holds, as CI and the packaged app do, and that a run where one
@@ -204,24 +206,57 @@ def _failed_lines(output: str) -> list:
                   if ln.startswith(("FAILED ", "ERROR ")))
 
 
+def _with_plugin(suite: Path, record, followed: Path) -> subprocess.CompletedProcess:
+    """The suite run by pytest with the plugin, writing to record and
+    following the tests of the file followed."""
+    env = rat.with_this_core(rat.PLUGINS)
+    env[rat.WHERE_FILE] = str(record)
+    env[rat.OUTCOMES_OF] = str(followed)
+    return subprocess.run([sys.executable, "-m", "pytest", "-q", "--no-header", "-rsfE",
+                           "-p", "no:cacheprovider", "-p", rat.WHERE],
+                          cwd=suite, capture_output=True, text=True, timeout=300, env=env)
+
+
 def test_the_plugin_changes_no_outcome(walked, tmp_path):
-    """It must never change a run. The same suite without it, and with a
-    record file it cannot write, ends exactly the same way."""
+    """It must never change a run. The same suite without it, with a
+    record file it cannot write, and following every test of the suite's
+    file, ends exactly the same way."""
     suite = walked["suite"]
     plain = subprocess.run([sys.executable, "-m", "pytest", "-q", "--no-header", "-rsfE",
                             "-p", "no:cacheprovider"],
                            cwd=suite, capture_output=True, text=True, timeout=300)
-    env = rat.with_this_core(rat.PLUGINS)
-    env[rat.WHERE_FILE] = str(tmp_path)          # a folder, so the write fails
-    blocked = subprocess.run([sys.executable, "-m", "pytest", "-q", "--no-header", "-rsfE",
-                              "-p", "no:cacheprovider", "-p", rat.WHERE],
-                             cwd=suite, capture_output=True, text=True, timeout=300, env=env)
+    # A folder, so every write fails, the ones about each test followed too.
+    blocked = _with_plugin(suite, tmp_path, suite / "tests" / "test_walk.py")
+    followed = _with_plugin(suite, tmp_path / "record.jsonl", suite / "tests" / "test_walk.py")
     out = plain.stdout + plain.stderr
     assert _summary(out) == "4 failed, 2 passed, 1 error"
-    for other in (walked["output"], blocked.stdout + blocked.stderr):
+    for other in (walked["output"], blocked.stdout + blocked.stderr, followed.stdout + followed.stderr):
         assert _summary(other) == _summary(out)
         assert _failed_lines(other) == _failed_lines(out)
-    assert walked["code"] == plain.returncode == blocked.returncode == 1
+    assert walked["code"] == plain.returncode == blocked.returncode == followed.returncode == 1
+
+
+def test_the_plugin_writes_down_how_each_test_of_one_file_ended(walked, tmp_path):
+    """Passed or not, and only for the file it is given. A strict xfail
+    that passed, and a teardown that failed after a test passed, count as
+    failed, as pytest counts them."""
+    suite = walked["suite"]
+    record = tmp_path / "record.jsonl"
+    _with_plugin(suite, record, suite / "tests" / "test_walk.py")
+    records = rat.read_records(record)
+    followed = [rec for rec in records if "outcome_of" in rec]
+    assert {rec["outcome_of"].split("::")[0] for rec in followed} == {"apps/fake/tests/test_walk.py"}
+    assert rat.canary_counts(records) == {"tests": 6, "passed": 1, "failed": 5, "skipped": 0,
+                                          "never ran": 0, "did not finish": 0}
+    assert [(rec["when"], rec.get("outcome")) for rec in followed
+            if rec["outcome_of"].endswith("::test_passes")] == [
+        ("collected", None), ("setup", "passed"), ("call", "passed"), ("teardown", "passed")]
+    # Followed or not, each failure is written down the same way.
+    assert [rec["nodeid"] for rec in records if "outcome_of" not in rec] == \
+        [rec["nodeid"] for rec in walked["failures"]]
+    other = tmp_path / "other.jsonl"
+    _with_plugin(suite, other, suite / "fake_site.py")
+    assert rat.canary_counts(rat.read_records(other))["tests"] == 0
 
 
 def test_a_module_that_cannot_import_names_the_line_that_failed(tmp_path):
@@ -319,6 +354,18 @@ def test_with_no_record_the_failure_lines_are_kept_as_before():
         ["ERROR: usage", "something broke"]
 
 
+def test_what_the_plugin_wrote_about_a_canary_test_is_no_failure():
+    """It goes in the same file as each failure. A canary test that was
+    collected and passed is not printed as one, and with nothing else
+    written down a failing suite still gets pytest's own lines."""
+    canary = [{"outcome_of": "core/tests/test_failure_canary.py::test_it", "when": "collected"},
+              {"outcome_of": "core/tests/test_failure_canary.py::test_it", "when": "call", "outcome": "passed"}]
+    assert rat.where_it_failed("", canary + [_record(1)]) == [
+        "FAILED tests/test_x.py::test_x", "  x.py:1 in f", "  RecursionError: too deep"]
+    assert rat.where_it_failed("FAILED tests/test_x.py::test_x - assert 1 == 2\n", canary) == \
+        ["FAILED tests/test_x.py::test_x - assert 1 == 2"]
+
+
 # -- the whole output ----------------------------------------------------------
 
 def test_on_ci_the_whole_output_is_a_group_that_runs_no_command(tmp_path):
@@ -353,15 +400,24 @@ def test_the_kept_output_is_never_committed():
 
 @pytest.fixture
 def one_suite(tmp_path, monkeypatch):
-    """main() over a single suite of our making, with its output kept in
-    tmp_path rather than the checkout's own folder."""
-    def make(files: dict):
+    """main() over a single suite of our making, the core, with its output
+    kept in tmp_path rather than the checkout's own folder. App suites of
+    our making can be handed in too, and the times a run is split by."""
+    def make(files: dict, others: dict = None, times: dict = None):
         (tmp_path / "pytest.ini").write_text((REPO / "pytest.ini").read_text(encoding="utf-8"),
                                              encoding="utf-8")
         suite = tmp_path / "core"
         for rel, text in files.items():
             _write(suite, rel, text)
-        monkeypatch.setattr(rat, "suites", lambda quick: [("core", suite, "core")])
+        plan = [("core", suite, "core")]
+        for name, its_files in (others or {}).items():
+            for rel, text in its_files.items():
+                _write(tmp_path / name, rel, text)
+            plan.append((name, tmp_path / name, "app"))
+        monkeypatch.setattr(rat, "suites", lambda quick: list(plan))
+        if times is not None:
+            (tmp_path / "times.json").write_text(json.dumps(times), encoding="utf-8")
+            monkeypatch.setattr(rat, "TIMES", tmp_path / "times.json")
         monkeypatch.setattr(rat, "candidates", lambda: [])
         monkeypatch.setattr(rat, "python_for", lambda d, kind, spares: (Path(sys.executable), []))
         monkeypatch.setattr(rat, "OUTPUT", tmp_path / "test-output")
@@ -398,6 +454,138 @@ def test_a_run_with_the_canary_passes(one_suite, capsys):
     one_suite({"tests/test_failure_canary.py": "def test_it():\n    pass\n"})
     assert rat.main() == 0
     assert capsys.readouterr().out.rstrip().endswith("all suites passed, privacy canary included")
+
+
+# Not being skipped is not the same as having run. Until 2026-10-07 a run
+# refused only a skip that named the canary, so a canary deleted, renamed
+# or deselected, or a core suite that collected nothing, passed and said
+# "privacy canary included".
+
+CANARY = "def test_it():\n    pass\n"
+ANOTHER = "def test_another():\n    pass\n"
+# A conftest that takes the canary's tests named out of the run, as a
+# marker or a keyword given to pytest would, and tells pytest so.
+DESELECT = """
+    def pytest_collection_modifyitems(config, items):
+        dropped = [item for item in items if item.nodeid.split("::")[0].endswith("test_failure_canary.py")
+                   and item.name in %r]
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = [item for item in items if item not in dropped]
+    """
+
+
+@pytest.mark.parametrize("files, said", [
+    ({"tests/test_another.py": ANOTHER},
+     "core/tests/test_failure_canary.py is missing, so none of its tests ran."),
+    ({"tests/test_another.py": ANOTHER, "tests/test_privacy_canary.py": CANARY},
+     "core/tests/test_failure_canary.py is missing, so none of its tests ran."),
+    ({"tests/test_failure_canary.py": CANARY, "tests/conftest.py": "collect_ignore = ['test_failure_canary.py']\n"},
+     "The core suite ran none of the tests in core/tests/test_failure_canary.py."),
+    ({"tests/test_failure_canary.py": CANARY, "tests/test_another.py": ANOTHER,
+      "tests/conftest.py": DESELECT % (["test_it"],)},
+     "Of the 1 test in core/tests/test_failure_canary.py, 0 passed and 1 never ran."),
+], ids=["deleted", "renamed", "the core collected nothing", "deselected"])
+def test_a_run_holding_the_core_refuses_to_pass_unless_the_canary_ran(files, said, one_suite, capsys):
+    one_suite(files)
+    assert rat.main() == 1
+    out = capsys.readouterr().out
+    assert ("\nTHE PRIVACY CANARY DID NOT RUN.\n%s\nIt is the only test holding the promise that a "
+            "failure file\n" % said) in out, out
+    assert "FAILING SUITE" not in out, "the core suite itself passed"
+    assert "pip install playwright" not in out, "nothing was skipped"
+    assert "all suites passed" not in out
+
+
+def test_a_canary_that_ran_only_in_part_refuses_and_counts_each_way_it_ended(one_suite, capsys):
+    """Counts, never a test's name, since this may be pasted into a public
+    issue. The skip brings the line saying what to install."""
+    one_suite({"tests/test_failure_canary.py": """
+                   import pytest
+
+                   def test_it():
+                       pass
+
+                   def test_the_journal():
+                       pass
+
+                   def test_needs_a_browser():
+                       pytest.skip("no browser available")
+
+                   def test_finds_nothing():
+                       assert "CANARYNAME" not in "Orders for " + "CANARYNAME"
+                   """,
+               "tests/conftest.py": DESELECT % (["test_the_journal"],)})
+    assert rat.main() == 1
+    out = capsys.readouterr().out
+    assert ("\nTHE PRIVACY CANARY DID NOT PASS.\nOf the 4 tests in core/tests/test_failure_canary.py, "
+            "1 passed, 1 failed, 1 was skipped and 1 never ran.\n") in out, out
+    assert "   pip install playwright && python -m playwright install chromium" in out, out
+    assert "FAILING SUITE  core" in out
+
+
+def test_each_way_a_canary_test_can_end_is_counted():
+    def ended(name, **phases):
+        return [{"outcome_of": name, "when": "collected"}] + [
+            {"outcome_of": name, "when": when, "outcome": outcome} for when, outcome in phases.items()]
+    records = (ended("a", setup="passed", call="passed", teardown="passed")
+               + ended("b", setup="passed", call="failed", teardown="passed")
+               + ended("c", setup="passed", call="passed", teardown="failed")
+               + ended("d", setup="skipped", teardown="passed")
+               + ended("e")
+               + ended("f", setup="passed", call="passed")
+               + [_record(1)])
+    counts = rat.canary_counts(records)
+    assert counts == {"tests": 6, "passed": 1, "failed": 2, "skipped": 1, "never ran": 1, "did not finish": 1}
+    assert rat.canary_refusal(True, counts, True, False)[:2] == [
+        "THE PRIVACY CANARY DID NOT PASS.",
+        "Of the 6 tests in core/tests/test_failure_canary.py, 1 passed, 2 failed, 1 was skipped, "
+        "1 never ran and 1 did not finish."]
+    every = rat.canary_counts(ended("a", setup="passed", call="passed", teardown="passed"))
+    assert rat.canary_refusal(True, every, True, False) == []
+    assert rat.canary_refusal(False, None, False, False) == [], "a run without the core is not refused"
+
+
+def test_a_part_without_the_core_says_which_part_runs_the_canary(one_suite, capsys):
+    """CI splits the suites into parts, and the job named tests passes when
+    every part does. Each part used to end "privacy canary included",
+    while only the part holding the core suite ran it."""
+    one_suite({"tests/test_failure_canary.py": CANARY}, others={"aafmaa": {"tests/test_it.py": ANOTHER}},
+              times={"core": 100, "aafmaa": 90})
+    assert rat.main(["--shard", "2/2", "--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "\nok   aafmaa " in out and "\nok   core " not in out, out
+    assert out.rstrip().endswith("\nall suites passed, and the privacy canary runs in part 1 of 2, "
+                                 "which holds the core suite"), out
+    assert "privacy canary included" not in out
+    assert rat.main(["--shard", "1/2", "--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "\nok   core " in out and "\nok   aafmaa " not in out, out
+    assert out.rstrip().endswith("\nall suites passed, privacy canary included"), out
+
+
+def test_the_part_holding_the_core_refuses_to_pass_without_the_canary(one_suite, capsys):
+    """The others still pass, saying where it runs, and CI's job named
+    tests fails with that one part."""
+    one_suite({"tests/test_another.py": ANOTHER}, others={"aafmaa": {"tests/test_it.py": ANOTHER}},
+              times={"core": 100, "aafmaa": 90})
+    assert rat.main(["--shard", "1/2", "--jobs", "1"]) == 1
+    out = capsys.readouterr().out
+    assert "\nTHE PRIVACY CANARY DID NOT RUN.\ncore/tests/test_failure_canary.py is missing" in out, out
+    assert "all suites passed" not in out
+    assert rat.main(["--shard", "2/2", "--jobs", "1"]) == 0
+    assert "the privacy canary runs in part 1 of 2" in capsys.readouterr().out
+
+
+def test_every_run_holds_the_core_suite_and_its_canary():
+    """A run without the core suite is not refused, since it never held
+    the canary. So the runner's own list of suites always has it, quick or
+    whole, with the canary in it, and one of CI's four parts holds it."""
+    for quick in (False, True):
+        core = [d for name, d, kind in rat.suites(quick) if name == rat.CANARY_SUITE]
+        assert core == [REPO / "core"], quick
+        assert (core[0] / rat.CANARY_FILE).is_file()
+    names = [name for name, _d, _kind in rat.suites(False)]
+    assert rat.canary_part(names, rat.load_times(), 4) in (1, 2, 3, 4)
 
 
 def test_a_failing_suite_in_a_run_prints_its_frames_and_keeps_its_output(one_suite, capsys, tmp_path):
@@ -631,18 +819,25 @@ def test_the_runner_looks_for_chromium_where_the_core_does(platform, settings, e
     assert rat.browsers_folder(package, os.getcwd()) == browser._playwright_root() == Path(expected.format(**fill))
 
 
+# What the plugin writes down when a canary of one test passes, for a core
+# suite that is a stand-in and runs nothing.
+CANARY_PASSED = [{"outcome_of": "core/tests/test_failure_canary.py::test_it", "when": "collected"}] + [
+    {"outcome_of": "core/tests/test_failure_canary.py::test_it", "when": when, "outcome": "passed"}
+    for when in ("setup", "call", "teardown")]
+
+
 @pytest.fixture
 def run_with(environments, asked_afresh, tmp_path, monkeypatch):
     """main() over suites of our making, each run in whichever of the
-    environments named the runner picks, and each passing at once, with
-    the Chromium builds named installed. Hands back which interpreter ran
-    each suite."""
+    environments named the runner picks, and each passing at once, the
+    core with its canary, with the Chromium builds named installed. Hands
+    back which interpreter ran each suite."""
     def make(suites: dict, names: list, builds=("1234", "1243"), unfinished=()) -> dict:
         ran = {}
 
         def run_suite(d, py, timeout=rat.SUITE_LIMIT_S):
             ran[d.name] = py
-            return "1 passed in 0.01s", 0, []
+            return "1 passed in 0.01s", 0, list(CANARY_PASSED) if d.name == rat.CANARY_SUITE else []
         monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
         monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH",
                            str(_installed(tmp_path / "browsers", *builds, unfinished=unfinished)))
@@ -676,7 +871,7 @@ def test_a_run_on_the_newest_playwright_and_its_own_chromium_says_so_and_passes(
     assert ran == {"server": environments["panel"][1], "aafmaa": environments["panel"][1]}
     assert ("\nPlaywright 1.63.0 for every suite that uses it\n"
             "and its own Chromium, build 1243, for the tests that start one themselves\n") in out, out
-    assert out.rstrip().endswith("all suites passed, privacy canary included")
+    assert out.rstrip().endswith("all suites passed, and the privacy canary was not among them")
 
 
 def test_a_suite_that_does_not_use_playwright_is_not_held_to_it(run_with, environments, capsys):
@@ -687,7 +882,7 @@ def test_a_suite_that_does_not_use_playwright_is_not_held_to_it(run_with, enviro
     out = capsys.readouterr().out
     assert ran == {"gui": environments["panel_ui"][1], "aafmaa": environments["panel"][1]}
     assert "\nPlaywright 1.63.0 for every suite that uses it\n" in out, out
-    assert out.rstrip().endswith("all suites passed, privacy canary included")
+    assert out.rstrip().endswith("all suites passed, and the privacy canary was not among them")
 
 
 def test_a_suite_whose_environment_has_no_playwright_is_named_apart(run_with, environments, capsys):

@@ -102,7 +102,10 @@ python -m playwright install chromium
 ```
 
 `run_all_tests.py` prints every skip at the end and refuses to report
-success while the canary is one of them.
+success while the canary is one of them. Not being skipped is not enough
+either. A run that holds the core suite passes only when every test of
+the canary ran and passed, so a canary deleted, renamed or deselected
+stops it too.
 
 CI and the packaged app install the newest Playwright and the Chromium it
 was made for, and two versions can differ in what a page hands over. So

@@ -142,9 +142,16 @@ def test_one_at_a_time_the_same_suites_fail(fake_run, tmp_path, monkeypatch, cap
     assert sum(1 for ln in out.splitlines() if ln.split()[:2] == ["ok", "gamma"]) == 1, out
 
 
+# What the plugin writes down when a canary of one test passes, for a core
+# suite that is a stand-in. A run holding the core refuses to pass without it.
+CANARY_PASSED = [{"outcome_of": "core/tests/test_failure_canary.py::test_it", "when": when, "outcome": "passed"}
+                 for when in ("setup", "call", "teardown")]
+
+
 def test_one_at_a_time_keeps_the_old_order(fake_run, tmp_path, monkeypatch):
     seen = []
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: (seen.append(d.name) or ("1 passed", 0, [])))
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: (
+        seen.append(d.name) or ("1 passed", 0, list(CANARY_PASSED) if d.name == rat.CANARY_SUITE else [])))
     fake_run({n: tmp_path / n for n in ("core", "gui", "amazon")}, {"amazon": 500, "core": 5})
     assert rat.main(["--jobs", "1"]) == 0
     assert seen == ["core", "gui", "amazon"]
