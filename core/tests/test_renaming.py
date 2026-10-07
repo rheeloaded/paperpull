@@ -142,13 +142,21 @@ def test_only_a_pdf_in_a_folder_the_app_files_in_is_renamed(tmp_path, monkeypatc
 def test_a_pdf_left_under_the_name_it_was_delivered_to_is_finished(tmp_path):
     """Robinhood records a tax form under the name it was written to beside
     its place, ".pdf.delivering", when moving it into place fails, for
-    Rename to finish."""
+    Rename to finish, and its row says it was saved. A form under that name
+    whose row says it needs review failed its check, and stays as it is
+    for the next run to fetch again. A path alone never holds one."""
     filed = tmp_path / "Tax Documents"
     filed.mkdir()
-    staged = row(filed, "2021-12-31 Testco Form.pdf.delivering", order="A1")
-    result = renaming.apply(renaming.plan([staged], by_order, folders=[filed]))
-    assert result.renamed == 1
-    assert sorted(p.name for p in filed.iterdir()) == ["2026-09-23 Testco A1 Receipt.pdf"]
+    staged = row(filed, "2021-12-31 Testco Form.pdf.delivering", order="A1",
+                 **{"Processing Status": "Completed"})
+    failed = row(filed, "2021-12-31 Testco Other Form.pdf.delivering", order="A2",
+                 **{"Processing Status": "Needs Manual Review"})
+    changes = renaming.plan([staged, failed], by_order, folders=[filed])
+    assert [c.reason for c in changes] == ["", renaming.NOT_HELD]
+    assert renaming.apply(changes).renamed == 1
+    assert sorted(p.name for p in filed.iterdir()) == [
+        "2021-12-31 Testco Other Form.pdf.delivering", "2026-09-23 Testco A1 Receipt.pdf"]
+    assert renaming.held_document(failed[PATH], [filed]) is None
 
 
 def test_a_row_left_alone_keeps_its_name_when_a_file_renamed_had_it(tmp_path):
@@ -225,7 +233,6 @@ def test_a_link_in_a_folder_the_app_files_in_is_not_renamed(tmp_path):
     try:
         link.symlink_to(Path(target[PATH]))
     except (OSError, NotImplementedError):
-        import pytest
         pytest.skip("this system does not let a test make a link")
     changes = renaming.plan([{PATH: str(link), NAME: link.name, "order": "A2"}], by_order,
                             folders=[filed])
@@ -376,6 +383,32 @@ def test_a_summary_the_app_has_since_improved_is_what_the_file_is_named_for(tmp_
     assert (tmp_path / "2026-09-05 Testco Internet Monthly Statement.pdf").exists()
     assert not f.exists()
     assert rows[0]["PDF Filename"] == "2026-09-05 Testco Internet Monthly Statement.pdf"
+
+
+def test_each_purchases_order_history_follows_its_own_file(tmp_path):
+    """Two receipts of one day under one name in two folders, renamed
+    apart. The order history carries a purchase's number and its file's
+    name and no path, and each of its rows takes the new name of its own
+    purchase's file. Matched by the name alone, both took whichever came
+    last."""
+    online, instore = tmp_path / "Online", tmp_path / "In-Store"
+    online.mkdir()
+    instore.mkdir()
+    name = "2026-09-05 Testco Order.pdf"
+    index = [row(folder, name, **{"Purchase Date": "2026-09-05", "Purchase Summary": summary,
+                                  "Order or Receipt Number": number})
+             for folder, summary, number in ((online, "Alpha", "A1"), (instore, "Beta", "B2"))]
+    history = [{NAME: name, "Order or Receipt Number": number, "Notes": ""}
+               for number in ("A1", "A1", "B2")]
+    app = _App(tmp_path, index)
+    app.order_csv = _Csv(tmp_path / "history.csv", history)
+    app.order_csv.columns = [NAME, "Order or Receipt Number", "Notes"]
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert [Path(r[PATH]) for r in index] == [online / "2026-09-05 Testco Alpha.pdf",
+                                              instore / "2026-09-05 Testco Beta.pdf"]
+    assert [(r["Order or Receipt Number"], r[NAME]) for r in history] == [
+        ("A1", "2026-09-05 Testco Alpha.pdf"), ("A1", "2026-09-05 Testco Alpha.pdf"),
+        ("B2", "2026-09-05 Testco Beta.pdf")]
 
 
 def test_the_index_is_still_used_when_the_app_knows_nothing_better(tmp_path):

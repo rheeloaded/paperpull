@@ -101,12 +101,24 @@ def held_document(text: str, folders) -> Optional[Path]:
     or, with the output folder set to the app's own folder, the app's
     config file. None of those is a document this app holds, and neither
     is a file no longer on disk, one that is not a PDF, or a link, which a
-    rename would move in place of the file it leads to.
-
-    A PDF still under the name it was written to beside its place, which
-    ends ".pdf.delivering", is one the app holds. Robinhood records a tax
-    form so when moving it into place fails, for Rename to finish."""
+    rename would move in place of the file it leads to."""
     return _held(text, _real(folders))
+
+
+def held_row(row: dict, folders, path_key: str = "PDF Full Path") -> Optional[Path]:
+    """held_document for a row of an index, which also holds a PDF still
+    under the name it was written to beside its place, ending
+    ".pdf.delivering", when the row says it was saved. Robinhood records a
+    tax form so when moving it into place fails, for Rename to finish. It
+    also leaves a form that failed its check so, when moving that one to
+    Manual Review fails, and that row says it needs review."""
+    return _held_row(row, _real(folders), path_key)
+
+
+def _held_row(row: dict, real_folders: List[Path],
+              path_key: str = "PDF Full Path") -> Optional[Path]:
+    saved = (row.get("Processing Status") or "").strip().lower() == "completed"
+    return _held(row.get(path_key), real_folders, staged=saved)
 
 
 def _real(folders) -> List[Path]:
@@ -123,14 +135,16 @@ def _real(folders) -> List[Path]:
     return real
 
 
-def _held(text: str, real_folders: List[Path]) -> Optional[Path]:
-    """held_document, with the folders already found where they really are."""
+def _held(text: str, real_folders: List[Path], staged: bool = False) -> Optional[Path]:
+    """held_document, with the folders already found where they really are,
+    and with `staged` a PDF under its staging name as well."""
     text = (text or "").strip()
     if not text:
         return None
+    ends = (".pdf", ".pdf.delivering") if staged else (".pdf",)
     try:
         path = Path(text).resolve()
-        held = (path.name.lower().endswith((".pdf", ".pdf.delivering")) and path.is_file()
+        held = (path.name.lower().endswith(ends) and path.is_file()
                 and not Path(text).is_symlink()
                 and not set(path.parents).isdisjoint(real_folders))
     except (OSError, RuntimeError, ValueError):
@@ -153,9 +167,9 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
 
     `folders` are the folders the app files documents in
     (Paths.filing_folders). A row naming anything on disk that is not a PDF
-    in one of them is left out with the reason NOT_HELD, so no ledger can
-    have a rename touch a folder, the app's config or a file it does not
-    hold.
+    in one of them is left out with the reason NOT_HELD (held_row), so no
+    ledger can have a rename touch a folder, the app's config or a file it
+    does not hold.
 
     `distinguisher` is handed the same row and returns whatever tells it
     from another file wanting the same name, an order number usually.
@@ -173,7 +187,7 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
         if not raw and not old_name:
             continue
         old_path = Path(raw) if raw else Path(old_name)
-        if raw and old_path.exists() and _held(raw, inside) is None:
+        if raw and old_path.exists() and _held_row(row, inside, path_key) is None:
             changes.append(Change(row, old_path, old_name, reason=NOT_HELD))
             continue
         try:
@@ -314,7 +328,8 @@ def apply(changes: Iterable[Change], say=print) -> Result:
 def update_rows(rows: Iterable[dict], result: Result, *,
                 path_key: str = "PDF Full Path",
                 name_key: str = "PDF Filename",
-                note: str = "") -> int:
+                note: str = "",
+                numbered: Optional[dict] = None) -> int:
     """Point a ledger at the files as they are now called.
 
     Verify reads the full path out of the index, so a rename that skipped
@@ -326,7 +341,9 @@ def update_rows(rows: Iterable[dict], result: Result, *,
     by name as well, a row Rename left alone took the new name of another
     file that had the same old one, and of two files of one name in two
     folders each row took whichever new name came last. A row with a name
-    and no path, as in the order history, follows the name.
+    and no path, as in the order history, follows the file of its own order
+    or document number when `numbered` says which that is (_numbered), and
+    the name alone only when it carries no number.
     """
     touched = 0
     moved = _moved(result)
@@ -339,7 +356,10 @@ def update_rows(rows: Iterable[dict], result: Result, *,
             row[path_key] = new_path
             new_name = Path(new_path).name
         else:
-            new_name = result.names.get((row.get(name_key) or "").strip())
+            old_name = (row.get(name_key) or "").strip()
+            number = _first(row, _ID_KEYS) if numbered is not None else ""
+            new_name = (numbered.get((number, old_name)) if number
+                        else result.names.get(old_name))
             if not new_name:
                 continue
         if name_key in row:
@@ -498,8 +518,9 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
     result.spellings = spellings
     if not result.renamed:
         return result
+    numbered = _numbered(changes, result)
     for csv, rows in ledgers:
-        if update_rows(rows, result, note="renamed"):
+        if update_rows(rows, result, note="renamed", numbered=numbered):
             csv.rewrite(rows)
     update_progress(app.progress, result)
     say("")
@@ -508,6 +529,21 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
     if result.failed:
         say("%d could not be renamed and were left alone." % result.failed)
     return result
+
+
+def _numbered(changes: Iterable[Change], result: Result) -> dict:
+    """The new name of each file renamed, by the order or document number
+    of the row the plan read and the file's old name. The order history
+    carries a number and a file name and no path, and matched by the name
+    alone, two receipts of one name in two folders both took whichever new
+    name came last, which Review Names could then no longer put right."""
+    out = {}
+    for c in changes:
+        new = result.mapping.get(str(c.old_path))
+        number = _first(c.row, _ID_KEYS)
+        if new and number:
+            out[(number, c.old_path.name)] = Path(new).name
+    return out
 
 
 def _record_key(row: dict):

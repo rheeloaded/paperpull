@@ -166,17 +166,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its output folder to a new place names the files in the old one, and an
   index edited by hand can name anything. Rename now renames only a PDF in
   a folder the app files documents in, Manual Review included, and says
-  how many rows it left alone. Those rows and their records in
-  progress.json keep what they say. One naming a file with the same name
-  as a file renamed used to take its new name, and Robinhood and Newrez
-  could date one from the file it names. Every app renames through the
-  same code, so this holds in all 61. Anthem's ID cards, letters, plan
-  documents and authorizations, which it files by name rather than by
-  routing, are still renamed, and so is a Robinhood tax form left under
-  the name it was written to beside its place. Two files of one name in
-  two folders, an online and an in-store receipt of one day and one
-  summary for instance, now keep their own new names in the index and in
-  progress.json, where both took whichever came last.
+  how many rows it left alone. A row it leaves alone is not renamed in the
+  index or in progress.json either, where one naming a file with the same
+  name as a file renamed used to take its new name, and no app reads a
+  date or a store off the file such a row names, as Robinhood, Newrez and
+  Kroger did. Every app renames through the same code, so this holds in
+  all 61. Anthem's ID cards, letters, plan documents and authorizations,
+  which it files by name rather than by routing, are still renamed, and so
+  is a Robinhood tax form saved and left under the name it was written to
+  beside its place, while one that failed its check is left for the next
+  run to fetch again. Two receipts of one name in two folders, an online
+  and an in-store one of one day and one summary for instance, now keep
+  their own new names in the index, in progress.json and in the order
+  history, where both took whichever came last.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

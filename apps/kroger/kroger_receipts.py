@@ -1131,6 +1131,7 @@ class App:
         memory only, each change noted in `changed`, so a preview can put it
         back. Returns how many stores were read off a PDF."""
         n = 0
+        folders = self.paths.filing_folders()
         for key in set(self.progress.data) | set(self.discovery.data):
             recs = [r for r in (self.progress.data.get(key), self.discovery.data.get(key))
                     if isinstance(r, dict)]
@@ -1138,7 +1139,9 @@ class App:
             if not store:
                 prog = self.progress.data.get(key)
                 where = (prog or {}).get("pdf_path") if isinstance(prog, dict) else ""
-                if where and Path(where).exists():
+                # Only a receipt the app holds is read, as Rename renames
+                # only those (renaming.held_document).
+                if renaming.held_document(where, folders) is not None:
                     store = site.banner_from_lines(receipt_pdf.pdf_text(Path(where)).splitlines())
                     n += bool(store)
             for rec in recs:

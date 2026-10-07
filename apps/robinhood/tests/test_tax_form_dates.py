@@ -450,6 +450,43 @@ def test_a_form_left_under_the_name_it_was_delivered_to_is_finished_by_rename(tm
     assert app.progress.get(doc.key)["pdf_path"] == row["PDF Full Path"]
 
 
+def test_a_form_that_failed_its_check_is_left_for_the_next_run(tmp_path, monkeypatch):
+    """A form that fails its check goes to Manual Review, and when that move
+    fails too it stays under the name it was written to beside its place,
+    marked for review. Rename leaves it so, and the next run fetches the
+    form again and gives it the form's own name, where Rename used to give
+    that name to what failed and the form came beside it under another."""
+    app = _app(tmp_path)
+
+    def expired(page, title, out_path, year=""):
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_bytes(b"%PDF-1.4\n<html>Session expired</html>\n%%EOF\n")
+        return True
+    monkeypatch.setattr(site, "download_named", expired)
+    real_replace = Path.replace
+
+    def held_open(self, target):
+        if self.name.endswith(".delivering"):
+            raise PermissionError(32, "The file is being used by another process")
+        return real_replace(self, target)
+    monkeypatch.setattr(Path, "replace", held_open)
+    doc = _listed("2004")
+    name = storage.build_pdf_filename(doc.date, doc.summary, "")
+    app.download_one(_Page(), doc, name)
+    monkeypatch.setattr(Path, "replace", real_replace)
+    staged = "2004-12-31 Robinhood Consolidated 1099 Tax Form.pdf.delivering"
+    assert _everything(app) == [staged]
+    assert app.progress.get(doc.key)["state"] == State.NEEDS_MANUAL_REVIEW.value
+
+    app.args.apply = True
+    app.cmd_rename()
+    assert _everything(app) == [staged]
+
+    _fake_download(monkeypatch, FORM_2004)
+    app.download_one(_Page(), _listed("2004"), name)
+    assert _everything(app) == ["2004-12-31 Robinhood Consolidated 1099 Tax Form.pdf"]
+
+
 def test_rename_leaves_alone_the_date_of_a_row_it_does_not_hold(tmp_path):
     """An index copied from another folder can name a form there, which is
     not this app's to read. The form the app holds is dated and renamed,

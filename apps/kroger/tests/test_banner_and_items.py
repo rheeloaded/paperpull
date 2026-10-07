@@ -228,6 +228,32 @@ def test_receipts_saved_before_take_their_banner_at_rename(tmp_path, capsys):
     assert app.discovery.get(p.key)["store_info"] == "Fred Meyer"
 
 
+def test_rename_reads_no_store_off_a_receipt_the_app_does_not_hold(tmp_path, capsys):
+    """An index copied from another folder names a receipt there. Rename
+    leaves its row alone and reads no store off it into its record."""
+    core_storage.set_filename_patterns({"filename_pattern": PATTERN})
+    app = _app(tmp_path / "out")
+    outside = tmp_path / "elsewhere" / "2026-09-20 Kroger Groceries Receipt.pdf"
+    _text_pdf(outside, HEADER[1:] + ["Fred Meyer", "100 Example Rd"] + BODY[:3])
+    number = "540~00123~2026-09-20~101~1234567"
+    p = Purchase(purchase_type=IN_STORE, purchase_date="2026-09-20", order_number=number,
+                 summary="Groceries", pdf_filename=outside.name, pdf_path=str(outside),
+                 state=State.COMPLETED.value)
+    app.progress.update(p.key, dict(p.to_dict(), downloaded_ok=True))
+    app.index_csv.append_rows([{
+        "Purchase Date": "2026-09-20", "Purchase Type": IN_STORE,
+        "Order or Receipt Number": number, "Purchase Summary": "Groceries",
+        "Document Type": "Receipt", "PDF Filename": outside.name,
+        "PDF Full Path": str(outside), "Processing Status": "Completed"}])
+    before = dict(app.progress.get(p.key))
+    app.cmd_rename()
+    out = " ".join(capsys.readouterr().out.split())
+    assert "Read the store" not in out
+    assert "1 row(s) of the index name something other than a PDF" in out
+    assert app.progress.get(p.key) == before
+    assert outside.is_file()
+
+
 def test_the_purchase_list_never_brings_the_type_back_as_the_store(tmp_path):
     app = _app(tmp_path)
     app.progress.update("In-Store:a", {"store_info": "Fred Meyer", "store_read": True})

@@ -236,7 +236,7 @@ class _DatedByStatement:
             path = (row.get("PDF Full Path") or "").strip()
             # Only a statement the app holds is read. A row naming a file
             # anywhere else is one the rename leaves alone, and so is its date.
-            if date == rec["date"] and renaming.held_document(path, folders) is not None:
+            if date == rec["date"] and renaming.held_row(row, folders) is not None:
                 text = read_text(Path(path))
                 printed = site.printed_statement_date(text, date)
                 if printed:

@@ -54,6 +54,7 @@ def renames_through_the_core(app: Path) -> bool:
 APPS = sorted(d for d in (REPO / "apps").iterdir()
               if d.is_dir() and entry_of(d) and renames_through_the_core(d))
 IDS = [d.name for d in APPS]
+RECEIPT_APPS = [d for d in APPS if entry_of(d).name.endswith("_receipts.py")]
 
 
 class NoBrowser:
@@ -299,6 +300,41 @@ def test_a_rename_preview_offers_only_a_document_the_app_holds(home, tmp_path, m
         if k not in before["out"]:
             after["out"].pop(k)
     assert after == before, "%s's preview changed something" % home.app.name
+
+
+@pytest.mark.parametrize("home", RECEIPT_APPS, ids=[d.name for d in RECEIPT_APPS],
+                         indirect=True)
+def test_each_purchases_order_history_follows_its_own_file(home):
+    """Two receipts of one day filed under one name in two folders, renamed
+    apart. A purchase's rows in the order history, which carry its number
+    and its file's name and no path, take the new name of its own file.
+    Matched by the name alone, both purchases' rows took whichever came
+    last, and Review Names, which finds them by the name the index gives
+    the file, could no longer put them right."""
+    app = home.build()
+    first, second = [getattr(app.paths, f.attr) for f in core_storage.spec().folders
+                     if f.attr not in RECORDS][:2]
+    old = "old name.pdf"
+    rows = [a_row(app.index_csv.columns, 1, pdf(first / old, "first")),
+            a_row(app.index_csv.columns, 2, pdf(second / old, "second"))]
+    app.index_csv.append_rows(rows)
+    numbers = [r["Order or Receipt Number"] for r in rows]
+    app.order_csv.append_rows([{"Order or Receipt Number": number, "Item Name": item,
+                                "PDF Filename": old}
+                               for number, item in ((numbers[0], "Invented Item"),
+                                                    (numbers[0], "Other Item"),
+                                                    (numbers[1], "Invented Item"))])
+
+    said, error = home.rename("--apply")
+
+    assert error is None, "%s's Rename ended with %r\n%s" % (home.app.name, error, said[-1500:])
+    after = home.build()
+    named = {r["Order or Receipt Number"]: r["PDF Filename"] for r in after.index_csv.read_all()}
+    assert len(set(named.values()) - {old}) == 2, said[-1500:]
+    assert [(r["Order or Receipt Number"], r["PDF Filename"])
+            for r in after.order_csv.read_all()] == [
+        (numbers[0], named[numbers[0]]), (numbers[0], named[numbers[0]]),
+        (numbers[1], named[numbers[1]])], home.app.name
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)

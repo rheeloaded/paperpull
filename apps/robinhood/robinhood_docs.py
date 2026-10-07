@@ -212,7 +212,7 @@ class _DatedTaxForms:
             # Only a form the app holds is read. A row naming a file anywhere
             # else is one the rename leaves alone, and so is its date.
             path = (row.get("PDF Full Path") or "").strip()
-            if renaming.held_document(path, folders) is None:
+            if renaming.held_row(row, folders) is None:
                 continue
             year = site.printed_tax_year(read_text(Path(path)))
             if not year:
