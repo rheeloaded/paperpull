@@ -179,6 +179,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   in-store one of one day and one summary for instance, now keep their own
   new names in the index, in progress.json and in the order history, where
   both took whichever came last.
+- **Rename names a file in a deep folder as its download did, and always
+  finishes.** A download cuts a file name to fit max_path_length, the path
+  limit in config.json, when the folder is deep enough to need it. Rename
+  took the name it wanted whole whenever no other file held it, so in a
+  deep output folder Rename preview offered to give a file whose download
+  had cut its name the whole name back, a path longer than the limit the
+  download kept to, and Apply renames gave it. When several files wanted
+  one name too long for their folder, Rename could look for a free name by
+  adding " (2)", " (3)" and on, which cutting the name to fit took off
+  again each time, so Rename preview and Apply renames never finished.
+  Rename now names every file as downloads into its folder would, one
+  after another. A name is cut to fit the same way, and a receipt that
+  wants a name another receipt of the same rename was given takes its
+  order number first, as a download does, where it used to take a " (2)".
+  A file renamed after another file took its new name in the meantime
+  keeps to the limit in config.json too, where it kept to 240.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

@@ -5,7 +5,9 @@ name (#43). Nothing about those files needed fetching. These pin the
 promises the rename makes, above all that it cannot lose a file and
 cannot leave the ledger pointing at one that is gone.
 """
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from paperpull_core import renaming, storage  # noqa: E402
-from paperpull_core.storage import JsonStore  # noqa: E402
+from paperpull_core.storage import JsonStore, unique_path  # noqa: E402
 
 PATH = "PDF Full Path"
 NAME = "PDF Filename"
@@ -814,3 +816,118 @@ def test_every_file_of_one_order_takes_the_orders_record(tmp_path, monkeypatch):
     renaming.run_for(app, apply_changes=True, say=lambda *a: None)
     assert sorted(p.name for p in tmp_path.glob("*.pdf")) == [
         "2026-09-05 Testco A-77 (2).pdf", "2026-09-05 Testco A-77.pdf"]
+
+
+# -- a name too long for its folder is cut the way a download cuts it ----------
+
+# Longer than the 30 characters these tests leave for a name.
+LONG = "2026-09-12 Testco Billing Statement for the account ending 2222.pdf"
+
+
+def room_for(folder, chars):
+    """The max_path_length that leaves `chars` characters for a name in
+    `folder`, however deep the temporary folder is."""
+    return len(str(folder)) + 1 + chars
+
+
+def test_a_free_name_too_long_for_its_folder_is_cut_as_a_download_cuts_it(tmp_path):
+    """Nothing held the name, so the plan took it whole, a path longer than
+    the limit a download of the same document keeps to."""
+    limit = room_for(tmp_path, 30)
+    r = row(tmp_path, "2026-09-12 Testco Statement.pdf")
+    [change] = renaming.plan([r], lambda r: LONG, folders=[tmp_path],
+                             max_path_length=limit)
+    assert change.renaming, change.reason
+    assert len(str(change.new_path)) <= limit, change.new_name
+    assert change.new_name == unique_path(tmp_path, LONG, limit).name
+
+
+def test_a_file_whose_download_cut_its_name_to_fit_is_already_named_right(tmp_path):
+    """Its download cut the name to fit, and the preview offered to give it
+    the whole name back, a path longer than the limit the download kept to."""
+    limit = room_for(tmp_path, 30)
+    r = row(tmp_path, unique_path(tmp_path, LONG, limit).name)
+    [change] = renaming.plan([r], lambda r: LONG, folders=[tmp_path],
+                             max_path_length=limit)
+    assert not change.renaming, (change.new_name, limit)
+    assert change.reason == "already named that"
+
+
+def test_a_name_found_again_at_apply_keeps_to_the_limit_the_plan_kept_to(tmp_path):
+    """A file took the planned name between the plan and apply, and the
+    name apply found instead kept to 240 whatever the config said."""
+    limit = room_for(tmp_path, 30)
+    r = row(tmp_path, "2026-09-12 Testco Statement.pdf")
+    changes = renaming.plan([r], lambda r: LONG, folders=[tmp_path],
+                            max_path_length=limit)
+    planned = changes[0].new_path
+    planned.write_bytes(b"%PDF-1.7 a file that came meanwhile")
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert result.renamed == 1
+    [moved] = result.mapping.values()
+    assert len(moved) <= limit, moved
+    assert Path(moved).read_bytes() == b"%PDF-1.7 a file"
+    assert planned.read_bytes() == b"%PDF-1.7 a file that came meanwhile"
+
+
+def test_a_name_the_plan_gave_out_is_told_apart_as_a_download_would_tell_it(tmp_path):
+    """A download into a folder holding the first of two files wanting one
+    name gives the second its order number. The plan gave the second a
+    " (2)" instead, and the next Rename offered to move it again."""
+    a = row(tmp_path, "first.pdf", order="A1")
+    b = row(tmp_path, "second.pdf", order="A2")
+
+    def rename():
+        return renaming.plan([a, b], lambda r: "2026-09-23 Testco Receipt.pdf",
+                             folders=[tmp_path], distinguisher=lambda r: r["order"])
+
+    changes = rename()
+    assert [c.new_name for c in changes] == ["2026-09-23 Testco Receipt.pdf",
+                                             "2026-09-23 Testco Receipt A2.pdf"]
+    renaming.update_rows([a, b], renaming.apply(changes, say=lambda *a: None))
+    assert not [c.new_name for c in rename() if c.renaming], "it took a second Rename to settle"
+
+
+# plan() for every file in a folder, all wanting one name, printed as JSON.
+PLAN_IN_A_PROCESS_OF_ITS_OWN = """
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from paperpull_core import renaming
+folder, wanted, limit = Path(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+rows = [{"PDF Full Path": str(p), "PDF Filename": p.name, "order": p.stem}
+        for p in sorted(folder.iterdir())]
+told_apart = (lambda r: r["order"]) if sys.argv[5] == "orders" else None
+changes = renaming.plan(rows, lambda r: wanted, folders=[folder],
+                        distinguisher=told_apart, max_path_length=limit)
+print(json.dumps([[c.reason, str(c.new_path or "")] for c in changes]))
+"""
+
+
+@pytest.mark.parametrize("told_apart", ["orders", "nothing"])
+def test_three_files_wanting_one_name_cut_to_fit_are_each_given_a_name(tmp_path, told_apart):
+    """The second file wanting the name took it cut to fit. The third
+    looked for a free name by adding " (2)", " (3)" and on, which cutting
+    the name to fit took off again every time, so plan() never returned and
+    neither did Rename or the panel's Apply renames, with order numbers to
+    tell the files apart or without. plan() runs in a process of its own
+    here, ended after a minute, so a plan that never returns fails this
+    test rather than holding the suite until its time limit."""
+    folder = tmp_path / "out"
+    folder.mkdir()
+    for name in ("a.pdf", "b.pdf", "c.pdf"):
+        (folder / name).write_bytes(b"%PDF-1.7 a file")
+    limit = room_for(folder, 30)
+    core = str(Path(__file__).resolve().parents[1])
+    try:
+        done = subprocess.run([sys.executable, "-c", PLAN_IN_A_PROCESS_OF_ITS_OWN, core,
+                               str(folder), LONG, str(limit), told_apart],
+                              capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pytest.fail("plan() had not returned after a minute")
+    assert done.returncode == 0, done.stderr
+    planned = json.loads(done.stdout)
+    assert [reason for reason, _path in planned] == ["", "", ""], planned
+    targets = [path for _reason, path in planned]
+    assert len({t.lower() for t in targets}) == 3, "each file has a name of its own"
+    assert all(len(t) <= limit for t in targets), (limit, targets)

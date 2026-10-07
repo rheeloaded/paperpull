@@ -354,7 +354,8 @@ def title_case(text: str) -> str:
 
 
 def unique_path(directory: Path, filename: str, max_path_length: int = 240,
-                distinguisher: str = "", ignoring: str = "") -> Path:
+                distinguisher: str = "", ignoring: str = "",
+                held: Iterable[str] = ()) -> Path:
     """Return a path in *directory* that does not collide with any existing
     file, case-insensitively. Never returns a path to an existing file.
 
@@ -367,13 +368,35 @@ def unique_path(directory: Path, filename: str, max_path_length: int = 240,
     So when the caller knows something that tells the two apart, an order
     number or a payment id, that goes in the name instead and ' (2)' stays
     as the last resort. Nothing changes for a name that does not collide
-    (#49, and the same complaint on #43)."""
+    (#49, and the same complaint on #43).
+
+    `held` are names taken although no file has them yet. Rename passes the
+    names its plan has given other files, so a file wanting one is named
+    as a download into a folder already holding that file would name it."""
     directory = Path(directory)
     existing = {p.name.lower() for p in directory.iterdir()} if directory.exists() else set()
     # A file being renamed does not stand in its own way. Rename asks where a
     # file belongs while it is still there, and without this a file already
     # told apart by its order number was pushed on to " (2)".
     existing.discard((ignoring or "").lower())
+    existing.update(name.lower() for name in held)
+    return directory / _free_name(directory, filename, max_path_length, existing,
+                                  distinguisher)
+
+
+def fitted_name(directory: Path, filename: str, max_path_length: int = 240) -> str:
+    """*filename* as unique_path names it in *directory* when nothing there
+    holds it, cut to fit max_path_length. A download into a deep folder
+    cuts a name so, and Rename has to know the name it cut to tell a file
+    named right from one to rename. Raises ValueError, as unique_path does,
+    for a folder too deep to file into."""
+    return _free_name(Path(directory), filename, max_path_length, set(), "")
+
+
+def _free_name(directory: Path, filename: str, max_path_length: int,
+               existing: set, distinguisher: str) -> str:
+    """The name unique_path gives *filename* in *directory*, where `existing`
+    is every name held there, in lower case."""
     stem, ext = os.path.splitext(filename)
 
     # An empty stem used to return the DIRECTORY itself, because "dir / ''" is
@@ -418,7 +441,7 @@ def unique_path(directory: Path, filename: str, max_path_length: int = 240,
         if len(candidate) > room:
             candidate = shorten(with_token, "")
         if candidate.lower() not in existing:
-            return directory / candidate
+            return candidate
         stem = with_token
 
     n = 1
@@ -428,7 +451,7 @@ def unique_path(directory: Path, filename: str, max_path_length: int = 240,
         candidate = stem + suffix + ext
         if len(candidate) > room:
             candidate = shorten(stem, suffix)
-    return directory / candidate
+    return candidate
 
 
 # ---------------------------------------------------------------------------

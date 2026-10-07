@@ -150,10 +150,6 @@ class Home:
             "owner": "Dana Example", "output_dir": str(tmp_path / "out"),
             "profile_dir": str(tmp_path / "profile"), "cdp_url": "http://127.0.0.1:9",
             "delay_min_seconds": 0, "delay_max_seconds": 0, "default_start_date": "",
-            # Room enough that no name is cut short. A deep temporary folder
-            # cuts a download's name where Rename's plan does not, which is
-            # a question of its own and not this one.
-            "max_path_length": 1000,
         })
         for key in ("filename_pattern", "filename_pattern_receipts",
                     "filename_pattern_statements"):

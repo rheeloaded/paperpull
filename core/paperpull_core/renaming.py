@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from .models import State
-from .storage import build_pdf_filename, title_case, unique_path
+from .storage import build_pdf_filename, fitted_name, title_case, unique_path
 
 
 @dataclass
@@ -62,6 +62,9 @@ class Change:
     new_name: str
     reason: str = ""
     new_path: Optional[Path] = None
+    # The limit new_path was cut to fit, which a name found again at apply
+    # keeps to as well.
+    max_path_length: int = 240
 
     @property
     def renaming(self) -> bool:
@@ -176,10 +179,15 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
     Without it a file called "... Receipt (2)" is renamed to "(3)", which
     is the same complaint one number worse, since the name it wants is
     held by the file it collided with in the first place.
+
+    `max_path_length` is the app's own limit. Every name is cut to fit it
+    in the file's folder the way a download cuts it, so a file whose
+    download cut its name is named right already, and no rename gives a
+    file a longer path than its download would have.
     """
     inside = _real(folders)
     changes: List[Change] = []
-    wanted = []                       # (row, old_path, desired name)
+    wanted = []                       # (slot, row, old_path, name cut to fit, whole name)
 
     for row in rows:
         raw = (row.get(path_key) or "").strip()
@@ -200,6 +208,18 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
             changes.append(Change(row, old_path, old_name,
                                   reason="nothing to name it from"))
             continue
+        # The name cut to fit max_path_length in the file's folder, as a
+        # download cuts it. Taken whole, a file whose download had cut its
+        # name was offered the whole name back, a path longer than the
+        # limit the download kept to.
+        whole = new_name
+        try:
+            new_name = fitted_name(old_path.parent, whole, max_path_length)
+        except ValueError:
+            changes.append(Change(row, old_path, old_name,
+                                  reason="its folder is too deep for any name to fit "
+                                         "max_path_length"))
+            continue
         if new_name == old_path.name:
             changes.append(Change(row, old_path, new_name, reason="already named that"))
             continue
@@ -209,7 +229,7 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
             continue
         # A placeholder, so the plan reads back in the ledger's own order
         # rather than with everything that could not be renamed first.
-        wanted.append((len(changes), row, old_path, new_name))
+        wanted.append((len(changes), row, old_path, new_name, whole))
         changes.append(None)
 
     # A name is free if nothing holds it, and also if the only thing
@@ -217,13 +237,14 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
     # that want each other's names is the case that proves it, and without
     # this pass each would be pushed to a " (2)" by a collision that was
     # about to stop existing. Freeing them is apply's job.
-    leaving = {str(p).lower() for _i, _r, p, _n in wanted}
-    claimed = set()
+    leaving = {str(p).lower() for _i, _r, p, _n, _w in wanted}
+    claimed = {}                      # a folder -> the names given out in it
 
-    for slot, row, old_path, new_name in wanted:
+    for slot, row, old_path, new_name, whole in wanted:
         target = old_path.parent / new_name
-        key = str(target).lower()
-        free = (not target.exists() or key in leaving) and key not in claimed
+        given = claimed.setdefault(str(old_path.parent).lower(), set())
+        free = ((not target.exists() or str(target).lower() in leaving)
+                and new_name.lower() not in given)
         if not free:
             token = ""
             if distinguisher is not None:
@@ -231,23 +252,25 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
                     token = distinguisher(row) or ""
                 except Exception:
                     token = ""
-            target = unique_path(old_path.parent, new_name, max_path_length,
-                                 distinguisher=token, ignoring=old_path.name)
+            # The whole name, as a download hands it over, and the names this
+            # plan gave out held as files a download found there would hold
+            # them, so a file wanting one is told apart by its order number
+            # first, as a download tells it. They used to be held only after
+            # unique_path had answered, and a " (2)" put on its answer was
+            # cut off again whenever the name had to be cut to fit, so
+            # plan() never returned.
+            target = unique_path(old_path.parent, whole, max_path_length,
+                                 distinguisher=token, ignoring=old_path.name, held=given)
             # Told apart already, by the same order number it would be told
             # apart by now. It used to be pushed on to " (2)" because its own
             # name counted as taken, and five real files were asked to move.
-            if target.name.lower() == old_path.name.lower() and str(target).lower() not in claimed:
-                claimed.add(str(target).lower())
+            if target.name.lower() == old_path.name.lower():
+                given.add(target.name.lower())
                 changes[slot] = Change(row, old_path, target.name, reason="already named that")
                 continue
-            n = 1
-            stem, ext = os.path.splitext(target.name)
-            while str(target).lower() in claimed:
-                n += 1
-                target = unique_path(old_path.parent, "%s (%d)%s" % (stem, n, ext),
-                                     max_path_length)
-        claimed.add(str(target).lower())
-        changes[slot] = Change(row, old_path, target.name, new_path=target)
+        given.add(target.name.lower())
+        changes[slot] = Change(row, old_path, target.name, new_path=target,
+                               max_path_length=max_path_length)
     return changes
 
 
@@ -305,9 +328,10 @@ def apply(changes: Iterable[Change], say=print) -> Result:
     for c, source in staged:
         try:
             # Never over another file, including one that appeared while
-            # this was running.
+            # this was running, and never past the limit the plan kept to.
             if c.new_path.exists():
-                c.new_path = unique_path(c.new_path.parent, c.new_path.name)
+                c.new_path = unique_path(c.new_path.parent, c.new_path.name,
+                                         c.max_path_length)
             source.rename(c.new_path)
         except OSError as e:
             say("  could not rename %s (%s)" % (c.old_name, e.__class__.__name__))
