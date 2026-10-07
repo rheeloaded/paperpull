@@ -105,6 +105,8 @@ CHAIN_OF_TWO = (("A.pdf", "B.pdf"), ("B.pdf", "C.pdf"))
 CHAIN_OF_THREE = (("A.pdf", "B.pdf"), ("B.pdf", "C.pdf"), ("C.pdf", "D.pdf"))
 SWAP = (("A.pdf", "B.pdf"), ("B.pdf", "A.pdf"))
 RING_OF_THREE = (("A.pdf", "B.pdf"), ("B.pdf", "C.pdf"), ("C.pdf", "A.pdf"))
+CASE_ONLY = (("A.pdf", "a.pdf"),)
+CROSSED_CASE = (("A.pdf", "b.pdf"), ("B.pdf", "a.pdf"))
 
 
 def _in_every_order(**shapes):
@@ -138,14 +140,17 @@ def _holding(folder):
 
 @pytest.mark.parametrize("wants, order", _in_every_order(
     chain_of_two=CHAIN_OF_TWO, chain_of_three=CHAIN_OF_THREE,
-    swap=SWAP, ring_of_three=RING_OF_THREE))
+    swap=SWAP, ring_of_three=RING_OF_THREE, case_only=CASE_ONLY,
+    crossed_case=CROSSED_CASE))
 def test_a_chain_or_ring_of_renames_lands_as_the_preview_said(tmp_path, wants, order):
     """A wants B's name and B a free one. With A first in the ledger, A was
     put aside and then met B still in place, so it took "B (2).pdf", and
     only then did B move on. The preview had said A would be B.pdf, and the
     next Rename offered to move it again. Each file now waits for the one
     holding its new name, from each chain's free end, and a ring, which has
-    no free end, goes through a name put aside."""
+    no free end, goes through a name put aside. A name in another case is
+    the file's own where the folder ignores case, as on Windows, a Mac, or
+    a share or USB drive on Linux, and another file's where it does not."""
     rows = _wanting(tmp_path, wants, order)
     changes = _plan_wanted(tmp_path, rows)
     assert sorted((c.old_name, c.new_name) for c in changes) == sorted(wants), \
@@ -156,6 +161,24 @@ def test_a_chain_or_ring_of_renames_lands_as_the_preview_said(tmp_path, wants, o
     renaming.update_rows(rows, result)
     assert not any(c.renaming for c in _plan_wanted(tmp_path, rows)), \
         "a second Rename finds nothing to do"
+
+
+@pytest.mark.parametrize("wants", [CASE_ONLY, CROSSED_CASE], ids=["case_only", "crossed_case"])
+def test_a_name_in_another_case_is_the_files_own_where_linux_ignores_case(
+        tmp_path, monkeypatch, wants):
+    """Linux spells a path as written, yet a share or a USB drive there can
+    ignore case. Found by spelling, a.pdf was nobody's, so A.pdf met itself
+    under it and took "a (2).pdf". This disk ignores case, so with Linux's
+    spelling of a path it is that folder."""
+    (tmp_path / "X").mkdir()
+    if not (tmp_path / "x").exists():
+        pytest.skip("this folder tells case apart")
+    (tmp_path / "X").rmdir()
+    monkeypatch.setattr(renaming, "_same_file", lambda raw: os.path.abspath(raw))
+    rows = _wanting(tmp_path, wants)
+    result = renaming.apply(_plan_wanted(tmp_path, rows), say=lambda *a: None)
+    assert _holding(tmp_path) == {new: old for old, new in wants}
+    assert result.renamed == len(wants)
 
 
 def test_a_file_that_came_meanwhile_still_is_not_written_over_in_a_chain(tmp_path):
@@ -383,14 +406,79 @@ def test_a_file_held_a_moment_is_still_renamed(tmp_path, _held_from, monkeypatch
     real, refused = Path.rename, []
 
     def briefly(self, target):
-        if self.name.endswith(".renaming") and len(refused) < renaming._TRIES - 1:
+        if self.name.endswith(".renaming") and len(refused) < 3:
             refused.append(self.name)
             raise PermissionError(32, "held by another process", str(self))
         return real(self, target)
     monkeypatch.setattr(Path, "rename", briefly)
     result = renaming.apply(changes, say=lambda *a: None)
     assert _holding(tmp_path) == {"A.pdf": "B.pdf", "B.pdf": "A.pdf"}
-    assert (result.renamed, len(refused)) == (2, renaming._TRIES - 1)
+    assert (result.renamed, len(refused)) == (2, 3)
+
+
+def test_a_name_taken_while_a_ring_went_back_is_followed_by_the_ledgers(
+        tmp_path, _held_from, monkeypatch):
+    """The swap went back, and before the staged file could follow, another
+    program saved a file under its name. Nothing was renamed, so the index
+    and the run state were left naming that file for it."""
+    folder = tmp_path / "Statements"
+    folder.mkdir()
+    rows = []
+    for name, summary in (("Alpha", "Beta"), ("Beta", "Alpha")):
+        path = folder / ("2026-09-05 Testco %s.pdf" % name)
+        path.write_bytes(b"%PDF-1.7 " + name.encode())
+        rows.append({NAME: path.name, PATH: str(path), "Document Date": "2026-09-05",
+                     "Document Summary": summary, "Document Title": "t", "Notes": ""})
+    alpha = Path(rows[0][PATH])
+    records = {"key": {"pdf_path": str(alpha), "pdf_filename": alpha.name}}
+    app = _App(folder, rows, progress=records)
+    state = _held_from(10 ** 6)
+    real, moves_of_alpha = Path.rename, []
+
+    def newcomer(self, target):
+        if self.name.endswith(".renaming"):
+            state["held"].add(str(self).lower())
+        out = real(self, target)
+        if Path(self) == alpha:
+            moves_of_alpha.append(target)
+            if len(moves_of_alpha) == 2:      # Beta given its name back
+                alpha.write_bytes(b"%PDF-1.7 newcomer")
+        return out
+    monkeypatch.setattr(Path, "rename", newcomer)
+    said = []
+    result = renaming.run_for(app, apply_changes=True, say=said.append)
+    assert result.renamed == 0
+    assert alpha.read_bytes() == b"%PDF-1.7 newcomer"
+    for named in (rows[0][PATH], records["key"]["pdf_path"]):
+        assert Path(named).read_bytes() == b"%PDF-1.7 Alpha", named
+    assert Path(rows[1][PATH]).read_bytes() == b"%PDF-1.7 Beta"
+    text = "\n".join(said)
+    assert "another file has taken its name" in text, text
+
+
+def test_a_file_that_comes_while_a_rename_waits_is_not_written_over(
+        tmp_path, monkeypatch):
+    """A rename refused once waits and tries again. Where a rename takes
+    the place of a file already there, as on Linux and macOS, a file saved
+    under the new name meanwhile would have been replaced."""
+    monkeypatch.setattr(renaming, "_RETRY_PAUSE", 0)
+    rows = _wanting(tmp_path, (("A.pdf", "B.pdf"),))
+    changes = _plan_wanted(tmp_path, rows)
+    real, tries = Path.rename, []
+
+    def refused_then_replacing(self, target):
+        tries.append(target)
+        if len(tries) == 1:
+            Path(target).write_bytes(b"%PDF-1.7 newcomer")
+            raise PermissionError(32, "held by another process", str(self))
+        if Path(target).exists():           # what a rename does on Linux
+            os.replace(self, target)
+            return
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", refused_then_replacing)
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert _holding(tmp_path) == {"A.pdf": "A.pdf", "B.pdf": "newcomer"}
+    assert result.failed == 1
 
 
 def test_a_chain_whose_free_end_is_refused_leaves_the_rest_where_they_are(

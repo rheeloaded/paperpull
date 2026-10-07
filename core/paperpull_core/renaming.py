@@ -326,17 +326,21 @@ def apply(changes: Iterable[Change], say=print) -> Result:
     """
     changes = [c for c in changes if c.renaming and c.new_path]
     result = Result()
-    by_old = {}                       # a file, as _same_file reads it -> its change
+    by_old = {}                       # a file (_file_key) -> its change
     for c in changes:
         # One rename for one file. A second change for a file already in
         # the plan would move whatever took the file's name after it left.
-        by_old.setdefault(_same_file(str(c.old_path)) or str(c.old_path), c)
+        by_old.setdefault(_file_key(c.old_path), c)
     todo = list(by_old.values())
-    wants = {id(c): _same_file(str(c.new_path)) or str(c.new_path) for c in todo}
+    # The file each new name is held by, asked of the disk before anything
+    # moves, so a name spelled in another case is the file's own wherever
+    # the folder ignores case, a share or a USB drive on Linux included.
+    holds = {id(c): by_old.get(_file_key(c.new_path)) if c.new_path.exists() else None
+             for c in todo}
 
     def holder(c: Change) -> Optional[Change]:
         """The change whose file has c's new name now."""
-        return by_old.get(wants[id(c)])
+        return holds[id(c)]
 
     moved, done = set(), set()        # ids of changes
     for first in todo:
@@ -423,12 +427,16 @@ def _rename_ring(ring: List[Change], moved: set, result: Result, say) -> None:
             return
         result.stranded[str(aside)] = str(first.old_path)
         if first.old_path.exists():
-            # Its name holds another file of the ring now, so its rows and
-            # record follow it to where it is, never to that file.
+            # Its name holds another file now, so its rows and record
+            # follow it to where it is, never to that file.
             result.mapping[str(first.old_path)] = str(aside)
             result.names[first.old_name] = aside.name
-            say("  %s is left as %s, since %s could not give its name back"
-                % (first.old_name, aside.name, ring[-1].old_name))
+            if kept:
+                why = "%s could not give its name back" % ring[-1].old_name
+            else:
+                why = "another file has taken its name"
+            say("  %s is left as %s, since %s. The index and the run state name it "
+                "there." % (first.old_name, aside.name, why))
         else:
             say("  %s is left as %s, since it could not be renamed back. Rename it "
                 "to %s by hand." % (first.old_name, aside.name, first.old_name))
@@ -447,7 +455,7 @@ def _also_left(left: List[Change], say) -> None:
             % _listed(c.old_name for c in left))
 
 
-def _land(c: Change, source: Path) -> Optional[OSError]:
+def _land(c: Change, source: Path) -> Optional[Exception]:
     """Rename source to c's new name, and None, or the error that refused it.
     Never over another file, including one that appeared while this was
     running, and never past the limit the plan kept to."""
@@ -456,7 +464,8 @@ def _land(c: Change, source: Path) -> Optional[OSError]:
             c.new_path = unique_path(c.new_path.parent, c.new_path.name,
                                      c.max_path_length)
         _retried_rename(source, c.new_path)
-    except OSError as e:
+    except (OSError, ValueError) as e:
+        # ValueError when no name beside it fits the folder's limit.
         return e
     return None
 
@@ -474,6 +483,10 @@ def _put(source: Path, target: Path) -> bool:
 
 def _retried_rename(source: Path, target: Path) -> None:
     for attempt in range(_TRIES):
+        # Looked for at every try, since a rename overwrites on Linux and
+        # macOS, and a file can come while this waits.
+        if target.exists():
+            raise FileExistsError(17, "a file has that name", str(target))
         try:
             source.rename(target)
             return
@@ -481,6 +494,18 @@ def _retried_rename(source: Path, target: Path) -> None:
             if attempt == _TRIES - 1:
                 raise
             time.sleep(_RETRY_PAUSE)
+
+
+def _file_key(path: Path):
+    """The file at path, the same for every spelling of its name, or for a
+    name nothing is under, the name as _same_file reads it."""
+    try:
+        stat = os.stat(path)
+        if stat.st_ino:
+            return (stat.st_dev, stat.st_ino)
+    except (OSError, ValueError):
+        pass
+    return _same_file(str(path)) or str(path)
 
 
 def _renamed(c: Change, result: Result) -> None:
@@ -732,7 +757,9 @@ def run_for(app, apply_changes: bool = False, say=print,
                                   getattr(app.progress, "data", None) or {})
     result = apply(changes, say=say)
     result.spellings = spellings
-    if not result.renamed:
+    # A file left under a temporary name while its own name holds another
+    # file is in the mapping too, with nothing renamed perhaps.
+    if not result.mapping:
         _say_stranded(result, say)
         return result
     numbered = _numbered(changes, result)
@@ -740,10 +767,11 @@ def run_for(app, apply_changes: bool = False, say=print,
         if update_rows(rows, result, note="renamed", numbered=numbered):
             csv.rewrite(rows)
     update_progress(app.progress, result)
-    say("")
-    say("Renamed %d file(s). The index and the run state now point at them."
-        % result.renamed)
-    if result.failed - len(result.stranded):
+    if result.renamed:
+        say("")
+        say("Renamed %d file(s). The index and the run state now point at them."
+            % result.renamed)
+    if result.renamed and result.failed - len(result.stranded):
         say("%d could not be renamed and were left alone."
             % (result.failed - len(result.stranded)))
     _say_stranded(result, say)
