@@ -55,6 +55,12 @@ PRESS_EVENTS = frozenset(("click", "dblclick", "mousedown", "mouseup", "pointerd
 # What ships, apps and the core and what the panel and the server run.
 ROOTS = ("apps", "core", "gui", "server")
 
+# Folders a build or an install makes, copies of what ships and never what
+# a run reads from this tree. Installing the core on CI builds
+# core/build/lib, and the census read its 34 copies as sources of their
+# own, so CI ran 34 more tests than a run here.
+MADE_FOLDERS = {"build", "dist", "site-packages", "node_modules"}
+
 
 def is_test(path: Path) -> bool:
     parts = path.relative_to(REPO).parts
@@ -67,7 +73,8 @@ def sources():
     out = []
     for root in ROOTS:
         for path in sorted((REPO / root).rglob("*.py")):
-            if not is_test(path):
+            made = set(path.relative_to(REPO).parts[:-1]) & MADE_FOLDERS
+            if not is_test(path) and not made:
                 out.append(path)
     return out
 
