@@ -334,10 +334,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the apps and the core hand to a page, followed back through names,
   imports, joins, formats and the helpers that pass a script along, and
   fails on any press a page script makes that is not on its reviewed list
-  with the reason it is safe. Besides the core's own, four remain on it,
-  ADP's press of the View statement that shows its identity check, M&T's
-  year headings in its statements frame, and two links PG&E makes itself to
-  save a PDF.
+  with the reason it is safe. Besides the core's own, three remain on it,
+  M&T's year headings in its statements frame, and two links PG&E makes
+  itself to save a PDF.
+- **ADP presses the View statement that shows its identity check only when
+  it shows with nothing over it.** When ADP holds back a tax statement until
+  the person verifies themselves, the app presses the Tax Statements card's
+  own View statement, so that ADP shows its prompt in the browser. That
+  press was the button's own click run inside the page, which reached it
+  under whatever covered it and pressed it when it did not show. Now
+  Playwright presses it, through the same place in the core as the presses
+  above, and a button something covers or one that does not show stops the
+  run before it says a prompt is showing, saying why in PaperPull's own
+  words and writing the failure file. The scaffold capture ADP carried,
+  which no run called, is gone.
 
 ## [0.44.0] - 2026-10-07
 

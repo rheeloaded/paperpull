@@ -430,8 +430,8 @@ def opens_a_zip(app: Path) -> bool:
 def reachable(app: Path, start: str = "download_one") -> dict:
     """The app's own functions download_one can reach, by name, each with
     its definitions. A capture a module still carries and nothing calls is
-    not what a run does. ADP carries the scaffold's whole _catch_pdf and
-    takes every document from its statement services instead, and an
+    not what a run does. ADP carried the scaffold's whole _catch_pdf while
+    it took every document from its statement services instead, and an
     earlier version of this census drove the dead copy and passed."""
     defs: dict = {}
     for path in app_modules(app):
@@ -525,7 +525,7 @@ def test_the_apps_that_open_a_zip_are_found():
     assert {"wellsfargo", "adp", "etrade", "statefarm", "usaa", "citi", "tmobile"} <= names
     assert {"wellsfargo", "att", "newrez", "verizon", "chase", "amex"} <= {d.name for d in TAKING}
     assert {"tmobile", "navyfederal"} <= {d.name for d in DELIVERED}
-    # ADP carries a scaffold capture nothing calls.
+    # ADP asks its statement services for every document.
     assert {"citi", "usaa", "fidelity", "adp"} <= {d.name for d in ASKING}
     assert sorted(TAKING + DELIVERED + ASKING) == ZIP_APPS
 

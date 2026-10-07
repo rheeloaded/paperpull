@@ -48,10 +48,12 @@ signed-in employee account (a former employer's, still open):
   once per run, and once blocked the rest are left for the next run.
   Nothing is typed into this app to answer the check. The app presses the
   card's own "View statement", which is what makes ADP show the prompt,
-  and then watches the page: the viewer the page opens after a successful
-  check fetches the PDF itself, and that answer is the document. So the
-  person answers ADP in the browser and the run carries on by itself,
-  which matters because the control panel gives an app no keyboard at all.
+  only when the button shows with nothing over it (pressing.press_once),
+  and otherwise the run stops. Then it watches the page. The viewer the
+  page opens after a successful check fetches the PDF itself, and that
+  answer is the document. So the person answers ADP in the browser and
+  the run carries on by itself, which matters because the control panel
+  gives an app no keyboard at all.
   One verification covers every tax statement in the session (two W-2s
   from two employers came down after one, verified 2026-09-22).
 
@@ -94,17 +96,7 @@ from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import last_day as _last_day
 # re-exported: this app's docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
-from paperpull_core.capture import snapshot as _snapshot
-from paperpull_core.capture import take_download as _take_download
-from paperpull_core.capture import clear_copies as _clear_copies
-from paperpull_core.capture import ask_again as _ask_again
-from paperpull_core.capture import RequestsSince as _RequestsSince
-from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
-from paperpull_core.capture import take_new_tab as _core_take_new_tab
-from paperpull_core.capture import take_same_tab as _core_take_same_tab
-from paperpull_core.controls import control_texts as _control_texts
-from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
@@ -346,22 +338,6 @@ def is_safe_control(name: str) -> bool:
     if SETTINGS_CONTROL_RE.search(name) or AUTH_CONTROL_RE.search(name):
         return False
     return bool(SAFE_DOC_CONTROL_RE.search(name))
-
-
-# ---------------------------------------------------------------------------
-# Downloads from a real Edge or Chrome attached over CDP. The browser saves
-# the file itself, into its own Downloads folder, and Playwright's download
-# event never fires. So the browser is pointed at a folder of ours and that
-# folder is watched after every click. The Verizon app found this first.
-# AT&T's fourth round found it again, with a trace that showed a clean
-# click and nothing arriving.
-# ---------------------------------------------------------------------------
-
-
-def _take_new_tab(page, new_pages, out_path: Path) -> bool:
-    """A PDF a click opened in a new tab. The core does the reading, this
-    app's guard decides which addresses it may read."""
-    return _core_take_new_tab(page, new_pages, out_path, is_safe_url)
 
 
 # ---------------------------------------------------------------------------
@@ -674,22 +650,6 @@ class RawDoc:
     kind: str = "doc"
 
 
-# The date a bill control belongs to. The control's own name first, then
-# the nearest enclosing row or card whose text carries a date, up to six
-# levels up. Returned with the container's text so a repair can see what
-# the row looked like.
-_ROW_OF_JS = r"""el => {
-  const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/i;
-  let node = el, depth = 0;
-  while (node && depth < 6) {
-    const txt = (node.innerText || '').trim();
-    if (dateRe.test(txt)) return txt.slice(0, 300);
-    node = node.parentElement; depth++;
-  }
-  return '';
-}"""
-
-
 def collect_download_docs(page) -> List[RawDoc]:
     """Every pay statement and tax statement the services list. Nothing on
     the page is read or clicked."""
@@ -717,224 +677,10 @@ def collect_download_docs(page) -> List[RawDoc]:
     return docs
 
 
-def _control_for(page, iso: str):
-    """The control for the document dated `iso`, matched the same way
-    discovery found it, or None."""
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
-        except Exception:
-            name = ""
-        found = parse_date(name)
-        if not found:
-            try:
-                found = parse_date(el.evaluate(_ROW_OF_JS) or "")
-            except Exception:
-                found = None
-        if found == iso:
-            return el, name
-    return None, ""
-
-
 def _fetch_pdf(page, href: str) -> Optional[bytes]:
     """A PDF link fetched from inside the signed-in page, cookies and all.
     The fetching is the core's, the hosts are this app's."""
     return _core_fetch_pdf(page, href, is_safe_url)
-
-
-def _take_same_tab(page, start_url: str, out_path: Path, trace) -> bool:
-    """A PDF the click opened in this very tab. The core does the reading,
-    this app's guard decides which addresses it may read."""
-    return _core_take_same_tab(page, start_url, out_path, trace, is_safe_url)
-
-
-_SECOND_STEP_RE = re.compile(
-    r"^\s*(download|download\s+(pdf|now|file|statement|document)|save|save\s+(as\s+)?pdf|"
-    r"(regular|standard|full|detailed)\s+pdf|pdf|view\s*/\s*print\s+pdf|print|open\s+pdf)\s*$", re.I)
-
-
-def _second_step(page, appeared: set):
-    """A control the click revealed whose text says it finishes a download,
-    once it has passed the guard, or None. The choosing is the core's, the
-    words this provider uses and the guard are this app's."""
-    return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control)
-
-
-def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
-               dl_dir=None) -> bool:
-    """Click `el` and save whatever PDF the site produces, a file landing
-    in `dl_dir`, a download event, a PDF response, a new tab, this tab
-    moving to the document, or a second control the click revealed.
-    `trace` collects what happened, the click's own outcome included."""
-    ctx = page.context
-    got: dict = {}
-    downloads: list = []
-    # Answers to a request this press made, from its tab or one it opened,
-    # that called themselves a PDF and read empty. Asked for once more only
-    # when nothing else brings the document (capture.ask_again).
-    empty_answers: list = []
-    made_here = _RequestsSince(page, ctx.pages)
-    start_url = page.url or ""
-
-    def on_download(dl):
-        downloads.append(dl)
-
-    def on_response(res):
-        try:
-            url = res.url or ""
-            if not is_safe_url(url):
-                return
-            ct = (res.headers.get("content-type") or "").lower()
-            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct):
-                trace.append({"status": res.status, "type": ct[:40], "url": redact(url)[:160]})
-            if got:
-                return
-            if "pdf" in ct or "octet" in ct:
-                try:
-                    body = res.body()
-                except Exception:
-                    body = b""
-                    got["refetch"] = url
-                if body[:5] == b"%PDF-":
-                    got["body"] = body
-                elif not body and not got and made_here.made(res.request) \
-                        and (res.request.method, url) not in empty_answers:
-                    # A PDF the page reads into a blob leaves its answer
-                    # empty under Playwright 1.63 (capture.ask_again).
-                    empty_answers.append((res.request.method, url))
-        except Exception:
-            pass
-
-    ctx.on("response", on_response)
-    page.on("download", on_download)
-    before = set(ctx.pages)
-    seen = _snapshot(dl_dir)
-    controls_before = _control_texts(page)
-
-    def landed() -> bool:
-        # Pointed at a folder, the browser can save the only copy there and
-        # leave the event's own file empty, so that file is taken rather than
-        # the document asked for a second time (capture.take_download).
-        if downloads and _take_download(downloads[0], dl_dir, seen, out_path):
-            return True
-        if got.get("body"):
-            out_path.write_bytes(got["body"])
-            return True
-        if got.get("refetch"):
-            try:
-                # This address answered the press directly, so asking it
-                # again needs no redirect, and one would take the
-                # browser's cookies wherever it led.
-                resp = page.context.request.get(got.pop("refetch"), max_redirects=0,
-                                                timeout=60000)
-                body = resp.body() if resp.ok else b""
-                if body[:5] == b"%PDF-":
-                    out_path.write_bytes(body)
-                    return True
-            except Exception:
-                pass
-        return _take_new_pdf(dl_dir, seen, out_path)
-
-    def wait_for_pdf(seconds: int) -> bool:
-        for _ in range(seconds):
-            if landed():
-                return True
-            page.wait_for_timeout(1000)
-        return landed()
-
-    try:
-        try:
-            el.scroll_into_view_if_needed(timeout=4000)
-        except Exception:
-            pass
-        # Playwright's own press, and through the page only when nothing
-        # covered the control, its press never reached the page and nothing
-        # it should bring came. What cannot be told stops the run, and the
-        # control is never pressed twice (pressing.press_once).
-        outcome = pressing.press_once(
-            page, el, what="the control for this document", words=_words(),
-            guard=is_safe_control, dl_dir=dl_dir,
-            brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
-        if trace is not None:
-            if outcome.error is None:
-                trace.append({"note": "clicked", "control": redact(label)[:60]})
-            else:
-                trace.append({"note": "click failed", "control": redact(label)[:60],
-                              "error": str(outcome.error)[:160]})
-            if outcome.how == pressing.MADE:
-                trace.append({"note": "the press reached the page although it raised, "
-                                      "so it was not made again", "control": redact(label)[:60]})
-            elif outcome.how == pressing.THROUGH_THE_PAGE and outcome.page_error is None:
-                trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
-            elif outcome.how == pressing.THROUGH_THE_PAGE:
-                trace.append({"note": "DOM click failed too", "error": str(outcome.page_error)[:160]})
-        if outcome.how == pressing.GONE:
-            # Nothing was pressed, so nothing this document brings can come,
-            # and whatever the page shows now is not this press's. No second
-            # step is looked for, and the document is left for another run.
-            if trace is not None:
-                trace.append({"note": "the control left the page before it was pressed"})
-            return False
-        if wait_for_pdf(10):
-            return True
-        if _take_same_tab(page, start_url, out_path, trace):
-            return True
-        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-            return True
-        appeared = _control_texts(page) - controls_before
-        if trace is not None:
-            trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
-                          "appeared": [redact(t) for t in sorted(appeared)[:15]],
-                          "new_tabs": len([p for p in ctx.pages if p not in before])})
-        step, step_label = _second_step(page, appeared)
-        if step is not None:
-            try:
-                step.click(timeout=8000)
-                if trace is not None:
-                    trace.append({"note": "second step clicked", "control": redact(step_label)[:60]})
-            except Exception as e:
-                if trace is not None:
-                    trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
-                                  "error": str(e)[:160]})
-            if wait_for_pdf(20):
-                return True
-            if _take_same_tab(page, start_url, out_path, trace) or \
-                    _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-                return True
-        if wait_for_pdf(15):
-            return True
-        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-            return True
-        # Nothing else brought it, so the one answer that read empty is asked
-        # for once more (capture.ask_again).
-        if _ask_again(page, empty_answers, out_path, is_safe_url, zip_ok=False):
-            return True
-        log.info("click on %r produced no PDF", label)
-        return False
-    finally:
-        made_here.stop()
-        try:
-            ctx.remove_listener("response", on_response)
-        except Exception:
-            pass
-        try:
-            page.remove_listener("download", on_download)
-        except Exception:
-            pass
-        for extra in [p for p in ctx.pages if p not in before]:
-            try:
-                extra.close()
-            except Exception:
-                pass
-        # What the browser saved into the folder while the document came
-        # some other way, read off the answer or asked for again, goes when
-        # it is an exact copy of the one saved (capture.clear_copies).
-        try:
-            _clear_copies(dl_dir, seen, out_path)
-        except Exception:
-            pass
 
 
 _FETCH_PDF_B64_JS = r"""async ([url, accept]) => {
@@ -1018,6 +764,9 @@ def wait_for_tax_access(page, url: str, trace: Optional[list] = None,
 
     ctx.on("response", on_response)
     try:
+        # Pressed before anything is said, so a run that stops at the press
+        # never says a prompt is showing.
+        pressed = open_tax_statement_check(page)
         print("\n  >> ADP is showing a security prompt in your browser RIGHT NOW. <<")
         print("  Do not close or dismiss it. It is the identity check ADP asks for")
         print("  before it hands over a tax form, and it is asking how to send you")
@@ -1028,7 +777,7 @@ def wait_for_tax_access(page, url: str, trace: Optional[list] = None,
         print("  If the prompt is dismissed or ignored, ADP hands over no tax forms")
         print("  until you sign out of ADP and sign in again. Your pay statements are")
         print("  already saved by this point, so nothing else is held up.")
-        if not open_tax_statement_check(page):
+        if not pressed:
             print("  (Could not press the card's View statement, so open the Tax")
             print("   Statements card yourself and press View statement there.)")
         for waited in range(seconds):
@@ -1069,34 +818,61 @@ def step_up_pending(page) -> bool:
         return False
 
 
+# The Tax Statements card's own View statement, the last SDF-BUTTON or
+# BUTTON on the page whose whole text says so, found through every open
+# shadow root. The element itself is handed back and nothing is pressed.
+_VIEW_STATEMENT_JS = r"""() => {
+  const found = [];
+  const walk = (root) => {
+    for (const e of root.querySelectorAll('*')) {
+      if (e.shadowRoot) walk(e.shadowRoot);
+      const t = (e.innerText || '').trim();
+      if ((e.tagName === 'SDF-BUTTON' || e.tagName === 'BUTTON') && /^\s*view statement\s*$/i.test(t)) found.push(e);
+    }
+  };
+  walk(document);
+  return found.length ? found[found.length - 1] : null;
+}"""
+
+
 def open_tax_statement_check(page) -> bool:
     """Press the Tax Statements card's own "View statement", which is
     what starts ADP's identity check, so the person can answer it in the
-    window that is already open. The control has passed the guard. True
-    when it was pressed."""
+    window that is already open. True when it was pressed, and False when
+    the page or the button could not be found or the button left the page
+    before it was pressed, with nothing pressed.
+
+    The button is found as the element itself (_VIEW_STATEMENT_JS), so the
+    press and every check before it reach that one element through the
+    shadow roots it sits in. pressing.press_once presses it, Playwright's
+    own press first, which waits for the button to show and presses only
+    when nothing covers it. A button something covers, one that does not
+    show, and a press whose outcome cannot be told stop the run, and the
+    button is never pressed twice."""
     try:
         if not goto_documents(page):
             return False
-        pressed = page.evaluate(r"""() => {
-          const found = [];
-          const walk = (root) => {
-            for (const e of root.querySelectorAll('*')) {
-              if (e.shadowRoot) walk(e.shadowRoot);
-              const t = (e.innerText || '').trim();
-              if ((e.tagName === 'SDF-BUTTON' || e.tagName === 'BUTTON') && /^\s*view statement\s*$/i.test(t)) found.push(e);
-            }
-          };
-          walk(document);
-          const el = found[found.length - 1];
-          if (!el) return false;
-          el.scrollIntoView({block: 'center'});
-          el.click();
-          return true;
-        }""")
-        return bool(pressed)
+        found = page.evaluate_handle(_VIEW_STATEMENT_JS)
+    except Exception as e:
+        log.info("could not find the tax statement check: %s", e)
+        return False
+    try:
+        button = found.as_element()
+        if button is None:
+            log.info("the page shows no View statement for the tax statements")
+            return False
+        outcome = pressing.press_once(
+            page, button, what="the View statement button of the Tax Statements card",
+            words=_words(), guard=is_safe_control, step="open the identity check")
+        return outcome.how != pressing.GONE
     except Exception as e:
         log.info("could not open the tax statement check: %s", e)
         return False
+    finally:
+        try:
+            found.dispose()
+        except Exception:
+            pass
 
 
 def _pdf_addresses(key, iso_date: str) -> list:
