@@ -47,6 +47,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   once a document is about to be downloaded, as every other document app
   does. A dry run of Pilot or Run All still opens the browser, since it
   reads the list there.
+- **Rename no longer gives one bill's file another bill's account.**
+  Rename, and the File names page's offer to rename after a pattern
+  change, name each file from the record the app keeps for it. That record
+  was found by the statement's date and title, and every record of one
+  date and title was merged into one. American Family titles each bill's
+  statement "Account Statement" and its date, so with two bills that each
+  had a statement of one day, a Rename preview offered to give the first
+  bill's file the second bill's account and a " (2)", and after a pattern
+  change both files were named for the second bill. Nothing was deleted
+  and the index kept each bill's own summary, but the file names said the
+  wrong account. Citi titles each card's statement the same way, so two
+  cards' statements of one day did the same. Now a file is matched to the
+  record that names that very file, and by its date and title only when no
+  record names it and one document alone has that date and title. A file
+  that still cannot be placed is named from its own index row, which can
+  leave out what a record would add but never puts in another document's.
+  AAFMAA, Ally, Anthem, Capital One, Chase, Discover, FedEx, M&T Bank,
+  myPay, Navy Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard
+  keep a statement under the provider's own document id when it has one,
+  and Rename never found those records at all, so a naming pattern's
+  account or number never reached a file they had already downloaded. Now
+  it does.
 
 ## [0.44.0] - 2026-10-07
 

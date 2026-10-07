@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
@@ -354,14 +355,14 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
     # discovers from. Reading the row alone gave back the name the file
     # already had, so a rename reported that everything was already named
     # correctly while the filenames plainly lacked the new part (#26).
-    current = _records_now(app)
+    current = _Known(app)
 
     def build_name(row):
         # The whole record, not the row alone, because a pattern can name
         # a file for its order number, account or total (#50), and a
         # rename that left them out would name a file differently from a
         # download under the very same pattern.
-        record = current.get(_record_key(row)) or {}
+        record = current.record_for(row)
         summary = (record.get("summary") or "").strip() or _first(row, _SUMMARY_KEYS)
         return build_pdf_filename(_first(row, _DATE_KEYS), summary,
                                   _first(row, _TYPE_KEYS), part=_part_of(row),
@@ -394,10 +395,12 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
 
 
 def _record_key(row: dict):
-    """How a ledger row is matched to the record the app discovers from.
+    """How a ledger row is matched to a record when no record names the
+    row's own file (_Known.record_for).
 
-    A receipt is its order number. A document has none, so it is its date
-    and its title, which is what a document app already keys on."""
+    A receipt is its order number. A document has none in its row, so it
+    is its date and its title, which a document app's own key may add an
+    account or a count to."""
     order = _first(row, _ID_KEYS)
     if order:
         return ("order", order)
@@ -426,25 +429,98 @@ def _key_of_record(rec: dict):
     return ("doc", date, str(rec.get("title") or "").strip())
 
 
-def _records_now(app) -> dict:
-    """What the app knows about each document today, by row key.
+class _Known:
+    """What the app knows about each document today, and which document a
+    ledger row is.
 
-    Progress first and discovery over it, because discovery is the one an
-    app refreshes when it learns to read a page better, and progress
-    still holds anything discovery no longer lists. A value discovery
-    leaves empty does not wipe one progress has."""
-    out = {}
-    for store_name in ("progress", "discovery"):
-        store = getattr(app, store_name, None)
-        data = getattr(store, "data", None)
-        if not isinstance(data, dict):
-            continue
-        for rec in data.values():
-            if not isinstance(rec, dict):
+    A document is one key of the app's own, the one progress and discovery
+    both keep its records under. Progress first and discovery over it,
+    because discovery is the one an app refreshes when it learns to read a
+    page better, and progress still holds anything discovery no longer
+    lists. A value discovery leaves empty does not wipe one progress has.
+
+    A row is the document whose record names the row's own file. A date
+    and a title do not say which document a row is. American Family titles
+    every bill's statement "Account Statement" and its date, and Citi every
+    card's "Monthly Statement" and its date, so two bills with a statement
+    of one day were merged here into one record, the later one, and Rename
+    offered to give the first bill's file the second bill's account and a
+    " (2)" (the release review of 0.44.0). A row whose file no record names
+    is matched by its order number, or by its date and title among the
+    documents whose records name no file, and only when one document
+    answers. Any other row is named from the row alone, a name that leaves
+    out what a record would have added, and never one that says another
+    document's."""
+
+    def __init__(self, app):
+        self.records = {}      # the app's key -> what it knows of that document
+        self._by_file = {}     # a file -> the keys whose records name it
+        self._by_key = {}      # a row key -> the keys whose records carry it
+        self._named = set()    # the keys whose records name a file at all
+        self._files = {}       # a path as recorded -> _same_file of it
+        for store_name in ("progress", "discovery"):
+            store = getattr(app, store_name, None)
+            data = getattr(store, "data", None)
+            if not isinstance(data, dict):
                 continue
-            key = _key_of_record(rec)
-            if key is None:
-                continue
-            merged = out.setdefault(key, {})
-            merged.update({k: v for k, v in rec.items() if v not in (None, "")})
-    return out
+            for name, rec in data.items():
+                if not isinstance(rec, dict):
+                    continue
+                merged = self.records.setdefault(name, {})
+                merged.update({k: v for k, v in rec.items() if v not in (None, "")})
+                where = self._file(rec.get("pdf_path"))
+                if where:
+                    # A dict for its order, so a choice between keys is
+                    # made the same way on every run.
+                    self._by_file.setdefault(where, {})[name] = True
+                    self._named.add(name)
+                key = _key_of_record(rec)
+                if key is not None:
+                    self._by_key.setdefault(key, {})[name] = True
+
+    def _file(self, raw) -> str:
+        raw = str(raw or "").strip()
+        if not raw:
+            return ""
+        if raw not in self._files:
+            self._files[raw] = _same_file(raw)
+        return self._files[raw]
+
+    def record_for(self, row: dict) -> dict:
+        """The record of the document this row is, or {} when that cannot
+        be told."""
+        key = _record_key(row)
+        where = self._file(row.get("PDF Full Path"))
+        named = list(self._by_file.get(where, ())) if where else []
+        if named:
+            # Several records naming one file is a rename's own view at
+            # work. Robinhood and Newrez show it a copy of a record dated
+            # as the row now is, beside the record itself, and the copy is
+            # the one the row's own date and title name.
+            if len(named) > 1:
+                named = [n for n in named if n in self._by_key.get(key, ())]
+            return self.records[named[0]] if len(named) == 1 else {}
+        # An order number names one purchase, whichever of its files a row
+        # is. A date and a title are asked only of documents whose records
+        # name no file. One whose file is known and is not this row's may be
+        # another bill's, and nothing here tells that from an older copy of
+        # this one.
+        found = [n for n in self._by_key.get(key, ())
+                 if key[0] == "order" or n not in self._named]
+        return self.records[found[0]] if len(found) == 1 else {}
+
+
+def _same_file(raw: str) -> str:
+    """A recorded path the way every spelling of its file reads, resolved,
+    and in one case where the file system ignores case, as Windows and
+    macOS do. "" for a path that cannot be read as one."""
+    try:
+        path = os.path.realpath(raw)
+    except (OSError, ValueError):
+        try:
+            path = os.path.abspath(raw)
+        except (OSError, ValueError):
+            return ""
+    if os.name == "nt" or sys.platform == "darwin":
+        path = path.lower()
+    return path

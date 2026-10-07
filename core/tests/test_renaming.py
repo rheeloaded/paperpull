@@ -5,12 +5,15 @@ name (#43). Nothing about those files needed fetching. These pin the
 promises the rename makes, above all that it cannot lose a file and
 cannot leave the ledger pointing at one that is gone.
 """
+import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from paperpull_core import renaming  # noqa: E402
+from paperpull_core import renaming, storage  # noqa: E402
 from paperpull_core.storage import JsonStore  # noqa: E402
 
 PATH = "PDF Full Path"
@@ -318,3 +321,160 @@ def test_unique_path_can_leave_a_files_own_name_free(tmp_path):
     (tmp_path / "a.pdf").write_bytes(b"x")
     assert unique_path(tmp_path, "a.pdf").name == "a (2).pdf"
     assert unique_path(tmp_path, "a.pdf", ignoring="a.pdf").name == "a.pdf"
+
+
+# -- which record a row is (the release review of 0.44.0) ---------------------
+
+TITLE = "Account Statement - September 12, 2026"
+KEY = "Statement:2026-09-12:" + TITLE + ":%s"
+
+
+def _bill(tmp_path, account):
+    """One bill's statement of 2026-09-12 as American Family keeps it, with
+    the bill's account part in its summary, key and account and never in
+    its title. Its file, its index row, and the record a download leaves."""
+    name = "2026-09-12 Testco Billing Statement %s.pdf" % account
+    f = tmp_path / name
+    f.write_bytes(b"%PDF- the bill " + account.encode())
+    summary = "Billing Statement %s" % account
+    row = {"PDF Filename": name, "PDF Full Path": str(f), "Document Date": "2026-09-12",
+           "Document Summary": summary, "Document Title": TITLE, "Notes": ""}
+    rec = {"date": "2026-09-12", "title": TITLE, "account": account, "summary": summary,
+           "pdf_path": str(f), "pdf_filename": name}
+    return row, rec
+
+
+def _listed(rec):
+    """The same record as discovery keeps it, which names no file."""
+    return dict(rec, pdf_path="", pdf_filename="")
+
+
+def _names(tmp_path):
+    """Each file's name, by the bill its bytes are."""
+    return {p.read_bytes()[-4:].decode(): p.name for p in tmp_path.glob("*.pdf")}
+
+
+@pytest.fixture
+def by_account(monkeypatch):
+    monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {account} {summary}")
+
+
+def test_two_bills_of_one_day_are_each_named_for_their_own_record(tmp_path, by_account):
+    """The reviewer's case. Both statements have one date and one title,
+    and the record they were merged into gave the first bill's file the
+    second bill's account and a " (2)"."""
+    (row1, rec1), (row2, rec2) = _bill(tmp_path, "1111"), _bill(tmp_path, "2222")
+    app = _App(tmp_path, [row1, row2],
+               progress={KEY % "1111": rec1, KEY % "2222": rec2},
+               discovery={KEY % "1111": _listed(rec1), KEY % "2222": _listed(rec2)})
+    said = []
+    renaming.run_for(app, apply_changes=True, say=said.append)
+    assert _names(tmp_path) == {
+        "1111": "2026-09-12 Testco 1111 Billing Statement 1111.pdf",
+        "2222": "2026-09-12 Testco 2222 Billing Statement 2222.pdf"}, said
+    assert app.progress.data[KEY % "1111"]["pdf_path"] == str(
+        tmp_path / "2026-09-12 Testco 1111 Billing Statement 1111.pdf")
+
+
+def test_a_bill_whose_record_is_gone_is_never_named_for_another(tmp_path, by_account):
+    """Only the second bill's record is left, and it names its own file. The
+    first bill's file is named from its own row, a name that lacks what its
+    record would have added and never says the other bill's account."""
+    (row1, _rec1), (row2, rec2) = _bill(tmp_path, "1111"), _bill(tmp_path, "2222")
+    app = _App(tmp_path, [row1, row2], progress={KEY % "2222": rec2})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert _names(tmp_path) == {
+        "1111": "2026-09-12 Testco Billing Statement 1111.pdf",
+        "2222": "2026-09-12 Testco 2222 Billing Statement 2222.pdf"}
+
+
+def test_two_bills_only_listed_are_not_told_apart_by_date_and_title(tmp_path, by_account):
+    """Records that name no file, as discovery keeps a document it listed.
+    A date and a title cannot say which bill a row is, so neither file is
+    named for either record."""
+    (row1, rec1), (row2, rec2) = _bill(tmp_path, "1111"), _bill(tmp_path, "2222")
+    app = _App(tmp_path, [row1, row2],
+               discovery={KEY % "1111": _listed(rec1), KEY % "2222": _listed(rec2)})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert _names(tmp_path) == {
+        "1111": "2026-09-12 Testco Billing Statement 1111.pdf",
+        "2222": "2026-09-12 Testco Billing Statement 2222.pdf"}
+
+
+SPELLINGS = [
+    pytest.param(lambda f: f.name, id="relative to where the app runs"),
+    pytest.param(lambda f: str(f).upper(), id="in another case",
+                 marks=pytest.mark.skipif(not (os.name == "nt" or sys.platform == "darwin"),
+                                          reason="case counts in a path here")),
+]
+
+
+@pytest.mark.parametrize("spelled", SPELLINGS)
+def test_a_record_with_its_file_spelled_another_way_is_still_its_files(tmp_path, monkeypatch,
+                                                                         by_account, spelled):
+    monkeypatch.chdir(tmp_path)
+    (row1, rec1), (row2, rec2) = _bill(tmp_path, "1111"), _bill(tmp_path, "2222")
+    rec1["pdf_path"] = spelled(tmp_path / rec1["pdf_filename"])
+    app = _App(tmp_path, [row1, row2], progress={KEY % "1111": rec1, KEY % "2222": rec2})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert _names(tmp_path) == {
+        "1111": "2026-09-12 Testco 1111 Billing Statement 1111.pdf",
+        "2222": "2026-09-12 Testco 2222 Billing Statement 2222.pdf"}
+
+
+def test_where_case_is_ignored_one_file_has_one_spelling(tmp_path):
+    a = renaming._same_file(str(tmp_path / "Statements" / "A Bill.pdf"))
+    b = renaming._same_file(str(tmp_path / "STATEMENTS" / "a bill.PDF"))
+    assert (a == b) == (os.name == "nt" or sys.platform == "darwin")
+
+
+def test_a_file_two_bills_records_name_is_named_from_its_row(tmp_path, by_account):
+    """Both bills' records name the one file. They cannot both be right,
+    and the date and title say nothing about which is, so the file is named
+    from its row and for neither record."""
+    (row1, rec1), (row2, rec2) = _bill(tmp_path, "1111"), _bill(tmp_path, "2222")
+    (tmp_path / row2["PDF Filename"]).unlink()
+    rec2.update(pdf_path=rec1["pdf_path"], pdf_filename=rec1["pdf_filename"])
+    app = _App(tmp_path, [row1], progress={KEY % "1111": rec1, KEY % "2222": rec2})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert _names(tmp_path) == {"1111": "2026-09-12 Testco Billing Statement 1111.pdf"}
+
+
+def test_a_copy_dated_as_its_row_is_the_record_the_row_takes(tmp_path, monkeypatch):
+    """Robinhood and Newrez show Rename a copy of a record dated as its row
+    now is, beside the record itself, both naming the one file. The copy is
+    the one the row's own date and title name."""
+    monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {summary}")
+    name = "0000-00-00 Testco Form 1099.pdf"
+    f = tmp_path / name
+    f.write_bytes(b"%PDF- form")
+    rows = [{"PDF Filename": name, "PDF Full Path": str(f), "Document Date": "2025-12-31",
+             "Document Summary": "Form 1099", "Document Title": "Form 1099", "Notes": ""}]
+    undated = {"date": "", "title": "Form 1099", "summary": "Form 1099",
+               "pdf_path": str(f), "pdf_filename": name}
+    copy = dict(undated, date="2025-12-31", summary="Form 1099 Tax Year 2025")
+    app = _App(tmp_path, rows, progress={"Tax Document::Form 1099:": undated},
+               discovery={"dated by form:2025-12-31:Form 1099": copy})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert [p.name for p in tmp_path.glob("*.pdf")] == [
+        "2025-12-31 Testco Form 1099 Tax Year 2025.pdf"]
+
+
+def test_every_file_of_one_order_takes_the_orders_record(tmp_path, monkeypatch):
+    """An order number names one purchase whichever of its files a row is,
+    as when an order was downloaded again beside its first copy and the
+    record names the second."""
+    monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {number}")
+    rows = []
+    for name in ("2026-09-05 Testco Order.pdf", "2026-09-05 Testco Order A-77.pdf"):
+        f = tmp_path / name
+        f.write_bytes(b"%PDF- " + name.encode())
+        rows.append({"PDF Filename": name, "PDF Full Path": str(f),
+                     "Document Date": "2026-09-05", "Document Summary": "Order",
+                     "Document Title": "", "Order or Receipt Number": "A-77", "Notes": ""})
+    app = _App(tmp_path, rows, progress={"Online:A-77": {
+        "order_number": "A-77", "purchase_date": "2026-09-05", "summary": "Order",
+        "pdf_path": rows[1]["PDF Full Path"], "pdf_filename": rows[1]["PDF Filename"]}})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert sorted(p.name for p in tmp_path.glob("*.pdf")) == [
+        "2026-09-05 Testco A-77 (2).pdf", "2026-09-05 Testco A-77.pdf"]
