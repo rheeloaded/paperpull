@@ -590,9 +590,8 @@ class App:
             self._delay()
 
     def download_one(self, page, doc: Document, filename: str):
-        """Save one document. The site layer fetches the row's PDF link from
-        inside the page when there is one, and otherwise clicks the row's
-        own control and catches what arrives."""
+        """Save one document. The site layer fetches its PDF from inside
+        the page, at the address ADP's statement services gave for it."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.

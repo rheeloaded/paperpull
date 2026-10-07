@@ -387,9 +387,13 @@ def test_every_app_that_points_the_browser_at_a_folder_is_driven_here(app):
 
 
 # What taking a download looks like in an app's own code. Waiting for one,
-# saving one, or reading the folder one lands in.
+# saving one, reading the folder one lands in, or handing the press to
+# delivery.deliver, which does all of that.
 TAKERS = {"expect_download", "take_download", "take_new_pdf", "save_download", "save_as",
-          "snapshot", "arrived"}
+          "snapshot", "arrived", "deliver"}
+
+# Listening for one, or waiting for one by the event's name.
+LISTENERS = {"on", "once", "wait_for_event", "expect_event"}
 
 
 def takes_from_a_folder(app: Path) -> list:
@@ -402,7 +406,7 @@ def takes_from_a_folder(app: Path) -> list:
                 continue
             f = node.func
             name = (f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")).lstrip("_")
-            listens = (name in ("on", "once") and node.args
+            listens = (name in LISTENERS and node.args
                        and isinstance(node.args[0], ast.Constant) and node.args[0].value == "download")
             if name in TAKERS or listens:
                 found.append((path.name, node.lineno))
@@ -427,9 +431,13 @@ def test_what_takes_a_download_is_found(tmp_path):
         "def a(page, dl, d, s):\n    page.on('download', s.append)\n"
         "def b(dl, d, out):\n    capture.take_download(dl, d, set(), out)\n"
         "def c(d, out):\n    _take_new_pdf(d, set(), out)\n"
-        "def e(page):\n    page.on('response', print)\n", encoding="utf-8")
+        "def e(page):\n    page.on('response', print)\n"
+        "def f(page, req, out, d):\n    delivery.deliver(page, req, out, is_safe_url=ok, dl_dir=d)\n"
+        "def g(page):\n    with page.expect_event('download'):\n        pass\n"
+        "def h(page):\n    page.wait_for_event('popup')\n", encoding="utf-8")
     assert takes_from_a_folder(app) == [("made_site.py", 2), ("made_site.py", 4),
-                                        ("made_site.py", 6)]
+                                        ("made_site.py", 6), ("made_site.py", 10),
+                                        ("made_site.py", 12)]
 
 
 # -- what the source has to say ------------------------------------------------
