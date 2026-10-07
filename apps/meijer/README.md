@@ -133,7 +133,8 @@ already on your machine is used and not the bundled one.
   browser was showing, its rows stopped changing and drew no more when
   scrolled to the end, the page held fewer than 400 rows, the most the app
   reads from one page, its oldest receipt is at least 20 months old, and
-  the run's own discovery read it, so Resume never decides it. The tab
+  the run's own discovery read it, so a Resume that carries on without
+  reading the list never decides it. The tab
   showed no control but the two tabs and each row's own receipt or details
   link. Any other control on the In-Store Receipts tab, a button,
   a link, a dropdown, a menu or anything else to press, keeps such

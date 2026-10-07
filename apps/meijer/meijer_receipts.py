@@ -20,6 +20,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -118,8 +119,8 @@ class App:
     # them is ever taken for one it no longer lists (see _dropped_off).
     _listed_now = frozenset()
     # The kinds of purchase whose rows this run's discovery read. Without
-    # its own reading of the In-Store tab, as in Resume, a run never says a
-    # store receipt has dropped off the list.
+    # its own reading of the In-Store tab, as in a Resume after a list read
+    # whole, a run never says a store receipt has dropped off the list.
     _kinds_read = frozenset()
     # Every attempt this run wrote down for a tester, in the order they
     # came, and which purchase of the run is being worked on, as (its place,
@@ -479,6 +480,9 @@ class App:
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
         """Discovery pass: the orders page, then ?page=2 and on
         until a page adds no order the earlier pages did not have."""
+        # A listing that stops on the way, however it stops, is noted as one
+        # that stopped, so Resume reads the list again (paperpull_core.listing).
+        listing.started(self)
         page = self.page()
         n_new = 0
         floor = self.args.start_date or self.config.get("default_start_date")
@@ -539,6 +543,9 @@ class App:
             print(f"\n{again} purchase(s) Meijer had stopped listing are on its list "
                   "again, so this run tries them again.")
         self.discovery.save()
+        # The whole list is in, and only now may a Resume carry on from it
+        # without reading it again (paperpull_core.listing).
+        listing.read_whole(self)
 
         all_recs = list(self.discovery.data.values())
         self.stats["online_discovered"] = len(all_recs)
@@ -1018,8 +1025,8 @@ class App:
         as one that does. Every row of its kind shows a date, the collector
         read the whole list, the oldest row is at least WHOLE_LIST_MONTHS
         old, and the purchase is older still. This run's own discovery read
-        the In-Store rows, so Resume never decides it, and did not find this
-        purchase among them. Its receipt was never saved, since a purchase
+        the In-Store rows, so a Resume that reads no list never decides it,
+        and did not find this purchase among them. Its receipt was never saved, since a purchase
         downloaded before and looked for again under --redownload, as the
         panel's Download again asks, keeps the record and the rows it has
         (review). Only then is the list scrolled to its end, where it must
@@ -1471,6 +1478,13 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume works from the purchases a Discover found. After one that
+        # stopped before the list was read whole, that is some of them or none,
+        # and Resume finished clean with the rest never looked for. So the list
+        # is read before anything else, and a listing that stops again stops
+        # the run (paperpull_core.listing).
+        if listing.read_again_first(self):
+            self.cmd_discover(quiet=True)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]
         pend = [p for p in pend if not self._already_done(p)]

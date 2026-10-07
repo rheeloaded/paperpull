@@ -785,11 +785,15 @@ def test_a_list_that_goes_back_less_than_twenty_months_is_never_taken_for_the_wh
 
 
 def test_resume_never_decides_it(attached, known, tmp_path):
-    """Resume reads no list of its own before it presses, so what a
-    purchase's tab shows then is never taken for all of Meijer's list. The
-    run that stopped and told the person to press Resume did so because
-    Meijer seemed to be slowing requests, when a short list is likeliest."""
+    """A Resume after a list read whole reads no list of its own before it
+    presses, so what a purchase's tab shows then is never taken for all of
+    Meijer's list. The run that stopped and told the person to press Resume
+    did so because Meijer seemed to be slowing requests, when a short list
+    is likeliest. A Resume after a listing that stopped reads the list
+    first, as Run All does, and decides only as Run All decides."""
     start_from(tmp_path, known)
+    (tmp_path / "out" / "last-listing.json").write_text(
+        json.dumps({"complete": True, "at": "2026-01-20T10:00:00"}), encoding="utf-8")
     mark_saved(tmp_path, [F1, F2, K1, K2, C2])
     SITE.orders = orders_page([K1, K2])
     took = run(tmp_path, attached, "--resume")

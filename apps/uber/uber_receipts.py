@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from paperpull_core import delivery
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -321,14 +322,6 @@ class App:
         if self._stopped_sides or self._cut_short_sides:
             raise SystemExit(0)
 
-    def _unfinished_mark(self) -> Path:
-        """Present while a Discover is under way and after one that did not
-        read both lists to their end, so Resume knows to read them first, as
-        Target's and Kroger's do. A side that asked for a sign-in or was cut
-        short leaves it, and so does a run that read one side, or one year or
-        stretch of a list, since the rest was not read."""
-        return self.paths.discovery_json.with_name(".discovery-unfinished")
-
     def _open(self, side: str):
         """The side's tab, opened on its list page. The tab, or None when
         the side asked for a sign-in or showed a check, which is said."""
@@ -441,11 +434,10 @@ class App:
         is missing, so the run stops at its end rather than finish, as it
         does when a side asks for a sign-in. With finish=False the caller
         does that once it has used them."""
+        # A Discover that stops on the way, however it stops, is noted as one
+        # that stopped, so Resume reads the list again (paperpull_core.listing).
+        listing.started(self)
         types = list(types or PURCHASE_TYPES)
-        try:
-            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
-        except OSError:
-            pass
         n_new = {RIDES: 0, EATS: 0}
         if RIDES in types:
             n_new[RIDES] = self._discover_rides()
@@ -454,11 +446,13 @@ class App:
         self.discovery.save()
         unfinished = bool(self._stopped_sides or self._cut_short_sides)
         narrowed = bool(getattr(self.args, "year", None) or self.args.start_date)
+        # Only both lists read to their end let Resume carry on without
+        # reading them again. A side that asked for a sign-in or was cut
+        # short leaves the listing noted as one that stopped, and so does a
+        # run that read one side, or one year or stretch of a list, since
+        # the rest was not read.
         if not unfinished and not narrowed and set(PURCHASE_TYPES) <= set(types):
-            try:
-                self._unfinished_mark().unlink()
-            except OSError:
-                pass
+            listing.read_whole(self)
 
         all_recs = [r for r in self.discovery.data.values() if isinstance(r, dict)]
         self.stats["rides_discovered"] = sum(
@@ -1142,9 +1136,9 @@ class App:
         # never looked for. So both lists are read first, and a side that
         # does not come this time either still leaves the purchases already
         # found to download, and the run stops at its end.
-        if self._unfinished_mark().exists():
-            print("The last Discover did not read both of your lists to their end, "
-                  "so it runs again first.")
+        # On an install that has never listed anything, Resume says so and
+        # stops (paperpull_core.listing).
+        if listing.read_again_first(self):
             self.cmd_discover(quiet=True, finish=False)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]

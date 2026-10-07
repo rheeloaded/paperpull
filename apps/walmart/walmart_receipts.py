@@ -24,6 +24,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -413,6 +414,9 @@ class App:
 
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
         """Discovery pass over one or both history sections. Saves discovery.json."""
+        # A listing that stops on the way, however it stops, is noted as one
+        # that stopped, so Resume reads the list again (paperpull_core.listing).
+        listing.started(self)
         types = types or [ONLINE, IN_STORE]
         page = self.page()
         counts = {}
@@ -451,6 +455,10 @@ class App:
             self.discovery.save()
             counts[ptype] = n_new
             self._delay()
+
+        # The whole list is in, and only now may a Resume carry on from it
+        # without reading it again (paperpull_core.listing).
+        listing.read_whole(self)
 
         all_recs = list(self.discovery.data.values())
         online = [r for r in all_recs if r.get("purchase_type") == ONLINE]
@@ -1278,6 +1286,13 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume works from the purchases a Discover found. After one that
+        # stopped before the list was read whole, that is some of them or none,
+        # and Resume finished clean with the rest never looked for. So the list
+        # is read before anything else, and a listing that stops again stops
+        # the run (paperpull_core.listing).
+        if listing.read_again_first(self):
+            self.cmd_discover(quiet=True)
         known = [Purchase.from_dict(r) for r in self.discovery.data.values()
                  if isinstance(r, dict) and r.get("order_number")]
         pend, aside = [], []

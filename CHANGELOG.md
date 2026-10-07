@@ -76,6 +76,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   does not carry, so it never found one, and a naming pattern's account or
   number never reached a file those apps had already downloaded. Now it
   does.
+- **Every receipt app's Resume reads the purchase list again after a run
+  that stopped while reading it.** After a Discover, Pilot or Run All that
+  stopped while it read the purchase list, at a sign-in, a check or a
+  browser that had been closed, Amazon, Costco, eBay, Gap, GitHub, Lowe's,
+  Meijer and Walmart carried on from the purchases already found, said all
+  of them were complete, and the panel called the run clean, although the
+  rest of the history was never looked at. Their Resume now reads the list
+  again before it downloads anything, as Target's does, and when the list
+  does not come this time either, the run stops there as one that stopped,
+  with the purchases it knows left for the next run. Apple, Best Buy, Home
+  Depot, Kroger and Uber already read their lists again first, and still
+  go on with the purchases they know when a list does not come. On an
+  install that had never listed anything, all fourteen said the same clean
+  line, and now Resume says no purchases have been listed yet and stops,
+  without asking for the browser, until a Pilot or Run All reads the list.
+  Each receipt app now notes in `last-listing.json`, as the document apps
+  do, whether its last listing read the whole list, in place of the
+  `.discovery-unfinished` file six of them kept, so an install of one of
+  those six whose listing stopped under an earlier release still has its
+  list read again by its first Resume. A Resume after a whole listing, or
+  on an install from before this release that has listed purchases,
+  finishes as it always did.
 
 ## [0.44.0] - 2026-10-07
 

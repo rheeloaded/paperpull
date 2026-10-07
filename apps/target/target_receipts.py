@@ -25,6 +25,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
@@ -521,22 +522,14 @@ class App:
             print("asks there yourself, then run --login again.")
         self.close()
 
-    def _unfinished_mark(self) -> Path:
-        """Present while a Discover is under way and after one that stopped,
-        so Resume knows to discover again first (review of 0.41.0)."""
-        return self.paths.discovery_json.with_name(".discovery-unfinished")
-
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
         """Discovery pass over one or both history sections. Saves discovery.json."""
-        try:
-            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
-        except OSError:
-            pass
+        # A Discover that stops on the way, however it stops, is noted as one
+        # that stopped, so Resume discovers again first (review of 0.41.0,
+        # paperpull_core.listing).
+        listing.started(self)
         counts = self._discover(types, quiet)
-        try:
-            self._unfinished_mark().unlink()
-        except OSError:
-            pass
+        listing.read_whole(self)
         return counts
 
     def _discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
@@ -1614,9 +1607,10 @@ class App:
         self.stats["mode"] = "resume"
         # A run stopped by Target's check during Discover listed only part of
         # the history. Resume read that part and finished clean, and the rest
-        # was never looked at (review of 0.41.0).
-        if self._unfinished_mark().exists():
-            print("The last Discover stopped partway, so it runs again first.")
+        # was never looked at (review of 0.41.0), so the list is read again
+        # first. On an install that has never listed anything, Resume says so
+        # and stops (paperpull_core.listing).
+        if listing.read_again_first(self):
             self.cmd_discover(quiet=True)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]

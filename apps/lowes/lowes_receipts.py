@@ -20,6 +20,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -373,6 +374,9 @@ class App:
         drawn, since one read too soon is empty and would end the walk
         early. The walk stops at the last page the pager shows, or at the
         first page that holds nothing new."""
+        # A listing that stops on the way, however it stops, is noted as one
+        # that stopped, so Resume reads the list again (paperpull_core.listing).
+        listing.started(self)
         page = self.page()
         n_new = {ONLINE: 0, IN_STORE: 0}
         floor = self.args.start_date or self.config.get("default_start_date")
@@ -439,6 +443,9 @@ class App:
                     "status": purchase.status or self.discovery.get(key).get("status", ""),
                 }, save=False)
         self.discovery.save()
+        # The whole list is in, and only now may a Resume carry on from it
+        # without reading it again (paperpull_core.listing).
+        listing.read_whole(self)
 
         all_recs = list(self.discovery.data.values())
         self.stats["online_discovered"] = sum(
@@ -917,6 +924,13 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        # Resume works from the purchases a Discover found. After one that
+        # stopped before the list was read whole, that is some of them or none,
+        # and Resume finished clean with the rest never looked for. So the list
+        # is read before anything else, and a listing that stops again stops
+        # the run (paperpull_core.listing).
+        if listing.read_again_first(self):
+            self.cmd_discover(quiet=True)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]
         pend = [p for p in pend if not self._already_done(p)]

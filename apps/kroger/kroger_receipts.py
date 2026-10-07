@@ -22,6 +22,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -375,12 +376,6 @@ class App:
             print("anything Kroger asks there yourself, then run --login again.")
         self.close()
 
-    def _unfinished_mark(self) -> Path:
-        """Present while a Discover is under way and after one that did not
-        read the whole purchase history, so Resume knows to read it first,
-        as Target's does. Only the history's last page takes it away."""
-        return self.paths.discovery_json.with_name(".discovery-unfinished")
-
     @staticmethod
     def _history_facts(hist: dict) -> dict:
         """How far the history API got, for a failure file, since nobody has
@@ -456,10 +451,9 @@ class App:
         at its end rather than finish. With finish=False the caller does
         that once it has used them. need_history=False is Resume's, which
         goes on with the purchases already found even when no page comes."""
-        try:
-            self._unfinished_mark().write_text(now_iso(), encoding="utf-8")
-        except OSError:
-            pass
+        # A Discover that stops on the way, however it stops, is noted as one
+        # that stopped, so Resume reads the list again (paperpull_core.listing).
+        listing.started(self)
         page = self.page()
         n_new = 0
         floor = self.args.start_date or self.config.get("default_start_date")
@@ -502,10 +496,9 @@ class App:
         self.discovery.save()
 
         if hist.get("last"):
-            try:
-                self._unfinished_mark().unlink()
-            except OSError:
-                pass
+            # Only the history's last page shows it was read whole, and only
+            # then may Resume carry on without reading it again.
+            listing.read_whole(self)
         elif hist.get("pages"):
             self._history_cut_short = True
             print(f"\n!! Only {hist.get('pages', 0)} page(s) of your purchase history came "
@@ -1014,8 +1007,9 @@ class App:
         # with the rest never looked for. So the history is read first, and
         # when it does not come this time either, Resume still goes on with
         # the purchases it has and stops at its end.
-        if self._unfinished_mark().exists():
-            print("The last Discover did not read your whole purchase history, so it runs again first.")
+        # On an install that has never listed anything, Resume says so and
+        # stops (paperpull_core.listing).
+        if listing.read_again_first(self):
             self.cmd_discover(quiet=True, finish=False, need_history=False)
         pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
                 if isinstance(r, dict) and r.get("order_number")]

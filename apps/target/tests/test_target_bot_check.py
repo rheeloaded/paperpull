@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import storage  # noqa: F401  binds this provider's AppSpec
 import target_receipts
 import target_site as site
+from paperpull_core import listing
 from paperpull_core.models import ONLINE, Item, Purchase, State
 
 APP_DIR = Path(__file__).resolve().parents[1]
@@ -250,7 +251,7 @@ def test_resume_after_a_discover_the_check_stopped_discovers_again(page, tmp_pat
     monkeypatch.setattr(app, "_discover", stopped)
     with pytest.raises(SystemExit):
         app.cmd_discover()
-    assert app._unfinished_mark().exists(), "a Discover that stopped leaves its mark"
+    assert listing.last(app) == listing.STOPPED, "a Discover that stopped is noted so"
 
     monkeypatch.setattr(app, "_discover", lambda types=None, quiet=False: walked.append("again") or {})
     monkeypatch.setattr(app, "process_purchases", lambda pend, dry_run=False: None)
@@ -258,7 +259,7 @@ def test_resume_after_a_discover_the_check_stopped_discovers_again(page, tmp_pat
     app.args.dry_run = False
     app.cmd_resume()
     assert walked == ["stopped", "again"]
-    assert not app._unfinished_mark().exists(), "and one that finished clears it"
+    assert listing.last(app) == listing.COMPLETE, "and one that finished is noted whole"
 
 
 def test_a_sign_in_answered_mid_purchase_opens_its_details_again(tmp_path, monkeypatch):
