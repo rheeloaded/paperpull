@@ -182,3 +182,22 @@ def test_a_provider_spreadsheet_holds_both_of_its_accounts(root):
         rows = list(csv.DictReader(fh))
     assert {x["Account"] for x in rows} == {"", "Jane"} and all(x["Provider"] == "Amazon" for x in rows)
     assert len(rows) == 5
+
+
+def test_an_order_saved_after_a_write_that_saved_nothing_is_listed_once(tmp_path):
+    """An older version wrote a receipt whose page did not show it down with
+    no PDF, and a later run saved it and wrote it down again (#70). The
+    order keeps the saved write's rows only. One never saved keeps its own."""
+    _history(tmp_path / "Kroger Receipts", "Kroger", [
+        _row("2026-05-22", "K-1", "Oats", pdf="", proc="Needs Manual Review"),
+        _row("2026-05-22", "K-2", "Apples", pdf="", proc="Needs Manual Review"),
+        _row("2026-05-22", "K-1", "Oats", pdf="2026-05-22 Kroger Groceries Receipt.pdf"),
+        _row("2026-05-20", "K-3", "Card", pdf="", status="Canceled", proc="Canceled"),
+    ])
+    (prov, f), = xp.find_histories(tmp_path)
+    purchases = xp.load_purchases(prov, f)
+    assert [(p["Order Number"], p["Receipt PDF"]) for p in purchases] == [
+        ("K-2", ""), ("K-1", "2026-05-22 Kroger Groceries Receipt.pdf"), ("K-3", "")]
+    by_no = {o["Order Number"]: o for o in xp.orders_from(purchases)}
+    assert by_no["K-1"]["Items"] == 1
+    assert by_no["K-1"]["Receipt PDF"] == "2026-05-22 Kroger Groceries Receipt.pdf"

@@ -25,6 +25,7 @@ import argparse
 import ast
 import collections
 import importlib
+import itertools
 import inspect
 import sys
 from pathlib import Path
@@ -154,14 +155,17 @@ class _SiteThatShowsNothing:
         return lambda *a, **k: None
 
 
-def app_in(mod, out: Path):
+RUNS = itertools.count(1)
+
+
+def app_in(mod, out: Path, redownload: bool = False):
     """The app's own downloader over an output folder on disk, without its
     __init__, which would want a config file and a console. A new one is a
-    new run."""
+    new run, started a second after the one before."""
     storage = sys.modules["storage"]            # the app's own, loaded with it
     inst = object.__new__(mod.App)
     inst.config = {"max_path_length": 240, "min_pdf_bytes": 2000, "owner": ""}
-    inst.args = argparse.Namespace(redownload=False)
+    inst.args = argparse.Namespace(redownload=redownload)
     inst.paths = storage.Paths(out)
     inst.paths.ensure()
     backups = inst.paths.backups
@@ -176,6 +180,7 @@ def app_in(mod, out: Path):
     inst.stats = collections.defaultdict(int)
     inst.stats["new_files"] = []
     inst.stats["dates_processed"] = []
+    inst.stats["started"] = "2026-10-07T12:%02d:%02d" % divmod(next(RUNS) % 3600, 60)
     inst.write_failure = lambda *a, **k: None
     inst.check_session = lambda *a, **k: False
     inst._journal = _Anything()                 # the journal property makes one otherwise
@@ -230,35 +235,80 @@ def test_only_those_records_are_asked_for_again(app, tmp_path):
                     dict(rec, notes=note, downloaded_ok=True)), (app.name, note)
 
 
+def look(mod, out: Path, method: str, redownload: bool = False, rec: dict = None):
+    """One run's look for the receipt on a page that never shows it, by the
+    app's own method. The run, and what it printed is read off capsys."""
+    inst = app_in(mod, out, redownload)
+    p = purchase()
+    inst.discovery.update(p.key, p.to_dict())
+    if rec:
+        inst.progress.update(p.key, dict(p.to_dict(), **rec))
+    found = getattr(inst, method)
+    named = inspect.signature(found).parameters
+    args = [_Anything() if n == "page" else p for n in named if n in ("page", "purchase")]
+    assert not found(*args), "nothing was saved"
+    return inst
+
+
+def written_down(inst) -> int:
+    return sum(1 for f in (inst.order_csv, inst.index_csv) for r in f.read_all()
+               if ORDER in " ".join(r.values()))
+
+
 @pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
 def test_a_page_that_did_not_show_the_receipt_is_asked_for_again(app, method, tmp_path,
                                                                  monkeypatch, capsys):
     mod = load(app)
     monkeypatch.setattr(mod, "site", _SiteThatShowsNothing())
-    inst = app_in(mod, tmp_path)
     p = purchase()
-    inst.discovery.update(p.key, p.to_dict())
-    look = getattr(inst, method)
-    named = inspect.signature(look).parameters
-    args = [_Anything() if n == "page" else p for n in named if n in ("page", "purchase")]
 
-    assert not look(*args), "nothing was saved"
+    for n in (1, 2):
+        inst = look(mod, tmp_path, method)
+        said = " ".join(capsys.readouterr().out.split())
+        rec = inst.progress.get(p.key) or {}
+        assert rec.get("state") not in (State.NO_RECEIPT_AVAILABLE.value, State.COMPLETED.value,
+                                        State.CANCELED.value), (app.name, rec.get("state"))
+        assert "on %d of 3 separate runs. It is tried again next run." % n in said, said
+        assert "marked for manual review" not in said, said
+        assert not done_already(mod, tmp_path, p),             "%s's next run skips a purchase whose receipt page did not show it" % app.name
+        # The panel counts it as something to look at.
+        assert inst.stats["failed"] + inst.stats["manual_review"] >= 1
+        # The run that saves it writes it down. The CSVs only take rows on
+        # the end, so rows written now would stand beside those, once per try.
+        assert not written_down(inst), app.name
 
+    # The third run that finds nothing sets it aside, and writes it down once.
+    inst = look(mod, tmp_path, method)
     said = " ".join(capsys.readouterr().out.split())
-    rec = inst.progress.get(p.key) or {}
-    assert rec.get("state") not in (State.NO_RECEIPT_AVAILABLE.value, State.COMPLETED.value,
-                                    State.CANCELED.value), (app.name, rec.get("state"))
-    assert "tried again next run" in said, said
-    assert "marked for manual review" not in said, said
-    assert not done_already(mod, tmp_path, p), \
-        "%s's next run skips a purchase whose receipt page did not show it" % app.name
-    # The panel counts it as something to look at.
-    assert inst.stats["failed"] + inst.stats["manual_review"] >= 1
-    # The run that saves it writes it down. The CSVs only take rows on the
-    # end, so rows written now would stand beside those, once per try.
-    for csv_file in (inst.order_csv, inst.index_csv):
-        rows = [r for r in csv_file.read_all() if ORDER in " ".join(r.values())]
-        assert not rows, (app.name, csv_file.path.name, rows)
+    assert "on 3 of 3 separate runs. It is not asked for again" in said, said
+    assert (inst.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
+    assert inst.stats["manual_review"] >= 1
+    rows = written_down(inst)
+    assert rows >= 2, "a row in each CSV"
+    assert done_already(mod, tmp_path, p)
+
+    # Download again asks for it, and finding nothing again writes nothing.
+    inst = look(mod, tmp_path, method, redownload=True)
+    capsys.readouterr()
+    assert written_down(inst) == rows
+
+
+@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+def test_download_again_keeps_a_receipt_saved_before(app, method, tmp_path, monkeypatch, capsys):
+    """Download again asks for a receipt saved before, and when its page
+    does not show it no plain run asks for it again, so the run does not
+    say one will."""
+    mod = load(app)
+    monkeypatch.setattr(mod, "site", _SiteThatShowsNothing())
+    p = purchase()
+    inst = look(mod, tmp_path, method, redownload=True,
+                rec={"state": State.COMPLETED.value, "downloaded_ok": True})
+    said = " ".join(capsys.readouterr().out.split())
+    assert "The receipt saved before is kept." in said, said
+    assert "tried again next run" not in said, said
+    assert (inst.progress.get(p.key) or {}).get("downloaded_ok")
+    assert done_already(mod, tmp_path, p)
+    assert not written_down(inst)
 
 
 def done_already(mod, out: Path, p) -> bool:
@@ -284,3 +334,29 @@ def test_no_receipt_app_records_no_receipt_from_a_page_that_did_not_show_one(app
                         isinstance(node.func, ast.Attribute) and node.func.attr == "_write_csv_rows"):
                     faults.append("%s line %d: %s" % (m.name, node.lineno, said[:80]))
     assert not faults, faults
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_a_purchase_set_aside_is_never_said_to_be_completed(app):
+    """A run told a tester "Already completed and PDF verified" for a
+    receipt never saved (#70). Every place an app says it asks the core
+    first, which says a purchase set aside was skipped for that."""
+    tree = ast.parse(entry_of(app).read_text(encoding="utf-8-sig"))
+    said = [n for n in ast.walk(tree) if isinstance(n, ast.Constant)
+            and isinstance(n.value, str) and "Already completed and PDF verified" in n.value]
+    asked = {id(a) for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr == "skipped"
+             and isinstance(n.func.value, ast.Name) and n.func.value.id == "not_shown"
+             for a in n.args}
+    assert said, "the app says it skipped something"
+    assert all(id(n) in asked for n in said), app.name
+
+
+def test_the_words_for_a_purchase_set_aside():
+    from paperpull_core import not_shown
+    aside = {"state": State.NO_RECEIPT_AVAILABLE.value, "not_shown_runs": ["a", "b", "c"]}
+    assert "did not show on 3 separate runs" in not_shown.skipped(aside, "done")
+    assert not_shown.skipped(dict(aside, not_shown_runs=["a", "b"]), "done") == "done"
+    assert not_shown.skipped(dict(aside, downloaded_ok=True), "done") == "done"
+    assert not_shown.skipped({"state": State.COMPLETED.value}, "done") == "done"
+    assert not_shown.skipped(None, "done") == "done"

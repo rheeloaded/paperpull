@@ -271,7 +271,7 @@ def test_a_receipt_that_did_not_show_is_fetched_on_the_next_run(attached, shown,
     said, panel = run_all(tmp_path, attached, capsys)
 
     assert downloaded(tmp_path) == [STORE], "the receipt that showed is saved"
-    assert "%s. It is tried again next run." % why in said, said
+    assert "%s, on 1 of 3 separate runs. It is tried again next run." % why in said, said
     assert "marked for manual review" not in said, said
     assert panel["failed"] == 1, "the panel says one receipt was not saved"
     rec = progress(tmp_path)[OTHER]
@@ -288,6 +288,28 @@ def test_a_receipt_that_did_not_show_is_fetched_on_the_next_run(attached, shown,
     assert "Already completed and PDF verified - skipping." in said
     assert panel["failed"] == 0 and panel["new_files"] == 1, panel
     assert rows_naming(tmp_path, OTHER)["receipt_index_csv"] == 1, "written down once, when saved"
+
+
+def test_a_receipt_that_never_shows_is_set_aside_after_three_runs(attached, tmp_path, capsys):
+    """Each run asks for it, and on the third that finds nothing it is set
+    aside, written down once and counted for review. The next run skips it
+    and says why, rather than calling it completed."""
+    SITE.failing = {OTHER_KEY: COULD_NOT_LOAD}
+    for n in (1, 2):
+        said, panel = run_all(tmp_path, attached, capsys)
+        assert "on %d of 3 separate runs. It is tried again next run." % n in said, said
+        assert receipts_opened() == ([OTHER_KEY, STORE_KEY] if n == 1 else [OTHER_KEY])
+    said, panel = run_all(tmp_path, attached, capsys)
+    assert "on 3 of 3 separate runs. It is not asked for again, and Download again still "            "asks for it." in said, said
+    assert panel["failed"] == 0 and panel["manual_review"] >= 1, panel
+    assert progress(tmp_path)[OTHER]["state"] == "No Receipt Available"
+    assert rows_naming(tmp_path, OTHER) == {"receipt_index_csv": 1, "order_history_csv": 1}
+
+    said, panel = run_all(tmp_path, attached, capsys)
+    assert receipts_opened() == [], said
+    assert "Its receipt did not show on 3 separate runs, so it is skipped. Download again "            "asks for it." in said, said
+    assert rows_naming(tmp_path, OTHER) == {"receipt_index_csv": 1, "order_history_csv": 1}
+    assert downloaded(tmp_path) == [STORE]
 
 
 @pytest.mark.parametrize("why", [w for _, w in FAILING.values()])

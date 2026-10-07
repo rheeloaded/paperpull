@@ -662,7 +662,8 @@ class App:
                     # that put them there again (#63).
                     print("  " + self._put_aside_said(aside))
                 else:
-                    print("  Already completed and PDF verified - skipping.")
+                    print(not_shown.skipped(self.progress.get(purchase.key),
+                                            "  Already completed and PDF verified - skipping."))
                 self.stats["skipped_completed"] += 1
                 # Inside the dates when it has one, since the selection
                 # left out every dated purchase outside them.

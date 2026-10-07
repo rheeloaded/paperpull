@@ -263,16 +263,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   receipt, which is final, and wrote it into both CSVs. The next run said
   it was already completed and skipped it, and no file was anywhere.
   Amazon, Best Buy, Costco, eBay, Gap, GitHub, Home Depot and Lowe's did
-  the same when a receipt page did not fill in, and Meijer, which did try
+  the same when a receipt page did not fill in, Target when an order's
+  page showed neither a receipt nor an invoice, and Meijer, which did try
   again, wrote the purchase into both CSVs once more on every run that
   tried. Such a purchase is now a failure that says it is tried again next
   run, the panel counts it, and nothing goes into the CSVs until a run
-  saves the receipt. Purchases an earlier version left that way are
-  fetched on the next run as well, found by the words it noted them with,
-  and the rows it wrote for them stay in the CSVs beside the ones the
-  saving run adds. A purchase the store showed has no receipt, a Target
-  order with no receipt control or a GitHub payment whose row has no
-  receipt link, stays as it was.
+  saves the receipt. One whose receipt has not shown on three separate
+  runs is set aside for review, written into the CSVs once, and skipped
+  with a line that says so, and Download again still asks for it.
+  Purchases an earlier version left that way are fetched on the next run
+  as well, found by the words it noted them with. The rows it wrote for
+  them stay in the CSVs, and the All Purchases workbook leaves out an
+  order's rows from a write that saved nothing once a later one saved it.
+  A purchase the store showed has no receipt, a Target order with only an
+  invoice or a GitHub payment whose row has no receipt link, stays as it
+  was, and moving a download history to another computer keeps the rest
+  asked for.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

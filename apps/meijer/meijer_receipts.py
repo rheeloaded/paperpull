@@ -675,6 +675,10 @@ class App:
         # (_listed_again).
         if state == State.NO_LONGER_LISTED.value:
             return True
+        # Its receipt page showed nothing on three separate runs, so it was
+        # set aside (#70). Download again still asks for it.
+        if not_shown.set_aside(rec):
+            return True
         # A copy put aside for review counts as done while it is still in
         # Manual Review, and deleting it is how a person asks for the receipt
         # again (#42). Trying it again on its own every run added a copy a run,
@@ -714,7 +718,8 @@ class App:
                     print("  Put aside in Manual Review by an earlier run, so it is skipped. "
                           "Delete it there to have it fetched again.")
                 else:
-                    print("  Already completed and PDF verified - skipping.")
+                    print(not_shown.skipped(self.progress.get(purchase.key),
+                                            "  Already completed and PDF verified - skipping."))
                 self.stats["skipped_completed"] += 1
                 continue
             # Which document the run is on, so a failure file says how far

@@ -555,7 +555,8 @@ class App:
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if self._already_done(purchase):
-                print("  Already completed and PDF verified - skipping.")
+                print(not_shown.skipped(self.progress.get(purchase.key),
+                                        "  Already completed and PDF verified - skipping."))
                 self.stats["skipped_completed"] += 1
                 continue
             # Which document the run is on, so a failure file says how far

@@ -712,7 +712,8 @@ class App:
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if self._already_done(purchase):
-                print("  Already completed and PDF verified - skipping.")
+                print(not_shown.skipped(self.progress.get(purchase.key),
+                                        "  Already completed and PDF verified - skipping."))
                 self.stats["skipped_completed"] += 1
                 continue
             # Which document the run is on, so a failure file says how far
@@ -1084,13 +1085,19 @@ class App:
             return self._left_unread(purchase, "an invoice")
         if invoices and self.config.get("include_invoices"):
             return self._save_invoices(page, purchase, invoices, listed)
+        # A page that showed neither a receipt nor an invoice may be one that
+        # had not drawn yet, so the order is asked for again (#70). One that
+        # shows only an invoice has no receipt to print.
+        if not invoices:
+            return not_shown.tried_again(self, purchase,
+                                         "Neither a receipt nor an invoice showed")
 
         self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
                            notes="No printable receipt available")
         self._write_csv_rows(purchase, receipt_status="No printable receipt available",
                              processing_status=State.NEEDS_MANUAL_REVIEW.value,
                              notes_extra="No Print receipts control found"
-                             + ("" if not invoices else "; invoice exists (use --include-invoices)"))
+                             "; invoice exists (use --include-invoices)")
         self.stats["no_receipt"] += 1
         self.stats["manual_review"] += 1
         print("  No printable receipt available - marked for manual review.")
