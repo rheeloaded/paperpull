@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -545,6 +546,11 @@ class App:
         if rec.get("downloaded_ok"):
             return True
         state = rec.get("state")
+        # An older version recorded this final when the receipt page did not
+        # show the receipt, which says nothing about whether there is one,
+        # so it is asked for again (#70).
+        if not_shown.asked_again(rec):
+            return False
         # terminal / already-completed (incl. records made before the
         # downloaded_ok marker existed): done, do not re-download.
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
@@ -711,17 +717,11 @@ class App:
             print("  eBay no longer shows this order's details. Printing its history card.")
             card_only = site.show_order_card(page, purchase)
 
+        # A page that did not render says nothing about whether the order has
+        # a receipt, so the next run asks for it again (#70).
         if not card_only and not site.receipt_is_present(page):
-            self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                               notes="Order-details receipt did not render")
-            self._write_csv_rows(purchase,
-                                 receipt_status="No printable receipt available",
-                                 processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                                 notes_extra="Order-details page did not hydrate")
-            self.stats["no_receipt"] += 1
-            self.stats["manual_review"] += 1
-            print("  Order-details receipt did not render - marked for manual review.")
-            return False
+            return not_shown.tried_again(
+                self, purchase, "The order-details receipt did not render")
 
         purchase.document_type = "Order Summary" if card_only else "Receipt"
         folder = self.paths.folder_for(purchase.purchase_type,

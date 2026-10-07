@@ -256,6 +256,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
   prints, with the name to give it back when that name is free, and when
   its old name holds another file by then, its row and record name it
   where it is.
+- **A receipt whose page did not show it is fetched on the next run
+  (#70).** When Kroger answered a receipt with its own "There was a
+  problem loading the receipt. Please try again.", the app said the
+  receipt was marked for manual review, recorded the purchase as having no
+  receipt, which is final, and wrote it into both CSVs. The next run said
+  it was already completed and skipped it, and no file was anywhere.
+  Amazon, Best Buy, Costco, eBay, Gap, GitHub, Home Depot and Lowe's did
+  the same when a receipt page did not fill in, and Meijer, which did try
+  again, wrote the purchase into both CSVs once more on every run that
+  tried. Such a purchase is now a failure that says it is tried again next
+  run, the panel counts it, and nothing goes into the CSVs until a run
+  saves the receipt. Purchases an earlier version left that way are
+  fetched on the next run as well, found by the words it noted them with,
+  and the rows it wrote for them stay in the CSVs beside the ones the
+  saving run adds. A purchase the store showed has no receipt, a Target
+  order with no receipt control or a GitHub payment whose row has no
+  receipt link, stays as it was.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

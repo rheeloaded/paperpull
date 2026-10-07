@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -491,6 +492,11 @@ class App:
         if rec.get("downloaded_ok"):
             return True
         state = rec.get("state")
+        # An older version recorded this final when the receipt page did not
+        # show the receipt, which says nothing about whether there is one,
+        # so it is asked for again (#70).
+        if not_shown.asked_again(rec):
+            return False
         # terminal / already-completed (incl. records made before the
         # downloaded_ok marker existed): done, do not re-download.
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
@@ -663,17 +669,12 @@ class App:
             why = site.not_this_purchase(page, url)
             if why:
                 return self._refuse_page(purchase, why)
+            # Nor does the receipt page when it did not show a receipt, so
+            # the next run asks for it again (#70).
             if not site.receipt_is_present(page):
-                self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                                   notes="Receipt page did not show a receipt")
-                self._write_csv_rows(purchase, receipt_status="No printable receipt available",
-                                     processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                                     notes_extra="Receipt page did not render")
-                self.stats["no_receipt"] += 1
                 self.write_failure('find the receipt', 'there was no receipt to save')
-                self.stats["manual_review"] += 1
-                print("  Receipt page did not render - marked for manual review.")
-                return False
+                return not_shown.tried_again(
+                    self, purchase, "The receipt page did not show a receipt")
             purchase = site.extract_details(page, purchase)
             self._capture_document(page, purchase, out_path)
             return self._finish_pdf(page, purchase, out_path, source_page=page)

@@ -30,6 +30,7 @@ from __future__ import annotations
 from paperpull_core import delivery
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -725,6 +726,11 @@ class App:
         if rec.get("downloaded_ok"):
             return True
         state = rec.get("state")
+        # An older version recorded this final when the receipt page did not
+        # show the receipt, which says nothing about whether there is one,
+        # so it is asked for again (#70).
+        if not_shown.asked_again(rec):
+            return False
         # Terminal or already completed, including records made before the
         # downloaded_ok marker existed. Done, and not downloaded again.
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
