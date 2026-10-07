@@ -1,0 +1,17 @@
+{
+  "_comment": "Editable rules mapping Nelnet document titles to filename summaries. Nelnet names a billing statement by its date, '09/27/2026 Statement', and the year-end form on Tax Info is filed as '1098-E Tax Year 2025'. Checked in order: tax, then insurance (unused), then statement. Letters and notices from the inbox classify as Other Document and are out of scope unless 'Other Document' is added to document_types in config.json.",
+  "tax_rules": [
+    {"pattern": "\\b1098-?E\\b", "summary": "1098-E Tax Form"},
+    {"pattern": "\\b1098\\b", "summary": "1098 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement|information)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "\\bstatement\\b", "summary": "Statement"}
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "\\bfaq\\b"
+  ]
+}
