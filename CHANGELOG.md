@@ -216,6 +216,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
   order number first, as a download does, where it used to take a " (2)".
   A file renamed after another file took its new name in the meantime
   keeps to the limit in config.json too, where it kept to 240.
+- **Rename gives every file the name its preview gave it, and a swap it
+  cannot finish goes back.** When one file wanted the name of another
+  that was itself being renamed to a free name, and the first came first
+  in the index, Rename put the first aside, found the second still under
+  its name, and gave the first that name with " (2)" added, and only then
+  renamed the second. The preview had said otherwise, and the next Rename
+  offered to rename the file again. Now a file waits for the one holding
+  the name it wants, each chain of names is renamed from its free end,
+  and when a file of a chain cannot be renamed, those waiting for its
+  name keep their own. Files that trade names, two or more in a ring,
+  still go through a temporary name ending ".renaming". When another
+  program, such as a sync client or virus scanner, held a file in a swap
+  so its rename was refused, the file could stay under its temporary name
+  while its row in the index and its record named its old name, which by
+  then held the other file of the swap. Rename then said only that a file
+  had been left alone. A refused rename is now tried a few more times, and
+  when it is still refused the files of the ring go back to the names they
+  had. A file that cannot leave its temporary name is named in what Rename
+  prints, with the name to give it back when that name is free, and when
+  its old name holds another file by then, its row and record name it
+  where it is.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

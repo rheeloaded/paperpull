@@ -45,6 +45,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
@@ -83,6 +84,7 @@ class Result:
     mapping: dict = field(default_factory=dict)   # old path str -> new path str
     names: dict = field(default_factory=dict)     # old name -> new name
     spellings: dict = field(default_factory=dict) # another spelling -> old path str
+    stranded: dict = field(default_factory=dict)  # aside path str -> old path str
 
 
 # Why a row naming something on disk is left out of a rename, when that
@@ -295,58 +297,204 @@ def describe(changes: Iterable[Change], say=print, limit: int = 0) -> None:
             "folders, so they are left alone." % left)
 
 
+# A rename refused because another program has the file open, as a virus
+# scanner or a sync client may open a file just renamed, is tried this many
+# times, this many seconds apart.
+_TRIES = 5
+_RETRY_PAUSE = 0.4
+
+
 def apply(changes: Iterable[Change], say=print) -> Result:
     """Do the renames, and say what happened to each.
 
-    Two files can want each other's names, which a straight rename would
-    resolve by refusing or by overwriting depending on the platform. Any
-    file whose target is another file in this same plan goes to a
-    temporary name first, so the whole set lands whatever order it is in.
+    A file wanting the name of another file in this same plan waits for
+    that one to move first, so each chain of names goes from its free end
+    and every file lands on the name the preview gave it. A rename onto a
+    name still in use would refuse or overwrite depending on the platform,
+    and a file meeting one took a name beside it the preview never gave.
+    When a file of a chain cannot move, those waiting on its name keep
+    their own.
+
+    Files wanting each other's names in a ring, as two swapping names do,
+    have no free end, so one of them goes to a temporary name first. When
+    a rename in a ring is refused, the ring goes back as it was, since a
+    file left partway would sit under a name the ledger gives another
+    file. A file that cannot leave its temporary name is said by name and
+    kept in Result.stranded, and when its own name holds another file by
+    then, Result.mapping gives it the temporary name, so no ledger names
+    the other file for it.
     """
     changes = [c for c in changes if c.renaming and c.new_path]
     result = Result()
-    sources = {str(c.old_path).lower() for c in changes}
-    staged = []
-
+    by_old = {}                       # a file, as _same_file reads it -> its change
     for c in changes:
-        if str(c.new_path).lower() in sources:
-            tmp = c.old_path.with_name(c.old_path.name + ".renaming")
-            n = 0
-            while tmp.exists():
-                n += 1
-                tmp = c.old_path.with_name("%s.renaming%d" % (c.old_path.name, n))
-            try:
-                os.replace(c.old_path, tmp)
-                staged.append((c, tmp))
-                continue
-            except OSError as e:
-                say("  could not move %s (%s)" % (c.old_name, e.__class__.__name__))
-                result.failed += 1
-                continue
-        staged.append((c, c.old_path))
+        # One rename for one file. A second change for a file already in
+        # the plan would move whatever took the file's name after it left.
+        by_old.setdefault(_same_file(str(c.old_path)) or str(c.old_path), c)
+    todo = list(by_old.values())
+    wants = {id(c): _same_file(str(c.new_path)) or str(c.new_path) for c in todo}
 
-    for c, source in staged:
-        try:
-            # Never over another file, including one that appeared while
-            # this was running, and never past the limit the plan kept to.
-            if c.new_path.exists():
-                c.new_path = unique_path(c.new_path.parent, c.new_path.name,
-                                         c.max_path_length)
-            source.rename(c.new_path)
-        except OSError as e:
-            say("  could not rename %s (%s)" % (c.old_name, e.__class__.__name__))
-            result.failed += 1
-            try:                                     # put a staged file back
-                if source != c.old_path and not c.old_path.exists():
-                    source.rename(c.old_path)
-            except OSError:
-                pass
-            continue
-        result.renamed += 1
-        result.mapping[str(c.old_path)] = str(c.new_path)
-        result.names[c.old_path.name] = c.new_path.name
-    result.skipped = len(list(changes)) - result.renamed - result.failed
+    def holder(c: Change) -> Optional[Change]:
+        """The change whose file has c's new name now."""
+        return by_old.get(wants[id(c)])
+
+    moved, done = set(), set()        # ids of changes
+    for first in todo:
+        # Follow the names from this file to the end of its chain, or round
+        # to a file already met, which makes a ring.
+        path, at = [], {}
+        c = first
+        while c is not None and id(c) not in done and id(c) not in at:
+            at[id(c)] = len(path)
+            path.append(c)
+            c = holder(c)
+        if c is not None and id(c) in at:
+            ring, path = path[at[id(c)]:], path[:at[id(c)]]
+            _rename_ring(ring, moved, result, say)
+            done.update(id(r) for r in ring)
+        for c in reversed(path):      # the free end first
+            _rename_one(c, holder(c), moved, result, say)
+            done.add(id(c))
+    result.skipped = len(changes) - result.renamed - result.failed
     return result
+
+
+def _rename_one(c: Change, holder: Optional[Change], moved: set, result: Result,
+                say) -> None:
+    """One file of a chain, once the file holding its new name has moved."""
+    if holder is not None and id(holder) not in moved:
+        say("  could not rename %s, since %s could not be renamed first"
+            % (c.old_name, holder.old_name))
+        result.failed += 1
+        return
+    error = _land(c, c.old_path)
+    if error:
+        say("  could not rename %s (%s)" % (c.old_name, error.__class__.__name__))
+        result.failed += 1
+        return
+    moved.add(id(c))
+    _renamed(c, result)
+
+
+def _rename_ring(ring: List[Change], moved: set, result: Result, say) -> None:
+    """Files wanting each other's names, ring[i] the name of ring[i + 1] and
+    the last ring[0]'s. ring[0] goes aside, then each file from the last
+    back takes the name the one after it has left, and ring[0] goes last.
+    A file renamed only in letter case is a ring of one."""
+    first = ring[0]
+    aside = first.old_path.with_name(first.old_path.name + ".renaming")
+    n = 0
+    while aside.exists():
+        n += 1
+        aside = first.old_path.with_name("%s.renaming%d" % (first.old_path.name, n))
+    try:
+        _retried_rename(first.old_path, aside)
+    except OSError as e:
+        say("  could not move %s (%s)" % (first.old_name, e.__class__.__name__))
+        _also_left(ring[1:], say)
+        result.failed += len(ring)
+        return
+
+    went = []
+    for c in list(reversed(ring[1:])) + [first]:
+        error = _land(c, aside if c is first else c.old_path)
+        if not error:
+            went.append(c)
+            continue
+        say("  could not rename %s (%s)" % (c.old_name, error.__class__.__name__))
+        # Back as it was, the last to move first, each into the name the
+        # one after it has just given back. One that cannot go back keeps
+        # its new name, and so do those that moved before it, whose old
+        # names it holds.
+        kept = []
+        for w in reversed(went):
+            if kept or not _put(w.new_path, w.old_path):
+                kept.append(w)
+        for w in kept:
+            say("  %s stays renamed to %s, since it could not be renamed back"
+                % (w.old_name, w.new_path.name))
+            moved.add(id(w))
+            _renamed(w, result)
+        result.failed += len(ring) - len(kept)
+        home = _put(aside, first.old_path)
+        _also_left([r for r in ring if r is not c and r not in kept
+                    and (home or r is not first)], say)
+        if home:
+            return
+        result.stranded[str(aside)] = str(first.old_path)
+        if first.old_path.exists():
+            # Its name holds another file of the ring now, so its rows and
+            # record follow it to where it is, never to that file.
+            result.mapping[str(first.old_path)] = str(aside)
+            result.names[first.old_name] = aside.name
+            say("  %s is left as %s, since %s could not give its name back"
+                % (first.old_name, aside.name, ring[-1].old_name))
+        else:
+            say("  %s is left as %s, since it could not be renamed back. Rename it "
+                "to %s by hand." % (first.old_name, aside.name, first.old_name))
+        return
+    for c in went:
+        moved.add(id(c))
+        _renamed(c, result)
+
+
+def _also_left(left: List[Change], say) -> None:
+    """Say the other files of a ring were left with the names they had."""
+    if len(left) == 1:
+        say("  so %s, which trades names with it, keeps its name" % left[0].old_name)
+    elif left:
+        say("  so %s, which trade names with it, keep their names"
+            % _listed(c.old_name for c in left))
+
+
+def _land(c: Change, source: Path) -> Optional[OSError]:
+    """Rename source to c's new name, and None, or the error that refused it.
+    Never over another file, including one that appeared while this was
+    running, and never past the limit the plan kept to."""
+    try:
+        if c.new_path.exists():
+            c.new_path = unique_path(c.new_path.parent, c.new_path.name,
+                                     c.max_path_length)
+        _retried_rename(source, c.new_path)
+    except OSError as e:
+        return e
+    return None
+
+
+def _put(source: Path, target: Path) -> bool:
+    """Rename source back to target, unless something is there already."""
+    try:
+        if target.exists():
+            return False
+        _retried_rename(source, target)
+    except OSError:
+        return False
+    return True
+
+
+def _retried_rename(source: Path, target: Path) -> None:
+    for attempt in range(_TRIES):
+        try:
+            source.rename(target)
+            return
+        except PermissionError:
+            if attempt == _TRIES - 1:
+                raise
+            time.sleep(_RETRY_PAUSE)
+
+
+def _renamed(c: Change, result: Result) -> None:
+    result.renamed += 1
+    result.mapping[str(c.old_path)] = str(c.new_path)
+    result.names[c.old_path.name] = c.new_path.name
+
+
+def _listed(names) -> str:
+    """"a", "a and b", "a, b and c"."""
+    names = list(names)
+    if len(names) < 2:
+        return "".join(names)
+    return "%s and %s" % (", ".join(names[:-1]), names[-1])
 
 
 def update_rows(rows: Iterable[dict], result: Result, *,
@@ -585,6 +733,7 @@ def run_for(app, apply_changes: bool = False, say=print,
     result = apply(changes, say=say)
     result.spellings = spellings
     if not result.renamed:
+        _say_stranded(result, say)
         return result
     numbered = _numbered(changes, result)
     for csv, rows in ledgers:
@@ -594,9 +743,17 @@ def run_for(app, apply_changes: bool = False, say=print,
     say("")
     say("Renamed %d file(s). The index and the run state now point at them."
         % result.renamed)
-    if result.failed:
-        say("%d could not be renamed and were left alone." % result.failed)
+    if result.failed - len(result.stranded):
+        say("%d could not be renamed and were left alone."
+            % (result.failed - len(result.stranded)))
+    _say_stranded(result, say)
     return result
+
+
+def _say_stranded(result: Result, say) -> None:
+    if result.stranded:
+        say("%d could not be renamed and %s left under a temporary name, as said above."
+            % (len(result.stranded), "was" if len(result.stranded) == 1 else "were"))
 
 
 def _numbered(changes: Iterable[Change], result: Result) -> dict:
