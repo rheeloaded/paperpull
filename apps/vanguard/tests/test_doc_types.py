@@ -356,13 +356,16 @@ def test_a_safe_nbsp_label_reaches_the_click(tmp_path, monkeypatch, pressed_as_g
             self.clicked += 1
             raise RuntimeError("no download event on a fake page")
 
+    from paperpull_core import pressing
     page = _FakePage(label)
     page._icon.__class__ = _ClickRecorder
     out = tmp_path / "y.pdf"
-    got = site.download_document(
-        page, account_id="internal", charitable=False, doc_type="Statement",
-        title="Account Statement - Example Holder \u2014 Cash Plus Account \u2014 1234567",
-        date="2026-08-31", out_path=out)
-    assert got is False            # the capture fails (no real browser)
+    # No download comes on a fake page, and a press that brings none stops
+    # the run rather than go on.
+    with pytest.raises(pressing.NoAnswer):
+        site.download_document(
+            page, account_id="internal", charitable=False, doc_type="Statement",
+            title="Account Statement - Example Holder \u2014 Cash Plus Account \u2014 1234567",
+            date="2026-08-31", out_path=out)
     assert page._icon.clicked == 1, "guard over-refused the real label"
     assert not out.exists()        # and nothing was left behind

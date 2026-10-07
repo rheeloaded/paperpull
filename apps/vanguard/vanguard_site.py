@@ -537,7 +537,9 @@ def download_document(page, account_id: str, charitable: bool,
     macOS, that copy is saved. Nothing is taken when the download failed or
     no download began, and nothing else in the folder is touched, but an
     exact copy of the statement. Without `dl_dir` the browser is left where
-    it is and only the download event is taken.
+    it is and only the download event is taken. A press that brought no
+    download at all stops the run (pressing.no_answer), since pressing again,
+    here or on the next statement, could do something other than it did.
 
     A press whose download begins later than EVENT_WAIT_MS fails, and its
     event can arrive inside the next press's wait. When this press's own
@@ -596,6 +598,7 @@ def download_document(page, account_id: str, charitable: bool,
         return False
     dl = None
     failed = ""
+    began = False
     try:
         # Never forced. The icon is brought to the middle of the window and
         # pressed only when it is the thing on top there, and otherwise
@@ -605,6 +608,7 @@ def download_document(page, account_id: str, charitable: bool,
                            what="the download icon of the statement dated %s" % date,
                            words=_words(), step="press a download icon")
         dl = dl_info.value
+        began = True
         try:
             failed = dl.failure() or ""   # returns once the download has finished
         except Exception as e:
@@ -647,6 +651,13 @@ def download_document(page, account_id: str, charitable: bool,
             out_path.unlink()
     except OSError:
         pass
+    if not began:
+        # The icon was pressed and no download began at all. Pressing it
+        # again, or the next statement's icon, could do something other than
+        # this press did, so the run stops here, as American Express's does.
+        raise pressing.no_answer("download a statement", "no download came",
+                                 "The download icon of the statement dated %s was pressed "
+                                 "once and no download came." % date)
     return False
 
 

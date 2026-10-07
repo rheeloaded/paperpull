@@ -912,10 +912,18 @@ class App:
             info["samples"] = samples
             ui = site.read_page_ui(page) or {}
             info["rendered"] = {"years": ui.get("years")}
+        except pressing.Stop as stop:
+            # A press it would not make ends the look there, and the file
+            # still says what was seen and why it stopped, in our own words
+            # and words from the list.
+            info["stopped"] = {"step": stop.step, "reason": stop.reason, "facts": stop.facts}
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
         write_shaped(out, info, words)
+        if info.get("stopped"):
+            print("A press was not made, or brought nothing, so Diagnose stopped there.")
+            print("The file below says which, in words from PaperPull's fixed list.")
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")

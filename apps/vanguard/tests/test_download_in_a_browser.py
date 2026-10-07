@@ -253,13 +253,20 @@ def test_a_download_cut_off_is_not_saved_and_nothing_else_is_taken(browser_page,
 
 def test_a_press_that_starts_no_download_takes_nothing(browser_page, tmp_path, answer, monkeypatch):
     """With no download of its own, the newest PDF in the folder was taken,
-    which could be another tab's, or an earlier statement answered late."""
+    which could be another tab's, or an earlier statement answered late.
+    Nothing is taken, and the run stops there rather than press again or go
+    on to the next statement's icon, as American Express's does."""
+    from paperpull_core import pressing
     answer["doc"] = "none"
     monkeypatch.setattr(site, "EVENT_WAIT_MS", 3000)
     page = browser_page(True)
     t, theirs, body = _another_tab(tmp_path / ".vanguard-downloads", 0.5)
-    got, archive, staging, out = _download(page, tmp_path)
+    archive, staging = tmp_path / "Statements", tmp_path / ".vanguard-downloads"
+    with pytest.raises(pressing.NoAnswer) as stopped:
+        _download(page, tmp_path)
     t.join()
-    assert got is False
+    assert stopped.value.reason == "no download came"
+    assert stopped.value.lines[0] == ("The download icon of the statement dated 2026-08-31 "
+                                      "was pressed once and no download came.")
     assert _listing(archive) == []
     assert (staging / theirs).read_bytes() == body

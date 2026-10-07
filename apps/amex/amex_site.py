@@ -518,11 +518,14 @@ def _pdf_radio(page):
     that does not. A radio button that does not show is drawn by its label
     alone, the way a styled one can be, and pressing.check checks it
     through that label. A dialog can draw its choices a moment after its
-    Download, so they are looked for again for a few seconds."""
+    Download, so they are looked for again for a few seconds. Inside the
+    file-type dialog itself whenever it is found, so a PDF choice elsewhere
+    on the page is never taken for its own."""
     for _ in range(10):
+        scope = _dialog_scope(page)
         for sel in ("input[type='radio'][value='statement_pdf']",
                     "input[type='radio'][value*='pdf' i]"):
-            loc = page.locator(sel)
+            loc = scope.locator(sel)
             found = []
             for i in range(min(_safe_count(loc), 12)):
                 el = loc.nth(i)
@@ -560,26 +563,35 @@ def _choose_pdf(page, thing: str, words) -> None:
 _DIALOG_CONFIRM_SEL = (
     "[data-test-id='myca-activity-download-footer-download-confirm-anchor'], "
     "[id*='download-confirm'][id$='-anchor']")
-# The dialog is "open" when its PDF radio or its confirm button is present.
+# The dialog's own controls, its PDF radio and its confirm button, looked for
+# inside the dialog whenever it is found (_dialog_open).
 _DIALOG_OPEN_SEL = "input[type='radio'][value*='pdf' i], " + _DIALOG_CONFIRM_SEL
-# The file-type dialog itself, the dialog that holds those controls. Only its
-# own Cancel or Close is ever pressed to close a dialog. A dialog, frame or
-# widget of anything else on the page, a chat window among them, is left as
-# it is.
+# The file-type dialog itself, the dialog that holds its confirm button. Only
+# its own Cancel or Close is ever pressed to close a dialog. A dialog, frame
+# or widget of anything else on the page, a chat window among them, is left
+# as it is.
 _DIALOGS = "[role='dialog'], [role='alertdialog'], dialog, [aria-modal='true']"
 _CLOSE_NAME = re.compile(r"^\s*(cancel|close)\s*$", re.I)
 
 
 def _file_type_dialog(page):
-    """The file-type dialog's own element, known by the controls only it
-    has, or None."""
-    return _last_visible(page.locator(_DIALOGS).filter(has=page.locator(_DIALOG_OPEN_SEL)))
+    """The file-type dialog's own element, known by its own Download, whose
+    test id nothing else on the page has, or None. A PDF choice alone does
+    not make a dialog this one, since a setting elsewhere can offer a PDF."""
+    return _last_visible(page.locator(_DIALOGS).filter(has=page.locator(_DIALOG_CONFIRM_SEL)))
+
+
+def _dialog_scope(page):
+    """Where the file-type dialog's own controls are looked for, inside the
+    dialog whenever it is found, and on the page only when it is not."""
+    dialog = _file_type_dialog(page)
+    return dialog if dialog is not None else page
 
 
 def _dialog_download_button(page, timeout: int = 8000):
     """The confirm 'Download' button INSIDE the file-type dialog, matched by its
     stable test id (not by accessible name, which is just an icon glyph)."""
-    loc = page.locator(_DIALOG_CONFIRM_SEL)
+    loc = _dialog_scope(page).locator(_DIALOG_CONFIRM_SEL)
     try:
         loc.first.wait_for(state="visible", timeout=timeout)
     except Exception:
@@ -614,8 +626,14 @@ def _safe_count(loc) -> int:
 
 def _dialog_open(page) -> bool:
     """Whether the file-type dialog shows, by its PDF choice or its
-    Download. A copy left hidden in the page does not count."""
-    loc = page.locator(_DIALOG_OPEN_SEL)
+    Download inside the dialog whenever it is found, and by its Download
+    alone when it is not, so a PDF choice elsewhere on the page never counts.
+    A copy left hidden in the page does not count either."""
+    dialog = _file_type_dialog(page)
+    if dialog is not None:
+        loc = dialog.locator(_DIALOG_OPEN_SEL)
+    else:
+        loc = page.locator(_DIALOG_CONFIRM_SEL)
     return any(_shows(loc.nth(i)) for i in range(min(_safe_count(loc), 12)))
 
 
@@ -635,8 +653,10 @@ def _wait_for_dialog(page, ms: int) -> bool:
 
 def close_file_type_dialog(page, quiet: bool = False) -> None:
     """Close the file-type dialog when it shows, once, through its own
-    Cancel or Close, or with Escape sent to one of its own controls when it
-    has neither. Nothing outside that dialog is pressed, so a chat window or
+    Cancel or Close, or with Escape sent to one of its own controls that
+    shows when it has neither. Both are looked for only inside the dialog
+    itself, so with no dialog element of its own to look in nothing is
+    sent at all. Nothing outside that dialog is pressed, so a chat window or
     a dialog of anything else is left as it is.
 
     The Cancel or Close goes through pressing.click like every press. A
@@ -648,19 +668,23 @@ def close_file_type_dialog(page, quiet: bool = False) -> None:
         return
     try:
         dialog = _file_type_dialog(page)
-        closer = None
+        closer = own = None
         if dialog is not None:
             closer = _first_visible(dialog.get_by_role("button", name=_CLOSE_NAME))
-        if closer is not None and _shows(closer):
+            if closer is not None and not _shows(closer):
+                closer = None
+            if closer is None:
+                own = _first_visible(dialog.locator(_DIALOG_OPEN_SEL))
+                if own is not None and not _shows(own):
+                    own = None
+        if closer is not None:
             pressing.click(page, closer, css=pressing.BUTTONS,
                            what="the Cancel of the file type dialog", words=_words(),
                            step="close the file type dialog")
-        else:
-            own = _first_visible(page.locator(_DIALOG_OPEN_SEL))
-            if own is not None:
-                # A key goes to the element that has the focus, so it is
-                # given to one of the dialog's own controls first.
-                own.press("Escape", timeout=3000)
+        elif own is not None:
+            # A key goes to the element that has the focus, so it is given
+            # to one of the dialog's own controls first, never to the page.
+            own.press("Escape", timeout=3000)
         page.wait_for_timeout(700)
     except pressing.Stop as stop:
         if not quiet:

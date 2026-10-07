@@ -23,19 +23,25 @@ confirms a dialog.
 
 No press is ever forced. Each control is brought to the middle of the
 window first, and pressed only when it is the thing on top at the point
-the press lands. A chat bubble, an offer or a banner sitting over a
-Download button is never pressed in its place. The run stops instead, says
-what is over the button in words from PaperPull's fixed list, and writes a
-failure file, and nothing more is pressed. Close whatever covers it in the
-browser window, then press Resume in the panel or run
-`paperpull amex resume`.
+the press lands. A chat bubble, an offer or a banner already sitting over
+a Download button is never pressed in its place. The run stops instead,
+says what is over the button in words from PaperPull's fixed list, and
+writes a failure file, and nothing more is pressed. One that comes over the
+button at the very moment of the press is refused by Playwright's own
+check when it is part of the page. A chat window drawn in a frame of its
+own is out of that check's sight and can still take that one press, so the
+point is looked at again right after every press, and the run stops there
+too. Close whatever covers it in the browser window, then press Resume in
+the panel or run `paperpull amex resume`.
 
 A Download is pressed once. When the file type dialog does not open after
 a row's Download, or the dialog's Download brings no file, the run stops
 there rather than pressing it again or going on to the next document. The
-file type dialog is closed only through its own Cancel or Close, so a
-button of a chat window or of any other dialog is never pressed to close
-it.
+file type dialog is closed only through its own Cancel or Close, or, when
+it has neither, with Escape sent to one of its own controls. Nothing is
+pressed and no key is sent to a chat window or any other dialog to close
+it, and when the dialog cannot be told apart from the rest of the page,
+nothing is sent and the run stops.
 
 ## How it connects
 

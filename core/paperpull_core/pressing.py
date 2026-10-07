@@ -1,4 +1,5 @@
-"""A press lands on the control, or nothing is pressed and the run stops.
+"""A press is made only when the control is the thing on top, and when
+anything else is over it the run stops.
 
 Playwright's force=True turns off its checks before a press, the check that
 the element itself would receive the press among them, and then presses the
@@ -20,8 +21,14 @@ So a press here takes three steps, and stops the run rather than guess.
      pressed. A radio button or a checkbox hidden under its own label is
      pressed through that label, since pressing a label is pressing the
      control it names.
-  3. Playwright presses, unforced, so its own check runs once more at the
-     moment of the press.
+  3. Playwright presses, unforced, and its own check runs once more at the
+     moment of the press. An element of the page that has come over the
+     control by then does not get the press, Playwright says so, and the
+     run stops. Playwright's check cannot see into a frame, so a frame of
+     its own, a chat window drawn in one say, that comes over the control
+     at that moment can still get the press. So the point is read once more
+     right after the press, and a frame on top there that was not at the
+     point before stops the run, with the press perhaps gone to it.
 
 When something covers the control, the run stops with Covered. When the
 control could not be read, it stops with Unread, and when Playwright could
@@ -128,7 +135,12 @@ def stop_run(app, stop: Stop) -> None:
     the run leaves on SystemExit with the stop in flight, which is what the
     core reports as a run that stopped, never one that finished clean
     (run_reporting.stopped_early). Diagnose and record download nothing and
-    write no failure file."""
+    write no failure file.
+
+    An app writes one failure file a run, and a run that wrote one for an
+    earlier document would write nothing for the stop. The stop is what a
+    tester has to send, so it writes a file of its own all the same, the
+    newest in the folder, and the run says where."""
     try:
         app.progress.save(backup=True)
     except Exception:
@@ -136,7 +148,10 @@ def stop_run(app, stop: Stop) -> None:
     print()
     for i, line in enumerate(stop.lines):
         print(("!! " if i == 0 else "   ") + line)
-    if (getattr(app, "stats", None) or {}).get("mode") not in ("diagnose", "record"):
+    stats = getattr(app, "stats", None)
+    if not isinstance(stats, dict) or stats.get("mode") not in ("diagnose", "record"):
+        if isinstance(stats, dict):
+            stats.pop("failure_files", None)
         app.write_failure(stop.step, stop.reason, extra=stop.facts)
     raise SystemExit(0)
 
@@ -149,6 +164,7 @@ def stop_run(app, stop: Stop) -> None:
 # "covered" or "unread", and nothing from the page but what describes a
 # covering element, which is shaped before anything else sees it.
 LOOK_JS = r"""(args) => {
+  const FRAMES = new Set(['iframe', 'frame', 'object', 'embed']);
   const near = (a, b) => Math.abs(a - b) <= 1;
   const parentOrHost = (e) => e.parentElement ||
     (e.parentNode && e.parentNode.nodeType === 11 ? e.parentNode.host : null);
@@ -230,13 +246,32 @@ LOOK_JS = r"""(args) => {
   const chain = [];
   let h = hit;
   while (h && h !== target) { chain.push(h); h = h.assignedSlot || parentOrHost(h); }
-  if (h === target) return Object.assign({state: 'inside'}, where);
+
+  // Every frame at the point before the press, on top or under it, kept in
+  // this world for the read after the press (AFTER_JS), so a frame that was
+  // already there is told from one that came over the control.
+  const remember = () => {
+    const frames = new Set(), roots = new Set();
+    const walk = (root) => {
+      if (roots.has(root)) return;
+      roots.add(root);
+      for (const e of root.elementsFromPoint(point.x, point.y)) {
+        if (FRAMES.has(e.localName)) frames.add(e);
+        if (e.shadowRoot) walk(e.shadowRoot);
+      }
+    };
+    walk(document);
+    globalThis.__paperpullBefore = {x: point.x, y: point.y, frames: frames};
+  };
+  if (h === target) { remember(); return Object.assign({state: 'inside'}, where); }
 
   // A form control under its own label is pressed through the label.
   if (args.labels && target.labels) {
     for (const label of target.labels) {
-      if (chain.includes(label))
+      if (chain.includes(label)) {
+        remember();
         return Object.assign({state: 'label', wraps: label.contains(target)}, where);
+      }
     }
   }
 
@@ -262,9 +297,40 @@ LOOK_JS = r"""(args) => {
                         pinned: pinned, same: widget === chain[0]}, where);
 }"""
 
+# Runs in this module's own world right after a press, at the point LOOK_JS
+# found, without scrolling. Playwright's own check at the press cannot see
+# into a frame, so a frame that came over the control as it was pressed can
+# have taken the press. A frame on top at the point that was not at the
+# point before the press is said to be covering it, and nothing else is.
+AFTER_JS = r"""(args) => {
+  const FRAMES = new Set(['iframe', 'frame', 'object', 'embed']);
+  const p = args.point;
+  let top = document.elementFromPoint(p.x, p.y);
+  while (top && top.shadowRoot) {
+    const inner = top.shadowRoot.elementFromPoint(p.x, p.y);
+    if (!inner || inner === top) break;
+    top = inner;
+  }
+  if (!top || !FRAMES.has(top.localName)) return {state: 'clear'};
+  const before = globalThis.__paperpullBefore;
+  if (before && before.x === p.x && before.y === p.y && before.frames.has(top))
+    return {state: 'clear'};
+  let pinned = false;
+  for (let e = top; e; e = e.parentElement || (e.parentNode && e.parentNode.host) || null) {
+    const st = getComputedStyle(e);
+    if (st && (st.position === 'fixed' || st.position === 'sticky')) { pinned = true; break; }
+  }
+  const about = {
+    tag: top.localName || '',
+    role: top.getAttribute('role') || '',
+    label: (top.getAttribute('aria-label') || top.getAttribute('title') || '').trim().slice(0, 80),
+  };
+  return {state: 'covered', top: about, widget: about, pinned: pinned, same: true};
+}"""
 
-def _in_own_world(page, args: dict) -> Optional[dict]:
-    """LOOK_JS's answer, run in this module's own world in the page's main
+
+def _in_own_world(page, js: str, args: dict) -> Optional[dict]:
+    """What `js` answers, run in this module's own world in the page's main
     frame, or None when the page could not be asked."""
     from .failure import error_kind
     session = None
@@ -273,7 +339,7 @@ def _in_own_world(page, args: dict) -> Optional[dict]:
         frame = session.send("Page.getFrameTree")["frameTree"]["frame"]["id"]
         world = session.send("Page.createIsolatedWorld", {"frameId": frame, "worldName": WORLD})
         answer = session.send("Runtime.evaluate", {
-            "expression": "(%s)(%s)" % (LOOK_JS, json.dumps(args)),
+            "expression": "(%s)(%s)" % (js, json.dumps(args)),
             "contextId": world["executionContextId"],
             "returnByValue": True})
     except Exception as e:
@@ -309,7 +375,7 @@ def look(page, locator, css: str, labels: bool = False) -> dict:
             box = None
         if not box:
             return {"state": "unread", "why": "no box"}
-        seen = _in_own_world(page, {"css": css, "box": box, "labels": bool(labels)})
+        seen = _in_own_world(page, LOOK_JS, {"css": css, "box": box, "labels": bool(labels)})
         if seen is None:
             return {"state": "unread", "why": "not read"}
         if seen.get("state") != "unread" or seen.get("why") not in ("none", "several"):
@@ -388,7 +454,10 @@ def judge(seen: dict, what: str, words, step: str = "press a control") -> None:
 
 def _press(action, what: str, step: str) -> None:
     """Playwright's own unforced press. Any error from it means the press
-    may not have been made, so the run stops rather than press again."""
+    may not have been made, so the run stops rather than press again. That
+    includes Playwright's own verdict that something else got the press,
+    which it gives only when it is waited for, so the press is never made
+    with no_wait_after."""
     from .failure import error_kind
     try:
         action()
@@ -398,6 +467,28 @@ def _press(action, what: str, step: str) -> None:
         raise NotPressed(step, "the press did not go through", [
             "Pressing %s did not go through, so nothing more is pressed." % what,
             AGAIN], {"error": kind})
+
+
+def after(page, seen: dict, what: str, words, step: str = "press a control") -> None:
+    """Right after a press, the point it was made at is read once more,
+    without scrolling, and a frame on top there that was not at the point
+    before the press stops the run (Covered). Playwright's own check cannot
+    see into a frame, so such a frame can have taken the press. A page whose
+    point cannot be read now, one the press has left say, stops nothing."""
+    point = seen.get("point") if isinstance(seen, dict) else None
+    if not isinstance(point, dict):
+        return
+    now = _in_own_world(page, AFTER_JS, {"point": point})
+    if not now or now.get("state") != "covered":
+        return
+    cover = described(now, words)
+    lines = covering_lines(what, cover)
+    lines[0] = ("Something came over %s as it was pressed, and the press may have gone "
+                "to it, so nothing more is pressed." % what)
+    log.info("a frame came over %s as it was pressed, %s", what, lines[1])
+    raise Covered(step, "something on the page came over the control", lines,
+                  {"over_it": cover["widget"], "fixed": cover["pinned"],
+                   "after_the_press": True})
 
 
 def click(page, locator, *, css: str, what: str, words, step: str = "press a control",
@@ -410,7 +501,8 @@ def click(page, locator, *, css: str, what: str, words, step: str = "press a con
     is the app's word list, words_for(provider, site)."""
     seen = look(page, locator, css)
     judge(seen, what, words, step)
-    _press(lambda: locator.click(timeout=timeout, no_wait_after=True), what, step)
+    _press(lambda: locator.click(timeout=timeout), what, step)
+    after(page, seen, what, words, step)
 
 
 def _is_checked(locator) -> Optional[bool]:
@@ -477,6 +569,7 @@ def check(page, locator, *, css: str, what: str, words, step: str = "choose an o
         judge(seen, what, words, step)
         if seen.get("state") == "inside":
             _press(lambda: locator.check(timeout=timeout), what, step)
+            after(page, seen, what, words, step)
         else:
             label = _own_label(page, locator, bool(seen.get("wraps")))
             if label is None:

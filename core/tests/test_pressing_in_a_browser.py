@@ -239,6 +239,89 @@ def test_a_control_the_selector_does_not_find_is_not_pressed(show):
     assert pressed(page) == []
 
 
+# Something that comes over the button the moment the pointer moves onto it,
+# after every read before the press has passed. Its own presses are told.
+LATE = ('<button class="go" id="go" style="left: 400px; top: 250px" onclick="said(\'go\')">'
+        'Download</button>%s<script>let once = false; document.addEventListener("mousemove",'
+        ' () => { if (once) return; once = true;'
+        ' document.getElementById("late").style.visibility = "visible"; });</script>')
+LATE_DIV = ('<div id="late" style="position: fixed; left: 380px; top: 230px; width: 200px; '
+            'height: 80px; z-index: 9; background: #06c; visibility: hidden" '
+            'onmousedown="said(\'div-down\')" onclick="said(\'div-click\')"></div>')
+LATE_FRAME = ('<iframe id="late" style="position: fixed; left: 380px; top: 230px; width: 200px; '
+              'height: 80px; border: 0; z-index: 9; visibility: hidden" '
+              'srcdoc="<body style=&quot;margin: 0&quot;><button style=&quot;width: 200px; '
+              'height: 80px&quot; onmousedown=&quot;parent.said(\'frame-down\')&quot; '
+              'onclick=&quot;parent.said(\'frame-click\')&quot;>Chat</button></body>"></iframe>')
+
+
+def test_an_element_that_comes_over_the_control_as_it_is_pressed_stops_the_run(show):
+    """Playwright's own check at the press keeps the press from the element
+    that came over the button, and says so only when its verdict is waited
+    for. So the press is not reported as made, and the run stops."""
+    page = show(LATE % LATE_DIV)
+    with pytest.raises(pressing.NotPressed):
+        pressing.click(page, page.locator("#go"), css="button", what="the button", words=WORDS,
+                       timeout=2000)
+    assert pressed(page) == []
+
+
+def test_a_frame_that_comes_over_the_control_as_it_is_pressed_stops_the_run(show):
+    """Playwright's own check cannot see into a frame, so the press goes to
+    the frame that came over the button. The point is read again right
+    after the press, and the frame there stops the run, so the press is not
+    reported as made."""
+    page = show(LATE % LATE_FRAME)
+    with pytest.raises(pressing.Covered) as stopped:
+        pressing.click(page, page.locator("#go"), css="button", what="the button", words=WORDS)
+    stop = stopped.value
+    assert stop.reason == "something on the page came over the control"
+    assert stop.facts["after_the_press"] is True and stop.facts["over_it"]["tag"] == "iframe"
+    assert stop.lines[0].startswith("Something came over the button as it was pressed")
+    assert "go" not in pressed(page)
+
+
+def test_a_frame_already_under_the_control_is_not_taken_for_one_that_came_over_it(show):
+    """A box with its own Close sits over a frame, and the Close hides the
+    box, so once it is pressed the frame is on top at the point. The frame
+    was there before the press, under the box, so nothing stops."""
+    page = show('<iframe srcdoc="under" style="position: fixed; left: 300px; top: 200px; '
+                'width: 400px; height: 200px; border: 0"></iframe>'
+                '<div id="box" style="position: fixed; left: 280px; top: 180px; width: 440px; '
+                'height: 240px; background: #fff; z-index: 5">'
+                '<button class="go" id="close" style="left: 160px; top: 100px" '
+                'onclick="said(\'close\'); document.getElementById(\'box\').hidden = true">'
+                'Close</button></div>')
+    pressing.click(page, page.locator("#close"), css="button", what="the Close", words=WORDS)
+    assert pressed(page) == ["close"]
+
+
+def test_two_elements_of_one_box_are_not_told_apart_so_nothing_is_pressed(show):
+    """Two buttons drawn in the same place, both matching the selector. The
+    box cannot say which is the one Playwright would press, so neither is."""
+    page = show('<button class="go" id="a" style="left: 100px; top: 100px" '
+                'onclick="said(\'a\')">One</button>'
+                '<button class="go" id="b" style="left: 100px; top: 100px" '
+                'onclick="said(\'b\')">Two</button>')
+    with pytest.raises(pressing.Unread) as stopped:
+        pressing.click(page, page.locator("#b"), css="button", what="the button", words=WORDS)
+    assert stopped.value.facts == {"why": "several"}
+    assert pressed(page) == []
+
+
+def test_a_checked_checkbox_under_its_own_label_is_not_pressed(show):
+    """Its label is drawn over it, so a press would go through the label and
+    uncheck it. It is checked already, so nothing is pressed at all."""
+    page = show('<div style="position: absolute; left: 100px; top: 100px">'
+                '<input type="checkbox" id="c" checked style="position: absolute; left: 0; '
+                'top: 0; width: 18px; height: 18px; margin: 0; opacity: 0" '
+                'onclick="said(\'c\')">'
+                '<label for="c" style="position: relative; z-index: 1; display: block; '
+                'padding-left: 28px; line-height: 18px">Keep me posted</label></div>')
+    pressing.check(page, page.locator("#c"), css="input", what="the box", words=WORDS)
+    assert pressed(page) == [] and page.locator("#c").is_checked()
+
+
 def test_a_covered_label_is_not_pressed_either(show):
     page = show('<div style="position: absolute; left: 100px; top: 100px">'
                 '<input type="radio" id="pdf" style="opacity: 0; position: absolute; margin: 0">'

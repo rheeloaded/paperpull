@@ -61,5 +61,11 @@ session going, are brought to the middle of the window first and pressed
 only when they are the thing on top at the point the press lands. When a
 chat window, an offer or a banner sits over one, nothing is pressed, the
 run stops and says what is over it in words from PaperPull's fixed list,
-and a failure file is written. Close whatever covers it in the browser
-window, then press Resume in the panel or run `paperpull vanguard resume`.
+and a failure file is written. One that comes over the icon at the very
+moment of the press is refused by Playwright's own check when it is part
+of the page. A chat window drawn in a frame of its own is out of that
+check's sight and can still take that one press, so the point is looked at
+again right after the press, and the run stops there too. A press that
+brings no download at all is not made again, and the run stops there as
+well. Close whatever covers it in the browser window, then press Resume in
+the panel or run `paperpull vanguard resume`.

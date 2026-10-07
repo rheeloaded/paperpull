@@ -365,15 +365,25 @@ All notable changes to PaperPull are recorded here. Versioning follows
   presses, and Playwright checks once more as it presses. When anything else
   is on top, nothing is pressed and the run stops, saying what is over the
   control in words from PaperPull's fixed list and writing the failure file.
-  Close whatever covers it in the browser window, then press Resume or run
-  again. American Express also no longer presses a Download a second time
-  when the file type dialog does not open, or when the dialog's Download
-  brings no download, and no longer goes on to the next document after one.
-  The run stops there. The file type dialog is closed only through its own
-  Cancel or Close, never a button of another dialog or of a chat window. A
-  test now fails on any forced press, any press of the mouse at a point on
-  the page, and any click event sent straight to an element, in every app
-  and the core.
+  Something that comes over the control at the very moment of the press is
+  refused by Playwright's own check when it is part of the page, and the run
+  stops. A frame of its own, the way some chat windows are drawn, is out of
+  that check's sight and can still take the press, so the point is looked
+  at again right after every press, and a frame there that was not there
+  before stops the run too. Close whatever covers it in the browser window,
+  then press Resume or run again. American Express also no longer presses a
+  Download a second time when the file type dialog does not open, or when
+  the dialog's Download brings no download, and no longer goes on to the
+  next document after one. The run stops there, and Vanguard's run stops
+  the same way when its download icon brings no download. The file type
+  dialog is closed only through its own Cancel or Close, or with Escape
+  sent to one of its own controls when it has neither, and nothing is
+  pressed and no key is sent to another dialog or a chat window to close
+  it. A test now reads the Python source of every app and the core and
+  fails on a Playwright action called with force, a press of the mouse at a
+  point on the page, and a dispatch_event of a click or another press
+  event. It does not read JavaScript, so a click an app makes through a
+  page script, el.click() inside an evaluate, is not covered by it.
 
 ## [0.43.0] - 2026-10-05
 

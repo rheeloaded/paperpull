@@ -9,15 +9,21 @@ after it landed on the chat's suggested replies, one of them opened a
 window to dispute a charge, and a live agent joined.
 
 A press at a point on the page, page.mouse.click or a mouse down and up,
-lands on whatever is on top at that point in the same way. A click
-event dispatched to an element skips every check as well, with nothing on
-the page having been pressed by anyone.
+lands on whatever is on top at that point in the same way. A press event
+that Playwright's dispatch_event sends to an element skips every check as
+well.
 
-So this reads the source of every app and of the core, apart from their
-tests, and fails on any of them. A press goes through
+So this reads the Python source of every app, the core, the panel and the
+server, apart from their tests, and fails on three things. A Playwright
+action called with force, a press of the mouse or the touch screen at a
+point on the page, and a dispatch_event call that names a press event, or
+names its event in a way this cannot read. A press goes through
 paperpull_core.pressing, which brings the control to the middle of the
 window, presses only when it is the thing on top there, and presses
 unforced so Playwright checks once more.
+
+It reads Python and never JavaScript, so a press a page script makes is
+not read here. el.click() inside an evaluate is one, and it passes this.
 
 Read from the syntax tree, never by searching the text, so a force
 argument of something that is not a press (prime_session, a token

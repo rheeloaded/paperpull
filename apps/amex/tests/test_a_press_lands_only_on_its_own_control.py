@@ -96,13 +96,23 @@ footer { height: %(footer)s; }
 .choice label::before { content: ''; position: absolute; left: 0; top: 7px; width: 16px;
                         height: 16px; border: 1px solid #333; border-radius: 50%%; }
 .footer { margin-top: 12px; height: 36px; }
+#chatwin { position: fixed; left: 8px; top: 8px; width: 220px; height: 90px; z-index: 900;
+           background: #eef; }
+#prefs { position: fixed; left: 8px; top: 110px; width: 220px; height: 40px; background: #efe; }
 </style></head><body>
 <main>
 <h1>%(title)s</h1>
 <h2>Recent Statements</h2>
 %(rows)s
+%(heading)s
 </main>
 <footer></footer>
+<div id="chatwin" role="dialog" aria-label="Chat">
+  <input id="chat-input" aria-label="Message">
+  <button type="button" id="chat-close" aria-label="Close">x</button>
+  <button type="button" id="chat-cancel">Cancel</button>
+</div>
+%(prefs)s
 <div id="chat-launcher" role="button" tabindex="0" aria-label="Chat with %(canary)s">
   <span>%(canary)s</span></div>
 <div id="chat" hidden></div>
@@ -117,7 +127,7 @@ footer { height: %(footer)s; }
   <div class="choice"><input type="radio" id="ft-csv" name="ft" value="csv">
     <label for="ft-csv">Spreadsheet (CSV)</label></div>
   <div class="footer">
-    <button type="button" id="ft-cancel">Cancel</button>
+    %(cancel)s
     <a href="#" role="button" id="myca-activity-download-footer-download-confirm-anchor"
        data-test-id="myca-activity-download-footer-download-confirm-anchor">&#x2913;</a>
   </div>
@@ -143,10 +153,18 @@ for (const b of document.querySelectorAll('[data-testid$="/download-button"]')) 
 }
 for (const r of document.querySelectorAll('input[name=ft]'))
   r.addEventListener('change', () => said('choice/' + r.value));
-document.getElementById('ft-cancel').addEventListener('click', () => {
-  said('cancel');
-  closeDialog();
+const cancelButton = document.getElementById('ft-cancel');
+if (cancelButton) cancelButton.addEventListener('click', () => { said('cancel'); closeDialog(); });
+dialog.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { said('escape'); closeDialog(); }
 });
+document.getElementById('chat-close').addEventListener('click', () => said('chat-close'));
+document.getElementById('chat-cancel').addEventListener('click', () => said('chat-cancel'));
+document.getElementById('chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') said('chat-escape');
+});
+const other = document.getElementById('other-pdf');
+if (other) other.addEventListener('change', () => said('other-choice'));
 document.getElementById('myca-activity-download-footer-download-confirm-anchor')
   .addEventListener('click', (e) => {
     e.preventDefault();
@@ -154,6 +172,9 @@ document.getElementById('myca-activity-download-footer-download-confirm-anchor')
     if (SCENARIO.no_download.includes(current)) return;
     const kind = document.getElementById('ft-pdf').checked ? 'pdf' : 'csv';
     location.href = '/download/' + current + '.' + kind;
+    // A chat box that takes the focus as soon as anything happens, so a key
+    // sent to whatever has the focus goes to the chat.
+    if (SCENARIO.steal_focus) document.getElementById('chat-input').focus();
   });
 document.getElementById('chat-launcher').addEventListener('click', () => {
   said('bubble');
@@ -186,6 +207,16 @@ ROW = ('<div class="row">Statement closing %(date)s'
        '<button class="dl mobile" data-testid="myca-activity-statements/common/Table/'
        'recent-statements/%(date)s/download-button">Download</button></div>')
 
+# A collapsed section whose heading sits where the last Download button
+# would, under the bubble, for Diagnose, which opens such a section.
+HEADING = ('<div class="row">Year End Summary'
+           '<button class="dl" aria-expanded="false">Year End Summary</button></div>')
+# A choice of a PDF somewhere else on the page, a setting say, before the file
+# type dialog in the page's own order.
+PREFS = ('<div id="prefs"><input type="radio" id="other-pdf" name="pref" value="statement_pdf">'
+         '<label for="other-pdf">Paper or PDF</label></div>')
+CANCEL = '<button type="button" id="ft-cancel">Cancel</button>'
+
 # The page as tall as the window, with the rows at its foot, so nothing can
 # scroll and the last button stays where the bubble is.
 FIXED = {"main": "min-height: 100vh; display: flex; flex-direction: column; "
@@ -204,6 +235,11 @@ class FakeAmex:
         self.bubble = OVER_THE_MIDDLE
         self.no_dialog = []
         self.no_download = []
+        self.not_pdf = []
+        self.escape_only = False
+        self.steal_focus = False
+        self.prefs = False
+        self.heading = False
         self.pressed = []
         self.downloads = []
 
@@ -212,8 +248,12 @@ class FakeAmex:
             "title": TITLE, "canary": CANARY, "bubble": self.bubble,
             "main": self.layout["main"], "footer": self.layout["footer"],
             "rows": "".join(ROW % {"date": d} for d in DATES),
+            "heading": HEADING if self.heading else "",
+            "prefs": PREFS if self.prefs else "",
+            "cancel": "" if self.escape_only else CANCEL,
             "scenario": json.dumps({"no_dialog": self.no_dialog,
-                                    "no_download": self.no_download})}
+                                    "no_download": self.no_download,
+                                    "steal_focus": self.steal_focus})}
 
     def count(self, what):
         return sum(1 for p in self.pressed if p == what)
@@ -244,7 +284,7 @@ def _handler(fake):
                 name = path[len("/download/"):]
                 fake.downloads.append(name)
                 date, kind = name.rsplit(".", 1)
-                if kind == "pdf":
+                if kind == "pdf" and date not in fake.not_pdf:
                     body = testkit.text_pdf(["American Express", "Statement", date])
                     content = "application/pdf"
                 else:
@@ -454,8 +494,13 @@ def test_a_bubble_over_one_corner_leaves_the_press_to_the_button(attached, amex,
     """The bubble covers one corner of the button and not its middle, where
     Playwright presses. Every statement is saved, each row's button and the
     dialog's Download pressed once, the plain PDF chosen through its label,
-    and the bubble never pressed."""
+    and the bubble never pressed. A chat window open on the page has a Close
+    and a Cancel of its own, and a setting elsewhere on the page offers a
+    PDF, both before the file type dialog in the page's order. Neither is
+    pressed, since the dialog is closed through its own Cancel and its PDF
+    is looked for inside it."""
     amex.bubble = OVER_A_CORNER
+    amex.prefs = True
     their_tab(attached, amex)
     code, out = run_all(config(tmp_path, attached), capsys)
     settle(amex, 4 * len(DATES))
@@ -471,6 +516,8 @@ def test_a_bubble_over_one_corner_leaves_the_press_to_the_button(attached, amex,
         assert amex.count("confirm/" + date) == 1, amex.pressed
     assert amex.count("choice/statement_pdf") == len(DATES), amex.pressed
     assert amex.count("cancel") == len(DATES), "the dialog is closed by its own Cancel"
+    assert amex.count("chat-close") == 0 and amex.count("chat-cancel") == 0, amex.pressed
+    assert amex.count("other-choice") == 0, "a PDF choice outside the dialog was checked"
     assert sorted(amex.downloads) == sorted(d + ".pdf" for d in DATES)
 
 
@@ -533,6 +580,74 @@ def test_a_dialog_download_that_brings_nothing_stops_the_run_after_one_press(
     assert code == 0 and panel_reads(out)["stopped"] == 1, said
     assert ("The Download of the file type dialog for the statement dated %s was pressed once "
             "and no download came." % NEWEST) in said, said
+
+
+def test_a_dialog_with_no_cancel_or_close_is_closed_by_escape_sent_to_its_own_control(
+        attached, amex, tmp_path, capsys):
+    """The file type dialog has no Cancel or Close and closes on Escape, and
+    the chat box takes the focus as the dialog's Download is pressed. Escape
+    goes to one of the dialog's own controls, so the dialog closes after
+    each statement and the chat box never hears it. Sent to whatever had the
+    focus, it went to the chat box and the dialog stayed open."""
+    amex.bubble = OVER_A_CORNER
+    amex.escape_only = True
+    amex.steal_focus = True
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    settle(amex, 4 * len(DATES))
+
+    assert code == 0 and panel_reads(out)["stopped"] == 0, folded(out)
+    assert sorted(saved(tmp_path)) == DATES, folded(out)
+    assert amex.count("escape") == len(DATES), amex.pressed
+    assert amex.count("chat-escape") == 0, amex.pressed
+    assert amex.count("chat-close") == 0 and amex.count("chat-cancel") == 0, amex.pressed
+
+
+def test_a_stop_writes_its_own_failure_file_after_an_earlier_one(attached, amex, tmp_path,
+                                                                 capsys):
+    """The newest statement comes back as something other than a PDF, which
+    writes the run's failure file and goes on, and the next statement's
+    dialog never opens, which stops the run. A run writes one failure file,
+    and the stop wrote nothing, so the file a tester would send named the
+    first problem and not the stop. The stop writes a file of its own."""
+    amex.bubble = OVER_A_CORNER
+    amex.not_pdf = [NEWEST]
+    amex.no_dialog = [DATES[1]]
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    settle(amex, 5)
+
+    assert code == 0 and panel_reads(out)["stopped"] == 1, folded(out)
+    reasons = [json.loads(p.read_text(encoding="utf-8"))["reason"] for p in failure_files(tmp_path)]
+    assert "the dialog did not open" in reasons, reasons
+    newest = max(failure_files(tmp_path), key=lambda p: p.stat().st_mtime_ns)
+    assert json.loads(newest.read_text(encoding="utf-8"))["reason"] == "the dialog did not open"
+
+
+def test_diagnose_that_meets_a_covered_control_still_writes_its_files(attached, amex, tmp_path,
+                                                                      capsys):
+    """Diagnose opens a collapsed section, and the bubble covers its
+    heading. Nothing is pressed, and Diagnose still writes its detailed file,
+    which says why it stopped, and the survey that is safe to send."""
+    amex.heading = True
+    their_tab(attached, amex)
+    code = "finished"
+    try:
+        code = app_mod.main(["--diagnose", "--config", str(config(tmp_path, attached))])
+    except SystemExit as stopped:
+        code = stopped.code
+    out = capsys.readouterr().out
+    settle(amex, 0)
+
+    assert code == 0, folded(out)
+    assert amex.pressed == [], amex.pressed
+    detailed = tmp_path / "out" / "Diagnostics" / "diagnose-documents.json"
+    info = json.loads(detailed.read_text(encoding="utf-8"))
+    assert info["stopped"]["reason"] == "something on the page is over the control", info
+    assert sorted((tmp_path / "out" / "Diagnostics").glob("survey-*.json")), files_written(tmp_path)
+    assert "Diagnose stopped there" in folded(out)
+    for path in files_written(tmp_path):
+        assert CANARY.lower() not in path.read_text(encoding="utf-8", errors="ignore").lower(), path
 
 
 def test_the_stops_are_stops_and_not_failures():
