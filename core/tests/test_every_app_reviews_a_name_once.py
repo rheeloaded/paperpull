@@ -20,7 +20,8 @@ nothing run after it, left every rename of that review out of them.
 A receipt whose PDF failed its check is put aside in Manual Review, one of
 the folders the review offers receipts from. A new name for it marked it
 Completed, so no run fetched it again, though its copy was still the one
-that failed.
+that failed. A new name for an older copy of a purchase was written into
+the purchase's record as well, which changed what the next run fetched.
 
 These run each app's own review_names over an output folder on disk, with
 the typing stood in for. Every name, number and answer is invented.
@@ -493,3 +494,57 @@ def test_a_new_name_completes_only_a_receipt_that_was_saved(app, tmp_path, monke
     lamp.unlink()
     assert [inst._already_done(p) for p in (saved, kept)] == [True, False], \
         "a receipt saved stays done once its file is deleted, a copy put aside does not"
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+def test_a_new_name_for_an_older_copy_leaves_the_record_alone(app, tmp_path, monkeypatch):
+    """A purchase's record says what a run fetches, and it names the copy
+    the last run left. An older copy keeps rows of its own, which the
+    review offers. Here one was put aside before a later run saved the
+    receipt, one before a newer copy that opens was put aside as well, and
+    one before a later run found a page that was another purchase's and
+    kept nothing. A new name for the older copy was written into the
+    record as well. That moved the first record off the receipt saved and
+    marked the failed copy's rows Completed, had the next run fetch a third
+    copy of the second, and stopped the third from being fetched again.
+    Only the older copy's rows take its new name now."""
+    mod = load(app)
+    inst = runnable(mod, tmp_path / "out")
+    aside, filed = inst.paths.manual_review, inst.paths.folder_for(ONLINE)
+    as_a_run_left_it(inst, "ORDER-0001", receipt(aside, "2026-05-14 First Receipt.pdf"),
+                     saved=False, confidence="High")
+    later = as_a_run_left_it(inst, "ORDER-0001",
+                             opening_pdf(filed, "2026-05-14 Saved Receipt.pdf"),
+                             saved=True, confidence="Low")
+    as_a_run_left_it(inst, "ORDER-0002", receipt(aside, "2026-05-14 Small Receipt.pdf"),
+                     saved=False, confidence="High")
+    newer = as_a_run_left_it(inst, "ORDER-0002",
+                             opening_pdf(aside, "2026-05-14 Newer Receipt.pdf"),
+                             saved=False, confidence="High")
+    as_a_run_left_it(inst, "ORDER-0003", opening_pdf(aside, "2026-05-14 Kept Receipt.pdf"),
+                     saved=False, confidence="High")
+    refused = Purchase(purchase_type=ONLINE, purchase_date="2026-05-14",
+                       order_number="ORDER-0003")
+    inst._record_state(refused, State.NEEDS_MANUAL_REVIEW,
+                       notes="The page was another purchase's")
+    purchases = (later, newer, refused)
+    records = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))
+    assert [inst._already_done(p) for p in purchases] == [True, True, False]
+
+    # Each older copy is renamed and each copy a record names is kept.
+    answers = iter(["Garden Hose", "", "Hardware", "", "Lamp"])
+    monkeypatch.setattr(mod, "ask", lambda prompt: next(answers))
+    inst.cmd_review_names()
+
+    assert [inst._already_done(p) for p in purchases] == [True, True, False], \
+        "a new name for an older copy changes nothing a run fetches"
+    assert json.loads(inst.paths.progress_json.read_text(encoding="utf-8")) == records
+    index = inst.index_csv.read_all()
+    assert [(r["Order or Receipt Number"], r["Processing Status"]) for r in index] == [
+        ("ORDER-0001", "Needs Manual Review"), ("ORDER-0001", "Review Needed"),
+        ("ORDER-0002", "Needs Manual Review"), ("ORDER-0002", "Needs Manual Review"),
+        ("ORDER-0003", "Needs Manual Review")]
+    assert [word in r["PDF Filename"] for r, word in zip(
+        index, ["Garden Hose", "Saved", "Hardware", "Newer", "Lamp"])] == [True] * 5
+    assert [r["Processing Status"] for r in inst.order_csv.read_all()] == [
+        r["Processing Status"] for r in index]

@@ -719,8 +719,10 @@ def review_names(app, ask, words: ReviewWords = WORDS,
 
     A new name marks a receipt Completed only when its record says it was
     saved, with downloaded_ok. One put aside because its PDF failed its
-    check keeps the state its run gave it, so whether a run fetches it
-    again is what it was before the name."""
+    check keeps the state its run gave it, and an older copy of a purchase
+    whose record names another copy leaves that record as it is, so
+    whether a run fetches a purchase again is what it was before the
+    name."""
     rows = app.index_csv.read_all()
     # A row somebody already renamed is left out, even one renamed before
     # its confidence was marked High as well (#47).
@@ -778,13 +780,19 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             pending = True
             number = r.get("Order or Receipt Number")
             old_filename = r.get("PDF Filename")
+            # The purchase's record says what a run fetches, and it speaks for
+            # this file only when it names it, or when there is no record
+            # yet. An older copy, put aside before a later run saved the
+            # receipt or put aside a newer copy, keeps rows of its own, and
+            # only those take its new name. Written into the record, it moved
+            # the record off the copy the last run left.
+            ours = not prog or str(Path(prog.get("pdf_path") or "")) == str(old_path)
             # Completed is for a receipt that was saved and marked for review
             # for its name alone, which its record says with downloaded_ok. A
             # receipt put aside in Manual Review because its PDF failed its
-            # check has none. A run fetches it again when its copy fails the
-            # check, or once the copy is deleted, and marked Completed it was
-            # never fetched again, though its copy was the one that failed.
-            saved = bool(prog.get("downloaded_ok"))
+            # check has none, and marked Completed no run fetched it again,
+            # though its copy was the one that failed.
+            saved = ours and bool(prog.get("downloaded_ok"))
             # Every index row of this purchase naming this file follows it.
             # Target once wrote two for most invoice orders, and the one not
             # renamed named a file that was gone. A row of another purchase
@@ -808,11 +816,12 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                     orow["Purchase Summary"] = new_summary
                     if saved:
                         orow["Processing Status"] = "Completed"
-            named = {"summary": new_summary, "pdf_filename": new_path.name,
-                     "pdf_path": str(new_path), "confidence": "High"}
-            if saved:
-                named["state"] = State.COMPLETED.value
-            app.progress.update(key, named)  # key (purchase identifier) unchanged
+            if ours:
+                named = {"summary": new_summary, "pdf_filename": new_path.name,
+                         "pdf_path": str(new_path), "confidence": "High"}
+                if saved:
+                    named["state"] = State.COMPLETED.value
+                app.progress.update(key, named)  # key (purchase identifier) unchanged
             _write_down(app, rows, order_rows, backup=not written)
             pending, written = False, True
             print(f"{words.renamed}{new_path.name}\n")
