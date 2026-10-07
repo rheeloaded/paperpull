@@ -313,3 +313,102 @@ def test_list_names_a_worktree_on_unrelated_history(world, capsys):
     wt.describe(world)
     out = capsys.readouterr().out
     assert any("rsd-old" in ln and "OLD HISTORY" in ln for ln in out.splitlines())
+
+
+# -- a landing runs the suites it touches (2026-10-07) ----------------------------
+
+def recording_runner(tmp_path):
+    """A runner that writes down what it was asked to run and passes."""
+    log = tmp_path / "runner-asked.txt"
+    return log, [sys.executable, "-c",
+                 "import sys, pathlib; pathlib.Path(%r).write_text(' '.join(sys.argv[1:]))" % str(log)]
+
+
+def test_the_suites_a_change_touches(tmp_path):
+    (tmp_path / "apps" / "alpha" / "tests").mkdir(parents=True)
+    (tmp_path / "apps" / "beta").mkdir(parents=True)          # no suite of its own
+    changed = ["apps/alpha/alpha.py", "apps/alpha/tests/test_a.py", "apps/beta/beta.py",
+               "core/paperpull_core/x.py", "tools/migrate.py", "gui/app.py", "server/compose.yaml",
+               "CHANGELOG.md", "README.md", "apps\\alpha\\README.md", "gui"]
+    assert wt.suites_for(tmp_path, changed) == ["alpha", "core", "gui", "server"]
+    assert wt.suites_for(tmp_path, ["CHANGELOG.md", "VERSION", ".github/workflows/tests.yml"]) == []
+
+
+def test_land_runs_the_suites_its_change_touches(world, tmp_path, capsys):
+    tree = wt.new(world, "feature")
+    (tree / "apps" / "alpha" / "tests").mkdir()
+    (tree / "apps" / "alpha" / "tests" / "test_alpha.py").write_text("def test_it():\n    pass\n",
+                                                                       encoding="utf-8")
+    (tree / "apps" / "alpha" / "alpha.py").write_text("y = 3\n", encoding="utf-8")
+    git(tree, "add", ".")
+    git(tree, "commit", "-q", "-m", "change alpha")
+    log, runner = recording_runner(tmp_path)
+    os.chdir(tree)
+    assert wt.land(tree, ruff_cmd=PASS, runner_cmd=runner, keep=True) == 0
+    assert log.read_text() == "--suites alpha"
+    out = capsys.readouterr().out
+    assert "running the suites this changes, alpha," in out and "CI runs every suite" in out
+    assert "gh run list --workflow Tests --branch main" in out, "it says which run to watch"
+
+
+def test_land_full_runs_every_suite(world, tmp_path):
+    tree = committed_change(world)
+    log, runner = recording_runner(tmp_path)
+    os.chdir(tree)
+    assert wt.land(tree, ruff_cmd=PASS, runner_cmd=runner, keep=True, full=True) == 0
+    assert log.read_text() == ""
+
+
+def test_a_change_no_suite_tests_runs_ruff_alone(world, tmp_path, capsys):
+    tree = committed_change(world)                 # app.py, at the top, in no suite
+    log, runner = recording_runner(tmp_path)
+    ruff_log = tmp_path / "ruff-ran.txt"
+    ruff = [sys.executable, "-c", "import pathlib; pathlib.Path(%r).write_text('ran')" % str(ruff_log)]
+    os.chdir(tree)
+    assert wt.land(tree, ruff_cmd=ruff, runner_cmd=runner, keep=True) == 0
+    assert not log.exists(), "no runner for no suite"
+    assert ruff_log.exists()
+    assert "ruff alone runs" in capsys.readouterr().out
+
+
+def test_land_does_not_land_on_a_red_main(world, capsys):
+    tree = committed_change(world)
+    before = git(world, "ls-remote", "origin", "refs/heads/main").split()[0]
+    red = lambda tree: "main's newest finished Tests run ended failure, https://example.invalid/1"  # noqa: E731
+    os.chdir(tree)
+    assert wt.land(tree, suite_cmd=PASS, ruff_cmd=PASS, red=red) == 1
+    assert "not landing on a red main" in capsys.readouterr().out
+    assert git(world, "ls-remote", "origin", "refs/heads/main").split()[0] == before
+    # The change that mends it lands.
+    assert wt.land(tree, suite_cmd=PASS, ruff_cmd=PASS, red=red, onto_red=True, keep=True) == 0
+    assert git(world, "ls-remote", "origin", "refs/heads/main").split()[0] != before
+
+
+def test_main_is_red_reads_the_newest_finished_push_run(monkeypatch, tmp_path):
+    """Read off what gh answers, never off GitHub itself here."""
+    import json as _json
+    answers = {}
+
+    class Done:
+        def __init__(self, out, code=0):
+            self.stdout, self.returncode = out, code
+
+    def fake_run(cmd, **kw):
+        if cmd[0] == "gh":
+            return Done(_json.dumps(answers["runs"]), answers.get("code", 0))
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(wt, "git", lambda where, *a, **k: Done("https://github.com/o/r.git\n"))
+    monkeypatch.setattr(wt.subprocess, "run", fake_run)
+    run = lambda status, conclusion, event="push": {"status": status, "conclusion": conclusion,  # noqa: E731
+                                                     "event": event, "url": "u"}
+    answers["runs"] = [run("in_progress", ""), run("completed", "failure"), run("completed", "success")]
+    assert "ended failure" in wt.main_is_red(tmp_path)
+    answers["runs"] = [run("in_progress", ""), run("completed", "success"), run("completed", "failure")]
+    assert wt.main_is_red(tmp_path) == ""
+    answers["runs"] = [run("completed", "failure", event="workflow_dispatch"), run("completed", "success")]
+    assert wt.main_is_red(tmp_path) == "", "a run started by hand is not a push to main"
+    answers["runs"] = [run("completed", "cancelled")]
+    assert "ended cancelled" in wt.main_is_red(tmp_path)
+    answers["code"] = 1
+    assert wt.main_is_red(tmp_path) == "", "when GitHub cannot be asked, it says so and lands"

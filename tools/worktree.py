@@ -1,7 +1,8 @@
 """Give a piece of work its own worktree, land it, and clean up after it.
 
     python tools/worktree.py new <name>       a worktree beside this checkout
-    python tools/worktree.py land             rebase, full suite, push to main, remove
+    python tools/worktree.py land             rebase, the suites it touches, push to main, remove
+    python tools/worktree.py land --full      the same with the whole suite
     python tools/worktree.py remove <name>    unlink its venvs, remove it, drop its branch
                                               (or the worktree's path, from any folder)
     python tools/worktree.py list             every worktree and what is left in it
@@ -41,11 +42,23 @@ LANDING
 land refuses a worktree with uncommitted changes, waits for nothing and
 stops when a release is in progress (release take, or another worktree
 holding an unfinished VERSION), rebases onto a freshly
-fetched origin/main, runs the whole suite and ruff on exactly that tree,
-and pushes it to main. The push runs the pre-push hook, which checks what
-it adds against the real records. When main moved during the suite, the
-push is refused and land says to run it again, since a tree nobody tested
-must not go out.
+fetched origin/main, runs the suites of what the branch changes and ruff
+on exactly that tree, and pushes it to main. The push runs the pre-push
+hook, which checks what it adds against the real records. When main moved
+during the suites, the push is refused and land says to run it again,
+since a tree nobody tested must not go out.
+
+The whole suite runs before each release, on the release's own tree, and
+CI runs it on every push to main (since 2026-10-07, at most one release a
+day). It used to run on every landing too, about half an hour each behind
+one lock on this machine, and a busy evening queued half a dozen of them.
+So a landing runs the suites that test what it changes, an app's own for a
+file under apps/<name>, the core's for the core and for tools, whose tests
+are in the core's, and the panel's and the server's for theirs, and --full
+runs every one. What a landing does not run, CI runs on its push, so land
+says which run to watch, and it will not land on a main whose newest
+finished Tests run failed, since a second change on a red main hides which
+one broke it. --onto-red lands the change that mends it.
 """
 from __future__ import annotations
 
@@ -59,6 +72,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[1]
 RELEASE_LOCK = "paperpull-release.json"
+
+# How a finished Tests run on main ends when main is red.
+RED = ("failure", "timed_out", "cancelled", "startup_failure")
 
 
 def git(where, *args, check=False):
@@ -314,7 +330,52 @@ def describe(where) -> None:
         print("%-48s %-28s %s" % (p, wt.get("branch", "(detached)"), ", ".join(notes)))
 
 
-def land(where, suite_cmd=None, ruff_cmd=None, keep=False) -> int:
+def suites_for(tree: Path, changed) -> list:
+    """The suites that test what a change touches, by the files it changes,
+    in the order first met. Every other suite runs on CI, on the push."""
+    names = []
+    for path in changed:
+        parts = path.replace("\\", "/").split("/")
+        if parts[0] == "apps" and len(parts) > 2:
+            name = parts[1] if (tree / "apps" / parts[1] / "tests").is_dir() else ""
+        elif parts[0] in ("core", "tools"):
+            name = "core"
+        elif parts[0] in ("gui", "server") and len(parts) > 1:
+            name = parts[0]
+        else:
+            name = ""
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def main_is_red(tree: Path) -> str:
+    """Why nothing should land on main now, from the newest finished Tests
+    run of a push to it, or "" when that run passed or nobody can say."""
+    origin = git(tree, "remote", "get-url", "origin").stdout.strip()
+    if "github.com" not in origin:
+        return ""
+    try:
+        r = subprocess.run(["gh", "run", "list", "--workflow", "Tests", "--branch", "main",
+                            "--limit", "10", "--json", "status,conclusion,event,url"],
+                           cwd=tree, capture_output=True, text=True, timeout=60)
+        runs = json.loads(r.stdout or "[]") if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        runs = None
+    if not isinstance(runs, list):
+        print("GitHub could not be asked how main's last Tests run ended, so this lands "
+              "without knowing", flush=True)
+        return ""
+    done = [x for x in runs if isinstance(x, dict) and x.get("status") == "completed"
+            and x.get("event") == "push"]
+    if done and done[0].get("conclusion") in RED:
+        return "main's newest finished Tests run ended %s, %s" % (done[0]["conclusion"],
+                                                                 done[0].get("url", ""))
+    return ""
+
+
+def land(where, suite_cmd=None, ruff_cmd=None, keep=False, full=False, onto_red=False,
+         red=main_is_red, runner_cmd=None) -> int:
     tree = Path(git(where, "rev-parse", "--show-toplevel", check=True).stdout.strip())
     main = main_checkout(where)
     if os.path.normcase(str(tree.resolve())) == os.path.normcase(str(main.resolve())):
@@ -335,11 +396,30 @@ def land(where, suite_cmd=None, ruff_cmd=None, keep=False) -> int:
               % (r.stdout + r.stderr).strip()[-1500:])
         return 1
     tested = git(tree, "rev-parse", "HEAD", check=True).stdout.strip()
+    why = "" if onto_red else red(tree)
+    if why:
+        print("not landing on a red main, %s. Mend it first, or land the change that mends "
+              "it with --onto-red." % why)
+        return 1
     py = str(main / "gui" / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
-    suite_cmd = suite_cmd or [py, "tools/run_all_tests.py"]
+    runner_cmd = runner_cmd or [py, "tools/run_all_tests.py"]
     ruff_cmd = ruff_cmd or [py, "-m", "ruff", "check", "."]
-    print("running the whole suite on %s" % tested[:9], flush=True)
-    if subprocess.run(suite_cmd, cwd=tree).returncode != 0:
+    if suite_cmd:
+        print("running the suite on %s" % tested[:9], flush=True)
+    elif full:
+        suite_cmd = list(runner_cmd)
+        print("running the whole suite on %s" % tested[:9], flush=True)
+    else:
+        changed = git(tree, "diff", "--name-only", "origin/main...HEAD").stdout.splitlines()
+        names = suites_for(tree, changed)
+        if names:
+            suite_cmd = list(runner_cmd) + ["--suites", ",".join(names)]
+            print("running the suites this changes, %s, on %s. CI runs every suite on the push."
+                  % (", ".join(names), tested[:9]), flush=True)
+        else:
+            print("no suite tests what this changes, so ruff alone runs on %s. CI runs every "
+                  "suite on the push." % tested[:9], flush=True)
+    if suite_cmd and subprocess.run(suite_cmd, cwd=tree).returncode != 0:
         print("the suite did not pass, nothing was pushed")
         return 1
     if subprocess.run(ruff_cmd, cwd=tree).returncode != 0:
@@ -353,7 +433,10 @@ def land(where, suite_cmd=None, ruff_cmd=None, keep=False) -> int:
         print("the push was refused. If main moved during the suite, run land again, "
               "and if the pre-push check stopped it, look at each line it named.")
         return 1
-    print("landed %s on main. Watch its CI run with gh run watch." % tested[:9], flush=True)
+    print("landed %s on main. Its Tests run on CI is the rest of the check. Find it with\n"
+          "  gh run list --workflow Tests --branch main --limit 1\n"
+          "and watch it with gh run watch <id>. A red one is mended before anything else lands."
+          % tested[:9], flush=True)
     if not keep:
         os.chdir(main)
         try:
@@ -375,6 +458,10 @@ def main(argv=None) -> int:
     r.add_argument("name")
     la = sub.add_parser("land")
     la.add_argument("--keep", action="store_true", help="leave the worktree after landing")
+    la.add_argument("--full", action="store_true",
+                    help="run the whole suite, not only the suites the change touches")
+    la.add_argument("--onto-red", action="store_true",
+                    help="land although main's newest Tests run failed, for the change that mends it")
     sub.add_parser("list")
     rel = sub.add_parser("release")
     rel.add_argument("what", choices=["take", "drop", "show"])
@@ -388,7 +475,7 @@ def main(argv=None) -> int:
         remove(where, args.name)
         return 0
     if args.action == "land":
-        return land(where, keep=args.keep)
+        return land(where, keep=args.keep, full=args.full, onto_red=args.onto_red)
     if args.action == "list":
         describe(where)
         return 0
