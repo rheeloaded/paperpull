@@ -71,6 +71,17 @@ def ask(prompt: str) -> str:
         raise SystemExit(3)
 
 
+def notice_summary(title: str) -> str:
+    """What a notice is called in its file name. The shared rules have no
+    word for a letter, and Nelnet's notices carry their own subject, which
+    can run to a whole sentence, so it is cut at a word near sixty
+    characters."""
+    text = re.sub(r"\s+", " ", title or "").strip().rstrip(".!?")
+    if len(text) <= 60:
+        return text or "Notice"
+    return text[:60].rsplit(" ", 1)[0]
+
+
 class Document:
     """One Nelnet document."""
 
@@ -405,6 +416,8 @@ class App:
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        if category == doc_types.OTHER:
+            summary = notice_summary(title)
         date = (r.date_text or "").strip()
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
             date, _ = site.parse_period_date(title)

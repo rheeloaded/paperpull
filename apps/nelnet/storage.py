@@ -38,7 +38,8 @@ SPEC = AppSpec(
         # Nelnet does not issue them, so it is created only if one ever
         # actually routes there, never left sitting empty.
         Folder("insurance_documents", "Insurance Documents", precreate=False),
-        Folder("other_documents", "Other Documents", precreate=False),
+        # Nelnet's notices and letters.
+        Folder("other_documents", "Other Documents"),
         *INFRASTRUCTURE_FOLDERS,
     ],
     routes={
@@ -56,7 +57,7 @@ SPEC = AppSpec(
         "delay_min_seconds": 2.5,
         "delay_max_seconds": 5.0,
         "pilot_count": 5,
-        "document_types": ["Statement", "Tax Document"],
+        "document_types": ["Statement", "Tax Document", "Other Document"],
     },
     base_url="https://www.studentaid.gov/",
     rules_filename="document_rules.json",

@@ -7,7 +7,8 @@
   "cdp_url": "http://127.0.0.1:9283",
   "document_types": [
     "Statement",
-    "Tax Document"
+    "Tax Document",
+    "Other Document"
   ],
   "default_start_date": "",
   "min_pdf_bytes": 2000,

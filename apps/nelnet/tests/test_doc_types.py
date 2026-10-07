@@ -31,6 +31,18 @@ def test_titles_classify_the_way_the_filenames_need():
         assert s == summary, (title, s)
 
 
+def test_a_notice_is_named_by_its_own_subject():
+    import nelnet_docs
+    assert nelnet_docs.notice_summary("Deferment Approved") == "Deferment Approved"
+    long = ("An administrative forbearance has been applied and your first payment "
+            "will be due in October 2099. Please review your options.")
+    cut = nelnet_docs.notice_summary(long)
+    assert len(cut) <= 60 and long.startswith(cut) and not cut.endswith(" ")
+    assert nelnet_docs.notice_summary("Your plan has changed!") == "Your plan has changed"
+    assert nelnet_docs.notice_summary("") == "Notice"
+    assert "Other Document" in storage.SPEC.config_defaults["document_types"]
+
+
 def test_the_noise_is_skipped():
     for t in ["Privacy notice", "Terms and conditions", "FAQ"]:
         assert doc_types.should_skip(t, RULES), t

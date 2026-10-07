@@ -50,7 +50,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Mortgage servicing |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits | Quarterly or monthly 401(k) statements, made to order and rendered; nothing clicked | Workplace retirement plan |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Bank / credit union |
-| [`nelnet`](apps/nelnet) | Nelnet | Student loan billing statements and the 1098-E, from a federal student loan servicer. Contributed by @tylerverry. A pilot saved five statements and the 1098-E, every one a valid PDF. Notices in the inbox are not saved by default | Student loan servicer |
+| [`nelnet`](apps/nelnet) | Nelnet | Student loan billing statements and the 1098-E, from a federal student loan servicer. Contributed by @tylerverry. A full run saved all 47 documents, 41 statements back to 2019, the 1098-E and 5 notices, every one a valid PDF | Student loan servicer |
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098. Confirmed by @watling777, whose run saved every document, three years of statements through the statements page's year picker and the 1098s (#38) | Mortgage servicer |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements, the three years the site keeps online. Tax forms not yet covered. Built on the maintainer's own account, 25 statements. A business account's statements from Activity, All Reports, written from a tester's recording and not yet run on a business account. Have one? Run Pilot and Diagnose and attach the files to the PayPal issue | Payments |
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |

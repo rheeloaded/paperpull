@@ -21,13 +21,15 @@ Deleting a downloaded file does not reset that history.
 
 ## Validation status
 
-Mapped and run against a real account (2026-10-07). A pilot saved 5 of 5
-statements, each a valid three-page PDF whose printed statement date matches
-its file name. A pilot of the tax document saved the 1098-E, one page, and
-running the pilot again skipped every document it already had. Automated
-tests cover the guard, the
-pager, the row reading, the host check, filing, and the 1098-E capture in a
-real browser against an invented page.
+Mapped and run against a real account (2026-10-07). A full run saved all 47
+documents the site lists: 41 statements back to December 2019, the 1098-E,
+and 5 notices. Every one is a valid PDF, nothing was sent to manual review,
+and the count matches the inbox's 46 items plus the 1098-E. The statements
+are three pages each, and the printed statement date in the five checked
+matches its file name. The 1098-E is one page. Running it again downloaded
+nothing. Automated tests cover the guard, the pager, the row reading, the
+host check, filing, notice names, and the 1098-E capture in a real browser
+against an invented page.
 
 ## What it saves
 
@@ -35,15 +37,14 @@ real browser against an invented page.
   filed in `Statements`.
 - **The 1098-E.** From Tax Info, filed in `Tax Documents` and dated the end
   of its tax year.
+- **Notices.** The letters in the same inbox, such as an annual repayment
+  notice or a deferment or forbearance letter, filed in `Other Documents`.
+  The shared rules have no word for a letter, so each is named by its own
+  subject, cut near sixty characters, since Nelnet's subjects can run to a
+  whole sentence.
 
 Not saved:
 
-- **Notices.** The inbox also holds letters from Nelnet, such as an annual
-  repayment notice or a deferment or forbearance letter. They classify
-  as Other Documents and are out of scope unless `"Other Document"` is added
-  to `document_types` in `config.json`. Their file names then read
-  `Nelnet Document`, because the shared classifier has nothing better to
-  call them.
 - **Loan Summary and Payment Schedule.** These are web pages with a Print
   button and no file, and the Loan Summary carries the day it was opened, so
   neither is a document that stays the same.
