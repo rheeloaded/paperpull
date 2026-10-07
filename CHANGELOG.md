@@ -101,10 +101,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   pattern change, looked for that id in the file's row of the index, which
   never has one. So under the very pattern the files were saved by, a
   preview offered to rename the second statement to "2026-09-12 Chase
-  Monthly Statement (2).pdf". It happened in the sixteen apps that keep an
-  id from the provider's page in a statement's record, AAFMAA, Ally,
-  Anthem, Capital One, Chase, Discover, FedEx, M&T Bank, myPay, Navy
-  Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard. Rename now
+  Monthly Statement (2).pdf". It happened in the fifteen apps that keep an
+  id from the provider's page in a statement's record, Ally, Anthem,
+  Capital One, Chase, Discover, FedEx, M&T Bank, myPay, Navy Federal,
+  Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard. Rename now
   tells a file apart by what its download added, read from the record
   written when the file was saved, so a later listing that gives a
   statement another id, which Capital One, Schwab and Vanguard write down,
@@ -114,6 +114,25 @@ All notable changes to PaperPull are recorded here. Versioning follows
   another statement ending on the same day has the name. A statement saved
   with " (2)" before its app added the id to a taken name is offered the
   end of the id its record kept instead.
+- **AAFMAA tells a second file of one name apart by its policy, never by
+  "cument".** AAFMAA gives a document no id, and what its listing kept as
+  one was the name of the View control on the document's row, which ends
+  in "cument" for every document and names only the row's place on a page
+  of the table. So when a file already had a document's name, the second
+  was saved as "... cument.pdf" and a third as "... cument (2).pdf", which
+  said nothing about which document either was, and a file name pattern
+  with {number} in it wrote the control's whole name into every file name.
+  A download now adds the document's policy number, which is part of what
+  the app knows the document by. The summary in AAFMAA's names already
+  carries the policy, so under the default pattern two files wanting one
+  name are two documents of one policy and day, and the second is told
+  apart by " (2)". The policy number tells two policies apart under a
+  pattern that leaves the summary and account out. AAFMAA's records no
+  longer keep the control's name, so {number} is empty for AAFMAA, as the
+  File names page says for a field a provider never fills. Rename tells a
+  file apart the way its download does, so it offers each file already
+  saved with "cument" in its name the name a download gives it today, in
+  a preview first, as for any other rename.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a

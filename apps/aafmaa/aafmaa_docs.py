@@ -69,7 +69,7 @@ class Document:
 
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
-                 date_text="", document_id="", **kw):
+                 date_text="", **kw):
         self.title = title
         self.account = account
         self.category = category
@@ -77,7 +77,9 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # today's postback target, NOT identity
+        # No document_id. AAFMAA gives a document no id, and the View
+        # control's postback name, which a record from before kept as one,
+        # names a row's place on a page of the table (forget_postback_names).
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -97,7 +99,7 @@ class Document:
     def key(self) -> str:
         """Stable identity: category, date, title and policy.
 
-        Deliberately NOT the postback target stored in document_id. WebForms
+        Deliberately NOT the View control's postback target. WebForms
         regenerates control names per page render, so the same statement can
         carry a different target on a different visit. Keying on it would make
         every rediscovery look like new documents, and the sticky downloaded_ok
@@ -116,6 +118,40 @@ class Document:
     @classmethod
     def from_dict(cls, d: dict) -> "Document":
         return cls(**d)
+
+
+def policy_of(account: str) -> str:
+    """The policy number in a row's account, "policy insured" as the
+    listing joins them, or an empty string."""
+    m = re.search(r"(\d{5,7}-\d)", account or "")
+    return m.group(1) if m else ""
+
+
+def told_apart_by(record: dict) -> str:
+    """What a document's file adds to its name when another file already
+    has that name, the same on every run. AAFMAA gives a document no id, so
+    it is the policy number, which is part of the document's identity.
+    The summary carries it too, so under the default pattern two files
+    wanting one name are of one policy, the number is already in the name,
+    and the second is told apart by " (2)". A pattern leaving the summary
+    and the account out is where it tells two policies' documents apart.
+    The download and Rename both ask this, so a rename tells a file apart
+    the way its download did."""
+    return policy_of(str((record or {}).get("account") or ""))
+
+
+def forget_postback_names(records: dict) -> int:
+    """Take the postback name a record from before kept as its id out of
+    it. It ended "cument" for every document, which told a second file of
+    one name apart by nothing, and a pattern's {number} wrote it into the
+    file name. Nothing reads it, since every download finds its row again
+    by its content. Returns how many records changed."""
+    changed = 0
+    for record in records.values():
+        if isinstance(record, dict) and "document_id" in record:
+            del record["document_id"]
+            changed += 1
+    return changed
 
 
 def migrate_legacy_keys(records: dict) -> int:
@@ -152,7 +188,8 @@ class App:
         self.progress.load()
         self.discovery.load()
         for store in (self.progress, self.discovery):
-            if migrate_legacy_keys(store.data):
+            moved = migrate_legacy_keys(store.data)
+            if forget_postback_names(store.data) or moved:
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups)
@@ -417,8 +454,7 @@ class App:
         full_summary = f"{summary} {account}".strip() if account else summary
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, account=account,
-                       date_text=d.get("displayDate", ""),
-                       document_id=d.get("documentId", ""))
+                       date_text=d.get("displayDate", ""))
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -446,8 +482,9 @@ class App:
                 raise SystemExit(0)
         self.check_session(page)
 
-        # Enumerate EVERY document via Armed Forces Mutual's documents JSON API (stable
-        # documentIds, full history), not by scraping the visible table.
+        # Every document on every page of the table, read through its pager.
+        # AAFMAA gives a document no id, so each is known by its date, title
+        # and policy (Document.key).
         api_docs = site.collect_all_pages(page)
         log.info("Armed Forces Mutual documents API returned %d unique documents", len(api_docs))
         n_new = 0
@@ -578,10 +615,9 @@ class App:
         Policy column carries the same number, so the file can be made to
         prove it is the one that was asked for. No match, no archive entry.
         """
-        m = re.search(r"(\d{5,7}-\d)", account or "")
-        if not m:
+        want = policy_of(account)
+        if not want:
             return True, "no policy number on the row to check against"
-        want = m.group(1)
         try:
             from pypdf import PdfReader
             reader = PdfReader(str(pdf_path))
@@ -604,12 +640,14 @@ class App:
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        # The last of the document id, used only if the name is taken.
+        # The policy number, used only if the name is taken (told_apart_by).
         # Two documents on one day used to differ by " (2)", which says
         # nothing about which is which and moves between them when a file
-        # is deleted (#49, and the same complaint on #43).
+        # is deleted (#49, and the same complaint on #43). The end of the
+        # postback name that took its place said nothing either, since it
+        # was "cument" for every document.
         out_path = unique_path(folder, filename, self.config["max_path_length"],
-                               distinguisher=(doc.document_id or "")[-6:])
+                               distinguisher=told_apart_by(doc.to_dict()))
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
@@ -814,7 +852,8 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)),
+                         told_apart=told_apart_by)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
