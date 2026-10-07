@@ -654,10 +654,12 @@ def test_each_run_keeps_its_times_and_writes_them_only_when_asked(fake_run, tmp_
 
 def as_from_a_terminal(monkeypatch):
     """main() as a run started from a terminal makes it, taking the machine's
-    lock, here the one in the folder fake_run points LOCK_DIR at. Called in
-    the test itself, since pytest names the test afresh in each phase."""
+    lock, here the one in the folder fake_run points LOCK_DIR at, with two
+    suites at a time as this machine's own number. Called in the test
+    itself, since pytest names the test afresh in each phase."""
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv(rat.IN_RUN, raising=False)
+    monkeypatch.setenv("PAPERPULL_TEST_JOBS", "2")
 
 
 class Clock:
@@ -857,6 +859,39 @@ def test_a_quick_run_or_a_part_leaves_the_record_alone(fake_run, tmp_path, monke
     assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == {"a": 100, "b": 90}
 
 
+@pytest.mark.parametrize("flags", [["--jobs", "1"], ["--jobs", "3"]], ids=["fewer", "more"])
+def test_a_run_of_another_number_at_a_time_leaves_the_record_alone(fake_run, tmp_path, monkeypatch, flags):
+    # The record holds runs as they go here. A suite beside one other is
+    # quicker than beside five, and beside eight slower.
+    took = {"a": 10, "b": 20}
+    fake_run({n: tmp_path / n for n in took}, {"a": 100, "b": 90})
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps({"a": 100, "b": 90}), encoding="utf-8")
+    as_from_a_terminal(monkeypatch)
+    timed_suites(monkeypatch, took)
+    assert rat.main(flags) == 0
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == {"a": 100, "b": 90}
+    assert rat.main([]) == 0, "at this machine's own number it is written"
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == took
+
+
+def test_a_suite_timed_past_its_limit_keeps_the_time_it_had(fake_run, tmp_path, monkeypatch):
+    # Only the clock moving, or the machine asleep while the suite ran, can
+    # time a suite that passed past its limit. Kept, such a time made the
+    # next limit as long, and one of more than 49.7 days ends a run on
+    # Windows, since no wait can be that long.
+    took = {"stepped": 5000, "fine": 100}
+    fake_run({n: tmp_path / n for n in took}, {"fine": 90})
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps({"stepped": 300}), encoding="utf-8")
+    as_from_a_terminal(monkeypatch)
+    _, limits = timed_suites(monkeypatch, took)
+    assert rat.main(["--jobs", "2", "--write-times"]) == 0
+    assert limits["stepped"] == 1800
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == {"stepped": 300, "fine": 100}
+    assert json.loads((tmp_path / "times.json").read_text(encoding="utf-8")) == {"fine": 100}
+
+
 def test_a_part_plans_by_the_file_alone_whatever_the_record_says(fake_run, tmp_path, monkeypatch, capsys):
     # Every part works out the split for itself, on a machine of its own, so
     # a record one of them could see would give two parts different splits.
@@ -916,7 +951,9 @@ def test_a_write_cut_short_leaves_the_record_as_it_was(tmp_path, monkeypatch):
 def test_a_record_held_open_for_a_moment_is_still_replaced(tmp_path, monkeypatch, capsys):
     # Windows refuses to replace a file another process holds open, as a
     # virus scan does for a moment after a file is written.
-    record = tmp_path / rat.RECORD
+    monkeypatch.setattr(rat, "OUTPUT", tmp_path / "test-output")
+    (tmp_path / "lock").mkdir()
+    record = tmp_path / "lock" / rat.RECORD
     record.write_text(json.dumps({"a": 1}), encoding="utf-8")
     real_replace, refused = os.replace, []
 
@@ -938,15 +975,17 @@ def test_a_record_held_open_for_a_moment_is_still_replaced(tmp_path, monkeypatch
     rat.keep_times({"a": 3}, {"a": 3}, write=False, record=record)
     assert json.loads(record.read_text(encoding="utf-8")) == {"a": 2}
     assert capsys.readouterr().out == "could not keep this run's times in %s, PermissionError\n" % rat.RECORD
-    assert [p.name for p in tmp_path.iterdir()] == [rat.RECORD]
+    assert [p.name for p in (tmp_path / "lock").iterdir()] == [rat.RECORD]
+    assert json.loads((tmp_path / "test-output" / "times.json").read_text(encoding="utf-8")) == {"a": 3}
 
 
 def test_times_that_are_not_seconds_are_left_out(tmp_path):
-    # Infinity would end the run, since a limit is a whole number of seconds.
+    # Infinity would end the run, since a limit is a whole number of seconds,
+    # and so would a time a limit could not wait for, far past a day.
     f = tmp_path / "times.json"
-    f.write_text('{"a": 5, "b": "slow", "c": -1, "d": Infinity, "e": NaN, "f": true, "g": null, "h": 2.5}',
-                 encoding="utf-8")
-    assert rat.load_times(f) == {"a": 5.0, "h": 2.5}
+    f.write_text('{"a": 5, "b": "slow", "c": -1, "d": Infinity, "e": NaN, "f": true, "g": null, "h": 2.5, '
+                 '"i": 86400, "j": 86401, "k": 1e308, "l": %s}' % ("9" * 400), encoding="utf-8")
+    assert rat.load_times(f) == {"a": 5.0, "h": 2.5, "i": 86400.0}
     f.write_text("[1, 2]", encoding="utf-8")
     assert rat.load_times(f) == {}
     f.write_text('{"a": 5', encoding="utf-8")

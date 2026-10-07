@@ -148,17 +148,20 @@ Only a time that says how long a suite takes is kept. A suite that failed
 or ran out of time keeps the time it had, since one stopped at its limit
 would otherwise have its limit doubled for the next run, and one that
 broke at once would be started last. So does a suite that collected
-nothing or ran without a library it wanted. A run refused for its canary,
-an older Playwright or a missing Chromium keeps no times at all, since its
-suites did not run as they do. A --quick run and a part write nothing
-there either, since a suite beside a few others is quicker than beside
-sixty, and a run inside a test neither reads nor writes the record, since
-it holds no lock.
+nothing or ran without a library it wanted, and one timed past its own
+limit, which only a clock moved or a machine asleep while it ran can give.
+A run refused for its canary, an older Playwright or a missing Chromium
+keeps no times at all, since its suites did not run as they do. A --quick
+run, a part and a run of another number of suites at a time than this
+machine's own write nothing there either, since a suite beside a few
+others is quicker than beside sixty, and a run inside a test neither
+reads nor writes the record, since it holds no lock. Nor is a time of
+more than a day ever read from either file.
 
 The file still matters. A machine with no record orders by it, and CI
 plans its parts by it alone. So the summary names each suite that took far
 longer than the file says, allowing for how much slower or faster the
-whole run went, and --write-times still keeps a whole run's times there.
+whole run went, and --write-times still keeps a full run's times there.
 
 PARTS ON CI
 
@@ -259,6 +262,10 @@ LOCK_DIR = Path(os.environ.get("PAPERPULL_TEST_LOCK_DIR")
 BEHIND_TIMES = 1.5
 BEHIND_S = 120
 PACE_FROM_S = 60
+# No suite takes a day, and a limit worked out from a time far past one,
+# 49.7 days on Windows, ends the run at that suite, since a wait cannot be
+# that long. So a longer time is read from neither file.
+TIMES_UP_TO = 86400
 
 DETAILED = 5          # failures per suite printed with their frames
 NAMED = 20            # failures named after those, one line each
@@ -892,8 +899,9 @@ def default_jobs() -> int:
 
 def load_times(path=None) -> dict:
     """Seconds by suite, from tools/suite_times.json or the file handed in.
-    An entry that is not a number of seconds is left out, so a limit is
-    never worked out from one, and a file that cannot be read holds none."""
+    An entry that is not a number of seconds up to TIMES_UP_TO is left
+    out, so a limit is never worked out from one, and a file that cannot
+    be read holds none."""
     try:
         data = json.loads(Path(path or TIMES).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
@@ -901,7 +909,7 @@ def load_times(path=None) -> dict:
     if not isinstance(data, dict):
         return {}
     return {str(k): float(v) for k, v in data.items()
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < float("inf")}
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= TIMES_UP_TO}
 
 
 def longer_of(*sources) -> dict:
@@ -1339,13 +1347,16 @@ def run(args, lock=None) -> int:
         refused = True
 
     # A suite was timed doing its work only when it passed having run its
-    # tests, exit code 0, with everything it wanted, in a run that was not
-    # refused. One stopped at its limit, broken at once, that collected
-    # nothing, or that ran without a library or beside a canary that did
-    # not run or an older Playwright, says nothing about how long it takes.
+    # tests, exit code 0, with everything it wanted, within its limit, in a
+    # run that was not refused. One stopped at its limit, broken at once,
+    # that collected nothing, or that ran without a library or beside a
+    # canary that did not run or an older Playwright, says nothing about how
+    # long it takes. Nor does one that passed in more than its limit, which
+    # only the clock moving or the machine sleeping can make it seem to.
     wanting = {name for name, _lack in under_equipped}
     measured = {} if refused else {name: seconds for name, seconds in took.items()
-                                   if codes.get(name) == 0 and name not in wanting}
+                                   if codes.get(name) == 0 and name not in wanting
+                                   and seconds <= limit_of(name, times)}
     full = not args.quick and not args.shard
     write = args.write_times and full
     far = [] if write else behind(measured, entries)
@@ -1354,8 +1365,11 @@ def run(args, lock=None) -> int:
         for name, seconds, entry in far:
             print("   %-16s %ds here, %s" % (name, seconds, "it says %ds" % entry if entry is not None
                                               else "it has no entry"))
-        print("set their entries to these times, or keep a whole run's with --write-times")
-    keep_times(took, measured, write=write, record=record if full else None)
+        print("set their entries to these times, or run every suite with --write-times")
+    # The record holds runs as they go here, every suite and as many at a
+    # time as this machine runs by default.
+    usual = full and jobs == default_jobs()
+    keep_times(took, measured, write=write, record=record if usual else None)
 
     if refused or broken:
         return 1
