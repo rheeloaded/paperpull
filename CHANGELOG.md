@@ -100,12 +100,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   finishes as it always did.
 
 ### Security
-- **A press made through the page is made only when it is safe, and
-  never twice.** American Family, Apple Card, AT&T, E*TRADE, Golden 1,
-  Newrez, PG&E, SBA, SMUD, State Farm, Verizon Mobile and Wells Fargo
-  pressed a document's control a second way whenever Playwright's own press
-  raised, with the control's own click run inside the page, and ADP had the
-  same code where nothing calls it. That press skips every check Playwright
+- **A press made through the page is made only when it is safe, and never
+  twice.** American Family, Apple Card, AT&T, E*TRADE, Golden 1, Newrez,
+  PG&E, SBA, SMUD, State Farm, Verizon Mobile and Wells Fargo pressed a
+  document's control a second way whenever Playwright's own press raised,
+  with the control's own click run inside the page, and ADP had the same
+  code where nothing calls it. That press skips every check Playwright
   makes. It reached the control under whatever covered it, even when
   Playwright's error said something covered it, it reached a control that
   did not show, and when Playwright's press had already reached the page
@@ -113,36 +113,35 @@ All notable changes to PaperPull are recorded here. Versioning follows
   stopped forced presses, after a chat bubble took a press on a tester's
   American Express account, did not cover these, since its test reads
   Python and not the JavaScript an app runs in a page. That second press
-  now goes through one place in the core. It is made at most once, and
-  only when Playwright says nothing covered the control, its press never
-  began and the control was not turned off, when no tab opened, no
-  download or load began and nothing else the press brings came, when the
-  control heard no press, when the app's own guard still passes every word
-  the control carries and the app's own checks still pass, and when the
-  control shows in the middle of the window with nothing over it. In the
-  same step as the press, the control has to still be on the page with
-  the words it had before. When something covers the control, or any of
-  that cannot be told, nothing is pressed and the run stops, saying why in
-  PaperPull's own words and writing the failure file. Close whatever
-  covers the control in the browser window, then press Resume or run
-  again. A press Playwright says was made before it raised is never made
-  again, and the run goes on to wait for what it brought. A control the
-  page took away before it was pressed, a list drawn anew say, is not
-  pressed at all, and its document is left for the next run while the run
-  goes on. PG&E's page
-  picker no longer presses a page's number a second time when the first
-  press moved nothing, and asks for the page by value instead, as it did
-  before. PG&E's Diagnose, which walks the history's pages through that
-  picker, says such a stop and still writes its files. Apple Card presses
-  a statement's button again, after a first press that brought nothing,
-  only when that first press went through without raising. A new test
-  reads every script the apps and the core hand to a page, followed back
-  through names, imports, joins, formats and the helpers that pass a
-  script along, and fails on any press a page script makes that is not on
-  its reviewed list with the reason it is safe.
-  Besides the core's own, four remain on it, ADP's press of the View
-  statement that shows its identity check, M&T's year headings in its
-  statements frame, and two links PG&E makes itself to save a PDF.
+  now goes through one place in the core. It is made at most once, and only
+  when Playwright says nothing covered the control, its press never began
+  and the control was not turned off, when no tab opened, no download or
+  load began and nothing else the press brings came, when the control heard
+  no press, when the app's own guard still passes every word the control
+  carries and the app's own checks still pass, and when the control shows
+  in the middle of the window with nothing over it. In the same step as the
+  press, the control has to still be on the page with the words it had
+  before. When something covers the control, or any of that cannot be told,
+  nothing is pressed and the run stops, saying why in PaperPull's own words
+  and writing the failure file. Close whatever covers the control in the
+  browser window, then press Resume or run again. A press Playwright says
+  was made before it raised is never made again, and the run goes on to
+  wait for what it brought. A control the page took away before it was
+  pressed, a list drawn anew say, is not pressed at all, and its document
+  is left for the next run while the run goes on. PG&E's page picker no
+  longer presses a page's number a second time when the first press moved
+  nothing, and asks for the page by value instead, as it did before. PG&E's
+  Diagnose, which walks the history's pages through that picker, says such
+  a stop and still writes its files. Apple Card presses a statement's
+  button again, after a first press that brought nothing, only when that
+  first press went through without raising. A new test reads every script
+  the apps and the core hand to a page, followed back through names,
+  imports, joins, formats and the helpers that pass a script along, and
+  fails on any press a page script makes that is not on its reviewed list
+  with the reason it is safe. Besides the core's own, four remain on it,
+  ADP's press of the View statement that shows its identity check, M&T's
+  year headings in its statements frame, and two links PG&E makes itself to
+  save a PDF.
 
 ## [0.44.0] - 2026-10-07
 
