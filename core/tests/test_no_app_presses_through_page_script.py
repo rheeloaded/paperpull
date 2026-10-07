@@ -46,6 +46,12 @@ REPO = Path(__file__).resolve().parents[2]
 # What ships, apps and the core and what the panel and the server run.
 ROOTS = ("apps", "core", "gui", "server")
 
+# Folders a build or an install makes, copies of what ships and never what
+# a run reads from this tree. Installing the core builds core/build/lib on
+# CI, where the census read a second pressing.py whose press it did not
+# know as reviewed.
+MADE_FOLDERS = {"build", "dist", "site-packages", "node_modules"}
+
 # Every way Playwright runs a script in a page, by the position and the
 # name the script is passed under.
 EVALUATORS = {"evaluate": (0, "expression"), "evaluate_handle": (0, "expression"),
@@ -142,8 +148,10 @@ def sources():
     for root in ROOTS:
         for folder, dirs, files in os.walk(REPO / root):
             # Pruned as the walk goes, so a linked environment is never
-            # entered, which was most of the census's time.
-            dirs[:] = sorted(d for d in dirs if d != "tests" and not d.startswith((".", "__")))
+            # entered, which was most of the census's time, and a copy a
+            # build made is never read as source.
+            dirs[:] = sorted(d for d in dirs if d != "tests" and d not in MADE_FOLDERS
+                             and not d.startswith((".", "__")) and not d.endswith(".egg-info"))
             out.extend(Path(folder) / f for f in files
                        if f.endswith(".py") and not f.startswith("test_") and f != "conftest.py")
     return sorted(p for p in out if not is_test(p))
@@ -709,6 +717,23 @@ def test_the_census_reads_every_app_and_the_core():
     assert {"core/paperpull_core/pressing.py", "core/paperpull_core/capture.py",
             "gui/app.py"} <= names
     assert not [n for n in names if "/tests/" in n or n.split("/")[-1].startswith("test_")]
+
+
+def test_a_copy_a_build_made_is_not_read_as_source(tmp_path, monkeypatch):
+    """Installing the core on CI builds core/build/lib, a second copy of
+    every core module, and the census read that copy's press as one nobody
+    reviewed. Folders a build or an install makes are never walked, while
+    the source beside them still is."""
+    made = ["core/build/lib/paperpull_core/pressing.py", "core/dist/pressing.py",
+            "core/paperpull_core.egg-info/pressing.py", "gui/node_modules/x/pressing.py",
+            "apps/sample/site-packages/pressing.py"]
+    kept = ["core/paperpull_core/pressing.py", "apps/sample/sample_site.py", "gui/app.py",
+            "server/serve.py"]
+    for rel in made + kept:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("", encoding="utf-8")
+    monkeypatch.setitem(globals(), "REPO", tmp_path)
+    assert [p.relative_to(tmp_path).as_posix() for p in sources()] == sorted(kept)
 
 
 def test_every_press_made_through_page_script_was_reviewed(counted):
