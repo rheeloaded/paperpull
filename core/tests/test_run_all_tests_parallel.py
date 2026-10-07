@@ -15,7 +15,17 @@ it, and a test's cleanup ended the test's own pytest, because stop_tree
 ended a whole process group. CI runs on Windows only, where none of that
 could happen, so the checks for it were also run on Linux by hand when it
 was fixed on 2026-10-03.
+
+Since 2026-10-07 a run here is ordered by the time each suite took on this
+machine's latest full run, kept beside the lock, as well as by
+tools/suite_times.json. These check that the run holding the lock alone
+reads and writes that record, that only a full run writes it and only with
+the suites that passed, that a part plans from the file alone, that a write
+cut short leaves the record as it was, and which suites the summary names
+as far behind the file.
 """
+import concurrent.futures
+import io
 import json
 import os
 import signal
@@ -637,6 +647,299 @@ def test_each_run_keeps_its_times_and_writes_them_only_when_asked(fake_run, tmp_
     assert json.loads((tmp_path / "times.json").read_text()) == {"x": 7}
     assert rat.main(["--jobs", "2", "--write-times"]) == 0
     assert set(json.loads((tmp_path / "times.json").read_text())) == {"x", "y"}
+
+
+# -- which times order a run ---------------------------------------------------
+
+def as_from_a_terminal(monkeypatch):
+    """main() as a run started from a terminal makes it, taking the machine's
+    lock, here the one in the folder fake_run points LOCK_DIR at. Called in
+    the test itself, since pytest names the test afresh in each phase."""
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv(rat.IN_RUN, raising=False)
+
+
+class Clock:
+    """The time module as the runner sees it, where a suite takes the
+    seconds the test gives it and nothing else moves the clock."""
+
+    def __init__(self):
+        self.now = 1_000_000.0
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def time(self):
+        return self.now
+
+
+class InOrder:
+    """A ThreadPoolExecutor that does each task as it is handed in, so the
+    order a run starts its suites in can be read."""
+
+    def __init__(self, max_workers=None):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def map(self, fn, items):
+        return [fn(item) for item in items]
+
+    def submit(self, fn, *args):
+        done = concurrent.futures.Future()
+        try:
+            done.set_result(fn(*args))
+        except BaseException as e:
+            done.set_exception(e)
+        return done
+
+
+def timed_suites(monkeypatch, took: dict, failing=()):
+    """Suites that take the seconds given, as the clock the run reads has
+    it. Each one named in failing fails, and each given None runs out of
+    its time. Hands back the order the run started them in and the limit
+    each was given."""
+    clock = Clock()
+    monkeypatch.setattr(rat, "time", clock)
+    monkeypatch.setattr(rat, "ThreadPoolExecutor", InOrder)
+    started, limits = [], {}
+
+    def run_suite(d, py, timeout=rat.SUITE_LIMIT_S):
+        started.append(d.name)
+        limits[d.name] = timeout
+        if took[d.name] is None:
+            clock.now += timeout
+            return "timed out after %ds, the suite was stopped" % timeout, -1, []
+        clock.now += took[d.name]
+        if d.name in failing:
+            return "1 failed in %ds" % took[d.name], 1, []
+        return "1 passed in %ds" % took[d.name], 0, []
+    monkeypatch.setattr(rat, "run_suite", run_suite)
+    return started, limits
+
+
+def record_of(tmp_path) -> Path:
+    return tmp_path / "lock" / rat.RECORD
+
+
+def test_a_suite_that_grew_starts_first_on_the_next_run_here(fake_run, tmp_path, monkeypatch, capsys):
+    # amfam's case on 2026-10-06. The file said 171s, the suite took 865s,
+    # and the next run started it about 1066s in, last.
+    took = {"grew": 865, "big": 780, "mid": 410, "small": 95}
+    fake_run({n: tmp_path / n for n in took}, {"grew": 171, "big": 800, "mid": 400, "small": 100})
+    as_from_a_terminal(monkeypatch)
+    started, _ = timed_suites(monkeypatch, took)
+    assert rat.main(["--jobs", "2"]) == 0
+    assert started == ["big", "mid", "grew", "small"], "with no record yet, the file orders the run"
+    out = capsys.readouterr().out
+    assert "\n   grew             865s here, it says 171s\n" in out, out
+    assert not any(ln.split()[:1] in (["big"], ["mid"], ["small"]) for ln in out.splitlines()), out
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == took
+
+    started.clear()
+    assert rat.main(["--jobs", "2"]) == 0
+    assert started == ["grew", "big", "mid", "small"]
+    assert "4 suites, 2 at a time, longest first, with this machine's times of " in capsys.readouterr().out
+
+
+def test_a_run_here_takes_the_longer_of_the_record_and_the_file(fake_run, tmp_path, monkeypatch):
+    # "shrank" was written short by a run of an older branch, where it had
+    # fewer tests, and still starts first, while "grew" outgrew its entry and
+    # starts before suites the file says are longer. A suite only the record
+    # knows is placed by it. The limits follow the same times.
+    took = dict.fromkeys(("grew", "shrank", "steady", "only_here"), 1)
+    fake_run({n: tmp_path / n for n in took}, {"grew": 400, "shrank": 1300, "steady": 450})
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps({"grew": 1200, "shrank": 500, "steady": 450, "only_here": 1000}),
+                                   encoding="utf-8")
+    as_from_a_terminal(monkeypatch)
+    started, limits = timed_suites(monkeypatch, took)
+    assert rat.main(["--jobs", "2"]) == 0
+    assert started == ["shrank", "grew", "only_here", "steady"]
+    assert limits == {"shrank": 2600, "grew": 2400, "only_here": 2000, "steady": 1800}
+
+
+def test_a_run_that_holds_no_lock_neither_reads_nor_writes_the_record(fake_run, tmp_path, monkeypatch):
+    # As every run inside a test, these tests' own included. The record a
+    # test's run read would make its order depend on this machine, and a
+    # record it wrote would hold the times of suites of a test's making.
+    took = {"long": 100, "short": 1}
+    fake_run({n: tmp_path / n for n in took}, {"long": 100, "short": 1})
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps({"short": 5000}), encoding="utf-8")
+    started, limits = timed_suites(monkeypatch, took)
+    assert os.environ.get("PYTEST_CURRENT_TEST")
+    assert rat.main(["--jobs", "2"]) == 0
+    assert started == ["long", "short"]
+    assert limits == {"long": 1800, "short": 1800}
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == {"short": 5000}
+
+
+def test_a_suite_that_failed_or_ran_out_of_time_keeps_the_time_it_had(fake_run, tmp_path, monkeypatch):
+    # One stopped at its limit would have its limit doubled for the next
+    # run, and one that broke at once would be started last. Both kinds of
+    # file are kept the same way.
+    took = {"passes": 300, "broke": 3, "hung": None, "new": 50}
+    kept = {"broke": 500, "hung": 700}
+    fake_run({n: tmp_path / n for n in took}, dict(kept))
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps(kept), encoding="utf-8")
+    as_from_a_terminal(monkeypatch)
+    timed_suites(monkeypatch, took, failing=("broke",))
+    assert rat.main(["--jobs", "2", "--write-times"]) == 1
+    want = {"passes": 300, "broke": 500, "hung": 700, "new": 50}
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == want
+    assert json.loads((tmp_path / "times.json").read_text(encoding="utf-8")) == want
+    # Beside the run's output every suite's time stays as it went.
+    assert json.loads((tmp_path / "test-output" / "times.json").read_text(encoding="utf-8")) == \
+        {"passes": 300, "broke": 3, "hung": 1800, "new": 50}
+
+
+@pytest.mark.parametrize("flags", [["--quick"], ["--shard", "1/2"]], ids=["quick", "part"])
+def test_a_quick_run_or_a_part_leaves_the_record_alone(fake_run, tmp_path, monkeypatch, flags):
+    # Each runs a few suites, and a suite beside a few others is quicker
+    # than beside sixty.
+    took = {"a": 10, "b": 20}
+    fake_run({n: tmp_path / n for n in took}, {"a": 100, "b": 90})
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps({"a": 100, "b": 90}), encoding="utf-8")
+    as_from_a_terminal(monkeypatch)
+    timed_suites(monkeypatch, took)
+    assert rat.main(["--jobs", "2"] + flags) == 0
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == {"a": 100, "b": 90}
+
+
+def test_a_part_plans_by_the_file_alone_whatever_the_record_says(fake_run, tmp_path, monkeypatch, capsys):
+    # Every part works out the split for itself, on a machine of its own, so
+    # a record one of them could see would give two parts different splits.
+    entries = {"a": 100, "b": 90, "c": 20, "d": 10}
+    fake_run({n: tmp_path / n for n in entries}, entries)
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps({"d": 500, "c": 1500}), encoding="utf-8")
+    as_from_a_terminal(monkeypatch)
+    started, limits = timed_suites(monkeypatch, dict.fromkeys(entries, 1))
+    assert rat.main(["--shard", "1/2", "--jobs", "2"]) == 0
+    assert sorted(started) == sorted(rat.shard_of(list(entries), entries, 1, 2)) == ["a", "d"]
+    assert limits == {"a": 1800, "d": 1800}
+    assert "with this machine's times" not in capsys.readouterr().out
+
+
+def test_a_write_cut_short_leaves_the_record_as_it_was(tmp_path, monkeypatch):
+    # A full disk, or a run ended while it wrote. Written in place, the
+    # record would be left half written, and read as no record at all.
+    record = tmp_path / rat.RECORD
+    record.write_text(json.dumps({"a": 1}), encoding="utf-8")
+    before = record.read_bytes()
+    real_open = io.open
+
+    class CutShort:
+        """A file that takes half of what is written to it, then fails."""
+
+        def __init__(self, f):
+            self.f = f
+
+        def write(self, text):
+            self.f.write(text[:len(text) // 2])
+            raise OSError("no space left on the device")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.f.close()
+            return False
+
+        def __getattr__(self, name):
+            return getattr(self.f, name)
+
+    def cut_short(file, mode="r", *args, **kwargs):
+        f = real_open(file, mode, *args, **kwargs)
+        return CutShort(f) if "w" in mode else f
+    monkeypatch.setattr(io, "open", cut_short)
+    try:
+        with pytest.raises(OSError):
+            rat.replace_times(record, {"a": 2, "b": 3})
+    finally:
+        monkeypatch.undo()
+    assert record.read_bytes() == before
+    assert [p.name for p in tmp_path.iterdir()] == [rat.RECORD], "a part of the write was left behind"
+
+
+def test_a_record_held_open_for_a_moment_is_still_replaced(tmp_path, monkeypatch, capsys):
+    # Windows refuses to replace a file another process holds open, as a
+    # virus scan does for a moment after a file is written.
+    record = tmp_path / rat.RECORD
+    record.write_text(json.dumps({"a": 1}), encoding="utf-8")
+    real_replace, refused = os.replace, []
+
+    def held_twice(src, dst):
+        if len(refused) < 2:
+            refused.append(dst)
+            raise PermissionError(13, "the file is in use")
+        real_replace(src, dst)
+    monkeypatch.setattr(rat.os, "replace", held_twice)
+    monkeypatch.setattr(rat, "time", Hurried())
+    rat.keep_times({"a": 2}, {"a": 2}, write=False, record=record)
+    assert len(refused) == 2
+    assert json.loads(record.read_text(encoding="utf-8")) == {"a": 2}
+    assert capsys.readouterr().out == ""
+
+    # Held for good, the record stays as it was, and the run says so by the
+    # file's name alone, since its place could name the person.
+    monkeypatch.setattr(rat.os, "replace", lambda src, dst: (_ for _ in ()).throw(PermissionError(13, "in use")))
+    rat.keep_times({"a": 3}, {"a": 3}, write=False, record=record)
+    assert json.loads(record.read_text(encoding="utf-8")) == {"a": 2}
+    assert capsys.readouterr().out == "could not keep this run's times in %s, PermissionError\n" % rat.RECORD
+    assert [p.name for p in tmp_path.iterdir()] == [rat.RECORD]
+
+
+def test_times_that_are_not_seconds_are_left_out(tmp_path):
+    # Infinity would end the run, since a limit is a whole number of seconds.
+    f = tmp_path / "times.json"
+    f.write_text('{"a": 5, "b": "slow", "c": -1, "d": Infinity, "e": NaN, "f": true, "g": null, "h": 2.5}',
+                 encoding="utf-8")
+    assert rat.load_times(f) == {"a": 5.0, "h": 2.5}
+    f.write_text("[1, 2]", encoding="utf-8")
+    assert rat.load_times(f) == {}
+    f.write_text('{"a": 5', encoding="utf-8")
+    assert rat.load_times(f) == {}
+    f.write_bytes(b'\xef\xbb\xbf{"a": 5}')
+    assert rat.load_times(f) == {"a": 5.0}
+    assert rat.load_times(tmp_path / "missing.json") == {}
+
+
+# Two full runs of 2026-10-06 at 20:17 and 21:19, as (entry in the file the
+# second ran with, seconds it took then). amfam and meijer had grown in a
+# land between them, walmart a little.
+ENTRY_AND_TOOK = {
+    "core": (1284, 1270), "target": (832, 773), "statefarm": (769, 785), "bestbuy": (500, 483),
+    "pge": (432, 441), "etrade": (338, 332), "applecard": (289, 299), "golden1": (287, 338),
+    "newrez": (273, 281), "att": (263, 278), "apple": (252, 234), "homedepot": (158, 153),
+    "github": (149, 154), "ally": (128, 120), "kroger": (116, 121), "tsp": (9, 6),
+    "amfam": (171, 865), "meijer": (406, 815), "walmart": (336, 433),
+}
+
+
+def test_the_suites_far_behind_the_file_are_the_ones_that_grew():
+    entries = {n: e for n, (e, _t) in ENTRY_AND_TOOK.items()}
+    measured = {n: t for n, (_e, t) in ENTRY_AND_TOOK.items()}
+    measured["newapp"] = 900
+    # The new app counts as the middle entry, 287s, as it does in the order.
+    assert rat.behind(measured, entries) == [("amfam", 865, 171), ("newapp", 900, None), ("meijer", 815, 406)]
+
+
+def test_a_busy_machine_names_no_suite_as_behind():
+    # Everything 1.8 times as slow, as on a busy night. Measured against the
+    # file alone, core would be 1027s behind.
+    entries = {n: e for n, (e, _t) in ENTRY_AND_TOOK.items() if n not in ("amfam", "meijer", "walmart")}
+    assert rat.behind({n: 1.8 * e for n, e in entries.items()}, entries) == []
+    slow = {n: 1.8 * e for n, e in entries.items()}
+    slow["kroger"] = 1.8 * 116 * 3
+    assert rat.behind(slow, entries) == [("kroger", slow["kroger"], 116)]
 
 
 def test_the_default_is_a_quarter_of_the_processors_at_most_six(monkeypatch):

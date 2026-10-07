@@ -105,7 +105,7 @@ PAPERPULL_TEST_JOBS when it is set. Each suite is still its own pytest
 process with its own interpreter, and no test binds a fixed port, so they
 do not meet. A suite that runs past its time limit is a failing suite,
 never the end of the whole run. The limit is twice what the suite took on
-a full run (tools/suite_times.json), and never less than half an hour.
+a full run, and never less than half an hour.
 
 On macOS and Linux every suite is in the runner's process group, so Ctrl+C,
 a closed terminal or a kill of the run's group reaches every suite as it
@@ -125,6 +125,36 @@ an older tree. This run stops and names it instead, --replace stops the
 earlier one and goes ahead, and --stop only stops it, with every process
 it started. A run started inside a test does not take the lock.
 
+WHICH TIMES ORDER A RUN
+
+Longest first needs each suite's time, and so does each suite's limit.
+Until 2026-10-07 both came from tools/suite_times.json alone, which changes
+only when somebody runs the whole suite with --write-times and commits it,
+so a suite that grew in between was started late and ended the run. On
+2026-10-06 amfam had grown to 209 tests and took 865s while the file said
+171s. A land started it about 1066s in, it ended last, and the run took
+1939s, where the same suites in a fresh order take about 1520s.
+
+So a run of every suite that holds this machine's lock keeps the time of
+each suite that passed in suite-times.json beside the lock, and a run here
+that holds the lock orders its suites and sizes their limits by that time
+or the file's, whichever is longer. The longer, because a run of an older
+branch, where a suite is shorter, writes its time there too, and a suite
+started too early costs a run little while one started too late can end
+it. A suite that failed or ran out of time keeps the time it had. One
+stopped at its limit would otherwise have its limit doubled for the next
+run, and one that broke at once would be started last. A --quick run and
+a part write nothing there, since a suite beside a few others is quicker
+than beside sixty, and a run inside a test neither reads nor writes it,
+since it holds no lock. The record is written whole under another name and
+then put in its place, so a run ended while writing it leaves the one
+before.
+
+The file still matters. A machine with no record orders by it, and CI
+plans its parts by it alone. So the summary names each suite that took far
+longer than the file says, allowing for how much slower or faster the
+whole run went, and --write-times still keeps a whole run's times there.
+
 PARTS ON CI
 
 On CI the suites are split by --shard K/N, balanced by how long each took
@@ -132,6 +162,14 @@ on a full run (tools/suite_times.json, refreshed by --write-times), so
 several runners together finish in about the time of the longest part.
 Each part refuses to pass on what it ran, and the privacy canary runs in
 the part that holds the core.
+
+A part plans from that file alone, never from a record of the machine it
+runs on, since each part works out the split for itself and all of them
+have to agree. CI's times are close to this machine's when it is quiet.
+On 2026-10-07 every suite of a minute or more took 0.95 to 1.15 times as
+long on CI as in a full run here, while on a busy night on 2026-10-06 core
+took half again as long here as on CI, more than the rest. So the file is
+best refreshed from a run on a quiet machine.
 
 WHAT IT PRINTS
 
@@ -187,13 +225,17 @@ OUTPUT = REPO / "test-output"
 # How long each suite took on a full run. The longest start first, and the
 # parts on CI are balanced by it. A suite not listed counts as a middling one.
 TIMES = REPO / "tools" / "suite_times.json"
+# How long each suite took on this machine's latest full run where it
+# passed, kept beside the run lock. See WHICH TIMES ORDER A RUN.
+RECORD = "suite-times.json"
 # How long a suite may run before it is stopped as hung, LIMIT_TIMES as
-# long as it took on a full run, as tools/suite_times.json has it, and never
-# less than SUITE_LIMIT_S. Every suite once had the same 1800 seconds, and
-# core took 1655 to 1718 of them in full runs on 2026-10-06. Two lands that
-# day had it stopped at 99% with nothing failed while other sessions ran
-# tests beside them. An hour for every suite, which came next, let a small
-# suite that hung hold a run up for that hour.
+# long as it took on a full run, by tools/suite_times.json or this machine's
+# record, whichever is longer, and never less than SUITE_LIMIT_S. Every
+# suite once had the same 1800 seconds, and core took 1655 to 1718 of them
+# in full runs on 2026-10-06. Two lands that day had it stopped at 99% with
+# nothing failed while other sessions ran tests beside them. An hour for
+# every suite, which came next, let a small suite that hung hold a run up
+# for that hour.
 SUITE_LIMIT_S = 1800
 LIMIT_TIMES = 2
 # Set for every suite this runs, so a run started inside one never waits
@@ -201,6 +243,17 @@ LIMIT_TIMES = 2
 IN_RUN = "PAPERPULL_IN_TEST_RUN"
 LOCK_DIR = Path(os.environ.get("PAPERPULL_TEST_LOCK_DIR")
                 or Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "PaperPull-dev")
+# A suite is named as far behind its entry in tools/suite_times.json when it
+# took BEHIND_TIMES as long as the entry says and BEHIND_S more, both after
+# allowing for the run's pace. The pace is the median of time over entry
+# among the suites with an entry of PACE_FROM_S or more, so a busy machine,
+# which slows every suite, names none of them. Between two full runs on
+# 2026-10-06 the twenty suites of a minute or more whose tests had not
+# changed moved by a quarter at most, and amfam and meijer, which had grown,
+# took 5.1 and 2.0 times their entries.
+BEHIND_TIMES = 1.5
+BEHIND_S = 120
+PACE_FROM_S = 60
 
 DETAILED = 5          # failures per suite printed with their frames
 NAMED = 20            # failures named after those, one line each
@@ -833,11 +886,26 @@ def default_jobs() -> int:
 
 
 def load_times(path=None) -> dict:
+    """Seconds by suite, from tools/suite_times.json or the file handed in.
+    An entry that is not a number of seconds is left out, so a limit is
+    never worked out from one, and a file that cannot be read holds none."""
     try:
-        data = json.loads(Path(path or TIMES).read_text(encoding="utf-8"))
-        return {str(k): float(v) for k, v in data.items()}
-    except (OSError, ValueError, TypeError, AttributeError):
+        data = json.loads(Path(path or TIMES).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
         return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): float(v) for k, v in data.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < float("inf")}
+
+
+def longer_of(*sources) -> dict:
+    """Each suite's longest time in the sources handed in."""
+    out = {}
+    for times in sources:
+        for name, seconds in times.items():
+            out[name] = max(seconds, out.get(name, 0.0))
+    return out
 
 
 def expected(name: str, times: dict) -> float:
@@ -848,9 +916,26 @@ def expected(name: str, times: dict) -> float:
 
 
 def limit_of(name: str, times: dict) -> int:
-    """How long the suite may run before it is stopped as hung. A suite not
-    listed gets SUITE_LIMIT_S, as every suite once did."""
+    """How long the suite may run before it is stopped as hung, by the times
+    the run is ordered by. A suite they do not hold gets SUITE_LIMIT_S, as
+    every suite once did."""
     return int(max(SUITE_LIMIT_S, LIMIT_TIMES * times.get(name, 0)))
+
+
+def behind(measured: dict, entries: dict) -> list:
+    """The suites that took far longer than tools/suite_times.json says, as
+    (name, seconds, entry), the furthest behind first. A suite with no entry
+    counts as a middling one, as it does in the order, and its entry is
+    None. See BEHIND_TIMES."""
+    ratios = sorted(seconds / entries[name] for name, seconds in measured.items()
+                    if entries.get(name, 0) >= PACE_FROM_S)
+    pace = ratios[len(ratios) // 2] if ratios else 1.0
+    far = []
+    for name, seconds in measured.items():
+        paced = expected(name, entries) * pace
+        if seconds >= BEHIND_TIMES * paced and seconds - paced >= BEHIND_S:
+            far.append((seconds - paced, name, seconds, entries.get(name)))
+    return [(name, seconds, entry) for _, name, seconds, entry in sorted(far, key=lambda f: (-f[0], f[1]))]
 
 
 def longest_first(names: list, times: dict) -> list:
@@ -903,6 +988,12 @@ class RunLock:
     @property
     def info(self) -> Path:
         return self.folder / "test-run.json"
+
+    @property
+    def times(self):
+        """This machine's record of suite times, which only the run holding
+        the lock reads or writes. None while the lock is not held."""
+        return self.folder / RECORD if self.file is not None else None
 
     def holder(self) -> dict:
         try:
@@ -1020,7 +1111,7 @@ def main(argv=None) -> int:
     ap.add_argument("--replace", action="store_true",
                     help="stop a run of this checkout that is still going, then run")
     ap.add_argument("--write-times", action="store_true",
-                    help="keep this run's suite times in tools/suite_times.json")
+                    help="keep the times of the suites that passed in tools/suite_times.json")
     args = ap.parse_args(argv)
 
     try:
@@ -1038,14 +1129,20 @@ def main(argv=None) -> int:
         if code is not None:
             return code
     try:
-        return run(args)
+        return run(args, lock)
     finally:
         lock.release()
 
 
-def run(args) -> int:
+def run(args, lock=None) -> int:
     jobs = max(1, args.jobs or default_jobs())
-    times = load_times()
+    entries = load_times()
+    # The machine's record is read only by the run holding its lock, and
+    # never by a part, which plans from the file alone since every part
+    # works out the split for itself and they have to agree.
+    record = lock.times if lock is not None and not args.shard else None
+    kept = load_times(record) if record else {}
+    times = longer_of(entries, kept)
     plan = suites(args.quick)
     if args.shard:
         k, n = parse_shard(args.shard)
@@ -1105,7 +1202,14 @@ def run(args) -> int:
         # Asked for two made-up suites, it differs only when it is each suite's own.
         own_folders = browsers_folder("one", "one") != browsers_folder("other", "other")
     if jobs > 1 and len(work) > 1:
-        print("%d suites, %d at a time, longest first" % (len(work), min(jobs, len(work))), flush=True)
+        whose = ""
+        if kept:
+            try:
+                whose = ", with this machine's times of %s" % time.strftime(
+                    "%Y-%m-%d %H:%M", time.localtime(record.stat().st_mtime))
+            except OSError:
+                whose = ", with this machine's times"
+        print("%d suites, %d at a time, longest first%s" % (len(work), min(jobs, len(work)), whose), flush=True)
 
     def one(item):
         name, d, py = item
@@ -1194,10 +1298,24 @@ def run(args) -> int:
         for name, version, py in older:
             print("   %-16s %s, in %s" % (name, version, printable_place(py, REPO, [])))
 
+    # Only a suite that passed was timed doing all its work. One stopped at
+    # its limit or broken at once says nothing about how long it takes.
+    failing = {name for name, _ in broken}
+    measured = {name: seconds for name, seconds in took.items() if name not in failing}
+    full = not args.quick and not args.shard
+    write = args.write_times and full
+    far = [] if write else behind(measured, entries)
+    if far:
+        print("\nsuites that took far longer than tools/suite_times.json says, which CI's parts are balanced by")
+        for name, seconds, entry in far:
+            print("   %-16s %ds here, %s" % (name, seconds, "it says %ds" % entry if entry is not None
+                                              else "it has no entry"))
+        print("set their entries to these times, or keep a whole run's with --write-times")
+
     for name, summary in broken:
         print("FAILING SUITE  %-14s %s" % (name, summary))
 
-    keep_times(took, write=args.write_times and not args.quick and not args.shard)
+    keep_times(took, measured, write=write, record=record if full else None)
 
     refused = False
     # A run that holds the core suite has to have seen every test of the
@@ -1247,21 +1365,56 @@ def run(args) -> int:
     return 0
 
 
-def keep_times(took: dict, write: bool) -> None:
-    """This run's times beside its output, and in tools/suite_times.json
-    when asked, which is what orders the next run and splits CI."""
-    if not took:
+def keep_times(took: dict, measured: dict, write: bool, record=None) -> None:
+    """Every suite's time beside the run's output. The times measured, those
+    of the suites that passed, go into tools/suite_times.json as well when
+    asked, which CI's parts are balanced by, and into this machine's record
+    when handed its path, which orders the next run here. A suite that
+    failed or ran out of time keeps the time it had in both."""
+    if took:
+        try:
+            OUTPUT.mkdir(parents=True, exist_ok=True)
+            (OUTPUT / "times.json").write_text(json.dumps(dict(sorted(took.items())), indent=1) + "\n",
+                                               encoding="utf-8")
+        except OSError:
+            pass
+    for path in ([TIMES] if write else []) + ([record] if record is not None else []):
+        try:
+            replace_times(Path(path), measured)
+        except OSError as e:
+            # Its name only, as a path on this machine could name the person.
+            print("could not keep this run's times in %s, %s" % (Path(path).name, type(e).__name__))
+
+
+def replace_times(path: Path, measured: dict) -> None:
+    """The times measured, over what the file held, written whole under
+    another name and then moved into its place, so a reader finds the old
+    file or the new one and never part of either. Windows refuses the move
+    while another process has the file open, as a virus scan can for a
+    moment after it is written, so the move is tried for a few seconds."""
+    if not measured:
         return
+    merged = {**load_times(path), **measured}
+    text = json.dumps({k: round(v) for k, v in sorted(merged.items())}, indent=1) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, part = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".part")
     try:
-        OUTPUT.mkdir(parents=True, exist_ok=True)
-        (OUTPUT / "times.json").write_text(json.dumps(dict(sorted(took.items())), indent=1) + "\n",
-                                           encoding="utf-8")
-        if write:
-            merged = {**load_times(), **took}
-            TIMES.write_text(json.dumps({k: round(v) for k, v in sorted(merged.items())}, indent=1) + "\n",
-                             encoding="utf-8")
-    except OSError:
-        pass
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        for attempt in range(10):
+            try:
+                os.replace(part, path)
+                return
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(0.5)
+    except BaseException:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        raise
 
 
 if __name__ == "__main__":
