@@ -329,7 +329,9 @@ def test_there_are_apps_to_check():
     found nobody."""
     assert len(APPS) >= 61, IDS
     assert {"amfam", "citi", "target", "wellsfargo"} <= set(IDS)
-    assert len(WITH_IDS) >= 16 and {"capitalone", "chase", "vanguard"} <= {
+    # Fifteen, since AAFMAA, which gives a document no id, stopped keeping
+    # its View control's postback name as one.
+    assert len(WITH_IDS) >= 15 and {"capitalone", "chase", "vanguard"} <= {
         d.name for d in WITH_IDS}, [d.name for d in WITH_IDS]
 
 
