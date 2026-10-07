@@ -7,7 +7,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.44.0] - 2026-10-07
+
+American Express and Vanguard press a control only when nothing covers
+it, after a chat bubble took a press on a tester's American Express
+account, and a test now fails if any app forces a press. The panel can
+download again what an app already downloaded. PayPal reads a business
+account's statements, American Family opens each bill's details to find
+its statements, Walmart waits for its own invoice, Meijer stops looking
+for store receipts its list no longer shows, and Resume no longer calls a
+run clean after a list it did not read whole. Every file a tester might
+post keeps a page's words only from a fixed list, every redirect is
+checked against the provider's own sites, and the control panel answers
+only its own page.
 
 ### Added
 - **Download again, from the panel.** A box under Scope, Download again
