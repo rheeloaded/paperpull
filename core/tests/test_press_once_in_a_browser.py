@@ -597,3 +597,56 @@ def test_playwrights_word_is_read_from_its_account_alone():
                 "    - waiting for element to be visible, enabled and stable\n") == "not made"
     assert word('Locator.click: Timeout 2000ms exceeded.\nCall log:\n'
                 '  - waiting for locator("#nowhere")\n') == "not made"
+    for waited in ('get_by_role("button", name="Download statement")',
+                   'get_by_role("button", name=re.compile(r"^download", re.IGNORECASE)).first',
+                   'get_by_role("button", name="Download statement").or_('
+                   'get_by_role("link", name="View PDF")).first',
+                   'get_by_text("View PDF")',
+                   'locator("button").filter(has_text="Download statement")',
+                   'locator("button.w").first'):
+        assert word('Locator.click: Timeout 800ms exceeded.\nCall log:\n'
+                    '  - waiting for %s\n'
+                    '    - locator resolved to <button id="a" class="w">Download statement</button>\n'
+                    '  - attempting click action\n'
+                    '    - waiting for element to be visible, enabled and stable\n'
+                    % waited) == "not made", waited
+
+# A control that moves by less than a pixel, again and again. Playwright
+# never finds it still, while it stays where the read of what is on top
+# finds it.
+JIGGLE = ("<style>@keyframes jig { from { transform: translateX(0) } "
+          "to { transform: translateX(0.4px) } } #go { animation: jig 0.1s infinite alternate; }</style>")
+
+
+def test_a_control_found_by_its_role_that_never_holds_still_is_pressed_once(show):
+    """Playwright's own account of a press through a role locator names it
+    get_by_role, not locator, and was read as a press that may have begun,
+    so every such press that raised stopped the run. Here Playwright gives
+    up for real, its press never begun, and the control is pressed through
+    the page once."""
+    page = show(BUTTON % "" + JIGGLE)
+    got = press(page, el=page.get_by_role("button", name="Download statement"))
+    assert got.how == pressing.THROUGH_THE_PAGE
+    assert "get_by_role" in str(got.error) and "element is not stable" in str(got.error)
+    assert presses(page) == 1
+
+
+def test_a_press_heard_as_the_control_is_taken_away_is_taken_as_made(show, unstable,
+                                                                     monkeypatch):
+    """The person pressed the control right after it was read as on top,
+    and the press took the control off the page. In the step of the press
+    through the page, a press heard counts before a control gone, so it is
+    taken as made and the capture goes on to wait for what it brought."""
+    page = show(BUTTON % " this.remove();")
+    real = pressing.look
+
+    def person_presses_then(page_, locator, css, labels=False):
+        seen = real(page_, locator, css, labels)
+        box = page_.locator("#go").bounding_box()
+        page_.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        return seen
+    monkeypatch.setattr(pressing, "look", person_presses_then)
+    unstable()
+    got = press(page)
+    assert got.how == pressing.MADE
+    assert presses(page) == 1

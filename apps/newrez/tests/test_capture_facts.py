@@ -627,8 +627,8 @@ def test_a_row_that_changes_while_the_press_is_tried_is_not_pressed_through_the_
         def evaluate(self, js, arg=None):
             if js == pressing._HEAR_JS:
                 return {"words": [self.label], "css": "a"}
-            if js == pressing._HEARD_JS:
-                return False
+            if js == pressing._STATE_JS:
+                return {"heard": False, "connected": True}
             if js == pressing._WORDS_JS:
                 return [self.label]
             if js == pressing._PRESS_JS:

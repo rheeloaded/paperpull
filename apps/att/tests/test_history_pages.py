@@ -576,6 +576,46 @@ def test_view_print_alone_is_pressed_once(browser, tmp_path, monkeypatch):
     assert presses["view"] == 1, "View/print PDF was pressed %d times" % presses["view"]
 
 
+# The bill's panel drawn anew with no Download PDF in it, the moment
+# Download PDF is about to be pressed.
+_PANEL_WITHOUT_DOWNLOAD = r"""() => {
+  panel = function () {
+    return '<div class="panel"><button>Internet<br>$1.00</button>' +
+      '<button onclick="presses.view++">View/print PDF</button></div>';
+  };
+  draw();
+}"""
+
+
+def test_a_download_pdf_that_left_the_page_is_followed_by_no_other_press(
+        browser, tmp_path, monkeypatch):
+    """The page drew the bill's panel anew as Download PDF was about to be
+    pressed, so the control the run held left the page and Playwright's
+    press never began. Nothing is pressed for this bill after that. A
+    View/print PDF found on the page drawn anew may be another bill's, and
+    it was pressed next."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    bills = _bills(_newest_now(), 16)
+    presses = _presses_on_leaving(browser[0], monkeypatch)
+    real = sync_api.Locator.click
+    drawn = []
+
+    def drawn_anew_first(self, *args, **kwargs):
+        if not drawn and (self.get_attribute("onclick", timeout=500) or "") == "download()":
+            drawn.append(1)
+            self.page.evaluate(_PANEL_WITHOUT_DOWNLOAD)
+            kwargs["timeout"] = 500
+        return real(self, *args, **kwargs)
+    monkeypatch.setattr(sync_api.Locator, "click", drawn_anew_first)
+    ok, out, trace, page = _download(browser, tmp_path, _history(bills), bills[1]["iso"])
+    assert drawn, "Download PDF was never pressed"
+    assert not ok and not out.exists()
+    counts = presses or page.evaluate("window.presses")
+    assert counts["download"] == 0
+    assert counts["view"] == 0, "View/print PDF was pressed after Download PDF left the page"
+    assert {"note": "the control left the page before it was pressed"} in trace
+
+
 def test_download_pdf_drawn_after_view_print_is_still_the_one_pressed(browser, tmp_path):
     """In real time, since what is tested is the wait."""
     bills = _bills(_newest_now(), 16)

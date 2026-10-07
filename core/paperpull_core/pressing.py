@@ -765,9 +765,9 @@ _HEAR_JS = r"""(el, args) => {
   return {words: wordsOf(el), css: CSS.escape(el.localName || '')};
 }""" % _WORDS_OF_JS
 
-_HEARD_JS = "(el, key) => el[key] === true"
-
-_CONNECTED_JS = "el => el.isConnected"
+# Whether the control heard a press and whether it is still on the page,
+# read in one step, so a press heard is never taken for a control gone.
+_STATE_JS = "(el, key) => ({heard: el[key] === true, connected: el.isConnected})"
 
 _WORDS_JS = r"""el => {
   %s
@@ -781,8 +781,8 @@ _WORDS_JS = r"""el => {
 _PRESS_JS = r"""(el, args) => {
   %s
   const want = args.want;
-  if (!el.isConnected) return 'gone';
   if (el[args.key] === true) return 'heard';
+  if (!el.isConnected) return 'gone';
   const now = wordsOf(el);
   if (now.length !== want.length || now.some((w, i) => w !== want[i])) return 'changed';
   el.click();
@@ -793,7 +793,8 @@ _PRESS_JS = r"""(el, args) => {
 # waited for the control or found it not yet ready to press. Nothing in such
 # an account comes after a press began.
 _BEFORE_A_PRESS = tuple(re.compile(p) for p in (
-    r"waiting for locator\(", r"locator resolved to ", r"attempting click action$",
+    r"waiting for (locator|frame_locator|get_by_[a-z_]+)\(", r"locator resolved to ",
+    r"attempting click action$",
     r"retrying click action$", r"waiting \d+ ?ms$",
     r"waiting for element to be visible(, enabled)? and stable$",
     r"element is not (visible|stable|enabled)$", r"element is outside of the viewport$",
@@ -905,16 +906,17 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
          path through the control, so one Playwright made, or the person
          made, is known, and is never made again (MADE). When that could
          not be asked, or not read afterwards, the run stops.
-      4. The control is still on the page. One the page took away, a list
-         drawn anew say, is not pressed at all, and the run goes on with
-         the document left for another run (GONE).
+      4. The control is still on the page, read in the same step as
+         whether it heard a press. One the page took away, a list drawn
+         anew say, is not pressed at all, and the run goes on with the
+         document left for another run (GONE).
       5. The app's own `guard` passes the control's words read now, joined
          the way controls.control_label joins them, and the app's own
          `check`, when given, says nothing. Otherwise the run stops.
       6. The control is in the middle of the window with nothing over it,
          read the way click reads it (look, judge). Otherwise the run stops.
       7. Nothing has come since, and in the same step as the press the
-         control is still on the page, has heard no press, and has the
+         control has heard no press, is still on the page, and has the
          words it had before Playwright pressed. A press heard or anything
          come by then is never made again (MADE), a control gone is not
          pressed (GONE), and other words stop the run.
@@ -1038,8 +1040,10 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
                      "again", what, kind)
             return Pressed(MADE, first)
 
-        # 3. Whether the control heard a press, Playwright's or the person's.
-        noted = _ask(handle, _HEARD_JS, _KEY)
+        # 3. Whether the control heard a press, Playwright's or the person's,
+        # read in one step with whether it is still on the page.
+        state = _ask(handle, _STATE_JS, _KEY)
+        noted = state.get("heard") if isinstance(state, dict) else None
         if came or noted is True:
             log.info("%s heard the press that raised (%s), so it is not made again", what, kind)
             return Pressed(MADE, first)
@@ -1053,7 +1057,7 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
 
         # 4. Still on the page. One the page took away is not pressed, and
         # nothing about it is unsure, so the run goes on.
-        if _ask(handle, _CONNECTED_JS) is False:
+        if state.get("connected") is False:
             log.info("%s left the page before Playwright's press began (%s), so nothing is "
                      "pressed", what, kind)
             return Pressed(GONE, first)
@@ -1089,8 +1093,8 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
             raise
 
         # 7. Nothing has come in the time those checks took, and in the same
-        # step as the press the control is on the page, has heard no press,
-        # the person's included, and has its words.
+        # step as the press the control has heard no press, the person's
+        # included, is on the page, and has its words.
         if anything_came():
             log.info("something came while %s was checked (%s), so it is not pressed again",
                      what, kind)

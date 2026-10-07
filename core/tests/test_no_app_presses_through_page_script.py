@@ -69,7 +69,8 @@ PRESSES = (
     ("click.call()", re.compile(r"\.\s*click\s*\.\s*(?:call|apply|bind)\s*\(")),
     ("submit.call()", re.compile(r"\.\s*(?:submit|requestSubmit)\s*\.\s*(?:call|apply|bind)\s*\(")),
     ("submit()", re.compile(r"\.\s*(?:submit|requestSubmit)\s*\(")),
-    ("a handler called", re.compile(r"\.\s*on(?:%s)\s*\(" % "|".join(sorted(PRESS_EVENTS)))),
+    ("a handler called", re.compile(r"\.\s*on(?:%s)\s*(?:\.\s*(?:call|apply|bind)\s*)?\("
+                                    % "|".join(sorted(PRESS_EVENTS)))),
     ("an event built by hand", re.compile(r"\binit(?:Mouse|Pointer|Touch|Keyboard|UI)?Event\s*\(")),
     ("trigger()", re.compile(r"""\.\s*trigger(?:Handler)?\s*\(\s*(['"`])(?:%s)\1"""
                              % "|".join(sorted(PRESS_EVENTS)))),
@@ -616,7 +617,9 @@ def scripts(mod: Module):
             # A spread of keywords or arguments can only carry the script
             # when it was not given here, and a file or an address always
             # can, beside one that was.
-            elsewhere = any(k.arg in ("path", "url") for k in node.keywords)
+            elsewhere = any(k.arg in ("path", "url") for k in node.keywords) or (
+                name in ("add_init_script", "add_script_tag")
+                and any(k.arg is None for k in node.keywords))
             if given is not None:
                 yield node, given
             if given is None or elsewhere:
@@ -634,8 +637,11 @@ def scripts(mod: Module):
                 for k, v in zip(params.keys, params.values):
                     if k is None or (isinstance(k, ast.Constant) and k.value in keys):
                         yield node, v
-            elif isinstance(method, ast.Constant):
-                yield node, params
+            else:
+                # Parameters in a variable. The script in them is read only
+                # when the method is known to take one, and a method in a
+                # variable may be any.
+                yield node, (params if isinstance(method, ast.Constant) else None)
 
 
 def census(paths=None):
@@ -762,6 +768,7 @@ def test_every_kind_of_press_is_found_in_javascript():
         "f => f.requestSubmit(f.querySelector('button'))": ["submit()"],
         "el => el.onclick(new Event('x'))": ["a handler called"],
         "el => el.onmousedown()": ["a handler called"],
+        "el => el.onclick.call(el)": ["a handler called"],
         "el => { const e = document.createEvent('MouseEvents'); e.initMouseEvent('click'); }":
             ["an event built by hand"],
         "el => el.dispatchEvent(new MouseEvent('click', {bubbles: true}))": ["dispatchEvent of click"],
@@ -842,6 +849,9 @@ def elsewhere(page, el, session, method, kw):
     el.evaluate(**kw)
     session.send(method, {"expression": _HALF + _OTHER_HALF})
     el.evaluate("el => el.onmousedown()")
+    page.add_init_script("() => 1", **kw)
+    session.send(method, kw)
+    el.evaluate("el => el.onclick.call(el)")
 '''
 
 SAMPLE_CORE = r'''
@@ -873,7 +883,9 @@ def test_the_census_follows_a_script_back_wherever_it_is_built(tmp_path):
         ("sample_site.py", "presses", "submit()"),
     ], sorted(found)
     assert found[("sample_site.py", "elsewhere", "click() put together from parts")] == {52}
-    assert holes[("sample_site.py", "elsewhere", "a script given another way")] == {49, 50, 51}
+    assert holes[("sample_site.py", "elsewhere", "a script given another way")] == {49, 50, 51,
+                                                                                     54, 55}
+    assert found[("sample_site.py", "elsewhere", "a handler called")] == {53, 56}
     # The four strings in presses() that each hold a whole press, the
     # template's filling among them, and the three put together, from two
     # names, an f-string and what a replace made.

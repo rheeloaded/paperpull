@@ -1806,6 +1806,12 @@ def _view_print_button(page):
     return None, ""
 
 
+# What _catch_pdf adds to the list of controls it was handed when its
+# control left the page before anything pressed it. A page's own words
+# never hold a NUL, so no label can read as this.
+_LEFT_THE_PAGE = "\x00left the page"
+
+
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
                dl_dir=None, pressed: Optional[list] = None) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
@@ -1908,6 +1914,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             # step is looked for, and the document is left for another run.
             if trace is not None:
                 trace.append({"note": "the control left the page before it was pressed"})
+            if pressed is not None:
+                pressed.append(_LEFT_THE_PAGE)
             return False
         if wait_for_pdf(12):
             return True
@@ -2045,6 +2053,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
                 tried: list = []
                 if _catch_pdf(page, btn, blabel, out_path, trace, dl_dir, tried):
                     return True
+                # Download PDF left the page before anything pressed it, so the
+                # page was drawn anew, and a View/print PDF found on it now may
+                # be another bill's. Nothing more is pressed for this one.
+                if _LEFT_THE_PAGE in tried:
+                    return False
                 # Download PDF gave nothing. View/print PDF is the other
                 # control the survey saw, and it may open the PDF in a tab.
                 # It is pressed once at most, so not when that attempt has
