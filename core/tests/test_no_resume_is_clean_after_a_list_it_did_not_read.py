@@ -355,12 +355,12 @@ def test_resume_stops_at_its_end_after_a_list_cut_short(home):
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
 def test_resume_carries_on_with_what_is_known_and_then_stops(home, monkeypatch):
     """A document the stopped listing knew is still handed on to be taken,
-    here in a dry run, and the run then stops all the same. Robinhood, USAA
-    and Wealthfront attach to the browser before a dry run's first document,
-    so theirs stops there, and the stop at Resume's end is the test above.
-    A Resume that reads the list again before it takes anything (E*TRADE's,
-    which needs what the list says about each row) stops when that listing
-    does, with no browser to read it in."""
+    here in a dry run, and the run then stops all the same. A dry run never
+    reaches for the browser to do it. Robinhood, USAA and Wealthfront did,
+    before a dry run's first document, so with no browser theirs stopped
+    there instead. A Resume that reads the list again before it takes
+    anything (E*TRADE's, which needs what the list says about each row)
+    stops when that listing does, with no browser to read it in."""
     doc = home.listed_before(done=False, whole=False)
     handed, returned = [], []
     take = home.mod.App.process
@@ -377,10 +377,8 @@ def test_resume_carries_on_with_what_is_known_and_then_stops(home, monkeypatch):
         return
     assert handed == [doc.key], (
         "the document the list held was not carried on with\n" + said[-1500:])
-    if returned:
-        assert "DRY RUN" in said and STOPS_HERE in said, said[-1500:]
-    else:
-        assert home.browser.asked, said[-1500:]
+    assert home.browser.asked == 0, "a dry run reached for the browser\n" + said[-1500:]
+    assert returned and "DRY RUN" in said and STOPS_HERE in said, said[-1500:]
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)

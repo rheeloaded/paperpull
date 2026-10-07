@@ -455,7 +455,6 @@ class App:
     # -- processing --------------------------------------------------------
 
     def process(self, docs: List[Document], dry_run: bool = False):
-        page = self.page()
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
@@ -467,6 +466,11 @@ class App:
             if dry_run:
                 print(f"  DRY RUN - would save: {filename}")
                 continue
+            # The tab is asked for here, past a dry run's continue, so a dry
+            # run of Resume, which reads no list, never reaches for the
+            # browser. It is still asked for before the journal first notes
+            # a document, which takes the tab the run works in.
+            page = self.page()
             # Which document the run is on, so a failure file says how far
             # it got and whether it ever reached a second one.
             try:

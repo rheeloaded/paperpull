@@ -40,6 +40,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   shows. A Chase tab left on the tax documents or year-end summaries no
   longer passes for the statements, which it did whenever it showed a
   row.
+- **A dry run of Resume in Robinhood, USAA or Wealthfront no longer needs
+  the browser.** Each asked for its tab before the first document, so even
+  a dry run of Resume, which reads no list and downloads nothing, attached
+  to the browser and stopped when it was closed. They now ask for it only
+  once a document is about to be downloaded, as every other document app
+  does. A dry run of Pilot or Run All still opens the browser, since it
+  reads the list there.
 
 ## [0.44.0] - 2026-10-07
 
