@@ -931,3 +931,76 @@ def test_three_files_wanting_one_name_cut_to_fit_are_each_given_a_name(tmp_path,
     targets = [path for _reason, path in planned]
     assert len({t.lower() for t in targets}) == 3, "each file has a name of its own"
     assert all(len(t) <= limit for t in targets), (limit, targets)
+# -- what a download told a second file of one name apart by --------------------
+
+def test_a_record_tells_its_file_apart_the_way_a_download_does():
+    """The order number for a purchase, the last six of the provider's id
+    for a document, as every app's download hands unique_path, and nothing
+    for a record that has neither."""
+    assert renaming.told_apart_by({"order_number": "112-77", "document_id": "X"}) == "112-77"
+    assert renaming.told_apart_by({"document_id": "a1b2c3d4e5f6"}) == "d4e5f6"
+    assert renaming.told_apart_by({"document_id": "D9"}) == "D9"
+    assert renaming.told_apart_by({"title": "Monthly Statement"}) == ""
+    assert renaming.told_apart_by({}) == renaming.told_apart_by(None) == ""
+
+
+def _statement(tmp_path, name, body, **rec):
+    """A statement of 2026-09-12, its file, its index row, which carries no
+    id, and the record its download left."""
+    f = tmp_path / name
+    f.write_bytes(b"%PDF- " + body)
+    title = "Monthly Statement - September 12, 2026"
+    row = {"PDF Filename": name, "PDF Full Path": str(f), "Document Date": "2026-09-12",
+           "Document Summary": "Monthly Statement", "Document Title": title, "Notes": ""}
+    rec.update({"date": "2026-09-12", "title": title, "summary": "Monthly Statement",
+                "pdf_path": str(f), "pdf_filename": name})
+    return row, rec
+
+
+def test_a_second_statement_told_apart_by_its_id_is_already_named(tmp_path):
+    """Its download saved it with the last six of the provider's id, since
+    the first held the name. Its row carries no id, so Rename told it apart
+    by nothing and offered it " (2)" under the pattern it was saved by."""
+    row1, rec1 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement.pdf", b"1111",
+                            document_id="DOC-1111")
+    row2, rec2 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement C-2222.pdf",
+                            b"2222", document_id="DOC-2222")
+    app = _App(tmp_path, [row1, row2], progress={"id:DOC-1111": rec1, "id:DOC-2222": rec2})
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append)
+    assert "already named" in " ".join(said) and "(2)" not in " ".join(said), said
+
+
+def test_a_statement_saved_with_a_number_before_its_id_was_used_takes_its_id(tmp_path):
+    """A download from before the provider's id was used gave the second
+    statement " (2)". Rename gives it the name a download gives it today,
+    with the end of its id, and its record follows it."""
+    row1, rec1 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement.pdf", b"1111",
+                            document_id="DOC-1111")
+    row2, rec2 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement (2).pdf", b"2222",
+                            document_id="DOC-2222")
+    app = _App(tmp_path, [row1, row2], progress={"id:DOC-1111": rec1, "id:DOC-2222": rec2})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    taken = tmp_path / "2026-09-12 Testco Monthly Statement C-2222.pdf"
+    assert sorted(p.name for p in tmp_path.glob("*.pdf")) == [
+        taken.name, "2026-09-12 Testco Monthly Statement.pdf"]
+    assert taken.read_bytes().endswith(b"2222")
+    assert app.progress.data["id:DOC-2222"]["pdf_path"] == str(taken)
+
+
+def test_an_apps_own_rule_tells_its_files_apart(tmp_path):
+    """PayPal tells two business statements ending on one day apart by the
+    first day each covers, a rule of its own that it hands Rename as well.
+    Without it, the second is told apart by nothing."""
+    row1, rec1 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement.pdf", b"0801",
+                            first="2026-08-01")
+    row2, rec2 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement 2026-08-15.pdf",
+                            b"0815", first="2026-08-15")
+    app = _App(tmp_path, [row1, row2], progress={"one": rec1, "two": rec2})
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append,
+                     told_apart=lambda rec: rec.get("first", ""))
+    assert "already named" in " ".join(said), said
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append)
+    assert "Monthly Statement (2).pdf" in " ".join(said), said

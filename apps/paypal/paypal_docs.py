@@ -150,6 +150,20 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+def told_apart_by(record: dict) -> str:
+    """What a statement's file adds to its name when another file already
+    has that name, the same on every run. A business statement has no id,
+    and two ending on the same day are told apart by the first day each
+    covers, read from its own record's link, or by the day PayPal made it
+    when that is all the list gave. Any other statement is told apart the
+    usual way (renaming.told_apart_by). The download and Rename both ask
+    this, so a rename tells a file apart the way its download did."""
+    ref = site.business_ref(str((record or {}).get("href") or ""))
+    if ref is not None:
+        return ref.start or ref.created
+    return renaming.told_apart_by(record)
+
+
 class App:
     _journal = None
     _requests = None
@@ -927,16 +941,12 @@ class App:
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         ref = site.business_ref(doc.href)
-        # The last of the document id, used only if the name is taken.
-        # Two documents on one day used to differ by " (2)", which says
-        # nothing about which is which and moves between them when a file
-        # is deleted (#49, and the same complaint on #43). A business
-        # statement has no id, and two ending on the same day are told apart
-        # by the first day each covers, read from its own record's link, the
-        # same name on every run.
+        # What tells the file apart, used only if the name is taken
+        # (told_apart_by). Two documents on one day used to differ by
+        # " (2)", which says nothing about which is which and moves between
+        # them when a file is deleted (#49, and the same complaint on #43).
         out_path = unique_path(folder, filename, self.config["max_path_length"],
-                               distinguisher=(ref.start or ref.created) if ref is not None
-                               else (doc.document_id or "")[-6:])
+                               distinguisher=told_apart_by(doc.to_dict()))
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
@@ -1137,7 +1147,8 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)),
+                         told_apart=told_apart_by)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"

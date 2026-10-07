@@ -93,6 +93,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
   does not carry, so it never found one, and a naming pattern's account or
   number never reached a file those apps had already downloaded. Now it
   does.
+- **Rename no longer offers " (2)" to a statement its download told apart
+  by an id.** When two statements of one day and one summary would share
+  a name, a download saves the second with the last six characters of the
+  id its app keeps for it added, as in "2026-09-12 Chase Monthly Statement
+  OC2222.pdf". Rename, and the File names page's offer to rename after a
+  pattern change, looked for that id in the file's row of the index, which
+  never has one. So under the very pattern the files were saved by, a
+  preview offered to rename the second statement to "2026-09-12 Chase
+  Monthly Statement (2).pdf". It happened in the sixteen apps that keep an
+  id from the provider's page in a statement's record, AAFMAA, Ally,
+  Anthem, Capital One, Chase, Discover, FedEx, M&T Bank, myPay, Navy
+  Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard. Rename now
+  tells a file apart by what its download added, read from the record
+  written when the file was saved, so a later listing that gives a
+  statement another id, which Capital One, Schwab and Vanguard write down,
+  does not move it. After a pattern change that gives both statements one
+  name, the second keeps what its download added. A PayPal business
+  statement keeps the first day it covers, which its download adds when
+  another statement ending on the same day has the name. A statement saved
+  with " (2)" before its app added the id to a taken name is offered the
+  end of the id its record kept instead.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a

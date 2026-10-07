@@ -464,7 +464,26 @@ def _first(row: dict, keys) -> str:
     return ""
 
 
-def run_for(app, apply_changes: bool = False, say=print) -> Result:
+def told_apart_by(record) -> str:
+    """What a download adds to a file's name when another file already has
+    that name (unique_path), read from the file's own record. A purchase is
+    told apart by its order number. A document is told apart by the last
+    six characters of the id its record keeps, which is what the document
+    apps' downloads hand unique_path. Wealthfront's hands it nothing and
+    keeps no id, so the two agree there too. A record with neither adds
+    nothing, and its file was told apart by " (2)". PayPal tells a business
+    statement apart by the first day it covers and hands run_for that rule
+    of its own."""
+    if not isinstance(record, dict):
+        return ""
+    number = str(record.get("order_number") or "").strip()
+    if number:
+        return number
+    return str(record.get("document_id") or "")[-6:]
+
+
+def run_for(app, apply_changes: bool = False, say=print,
+            told_apart: Optional[Callable[[dict], str]] = None) -> Result:
     """Rename this app's files to the names it would give them today.
 
     One function rather than forty-eight, because the ledger is the same
@@ -474,6 +493,10 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
 
     Nothing is downloaded, nothing moves folder, and the identity that
     stops a second download is not touched.
+
+    `told_apart` is handed a document's record and returns what the app's
+    download adds to its name when another file has that name, for an app
+    whose download does not tell its files apart by told_apart_by.
     """
     # Every app holds its index as self.index_csv, and a receipt app holds
     # the order history as self.order_csv as well. That is the same in all
@@ -523,8 +546,29 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
                                   _first(row, _TYPE_KEYS), part=_part_of(row),
                                   record=record)
 
+    rule = told_apart or told_apart_by
+
+    def distinguisher(row):
+        # What the download told this file apart by when its name was
+        # taken, so a file it told apart keeps that, and a file wanting a
+        # name another file has is told apart as a download into that
+        # folder would tell it. A receipt's row carries its order number. A
+        # document's row carries no id, so the record naming the row's own
+        # file is asked, as it was written down when the file was saved,
+        # and a row whose record cannot be told adds nothing. The second of
+        # two statements of one day and one summary is saved as
+        # "... Monthly Statement OC2222.pdf", and asking the row alone
+        # offered to rename it to "... (2).pdf" under the very pattern it
+        # was saved by (#43, #49). Asking what a later listing wrote over
+        # the id offered it another id.
+        number = (row.get("Order or Receipt Number") or "").strip()
+        if number:
+            return number
+        record = current.record_for(row, saved=True)
+        return rule(record) if record else ""
+
     changes = plan(primary_rows, build_name, folders=app.paths.filing_folders(),
-                   distinguisher=lambda row: _first(row, _ID_KEYS),
+                   distinguisher=distinguisher,
                    max_path_length=app.config.get("max_path_length", 240))
     describe(changes, say=say, limit=0 if apply_changes else 20)
 
@@ -652,6 +696,7 @@ class _Known:
 
     def __init__(self, app, rows=()):
         self.records = {}      # the app's key -> what it knows of that document
+        self._saved = {}       # the app's key -> what its records naming a file said
         self._by_file = {}     # a file -> each key whose records name it -> their spellings
         self._by_key = {}      # a row key -> the keys whose records carry it
         self._keys = {}        # the app's key -> the row keys its records carry
@@ -675,6 +720,15 @@ class _Known:
                     # made the same way on every run.
                     self._by_file.setdefault(where, {}).setdefault(name, set()).add(raw)
                     self._named.add(name)
+                    # What was written down when the file was saved, from
+                    # progress first. A later listing refreshes discovery,
+                    # and Capital One, Schwab and Vanguard write a provider's
+                    # id there over the one their download told the file
+                    # apart by.
+                    saved = self._saved.setdefault(name, {})
+                    for k, v in rec.items():
+                        if v not in (None, "") and k not in saved:
+                            saved[k] = v
                 for key in _keys_of_record(rec):
                     self._by_key.setdefault(key, {})[name] = True
                     self._keys.setdefault(name, set()).add(key)
@@ -692,9 +746,12 @@ class _Known:
             self._files[raw] = _same_file(raw)
         return self._files[raw]
 
-    def record_for(self, row: dict):
+    def record_for(self, row: dict, saved: bool = False):
         """The record of the document this row is, {} when that cannot be
-        told, and None when whose file this is cannot be told either."""
+        told, and None when whose file this is cannot be told either. With
+        `saved`, a record that names a file is given as the stores naming
+        that file wrote it down, progress first, without what a later
+        listing has written into discovery since."""
         key = _record_key(row)
         raw = (row.get("PDF Full Path") or "").strip()
         where = self._file(raw)
@@ -716,7 +773,7 @@ class _Known:
             # purchase and the later one's record is gone.
             if key[0] == "order" and key not in self._keys.get(named[0], ()):
                 return None
-            return self.records[named[0]]
+            return self._view(named[0], saved)
         # An order number names one purchase, whichever of its files a row
         # is. A date and a title name a document only when one document has
         # them and no record of that date and title names a file. A record
@@ -727,7 +784,13 @@ class _Known:
         found = list(self._by_key.get(key, ()))
         if key[0] != "order" and any(n in self._named for n in found):
             return {}
-        return self.records[found[0]] if len(found) == 1 else {}
+        return self._view(found[0], saved) if len(found) == 1 else {}
+
+    def _view(self, name: str, saved: bool) -> dict:
+        """The record under the app's key `name`, as record_for gives it."""
+        if saved and name in self._saved:
+            return self._saved[name]
+        return self.records[name]
 
     def spellings(self, changes, rows, records) -> dict:
         """Each other spelling, among these rows' and records' paths, of a
