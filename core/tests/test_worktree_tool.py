@@ -412,3 +412,21 @@ def test_main_is_red_reads_the_newest_finished_push_run(monkeypatch, tmp_path):
     assert "ended cancelled" in wt.main_is_red(tmp_path)
     answers["code"] = 1
     assert wt.main_is_red(tmp_path) == "", "when GitHub cannot be asked, it says so and lands"
+
+
+def test_land_does_not_push_onto_a_main_that_turned_red_while_its_suites_ran(world, capsys):
+    """Main's Tests run of the push before can end red while a landing waits
+    for the lock and runs its suites. It is asked again before the push."""
+    tree = committed_change(world)
+    before = git(world, "ls-remote", "origin", "refs/heads/main").split()[0]
+    asked = []
+
+    def red(tree):
+        asked.append(1)
+        return "" if len(asked) == 1 else "main's newest finished Tests run ended failure, u"
+
+    os.chdir(tree)
+    assert wt.land(tree, suite_cmd=PASS, ruff_cmd=PASS, red=red) == 1
+    assert len(asked) == 2
+    assert "turned while the suites ran" in capsys.readouterr().out
+    assert git(world, "ls-remote", "origin", "refs/heads/main").split()[0] == before

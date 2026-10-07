@@ -428,6 +428,13 @@ def land(where, suite_cmd=None, ruff_cmd=None, keep=False, full=False, onto_red=
     if git(tree, "rev-parse", "HEAD").stdout.strip() != tested:
         print("the branch moved while the suite ran, so what passed is not what would go out")
         return 1
+    # Asked again, since main's Tests run can end red while the suites here
+    # wait for the lock and run, which takes the better part of an hour.
+    why = "" if onto_red else red(tree)
+    if why:
+        print("not landing on a red main, %s, which it turned while the suites ran. Nothing "
+              "was pushed. Land again once it is mended." % why)
+        return 1
     push = subprocess.run(["git", "-C", str(tree), "push", "origin", "HEAD:main"])
     if push.returncode != 0:
         print("the push was refused. If main moved during the suite, run land again, "
