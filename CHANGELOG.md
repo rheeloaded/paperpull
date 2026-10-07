@@ -126,7 +126,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   PaperPull's own words and writing the failure file. Close whatever
   covers the control in the browser window, then press Resume or run
   again. A press Playwright says was made before it raised is never made
-  again, and the run goes on to wait for what it brought. PG&E's page
+  again, and the run goes on to wait for what it brought. A control the
+  page took away before it was pressed, a list drawn anew say, is not
+  pressed at all, and its document is left for the next run while the run
+  goes on. PG&E's page
   picker no longer presses a page's number a second time when the first
   press moved nothing, and asks for the page by value instead, as it did
   before. PG&E's Diagnose, which walks the history's pages through that

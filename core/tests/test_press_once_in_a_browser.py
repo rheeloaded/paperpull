@@ -197,9 +197,9 @@ def test_a_press_that_landed_and_raised_before_playwright_said_so_is_not_made_ag
     out, so its account stops at performing the press. The press had landed.
     Whether it did cannot be told from that account, so the run stops and
     nothing is pressed again."""
-    page = show(BUTTON % " const t = Date.now(); while (Date.now() - t < 4000) {}")
+    page = show(BUTTON % " const t = Date.now(); while (Date.now() - t < 6000) {}")
     with pytest.raises(pressing.Unsure) as stop:
-        press(page)
+        press(page, timeout=4000)
     assert presses(page) == 1
     assert stop.value.facts["verdict"] == "unsure" and stop.value.after_a_press
 
@@ -352,6 +352,22 @@ def test_a_press_the_control_heard_is_not_made_again(show, unstable):
     assert presses(page) == 1
 
 
+def test_a_press_heard_is_taken_as_made_before_the_control_is_read_again(show, unstable):
+    """The person's press reached the control, and the control's own words
+    changed with it, to words the guard refuses. The press was made, so
+    nothing is pressed and nothing is stopped for what the press itself
+    changed."""
+    page = show(BUTTON % " this.textContent = 'Payment started';")
+
+    def person_presses(_el):
+        box = page.locator("#go").bounding_box()
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    unstable(person_presses)
+    got = press(page)
+    assert got.how == pressing.MADE
+    assert presses(page) == 1
+
+
 def test_a_control_that_could_not_be_listened_to_is_not_pressed_through_the_page(
         show, unstable, monkeypatch):
     """When the page could not be asked to listen before the press, nothing
@@ -436,7 +452,8 @@ def test_a_control_that_left_the_page_as_it_was_pressed_is_not_pressed(show, uns
                                                                         monkeypatch):
     """The page took the control away right after it was read as on top. A
     click through the page still reaches an element the page let go of, and
-    its handler still runs."""
+    its handler still runs. Nothing is pressed, and since nothing is in
+    doubt the run goes on, the document left for another run."""
     page = show(BUTTON % "")
     real = pressing.look
 
@@ -446,10 +463,80 @@ def test_a_control_that_left_the_page_as_it_was_pressed_is_not_pressed(show, uns
         return seen
     monkeypatch.setattr(pressing, "look", taken_away)
     unstable()
-    with pytest.raises(pressing.Changed) as stop:
-        press(page)
+    got = press(page)
+    assert got.how == pressing.GONE
     assert presses(page) == 0
-    assert stop.value.facts["why"] == "it left the page"
+
+
+def test_a_control_the_page_took_away_before_the_press_is_not_pressed(show):
+    """A list drawn anew while the run held a row's control. Playwright says
+    the element is not on the page any more. A click through the page would
+    still run its handler, so it is not made, and the run goes on."""
+    page = show(BUTTON % "")
+    held = page.query_selector("#go")
+    page.evaluate("window.held = document.getElementById('go'); window.held.remove()")
+    got = press(page, el=held)
+    assert got.how == pressing.GONE
+    assert "not attached" in str(got.error)
+    assert presses(page) == 0
+
+
+def test_a_press_the_person_makes_while_the_control_is_checked_is_not_made_again(show,
+                                                                                unstable):
+    """Playwright's press never began. While the app's own check ran, the
+    person pressed the control in the browser. The press through the page
+    reads in its own step whether the control heard a press, and is not
+    made."""
+    page = show(BUTTON % "")
+    unstable()
+
+    def person_presses():
+        box = page.locator("#go").bounding_box()
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        return ""
+    got = press(page, check=person_presses)
+    assert got.how == pressing.MADE
+    assert presses(page) == 1
+
+
+def test_what_came_while_the_control_was_checked_is_taken_for_the_press(show, unstable):
+    """A tab opened while the app's own check ran, as a press that was slow
+    to show can open one. What came is looked at once more right before the
+    press through the page, and it is not made."""
+    page = show(BUTTON % "")
+    unstable()
+
+    def a_tab_opens():
+        page.evaluate("u => { window.open(u); }", page.address + "other")
+        page.wait_for_timeout(300)
+        return ""
+    got = press(page, check=a_tab_opens)
+    assert got.how == pressing.MADE
+    assert presses(page) == 0
+
+
+def test_nothing_on_the_page_names_this_program(show, unstable):
+    """The page's own scripts can read what is put on a control and hear the
+    console, and some keep it, the way error and session-replay tools do.
+    Nothing this leaves there says paperpull, on a press that goes through
+    or on one made through the page."""
+    page = show(BUTTON % "" + """<script>
+      window.said = [];
+      for (const kind of ['log', 'debug', 'info', 'warn', 'error']) {
+        const real = console[kind].bind(console);
+        console[kind] = (...a) => { window.said.push(a.join(' ')); real(...a); };
+      }
+    </script>""")
+    assert press(page).how == pressing.PRESSED
+    unstable()
+    assert press(page).how == pressing.THROUGH_THE_PAGE
+    assert presses(page) == 2
+    left = page.evaluate("""() => {
+      const el = document.getElementById('go');
+      return {said: window.said, names: Object.getOwnPropertyNames(el)};
+    }""")
+    assert not [w for w in left["said"] if "paperpull" in w.lower()], left
+    assert not [n for n in left["names"] if "paperpull" in n.lower()], left
 
 
 def test_the_control_pressed_through_the_page_is_the_one_playwright_was_given(show, unstable):
@@ -501,3 +588,12 @@ def test_playwrights_word_is_read_from_its_account_alone():
     assert word(NOT_MADE.replace("element is not stable", "element is not enabled")) == "off"
     assert word("Target page, context or browser has been closed") == "unsure"
     assert word(None) == "unsure"
+    # A Playwright that words its press some other way presses nothing more.
+    assert word(NOT_MADE + "    - element is visible, enabled and stable\n"
+                "    - scrolling into view if needed\n    - done scrolling\n"
+                "    - dispatching pointer events\n") == "unsure"
+    assert word("ElementHandle.click: Element is not attached to the DOM\nCall log:\n"
+                "  - attempting click action\n"
+                "    - waiting for element to be visible, enabled and stable\n") == "not made"
+    assert word('Locator.click: Timeout 2000ms exceeded.\nCall log:\n'
+                '  - waiting for locator("#nowhere")\n') == "not made"

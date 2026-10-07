@@ -1888,6 +1888,10 @@ def _press_once(page, link, arrived, seconds: float = 6.0, said: Optional[dict] 
             log.info("the link's own click did not land either (%s)",
                      type(outcome.page_error).__name__)
             return None
+        if outcome.how == pressing.GONE:
+            log.info("the link left the page before it was pressed, so nothing was pressed")
+            said["gone"] = True
+            return None
         said["landed"] = True
         said["own_click"] = outcome.how == pressing.THROUGH_THE_PAGE
         said["late_error"] = outcome.how == pressing.MADE
@@ -2099,6 +2103,14 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
             print("  [site] Clicking 'View Bill PDF' link...")
             popup = _press_once(page, link, lambda: bool(
                 captured_download[0] or captured_response_bytes[0]), said=press)
+            if press.get("gone"):
+                # The link left the page before anything pressed it, a list
+                # drawn anew say, so nothing this bill brings can come, and
+                # whatever the page shows now is not this bill's. The bill is
+                # left for another run (pressing.press_once).
+                print("  [site] the link left the page before it was pressed, so nothing was pressed")
+                _trace("the link left the page before it was pressed")
+                return False
 
             blob_url = None
             if popup:

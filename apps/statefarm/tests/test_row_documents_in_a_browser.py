@@ -614,6 +614,8 @@ def test_a_failed_press_is_not_made_through_the_page_once_the_control_changed(pa
                 return {"words": ["Renewal Notice"], "css": "a"}
             if js == pressing._HEARD_JS:
                 return False
+            if js == pressing._CONNECTED_JS:
+                return True
             if js == pressing._WORDS_JS:
                 return ["Renewal Notice"]
             pressed.append(js)

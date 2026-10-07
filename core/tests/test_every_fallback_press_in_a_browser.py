@@ -50,6 +50,11 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</ti
 
 COVER = '<div class="cover" onclick="window.coverPresses++">Chat with us</div>'
 
+# Another statement's control, in a list drawn anew.
+REDRAWN = ("() => { window.laterPresses = 0; const b = document.createElement('button'); "
+           "b.type = 'button'; b.textContent = 'Download PDF'; "
+           "b.onclick = () => { window.laterPresses++; }; document.body.appendChild(b); }")
+
 # Playwright's account of a press it began and never finished, and of one
 # it finished before its time ran out waiting on what the press started.
 BEGUN = ('ElementHandle.click: Timeout 500ms exceeded.\nCall log:\n'
@@ -130,7 +135,7 @@ def capture(browser, tmp_path, monkeypatch):
     context = browser.new_context(viewport={"width": 1000, "height": 600})
     monkeypatch.setattr(pressing, "PRESS_MS", 500)
 
-    def run(app, extra=""):
+    def run(app, extra="", taken_away=False):
         site = site_of(app)
         monkeypatch.setattr(site, "is_safe_url", lambda url: (
             urlsplit(url or "").hostname == "127.0.0.1" and urlsplit(url).port == port))
@@ -144,9 +149,28 @@ def capture(browser, tmp_path, monkeypatch):
         staging = tmp_path / app.name / "downloads"
         staging.mkdir()
         page.result = {}
+        held = page.query_selector("#get")
+        if taken_away:
+            # The list is drawn anew while the run holds the row's control,
+            # and the new list holds a Download PDF of another statement,
+            # drawn once the press is over, the way a redraw finishes.
+            page.evaluate("() => { window.held = document.getElementById('get'); "
+                          "window.held.remove(); }")
+            real = pressing.press_once
+
+            def then_redrawn(*args, **kwargs):
+                try:
+                    return real(*args, **kwargs)
+                finally:
+                    page.evaluate(REDRAWN)
+            monkeypatch.setattr(pressing, "press_once", then_redrawn)
+            # Every wait after the press is a moment, so a capture that went
+            # on would reach its second step quickly.
+            own_wait = page.wait_for_timeout
+            page.wait_for_timeout = lambda ms: own_wait(min(ms, 20))
         try:
-            page.result["saved"] = site._catch_pdf(page, page.query_selector("#get"),
-                                                   "Download statement", out, [], staging)
+            page.result["saved"] = site._catch_pdf(page, held, "Download statement", out, [],
+                                                   staging)
         except pressing.Stop as stop:
             page.result["stop"] = stop
         page.result["out"] = out
@@ -206,3 +230,16 @@ def test_a_press_that_landed_and_raised_done_saves_what_it_brought(capture, app,
     assert page.result["saved"] is True
     assert page.result["out"].read_bytes() == _PDF
     assert page.evaluate("window.presses") == 1, "the control was pressed twice"
+
+
+@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
+def test_a_control_the_page_took_away_is_not_pressed_nor_anything_after_it(capture, app):
+    """Playwright says the control is not on the page any more. Nothing is
+    pressed, the run is not stopped, since nothing is in doubt, and the
+    capture ends there, so a control of the list drawn anew is never taken
+    for this press's second step."""
+    page = capture(app, taken_away=True)
+    assert "stop" not in page.result, page.result
+    assert page.result["saved"] is False
+    assert page.evaluate("window.presses") == 0
+    assert page.evaluate("window.laterPresses") == 0, "a control drawn after the press was pressed"

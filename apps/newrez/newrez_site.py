@@ -1379,6 +1379,7 @@ _CAPTURE_STEPS = {
     "DOM click failed too": "page click failed too",
     "the press reached the page although it raised, so it was not made again":
         "click reached the page and raised",
+    "the control left the page before it was pressed": "control left the page before the click",
     "the tab moved": "the tab moved",
     "after the click": "looked after the click",
     "second step clicked": "second step clicked",
@@ -2207,6 +2208,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
             elif outcome.how == pressing.THROUGH_THE_PAGE:
                 trace.append({"note": "DOM click failed too", "error": str(outcome.page_error)[:160]})
+        if outcome.how == pressing.GONE:
+            # Nothing was pressed, so nothing this document brings can come,
+            # and whatever the page shows now is not this press's. No second
+            # step is looked for, and the document is left for another run.
+            if trace is not None:
+                trace.append({"note": "the control left the page before it was pressed"})
+            return False
         how = wait_for_pdf(FIRST_WAIT_S)
         if how:
             return ended(how, "first wait")

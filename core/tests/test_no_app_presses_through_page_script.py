@@ -25,10 +25,11 @@ press put together from pieces is found too. A script that cannot be
 followed back to what it says fails here, unless it is in READ_AS_DATA
 with the reason it holds no script.
 
-A press in JavaScript is a call of click() on anything, an event of a
-press handed to dispatchEvent or one this cannot read, a form's submit or
-requestSubmit, an onclick handler called straight, an event built by hand
-with an init...Event call, and jQuery's trigger of a press.
+A press in JavaScript is a call of click() on anything, straight or
+through call, apply or bind, an event of a press handed to dispatchEvent or
+one this cannot read, a form's submit or requestSubmit, the handler of a
+press called straight, el.onclick() or el.onmousedown() say, an event built
+by hand with an init...Event call, and jQuery's trigger of a press.
 
 Each press found has to be in REVIEWED, and each entry there still found,
 so the list says what the code does.
@@ -68,7 +69,7 @@ PRESSES = (
     ("click.call()", re.compile(r"\.\s*click\s*\.\s*(?:call|apply|bind)\s*\(")),
     ("submit.call()", re.compile(r"\.\s*(?:submit|requestSubmit)\s*\.\s*(?:call|apply|bind)\s*\(")),
     ("submit()", re.compile(r"\.\s*(?:submit|requestSubmit)\s*\(")),
-    ("onclick()", re.compile(r"\.\s*onclick\s*\(")),
+    ("a handler called", re.compile(r"\.\s*on(?:%s)\s*\(" % "|".join(sorted(PRESS_EVENTS)))),
     ("an event built by hand", re.compile(r"\binit(?:Mouse|Pointer|Touch|Keyboard|UI)?Event\s*\(")),
     ("trigger()", re.compile(r"""\.\s*trigger(?:Handler)?\s*\(\s*(['"`])(?:%s)\1"""
                              % "|".join(sorted(PRESS_EVENTS)))),
@@ -82,26 +83,33 @@ _BUILT = re.compile(r"""\s*new\s+\w+\s*\(\s*(['"`])([\w:-]+)\1""")
 REVIEWED = {
     ("core/paperpull_core/pressing.py", "_PRESS_JS", "click()"):
         "The press through the page that press_once makes at most once, after "
-        "Playwright's own press raised. Only when Playwright says nothing covered "
-        "the control, the press never reached the page and nothing it should bring "
-        "came, the app's own guard passes the control's words, and the control is "
-        "the thing on top in the middle of the window. In the same step it must still "
-        "be on the page with the words it had before Playwright pressed. Anything "
-        "it cannot tell stops the run.",
+        "Playwright's own press raised. Only when every line of Playwright's account "
+        "says it waited for the control or found it not ready, nothing a press brings "
+        "came and the control heard no press, it is still on the page, the app's own "
+        "guard and checks pass its words, and it is the thing on top in the middle of "
+        "the window. In the same step it must still be on the page, have heard no "
+        "press and have the words it had before Playwright pressed. What it cannot "
+        "tell stops the run, and a control the page took away is not pressed at all. "
+        "When this press itself raises it may have been made, and nothing more is "
+        "pressed.",
     ("apps/adp/adp_site.py", "open_tax_statement_check", "click()"):
-        "The Tax Statements card's own View statement, pressed only after ADP has "
-        "refused a tax statement for want of its identity check, so that ADP shows "
-        "its prompt to the person, who answers it in the browser. The statement "
-        "ADP's viewer fetches once the check is passed is taken as it passes. A "
-        "check left unanswered ends the tax statements for the run, so it is not "
-        "pressed again in that run. ADP draws its cards in web components, and this "
-        "walks their open shadow roots to find the button.",
+        "The last button on the page whose whole text is View statement, an "
+        "SDF-BUTTON or a BUTTON found through every open shadow root, which on "
+        "ADP's statements page is the Tax Statements card's own. It is pressed only "
+        "after ADP has refused a tax statement for want of its identity check, so "
+        "that ADP shows its prompt to the person, who answers it in the browser, "
+        "and the statement ADP's viewer fetches once the check is passed is taken "
+        "as it passes. Nothing checks whether it shows or what covers it. A check "
+        "left unanswered ends the tax statements for the run, so it is not pressed "
+        "again in that run.",
     ("apps/mtb/mtb_site.py", "_OPEN_TABLE_CLICK_JS", "click()"):
-        "A collapsed year heading on M&T's statements list, in a frame M&T serves, "
-        "whose press lists that year through a GET. Its words are read and pass "
-        "the guard before each press, and the loop stops the moment the count of "
-        "collapsed years stops falling, so a heading that does not open is pressed "
-        "once. paperpull_core.pressing reads only a page's main frame, so it cannot "
+        "The first collapsed year heading on M&T's statements list, in a frame "
+        "M&T serves, whose press lists that year through a GET. Its heading's words "
+        "are read first and checked against the forbidden words, and the press then "
+        "finds the first collapsed heading again in a call of its own. The loop "
+        "stops the moment the count of collapsed years stops falling, so a heading "
+        "that does not open is pressed once. Nothing checks what covers it, and "
+        "paperpull_core.pressing reads only a page's main frame, so it could not "
         "check a heading in this frame.",
     ("apps/pge/pge_site.py", "_SAVE_BLOB_JS", "click()"):
         "A link this code makes itself, pointing at a PDF the page made, on the "
@@ -589,7 +597,10 @@ def _not_code(mod: Module, node) -> bool:
 
 
 def scripts(mod: Module):
-    """Every script `mod` hands to a page, as (call, expression)."""
+    """Every script `mod` hands to a page, as (call, expression), and None
+    for the expression of a script given some other way than in the call,
+    from a file, from an address or in a spread of keywords, which nothing
+    here can read."""
     for node in ast.walk(mod.tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
@@ -602,17 +613,28 @@ def scripts(mod: Module):
                     given = k.value
             if given is None and position is not None and len(node.args) > position:
                 given = node.args[position]
+            # A spread of keywords or arguments can only carry the script
+            # when it was not given here, and a file or an address always
+            # can, beside one that was.
+            elsewhere = any(k.arg in ("path", "url") for k in node.keywords)
             if given is not None:
                 yield node, given
-        elif name == "send" and node.args and isinstance(node.args[0], ast.Constant) \
-                and node.args[0].value in CDP and len(node.args) > 1:
-            params = node.args[1]
-            key = CDP[node.args[0].value]
+            if given is None or elsewhere:
+                yield node, None
+        elif name == "send" and len(node.args) > 1:
+            method, params = node.args[0], node.args[1]
+            if isinstance(method, ast.Constant) and method.value in CDP:
+                keys = {CDP[method.value]}
+            elif isinstance(method, ast.Constant):
+                continue
+            else:
+                # A method named in a variable may be any of them.
+                keys = set(CDP.values())
             if isinstance(params, ast.Dict):
                 for k, v in zip(params.keys, params.values):
-                    if isinstance(k, ast.Constant) and k.value == key:
+                    if k is None or (isinstance(k, ast.Constant) and k.value in keys):
                         yield node, v
-            else:
+            elif isinstance(method, ast.Constant):
                 yield node, params
 
 
@@ -638,6 +660,12 @@ def census(paths=None):
                     found.setdefault((mod.rel, mod.owner(node), kind), set()).add(node.lineno)
         # Every script handed to a page, followed back.
         for call, given in scripts(mod):
+            if given is None:
+                fn = mod.enclosing(call)
+                where = fn[0].name if fn and not isinstance(fn[0], ast.Lambda) else "<module>"
+                holes.setdefault((mod.rel, where, "a script given another way"), set()).add(
+                    call.lineno)
+                continue
             got = read(mod, given)
             followed |= got.followed
             for rel, where, what, line in got.holes:
@@ -732,7 +760,8 @@ def test_every_kind_of_press_is_found_in_javascript():
         "f => HTMLFormElement.prototype.submit.call(f)": ["submit.call()"],
         "el => el.closest('form').submit()": ["submit()"],
         "f => f.requestSubmit(f.querySelector('button'))": ["submit()"],
-        "el => el.onclick(new Event('x'))": ["onclick()"],
+        "el => el.onclick(new Event('x'))": ["a handler called"],
+        "el => el.onmousedown()": ["a handler called"],
         "el => { const e = document.createEvent('MouseEvents'); e.initMouseEvent('click'); }":
             ["an event built by hand"],
         "el => el.dispatchEvent(new MouseEvent('click', {bubbles: true}))": ["dispatchEvent of click"],
@@ -805,6 +834,14 @@ def presses(page, el, session, how):
     el.evaluate(json.dumps(how))
     el.evaluate(_NOTHING_JS)
     el.evaluate(how.script)
+
+
+def elsewhere(page, el, session, method, kw):
+    page.add_init_script(path="press.js")
+    page.add_script_tag(url="https://example.test/press.js")
+    el.evaluate(**kw)
+    session.send(method, {"expression": _HALF + _OTHER_HALF})
+    el.evaluate("el => el.onmousedown()")
 '''
 
 SAMPLE_CORE = r'''
@@ -816,7 +853,9 @@ def test_the_census_follows_a_script_back_wherever_it_is_built(tmp_path):
     """A module made for the census. Every press it makes is found, under
     the name of the string that holds it, a press put together from parts
     under the function that hands it over, and a script it cannot read is
-    a part it could not follow."""
+    a part it could not follow, a script given from a file, from an address
+    or in a spread of keywords among them. A DevTools call whose method is
+    in a variable is read too."""
     site = tmp_path / "sample_site.py"
     site.write_text(SAMPLE_SITE, encoding="utf-8")
     (tmp_path / "sample_core.py").write_text(SAMPLE_CORE, encoding="utf-8")
@@ -827,10 +866,14 @@ def test_the_census_follows_a_script_back_wherever_it_is_built(tmp_path):
         ("sample_site.py", "_OPEN_JS", "click()"),
         ("sample_site.py", "_catch_pdf", "click()"),
         ("sample_site.py", "_made_js", "submit()"),
+        ("sample_site.py", "elsewhere", "a handler called"),
+        ("sample_site.py", "elsewhere", "click() put together from parts"),
         ("sample_site.py", "presses", "click()"),
         ("sample_site.py", "presses", "click() put together from parts"),
         ("sample_site.py", "presses", "submit()"),
     ], sorted(found)
+    assert found[("sample_site.py", "elsewhere", "click() put together from parts")] == {52}
+    assert holes[("sample_site.py", "elsewhere", "a script given another way")] == {49, 50, 51}
     # The four strings in presses() that each hold a whole press, the
     # template's filling among them, and the three put together, from two
     # names, an f-string and what a replace made.
@@ -838,4 +881,5 @@ def test_the_census_follows_a_script_back_wherever_it_is_built(tmp_path):
     assert found[("sample_site.py", "presses", "click() put together from parts")] == {31, 33, 42}
     assert found[("sample_site.py", "_KINDS", "dispatchEvent of mousedown")] == {11}
     assert ("sample_site.py", "_evaluate") in followed
-    assert sorted(holes) == [("sample_site.py", "presses", "how.script")], holes
+    assert sorted(holes) == [("sample_site.py", "elsewhere", "a script given another way"),
+                             ("sample_site.py", "presses", "how.script")], holes

@@ -1887,7 +1887,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
         if outcome.error is not None:
             log.info("click on %r failed: %s", label, str(outcome.error)[:120])
-        if pressed is not None and outcome.page_error is None:
+        if pressed is not None and outcome.page_error is None and outcome.how != pressing.GONE:
             pressed.append(label)
         if trace is not None:
             if outcome.error is None:
@@ -1902,6 +1902,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
             elif outcome.how == pressing.THROUGH_THE_PAGE:
                 trace.append({"note": "DOM click failed too", "error": str(outcome.page_error)[:160]})
+        if outcome.how == pressing.GONE:
+            # Nothing was pressed, so nothing this document brings can come,
+            # and whatever the page shows now is not this press's. No second
+            # step is looked for, and the document is left for another run.
+            if trace is not None:
+                trace.append({"note": "the control left the page before it was pressed"})
+            return False
         if wait_for_pdf(12):
             return True
         # What did the click change? A menu or a dialog with the real

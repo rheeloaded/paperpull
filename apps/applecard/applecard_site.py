@@ -1355,6 +1355,7 @@ _TRACE_WORDS = frozenset(KINDS) | frozenset({
     "a control's name could not be read",
     "clicked", "click failed", "clicked through the DOM instead", "DOM click failed too",
     "the press reached the page although it raised, so it was not made again",
+    "the control left the page before it was pressed",
     "after the click", "second step clicked", "second step click failed",
     "pressed again", "the second press failed",
     "the page made the document itself", "another apple host",
@@ -1721,6 +1722,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 trace.append({"note": "clicked through the DOM instead", "control": _label_mask(label)})
             elif outcome.how == pressing.THROUGH_THE_PAGE:
                 trace.append({"note": "DOM click failed too", "error": _click_failure(outcome.page_error)})
+        if outcome.how == pressing.GONE:
+            # Nothing was pressed, so nothing this document brings can come,
+            # and whatever the page shows now is not this press's. No second
+            # step is looked for, and the document is left for another run.
+            if trace is not None:
+                trace.append({"note": "the control left the page before it was pressed"})
+            return False
         if wait_for_pdf(PRESS_WAIT_SECONDS):
             return True
         if refused:

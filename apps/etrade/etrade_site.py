@@ -2097,6 +2097,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 trace.append({"note": "clicked through the DOM instead"})
             elif outcome.how == pressing.THROUGH_THE_PAGE:
                 trace.append({"note": "DOM click failed too", "error": type(outcome.page_error).__name__})
+        if outcome.how == pressing.GONE:
+            # Nothing was pressed, so nothing this document brings can come,
+            # and whatever the page shows now is not this press's. No second
+            # step is looked for, and the document is left for another run.
+            if trace is not None:
+                trace.append({"note": "the control left the page before it was pressed"})
+            return False
         if wait_for_pdf(10):
             return True
         if _take_same_tab(page, start_url, out_path, trace):
