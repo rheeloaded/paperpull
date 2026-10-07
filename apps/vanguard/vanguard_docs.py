@@ -887,6 +887,7 @@ class App:
         words = words_for('Vanguard', site)
         page = self.page()
         info = {"timestamp": now_iso()}
+        stopped = None
         try:
             found = site.goto_documents(page)
             info["documents_page_found"] = found
@@ -917,13 +918,14 @@ class App:
             # still says what was seen and why it stopped, in our own words
             # and words from the list.
             info["stopped"] = {"step": stop.step, "reason": stop.reason, "facts": stop.facts}
+            stopped = stop
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
         write_shaped(out, info, words)
-        if info.get("stopped"):
-            print("A press was not made, or brought nothing, so Diagnose stopped there.")
-            print("The file below says which, in words from PaperPull's fixed list.")
+        if stopped is not None:
+            # The stop's own words, as a run says them (pressing.say).
+            pressing.say(stopped)
         print(f"Wrote {out}")
         print("  That is the detailed file, for repairing this provider. Any word")
         print("  in it that is not on PaperPull's fixed list is written as its")

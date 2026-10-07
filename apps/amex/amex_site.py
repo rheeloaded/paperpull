@@ -12,11 +12,13 @@ SAFETY (this is a credit-card account):
   a document action (SAFE_DOC_CONTROL_RE) before it may be clicked. There is no
   code here that submits a form or confirms a dialog.
 
-  Every press goes through paperpull_core.pressing, never forced. A control
-  is brought to the middle of the window and pressed only when it is the
-  thing on top there, and otherwise nothing is pressed and the run stops. A
-  forced press once landed on a chat bubble over the last Download button,
-  and the presses after it on the chat's suggested replies.
+  Every press a run makes goes through paperpull_core.pressing, never
+  forced. A control is brought to the middle of the window and pressed only
+  when it is the thing on top there, and otherwise nothing is pressed and
+  the run stops. A forced press once landed on a chat bubble over the last
+  Download button, and the presses after it on the chat's suggested
+  replies. next_page alone still presses through controls.click_next_page,
+  unforced, and nothing calls it.
 
 Amex is a heavy React SPA behind Akamai. The signed-in browser session (opened
 by login.bat and attached over CDP) carries the auth, so this module only reads
@@ -518,14 +520,17 @@ def _pdf_radio(page):
     that does not. A radio button that does not show is drawn by its label
     alone, the way a styled one can be, and pressing.check checks it
     through that label. A dialog can draw its choices a moment after its
-    Download, so they are looked for again for a few seconds. Inside the
-    file-type dialog itself whenever it is found, so a PDF choice elsewhere
-    on the page is never taken for its own."""
+    Download, so they are looked for again for a few seconds. Only inside the
+    file-type dialog's own element, so a PDF choice elsewhere on the page is
+    never taken for its own, and with no such element there is none."""
     for _ in range(10):
-        scope = _dialog_scope(page)
+        dialog = _file_type_dialog(page)
+        if dialog is None:
+            page.wait_for_timeout(500)
+            continue
         for sel in ("input[type='radio'][value='statement_pdf']",
                     "input[type='radio'][value*='pdf' i]"):
-            loc = scope.locator(sel)
+            loc = dialog.locator(sel)
             found = []
             for i in range(min(_safe_count(loc), 12)):
                 el = loc.nth(i)
@@ -548,6 +553,11 @@ def _choose_pdf(page, thing: str, words) -> None:
     The dialog's Download is never pressed with the PDF not chosen, since
     it would bring whichever kind of file was chosen before."""
     radio = _pdf_radio(page)
+    if radio is None and _file_type_dialog(page) is None:
+        raise pressing.Stop("choose the pdf", "the dialog was not found", [
+            "The file type dialog for %s could not be told from the rest of the page, "
+            "so nothing in it was pressed." % thing,
+            "Nothing more was pressed.", pressing.AGAIN])
     if radio is None:
         raise pressing.Stop("choose the pdf", "the dialog offered no pdf", [
             "The file type dialog for %s opened without its plain PDF choice, "
@@ -661,9 +671,12 @@ def close_file_type_dialog(page, quiet: bool = False) -> None:
 
     The Cancel or Close goes through pressing.click like every press. A
     dialog that is still there afterwards stops the run, since every press
-    after it would land on the dialog. Right after a document is saved this
-    is `quiet`, so a stop waits for the next document, which tries once
-    more before pressing anything else."""
+    after it would land on the dialog. Right after a document is saved and
+    recorded this is `quiet`. A refusal made before anything was pressed
+    then leaves the dialog for the next document, whose own close is the
+    first press of its Cancel. A stop that came once the press was tried,
+    one that may have gone to something else, stops the run there all the
+    same, quiet or not."""
     if not _dialog_open(page):
         return
     try:
@@ -682,12 +695,15 @@ def close_file_type_dialog(page, quiet: bool = False) -> None:
                            what="the Cancel of the file type dialog", words=_words(),
                            step="close the file type dialog")
         elif own is not None:
-            # A key goes to the element that has the focus, so it is given
-            # to one of the dialog's own controls first, never to the page.
-            own.press("Escape", timeout=3000)
+            # A key goes to the element that has the focus. It is sent only
+            # once one of the dialog's own controls holds the focus, never
+            # to whatever else on the page has it.
+            own.focus(timeout=3000)
+            if _safe_count(dialog.locator(":focus")) == 1:
+                own.press("Escape", timeout=3000)
         page.wait_for_timeout(700)
     except pressing.Stop as stop:
-        if not quiet:
+        if not quiet or stop.after_a_press:
             raise
         log.info("the file type dialog was left open (%s)", stop.reason)
         return
@@ -721,7 +737,10 @@ def download_document(page, category: str, date: str, out_path) -> bool:
     followed by more presses, on whatever it had opened.
 
     False only when the row's button is not on the page, and then nothing
-    was pressed for this document."""
+    was pressed for this document, or when the download came and could not
+    be saved. The dialog is left open once the statement is saved, for the
+    app to close once it has recorded the statement as saved, so a stop at
+    the close never loses a saved statement (close_file_type_dialog)."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     words = _words()
@@ -759,10 +778,13 @@ def download_document(page, category: str, date: str, out_path) -> bool:
 
     from paperpull_core.receipt_pdf import save_download
     try:
+        # The press is given as long as the download, since Playwright's
+        # wait on what a press starts runs on the press's own time.
         with page.expect_download(timeout=DOWNLOAD_WAIT_MS) as dl:
             pressing.click(page, confirm, css="%s, %s" % (_DIALOG_CONFIRM_SEL, pressing.BUTTONS),
                            what="the Download of the file type dialog for %s" % thing,
-                           words=words, step="press the dialog download")
+                           words=words, step="press the dialog download",
+                           timeout=DOWNLOAD_WAIT_MS)
         download = dl.value
     except Exception as e:
         log.info("no download came for %s %s (%s)", category, date, _error_kind(e))
@@ -774,9 +796,7 @@ def download_document(page, category: str, date: str, out_path) -> bool:
     except Exception as e:
         log.info("the download for %s %s could not be saved (%s)", category, date,
                  _error_kind(e))
-        close_file_type_dialog(page, quiet=True)
         return False
-    close_file_type_dialog(page, quiet=True)
     return True
 
 

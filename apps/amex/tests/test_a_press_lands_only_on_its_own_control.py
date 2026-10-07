@@ -28,6 +28,7 @@ the list.
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -41,6 +42,7 @@ import amex_docs as app_mod
 import amex_site as site
 from paperpull_core import browser as browser_launcher
 from paperpull_core import pressing, run_reporting, testkit
+from paperpull_core.models import State
 
 AMEX_HOST = "global.americanexpress.test"
 HOSTS = ("--host-resolver-rules=MAP %s 127.0.0.1, MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
@@ -118,8 +120,14 @@ footer { height: %(footer)s; }
 <div id="chat" hidden></div>
 <div id="dispute" role="dialog" aria-label="Dispute a charge" hidden>Tell us about the charge</div>
 <div class="backdrop" id="backdrop" hidden></div>
-<div class="dialog" id="filetype" role="dialog" aria-modal="true" aria-label="Select File Type" hidden>
+<iframe id="late-frame" style="position: fixed; border: 0; z-index: 2000; visibility: hidden;
+        left: 0; top: 0; width: 0; height: 0"
+        srcdoc="<body style=&quot;margin: 0&quot;><button style=&quot;width: 100%%;
+        height: 100%%&quot; onclick=&quot;parent.said('frame-click')&quot;>Dispute a charge</button>
+        </body>"></iframe>
+<div class="dialog" id="filetype" %(dialog_role)s aria-label="Select File Type" hidden>
   <h3>Select File Type</h3>
+  %(first_choice)s
   <div class="choice"><input type="radio" id="ft-pdf" name="ft" value="statement_pdf">
     <label for="ft-pdf">Billing Statement (PDF)</label></div>
   <div class="choice"><input type="radio" id="ft-sr" name="ft" value="accessible_pdf">
@@ -136,12 +144,26 @@ footer { height: %(footer)s; }
 let current = null;
 const dialog = document.getElementById('filetype');
 const backdrop = document.getElementById('backdrop');
+const lateFrame = document.getElementById('late-frame');
 function openDialog(date) {
   current = date;
   for (const r of document.querySelectorAll('input[name=ft]')) r.checked = false;
   backdrop.hidden = false;
   dialog.hidden = false;
+  const cancel = document.getElementById('ft-cancel');
+  if (SCENARIO.frame_over_cancel && cancel) {
+    const r = cancel.getBoundingClientRect();
+    Object.assign(lateFrame.style, {left: (r.left - 10) + 'px', top: (r.top - 6) + 'px',
+                                    width: (r.width + 20) + 'px', height: (r.height + 12) + 'px'});
+  }
 }
+document.addEventListener('mousemove', (e) => {
+  const cancel = document.getElementById('ft-cancel');
+  if (!SCENARIO.frame_over_cancel || !cancel || dialog.hidden) return;
+  const r = cancel.getBoundingClientRect();
+  if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom)
+    lateFrame.style.visibility = 'visible';
+});
 function closeDialog() { dialog.hidden = true; backdrop.hidden = true; }
 for (const b of document.querySelectorAll('[data-testid$="/download-button"]')) {
   b.addEventListener('click', () => {
@@ -216,6 +238,10 @@ HEADING = ('<div class="row">Year End Summary'
 PREFS = ('<div id="prefs"><input type="radio" id="other-pdf" name="pref" value="statement_pdf">'
          '<label for="other-pdf">Paper or PDF</label></div>')
 CANCEL = '<button type="button" id="ft-cancel">Cancel</button>'
+# A choice that cannot take the focus, first in the dialog, so Escape sent
+# to the dialog's first control would go to whatever has the focus instead.
+UNFOCUSABLE = ('<div class="choice"><input type="radio" id="ft-note" name="ft" value="pdf_note"'
+               ' disabled><label for="ft-note">Notes (PDF)</label></div>')
 
 # The page as tall as the window, with the rows at its foot, so nothing can
 # scroll and the last button stays where the bubble is.
@@ -240,6 +266,11 @@ class FakeAmex:
         self.steal_focus = False
         self.prefs = False
         self.heading = False
+        self.frame_over_cancel = False
+        self.bare_dialog = False
+        self.unfocusable_first = False
+        self.slow = {}
+        self.never = []
         self.pressed = []
         self.downloads = []
 
@@ -251,9 +282,12 @@ class FakeAmex:
             "heading": HEADING if self.heading else "",
             "prefs": PREFS if self.prefs else "",
             "cancel": "" if self.escape_only else CANCEL,
+            "dialog_role": "" if self.bare_dialog else 'role="dialog" aria-modal="true"',
+            "first_choice": UNFOCUSABLE if self.unfocusable_first else "",
             "scenario": json.dumps({"no_dialog": self.no_dialog,
                                     "no_download": self.no_download,
-                                    "steal_focus": self.steal_focus})}
+                                    "steal_focus": self.steal_focus,
+                                    "frame_over_cancel": self.frame_over_cancel})}
 
     def count(self, what):
         return sum(1 for p in self.pressed if p == what)
@@ -284,6 +318,10 @@ def _handler(fake):
                 name = path[len("/download/"):]
                 fake.downloads.append(name)
                 date, kind = name.rsplit(".", 1)
+                if date in fake.never:
+                    time.sleep(60)   # never answers while the run waits
+                    return
+                time.sleep(fake.slow.get(date, 0))
                 if kind == "pdf" and date not in fake.not_pdf:
                     body = testkit.text_pdf(["American Express", "Statement", date])
                     content = "application/pdf"
@@ -317,6 +355,8 @@ def amex():
     own, so nothing a test's page sends late reaches the next test."""
     fake = FakeAmex()
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _handler(fake))
+    # An answer held back on purpose is not waited for when the test ends.
+    httpd.block_on_close = False
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     fake.port = httpd.server_address[1]
     yield fake
@@ -645,9 +685,116 @@ def test_diagnose_that_meets_a_covered_control_still_writes_its_files(attached, 
     info = json.loads(detailed.read_text(encoding="utf-8"))
     assert info["stopped"]["reason"] == "something on the page is over the control", info
     assert sorted((tmp_path / "out" / "Diagnostics").glob("survey-*.json")), files_written(tmp_path)
-    assert "Diagnose stopped there" in folded(out)
+    assert ("Something on the page covers the heading of the Year End Summary section, "
+            "so nothing was pressed.") in folded(out), "the stop's own words are said"
     for path in files_written(tmp_path):
         assert CANARY.lower() not in path.read_text(encoding="utf-8", errors="ignore").lower(), path
+
+
+def test_a_frame_that_comes_over_cancel_after_a_saved_statement_stops_the_run(
+        attached, amex, tmp_path, capsys):
+    """The newest statement is saved, and as the dialog's own Cancel is
+    pressed a frame comes over it and takes the press. The run stops there,
+    saying the press may have gone to what came over it, and the statement
+    stays recorded as saved, so the next run neither loses it nor fetches
+    it again. The close made after a save used to let that stop go and the
+    run went on to the next statement."""
+    amex.bubble = OVER_A_CORNER
+    amex.frame_over_cancel = True
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    settle(amex, 4)
+    said = folded(out)
+
+    assert code == 0 and panel_reads(out)["stopped"] == 1, said
+    assert ("Something came over the Cancel of the file type dialog as it was pressed, and "
+            "the press may have gone to it, so nothing more is pressed.") in said, said
+    assert sorted(saved(tmp_path)) == [NEWEST], said
+    assert [r.get("state") for r in progress(tmp_path).values() if r.get("date") == NEWEST] \
+        == [State.COMPLETED.value], progress(tmp_path)
+    assert [p for p in amex.pressed if p.startswith("row/")] == ["row/" + NEWEST], amex.pressed
+    assert amex.count("cancel") == 0 and amex.count("frame-click") == 1, amex.pressed
+
+
+def test_a_download_that_answers_after_ten_seconds_is_saved(attached, amex, tmp_path, capsys,
+                                                            monkeypatch):
+    """The newest statement's download starts ten seconds after its press.
+    Playwright waits on what a press starts for as long as the press is
+    given, and the dialog's Download is given as long as the download, so
+    the statement is saved. Given the eight seconds of any other press, the
+    press stopped the run as one that did not go through, though it had."""
+    monkeypatch.setattr(site, "DOWNLOAD_WAIT_MS", 20000)
+    amex.bubble = OVER_A_CORNER
+    amex.slow = {NEWEST: 10}
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    settle(amex, 4 * len(DATES))
+
+    assert code == 0 and panel_reads(out)["stopped"] == 0, folded(out)
+    assert sorted(saved(tmp_path)) == DATES, folded(out)
+    assert amex.count("confirm/" + NEWEST) == 1, amex.pressed
+
+
+def test_a_download_that_never_answers_stops_saying_the_press_was_made(attached, amex, tmp_path,
+                                                                     capsys):
+    """The newest statement's download never answers. The press was made, so
+    the run stops saying it was pressed and the page did not answer in
+    time, not that the press did not go through, and nothing is pressed
+    again."""
+    amex.bubble = OVER_A_CORNER
+    amex.never = [NEWEST]
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    settle(amex, 3)
+    said = folded(out)
+
+    assert code == 0 and panel_reads(out)["stopped"] == 1, said
+    assert ("The Download of the file type dialog for the statement dated %s was pressed, and "
+            "the page did not answer in time, so nothing more is pressed." % NEWEST) in said, said
+    assert amex.count("confirm/" + NEWEST) == 1, amex.pressed
+    assert [p for p in amex.pressed if p.startswith("row/")] == ["row/" + NEWEST], amex.pressed
+    assert saved(tmp_path) == {}
+
+
+def test_a_dialog_with_no_element_of_its_own_stops_before_anything_in_it_is_pressed(
+        attached, amex, tmp_path, capsys):
+    """The file type dialog has no role, no dialog tag and no aria-modal, so
+    what is its own cannot be told from the rest of the page. Its PDF
+    choice is never looked for on the whole page, nothing in it is pressed,
+    and the run stops."""
+    amex.bubble = OVER_A_CORNER
+    amex.bare_dialog = True
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    settle(amex, 1)
+    said = folded(out)
+
+    assert code == 0 and panel_reads(out)["stopped"] == 1, said
+    assert ("The file type dialog for the statement dated %s could not be told from the rest "
+            "of the page, so nothing in it was pressed." % NEWEST) in said, said
+    assert amex.pressed == ["row/" + NEWEST], amex.pressed
+
+
+def test_escape_is_not_sent_when_the_dialogs_first_control_cannot_take_the_focus(
+        attached, amex, tmp_path, capsys):
+    """The dialog has no Cancel or Close, its first control cannot take the
+    focus, and the chat box takes it. Escape sent to that control would go
+    to the chat box, so nothing is sent, the dialog stays open, and the run
+    stops at the next statement, with the first one saved."""
+    amex.bubble = OVER_A_CORNER
+    amex.escape_only = True
+    amex.steal_focus = True
+    amex.unfocusable_first = True
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    settle(amex, 3)
+    said = folded(out)
+
+    assert code == 0 and panel_reads(out)["stopped"] == 1, said
+    assert ("The file type dialog was open and would not close, so nothing was pressed for "
+            "this document.") in said, said
+    assert sorted(saved(tmp_path)) == [NEWEST], said
+    assert amex.count("chat-escape") == 0 and amex.count("escape") == 0, amex.pressed
 
 
 def test_the_stops_are_stops_and_not_failures():

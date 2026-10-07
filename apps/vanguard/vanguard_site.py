@@ -603,10 +603,13 @@ def download_document(page, account_id: str, charitable: bool,
         # Never forced. The icon is brought to the middle of the window and
         # pressed only when it is the thing on top there, and otherwise
         # nothing is pressed and the run stops (paperpull_core.pressing).
+        # The press is given as long as the download, since Playwright's
+        # wait on what a press starts runs on the press's own time.
         with page.expect_download(timeout=EVENT_WAIT_MS) as dl_info:
             pressing.click(page, icon, css="[title]",
                            what="the download icon of the statement dated %s" % date,
-                           words=_words(), step="press a download icon")
+                           words=_words(), step="press a download icon",
+                           timeout=EVENT_WAIT_MS)
         dl = dl_info.value
         began = True
         try:

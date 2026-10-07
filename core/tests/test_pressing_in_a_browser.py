@@ -296,6 +296,22 @@ def test_a_frame_already_under_the_control_is_not_taken_for_one_that_came_over_i
     assert pressed(page) == ["close"]
 
 
+def test_a_frame_raised_over_a_control_still_there_stops_the_run(show):
+    """A frame sits under the button, and pressing the button raises the
+    frame over it. The frame was at the point before the press, but the
+    button is still there under it, so the frame came over the button and
+    the run stops."""
+    page = show('<iframe id="under" srcdoc="under" style="position: fixed; left: 300px; '
+                'top: 200px; width: 400px; height: 200px; border: 0; z-index: 1"></iframe>'
+                '<button class="go" id="go" style="position: fixed; left: 440px; top: 280px; '
+                'z-index: 5" onclick="said(\'go\'); '
+                'document.getElementById(\'under\').style.zIndex = 9">Download</button>')
+    with pytest.raises(pressing.Covered) as stopped:
+        pressing.click(page, page.locator("#go"), css="button", what="the button", words=WORDS)
+    assert stopped.value.facts["after_the_press"] is True
+    assert pressed(page) == ["go"]
+
+
 def test_two_elements_of_one_box_are_not_told_apart_so_nothing_is_pressed(show):
     """Two buttons drawn in the same place, both matching the selector. The
     box cannot say which is the one Playwright would press, so neither is."""

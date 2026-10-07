@@ -23,12 +23,14 @@ So a press here takes three steps, and stops the run rather than guess.
      control it names.
   3. Playwright presses, unforced, and its own check runs once more at the
      moment of the press. An element of the page that has come over the
-     control by then does not get the press, Playwright says so, and the
-     run stops. Playwright's check cannot see into a frame, so a frame of
-     its own, a chat window drawn in one say, that comes over the control
-     at that moment can still get the press. So the point is read once more
-     right after the press, and a frame on top there that was not at the
-     point before stops the run, with the press perhaps gone to it.
+     control by then does not get the press. Playwright waits and tries
+     again, and the run stops only if it is still there when the press's
+     time runs out. Playwright's check cannot see into a frame, so a frame
+     of its own, a chat window drawn in one say, that comes over the
+     control at that moment can still get the press. So the point is read
+     once more right after the press, and a frame on top there stops the
+     run, with the press perhaps gone to it, unless it was at the point
+     before the press and the control has left the point since.
 
 When something covers the control, the run stops with Covered. When the
 control could not be read, it stops with Unread, and when Playwright could
@@ -84,9 +86,12 @@ class Stop(SystemExit):
     lowercase letters and spaces. `lines` are what the run says, the first
     of them the reason. `facts` go into the failure file as they are, so
     they hold only our own words, counts, yes or no, and words that went
-    through the word list."""
+    through the word list. `after_a_press` is true for a stop that came once
+    a press had been tried, which may have reached the page or something
+    on it, so nothing may take it for a refusal made before any press."""
 
-    def __init__(self, step: str, reason: str, lines: Iterable[str], facts: Optional[dict] = None):
+    def __init__(self, step: str, reason: str, lines: Iterable[str], facts: Optional[dict] = None,
+                 after_a_press: bool = False):
         lines = [str(line) for line in lines]
         # What a stop no main() takes says on its way out. The app's own
         # main() catches it and stops the run with SystemExit(0).
@@ -95,6 +100,7 @@ class Stop(SystemExit):
         self.reason = reason
         self.lines = lines
         self.facts = dict(facts or {})
+        self.after_a_press = bool(after_a_press)
 
 
 class Covered(Stop):
@@ -123,7 +129,14 @@ def no_answer(step: str, reason: str, said: str) -> NoAnswer:
         said,
         "Nothing more was pressed. Pressing it again could do something other "
         "than it did the first time, so the run stops here.",
-        AGAIN])
+        AGAIN], after_a_press=True)
+
+
+def say(stop: Stop) -> None:
+    """A stop's own words on the console, the first line marked."""
+    print()
+    for i, line in enumerate(stop.lines):
+        print(("!! " if i == 0 else "   ") + line)
 
 
 def stop_run(app, stop: Stop) -> None:
@@ -145,9 +158,7 @@ def stop_run(app, stop: Stop) -> None:
         app.progress.save(backup=True)
     except Exception:
         pass
-    print()
-    for i, line in enumerate(stop.lines):
-        print(("!! " if i == 0 else "   ") + line)
+    say(stop)
     stats = getattr(app, "stats", None)
     if not isinstance(stats, dict) or stats.get("mode") not in ("diagnose", "record"):
         if isinstance(stats, dict):
@@ -247,9 +258,11 @@ LOOK_JS = r"""(args) => {
   let h = hit;
   while (h && h !== target) { chain.push(h); h = h.assignedSlot || parentOrHost(h); }
 
-  // Every frame at the point before the press, on top or under it, kept in
-  // this world for the read after the press (AFTER_JS), so a frame that was
-  // already there is told from one that came over the control.
+  // Every frame at the point before the press, on top or under it, and the
+  // control itself, kept in this world for the read after the press
+  // (AFTER_JS), so a frame that was already there and is on top only
+  // because the control has left the point is told from one that came over
+  // the control.
   const remember = () => {
     const frames = new Set(), roots = new Set();
     const walk = (root) => {
@@ -261,7 +274,7 @@ LOOK_JS = r"""(args) => {
       }
     };
     walk(document);
-    globalThis.__paperpullBefore = {x: point.x, y: point.y, frames: frames};
+    globalThis.__paperpullBefore = {x: point.x, y: point.y, frames: frames, control: target};
   };
   if (h === target) { remember(); return Object.assign({state: 'inside'}, where); }
 
@@ -300,8 +313,10 @@ LOOK_JS = r"""(args) => {
 # Runs in this module's own world right after a press, at the point LOOK_JS
 # found, without scrolling. Playwright's own check at the press cannot see
 # into a frame, so a frame that came over the control as it was pressed can
-# have taken the press. A frame on top at the point that was not at the
-# point before the press is said to be covering it, and nothing else is.
+# have taken the press. A frame on top at the point is said to be covering
+# it, unless it was at the point before the press and the control has left
+# the point since, so that nothing at the point now is the control or
+# inside it. A frame raised over a control still there covers it.
 AFTER_JS = r"""(args) => {
   const FRAMES = new Set(['iframe', 'frame', 'object', 'embed']);
   const p = args.point;
@@ -313,7 +328,21 @@ AFTER_JS = r"""(args) => {
   }
   if (!top || !FRAMES.has(top.localName)) return {state: 'clear'};
   const before = globalThis.__paperpullBefore;
-  if (before && before.x === p.x && before.y === p.y && before.frames.has(top))
+  const stillThere = () => {
+    const roots = new Set();
+    const walk = (root) => {
+      if (roots.has(root)) return false;
+      roots.add(root);
+      for (const e of root.elementsFromPoint(p.x, p.y)) {
+        if (e === before.control || before.control.contains(e)) return true;
+        if (e.shadowRoot && walk(e.shadowRoot)) return true;
+      }
+      return false;
+    };
+    return walk(document);
+  };
+  if (before && before.x === p.x && before.y === p.y && before.frames.has(top)
+      && before.control && !stillThere())
     return {state: 'clear'};
   let pinned = false;
   for (let e = top; e; e = e.parentElement || (e.parentNode && e.parentNode.host) || null) {
@@ -452,29 +481,68 @@ def judge(seen: dict, what: str, words, step: str = "press a control") -> None:
         AGAIN], {"why": why})
 
 
-def _press(action, what: str, step: str) -> None:
-    """Playwright's own unforced press. Any error from it means the press
-    may not have been made, so the run stops rather than press again. That
-    includes Playwright's own verdict that something else got the press,
-    which it gives only when it is waited for, so the press is never made
-    with no_wait_after."""
+def _stop_loading(page) -> None:
+    """Stop a load the page started and has not finished, as the browser's
+    own Stop does, over the DevTools protocol. While a tab waits on an
+    answer that never comes, Playwright answers no read of it, and the run
+    could not even write why it stopped. Nothing on the page is pressed."""
+    session = None
+    try:
+        session = page.context.new_cdp_session(page)
+        session.send("Page.stopLoading")
+    except Exception:
+        pass
+    finally:
+        if session is not None:
+            try:
+                session.detach()
+            except Exception:
+                pass
+
+
+def _press(page, action, what: str, step: str) -> None:
+    """Playwright's own unforced press. Any error from it stops the run, and
+    nothing is pressed again. That includes Playwright's own verdict that
+    something else got the press, which it gives only when it is waited
+    for, so the press is never made with no_wait_after.
+
+    The same wait also covers what a press starts, a page loading or a
+    download beginning, so an error can come after the press was made.
+    Playwright's own account of the call says "click action done" once it
+    has pressed, and then the stop says the press was made and the page did
+    not answer in time (NoAnswer), and otherwise that the press did not go
+    through (NotPressed). Only that phrase is looked for, since the account
+    also quotes the page. Either way any load the press started is stopped
+    first, so the page can be read for the failure file, even should a later
+    Playwright word its account some other way."""
     from .failure import error_kind
     try:
         action()
     except Exception as e:
         kind = error_kind(e)
+        _stop_loading(page)
+        if "click action done" in str(e):
+            log.info("the press on %s was made and the page did not answer in time (%s)",
+                     what, kind)
+            raise NoAnswer(step, "the press was made and the page did not answer", [
+                "%s was pressed, and the page did not answer in time, so nothing more "
+                "is pressed." % (what[:1].upper() + what[1:]),
+                AGAIN], {"error": kind, "made": True}, after_a_press=True)
         log.info("the press on %s did not go through (%s)", what, kind)
         raise NotPressed(step, "the press did not go through", [
             "Pressing %s did not go through, so nothing more is pressed." % what,
-            AGAIN], {"error": kind})
+            AGAIN], {"error": kind}, after_a_press=True)
 
 
 def after(page, seen: dict, what: str, words, step: str = "press a control") -> None:
     """Right after a press, the point it was made at is read once more,
-    without scrolling, and a frame on top there that was not at the point
-    before the press stops the run (Covered). Playwright's own check cannot
-    see into a frame, so such a frame can have taken the press. A page whose
-    point cannot be read now, one the press has left say, stops nothing."""
+    without scrolling, and a frame on top there stops the run (Covered),
+    unless it was at the point before the press and the control has left the
+    point since. Playwright's own check cannot see into a frame, so such a
+    frame can have taken the press. When the point cannot be read now,
+    nothing stops. A press that took the tab to a new document is read in
+    that document, where nothing from before the press is kept, so any frame
+    on top there stops the run."""
     point = seen.get("point") if isinstance(seen, dict) else None
     if not isinstance(point, dict):
         return
@@ -488,7 +556,7 @@ def after(page, seen: dict, what: str, words, step: str = "press a control") -> 
     log.info("a frame came over %s as it was pressed, %s", what, lines[1])
     raise Covered(step, "something on the page came over the control", lines,
                   {"over_it": cover["widget"], "fixed": cover["pinned"],
-                   "after_the_press": True})
+                   "after_the_press": True}, after_a_press=True)
 
 
 def click(page, locator, *, css: str, what: str, words, step: str = "press a control",
@@ -501,7 +569,7 @@ def click(page, locator, *, css: str, what: str, words, step: str = "press a con
     is the app's word list, words_for(provider, site)."""
     seen = look(page, locator, css)
     judge(seen, what, words, step)
-    _press(lambda: locator.click(timeout=timeout), what, step)
+    _press(page, lambda: locator.click(timeout=timeout), what, step)
     after(page, seen, what, words, step)
 
 
@@ -568,7 +636,7 @@ def check(page, locator, *, css: str, what: str, words, step: str = "choose an o
         seen = look(page, locator, css, labels=True)
         judge(seen, what, words, step)
         if seen.get("state") == "inside":
-            _press(lambda: locator.check(timeout=timeout), what, step)
+            _press(page, lambda: locator.check(timeout=timeout), what, step)
             after(page, seen, what, words, step)
         else:
             label = _own_label(page, locator, bool(seen.get("wraps")))
@@ -587,4 +655,4 @@ def check(page, locator, *, css: str, what: str, words, step: str = "choose an o
         raise NoAnswer(step, "the option did not take", [
             "%s was pressed and did not read as chosen afterwards, so nothing more "
             "is pressed." % (what[:1].upper() + what[1:]),
-            AGAIN])
+            AGAIN], after_a_press=True)

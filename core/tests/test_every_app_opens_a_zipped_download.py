@@ -591,7 +591,8 @@ CHASE_NAME = "Jan 31, 2026 Tax Form %s Saves document" % ACCOUNT
 AMEX_PAGE = (b"<!doctype html><meta charset='utf-8'>"
              b"<button data-testid='statements/2026-01-31/download-button' "
              b"onclick=\"document.getElementById('dlg').hidden=false\">Download</button>"
-             b"<div id='dlg' hidden><label><input type='radio' name='t' value='statement_pdf'>"
+             b"<div id='dlg' role='dialog' hidden><label>"
+             b"<input type='radio' name='t' value='statement_pdf'>"
              b"PDF</label><a id='x-download-confirm-anchor' href='/zip'>Download</a></div>")
 DOMINION_PAGE = (b"<!doctype html><meta charset='utf-8'><div class='MuiExpansionPanel-root'>"
                  b"<div class='MuiExpansionPanelSummary-root' aria-expanded='true'>"

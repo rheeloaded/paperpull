@@ -48,6 +48,11 @@ ANSWER = {"doc": "pdf"}
 class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         mode = ANSWER["doc"]
+        if self.path.startswith("/doc") and mode == "slow":
+            # The statement, ten seconds after it is asked for.
+            import time
+            time.sleep(10)
+            mode = "pdf"
         if self.path.startswith("/doc") and mode != "none":
             body = PDF if mode in ("pdf", "cut") else b"<html>Please sign in</html>" + b" " * 5000
             self.send_response(200)
@@ -249,6 +254,18 @@ def test_a_download_cut_off_is_not_saved_and_nothing_else_is_taken(browser_page,
     assert got is False
     assert _listing(archive) == []
     assert (staging / theirs).read_bytes() == body
+
+
+def test_a_statement_that_answers_after_ten_seconds_is_saved(browser_page, tmp_path, answer):
+    """Playwright waits on what a press starts for as long as the press is
+    given, and the icon is given as long as the download, so a statement
+    that starts ten seconds after its press is saved. Given the eight
+    seconds of any other press, the press stopped the run though it had
+    been made."""
+    answer["doc"] = "slow"
+    page = browser_page(True)
+    got, archive, staging, out = _download(page, tmp_path)
+    assert got is True and out.read_bytes() == PDF
 
 
 def test_a_press_that_starts_no_download_takes_nothing(browser_page, tmp_path, answer, monkeypatch):
