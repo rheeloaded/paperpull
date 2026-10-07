@@ -719,10 +719,10 @@ def review_names(app, ask, words: ReviewWords = WORDS,
 
     A new name marks a receipt Completed only when its record says it was
     saved, with downloaded_ok. One put aside because its PDF failed its
-    check keeps the state its run gave it, and an older copy of a purchase
-    whose record names another copy leaves that record as it is, so
-    whether a run fetches a purchase again is what it was before the
-    name."""
+    check keeps the state its run gave it. A purchase's record takes a new
+    name only when it names the file renamed, or when there is none yet,
+    so an older copy of a purchase whose record names another copy leaves
+    that record as it is."""
     rows = app.index_csv.read_all()
     # A row somebody already renamed is left out, even one renamed before
     # its confidence was marked High as well (#47).

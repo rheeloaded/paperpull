@@ -143,15 +143,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   run fetched it again, though its copy was still the one that failed,
   deleting the copy no longer asked for it again as Meijer and Walmart say
   it does, and the panel's Status counted it as downloaded. A new name for
-  an older copy, put aside before a later run saved the receipt or put
-  aside a newer copy, also moved the purchase's record onto that copy, so
-  the next run could fetch yet another copy or never fetch the receipt
-  again. A new name now marks a receipt Completed only when it was saved
-  and marked for review for its name alone, and changes a purchase's
-  record only when the record names the file renamed. Whether a run
-  fetches a receipt again is now what it was before the name, in all
-  fourteen receipt apps. In Uber, which names every receipt itself,
-  receipts put aside are the only ones the review offers.
+  an older copy, one put aside before a later run saved the receipt, put
+  aside a newer copy or kept nothing, also moved the purchase's record
+  onto that copy, so the next run could fetch yet another copy or never
+  fetch the receipt again. A new name now changes a purchase's record only
+  when the record names the file renamed, or when there is no record yet,
+  and marks the receipt Completed only when that record says it was saved.
+  This holds in all fourteen receipt apps. In Uber, which names every
+  receipt itself, receipts put aside are the only ones the review offers.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never
