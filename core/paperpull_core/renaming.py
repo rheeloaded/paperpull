@@ -71,6 +71,7 @@ class Result:
     failed: int = 0
     mapping: dict = field(default_factory=dict)   # old path str -> new path str
     names: dict = field(default_factory=dict)     # old name -> new name
+    spellings: dict = field(default_factory=dict) # another spelling -> old path str
 
 
 def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
@@ -293,21 +294,18 @@ def update_progress(progress, result: Result, *,
 
 def _moved(result: Result):
     """Where a recorded path's file went, by the path as the rename wrote
-    it or by any other spelling of the same file. Rename finds a record by
-    its file however its path is written (_same_file), and a record left
-    with its old spelling would no longer name the file it was found by,
-    so the next rename would name the file from its row and the one after
-    from its record again."""
-    by_file = {}
-    for old, new in result.mapping.items():
-        where = _same_file(old)
-        if where:
-            by_file[where] = new
-
+    it or by another spelling run_for found naming the same file before it
+    moved. Rename finds a record by its file however its path is written,
+    and a record left with its old spelling would no longer name the file
+    it was found by, so the next rename would name the file from its row
+    and the one after from its record again. Spellings are compared while
+    the files are there, since after the move two spellings that read alike
+    may be two files, as names differing only in case are in a folder that
+    tells case apart."""
     def find(raw: str) -> Optional[str]:
         if not raw:
             return None
-        return result.mapping.get(raw) or by_file.get(_same_file(raw))
+        return result.mapping.get(raw) or result.mapping.get(result.spellings.get(raw, ""))
     return find
 
 
@@ -377,7 +375,7 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
     # discovers from. Reading the row alone gave back the name the file
     # already had, so a rename reported that everything was already named
     # correctly while the filenames plainly lacked the new part (#26).
-    current = _Known(app)
+    current = _Known(app, primary_rows)
 
     def build_name(row):
         # The whole record, not the row alone, because a pattern can name
@@ -385,6 +383,8 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
         # rename that left them out would name a file differently from a
         # download under the very same pattern.
         record = current.record_for(row)
+        if record is None:
+            return ""          # whose file it is cannot be told, so it keeps its name
         summary = (record.get("summary") or "").strip() or _first(row, _SUMMARY_KEYS)
         return build_pdf_filename(_first(row, _DATE_KEYS), summary,
                                   _first(row, _TYPE_KEYS), part=_part_of(row),
@@ -401,7 +401,12 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
             say("Nothing has been changed. Run this again with --apply to do it.")
         return Result()
 
+    # Every other spelling of a file about to move, in the ledgers and the
+    # run state, read while the file is still there to be compared.
+    spellings = current.spellings(changes, [r for _csv, rows in ledgers for r in rows],
+                                  getattr(app.progress, "data", None) or {})
     result = apply(changes, say=say)
+    result.spellings = spellings
     if not result.renamed:
         return result
     for csv, rows in ledgers:
@@ -451,6 +456,22 @@ def _key_of_record(rec: dict):
     return ("doc", date, str(rec.get("title") or "").strip())
 
 
+def _keys_of_record(rec: dict) -> list:
+    """Every key a ledger row could be matched to this record by. A
+    document kept by an id is a document of its date and title as well,
+    which is all its row carries, so it is counted among the documents of
+    that date and title."""
+    key = _key_of_record(rec)
+    if key is None:
+        return []
+    keys = [key]
+    if key[0] == "order" and not str(rec.get("order_number") or "").strip():
+        date = str(rec.get("date") or rec.get("purchase_date") or "").strip()
+        if date:
+            keys.append(("doc", date, str(rec.get("title") or "").strip()))
+    return keys
+
+
 class _Known:
     """What the app knows about each document today, and which document a
     ledger row is.
@@ -467,18 +488,26 @@ class _Known:
     card's "Monthly Statement" and its date, so two bills with a statement
     of one day were merged here into one record, the later one, and Rename
     offered to give the first bill's file the second bill's account and a
-    " (2)" (the release review of 0.44.0). A row whose file no record names
-    is matched by its order number, or by its date and title when one
-    document alone has them and no record of that date and title names a
-    file. Any other row is named from the row alone, a name that leaves out
-    what a record would have added, and never one that says another
-    document's."""
+    " (2)" (the release review of 0.44.0). A record names a row's file when
+    its path is that very file, and two spellings that read alike are
+    compared as files (_one_file), since a folder that tells case apart can
+    hold two files whose names differ only in case. A row whose file no
+    record names is matched by its order number, or by its date and title
+    when one document alone has them and no record of that date and title
+    names a file. Any other row is named from the row alone, a name that
+    leaves out what a record would have added, and never one that says
+    another document's. A file that rows of the index give to two
+    documents, as when a deleted file's name was taken by a later download,
+    or whose record has another order number than its row, keeps its name,
+    since whose file it is cannot be told."""
 
-    def __init__(self, app):
+    def __init__(self, app, rows=()):
         self.records = {}      # the app's key -> what it knows of that document
-        self._by_file = {}     # a file -> the keys whose records name it
+        self._by_file = {}     # a file -> each key whose records name it -> their spellings
         self._by_key = {}      # a row key -> the keys whose records carry it
+        self._keys = {}        # the app's key -> the row keys its records carry
         self._named = set()    # the keys whose records name a file at all
+        self._rows_at = {}     # a file -> (spelling, row key) of each row naming it
         self._files = {}       # a path as recorded -> _same_file of it
         for store_name in ("progress", "discovery"):
             store = getattr(app, store_name, None)
@@ -490,15 +519,21 @@ class _Known:
                     continue
                 merged = self.records.setdefault(name, {})
                 merged.update({k: v for k, v in rec.items() if v not in (None, "")})
-                where = self._file(rec.get("pdf_path"))
+                raw = str(rec.get("pdf_path") or "").strip()
+                where = self._file(raw)
                 if where:
                     # A dict for its order, so a choice between keys is
                     # made the same way on every run.
-                    self._by_file.setdefault(where, {})[name] = True
+                    self._by_file.setdefault(where, {}).setdefault(name, set()).add(raw)
                     self._named.add(name)
-                key = _key_of_record(rec)
-                if key is not None:
+                for key in _keys_of_record(rec):
                     self._by_key.setdefault(key, {})[name] = True
+                    self._keys.setdefault(name, set()).add(key)
+        for row in rows:
+            raw = (row.get("PDF Full Path") or "").strip()
+            where = self._file(raw)
+            if where:
+                self._rows_at.setdefault(where, []).append((raw, _record_key(row)))
 
     def _file(self, raw) -> str:
         raw = str(raw or "").strip()
@@ -508,12 +543,16 @@ class _Known:
             self._files[raw] = _same_file(raw)
         return self._files[raw]
 
-    def record_for(self, row: dict) -> dict:
-        """The record of the document this row is, or {} when that cannot
-        be told."""
+    def record_for(self, row: dict):
+        """The record of the document this row is, {} when that cannot be
+        told, and None when whose file this is cannot be told either."""
         key = _record_key(row)
-        where = self._file(row.get("PDF Full Path"))
-        named = list(self._by_file.get(where, ())) if where else []
+        raw = (row.get("PDF Full Path") or "").strip()
+        where = self._file(raw)
+        if any(k != key and _one_file(r, raw) for r, k in self._rows_at.get(where, ())):
+            return None
+        named = [n for n, spelled in self._by_file.get(where, {}).items()
+                 if any(_one_file(s, raw) for s in spelled)]
         if named:
             # Several records naming one file is a rename's own view at
             # work. Robinhood and Newrez show it a copy of a record dated
@@ -521,7 +560,14 @@ class _Known:
             # the one the row's own date and title name.
             if len(named) > 1:
                 named = [n for n in named if n in self._by_key.get(key, ())]
-            return self.records[named[0]] if len(named) == 1 else {}
+            if len(named) != 1:
+                return {}
+            # A record with another order number than its row's is another
+            # purchase's, as when a deleted file's name was taken by a later
+            # purchase and the later one's record is gone.
+            if key[0] == "order" and key not in self._keys.get(named[0], ()):
+                return None
+            return self.records[named[0]]
         # An order number names one purchase, whichever of its files a row
         # is. A date and a title name a document only when one document has
         # them and no record of that date and title names a file. A record
@@ -534,11 +580,45 @@ class _Known:
             return {}
         return self.records[found[0]] if len(found) == 1 else {}
 
+    def spellings(self, changes, rows, records) -> dict:
+        """Each other spelling, among these rows' and records' paths, of a
+        file one of the changes is about to move, with the change's own path
+        for it. Read before the move, while the two can still be compared as
+        files."""
+        moving = {}
+        for c in changes:
+            if c.renaming and c.new_path:
+                old = str(c.old_path)
+                moving.setdefault(self._file(old), []).append(old)
+        raws = [(r.get("PDF Full Path") or "").strip() for r in rows]
+        raws += [str(rec.get("pdf_path") or "").strip() for rec in records.values()
+                 if isinstance(rec, dict)]
+        out = {}
+        for raw in raws:
+            for old in moving.get(self._file(raw), ()):
+                if raw != old and _one_file(raw, old):
+                    out[raw] = old
+        return out
+
+
+def _one_file(a: str, b: str) -> bool:
+    """Whether two spellings are one file on disk now. Two that read alike
+    after _same_file are two files where a folder tells case apart, so a
+    spelling that is not the same text has to be shown to be the same file."""
+    if a == b:
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except (OSError, ValueError):
+        return False
+
 
 def _same_file(raw: str) -> str:
-    """A recorded path the way every spelling of its file reads, resolved,
-    and in one case where the file system ignores case, as Windows and
-    macOS do. "" for a path that cannot be read as one."""
+    """A recorded path resolved, and in one case on Windows and macOS,
+    whose file systems ignore case unless a folder or volume is set to tell
+    it apart. Every spelling of one file reads alike this way, and
+    _one_file says whether two that read alike are one file. "" for a path
+    that cannot be read as one."""
     try:
         path = os.path.realpath(raw)
     except (OSError, ValueError):

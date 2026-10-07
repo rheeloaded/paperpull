@@ -458,6 +458,138 @@ def test_a_bill_taken_again_beside_one_that_failed_keeps_its_own_account(tmp_pat
         b"%PDF- again 1111")
 
 
+def test_a_document_kept_by_an_id_counts_among_its_date_and_title(tmp_path, by_account):
+    """The first bill is kept by an id and its record names its second copy.
+    The second bill, of the same date and title, was only listed and has no
+    id. A record kept by an id was not counted among the documents of its
+    date and title, so the first copy was named for the second bill."""
+    (row1, rec1), (row2, rec2) = _bill(tmp_path, "1111"), _bill(tmp_path, "2222")
+    (tmp_path / row2["PDF Filename"]).unlink()
+    again = tmp_path / "2026-09-12 Testco Billing Statement 1111 (2).pdf"
+    again.write_bytes(b"%PDF- again 1111")
+    rec1.update(document_id="DOC1111", pdf_path=str(again), pdf_filename=again.name)
+    row1_again = dict(row1, **{"PDF Filename": again.name, "PDF Full Path": str(again)})
+    app = _App(tmp_path, [row1, row1_again], progress={"id:DOC1111": rec1},
+               discovery={KEY % "2222": _listed(rec2)})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert sorted(p.name for p in tmp_path.glob("*.pdf")) == [
+        "2026-09-12 Testco 1111 Billing Statement 1111.pdf",
+        "2026-09-12 Testco Billing Statement 1111.pdf"]
+
+
+RECEIPT = "2026-09-05 Testco Household Goods Receipt.pdf"
+
+
+def _receipt_rows_and_records(f, *numbers):
+    rows = [{"PDF Filename": f.name, "PDF Full Path": str(f), "Purchase Date": "2026-09-05",
+             "Purchase Summary": "Household Goods", "Order or Receipt Number": n,
+             "Notes": ""} for n in numbers]
+    records = {"In-Store:%s" % n: {"order_number": n, "purchase_date": "2026-09-05",
+                                   "summary": "Household Goods", "pdf_path": str(f),
+                                   "pdf_filename": f.name} for n in numbers}
+    return rows, records
+
+
+def test_a_file_two_purchases_rows_give_it_to_keeps_its_name(tmp_path, monkeypatch):
+    """Purchase 1001's file was deleted after it was imported elsewhere, and
+    purchase 1002 of that day and summary was saved under the name it
+    freed. The index has a row for each naming the one file, and both
+    records name it. The file holds 1002's receipt and was named for 1001.
+    Whose file it is cannot be told from the ledger, so it keeps its name."""
+    monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {number} {summary}")
+    f = tmp_path / RECEIPT
+    f.write_bytes(b"%PDF- the receipt of 1002")
+    rows, records = _receipt_rows_and_records(f, "1001", "1002")
+    renaming.run_for(_App(tmp_path, rows, progress=records), apply_changes=True,
+                     say=lambda *a: None)
+    assert [p.name for p in tmp_path.glob("*.pdf")] == [RECEIPT]
+
+
+def test_a_file_whose_record_has_another_order_number_keeps_its_name(tmp_path, monkeypatch):
+    """The same, after purchase 1001's row was taken out of the index and
+    1002's record lost. The one record naming the file is another
+    purchase's than its row says."""
+    monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {number} {summary}")
+    f = tmp_path / RECEIPT
+    f.write_bytes(b"%PDF- the receipt of 1002")
+    rows, _records = _receipt_rows_and_records(f, "1002")
+    _rows, records = _receipt_rows_and_records(f, "1001")
+    renaming.run_for(_App(tmp_path, rows, progress=records), apply_changes=True,
+                     say=lambda *a: None)
+    assert [p.name for p in tmp_path.glob("*.pdf")] == [RECEIPT]
+
+
+def _bills_whose_names_read_alike(folder, first, second):
+    """Two bills of one day, the first for account 1111 and the second for
+    none, whose files' names read alike, each with its row and record."""
+    rows, records = [], {}
+    for account, summary in (("1111", first), ("", second)):
+        f = folder / ("2026-09-12 Testco %s.pdf" % summary)
+        f.write_bytes(b"%PDF- " + summary.encode())
+        rows.append({"PDF Filename": f.name, "PDF Full Path": str(f),
+                     "Document Date": "2026-09-12", "Document Summary": summary,
+                     "Document Title": TITLE, "Notes": ""})
+        records[KEY % summary] = {"date": "2026-09-12", "title": TITLE, "account": account,
+                                  "summary": summary, "pdf_path": str(f),
+                                  "pdf_filename": f.name}
+    return rows, records
+
+
+def _each_follows_its_own_file(folder, first, second):
+    rows, records = _bills_whose_names_read_alike(folder, first, second)
+    app = _App(folder, rows, progress=records)
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    files = {p.read_bytes(): p.name for p in folder.glob("*.pdf")}
+    assert files == {b"%PDF- " + first.encode(): "2026-09-12 Testco 1111 %s.pdf" % first,
+                     b"%PDF- " + second.encode(): "2026-09-12 Testco %s.pdf" % second}, files
+    for row in rows:
+        assert Path(row["PDF Full Path"]).read_bytes() == b"%PDF- " + row[
+            "Document Summary"].encode(), row
+    for rec in records.values():
+        assert Path(rec["pdf_path"]).read_bytes() == b"%PDF- " + rec["summary"].encode(), rec
+    said = []
+    renaming.run_for(app, apply_changes=True, say=said.append)
+    assert "already named" in " ".join(said), said
+
+
+def _a_folder_that_tells_case_apart(tmp_path):
+    """A folder with Windows' case sensitive attribute, or None where one
+    cannot be made here."""
+    folder = tmp_path / "case"
+    folder.mkdir()
+    if os.name != "nt":
+        return None
+    import subprocess
+    try:
+        done = subprocess.run(["fsutil.exe", "file", "setCaseSensitiveInfo", str(folder),
+                               "enable"], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    (folder / "a").write_bytes(b"a")
+    tells = done.returncode == 0 and not (folder / "A").exists()
+    (folder / "a").unlink()
+    return folder if tells else None
+
+
+def test_two_files_whose_names_differ_in_case_each_keep_their_row(tmp_path, by_account):
+    """In a folder that tells case apart, two names that differ only in case
+    are two files. After the first was renamed, the second's row and record
+    were pointed at the first's new name, since the two spellings read
+    alike, and nothing pointed at the second file any more."""
+    folder = _a_folder_that_tells_case_apart(tmp_path)
+    if folder is None:
+        pytest.skip("no folder that tells case apart can be made here")
+    _each_follows_its_own_file(folder, "ACME Statement", "Acme Statement")
+
+
+def test_two_files_that_read_alike_each_keep_their_row(tmp_path, monkeypatch, by_account):
+    """The same in any folder, with two names made to read alike as two
+    names differing only in case do in such a folder."""
+    real = renaming._same_file
+    monkeypatch.setattr(renaming, "_same_file", lambda raw: real(raw.replace("South", "North")))
+    _each_follows_its_own_file(tmp_path, "North Statement", "South Statement")
+
+
 def test_a_file_two_bills_records_name_is_named_from_its_row(tmp_path, by_account):
     """Both bills' records name the one file. They cannot both be right,
     and the date and title say nothing about which is, so the file is named

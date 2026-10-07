@@ -209,29 +209,32 @@ def body_of(account: str) -> bytes:
 
 # -- two documents of one date and one title -------------------------------------
 
-def two_documents(home: Home, with_ids: bool = False):
-    """Two documents of one date and one title for two accounts, as this
-    app's own Document class records them and told apart the way it tells
-    them apart, by the account or by which of the day's documents of that
-    title it is. With `with_ids`, each also has the provider's own id, as
-    the app records one it is given. None when its key tells them apart by
-    neither, so the app never holds both."""
+TITLE = "Monthly Statement - September 12, 2026"
+
+
+def two_documents(home: Home, with_ids: bool = False, titles=(TITLE, TITLE)):
+    """Two documents of one date for two accounts, of one title unless
+    `titles` says otherwise, as this app's own Document class records them
+    and told apart the way it tells them apart, by the account or by which
+    of the day's documents of that title it is. With `with_ids`, each also
+    has the provider's own id, as the app records one it is given. None
+    when its key tells them apart by neither, so the app never holds both."""
     Document = home.mod.Document
     category = (home.config.get("document_types") or ["Statement"])[0]
     takes = inspect.signature(Document.__init__).parameters
 
-    def make(account, occurrence=None):
-        kw = dict(title="Monthly Statement - September 12, 2026", category=category,
-                  summary="Monthly Statement", date=DATE, account=account)
+    def make(account, title, occurrence=None):
+        kw = dict(title=title, category=category, summary="Monthly Statement", date=DATE,
+                  account=account)
         if with_ids:
             kw["document_id"] = "DOC%s" % account
         if occurrence is not None:
             kw["occurrence"] = occurrence
         return Document(**kw)
 
-    pair = (make(ACCOUNTS[0]), make(ACCOUNTS[1]))
+    pair = (make(ACCOUNTS[0], titles[0]), make(ACCOUNTS[1], titles[1]))
     if pair[0].key == pair[1].key and "occurrence" in takes:
-        pair = (make(ACCOUNTS[0], 0), make(ACCOUNTS[1], 1))
+        pair = (make(ACCOUNTS[0], titles[0], 0), make(ACCOUNTS[1], titles[1], 1))
     return pair if pair[0].key != pair[1].key else None
 
 
@@ -333,6 +336,37 @@ def test_a_pattern_change_renames_each_file_for_its_own_record(home):
     said = home.rename("--apply")
     assert RENAMED_BOTH in said, said[-1500:]
     each_file_is_its_own(home, said, key, values)
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_name_a_deleted_file_freed_is_never_given_its_old_document(home):
+    """A file deleted after it was imported elsewhere frees its name, and a
+    later document of that day and summary is saved under it, since a free
+    name goes to whoever asks. The index then has a row for each, both
+    naming the one file, and both records name it. The file holds the later
+    document, and Rename named it for the deleted one."""
+    app = home.build()
+    if hasattr(home.mod, "Document"):
+        first, later = two_documents(home, titles=(TITLE, "Statement - September 12, 2026"))
+        path = downloaded(app, first)
+        path.unlink()
+        assert downloaded(app, later) == path, "the later document took another name"
+        old = ACCOUNTS[0]
+    else:
+        path = purchased(home, app, "ORD" + ACCOUNTS[0])
+        path.unlink()
+        assert purchased(home, app, "ORD" + ACCOUNTS[1]) == path, (
+            "the later purchase took another name")
+        old = "ORD" + ACCOUNTS[0]
+    saved(app)
+    home.set_pattern(PATTERN)
+    said = home.rename("--apply")
+    files = home.files()
+    assert list(files) == [body_of(ACCOUNTS[1])], said[-1500:]
+    assert old not in files[body_of(ACCOUNTS[1])].name, (
+        "%s named the later document's file %r for the deleted one\n%s"
+        % (home.app.name, files[body_of(ACCOUNTS[1])].name, said[-1500:]))
+    assert home.browser.asked == 0, "Rename reached for a browser"
 
 
 def purchased(home: Home, app, number: str) -> Path:

@@ -61,10 +61,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   cards' statements of one day did the same. Now a file is matched to the
   record that names that very file. Its date and title are asked only
   when no record names the file, and then only when a single document has
-  that date and title and names no file of its own. A file that still
-  cannot be placed is named from its own index row, which can leave out
-  what a record would add but never puts in another document's. The index
-  and the run state follow a renamed file however its path was written.
+  that date and title and names no file of its own. A file that two rows
+  of the index give to two documents keeps its name. That happens when a
+  file deleted after it was imported elsewhere frees its name for a later
+  download, and Rename used to name the later file for the deleted
+  document. A file that still cannot be placed is named from its own index
+  row, which can leave out what a record would add but never puts in
+  another document's. The index and the run state follow a renamed file
+  however its path was written.
   AAFMAA, Ally, Anthem, Capital One, Chase, Discover, FedEx, M&T Bank,
   myPay, Navy Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard
   keep an id from the provider's page in a statement's record when there
