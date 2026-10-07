@@ -17,15 +17,23 @@ progress.json, while the CSVs, written only at the end, still named the old
 files. Closing the console window partway, which ends the process with
 nothing run after it, left every rename of that review out of them.
 
+A receipt whose PDF failed its check is put aside in Manual Review, one of
+the folders the review offers receipts from. A new name for it marked it
+Completed, so no run fetched it again, though its copy was still the one
+that failed.
+
 These run each app's own review_names over an output folder on disk, with
 the typing stood in for. Every name, number and answer is invented.
 """
+import argparse
 import importlib
 import json
 import sys
 from pathlib import Path
 
 import pytest
+
+from paperpull_core.models import ONLINE, Purchase, State
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -110,6 +118,55 @@ def everything_under(folder: Path) -> dict:
     """Every file and folder below `folder`, each file with its bytes."""
     return {p.relative_to(folder).as_posix(): (p.read_bytes() if p.is_file() else None)
             for p in folder.rglob("*")}
+
+
+def runnable(mod, out: Path):
+    """app_in, with what the app's own skip decision reads as well, the
+    smallest PDF it takes and the command line."""
+    inst = app_in(mod, out)
+    inst.config["min_pdf_bytes"] = 2000
+    inst.args = argparse.Namespace(redownload=False)
+    return inst
+
+
+def opening_pdf(folder: Path, name: str) -> Path:
+    """A one page PDF of invented words that opens and is larger than the
+    smallest the app takes. A copy put aside that passes this much counts
+    as done while it is there, as one does that failed only on its words."""
+    from pypdf import PdfWriter
+    folder.mkdir(parents=True, exist_ok=True)
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_metadata({"/Subject": "Invented words " * 200})
+    path = folder / name
+    with open(path, "wb") as fh:
+        writer.write(fh)
+    return path
+
+
+def as_a_run_left_it(inst, number: str, path: Path, saved: bool, confidence: str):
+    """A receipt's records, written by the app's own _record_state and
+    _write_csv_rows in the order its run writes them. A receipt saved
+    passed its check and was marked for review for its name alone. One not
+    saved failed its check and was put aside in Manual Review."""
+    purchase = Purchase(purchase_type=ONLINE, purchase_date="2026-05-14",
+                        order_number=number, summary="Unsure Purchase",
+                        confidence=confidence, pdf_path=str(path), pdf_filename=path.name)
+    inst._record_state(purchase, State.PDF_SAVED)
+    if saved:
+        inst._record_state(purchase, State.PDF_VERIFIED, extra={
+            "pdf_size": path.stat().st_size, "pdf_pages": 1, "downloaded_ok": True})
+        inst._write_csv_rows(purchase, receipt_status="Downloaded",
+                             processing_status="Review Needed")
+        inst._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                           notes="Low classification confidence")
+    else:
+        inst._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                           notes="PDF validation failed, an invented reason")
+        inst._write_csv_rows(purchase, receipt_status="Validation Failed",
+                             processing_status=State.NEEDS_MANUAL_REVIEW.value,
+                             notes_extra="Validation, an invented reason")
+    return purchase
 
 
 def test_every_receipt_app_is_covered():
@@ -366,3 +423,73 @@ def test_a_review_cut_short_has_written_down_what_it_renamed(app, stop, ends, tm
     now = ([garden[0], second.name], [garden[0], second.name])
     assert on_disk == [now], "written down before the second question"
     assert written_down() == now
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+def test_a_new_name_completes_only_a_receipt_that_was_saved(app, tmp_path, monkeypatch):
+    """A receipt whose PDF failed its check is put aside in Manual Review
+    as Needs Manual Review, with no downloaded_ok. The next run fetches it
+    again when its copy fails the check, and when its copy opens it is
+    kept as done until the person deletes it, which is how Meijer and
+    Walmart tell a person to ask for it again. A new name for it marked it
+    Completed, in progress.json and both CSVs, and after that no run
+    fetched it, whatever became of its copy. Uber names every receipt
+    itself, so these are the only receipts its review offers.
+
+    A receipt saved and marked for review for its name alone has
+    downloaded_ok, and Completed is what a new name is for. All three are
+    renamed in one review, a receipt put aside first and last, so nothing
+    one rename decides carries over to the next. Each skip is the app's
+    own _already_done."""
+    mod = load(app)
+    inst = runnable(mod, tmp_path / "out")
+    assert callable(getattr(inst, "_already_done", None)), \
+        "a run decides what to fetch again in _already_done"
+    aside, filed = inst.paths.manual_review, inst.paths.folder_for(ONLINE)
+    failed = as_a_run_left_it(inst, "ORDER-0001",
+                              receipt(aside, "2026-05-14 Failed Receipt.pdf"),
+                              saved=False, confidence="High")
+    saved = as_a_run_left_it(inst, "ORDER-0002",
+                             opening_pdf(filed, "2026-05-14 Saved Receipt.pdf"),
+                             saved=True, confidence="Low")
+    kept = as_a_run_left_it(inst, "ORDER-0003",
+                            opening_pdf(aside, "2026-05-14 Kept Receipt.pdf"),
+                            saved=False, confidence="Low")
+    receipts = (failed, saved, kept)
+    assert [inst._already_done(p) for p in receipts] == [False, True, True], \
+        "as a run leaves them, only the copy that fails its check is fetched again"
+
+    answers = iter(["Garden Hose", "Hardware", "Lamp"])
+    monkeypatch.setattr(mod, "ask", lambda prompt: next(answers))
+    inst.cmd_review_names()
+
+    def renamed(folder, word):
+        found = [p for p in folder.iterdir() if word in p.name]
+        assert len(found) == 1, sorted(p.name for p in folder.iterdir())
+        return found[0]
+    garden, hardware, lamp = renamed(aside, "Garden Hose"), renamed(filed, "Hardware"), \
+        renamed(aside, "Lamp")
+    assert [inst._already_done(p) for p in receipts] == [False, True, True], \
+        "a new name changes nothing a run fetches"
+    progress = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))
+    assert {p.key: (progress[p.key]["state"], progress[p.key].get("downloaded_ok"),
+                    progress[p.key]["summary"], progress[p.key]["pdf_path"])
+            for p in receipts} == {
+        failed.key: ("Needs Manual Review", None, "Garden Hose", str(garden)),
+        saved.key: ("Completed", True, "Hardware", str(hardware)),
+        kept.key: ("Needs Manual Review", None, "Lamp", str(lamp))}
+    statuses = {"ORDER-0001": "Needs Manual Review", "ORDER-0002": "Completed",
+                "ORDER-0003": "Needs Manual Review"}
+    for csv in (inst.index_csv, inst.order_csv):
+        assert {r["Order or Receipt Number"]: r["Processing Status"]
+                for r in csv.read_all()} == statuses, csv.path.name
+
+    asked = []
+    monkeypatch.setattr(mod, "ask", lambda prompt: asked.append(prompt) or "Extra")
+    inst.cmd_review_names()
+    assert asked == [], "a receipt renamed is not offered again"
+
+    hardware.unlink()
+    lamp.unlink()
+    assert [inst._already_done(p) for p in (saved, kept)] == [True, False], \
+        "a receipt saved stays done once its file is deleted, a copy put aside does not"

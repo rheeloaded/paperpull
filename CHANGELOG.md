@@ -136,6 +136,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   whose file is gone is not offered either, where a new name for it used
   to change the CSVs alone. Every receipt app now runs the same Review
   Names, so this holds in all fourteen.
+- **Review Names no longer keeps a receipt that failed its check from being
+  fetched again.** A receipt whose PDF fails its check is put aside in
+  Manual Review, and a later run fetches it again when its copy still fails
+  the check, or once the copy is deleted, which is what Meijer and Walmart
+  tell you to do when they skip one. Review Names offers it, since Manual
+  Review is one of the app's folders, and a new name for it marked it
+  Completed. No run fetched it again after that, though its copy was still
+  the one that failed, and the panel's Status counted it as downloaded. A
+  new name now marks a receipt Completed only when the receipt was saved
+  and marked for review for its name alone. One put aside keeps its state
+  in progress.json and both CSVs, so runs treat it as they would have
+  without the name. This holds in all fourteen receipt apps, and in Uber,
+  which names every receipt itself, receipts put aside are the only ones
+  the review offers.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never
