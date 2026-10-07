@@ -10,6 +10,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds the AppSpec
@@ -240,10 +242,96 @@ def test_a_row_whose_id_is_not_a_plain_id_is_never_turned_into_a_selector():
 
 
 def test_a_pager_button_the_guard_refuses_is_not_pressed():
+    """And the list it would have turned is not taken for a whole one."""
     page = _Page(_three_pages())
     assert site._press_pager(page, site._NEXT_PAGE)
     page.locator = lambda selector: _Button(page, "Pay now", "next")
-    assert not site._press_pager(page, site._NEXT_PAGE)
+    pressed = list(page.pressed)
+    with pytest.raises(site.ListStopped):
+        site._press_pager(page, site._NEXT_PAGE)
+    assert page.pressed == pressed
+
+
+class _Stuck(_Button):
+    """A Next Page press that lands while the rows never change, as on a
+    page too slow to turn."""
+
+    def click(self, timeout=0):
+        self.page.pressed.append(self.label)
+
+
+def _stuck_on_next(page):
+    real = page.locator
+    page.locator = lambda selector: (_Stuck(page, "Next Page", "next") if selector == site._NEXT_PAGE
+                                     else real(selector))
+    return page
+
+
+def test_a_page_of_the_list_that_never_turns_stops_the_listing():
+    """It used to read as the last page, so discovery called the list whole
+    with the rows after it never read."""
+    page = _stuck_on_next(_Page(_three_pages()))
+    with pytest.raises(site.ListStopped) as stopped:
+        site._collect_inbox(page)
+    assert len(stopped.value.docs) == 10
+    assert page.pressed.count("Next Page") == 1
+
+
+class _NativelyDisabled(_Button):
+    """The pager's ends marked the way a plain disabled button marks them."""
+
+    def get_attribute(self, name):
+        if name == "aria-disabled":
+            return None
+        if name == "disabled":
+            last = self.page.index >= len(self.page.pages) - 1
+            first = self.page.index == 0
+            return "" if (self.kind == "next" and last) or (self.kind == "first" and first) else None
+        return super().get_attribute(name)
+
+
+def test_the_last_page_ends_the_list_whichever_way_its_button_is_disabled():
+    page = _Page(_three_pages())
+    page.locator = lambda selector: (_NativelyDisabled(page, "Next Page", "next") if selector == site._NEXT_PAGE
+                                     else _NativelyDisabled(page, "Go to first page", "first"))
+    assert len(site._collect_inbox(page)) == 25
+
+
+def test_a_list_longer_than_the_reader_goes_stops_the_listing(monkeypatch):
+    monkeypatch.setattr(site, "_MAX_LIST_PAGES", 2)
+    with pytest.raises(site.ListStopped) as stopped:
+        site._collect_inbox(_Page(_three_pages()))
+    assert len(stopped.value.docs) == 20
+
+
+def test_a_row_looked_for_on_a_list_that_stopped_is_not_found():
+    page = _stuck_on_next(_Page(_three_pages()))
+    assert site._inbox_control(page, "2024-01-15", "01/15/2024 Statement") == (None, "")
+
+
+def test_what_was_listed_before_a_stop_is_kept_with_tax_info(monkeypatch):
+    statement = site.RawDoc(title="01/15/2024 Statement", date_text="2024-01-15")
+    form = site.RawDoc(title="1098-E Tax Year 2025", date_text="2025-12-31", kind="tax")
+
+    def stopped(page):
+        raise site.ListStopped("the rows stayed the same after its pager button was pressed", [statement])
+    monkeypatch.setattr(site, "goto_documents", lambda page: True)
+    monkeypatch.setattr(site, "_collect_inbox", stopped)
+    monkeypatch.setattr(site, "_collect_tax", lambda page: [form])
+    with pytest.raises(site.ListStopped) as got:
+        site.collect_download_docs(object())
+    assert got.value.docs == [statement, form]
+
+
+def test_an_inbox_notice_about_the_1098e_is_taken_from_its_own_row(monkeypatch, tmp_path):
+    """A notice whose subject names the form used to be sent to Tax Info,
+    where the year's form would have been saved in its place."""
+    def never(page):
+        raise AssertionError("an inbox notice was looked for on Tax Info")
+    monkeypatch.setattr(site, "_goto_tax", never)
+    monkeypatch.setattr(site, "goto_documents", lambda page: False)
+    assert not site.download_bill(object(), None, "2026-01-20", tmp_path / "n.pdf",
+                                  title="Your 2025 1098-E Tax Form Is Available")
 
 
 def test_the_status_is_stated_where_a_reader_will_find_it():
@@ -306,3 +394,72 @@ def test_a_press_that_never_prints_saves_nothing(tmp_path):
     got, out = _print_with("/* nothing happens */", tmp_path)
     assert not got
     assert not out.exists()
+
+
+# ---------------------------------------------------------------------------
+# Which 1098-E is pressed. An invented Tax Info showing one tax year or two,
+# each form laid out for print only once its own button is pressed. The
+# first 1098-E control used to be pressed whatever year was asked for.
+# ---------------------------------------------------------------------------
+
+TAX_YEARS_PAGE = """<!doctype html><html><head><title>Tax Info</title><style>
+.form { display: none }
+@media print { .card, h2 { display: none } .form.chosen { display: block } }
+</style></head><body><main>%(years)s</main><script>
+for (const b of document.querySelectorAll('button')) b.addEventListener('click', () => {
+  document.getElementById('form-' + b.dataset.year).classList.add('chosen');
+  window.print();
+});
+</script></body></html>"""
+
+
+def _year(year, label):
+    return ('<h2>Tax Year %(y)s</h2><div class="card"><button data-year="%(y)s" aria-label="%(l)s">%(l)s'
+            '</button></div><div class="form" id="form-%(y)s"><h1>Form 1098-E Student Loan Interest '
+            'Statement</h1><p>For calendar year %(y)s, invented</p></div>' % {"y": year, "l": label})
+
+
+def _on_tax_info(tmp_path, monkeypatch, years, asked):
+    """What Tax Info lists, and what is saved for the 1098-E of `asked`."""
+    pytest, sync_playwright = _browser()
+    from paperpull_core import receipt_pdf
+    monkeypatch.setattr(site, "_goto_tax", lambda page: True)
+    out = tmp_path / "1098.pdf"
+    with sync_playwright() as p:
+        try:
+            b = p.chromium.launch(args=["--host-resolver-rules=MAP * ~NOTFOUND", "--no-proxy-server"])
+        except Exception:
+            pytest.skip("no browser to drive")
+        page = b.new_page()
+        page.set_content(TAX_YEARS_PAGE % {"years": "".join(_year(y, label) for y, label in years)})
+        listed = [d.title for d in site._collect_tax(page)]
+        got = site.download_bill(page, None, "%s-12-31" % asked, out, title="1098-E Tax Year %s" % asked)
+        b.close()
+    return listed, got, (receipt_pdf.pdf_text(out) if out.exists() else "")
+
+
+def test_the_1098e_of_each_year_is_that_years_own_form(tmp_path, monkeypatch):
+    listed, got, text = _on_tax_info(tmp_path, monkeypatch,
+                                     [("2025", "2025 1098-E Form"), ("2024", "2024 1098-E Form")], "2024")
+    assert listed == ["1098-E Tax Year 2025", "1098-E Tax Year 2024"]
+    assert got and "calendar year 2024" in text and "calendar year 2025" not in text
+
+
+def test_a_year_tax_info_does_not_show_is_never_saved(tmp_path, monkeypatch):
+    """What the review found. The 2025 form was saved as 2024's."""
+    listed, got, text = _on_tax_info(tmp_path, monkeypatch, [("2025", "2025 1098-E Form")], "2024")
+    assert listed == ["1098-E Tax Year 2025"]
+    assert not got and not text
+
+
+def test_a_label_without_a_year_takes_the_one_year_the_page_shows(tmp_path, monkeypatch):
+    listed, got, text = _on_tax_info(tmp_path, monkeypatch, [("2025", "1098-E Form")], "2025")
+    assert listed == ["1098-E Tax Year 2025"]
+    assert got and "calendar year 2025" in text
+
+
+def test_labels_without_a_year_on_a_page_of_two_years_are_never_pressed(tmp_path, monkeypatch):
+    listed, got, text = _on_tax_info(tmp_path, monkeypatch,
+                                     [("2025", "1098-E Form"), ("2024", "1098-E Form")], "2025")
+    assert listed == []
+    assert not got and not text

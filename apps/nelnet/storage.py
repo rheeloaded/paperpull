@@ -59,7 +59,7 @@ SPEC = AppSpec(
         "pilot_count": 5,
         "document_types": ["Statement", "Tax Document", "Other Document"],
     },
-    base_url="https://www.studentaid.gov/",
+    base_url="https://nelnet.studentaid.gov/",
     rules_filename="document_rules.json",
 )
 

@@ -449,7 +449,19 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        try:
+            docs = site.collect_download_docs(page)
+        except site.ListStopped as stop:
+            # What was listed is kept, and the listing stays noted as one
+            # that stopped, so neither this run nor a Resume calls it whole.
+            for r in stop.docs:
+                self._record_rawdoc(r, site.BILLING_URL)
+            self.discovery.save()
+            print(f"\n!! The Inbox & Statements list stopped partway, since {stop}.")
+            print(f"   The {len(stop.docs)} document(s) listed before it stopped are kept,")
+            print("   and this run stops rather than call the list read. Run it again.")
+            self.write_failure("read the inbox list", "the list stopped partway")
+            raise SystemExit(1)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()

@@ -12,7 +12,8 @@ two ways a document arrives:
   * The 1098-E is not a file. Its button calls window.print(), which would
     open the browser's print dialog and wait for a person, so
     `_print_tax_form` holds the page's print back for the press and
-    prints the live page to PDF itself.
+    prints the live page to PDF itself. The button pressed is the one for
+    the form's own tax year (`_tax_forms`), or none.
 
 Nelnet services federal student loans for the Department of Education at
 nelnet.studentaid.gov. The site is an Angular app on a cookie session, so
@@ -26,7 +27,9 @@ from the page and each document is taken by pressing its own control.
     billing statements and eCorrespondence, ten rows a page, paged inside
     the browser. Each row has a "View document in new tab" link and a
     "Download document to your device" button, both carrying the
-    document's id in `data-cy`. Only the download button is pressed.
+    document's id in `data-cy`. Only the download button is pressed. A
+    page of the list that cannot be reached stops the listing
+    (ListStopped) rather than end it.
   * Tax Info (/documents/tax-info) shows the 1098-E.
   * Loan Summary and Payment Schedule are rendered pages with a Print
     button and no file. Forms only links out to studentaid.gov. None of
@@ -63,7 +66,6 @@ from paperpull_core.redact import redact, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import last_day as _last_day
-from paperpull_core.dates import human_date as _human_date
 # re-exported: this app's docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
@@ -477,7 +479,21 @@ _LIST_ROWS_JS = r"""() => {
 _NEXT_PAGE = 'button[aria-label="Next Page"]'
 _FIRST_PAGE = 'button[aria-label="Go to first page"]'
 _MAX_LIST_PAGES = 60
+# How long a pressed pager button has to change the rows. The list is paged
+# inside the browser, so it changes at once when it changes at all.
+_PAGER_WAITS = 34      # times 300 ms, about ten seconds
 _CY_RE = re.compile(r"^document-download-[A-Za-z0-9-]+$")
+
+
+class ListStopped(Exception):
+    """The list has a page this could not reach, so what was read is not all
+    of it. `docs` holds what was read before it stopped. A reader that took
+    such a page for the last one ended the listing with rows still unread,
+    and discovery then called the list whole (paperpull_core.listing)."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 def _read_rows(page) -> list:
@@ -496,24 +512,35 @@ def _subject_of(row: dict) -> str:
 
 
 def _press_pager(page, selector: str) -> bool:
-    """Press one of the list's pager buttons once, when it is there and
-    not disabled. Its own label goes through the guard first. The list is
-    paged inside the browser, so this asks the site for nothing new."""
+    """Press one of the list's pager buttons once. False when there is no
+    page to go to, the button gone or disabled. Its own label goes through
+    the guard first. The list is paged inside the browser, so this asks the
+    site for nothing new.
+
+    A page that is there and could not be reached raises ListStopped, the
+    button refused by the guard, or pressed with the rows still the same
+    after about ten seconds. Both used to read as the last page, so a slow
+    page ended the listing with pages unread."""
     try:
         btn = page.locator(selector).first
-        if btn.count() == 0 or btn.get_attribute("aria-disabled") == "true":
+        if btn.count() == 0 or btn.get_attribute("aria-disabled") == "true" \
+                or btn.get_attribute("disabled") is not None:
             return False
-        if not is_safe_control(btn.get_attribute("aria-label") or ""):
-            return False
-        before = page.evaluate(_LIST_ROWS_JS)
+        label = btn.get_attribute("aria-label") or ""
+    except Exception as e:
+        raise ListStopped("its pager could not be read (%s)" % type(e).__name__)
+    if not is_safe_control(label):
+        raise ListStopped("the guard refused its pager button")
+    before = _read_rows(page)
+    try:
         btn.click(timeout=5000)
-        for _ in range(10):
-            page.wait_for_timeout(300)
-            if page.evaluate(_LIST_ROWS_JS) != before:
-                return True
-        return False
-    except Exception:
-        return False
+    except Exception as e:
+        raise ListStopped("its pager button could not be pressed (%s)" % type(e).__name__)
+    for _ in range(_PAGER_WAITS):
+        page.wait_for_timeout(300)
+        if _read_rows(page) != before:
+            return True
+    raise ListStopped("the rows stayed the same after its pager button was pressed")
 
 
 def _to_first_page(page) -> None:
@@ -527,26 +554,35 @@ def _row_is_tax(subject: str) -> bool:
 
 
 def _collect_inbox(page) -> List[RawDoc]:
+    """Every row of the inbox list, from its first page to its last. Raises
+    ListStopped, holding the rows read so far, when a page could not be
+    reached or the list runs past _MAX_LIST_PAGES."""
     docs: List[RawDoc] = []
     seen = set()
-    _to_first_page(page)
-    for _ in range(_MAX_LIST_PAGES):
-        for r in _read_rows(page):
-            subject = _subject_of(r)
-            iso = parse_date(r.get("date") or "")
-            if not iso or not subject or not is_safe_control(r.get("label") or ""):
-                continue
-            key = (iso, subject.lower())
-            if key in seen:
-                continue
-            seen.add(key)
-            docs.append(RawDoc(title=subject, date_text=iso,
-                               text=f"Nelnet {subject}", row_index=len(docs),
-                               kind=("tax" if _row_is_tax(subject)
-                                     else "statement" if re.search(r"\bstatement\b", subject, re.I)
-                                     else "letter")))
-        if not _press_pager(page, _NEXT_PAGE):
-            break
+    try:
+        _to_first_page(page)
+        for _ in range(_MAX_LIST_PAGES):
+            for r in _read_rows(page):
+                subject = _subject_of(r)
+                iso = parse_date(r.get("date") or "")
+                if not iso or not subject or not is_safe_control(r.get("label") or ""):
+                    continue
+                key = (iso, subject.lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+                docs.append(RawDoc(title=subject, date_text=iso,
+                                   text=f"Nelnet {subject}", row_index=len(docs),
+                                   kind=("tax" if _row_is_tax(subject)
+                                         else "statement" if re.search(r"\bstatement\b", subject, re.I)
+                                         else "letter")))
+            if not _press_pager(page, _NEXT_PAGE):
+                break
+        else:
+            raise ListStopped("it runs past %d pages" % _MAX_LIST_PAGES)
+    except ListStopped as stop:
+        stop.docs = docs
+        raise
     return docs
 
 
@@ -564,38 +600,77 @@ def _goto_tax(page) -> bool:
     return not looks_signed_out(page)
 
 
-def _collect_tax(page) -> List[RawDoc]:
-    """The 1098-E on Tax Info, filed at the end of its tax year."""
-    if not _goto_tax(page):
-        return []
+_YEAR_IN_LABEL_RE = re.compile(r"\b((?:19|20)\d{2})\b")
+# The title a 1098-E from Tax Info is listed under. A document whose title is
+# not exactly this came from the inbox, and is taken from its own row there,
+# whatever its subject says.
+_TAX_TITLE_RE = re.compile(r"^1098-E Tax Year ((?:19|20)\d{2})$")
+
+
+def _tax_forms(page) -> dict:
+    """Each 1098-E control on Tax Info by the tax year it is for, as
+    {year: (control, label)}, the first for each year as the page lists
+    them. A control's year is the one its own label names ("2024 1098-E
+    Form"), which has to be a tax year the page shows, or, when its label
+    names none, the one tax year the page shows. A control whose year
+    cannot be told that way is left out. The control pressed for a year is
+    then always one for that year. It used to be the first 1098-E control
+    whatever year was asked for, so a form for an older year, asked for
+    again, was the page's current form saved under the older year."""
     try:
         body = page.locator("main").inner_text(timeout=8000)
     except Exception:
-        return []
-    m = _TAX_YEAR_RE.search(body)
-    if not m:
-        return []
+        return {}
+    shown = set(_TAX_YEAR_RE.findall(body))
+    if not shown:
+        return {}
+    found = {}
     ctrls = _bill_controls(page)
     for i in range(ctrls.count()):
+        el = ctrls.nth(i)
         try:
-            name = (ctrls.nth(i).get_attribute("aria-label")
-                    or ctrls.nth(i).inner_text(timeout=800) or "").strip()
+            label = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
         except Exception:
             continue
-        if is_safe_control(name) and re.search(r"\b1098\b", name, re.I):
-            year = m.group(1)
-            return [RawDoc(title=f"1098-E Tax Year {year}", date_text=f"{year}-12-31",
-                           text=f"Nelnet 1098-E Tax Year {year}", kind="tax")]
-    return []
+        if not (is_safe_control(label) and re.search(r"\b1098\b", label, re.I)):
+            continue
+        named = set(_YEAR_IN_LABEL_RE.findall(label))
+        if len(named) > 1:
+            continue
+        year = named.pop() if named else (next(iter(shown)) if len(shown) == 1 else None)
+        if year is None or year not in shown:
+            continue
+        found.setdefault(year, (el, label))
+    return found
+
+
+def _collect_tax(page) -> List[RawDoc]:
+    """The 1098-E on Tax Info for each tax year it can be told for, filed at
+    the end of that year."""
+    if not _goto_tax(page):
+        return []
+    return [RawDoc(title=f"1098-E Tax Year {year}", date_text=f"{year}-12-31",
+                   text=f"Nelnet 1098-E Tax Year {year}", kind="tax")
+            for year in sorted(_tax_forms(page), reverse=True)]
 
 
 def collect_download_docs(page) -> List[RawDoc]:
     """Every statement and notice on Inbox & Statements, paged through,
-    and the 1098-E on Tax Info. Nothing is pressed except the pager."""
+    and the 1098-E on Tax Info. Nothing is pressed except the pager. An
+    inbox list that stopped partway still has Tax Info read, and then
+    raises ListStopped holding everything read."""
     docs: List[RawDoc] = []
+    stopped = None
     if goto_documents(page):
-        docs.extend(_collect_inbox(page))
+        try:
+            docs.extend(_collect_inbox(page))
+        except ListStopped as stop:
+            docs.extend(stop.docs)
+            stopped = stop
     docs.extend(_collect_tax(page))
+    if stopped is not None:
+        stopped.docs = docs
+        raise stopped
     return docs
 
 
@@ -643,34 +718,30 @@ def _inbox_control(page, iso: str, title: str):
     """The download button of the inbox row dated `iso` whose subject is
     `title`, found by paging from the first page, or (None, "")."""
     want = re.sub(r"\s+", " ", title or "").strip().lower()
-    _to_first_page(page)
-    for _ in range(_MAX_LIST_PAGES):
-        for r in _read_rows(page):
-            if parse_date(r.get("date") or "") != iso:
-                continue
-            if want and _subject_of(r).lower() != want:
-                continue
-            cy = r.get("cy") or ""
-            if _CY_RE.match(cy):
-                return page.locator('button[data-cy="%s"]' % cy).first, r.get("label") or ""
-        if not _press_pager(page, _NEXT_PAGE):
-            break
+    try:
+        _to_first_page(page)
+        for _ in range(_MAX_LIST_PAGES):
+            for r in _read_rows(page):
+                if parse_date(r.get("date") or "") != iso:
+                    continue
+                if want and _subject_of(r).lower() != want:
+                    continue
+                cy = r.get("cy") or ""
+                if _CY_RE.match(cy):
+                    return page.locator('button[data-cy="%s"]' % cy).first, r.get("label") or ""
+            if not _press_pager(page, _NEXT_PAGE):
+                break
+    except ListStopped as stop:
+        log.info("the inbox list stopped while looking for %s, %s", iso, stop)
     return None, ""
 
 
-def _tax_control(page, iso: str):
+def _tax_control(page, year: str):
+    """The 1098-E control for tax year `year`, or (None, "") when Tax Info
+    shows none that can be told to be for that year."""
     if not _goto_tax(page):
         return None, ""
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
-        except Exception:
-            continue
-        if re.search(r"\b1098\b", name, re.I):
-            return el, name
-    return None, ""
+    return _tax_forms(page).get(year, (None, ""))
 
 
 def _take_same_tab(page, start_url: str, out_path: Path, trace) -> bool:
@@ -863,10 +934,14 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     after every click."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    if _row_is_tax(title) and re.search(r"\b1098\b", title, re.I):
-        el, label = _tax_control(page, iso_date)
+    # Only a form listed from Tax Info is taken there, for its own year. An
+    # inbox notice whose subject names the 1098-E is a letter of its own,
+    # and used to be sent to Tax Info and saved as the year's form.
+    tax = _TAX_TITLE_RE.match((title or "").strip())
+    if tax:
+        el, label = _tax_control(page, tax.group(1))
         if el is None or not is_safe_control(label):
-            log.info("no safe 1098-E control for %s", iso_date)
+            log.info("no safe 1098-E control for tax year %s", tax.group(1))
             return False
         return _print_tax_form(page, el, label, out_path, trace)
     elif goto_documents(page):

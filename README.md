@@ -95,7 +95,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`mtb`](apps/mtb) | M&T Bank | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
 | [`netbenefits`](apps/netbenefits) | Fidelity NetBenefits (workplace 401(k)) | Quarterly or monthly statements, made to order | The site generates statements on request; the app requests each period and renders it, nothing clicked |
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
-| [`nelnet`](apps/nelnet) | Nelnet | Student loan statements, 1098-E, notices | **Contributed by [@tylerverry](https://github.com/tylerverry), 47 documents in one full run.** The inbox list, paged and read from the page, each statement taken from its own Download button; the 1098-E is the Tax Info page printed after its button is pressed |
+| [`nelnet`](apps/nelnet) | Nelnet | Student loan statements, 1098-E, notices | **Contributed by [@tylerverry](https://github.com/tylerverry), 47 documents in one full run.** The inbox list, paged and read from the page, each statement taken from its own Download button. The 1098-E is the Tax Info page printed after its own year's button is pressed |
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every document, three years of statements through the statements page's year picker and the 1098s ([#38](https://github.com/rheeloaded/paperpull/issues/38)) |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked; three years are online |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
@@ -618,7 +618,8 @@ found a bug and diagnosed it to the line.
   health insurer.
 - [@appchamp](https://github.com/appchamp), the PG&E app.
 - [@tylerverry](https://github.com/tylerverry), the Vanguard app, built
-  and run against five accounts back to 2020.
+  and run against five accounts back to 2020, and the Nelnet app, run
+  against a student loan account back to 2019.
 - [@marecabo](https://github.com/marecabo), Amazon's legal invoice PDFs on
   the German store.
 - [@watling777](https://github.com/watling777), the tester behind AT&T,
