@@ -144,10 +144,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   now keeps the end of the id in its name when that is what exactly one
   statement of its date and title would add, and is still named from its
   own row, never for that statement. After a pattern change it carries
-  that ending into its new name, and the new copy follows it with " (2)",
-  as downloads into an empty folder would name them. It happened in the
-  apps that tell a second statement apart by an id, and for PayPal's
-  business statements, told apart by their first day.
+  that ending into its new name, unless the name would have to be cut to
+  fit the folder's limit, where it is told apart by a number as before. It
+  happened in the apps that tell a second statement apart by an id, and
+  for PayPal's business statements, told apart by their first day.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a

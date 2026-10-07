@@ -721,6 +721,7 @@ def run_for(app, apply_changes: bool = False, say=print,
                                   record=record)
 
     rule = told_apart or told_apart_by
+    limit = app.config.get("max_path_length", 240)
 
     def distinguisher(row):
         # What the download told this file apart by when its name was
@@ -729,7 +730,8 @@ def run_for(app, apply_changes: bool = False, say=print,
         # folder would tell it. A receipt's row carries its order number. A
         # document's row carries no id, so the record naming the row's own
         # file is asked, as it was written down when the file was saved,
-        # and a row whose record cannot be told adds nothing. The second of
+        # and a row whose record cannot be told adds only an ending its
+        # name already has (told_apart_in_its_name). The second of
         # two statements of one day and one summary is saved as
         # "... Monthly Statement OC2222.pdf", and asking the row alone
         # offered to rename it to "... (2).pdf" under the very pattern it
@@ -745,11 +747,16 @@ def run_for(app, apply_changes: bool = False, say=print,
         # of a document so, "... OC2222.pdf" beside the "... OC2222 (2).pdf"
         # its record now names, and with nothing added it was offered
         # "... (2).pdf" under the very pattern it was saved by.
-        return current.told_apart_in_its_name(row, rule) if record == {} else ""
+        token = current.told_apart_in_its_name(row, rule) if record == {} else ""
+        # Kept only where it fits whole, a count after it included. Cut to
+        # fit, it no longer read as that ending, so the next Rename moved the
+        # file again, and the one after that moved another into its name.
+        if token and not _fits_whole(row, build_name(row), token, limit):
+            return ""
+        return token
 
     changes = plan(primary_rows, build_name, folders=app.paths.filing_folders(),
-                   distinguisher=distinguisher,
-                   max_path_length=app.config.get("max_path_length", 240))
+                   distinguisher=distinguisher, max_path_length=limit)
     describe(changes, say=say, limit=0 if apply_changes else 20)
 
     if not apply_changes:
@@ -783,6 +790,15 @@ def run_for(app, apply_changes: bool = False, say=print,
             % (result.failed - len(result.stranded)))
     _say_stranded(result, say)
     return result
+
+
+def _fits_whole(row: dict, name: str, token: str, max_path_length: int) -> bool:
+    """Whether `name` with `token` after it and a count after that, as
+    unique_path writes the second file told apart by one ending, fits
+    max_path_length whole in the folder of the row's file."""
+    folder = Path((row.get("PDF Full Path") or "").strip()).parent
+    stem, ext = os.path.splitext(name)
+    return len(str(folder)) + len("/%s %s (99)%s" % (stem, token, ext)) <= max_path_length
 
 
 def _say_stranded(result: Result, say) -> None:
@@ -996,8 +1012,7 @@ class _Known:
         documents. Only what tells it apart is read, and only an ending the
         name already has, so a rename keeps that ending and can add nothing
         the name did not say."""
-        raw = (row.get("PDF Full Path") or "").strip() or (row.get("PDF Filename") or "")
-        stem = Path(raw.strip()).stem
+        stem = Path((row.get("PDF Full Path") or "").strip()).stem
         stem = _NUMBERED.sub("", stem).lower()
         ends = set()
         for name in self._by_key.get(_record_key(row), ()):

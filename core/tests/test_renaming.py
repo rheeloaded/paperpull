@@ -1409,11 +1409,11 @@ def test_an_apps_own_rule_tells_its_files_apart(tmp_path):
 STATEMENT = "2026-09-12 Testco Monthly Statement"
 
 
-def _beside(tmp_path, old_names, current, others=()):
+def _beside(tmp_path, old_names, current, others=(), first=STATEMENT + ".pdf"):
     """The first statement, the files `old_names` no record names, and the
     second statement's copy `current`, which its record names. `others` are
     more records of that day, naming no file."""
-    row1, rec1 = _statement(tmp_path, STATEMENT + ".pdf", b"1111", document_id="DOC1111")
+    row1, rec1 = _statement(tmp_path, first, b"1111", document_id="DOC1111")
     rows = [row1] + [_statement(tmp_path, name, b"old %d" % i)[0]
                      for i, name in enumerate(old_names)]
     row2, rec2 = _statement(tmp_path, current, b"2222", document_id="DOC2222")
@@ -1474,3 +1474,28 @@ def test_an_ending_no_one_document_of_its_date_and_title_gives_is_not_kept(tmp_p
     said = _preview(_App(tmp_path, rows, progress=progress))
     assert "1 file(s) would be renamed" in said, said
     assert "%s -> %s (2).pdf" % (old, STATEMENT) in " ".join(said.split()), said
+
+
+@pytest.mark.parametrize("ends, room", [
+    pytest.param([" OC2222"], 3, id="the ending cut"),
+    pytest.param([" OC2222", " OC2222 (2)"], 7, id="the count after the ending cut"),
+])
+def test_an_old_copy_whose_ending_would_be_cut_to_fit_settles_after_one_rename(tmp_path, ends,
+                                                                                room):
+    """The new name fits the folder's limit, and with the end of the id after
+    it, or with a count after that, it does not. The old copy took the
+    ending cut to "OC", the next Rename no longer read that as its ending
+    and moved it to " (3)", and the one after moved the copy its record
+    names into the name it left (the review of this change)."""
+    storage.set_filename_owner("")
+    plain = STATEMENT.replace(" Testco", "")
+    old = [plain + end + ".pdf" for end in ends]
+    rows, progress = _beside(tmp_path, old, "%s OC2222 (%d).pdf" % (plain, len(old) + 1),
+                             first=plain + ".pdf")
+    app = _App(tmp_path, rows, progress=progress)
+    app.config["max_path_length"] = len(str(tmp_path / (STATEMENT + ".pdf"))) + room
+    bodies = sorted(p.read_bytes() for p in tmp_path.glob("*.pdf"))
+    renamed = [renaming.run_for(app, apply_changes=True, say=lambda *a: None).renamed
+               for _run in range(4)]
+    assert renamed == [len(rows), 0, 0, 0], renamed
+    assert sorted(p.read_bytes() for p in tmp_path.glob("*.pdf")) == bodies
