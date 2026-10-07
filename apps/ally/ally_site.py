@@ -79,6 +79,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from paperpull_core import controls as _controls
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -364,10 +365,36 @@ DOCUMENTS_NAV_RE = re.compile(
 
 
 def on_documents_page(page) -> bool:
-    """Are we looking at a document list? Requires rows the scraper can
-    actually read - a page that merely says "Documents" does not count."""
+    """Are we looking at a document list? Rows the scraper can actually
+    read, or the statements page itself drawn around a year with none. A
+    page that merely says "Documents" does not count."""
     try:
-        return len(collect_documents(page)) > 0
+        if len(collect_documents(page)) > 0:
+            return True
+    except Exception:
+        pass
+    return statements_page_drawn(page)
+
+
+# The statements page's own address, as the live probe found it.
+STATEMENTS_PATH = urlsplit(URLS["documents"]).path
+
+
+def statements_page_drawn(page) -> bool:
+    """The statements page on screen, even with no row in the year it shows.
+
+    The page opens on its newest year, and when that is a year Ally has
+    posted nothing in yet it holds no row, so a test of rows alone took the
+    page for one that never opened and Discover listed none of the years
+    before it. The page is told by its address, which its Tax Forms tab
+    only begins with and so does not match, and by its year picker, so a
+    dropdown of years on another page does not count."""
+    try:
+        url = page.url or ""
+        if not is_safe_url(url) or urlsplit(url).path.rstrip("/") != STATEMENTS_PATH \
+                or looks_signed_out(page):
+            return False
+        return bool(year_select(page)[1])
     except Exception:
         return False
 

@@ -341,7 +341,14 @@ class App:
             self.check_session(page)
             if not site.goto_documents(page):
                 print("Could not open the Documents page. Run --diagnose.")
-                return 0
+                print("If it shows no documents yet, there is nothing to download")
+                print("until the first one is posted.")
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                # The page counts as open only once it shows a document, so an
+                # account with none yet stops here until one is posted, and is
+                # told why.
+                raise SystemExit(0)
         self.check_session(page)
         site.scroll_full_page(page)
         n_new = 0

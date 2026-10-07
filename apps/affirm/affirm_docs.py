@@ -381,7 +381,9 @@ class App:
             if not site.ensure_statements(page):
                 print("Could not reach Affirm. Sign in in the browser (the tab")
                 print("should be on affirm.com), then try again.")
-                return 0
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                raise SystemExit(0)
         self.check_session(page)
 
         # The loans, read through their own API. Two agreements can share a

@@ -408,43 +408,59 @@ class App:
         # that stopped, for Resume (paperpull_core.listing).
         listing.started(self)
         page = self.page()
+        moved = False
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
-                if site.looks_moved_to_capital_one(page):
-                    print("Your Discover account has moved to Capital One.")
-                    print()
-                    print("Capital One acquired Discover and is moving card servicing")
-                    print("onto its own site. Once an account has moved, the Discover")
-                    print("pages this app reads no longer exist, and there is nothing")
-                    print("to fix on your end.")
-                    print()
-                    print("This app cannot download from Capital One yet. Anything you")
-                    print("already downloaded is untouched, and your history is kept, so")
-                    print("nothing is re-fetched if support arrives later.")
-                    return 0
-                print("Could not open your Discover statements. Sign in and open")
-                print("Statements & Documents in the browser, then try again.")
-                return 0
-        self.check_session(page)
+                if not site.looks_moved_to_capital_one(page):
+                    print("Could not open your Discover statements. Sign in and open")
+                    print("Statements & Documents in the browser, then try again.")
+                    print("If it shows no statements yet, there is nothing to download")
+                    print("until the first one is posted.")
+                    # Nothing was listed, so this run stops here rather than finish
+                    # clean, as a Resume after it does (paperpull_core.listing).
+                    # The page counts as open only once it shows a statement, so an
+                    # account with none yet stops here until one is posted, and is
+                    # told why.
+                    raise SystemExit(0)
+                print("Your Discover account has moved to Capital One.")
+                print()
+                print("Capital One acquired Discover and is moving card servicing")
+                print("onto its own site. Once an account has moved, the Discover")
+                print("pages this app reads no longer exist, and there is nothing")
+                print("to fix on your end.")
+                print()
+                print("This app cannot download from Capital One yet. Anything you")
+                print("already downloaded is untouched, and your history is kept, so")
+                print("nothing is re-fetched if support arrives later.")
+                # A moved account has no Discover pages left to list, which no
+                # sign-in and no later run changes. So its list is the whole of
+                # it with nothing in it, noted as read whole below, and neither
+                # this run nor a Resume after it stops for want of the list.
+                moved = True
 
-        # Discover's document list is read from the page until a probe confirms
-        # whether it has a JSON API behind it (run --diagnose: probe_api
-        # reports any it sees). Reading a provider's own API proved far more
-        # reliable than scraping on Ally and USAA, so that is the intended
-        # destination - but nothing here guesses at an endpoint that has not
-        # been observed.
-        # Read Discover's own document API by driving the page (one card at a
-        # time, every year the picker offers) and capturing what it fetches.
-        # Row scraping stays as the fallback if that ever answers nothing.
-        raw = site.discovercard_collect_via_api(page)
-        if raw:
-            log.info("Discover: %d document(s) read from the API", len(raw))
+        if moved:
+            raw = []
         else:
-            log.info("Discover: API returned nothing - falling back to scraping")
-            print("  Discover's document API returned nothing; reading the page instead.")
-            raw = site.discovercard_collect(page)
-            log.info("Discover: collected %d document rows", len(raw))
+            self.check_session(page)
+
+            # Discover's document list is read from the page until a probe confirms
+            # whether it has a JSON API behind it (run --diagnose: probe_api
+            # reports any it sees). Reading a provider's own API proved far more
+            # reliable than scraping on Ally and USAA, so that is the intended
+            # destination - but nothing here guesses at an endpoint that has not
+            # been observed.
+            # Read Discover's own document API by driving the page (one card at a
+            # time, every year the picker offers) and capturing what it fetches.
+            # Row scraping stays as the fallback if that ever answers nothing.
+            raw = site.discovercard_collect_via_api(page)
+            if raw:
+                log.info("Discover: %d document(s) read from the API", len(raw))
+            else:
+                log.info("Discover: API returned nothing - falling back to scraping")
+                print("  Discover's document API returned nothing; reading the page instead.")
+                raw = site.discovercard_collect(page)
+                log.info("Discover: collected %d document rows", len(raw))
         n_new = 0
         for d in raw:
             n_new += self._record_discover_doc(d)

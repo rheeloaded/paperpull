@@ -372,7 +372,9 @@ class App:
             if not site.ensure_statements(page):
                 print("Could not reach My Account. Sign in in the browser (the tab")
                 print("should be on api.rk.tsp.gov), then try again.")
-                return 0
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                raise SystemExit(0)
         self.check_session(page)
 
         # The mailbox, read through its own API. Two messages can share a

@@ -328,7 +328,9 @@ class App:
             if not site.goto_documents(page):
                 print("Could not open the PG&E bill history. In the browser go to")
                 print("Billing and payments, then try again.")
-                return 0
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                raise SystemExit(0)
         self.check_session(page)
         raw_docs = site.collect_download_docs(page)
         log.info("PG&E: %d bill row(s) across the history", len(raw_docs))

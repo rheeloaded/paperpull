@@ -415,7 +415,9 @@ class App:
             if not site.ensure_statements(page):
                 print("Could not open your Vanguard statements page. Sign in in the")
                 print("browser, then try again.")
-                return 0
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                raise SystemExit(0)
         self.check_session(page)
 
 

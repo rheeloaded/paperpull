@@ -420,7 +420,9 @@ class App:
             if not site.ensure_statements(page):
                 print("Could not open your Ally statements. Sign in and open")
                 print("Statements & Documents in the browser, then try again.")
-                return 0
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                raise SystemExit(0)
         self.check_session(page)
 
         # Ally drives the statements page from its own JSON API, which returns

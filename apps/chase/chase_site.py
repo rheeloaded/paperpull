@@ -343,10 +343,62 @@ DOCUMENTS_NAV_RE = re.compile(
 
 
 def on_documents_page(page) -> bool:
-    """Are we looking at a document list? Requires rows the scraper can
-    actually read - a page that merely says "Documents" does not count."""
+    """Are we looking at the statements list? Rows the scraper can
+    actually read, or the document center itself drawn around a view with
+    none, and never the center's tax documents or year-end summaries. A
+    page that merely says "Documents" does not count."""
     try:
-        return len(collect_documents(page)) > 0
+        if on_another_documents_tab(page.url or ""):
+            return False
+        if len(collect_documents(page)) > 0:
+            return True
+    except Exception:
+        pass
+    return document_center_drawn(page)
+
+
+# The document center's route, as the live probe found it
+# (#/dashboard/documents/myDocs/index).
+DOCUMENT_CENTER_ROUTE = "#/dashboard/documents/"
+# The center's tabs, named in its address by the same probe, of which
+# this app collects STATEMENTS alone.
+DOCUMENT_TYPE_RE = re.compile(r"documentType=([A-Za-z_]+)", re.I)
+
+
+def on_another_documents_tab(url: str) -> bool:
+    """Whether the address names a tab of the document center other than
+    the statements, its tax documents or year-end summaries. Its rows are
+    not statements, and a statement looked for there may meet a summary of
+    the same date and card, so it never counts as the statements list,
+    whether it shows a row or none."""
+    found = DOCUMENT_TYPE_RE.search(url or "")
+    return bool(found) and found.group(1).upper() != "STATEMENTS"
+
+
+def document_center_drawn(page) -> bool:
+    """The document center on screen, even with no row in its view.
+
+    The center opens with one card's accordion expanded on the current
+    year. From New Year until that card's first statement of the year, and
+    all year for a card with no statement in it, that view can hold no row,
+    and a test of rows alone took the center for a page that never opened,
+    so Discover listed nothing and a download gave up. The center is told
+    by its route, its "View:" year picker showing a year, and a card
+    accordion, the things the probe found and the collector works through.
+    The route alone is not enough, since the dashboard ignores a route
+    pasted into its address and may keep it there while it draws its own
+    front page, and a page that merely says Documents, or has a picker of
+    something other than years, does not count."""
+    try:
+        url = page.url or ""
+        if not is_safe_url(url) or DOCUMENT_CENTER_ROUTE not in url or looks_signed_out(page) \
+                or on_another_documents_tab(url):
+            return False
+        pickers = page.locator(YEAR_PICKER_SEL)
+        if not any(re.fullmatch(r"20\d{2}", (pickers.nth(i).get_attribute("value") or "").strip())
+                   for i in range(min(pickers.count(), 5))):
+            return False
+        return bool(card_accordions(page))
     except Exception:
         return False
 

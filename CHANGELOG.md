@@ -7,6 +7,40 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A run whose documents page would not open no longer finishes clean.**
+  In twenty document apps, when Discover could not open the documents
+  page, even after checking the session, it said so and returned. Pilot
+  then said there was nothing in scope to pilot, or worked through
+  documents an earlier run had listed, Run All did the same, and the panel
+  called the run finished although nothing had been listed, while a
+  Resume after it said the list had not been read. Now the run stops
+  there, as a run that stopped. Anthem's Run All still downloads the
+  member documents, ID cards and letters, each from a list of its own,
+  and stops after them. Discover and Wealthfront count the page as open
+  only once it lists something, and AAFMAA and USAA once it shows more
+  than one row, so an account with nothing posted yet stops each run until
+  its documents come, and they now say so. A Discover account that has
+  moved to Capital One still ends its listing with the notice that there
+  is nothing to fix, and a Resume after it no longer says the list was not
+  read. The twenty are AAFMAA, Affirm, Ally, Anthem, Capital One, Charles
+  Schwab, Chase, DFAS myPay, Discover, Fairfax Water, Fidelity, M&T Bank,
+  Navy Federal, NetBenefits, PG&E, TSP, U.S. Bank, USAA, Vanguard and
+  Wealthfront.
+- **Chase and Ally find their statements page open on a year with no
+  statement in it yet.** The page opens on the current year, Chase's with
+  one card's statements showing, and the check of the page counted the
+  rows on screen. So from New Year until that year's first statement, and
+  on Chase all year when the card shown had no statement in it, the page
+  read as one that never opened. Discover listed none of the years before
+  it, and a download gave up. The page is now known by its own address
+  and its year picker, and on Chase by a card as well, whatever year it
+  shows. A Chase tab left on the tax documents or year-end summaries no
+  longer passes for the statements, which it did whenever it showed a
+  row.
+
 ## [0.44.0] - 2026-10-07
 
 American Express and Vanguard press a control only when nothing covers

@@ -162,6 +162,9 @@ class App:
         self._context = None
         self._work_page = None
         self._cdp_mode = False
+        # Set when the EOB list would not open, so a Run All that goes on to
+        # the other lists still stops at its end (_stop_if_eobs_unread).
+        self._eobs_unread = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -386,7 +389,7 @@ class App:
         return 0
 
 
-    def cmd_discover(self, quiet: bool = False) -> int:
+    def cmd_discover(self, quiet: bool = False, finish: bool = True) -> int:
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, for Resume (paperpull_core.listing).
         listing.started(self)
@@ -396,6 +399,14 @@ class App:
             if not site.ensure_statements(page):
                 print("Could not open your Anthem statements. Sign in and open")
                 print("Statements & Documents in the browser, then try again.")
+                # No EOB was listed, so the run must not read as finished.
+                # Discover and Pilot stop here. Run All reads the member
+                # documents, ID cards and letters after the EOBs, each from a
+                # list of its own, so it asks for no stop here (finish=False)
+                # and stops at its end instead.
+                self._eobs_unread = True
+                if finish:
+                    self._stop_if_eobs_unread()
                 return 0
         self.check_session(page)
 
@@ -692,17 +703,29 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover()
+        # An EOB list that would not open stops a run that reads the other
+        # lists at its end, after those, and any other run at once.
+        others = mode_name == "all" and not self.args.dry_run
+        self.cmd_discover(finish=not others)
         docs = self._select()
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
         # "Fetch everything" also pulls the other document surfaces - member
         # documents across all coverage years, the ID cards, and the Letters -
         # each its own read-only member API.
-        if mode_name == "all" and not self.args.dry_run:
+        if others:
             self.cmd_documents()
             self.cmd_id_cards()
             self.cmd_letters()
+        self._stop_if_eobs_unread()
+
+    def _stop_if_eobs_unread(self) -> None:
+        """A run whose EOB list would not open did not finish, and must not
+        read as one that did. It leaves the way a run leaves on a sign-out,
+        which the panel reports as stopped."""
+        if self._eobs_unread:
+            print("\nYour EOBs were not listed, so this run stops here rather than finish.")
+            raise SystemExit(0)
 
     def _session_expired(self) -> None:
         print("  !! Anthem session expired. Sign in again, then run resume.bat.")

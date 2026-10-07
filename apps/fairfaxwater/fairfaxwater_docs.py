@@ -381,7 +381,9 @@ class App:
             if not site.ensure_statements(page):
                 print("Could not reach the customer portal. Sign in in the browser (the tab")
                 print("should be on fwcustomer.org), then try again.")
-                return 0
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                raise SystemExit(0)
         self.check_session(page)
 
         # The bill list, read from the portal's own page. Two bills can

@@ -378,7 +378,9 @@ class App:
             if not site.ensure_statements(page):
                 print("Could not reach NetBenefits. Sign in in the browser (the tab")
                 print("should be on api.rk.fidelity.com), then try again.")
-                return 0
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                raise SystemExit(0)
         self.check_session(page)
 
         # The statement periods, worked out from the plan's dates. Two can
