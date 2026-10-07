@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from paperpull_core import pressing
 from paperpull_core.run_reporting import report_run_result, PREFIX
 from paperpull_core.storage import atomic_write_text, now_iso
 
@@ -54,7 +55,9 @@ def test_interrupt_saves_progress_and_returns_nonzero(entry):
     args = SimpleNamespace(start_date=None, end_date=None, open_browser=False,
                            login=False, discover=False, pilot=False, all=True,
                            pilot_online=False, pilot_instore=False, online=False, instore=False)
-    scope = {"ONLINE": "Online", "IN_STORE": "In-Store", "App": FakeApp, "build_parser": lambda: SimpleNamespace(parse_args=lambda argv: args)}
+    # pressing is a name an app's main reads when it catches a stop at a press.
+    scope = {"ONLINE": "Online", "IN_STORE": "In-Store", "App": FakeApp, "pressing": pressing,
+             "build_parser": lambda: SimpleNamespace(parse_args=lambda argv: args)}
     exec(compile(ast.Module(body=[main], type_ignores=[]), str(entry), "exec"), scope)
     assert scope["main"]([]) == 130
     assert saved == ["progress", "discovery", "summary", "closed"]
@@ -119,7 +122,7 @@ def test_each_provider_reports_a_quiet_stop_as_stopped(entry, capsys):
     args = SimpleNamespace(start_date=None, end_date=None, open_browser=False,
                            login=False, discover=False, pilot=False, all=True,
                            pilot_online=False, pilot_instore=False, online=False, instore=False)
-    scope = {"ONLINE": "Online", "IN_STORE": "In-Store", "App": FakeApp,
+    scope = {"ONLINE": "Online", "IN_STORE": "In-Store", "App": FakeApp, "pressing": pressing,
              "build_parser": lambda: SimpleNamespace(parse_args=lambda argv: args)}
     exec(compile(ast.Module(body=[main], type_ignores=[]), str(entry), "exec"), scope)
     with pytest.raises(SystemExit):
