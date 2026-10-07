@@ -60,7 +60,7 @@ def a_run(tmp_path, include_invoices=True):
     path = tmp_path / "config.json"
     path.write_text(json.dumps(cfg), encoding="utf-8")
     app = target_receipts.App(target_receipts.build_parser().parse_args(["--config", str(path)]))
-    app.stats["started"] = "2026-10-07T12:00:%02d" % next(RUNS)
+    app.stats["started"] = "2031-04-02T12:00:%02d" % next(RUNS)
     return app
 
 
