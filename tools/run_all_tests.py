@@ -141,14 +141,19 @@ that holds the lock orders its suites and sizes their limits by that time
 or the file's, whichever is longer. The longer, because a run of an older
 branch, where a suite is shorter, writes its time there too, and a suite
 started too early costs a run little while one started too late can end
-it. A suite that failed or ran out of time keeps the time it had. One
-stopped at its limit would otherwise have its limit doubled for the next
-run, and one that broke at once would be started last. A --quick run and
-a part write nothing there, since a suite beside a few others is quicker
-than beside sixty, and a run inside a test neither reads nor writes it,
-since it holds no lock. The record is written whole under another name and
-then put in its place, so a run ended while writing it leaves the one
-before.
+it. The record is written whole under another name and then put in its
+place, so a run ended while writing it leaves the one before.
+
+Only a time that says how long a suite takes is kept. A suite that failed
+or ran out of time keeps the time it had, since one stopped at its limit
+would otherwise have its limit doubled for the next run, and one that
+broke at once would be started last. So does a suite that collected
+nothing or ran without a library it wanted. A run refused for its canary,
+an older Playwright or a missing Chromium keeps no times at all, since its
+suites did not run as they do. A --quick run and a part write nothing
+there either, since a suite beside a few others is quicker than beside
+sixty, and a run inside a test neither reads nor writes the record, since
+it holds no lock.
 
 The file still matters. A machine with no record orders by it, and CI
 plans its parts by it alone. So the summary names each suite that took far
@@ -1156,7 +1161,7 @@ def run(args, lock=None) -> int:
     spares = candidates()
     passed = failed = skipped = 0
     broken, under_equipped, skip_lines = [], [], []
-    took = {}
+    took, codes = {}, {}
     canary = None       # how the canary's tests ended, once the core suite has
     t0 = time.time()
     clear_old_output()
@@ -1219,7 +1224,7 @@ def run(args, lock=None) -> int:
 
     def report(name, out, returncode, records, seconds):
         nonlocal passed, failed, skipped, canary
-        took[name] = round(seconds)
+        took[name], codes[name] = round(seconds), returncode
         if name == CANARY_SUITE:
             canary = canary_counts(records)
         lines = [ln for ln in out.strip().splitlines() if ln.strip()]
@@ -1298,24 +1303,8 @@ def run(args, lock=None) -> int:
         for name, version, py in older:
             print("   %-16s %s, in %s" % (name, version, printable_place(py, REPO, [])))
 
-    # Only a suite that passed was timed doing all its work. One stopped at
-    # its limit or broken at once says nothing about how long it takes.
-    failing = {name for name, _ in broken}
-    measured = {name: seconds for name, seconds in took.items() if name not in failing}
-    full = not args.quick and not args.shard
-    write = args.write_times and full
-    far = [] if write else behind(measured, entries)
-    if far:
-        print("\nsuites that took far longer than tools/suite_times.json says, which CI's parts are balanced by")
-        for name, seconds, entry in far:
-            print("   %-16s %ds here, %s" % (name, seconds, "it says %ds" % entry if entry is not None
-                                              else "it has no entry"))
-        print("set their entries to these times, or keep a whole run's with --write-times")
-
     for name, summary in broken:
         print("FAILING SUITE  %-14s %s" % (name, summary))
-
-    keep_times(took, measured, write=write, record=record if full else None)
 
     refused = False
     # A run that holds the core suite has to have seen every test of the
@@ -1348,6 +1337,26 @@ def run(args, lock=None) -> int:
             for name, d, py in lacking:
                 print("   %-16s %s, from %s" % (name, printable_place(py, REPO, []), printable_place(d, REPO, [])))
         refused = True
+
+    # A suite was timed doing its work only when it passed having run its
+    # tests, exit code 0, with everything it wanted, in a run that was not
+    # refused. One stopped at its limit, broken at once, that collected
+    # nothing, or that ran without a library or beside a canary that did
+    # not run or an older Playwright, says nothing about how long it takes.
+    wanting = {name for name, _lack in under_equipped}
+    measured = {} if refused else {name: seconds for name, seconds in took.items()
+                                   if codes.get(name) == 0 and name not in wanting}
+    full = not args.quick and not args.shard
+    write = args.write_times and full
+    far = [] if write else behind(measured, entries)
+    if far:
+        print("\nsuites that took far longer than tools/suite_times.json says, which CI's parts are balanced by")
+        for name, seconds, entry in far:
+            print("   %-16s %ds here, %s" % (name, seconds, "it says %ds" % entry if entry is not None
+                                              else "it has no entry"))
+        print("set their entries to these times, or keep a whole run's with --write-times")
+    keep_times(took, measured, write=write, record=record if full else None)
+
     if refused or broken:
         return 1
     if canary_folder is not None:
@@ -1366,11 +1375,11 @@ def run(args, lock=None) -> int:
 
 
 def keep_times(took: dict, measured: dict, write: bool, record=None) -> None:
-    """Every suite's time beside the run's output. The times measured, those
-    of the suites that passed, go into tools/suite_times.json as well when
-    asked, which CI's parts are balanced by, and into this machine's record
-    when handed its path, which orders the next run here. A suite that
-    failed or ran out of time keeps the time it had in both."""
+    """Every suite's time beside the run's output. The times measured, of
+    the suites that ran as they do, go into tools/suite_times.json as well
+    when asked, which CI's parts are balanced by, and into this machine's
+    record when handed its path, which orders the next run here. Every
+    other suite keeps the time it had in both."""
     if took:
         try:
             OUTPUT.mkdir(parents=True, exist_ok=True)

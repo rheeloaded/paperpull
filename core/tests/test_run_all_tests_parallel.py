@@ -19,8 +19,9 @@ was fixed on 2026-10-03.
 Since 2026-10-07 a run here is ordered by the time each suite took on this
 machine's latest full run, kept beside the lock, as well as by
 tools/suite_times.json. These check that the run holding the lock alone
-reads and writes that record, that only a full run writes it and only with
-the suites that passed, that a part plans from the file alone, that a write
+reads and writes that record, that only a full run writes it, only with
+the suites that passed as they do and never after a refusal, that a part
+plans from the file alone, that a write
 cut short leaves the record as it was, and which suites the summary names
 as far behind the file.
 """
@@ -698,11 +699,12 @@ class InOrder:
         return done
 
 
-def timed_suites(monkeypatch, took: dict, failing=()):
+def timed_suites(monkeypatch, took: dict, failing=(), empty=(), canary_ran=True):
     """Suites that take the seconds given, as the clock the run reads has
-    it. Each one named in failing fails, and each given None runs out of
-    its time. Hands back the order the run started them in and the limit
-    each was given."""
+    it. Each one named in failing fails, each named in empty collects no
+    test, and each given None runs out of its time. The core suite's canary
+    passes when canary_ran. Hands back the order the run started them in
+    and the limit each was given."""
     clock = Clock()
     monkeypatch.setattr(rat, "time", clock)
     monkeypatch.setattr(rat, "ThreadPoolExecutor", InOrder)
@@ -717,7 +719,10 @@ def timed_suites(monkeypatch, took: dict, failing=()):
         clock.now += took[d.name]
         if d.name in failing:
             return "1 failed in %ds" % took[d.name], 1, []
-        return "1 passed in %ds" % took[d.name], 0, []
+        if d.name in empty:
+            return "no tests ran in %ds" % took[d.name], 5, []
+        canary = list(CANARY_PASSED) if d.name == rat.CANARY_SUITE and canary_ran else []
+        return "1 passed in %ds" % took[d.name], 0, canary
     monkeypatch.setattr(rat, "run_suite", run_suite)
     return started, limits
 
@@ -797,6 +802,45 @@ def test_a_suite_that_failed_or_ran_out_of_time_keeps_the_time_it_had(fake_run, 
     # Beside the run's output every suite's time stays as it went.
     assert json.loads((tmp_path / "test-output" / "times.json").read_text(encoding="utf-8")) == \
         {"passes": 300, "broke": 3, "hung": 1800, "new": 50}
+
+
+def test_a_suite_that_ran_no_test_or_lacked_a_library_keeps_the_time_it_had(fake_run, tmp_path, monkeypatch):
+    # A suite that collected nothing ends at once with an exit code that
+    # passes it, and one run without a library it wanted skips what needs
+    # it, so neither took as long as it takes.
+    took = {"empty": 2, "lacking": 40, "full": 300}
+    kept = {"empty": 400, "lacking": 600}
+    fake_run({n: tmp_path / n for n in took}, dict(kept))
+    monkeypatch.setattr(rat, "python_for", lambda d, kind, spares: (
+        Path(sys.executable), ["openpyxl"] if d.name == "lacking" else []))
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps(kept), encoding="utf-8")
+    as_from_a_terminal(monkeypatch)
+    timed_suites(monkeypatch, took, empty=("empty",))
+    assert rat.main(["--jobs", "2", "--write-times"]) == 0
+    want = {"empty": 400, "lacking": 600, "full": 300}
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == want
+    assert json.loads((tmp_path / "times.json").read_text(encoding="utf-8")) == want
+
+
+@pytest.mark.parametrize("core_ran_nothing", [True, False], ids=["core-collected-nothing", "canary-gone"])
+def test_a_run_refused_for_its_canary_keeps_no_times(fake_run, tmp_path, monkeypatch, capsys, core_ran_nothing):
+    # Found in review on 2026-10-07. A core suite that collected nothing
+    # passes by its exit code in a second or two, and one whose canary was
+    # deleted or deselected passes by its own, while the run is refused.
+    # Kept, either time would start core last. A refused run keeps no time
+    # at all, since what refused it says the run was not as runs are.
+    took = {"core": 2, "app": 300}
+    kept = {"core": 900, "app": 250}
+    fake_run({n: tmp_path / n for n in took}, dict(kept))
+    record_of(tmp_path).parent.mkdir()
+    record_of(tmp_path).write_text(json.dumps(kept), encoding="utf-8")
+    as_from_a_terminal(monkeypatch)
+    timed_suites(monkeypatch, took, empty=("core",) if core_ran_nothing else (), canary_ran=False)
+    assert rat.main(["--jobs", "2", "--write-times"]) == 1
+    assert "THE PRIVACY CANARY DID NOT RUN." in capsys.readouterr().out
+    assert json.loads(record_of(tmp_path).read_text(encoding="utf-8")) == kept
+    assert json.loads((tmp_path / "times.json").read_text(encoding="utf-8")) == kept
 
 
 @pytest.mark.parametrize("flags", [["--quick"], ["--shard", "1/2"]], ids=["quick", "part"])
