@@ -49,7 +49,7 @@ and files the PDF only when its text names the statement's first or last
 day and names no statement listed near it better. A day two listed
 statements share counts for neither. Filed statements get the same names
 a personal account's statements get, like
-`2026-08-31 PayPal Monthly Statement.pdf`, and one whose name is already
+`2031-08-31 PayPal Monthly Statement.pdf`, and one whose name is already
 taken gets the first day it covers added to it. A PDF whose dates cannot be
 checked, one that names another statement's dates better than its own, and
 one that names a statement ending on the same day as plainly as its own

@@ -651,7 +651,7 @@ _MON = (r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(
         r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)")
 # A day, written any of the ways a list or a table might write one. ISO with
 # or without a time after it, eight digits or a fourteen digit stamp,
-# month/day/year, "Aug 31, 2026" and "31 Aug 2026".
+# month/day/year, "Aug 31, 2031" and "31 Aug 2031".
 _DAY_RE = re.compile(
     r"(?<!\d)(?P<iy>\d{4})-(?P<im>\d{2})-(?P<id>\d{2})(?!\d)"
     r"|(?<!\d)(?P<sy>\d{4})(?P<sm>\d{2})(?P<sd>\d{2})(?:\d{6})?(?!\d)"
@@ -659,7 +659,7 @@ _DAY_RE = re.compile(
     r"|(?<![a-z])(?P<nm>" + _MON + r")\.?\s+(?P<nd>\d{1,2}),?\s+(?P<ny>\d{4})(?!\d)"
     r"|(?<!\d)(?P<dd>\d{1,2})\s+(?P<dm>" + _MON + r")\.?,?\s+(?P<dy>\d{4})(?!\d)",
     re.I)
-# A month with its year and no day, "August 2026", "2026-08" or "08/2026".
+# A month with its year and no day, "August 2031", "2031-08" or "08/2031".
 _MONTH_ONLY_RE = re.compile(
     r"(?<![a-z])(?P<nm>" + _MON + r")\.?,?\s+(?P<ny>\d{4})(?!\d)"
     r"|(?<![\d-])(?P<iy>\d{4})-(?P<im>\d{2})(?![\d-])"
