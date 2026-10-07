@@ -66,6 +66,18 @@ def _this_run(app) -> str:
     return key
 
 
+def written_down(app, purchase) -> bool:
+    """Whether the order history already has rows for this purchase. One
+    that cannot be read is taken as not, and writing to it says why."""
+    try:
+        rows = app.order_csv.read_all()
+    except Exception:
+        return False
+    return any(r.get("Order or Receipt Number") == purchase.order_number
+               and r.get("Purchase Type", purchase.purchase_type) == purchase.purchase_type
+               for r in rows)
+
+
 def tried_again(app, purchase, why: str) -> bool:
     """Record that this purchase's receipt page did not show its receipt.
     Always False, nothing was saved. `why` is a sentence without its full
@@ -90,13 +102,16 @@ def tried_again(app, purchase, why: str) -> bool:
               % (why, len(runs), RUNS))
         return False
     said = "%s on %d separate runs, so it is not asked for again" % (why, len(runs))
-    app._record_state(purchase, State.NO_RECEIPT_AVAILABLE, notes=said, extra={RUNS_KEY: runs})
-    # Written down once, on the run that sets it aside. A Download again
-    # that meets the same page later adds a run past RUNS and no rows.
-    if len(runs) == RUNS:
+    # Written down once. An older version that recorded the purchase as
+    # having no receipt wrote it down then, and a Download again after it
+    # was set aside finds it written. The rows go first, so a history that
+    # cannot be written to, open in Excel, leaves the purchase to the next
+    # run rather than set aside with nothing written.
+    if not written_down(app, purchase):
         app._write_csv_rows(purchase, receipt_status="No printable receipt available",
                             processing_status=State.NEEDS_MANUAL_REVIEW.value,
                             notes_extra="The receipt did not show on %d separate runs" % RUNS)
+    app._record_state(purchase, State.NO_RECEIPT_AVAILABLE, notes=said, extra={RUNS_KEY: runs})
     app.stats["no_receipt"] += 1
     app.stats["manual_review"] += 1
     print("  %s, on %d of %d separate runs. It is not asked for again, and Download "

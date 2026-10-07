@@ -409,3 +409,16 @@ def test_an_import_does_not_finish_a_receipt_this_install_asks_for_again(tmp_pat
 
     got = json.loads((new / "Kroger Receipts" / "progress.json").read_text(encoding="utf-8"))
     assert got["k:1"]["state"] == "Failed", got["k:1"]
+
+
+def test_the_core_beside_the_tool_comes_before_an_older_one_installed(tmp_path):
+    """An app's environment can hold an older core, one without the module
+    this tool reads, and the tool then failed before it could say a word."""
+    import subprocess
+    old = tmp_path / "old-core" / "paperpull_core"
+    old.mkdir(parents=True)
+    (old / "__init__.py").write_text("", encoding="utf-8")
+    tool = Path(__file__).resolve().parents[2] / "tools" / "migrate.py"
+    env = dict(__import__("os").environ, PYTHONPATH=str(tmp_path / "old-core"))
+    r = subprocess.run([sys.executable, str(tool), "--help"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr

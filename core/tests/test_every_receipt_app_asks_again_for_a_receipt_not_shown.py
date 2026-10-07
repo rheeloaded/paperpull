@@ -360,3 +360,59 @@ def test_the_words_for_a_purchase_set_aside():
     assert not_shown.skipped(dict(aside, downloaded_ok=True), "done") == "done"
     assert not_shown.skipped({"state": State.COMPLETED.value}, "done") == "done"
     assert not_shown.skipped(None, "done") == "done"
+
+
+@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+def test_a_purchase_written_down_before_is_not_written_down_again(app, method, tmp_path,
+                                                                  monkeypatch, capsys):
+    """An older version recorded the purchase as having no receipt and wrote
+    it into both CSVs then. Asked for again and set aside after three more
+    runs, it keeps those rows and gets no second set."""
+    mod = load(app)
+    monkeypatch.setattr(mod, "site", _SiteThatShowsNothing())
+    inst = app_in(mod, tmp_path)
+    p = purchase()
+    inst._write_csv_rows(p, receipt_status="No printable receipt available",
+                         processing_status=State.NEEDS_MANUAL_REVIEW.value,
+                         notes_extra=sorted(OLDER_VERSIONS_WROTE)[0])
+    before = written_down(inst)
+    assert before >= 2
+    rec = {"state": State.NO_RECEIPT_AVAILABLE.value, "notes": sorted(OLDER_VERSIONS_WROTE)[0]}
+    look(mod, tmp_path, method, rec=rec)
+    for _ in range(2):
+        inst = look(mod, tmp_path, method)
+    capsys.readouterr()
+    assert (inst.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
+    assert written_down(inst) == before, app.name
+
+
+@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+def test_a_history_that_cannot_be_written_leaves_it_to_the_next_run(app, method, tmp_path,
+                                                                    monkeypatch, capsys):
+    """The third run could not write the order history, open in Excel. The
+    purchase is not set aside with nothing written. The run after writes it
+    down and sets it aside."""
+    mod = load(app)
+    monkeypatch.setattr(mod, "site", _SiteThatShowsNothing())
+    p = purchase()
+    for _ in range(2):
+        look(mod, tmp_path, method)
+    real = mod.App._write_csv_rows
+
+    def locked(self, *a, **k):
+        raise PermissionError("the file is open in another program")
+
+    monkeypatch.setattr(mod.App, "_write_csv_rows", locked)
+    # Raised to the run, which records a failure, or caught by the app's own
+    # step, which does the same (GitHub, Meijer).
+    try:
+        look(mod, tmp_path, method)
+    except PermissionError:
+        pass
+    assert not done_already(mod, tmp_path, p), app.name
+    monkeypatch.setattr(mod.App, "_write_csv_rows", real)
+    inst = look(mod, tmp_path, method)
+    capsys.readouterr()
+    assert (inst.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
+    assert written_down(inst) >= 2
+    assert done_already(mod, tmp_path, p)

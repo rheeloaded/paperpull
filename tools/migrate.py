@@ -59,11 +59,12 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-try:
-    from paperpull_core.not_shown import asked_again
-except ImportError:                     # run from a checkout, beside the core
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core"))
-    from paperpull_core.not_shown import asked_again
+# The core beside this tool comes first, so an older copy installed in the
+# interpreter's own environment never stands in for it.
+_CORE = Path(__file__).resolve().parents[1] / "core"
+if (_CORE / "paperpull_core").is_dir():
+    sys.path.insert(0, str(_CORE))
+from paperpull_core.not_shown import asked_again  # noqa: E402
 
 SCHEMA = 1
 
