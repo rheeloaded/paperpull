@@ -3,6 +3,7 @@
 ![Version](https://img.shields.io/github/v/tag/rheeloaded/paperpull?sort=semver&label=version&color=blue)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+[![Self-host with Docker](https://img.shields.io/badge/self--host-Docker%20image-2496ED?logo=docker&logoColor=white)](#paperpull-server-beta)
 [![Sponsor on GitHub](https://img.shields.io/badge/sponsor-on%20GitHub-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/rheeloaded)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rheeloaded)
 [![Website](https://img.shields.io/badge/website-paperpull.net-4c8dff)](https://paperpull.net)
@@ -11,17 +12,24 @@
 
 PaperPull retrieves the statement and receipt history your banks, cards,
 stores and utilities already hold, organizes it as PDFs on your own
-computer, and turns your purchases and transactions into spreadsheets. It
-is a family of small, **read-only** tools that sign in *alongside you*: you
-type the password and answer the two-factor prompt in a real browser
-window, and PaperPull reads what you can see. Free and open source, no
-account, no cloud. Made for archiving (into
+computer or a server at home, and turns your purchases and transactions
+into spreadsheets. It is a family of small, **read-only** tools that sign
+in *alongside you*: you type the password and answer the two-factor prompt
+in a real browser window, and PaperPull reads what you can see. Free and
+open source, no account, no cloud. Made for archiving (into
 [paperless-ngx](https://docs.paperless-ngx.com/) or a folder of your own)
 instead of clicking through each site by hand.
 
+**On your computer, or on a server at home.** The desktop app runs on
+Windows and macOS. **[PaperPull Server](#paperpull-server-beta)** is the
+same app as one Docker image, for a NAS or home server beside
+Paperless-ngx. You use it from a browser on any computer in the house,
+sign in to each provider on a browser screen it shows you, and each run's
+new documents can go straight into Paperless. Both are free.
+
 ![The PaperPull control panel after a pilot run on a sample archive. Every name and amount is invented.](docs/panel.png)
 
-**Watch it:** a [75-second demo](https://youtu.be/_wZToSSMRPU) on the real panel with made-up accounts. **Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html) and the [Paperless-ngx tutorial](https://paperpull.net/paperless.html). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon, Linux from source.
+**Watch it:** a [75-second demo](https://youtu.be/_wZToSSMRPU) on the real panel with made-up accounts. **Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html) and the [Paperless-ngx tutorial](https://paperpull.net/paperless.html). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon, Linux from source. **Self-hosting** takes the Docker image `ghcr.io/rheeloaded/paperpull-server` and [three steps](#paperpull-server-beta).
 
 **It also turns those PDFs into spreadsheets.** Your receipts become one
 long table of every item you have ever bought, across every store and every
@@ -32,7 +40,8 @@ are looking at is a row that adds up. One button on the control panel, or
 one command. See [Every purchase in one spreadsheet](#every-purchase-in-one-spreadsheet)
 and [The transactions inside your statements](#the-transactions-inside-your-statements).
 
-Runs on **Windows and macOS** (and Linux), with the same commands on each.
+Runs on **Windows and macOS** (and Linux), with the same commands on each,
+and **self-hosted** on a NAS or home server with Docker.
 
 **PaperPull is free, and it costs money to make.** There is a server and
 domains to keep paid, developer accounts for the signed Mac build and the
@@ -226,7 +235,53 @@ directly as `--config`, and the sign-in launcher takes the label too
 (`login.bat spouse` / `./login.command spouse`). `python tools/add_account.py
 spouse` does every app at once.
 
+## PaperPull Server (beta)
+
+PaperPull also runs on an always-on machine at home, a NAS or a home server
+with Docker, next to [Paperless-ngx](https://docs.paperless-ngx.com/), and
+is used from a browser on any computer on your home network. The panel is
+the same, the providers' sign-in windows open on a browser screen the server
+shows you, and each run's new documents can be copied straight into
+Paperless's consume folder. You still sign in to each provider yourself, as
+on the desktop.
+
+| | Desktop app | PaperPull Server |
+|---|---|---|
+| Runs on | your Windows PC or Mac | a NAS or home server with Docker and an Intel or AMD processor |
+| You use it from | its own window | a browser on any computer on your home network |
+| Signing in | a browser window on your desktop | a browser screen the server shows in your browser |
+| New documents | folders on your computer | folders on the server, and copied into Paperless-ngx's consume folder if you mount it |
+| Who can reach it | only your computer | your home network, behind a password you choose |
+| Updates | the next installer, or the Store | `docker compose pull`, then `docker compose up -d` |
+| Price | free, or the Store edition | free |
+
+Getting it running takes three steps, and [SERVER.md](SERVER.md) has the
+rest, Paperless, a NAS's own Docker screens, updates and backups.
+
+1. Copy [`server/compose.yaml`](server/compose.yaml) and
+   [`server/seccomp-chrome.json`](server/seccomp-chrome.json) into a folder
+   on the server, and set `PUID`, `PGID`, `TZ` and the data folder in
+   `compose.yaml`.
+2. Start it. Docker downloads the image every release publishes,
+   `ghcr.io/rheeloaded/paperpull-server`.
+   ```bash
+   docker compose up -d
+   ```
+3. Open `http://<the server's address>:8765` from a browser at home and
+   choose a password, with the setup code the container prints in
+   `docker logs paperpull`.
+
+It is made for a machine at home. A rented server works, but providers
+treat data-center addresses as likely bots and check far more often. It
+listens on your home network behind a password, so it has privacy and
+security pages of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md) and
+[SECURITY-SERVER.md](SECURITY-SERVER.md). It is free, like the rest of
+PaperPull.
+
 ## Quick start
+
+These steps are for the desktop app. The server's are
+[above](#paperpull-server-beta).
 
 **Want to see it first?** The panel's welcome screen offers **See a sample
 archive**, a folder of invented statements and receipts. The Status tab
@@ -495,24 +550,10 @@ xattr -dr com.apple.quarantine .
 chmod +x setup-all.command apps/*/*.command gui/*.command
 ```
 
-## PaperPull Server (beta)
-
-PaperPull can also run on an always-on machine at home, a NAS or a home
-server with Docker, next to Paperless-ngx, and be used from a browser on any
-computer on your home network. The panel is the same, the providers' sign-in
-windows open on a browser screen the server shows you, and each run's new
-documents can be copied straight into Paperless's consume folder. You still
-sign in to each provider yourself, as on the desktop.
-
-It listens on your home network behind a password, so it has privacy and
-security pages of its own. Setting it up is in [SERVER.md](SERVER.md), and
-the two pages are [PRIVACY-SERVER.md](PRIVACY-SERVER.md) and
-[SECURITY-SERVER.md](SECURITY-SERVER.md). It is free, like the rest of
-PaperPull.
-
 ## Requirements
 
-- **Windows, macOS, or Linux**
+- **Windows, macOS, or Linux**, or for PaperPull Server, Docker on a
+  machine with an Intel or AMD processor (see [SERVER.md](SERVER.md))
 - For the Windows installer or the macOS `.dmg`, nothing else. They carry
   their own Python.
 - For a checkout, Python 3.11+ and Playwright (installed per app by the
@@ -548,6 +589,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
   tester, 15,171 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
+- ✅ **Self-hosted.** PaperPull Server, one Docker image published with
+  every release since 0.43.0 as `ghcr.io/rheeloaded/paperpull-server`,
+  in beta. See [PaperPull Server](#paperpull-server-beta).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,
   both built by GitHub Actions from the tagged commit, with checksums. The
   Windows builds are code-signed, and the
