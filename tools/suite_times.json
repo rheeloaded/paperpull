@@ -5,7 +5,7 @@
  "ally": 128,
  "amazon": 98,
  "amex": 20,
- "amfam": 171,
+ "amfam": 865,
  "anthem": 12,
  "apple": 252,
  "applecard": 289,
@@ -31,7 +31,7 @@
  "homedepot": 158,
  "kroger": 116,
  "lowes": 70,
- "meijer": 406,
+ "meijer": 815,
  "mtb": 2,
  "myecp": 2,
  "mypay": 11,
@@ -60,7 +60,7 @@
  "vanguard": 47,
  "verizon": 2,
  "verizonmobile": 3,
- "walmart": 336,
+ "walmart": 433,
  "wealthfront": 2,
  "wellsfargo": 27
 }
