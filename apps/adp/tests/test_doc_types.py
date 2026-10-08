@@ -201,6 +201,11 @@ def test_the_app_never_answers_the_check_itself():
     assert "step-up-myadp-pre-auth" not in src.replace("``/events/core/v1/step-up-myadp-pre-auth``", "")
     assert "verification code" not in inspect.getsource(site.open_tax_statement_check)
     assert "view statement" in inspect.getsource(site.open_tax_statement_check).lower()
+    # The script that chooses the button, read whole, since the docstring
+    # above says View statement whatever the script matches.
+    assert "verification" not in site._VIEW_STATEMENT_JS.lower()
+    assert r"/^\s*view statement\s*$/i" in site._VIEW_STATEMENT_JS
+    assert "_VIEW_STATEMENT_JS" in inspect.getsource(site.open_tax_statement_check)
 
 
 def test_the_check_is_answered_in_the_browser_and_needs_no_keyboard_here():

@@ -5,8 +5,9 @@ Twelve apps pressed their document's control through the page, el.click()
 inside an evaluate, whenever Playwright's own click raised. That press
 reached the control under whatever covered it, since Playwright's error
 said so and nothing read it, and after a press of Playwright's that had
-landed before it raised it was a second press. Each app's own _catch_pdf
-is pressed here against a page made for it, three ways.
+landed before it raised it was a second press. ADP's was a copy no run
+called, and it has gone since. Every other app's own _catch_pdf is
+pressed here against a page made for it, three ways.
 
   * Something covers the control. Playwright says so, nothing is pressed,
     the cover least of all, and the run stops.
@@ -198,9 +199,9 @@ def raising_after_the_press(monkeypatch, account):
 
 
 def test_every_app_that_pressed_through_the_page_is_here():
-    """Not vacuous. The twelve whose capture had the page press, by what the
-    capture does."""
-    assert {d.name for d in APPS} >= {"adp", "amfam", "applecard", "att", "etrade", "golden1",
+    """Not vacuous. The eleven whose capture had the page press and that a
+    run still calls, by what the capture does."""
+    assert {d.name for d in APPS} >= {"amfam", "applecard", "att", "etrade", "golden1",
                                        "newrez", "sba", "smud", "statefarm", "verizonmobile",
                                        "wellsfargo"}
 

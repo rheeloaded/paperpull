@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -563,6 +564,11 @@ class App:
         if rec.get("downloaded_ok"):
             return True
         state = rec.get("state")
+        # An older version recorded this final when the receipt page did not
+        # show the receipt, which says nothing about whether there is one,
+        # so it is asked for again (#70).
+        if not_shown.asked_again(rec):
+            return False
         # terminal / already-completed (incl. records made before the
         # downloaded_ok marker existed): done, do not re-download.
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
@@ -656,7 +662,8 @@ class App:
                     # that put them there again (#63).
                     print("  " + self._put_aside_said(aside))
                 else:
-                    print("  Already completed and PDF verified - skipping.")
+                    print(not_shown.skipped(self.progress.get(purchase.key),
+                                            "  Already completed and PDF verified - skipping."))
                 self.stats["skipped_completed"] += 1
                 # Inside the dates when it has one, since the selection
                 # left out every dated purchase outside them.

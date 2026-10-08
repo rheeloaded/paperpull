@@ -125,7 +125,20 @@ def load_purchases(provider: str, path: Path) -> List[dict]:
             if not row["Date"] and not row["Item"] and not row["Order Number"]:
                 continue
             rows.append(row)
-    return rows
+    return without_unsaved_writes(rows)
+
+
+def without_unsaved_writes(rows: List[dict]) -> List[dict]:
+    """An order's rows from a write that saved no receipt, when a later
+    write of the same order saved one. An app writes an order down again
+    when a later run saves it, an older version's write for a receipt page
+    that did not show its receipt (#70) among them, and the history only
+    ever takes rows on the end. Kept, each item was listed twice and the
+    order's Receipt PDF was the empty one of its first row."""
+    saved = {(r["Account"], r["Order Number"]) for r in rows
+             if r["Order Number"] and r["Receipt PDF"]}
+    return [r for r in rows if r["Receipt PDF"] or not r["Order Number"]
+            or (r["Account"], r["Order Number"]) not in saved]
 
 
 def orders_from(purchases: List[dict]) -> List[dict]:

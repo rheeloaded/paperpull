@@ -99,16 +99,6 @@ REVIEWED = {
         "tell stops the run, and a control the page took away is not pressed at all. "
         "When this press itself raises it may have been made, and nothing more is "
         "pressed.",
-    ("apps/adp/adp_site.py", "open_tax_statement_check", "click()"):
-        "The last button on the page whose whole text is View statement, an "
-        "SDF-BUTTON or a BUTTON found through every open shadow root, which on "
-        "ADP's statements page is the Tax Statements card's own. It is pressed only "
-        "after ADP has refused a tax statement for want of its identity check, so "
-        "that ADP shows its prompt to the person, who answers it in the browser, "
-        "and the statement ADP's viewer fetches once the check is passed is taken "
-        "as it passes. Nothing checks whether it shows or what covers it. A check "
-        "left unanswered ends the tax statements for the run, so it is not pressed "
-        "again in that run.",
     ("apps/mtb/mtb_site.py", "_OPEN_TABLE_CLICK_JS", "click()"):
         "The first collapsed year heading on M&T's statements list, in a frame "
         "M&T serves, whose press lists that year through a GET. Its heading's words "

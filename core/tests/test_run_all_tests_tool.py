@@ -1032,3 +1032,43 @@ def test_an_environment_that_could_not_be_asked_is_named(run_with, tmp_path, cap
     out = capsys.readouterr().out
     assert ("\nenvironments that could not say what they hold\n"
             "   <elsewhere>/python.exe, could not be started\n") in out, out
+
+
+# -- a run of the suites named (2026-10-07) --------------------------------------
+
+def test_a_run_of_named_suites_runs_only_those_and_says_it_is_not_a_full_run(one_suite, capsys):
+    """worktree.py land runs the suites a change touches, and the whole
+    suite runs before each release and on CI. A part run must never read as
+    a full one."""
+    one_suite({"tests/test_failure_canary.py": CANARY},
+              others={"aafmaa": {"tests/test_it.py": ANOTHER}, "kroger": {"tests/test_it.py": ANOTHER}})
+    assert rat.main(["--suites", "kroger", "--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "1 of the 3 suites, kroger, which is not a full run" in out, out
+    assert "\nok   kroger " in out and "\nok   aafmaa " not in out and "\nok   core " not in out
+    assert out.rstrip().endswith("\nthe 1 suites named passed, and the privacy canary was not "
+                                 "among them"), out
+
+    assert rat.main(["--suites", "core,aafmaa", "--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "\nok   core " in out and "\nok   aafmaa " in out and "\nok   kroger " not in out
+    assert out.rstrip().endswith("privacy canary included, which is not a full run"), out
+    assert "all suites passed" not in out
+
+
+def test_a_suite_named_wrong_is_refused_rather_than_skipped(one_suite, capsys):
+    one_suite({"tests/test_failure_canary.py": CANARY}, others={"kroger": {"tests/test_it.py": ANOTHER}})
+    assert rat.main(["--suites", "kroger,krogr", "--jobs", "1"]) == 2
+    assert "no suite is named krogr" in capsys.readouterr().out
+
+
+def test_named_suites_take_no_shard_and_keep_no_times(one_suite, capsys, tmp_path):
+    one_suite({"tests/test_failure_canary.py": CANARY}, others={"kroger": {"tests/test_it.py": ANOTHER}},
+              times={"core": 100, "kroger": 90})
+    with pytest.raises(SystemExit):
+        rat.main(["--suites", "kroger", "--shard", "1/2"])
+    capsys.readouterr()
+    before = (tmp_path / "times.json").read_text(encoding="utf-8")
+    assert rat.main(["--suites", "kroger", "--jobs", "1", "--write-times"]) == 0
+    assert (tmp_path / "times.json").read_text(encoding="utf-8") == before, \
+        "a part run's times are not the times of a full run"

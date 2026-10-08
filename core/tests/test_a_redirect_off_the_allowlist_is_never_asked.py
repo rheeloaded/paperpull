@@ -367,7 +367,7 @@ def test_a_tab_on_a_document_asks_its_own_address_and_nothing_further(page, serv
 # document from follows none, and `once` is that address sending the
 # session on, the second time it is asked.
 
-SCAFFOLD = ["adp", "amfam", "applecard", "etrade", "golden1", "newrez", "sba", "smud",
+SCAFFOLD = ["amfam", "applecard", "etrade", "golden1", "newrez", "sba", "smud",
             "statefarm", "verizonmobile", "wellsfargo"]
 
 

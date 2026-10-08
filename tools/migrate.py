@@ -59,6 +59,13 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+# The core beside this tool comes first, so an older copy installed in the
+# interpreter's own environment never stands in for it.
+_CORE = Path(__file__).resolve().parents[1] / "core"
+if (_CORE / "paperpull_core").is_dir():
+    sys.path.insert(0, str(_CORE))
+from paperpull_core.not_shown import asked_again  # noqa: E402
+
 SCHEMA = 1
 
 # The fields a skip decision actually reads. Everything else is history.
@@ -129,6 +136,24 @@ def scan(root: Path):
     return found
 
 
+def _done(rec: dict) -> bool:
+    """Skipped by the app, as its own _already_done decides. A record an
+    older version finished when the receipt page did not show the receipt
+    is asked for again, so it is not done (paperpull_core.not_shown)."""
+    return bool(rec.get("downloaded_ok")
+                or (rec.get("state") in TERMINAL and not asked_again(rec)))
+
+
+def _skip_fields(rec: dict) -> dict:
+    """The fields a skip decision reads. For a record asked for again that
+    is its last note too, one of the fixed words an older version wrote,
+    which says nothing of the purchase."""
+    out = {f: rec[f] for f in SKIP_FIELDS if f in rec}
+    if asked_again(rec):
+        out["notes"] = str(rec.get("notes") or "").rsplit("; ", 1)[-1].strip()
+    return out
+
+
 # -- export ------------------------------------------------------------------
 
 def export(root: Path, out: Path, minimal: bool = False) -> int:
@@ -144,10 +169,8 @@ def export(root: Path, out: Path, minimal: bool = False) -> int:
         for app in installs:
             recs = app["records"]
             if minimal:
-                recs = {k: {f: v[f] for f in SKIP_FIELDS if f in v}
-                        for k, v in recs.items()}
-            done = sum(1 for r in app["records"].values()
-                       if r.get("downloaded_ok") or r.get("state") in TERMINAL)
+                recs = {k: _skip_fields(v) for k, v in recs.items()}
+            done = sum(1 for r in app["records"].values() if _done(r))
             manifest["apps"].append({"folder": app["folder"], "provider": app["provider"],
                                      "kind": app["kind"], "records": len(recs),
                                      "already_downloaded": done})
@@ -259,7 +282,7 @@ def _merge(target: dict, incoming: dict, old_root: str,
         if inc.get("downloaded_ok") and not cur.get("downloaded_ok"):
             cur["downloaded_ok"] = True
             changed = True
-        if cur.get("state") not in TERMINAL and inc.get("state") in TERMINAL:
+        if cur.get("state") not in TERMINAL and _done(dict(inc, downloaded_ok=False)):
             cur["state"] = inc["state"]
             changed = True
         if changed:

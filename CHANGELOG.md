@@ -86,13 +86,68 @@ All notable changes to PaperPull are recorded here. Versioning follows
   row, which can leave out what a record would add but never puts in
   another document's. The index and the run state follow a renamed file
   however its path was written.
-  AAFMAA, Ally, Anthem, Capital One, Chase, Discover, FedEx, M&T Bank,
-  myPay, Navy Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard
-  keep an id from the provider's page in a statement's record when there
+  Ally, Anthem, Capital One, Chase, Discover, FedEx, M&T Bank, myPay,
+  Navy Federal, Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard keep an
+  id from the provider's page in a statement's record when there
   is one. Rename looked such a record up by that id, which an index row
   does not carry, so it never found one, and a naming pattern's account or
   number never reached a file those apps had already downloaded. Now it
   does.
+- **Rename no longer offers " (2)" to a statement its download told apart
+  by an id.** When two statements of one day and one summary would share
+  a name, a download saves the second with the last six characters of the
+  id its app keeps for it added, as in "2026-09-12 Chase Monthly Statement
+  OC2222.pdf". Rename, and the File names page's offer to rename after a
+  pattern change, looked for that id in the file's row of the index, which
+  never has one. So under the very pattern the files were saved by, a
+  preview offered to rename the second statement to "2026-09-12 Chase
+  Monthly Statement (2).pdf". It happened in the fifteen apps that keep an
+  id from the provider's page in a statement's record, Ally, Anthem,
+  Capital One, Chase, Discover, FedEx, M&T Bank, myPay, Navy Federal,
+  Schwab, Stripe, UPS, USAA, U.S. Bank and Vanguard. Rename now
+  tells a file apart by what its download added, read from the record
+  written when the file was saved, so a later listing that gives a
+  statement another id, which Capital One, Schwab and Vanguard write down,
+  does not move it. After a pattern change that gives both statements one
+  name, the second keeps what its download added. A PayPal business
+  statement keeps the first day it covers, which its download adds when
+  another statement ending on the same day has the name. A statement saved
+  with " (2)" before its app added the id to a taken name is offered the
+  end of the id its record kept instead.
+- **AAFMAA tells a second file of one name apart by its policy, never by
+  "cument".** AAFMAA gives a document no id, and what its listing kept as
+  one was the name of the View control on the document's row, which ends
+  in "cument" for every document and names only the row's place on a page
+  of the table. So when a file already had a document's name, the second
+  was saved as "... cument.pdf" and a third as "... cument (2).pdf", which
+  said nothing about which document either was, and a file name pattern
+  with {number} in it wrote the control's whole name into every file name.
+  A download now adds the document's policy number, which is part of what
+  the app knows the document by. The summary in AAFMAA's names already
+  carries the policy, so under the default pattern two files wanting one
+  name are two documents of one policy and day, and the second is told
+  apart by " (2)". The policy number tells two policies apart under a
+  pattern that leaves the summary and account out. AAFMAA's records drop
+  the control's name the next time the app starts, so {number} is empty
+  for AAFMAA from then on, and the File names page counts it as a field
+  AAFMAA never fills. Rename tells a file apart the way its download does,
+  so it offers a file already saved with "cument" in its name the name a
+  download gives it today, in a preview first, as for any other rename.
+- **Rename no longer offers " (2)" to the old copy Download again leaves.**
+  Download again saves the statement it takes again beside its first
+  copy, as "2026-09-12 Chase Monthly Statement OC2222 (2).pdf", and the
+  statement's record names the new copy from then on. No record names the
+  old copy, and with two statements of that day and title Rename cannot
+  tell whose it is, so it told the old copy apart by nothing, and a
+  preview offered to rename "2026-09-12 Chase Monthly Statement
+  OC2222.pdf" to "2026-09-12 Chase Monthly Statement (2).pdf". The old copy
+  now keeps the end of the id in its name when that is what exactly one
+  statement of its date and title would add, and is still named from its
+  own row, never for that statement. After a pattern change it carries
+  that ending into its new name, unless the name would have to be cut to
+  fit the folder's limit, where it is told apart by a number as before. It
+  happened in the apps that tell a second statement apart by an id, and
+  for PayPal's business statements, told apart by their first day.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a
@@ -179,6 +234,66 @@ All notable changes to PaperPull are recorded here. Versioning follows
   in-store one of one day and one summary for instance, now keep their own
   new names in the index, in progress.json and in the order history, where
   both took whichever came last.
+- **Rename names a file in a deep folder as its download did, and always
+  finishes.** A download cuts a file name to fit max_path_length, the path
+  limit in config.json, when the folder is deep enough to need it. Rename
+  took the name it wanted whole whenever no other file held it, so in a
+  deep output folder Rename preview offered to give a file whose download
+  had cut its name the whole name back, a path longer than the limit the
+  download kept to, and Apply renames gave it. When several files wanted
+  one name too long for their folder, Rename could look for a free name by
+  adding " (2)", " (3)" and on, which cutting the name to fit took off
+  again each time, so Rename preview and Apply renames never finished.
+  Rename now names every file as downloads into its folder would, one
+  after another. A name is cut to fit the same way, and a receipt that
+  wants a name another receipt of the same rename was given takes its
+  order number first, as a download does, where it used to take a " (2)".
+  A file renamed after another file took its new name in the meantime
+  keeps to the limit in config.json too, where it kept to 240.
+- **Rename gives every file the name its preview gave it, and a swap it
+  cannot finish goes back.** When one file wanted the name of another
+  that was itself being renamed to a free name, and the first came first
+  in the index, Rename put the first aside, found the second still under
+  its name, and gave the first that name with " (2)" added, and only then
+  renamed the second. The preview had said otherwise, and the next Rename
+  offered to rename the file again. Now a file waits for the one holding
+  the name it wants, each chain of names is renamed from its free end,
+  and when a file of a chain cannot be renamed, those waiting for its
+  name keep their own. Files that trade names, two or more in a ring,
+  still go through a temporary name ending ".renaming". When another
+  program, such as a sync client or virus scanner, held a file in a swap
+  so its rename was refused, the file could stay under its temporary name
+  while its row in the index and its record named its old name, which by
+  then held the other file of the swap. Rename then said only that a file
+  had been left alone. A refused rename is now tried a few more times, and
+  when it is still refused the files of the ring go back to the names they
+  had. A file that cannot leave its temporary name is named in what Rename
+  prints, with the name to give it back when that name is free, and when
+  its old name holds another file by then, its row and record name it
+  where it is.
+- **A receipt whose page did not show it is fetched on the next run
+  (#70).** When Kroger answered a receipt with its own "There was a
+  problem loading the receipt. Please try again.", the app said the
+  receipt was marked for manual review, recorded the purchase as having no
+  receipt, which is final, and wrote it into both CSVs. The next run said
+  it was already completed and skipped it, and no file was anywhere.
+  Amazon, Best Buy, Costco, eBay, Gap, GitHub, Home Depot and Lowe's did
+  the same when a receipt page did not fill in, Target when an order's
+  page showed neither a receipt nor an invoice, and Meijer, which did try
+  again, wrote the purchase into both CSVs once more on every run that
+  tried. Such a purchase is now a failure that says it is tried again next
+  run, the panel counts it, and nothing goes into the CSVs until a run
+  saves the receipt. One whose receipt has not shown on three separate
+  runs is set aside for review, written into the CSVs once, and skipped
+  with a line that says so, and Download again still asks for it.
+  Purchases an earlier version left that way are fetched on the next run
+  as well, found by the words it noted them with. The rows it wrote for
+  them stay in the CSVs, and the All Purchases workbook leaves out an
+  order's rows from a write that saved nothing once a later one saved it.
+  A purchase the store showed has no receipt, a Target order with only an
+  invoice or a GitHub payment whose row has no receipt link, stays as it
+  was, and moving a download history to another computer keeps the rest
+  asked for.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never
@@ -219,10 +334,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the apps and the core hand to a page, followed back through names,
   imports, joins, formats and the helpers that pass a script along, and
   fails on any press a page script makes that is not on its reviewed list
-  with the reason it is safe. Besides the core's own, four remain on it,
-  ADP's press of the View statement that shows its identity check, M&T's
-  year headings in its statements frame, and two links PG&E makes itself to
-  save a PDF.
+  with the reason it is safe. Besides the core's own, three remain on it,
+  M&T's year headings in its statements frame, and two links PG&E makes
+  itself to save a PDF.
+- **ADP presses the View statement that shows its identity check only when
+  it shows with nothing over it.** When ADP holds back a tax statement until
+  the person verifies themselves, the app presses the Tax Statements card's
+  own View statement, so that ADP shows its prompt in the browser. That
+  press was the button's own click run inside the page, which reached it
+  under whatever covered it and pressed it when it did not show. Now
+  Playwright presses it, through the same place in the core as the presses
+  above, and a button something covers or one that does not show stops the
+  run before it says a prompt is showing, saying why in PaperPull's own
+  words and writing the failure file. The scaffold capture ADP carried,
+  which no run called, is gone.
 
 ## [0.44.0] - 2026-10-07
 

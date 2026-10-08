@@ -246,10 +246,10 @@ class App:
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # A real Edge or Chrome attached over CDP saves a download itself,
-        # into its own Downloads folder, and Playwright never sees it. So
-        # the browser is pointed at a folder under the output and the site
-        # layer watches that folder after every click, alongside the
-        # download event, PDF response and new tab it already catches.
+        # into its own Downloads folder. Every document here is fetched
+        # inside the page and nothing is taken from a download, but the
+        # browser is still pointed at a folder under the output, so what it
+        # saves while the run is attached stays out of the person's own.
         self._dl_dir = Path(self.config["output_dir"]) / ".adp-downloads"
         site.set_download_dir(self._work_page, self._dl_dir)
         # A file here that is an exact copy of a document in the archive
@@ -590,9 +590,8 @@ class App:
             self._delay()
 
     def download_one(self, page, doc: Document, filename: str):
-        """Save one document. The site layer fetches the row's PDF link from
-        inside the page when there is one, and otherwise clicks the row's
-        own control and catches what arrives."""
+        """Save one document. The site layer fetches its PDF from inside
+        the page, at the address ADP's statement services gave for it."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.

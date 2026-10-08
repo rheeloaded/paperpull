@@ -31,6 +31,7 @@ argument of something that is not a press (prime_session, a token
 reader, an opener, logging.basicConfig) is no press at all.
 """
 import ast
+import os
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,12 @@ PRESS_EVENTS = frozenset(("click", "dblclick", "mousedown", "mouseup", "pointerd
 # What ships, apps and the core and what the panel and the server run.
 ROOTS = ("apps", "core", "gui", "server")
 
+# Folders a build or an install makes, copies of what ships and never what
+# a run reads from this tree. Installing the core on CI builds
+# core/build/lib, and the census read its 34 copies as sources of their
+# own, so CI ran 34 more tests than a run here.
+MADE_FOLDERS = {"build", "dist", "site-packages", "node_modules"}
+
 
 def is_test(path: Path) -> bool:
     parts = path.relative_to(REPO).parts
@@ -66,10 +73,14 @@ def is_test(path: Path) -> bool:
 def sources():
     out = []
     for root in ROOTS:
-        for path in sorted((REPO / root).rglob("*.py")):
-            if not is_test(path):
-                out.append(path)
-    return out
+        for folder, dirs, files in os.walk(REPO / root):
+            # Pruned as the walk goes, so a linked environment is never
+            # entered, which took about 4.6 s of collection, and a copy a
+            # build made is never read as source.
+            dirs[:] = sorted(d for d in dirs if d != "tests" and d not in MADE_FOLDERS
+                             and not d.startswith((".", "__")) and not d.endswith(".egg-info"))
+            out.extend(Path(folder) / f for f in files if f.endswith(".py"))
+    return sorted(p for p in out if not is_test(p))
 
 
 def _forced(call: ast.Call) -> bool:

@@ -53,8 +53,10 @@ HOW THIS SITE IS BUILT
   * Many "links" are not links. They are javascript:__doPostBack(...) on an
     <a>, so the href tells you nothing and the control has to be clicked.
     Confirmed for this page: every View and Download control is a postback,
-    and no handler URL with a document id exists anywhere. The postback
-    target name is therefore the document's identity.
+    and no handler URL with a document id exists anywhere. A document has
+    no id at all, and the postback target is not one either, since it
+    names a row's place on whichever page of the table is showing. A
+    document is known by its date, title and policy.
 
 THE TABLE, confirmed 2026-08-22
   Date | Document | Policy | Name of Insured | View in Browser | Download a Copy

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -674,6 +675,10 @@ class App:
         # (_listed_again).
         if state == State.NO_LONGER_LISTED.value:
             return True
+        # Its receipt page showed nothing on three separate runs, so it was
+        # set aside (#70). Download again still asks for it.
+        if not_shown.set_aside(rec):
+            return True
         # A copy put aside for review counts as done while it is still in
         # Manual Review, and deleting it is how a person asks for the receipt
         # again (#42). Trying it again on its own every run added a copy a run,
@@ -713,7 +718,8 @@ class App:
                     print("  Put aside in Manual Review by an earlier run, so it is skipped. "
                           "Delete it there to have it fetched again.")
                 else:
-                    print("  Already completed and PDF verified - skipping.")
+                    print(not_shown.skipped(self.progress.get(purchase.key),
+                                            "  Already completed and PDF verified - skipping."))
                 self.stats["skipped_completed"] += 1
                 continue
             # Which document the run is on, so a failure file says how far
@@ -880,17 +886,13 @@ class App:
             why = site.not_this_purchase(page, url)
             if why:
                 return self._refuse_page(purchase, why)
+            # Nor does the receipt page when it did not show a receipt. The
+            # next run asks for it again, as it always did here, and writes
+            # it down once it is saved, not on every run that tried (#70).
             if not site.receipt_is_present(page):
-                self._record_state(purchase, State.NO_RECEIPT_AVAILABLE,
-                                   notes="Receipt page did not show a receipt")
-                self._write_csv_rows(purchase, receipt_status="No printable receipt available",
-                                     processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                                     notes_extra="Receipt page did not render")
-                self.stats["no_receipt"] += 1
                 self.write_failure('find the receipt', 'there was no receipt to save')
-                self.stats["manual_review"] += 1
-                print("  Receipt page did not render - marked for manual review.")
-                return False
+                return not_shown.tried_again(
+                    self, purchase, "The receipt page did not show a receipt")
             purchase = site.extract_details(page, purchase)
             self._capture_document(page, purchase, out_path)
             return self._finish_pdf(page, purchase, out_path, source_page=page)

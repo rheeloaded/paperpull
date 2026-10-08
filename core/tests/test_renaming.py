@@ -5,7 +5,10 @@ name (#43). Nothing about those files needed fetching. These pin the
 promises the rename makes, above all that it cannot lose a file and
 cannot leave the ledger pointing at one that is gone.
 """
+import itertools
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,7 +17,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from paperpull_core import renaming, storage  # noqa: E402
-from paperpull_core.storage import JsonStore  # noqa: E402
+from paperpull_core.storage import JsonStore, unique_path  # noqa: E402
 
 PATH = "PDF Full Path"
 NAME = "PDF Filename"
@@ -94,6 +97,403 @@ def test_two_files_that_want_each_others_names_both_land(tmp_path):
     assert (tmp_path / "2026-09-23 Testco A1 Receipt.pdf").read_bytes() == b"%PDF-A"
     assert (tmp_path / "2026-09-23 Testco A2 Receipt.pdf").read_bytes() == b"%PDF-B"
     assert not list(tmp_path.glob("*.renaming*"))
+
+
+# -- chains and rings of renames ----------------------------------------------
+
+CHAIN_OF_TWO = (("A.pdf", "B.pdf"), ("B.pdf", "C.pdf"))
+CHAIN_OF_THREE = (("A.pdf", "B.pdf"), ("B.pdf", "C.pdf"), ("C.pdf", "D.pdf"))
+SWAP = (("A.pdf", "B.pdf"), ("B.pdf", "A.pdf"))
+RING_OF_THREE = (("A.pdf", "B.pdf"), ("B.pdf", "C.pdf"), ("C.pdf", "A.pdf"))
+CASE_ONLY = (("A.pdf", "a.pdf"),)
+CROSSED_CASE = (("A.pdf", "b.pdf"), ("B.pdf", "a.pdf"))
+
+
+def _in_every_order(**shapes):
+    """Each shape with its ledger rows in every order there is."""
+    return [pytest.param(wants, order, id="%s-%s" % (name, "".join(o[0] for o in order)))
+            for name, wants in shapes.items()
+            for order in itertools.permutations(old for old, _new in wants)]
+
+
+def _wanting(folder, wants, order=None):
+    """A ledger row for each file, asking for the name beside it. Each file
+    holds its own old name, so whose bytes a name holds says which file
+    went there."""
+    rows = {}
+    for old, new in wants:
+        path = folder / old
+        path.write_bytes(b"%PDF-1.7 " + old.encode())
+        rows[old] = {PATH: str(path), NAME: old, "Notes": "", "want": new}
+    return [rows[old] for old in (order or [old for old, _new in wants])]
+
+
+def _plan_wanted(folder, rows):
+    return renaming.plan(rows, lambda r: r["want"], folders=[folder])
+
+
+def _holding(folder):
+    """Each file in the folder, with the old name of the file it is."""
+    return {p.name: p.read_bytes()[len(b"%PDF-1.7 "):].decode()
+            for p in folder.iterdir() if p.is_file()}
+
+
+@pytest.mark.parametrize("wants, order", _in_every_order(
+    chain_of_two=CHAIN_OF_TWO, chain_of_three=CHAIN_OF_THREE,
+    swap=SWAP, ring_of_three=RING_OF_THREE, case_only=CASE_ONLY,
+    crossed_case=CROSSED_CASE))
+def test_a_chain_or_ring_of_renames_lands_as_the_preview_said(tmp_path, wants, order):
+    """A wants B's name and B a free one. With A first in the ledger, A was
+    put aside and then met B still in place, so it took "B (2).pdf", and
+    only then did B move on. The preview had said A would be B.pdf, and the
+    next Rename offered to move it again. Each file now waits for the one
+    holding its new name, from each chain's free end, and a ring, which has
+    no free end, goes through a name put aside. A name in another case is
+    the file's own where the folder ignores case, as on Windows, a Mac, or
+    a share or USB drive on Linux, and another file's where it does not."""
+    rows = _wanting(tmp_path, wants, order)
+    changes = _plan_wanted(tmp_path, rows)
+    assert sorted((c.old_name, c.new_name) for c in changes) == sorted(wants), \
+        "the preview says what is asked"
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert _holding(tmp_path) == {new: old for old, new in wants}
+    assert (result.renamed, result.failed) == (len(wants), 0)
+    renaming.update_rows(rows, result)
+    assert not any(c.renaming for c in _plan_wanted(tmp_path, rows)), \
+        "a second Rename finds nothing to do"
+
+
+@pytest.mark.parametrize("wants", [CASE_ONLY, CROSSED_CASE], ids=["case_only", "crossed_case"])
+def test_a_name_in_another_case_is_the_files_own_where_linux_ignores_case(
+        tmp_path, monkeypatch, wants):
+    """Linux spells a path as written, yet a share or a USB drive there can
+    ignore case. Found by spelling, a.pdf was nobody's, so A.pdf met itself
+    under it and took "a (2).pdf". This disk ignores case, so with Linux's
+    spelling of a path it is that folder."""
+    (tmp_path / "X").mkdir()
+    if not (tmp_path / "x").exists():
+        pytest.skip("this folder tells case apart")
+    (tmp_path / "X").rmdir()
+    monkeypatch.setattr(renaming, "_same_file", lambda raw: os.path.abspath(raw))
+    rows = _wanting(tmp_path, wants)
+    result = renaming.apply(_plan_wanted(tmp_path, rows), say=lambda *a: None)
+    assert _holding(tmp_path) == {new: old for old, new in wants}
+    assert result.renamed == len(wants)
+
+
+def test_a_file_that_came_meanwhile_still_is_not_written_over_in_a_chain(tmp_path):
+    """The free end's name was taken between the preview and the rename,
+    by a file that is not in the plan. B finds a name beside it, as any
+    file meeting a newcomer does, and A still takes B's old name."""
+    rows = _wanting(tmp_path, CHAIN_OF_TWO)
+    changes = _plan_wanted(tmp_path, rows)
+    (tmp_path / "C.pdf").write_bytes(b"%PDF-1.7 newcomer")
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert _holding(tmp_path) == {"B.pdf": "A.pdf", "C (2).pdf": "B.pdf",
+                                  "C.pdf": "newcomer"}
+    assert result.renamed == 2
+
+
+def test_a_file_two_changes_name_is_renamed_once(tmp_path):
+    """Two rows of the index can name one file, after Download again saved
+    a deleted PDF under its old name. Renamed for each, the second rename
+    moved D, which had taken A's old name by then, and named it for A."""
+    for name in ("A.pdf", "D.pdf"):
+        (tmp_path / name).write_bytes(b"%PDF-1.7 " + name.encode())
+
+    def change(old, new):
+        return renaming.Change({PATH: str(tmp_path / old)}, tmp_path / old, new,
+                               new_path=tmp_path / new)
+    changes = [change("D.pdf", "A.pdf"), change("A.pdf", "X.pdf"), change("A.pdf", "Y.pdf")]
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert _holding(tmp_path) == {"A.pdf": "D.pdf", "X.pdf": "A.pdf"}
+    assert (result.renamed, result.failed, result.skipped) == (2, 0, 1)
+
+
+@pytest.fixture
+def _held_from(monkeypatch):
+    """A program opening the file the k-th rename of apply is about to move,
+    as a sync client or virus scanner may with a file just renamed, and
+    holding it so no rename of it goes through, wherever it is now."""
+    from paperpull_core import renaming as module
+    monkeypatch.setattr(module, "_RETRY_PAUSE", 0, raising=False)
+    real_rename, real_replace = Path.rename, os.replace
+
+    def hold(k):
+        state = {"calls": 0, "held": set()}
+
+        def refused(source):
+            state["calls"] += 1
+            if state["calls"] == k:
+                state["held"].add(str(source).lower())
+            if str(source).lower() in state["held"]:
+                raise PermissionError(32, "held by another process", str(source))
+
+        def rename(self, target):
+            refused(self)
+            return real_rename(self, target)
+
+        def replace(source, target, *a, **kw):
+            refused(source)
+            return real_replace(source, target, *a, **kw)
+
+        monkeypatch.setattr(Path, "rename", rename)
+        monkeypatch.setattr(os, "replace", replace)
+        return state
+    yield hold
+    monkeypatch.undo()
+
+
+def _follows_its_own(folder, rows, records, result, said):
+    """Every row and record names the file holding its own document, or a
+    file gone from its name whose temporary name Rename said out loud and
+    which holds that document."""
+    renaming.update_rows(rows, result)
+    store = _Store(records)
+    renaming.update_progress(store, result)
+    stranded = getattr(result, "stranded", {})
+    text = "\n".join(said)
+    named = [(r[PATH], r["own"]) for r in rows] + \
+            [(rec["pdf_path"], rec["own"]) for rec in records.values()]
+    for path, own in named:
+        path = Path(path)
+        if path.exists():
+            assert path.read_bytes() == b"%PDF-1.7 " + own.encode(), \
+                "%s names %s, which holds another file" % (own, path.name)
+            continue
+        aside = [Path(a) for a, old in stranded.items() if Path(old) == path]
+        assert aside, "%s names %s, which is gone, and nothing says where" % (own, path.name)
+        assert aside[0].read_bytes() == b"%PDF-1.7 " + own.encode()
+        assert aside[0].name in text, text
+    for path in folder.glob("*.renaming*"):
+        assert str(path) in stranded and path.name in text, \
+            "%s was left aside unsaid" % path.name
+    assert sorted(_holding(folder).values()) == sorted(r["own"] for r in rows), \
+        "nothing lost and nothing doubled"
+
+
+@pytest.mark.parametrize("k", range(1, 9))
+@pytest.mark.parametrize("wants", [SWAP, RING_OF_THREE, CHAIN_OF_THREE],
+                         ids=["swap", "ring_of_three", "chain_of_three"])
+def test_a_rename_refused_partway_leaves_every_ledger_naming_its_own_file(
+        tmp_path, _held_from, wants, k):
+    """A and B swap names. A's staged file reached B's old name, then B's
+    staged file was refused its rename to A's old name, and with A there
+    it could not go back either, so it stayed under "B.pdf.renaming".
+    Rename said one file was left alone while B's row and record still
+    named B.pdf, which now held A's document. A ring a rename was refused
+    in now goes back as it was, and a file that cannot is said by name."""
+    rows = _wanting(tmp_path, wants)
+    for r in rows:
+        r["own"] = r[NAME]
+    records = {"key " + r[NAME]: {"pdf_path": r[PATH], "pdf_filename": r[NAME],
+                                  "own": r[NAME]} for r in rows}
+    changes = _plan_wanted(tmp_path, rows)
+    _held_from(k)
+    said = []
+    result = renaming.apply(changes, say=said.append)
+    _follows_its_own(tmp_path, rows, records, result, said)
+
+
+def test_a_swap_whose_staged_file_is_refused_goes_back_as_it_was(tmp_path, _held_from,
+                                                                monkeypatch):
+    """The swap's last rename, the staged file's into its new name, is
+    refused. The other file goes back to its own name, so neither row
+    names the other's document, and the staged file is said by name since
+    it cannot go home while it is held."""
+    rows = _wanting(tmp_path, SWAP)
+    changes = _plan_wanted(tmp_path, rows)
+    state = _held_from(10 ** 6)
+
+    real = Path.rename
+
+    def refuse_a_staged_one(self, target):
+        if self.name.endswith(".renaming"):
+            state["held"].add(str(self).lower())
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", refuse_a_staged_one)
+    said = []
+    result = renaming.apply(changes, say=said.append)
+    assert _holding(tmp_path) == {"B.pdf": "B.pdf", "A.pdf.renaming": "A.pdf"}
+    assert (result.renamed, result.failed) == (0, 2)
+    assert result.stranded == {str(tmp_path / "A.pdf.renaming"): str(tmp_path / "A.pdf")}
+    assert not result.mapping
+    text = "\n".join(said)
+    assert "A.pdf.renaming" in text and "by hand" in text, text
+
+
+def test_a_swap_that_cannot_go_back_has_each_ledger_follow_its_own_file(
+        tmp_path, _held_from, monkeypatch):
+    """The staged file is refused its new name, and then the other file is
+    refused its way back. That one keeps its new name, A's old one, so A's
+    rows and record follow A to its temporary name rather than name the
+    other file."""
+    rows = _wanting(tmp_path, SWAP)
+    for r in rows:
+        r["own"] = r[NAME]
+    records = {"key " + r[NAME]: {"pdf_path": r[PATH], "pdf_filename": r[NAME],
+                                  "own": r[NAME]} for r in rows}
+    changes = _plan_wanted(tmp_path, rows)
+    state = _held_from(10 ** 6)
+    real = Path.rename
+
+    def refuse_both(self, target):
+        if self.name.endswith(".renaming"):
+            state["held"].update({str(self).lower(), str(tmp_path / "A.pdf").lower()})
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", refuse_both)
+    said = []
+    result = renaming.apply(changes, say=said.append)
+    assert _holding(tmp_path) == {"A.pdf": "B.pdf", "A.pdf.renaming": "A.pdf"}
+    assert (result.renamed, result.failed) == (1, 1)
+    assert result.mapping[str(tmp_path / "A.pdf")] == str(tmp_path / "A.pdf.renaming")
+    _follows_its_own(tmp_path, rows, records, result, said)
+
+
+def test_rename_says_which_file_it_left_under_a_temporary_name(tmp_path, _held_from,
+                                                               monkeypatch):
+    """Rename ended saying one file could not be renamed and was left
+    alone, while that file sat under a name ending ".renaming"."""
+    folder = tmp_path / "Statements"
+    folder.mkdir()
+    rows = []
+    for name, summary in (("Alpha", "Beta"), ("Beta", "Alpha")):
+        path = folder / ("2026-09-05 Testco %s.pdf" % name)
+        path.write_bytes(b"%PDF-1.7 " + name.encode())
+        rows.append({NAME: path.name, PATH: str(path), "Document Date": "2026-09-05",
+                     "Document Summary": summary, "Document Title": "t", "Notes": ""})
+    app = _App(folder, rows)
+    state = _held_from(10 ** 6)
+    real = Path.rename
+
+    def refuse_a_staged_one(self, target):
+        if self.name.endswith(".renaming"):
+            state["held"].add(str(self).lower())
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", refuse_a_staged_one)
+    said = []
+    result = renaming.run_for(app, apply_changes=True, say=said.append)
+    [aside] = result.stranded
+    text = "\n".join(said)
+    assert Path(aside).name in text and "by hand" in text, text
+    assert "left under a temporary name" in text, text
+    assert "left alone." not in text, text
+    for r in rows:
+        assert not Path(r[PATH]).exists() or Path(r[PATH]).read_bytes() == \
+            b"%PDF-1.7 " + r[NAME][len("2026-09-05 Testco "):-4].encode()
+
+
+@pytest.mark.parametrize("wants", [SWAP, RING_OF_THREE], ids=["swap", "ring_of_three"])
+def test_a_ring_whose_other_file_is_refused_is_left_as_it_was(tmp_path, _held_from, wants):
+    """B is held, so the ring cannot turn. The file put aside for it goes
+    back to its own name, and nothing is left under ".renaming"."""
+    rows = _wanting(tmp_path, wants)
+    changes = _plan_wanted(tmp_path, rows)
+    state = _held_from(10 ** 6)
+    state["held"].add(str(tmp_path / "B.pdf").lower())
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert _holding(tmp_path) == {old: old for old, _new in wants}
+    assert (result.renamed, result.failed, result.stranded) == (0, len(wants), {})
+    assert not result.mapping
+
+
+def test_a_file_held_a_moment_is_still_renamed(tmp_path, _held_from, monkeypatch):
+    """A scanner opening a file just renamed lets go of it a moment later,
+    so a refused rename is tried again before the ring goes back."""
+    rows = _wanting(tmp_path, SWAP)
+    changes = _plan_wanted(tmp_path, rows)
+    _held_from(10 ** 6)
+    real, refused = Path.rename, []
+
+    def briefly(self, target):
+        if self.name.endswith(".renaming") and len(refused) < 3:
+            refused.append(self.name)
+            raise PermissionError(32, "held by another process", str(self))
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", briefly)
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert _holding(tmp_path) == {"A.pdf": "B.pdf", "B.pdf": "A.pdf"}
+    assert (result.renamed, len(refused)) == (2, 3)
+
+
+def test_a_name_taken_while_a_ring_went_back_is_followed_by_the_ledgers(
+        tmp_path, _held_from, monkeypatch):
+    """The swap went back, and before the staged file could follow, another
+    program saved a file under its name. Nothing was renamed, so the index
+    and the run state were left naming that file for it."""
+    folder = tmp_path / "Statements"
+    folder.mkdir()
+    rows = []
+    for name, summary in (("Alpha", "Beta"), ("Beta", "Alpha")):
+        path = folder / ("2026-09-05 Testco %s.pdf" % name)
+        path.write_bytes(b"%PDF-1.7 " + name.encode())
+        rows.append({NAME: path.name, PATH: str(path), "Document Date": "2026-09-05",
+                     "Document Summary": summary, "Document Title": "t", "Notes": ""})
+    alpha = Path(rows[0][PATH])
+    records = {"key": {"pdf_path": str(alpha), "pdf_filename": alpha.name}}
+    app = _App(folder, rows, progress=records)
+    state = _held_from(10 ** 6)
+    real, moves_of_alpha = Path.rename, []
+
+    def newcomer(self, target):
+        if self.name.endswith(".renaming"):
+            state["held"].add(str(self).lower())
+        out = real(self, target)
+        if Path(self) == alpha:
+            moves_of_alpha.append(target)
+            if len(moves_of_alpha) == 2:      # Beta given its name back
+                alpha.write_bytes(b"%PDF-1.7 newcomer")
+        return out
+    monkeypatch.setattr(Path, "rename", newcomer)
+    said = []
+    result = renaming.run_for(app, apply_changes=True, say=said.append)
+    assert result.renamed == 0
+    assert alpha.read_bytes() == b"%PDF-1.7 newcomer"
+    for named in (rows[0][PATH], records["key"]["pdf_path"]):
+        assert Path(named).read_bytes() == b"%PDF-1.7 Alpha", named
+    assert Path(rows[1][PATH]).read_bytes() == b"%PDF-1.7 Beta"
+    text = "\n".join(said)
+    assert "another file has taken its name" in text, text
+
+
+def test_a_file_that_comes_while_a_rename_waits_is_not_written_over(
+        tmp_path, monkeypatch):
+    """A rename refused once waits and tries again. Where a rename takes
+    the place of a file already there, as on Linux and macOS, a file saved
+    under the new name meanwhile would have been replaced."""
+    monkeypatch.setattr(renaming, "_RETRY_PAUSE", 0)
+    rows = _wanting(tmp_path, (("A.pdf", "B.pdf"),))
+    changes = _plan_wanted(tmp_path, rows)
+    real, tries = Path.rename, []
+
+    def refused_then_replacing(self, target):
+        tries.append(target)
+        if len(tries) == 1:
+            Path(target).write_bytes(b"%PDF-1.7 newcomer")
+            raise PermissionError(32, "held by another process", str(self))
+        if Path(target).exists():           # what a rename does on Linux
+            os.replace(self, target)
+            return
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", refused_then_replacing)
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert _holding(tmp_path) == {"A.pdf": "A.pdf", "B.pdf": "newcomer"}
+    assert result.failed == 1
+
+
+def test_a_chain_whose_free_end_is_refused_leaves_the_rest_where_they_are(
+        tmp_path, _held_from):
+    """B could not move, so A's new name never came free. A used to take
+    "B (2).pdf", a name the preview never offered."""
+    rows = _wanting(tmp_path, CHAIN_OF_TWO)
+    changes = _plan_wanted(tmp_path, rows)
+    state = _held_from(10 ** 6)
+    state["held"].add(str(tmp_path / "B.pdf").lower())
+    said = []
+    result = renaming.apply(changes, say=said.append)
+    assert _holding(tmp_path) == {"A.pdf": "A.pdf", "B.pdf": "B.pdf"}
+    assert (result.renamed, result.failed) == (0, 2)
+    assert "B.pdf" in "\n".join(said)
 
 
 def test_a_file_that_is_not_in_the_ledger_is_never_touched(tmp_path):
@@ -814,3 +1214,288 @@ def test_every_file_of_one_order_takes_the_orders_record(tmp_path, monkeypatch):
     renaming.run_for(app, apply_changes=True, say=lambda *a: None)
     assert sorted(p.name for p in tmp_path.glob("*.pdf")) == [
         "2026-09-05 Testco A-77 (2).pdf", "2026-09-05 Testco A-77.pdf"]
+
+
+# -- a name too long for its folder is cut the way a download cuts it ----------
+
+# Longer than the 30 characters these tests leave for a name.
+LONG = "2026-09-12 Testco Billing Statement for the account ending 2222.pdf"
+
+
+def room_for(folder, chars):
+    """The max_path_length that leaves `chars` characters for a name in
+    `folder`, however deep the temporary folder is."""
+    return len(str(folder)) + 1 + chars
+
+
+def test_a_free_name_too_long_for_its_folder_is_cut_as_a_download_cuts_it(tmp_path):
+    """Nothing held the name, so the plan took it whole, a path longer than
+    the limit a download of the same document keeps to."""
+    limit = room_for(tmp_path, 30)
+    r = row(tmp_path, "2026-09-12 Testco Statement.pdf")
+    [change] = renaming.plan([r], lambda r: LONG, folders=[tmp_path],
+                             max_path_length=limit)
+    assert change.renaming, change.reason
+    assert len(str(change.new_path)) <= limit, change.new_name
+    assert change.new_name == unique_path(tmp_path, LONG, limit).name
+
+
+def test_a_file_whose_download_cut_its_name_to_fit_is_already_named_right(tmp_path):
+    """Its download cut the name to fit, and the preview offered to give it
+    the whole name back, a path longer than the limit the download kept to."""
+    limit = room_for(tmp_path, 30)
+    r = row(tmp_path, unique_path(tmp_path, LONG, limit).name)
+    [change] = renaming.plan([r], lambda r: LONG, folders=[tmp_path],
+                             max_path_length=limit)
+    assert not change.renaming, (change.new_name, limit)
+    assert change.reason == "already named that"
+
+
+def test_a_name_found_again_at_apply_keeps_to_the_limit_the_plan_kept_to(tmp_path):
+    """A file took the planned name between the plan and apply, and the
+    name apply found instead kept to 240 whatever the config said."""
+    limit = room_for(tmp_path, 30)
+    r = row(tmp_path, "2026-09-12 Testco Statement.pdf")
+    changes = renaming.plan([r], lambda r: LONG, folders=[tmp_path],
+                            max_path_length=limit)
+    planned = changes[0].new_path
+    planned.write_bytes(b"%PDF-1.7 a file that came meanwhile")
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert result.renamed == 1
+    [moved] = result.mapping.values()
+    assert len(moved) <= limit, moved
+    assert Path(moved).read_bytes() == b"%PDF-1.7 a file"
+    assert planned.read_bytes() == b"%PDF-1.7 a file that came meanwhile"
+
+
+def test_a_name_the_plan_gave_out_is_told_apart_as_a_download_would_tell_it(tmp_path):
+    """A download into a folder holding the first of two files wanting one
+    name gives the second its order number. The plan gave the second a
+    " (2)" instead, and the next Rename offered to move it again."""
+    a = row(tmp_path, "first.pdf", order="A1")
+    b = row(tmp_path, "second.pdf", order="A2")
+
+    def rename():
+        return renaming.plan([a, b], lambda r: "2026-09-23 Testco Receipt.pdf",
+                             folders=[tmp_path], distinguisher=lambda r: r["order"])
+
+    changes = rename()
+    assert [c.new_name for c in changes] == ["2026-09-23 Testco Receipt.pdf",
+                                             "2026-09-23 Testco Receipt A2.pdf"]
+    renaming.update_rows([a, b], renaming.apply(changes, say=lambda *a: None))
+    assert not [c.new_name for c in rename() if c.renaming], "it took a second Rename to settle"
+
+
+# plan() for every file in a folder, all wanting one name, printed as JSON.
+PLAN_IN_A_PROCESS_OF_ITS_OWN = """
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from paperpull_core import renaming
+folder, wanted, limit = Path(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+rows = [{"PDF Full Path": str(p), "PDF Filename": p.name, "order": p.stem}
+        for p in sorted(folder.iterdir())]
+told_apart = (lambda r: r["order"]) if sys.argv[5] == "orders" else None
+changes = renaming.plan(rows, lambda r: wanted, folders=[folder],
+                        distinguisher=told_apart, max_path_length=limit)
+print(json.dumps([[c.reason, str(c.new_path or "")] for c in changes]))
+"""
+
+
+@pytest.mark.parametrize("told_apart", ["orders", "nothing"])
+def test_three_files_wanting_one_name_cut_to_fit_are_each_given_a_name(tmp_path, told_apart):
+    """The second file wanting the name took it cut to fit. The third
+    looked for a free name by adding " (2)", " (3)" and on, which cutting
+    the name to fit took off again every time, so plan() never returned and
+    neither did Rename or the panel's Apply renames, with order numbers to
+    tell the files apart or without. plan() runs in a process of its own
+    here, ended after a minute, so a plan that never returns fails this
+    test rather than holding the suite until its time limit."""
+    folder = tmp_path / "out"
+    folder.mkdir()
+    for name in ("a.pdf", "b.pdf", "c.pdf"):
+        (folder / name).write_bytes(b"%PDF-1.7 a file")
+    limit = room_for(folder, 30)
+    core = str(Path(__file__).resolve().parents[1])
+    try:
+        done = subprocess.run([sys.executable, "-c", PLAN_IN_A_PROCESS_OF_ITS_OWN, core,
+                               str(folder), LONG, str(limit), told_apart],
+                              capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pytest.fail("plan() had not returned after a minute")
+    assert done.returncode == 0, done.stderr
+    planned = json.loads(done.stdout)
+    assert [reason for reason, _path in planned] == ["", "", ""], planned
+    targets = [path for _reason, path in planned]
+    assert len({t.lower() for t in targets}) == 3, "each file has a name of its own"
+    assert all(len(t) <= limit for t in targets), (limit, targets)
+# -- what a download told a second file of one name apart by --------------------
+
+def test_a_record_tells_its_file_apart_the_way_a_download_does():
+    """The order number for a purchase, the last six of the provider's id
+    for a document, as every app's download hands unique_path, and nothing
+    for a record that has neither."""
+    assert renaming.told_apart_by({"order_number": "112-77", "document_id": "X"}) == "112-77"
+    assert renaming.told_apart_by({"document_id": "a1b2c3d4e5f6"}) == "d4e5f6"
+    assert renaming.told_apart_by({"document_id": "D9"}) == "D9"
+    assert renaming.told_apart_by({"title": "Monthly Statement"}) == ""
+    assert renaming.told_apart_by({}) == renaming.told_apart_by(None) == ""
+
+
+def _statement(tmp_path, name, body, **rec):
+    """A statement of 2026-09-12, its file, its index row, which carries no
+    id, and the record its download left."""
+    f = tmp_path / name
+    f.write_bytes(b"%PDF- " + body)
+    title = "Monthly Statement - September 12, 2026"
+    row = {"PDF Filename": name, "PDF Full Path": str(f), "Document Date": "2026-09-12",
+           "Document Summary": "Monthly Statement", "Document Title": title, "Notes": ""}
+    rec.update({"date": "2026-09-12", "title": title, "summary": "Monthly Statement",
+                "pdf_path": str(f), "pdf_filename": name})
+    return row, rec
+
+
+def test_a_second_statement_told_apart_by_its_id_is_already_named(tmp_path):
+    """Its download saved it with the last six of the provider's id, since
+    the first held the name. Its row carries no id, so Rename told it apart
+    by nothing and offered it " (2)" under the pattern it was saved by."""
+    row1, rec1 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement.pdf", b"1111",
+                            document_id="DOC-1111")
+    row2, rec2 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement C-2222.pdf",
+                            b"2222", document_id="DOC-2222")
+    app = _App(tmp_path, [row1, row2], progress={"id:DOC-1111": rec1, "id:DOC-2222": rec2})
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append)
+    assert "already named" in " ".join(said) and "(2)" not in " ".join(said), said
+
+
+def test_a_statement_saved_with_a_number_before_its_id_was_used_takes_its_id(tmp_path):
+    """A download from before the provider's id was used gave the second
+    statement " (2)". Rename gives it the name a download gives it today,
+    with the end of its id, and its record follows it."""
+    row1, rec1 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement.pdf", b"1111",
+                            document_id="DOC-1111")
+    row2, rec2 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement (2).pdf", b"2222",
+                            document_id="DOC-2222")
+    app = _App(tmp_path, [row1, row2], progress={"id:DOC-1111": rec1, "id:DOC-2222": rec2})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    taken = tmp_path / "2026-09-12 Testco Monthly Statement C-2222.pdf"
+    assert sorted(p.name for p in tmp_path.glob("*.pdf")) == [
+        taken.name, "2026-09-12 Testco Monthly Statement.pdf"]
+    assert taken.read_bytes().endswith(b"2222")
+    assert app.progress.data["id:DOC-2222"]["pdf_path"] == str(taken)
+
+
+def test_an_apps_own_rule_tells_its_files_apart(tmp_path):
+    """PayPal tells two business statements ending on one day apart by the
+    first day each covers, a rule of its own that it hands Rename as well.
+    Without it, the second is told apart by nothing."""
+    row1, rec1 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement.pdf", b"0801",
+                            first="2026-08-01")
+    row2, rec2 = _statement(tmp_path, "2026-09-12 Testco Monthly Statement 2026-08-15.pdf",
+                            b"0815", first="2026-08-15")
+    app = _App(tmp_path, [row1, row2], progress={"one": rec1, "two": rec2})
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append,
+                     told_apart=lambda rec: rec.get("first", ""))
+    assert "already named" in " ".join(said), said
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append)
+    assert "Monthly Statement (2).pdf" in " ".join(said), said
+
+
+# -- an old copy Download again left, which no record names --------------------
+
+STATEMENT = "2026-09-12 Testco Monthly Statement"
+
+
+def _beside(tmp_path, old_names, current, others=(), first=STATEMENT + ".pdf"):
+    """The first statement, the files `old_names` no record names, and the
+    second statement's copy `current`, which its record names. `others` are
+    more records of that day, naming no file."""
+    row1, rec1 = _statement(tmp_path, first, b"1111", document_id="DOC1111")
+    rows = [row1] + [_statement(tmp_path, name, b"old %d" % i)[0]
+                     for i, name in enumerate(old_names)]
+    row2, rec2 = _statement(tmp_path, current, b"2222", document_id="DOC2222")
+    progress = {"id:DOC1111": rec1, "id:DOC2222": rec2}
+    for i, (title, document_id) in enumerate(others):
+        progress["id:other%d" % i] = {"date": "2026-09-12", "title": title,
+                                      "summary": "Monthly Statement",
+                                      "document_id": document_id}
+    return rows + [row2], progress
+
+
+def _preview(app):
+    said = []
+    renaming.run_for(app, apply_changes=False, say=said.append)
+    return " ".join(said)
+
+
+def test_every_old_copy_download_again_left_keeps_what_told_it_apart(tmp_path):
+    """Two Download agains left "... OC2222.pdf" and "... OC2222 (2).pdf",
+    and the record names the third. No record names the old two, so they
+    were offered " (2)" and " (3)" under the pattern they were saved by."""
+    rows, progress = _beside(tmp_path, [STATEMENT + " OC2222.pdf",
+                                        STATEMENT + " OC2222 (2).pdf"],
+                             STATEMENT + " OC2222 (3).pdf")
+    said = _preview(_App(tmp_path, rows, progress=progress))
+    assert "already named" in said, said
+
+
+def test_an_old_copy_keeps_the_ending_its_download_wrote_after_a_later_listing(tmp_path):
+    """Capital One, Schwab and Vanguard write an id a later listing gives
+    over the one in discovery. The ending is read from the record as its
+    download wrote it down."""
+    rows, progress = _beside(tmp_path, [STATEMENT + " OC2222.pdf"],
+                             STATEMENT + " OC2222 (2).pdf")
+    app = _App(tmp_path, rows, progress=progress,
+               discovery={"id:DOC2222": dict(progress["id:DOC2222"], document_id="DOC9999",
+                                             pdf_path="", pdf_filename="")})
+    said = _preview(app)
+    assert "already named" in said, said
+
+
+@pytest.mark.parametrize("old, others", [
+    pytest.param(STATEMENT + " NOC2222.pdf", (), id="an ending running into the name"),
+    pytest.param(STATEMENT + " OC3333.pdf",
+                 [("Statement - September 12, 2026", "DOC3333")],
+                 id="the ending of a document of another title"),
+    pytest.param(STATEMENT + " B 2222.pdf",
+                 [("Monthly Statement - September 12, 2026", "B 2222"),
+                  ("Monthly Statement - September 12, 2026", "2222")],
+                 id="two endings of its date and title"),
+])
+def test_an_ending_no_one_document_of_its_date_and_title_gives_is_not_kept(tmp_path, old,
+                                                                            others):
+    """Only an ending that one document of the row's date and title would
+    give is kept, and only whole. Anything else is told apart by " (2)", as
+    before."""
+    rows, progress = _beside(tmp_path, [old], STATEMENT + " OC2222.pdf", others)
+    said = _preview(_App(tmp_path, rows, progress=progress))
+    assert "1 file(s) would be renamed" in said, said
+    assert "%s -> %s (2).pdf" % (old, STATEMENT) in " ".join(said.split()), said
+
+
+@pytest.mark.parametrize("ends, room", [
+    pytest.param([" OC2222"], 3, id="the ending cut"),
+    pytest.param([" OC2222", " OC2222 (2)"], 7, id="the count after the ending cut"),
+])
+def test_an_old_copy_whose_ending_would_be_cut_to_fit_settles_after_one_rename(tmp_path, ends,
+                                                                                room):
+    """The new name fits the folder's limit, and with the end of the id after
+    it, or with a count after that, it does not. The old copy took the
+    ending cut to "OC", the next Rename no longer read that as its ending
+    and moved it to " (3)", and the one after moved the copy its record
+    names into the name it left (the review of this change)."""
+    storage.set_filename_owner("")
+    plain = STATEMENT.replace(" Testco", "")
+    old = [plain + end + ".pdf" for end in ends]
+    rows, progress = _beside(tmp_path, old, "%s OC2222 (%d).pdf" % (plain, len(old) + 1),
+                             first=plain + ".pdf")
+    app = _App(tmp_path, rows, progress=progress)
+    app.config["max_path_length"] = len(str(tmp_path / (STATEMENT + ".pdf"))) + room
+    bodies = sorted(p.read_bytes() for p in tmp_path.glob("*.pdf"))
+    renamed = [renaming.run_for(app, apply_changes=True, say=lambda *a: None).renamed
+               for _run in range(4)]
+    assert renamed == [len(rows), 0, 0, 0], renamed
+    assert sorted(p.read_bytes() for p in tmp_path.glob("*.pdf")) == bodies

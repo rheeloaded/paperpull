@@ -45,12 +45,14 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from .models import State
-from .storage import build_pdf_filename, title_case, unique_path
+from .storage import (build_pdf_filename, fitted_name, sanitize_component, title_case,
+                      unique_path)
 
 
 @dataclass
@@ -62,6 +64,9 @@ class Change:
     new_name: str
     reason: str = ""
     new_path: Optional[Path] = None
+    # The limit new_path was cut to fit, which a name found again at apply
+    # keeps to as well.
+    max_path_length: int = 240
 
     @property
     def renaming(self) -> bool:
@@ -80,6 +85,7 @@ class Result:
     mapping: dict = field(default_factory=dict)   # old path str -> new path str
     names: dict = field(default_factory=dict)     # old name -> new name
     spellings: dict = field(default_factory=dict) # another spelling -> old path str
+    stranded: dict = field(default_factory=dict)  # aside path str -> old path str
 
 
 # Why a row naming something on disk is left out of a rename, when that
@@ -176,10 +182,15 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
     Without it a file called "... Receipt (2)" is renamed to "(3)", which
     is the same complaint one number worse, since the name it wants is
     held by the file it collided with in the first place.
+
+    `max_path_length` is the app's own limit. Every name is cut to fit it
+    in the file's folder the way a download cuts it, so a file whose
+    download cut its name is named right already, and no rename gives a
+    file a longer path than its download would have.
     """
     inside = _real(folders)
     changes: List[Change] = []
-    wanted = []                       # (row, old_path, desired name)
+    wanted = []                       # (slot, row, old_path, name cut to fit, whole name)
 
     for row in rows:
         raw = (row.get(path_key) or "").strip()
@@ -200,6 +211,18 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
             changes.append(Change(row, old_path, old_name,
                                   reason="nothing to name it from"))
             continue
+        # The name cut to fit max_path_length in the file's folder, as a
+        # download cuts it. Taken whole, a file whose download had cut its
+        # name was offered the whole name back, a path longer than the
+        # limit the download kept to.
+        whole = new_name
+        try:
+            new_name = fitted_name(old_path.parent, whole, max_path_length)
+        except ValueError:
+            changes.append(Change(row, old_path, old_name,
+                                  reason="its folder is too deep for any name to fit "
+                                         "max_path_length"))
+            continue
         if new_name == old_path.name:
             changes.append(Change(row, old_path, new_name, reason="already named that"))
             continue
@@ -209,7 +232,7 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
             continue
         # A placeholder, so the plan reads back in the ledger's own order
         # rather than with everything that could not be renamed first.
-        wanted.append((len(changes), row, old_path, new_name))
+        wanted.append((len(changes), row, old_path, new_name, whole))
         changes.append(None)
 
     # A name is free if nothing holds it, and also if the only thing
@@ -217,13 +240,14 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
     # that want each other's names is the case that proves it, and without
     # this pass each would be pushed to a " (2)" by a collision that was
     # about to stop existing. Freeing them is apply's job.
-    leaving = {str(p).lower() for _i, _r, p, _n in wanted}
-    claimed = set()
+    leaving = {str(p).lower() for _i, _r, p, _n, _w in wanted}
+    claimed = {}                      # a folder -> the names given out in it
 
-    for slot, row, old_path, new_name in wanted:
+    for slot, row, old_path, new_name, whole in wanted:
         target = old_path.parent / new_name
-        key = str(target).lower()
-        free = (not target.exists() or key in leaving) and key not in claimed
+        given = claimed.setdefault(str(old_path.parent).lower(), set())
+        free = ((not target.exists() or str(target).lower() in leaving)
+                and new_name.lower() not in given)
         if not free:
             token = ""
             if distinguisher is not None:
@@ -231,23 +255,25 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
                     token = distinguisher(row) or ""
                 except Exception:
                     token = ""
-            target = unique_path(old_path.parent, new_name, max_path_length,
-                                 distinguisher=token, ignoring=old_path.name)
+            # The whole name, as a download hands it over, and the names this
+            # plan gave out held as files a download found there would hold
+            # them, so a file wanting one is told apart by its order number
+            # first, as a download tells it. They used to be held only after
+            # unique_path had answered, and a " (2)" put on its answer was
+            # cut off again whenever the name had to be cut to fit, so
+            # plan() never returned.
+            target = unique_path(old_path.parent, whole, max_path_length,
+                                 distinguisher=token, ignoring=old_path.name, held=given)
             # Told apart already, by the same order number it would be told
             # apart by now. It used to be pushed on to " (2)" because its own
             # name counted as taken, and five real files were asked to move.
-            if target.name.lower() == old_path.name.lower() and str(target).lower() not in claimed:
-                claimed.add(str(target).lower())
+            if target.name.lower() == old_path.name.lower():
+                given.add(target.name.lower())
                 changes[slot] = Change(row, old_path, target.name, reason="already named that")
                 continue
-            n = 1
-            stem, ext = os.path.splitext(target.name)
-            while str(target).lower() in claimed:
-                n += 1
-                target = unique_path(old_path.parent, "%s (%d)%s" % (stem, n, ext),
-                                     max_path_length)
-        claimed.add(str(target).lower())
-        changes[slot] = Change(row, old_path, target.name, new_path=target)
+        given.add(target.name.lower())
+        changes[slot] = Change(row, old_path, target.name, new_path=target,
+                               max_path_length=max_path_length)
     return changes
 
 
@@ -272,57 +298,229 @@ def describe(changes: Iterable[Change], say=print, limit: int = 0) -> None:
             "folders, so they are left alone." % left)
 
 
+# A rename refused because another program has the file open, as a virus
+# scanner or a sync client may open a file just renamed, is tried this many
+# times, this many seconds apart.
+_TRIES = 5
+_RETRY_PAUSE = 0.4
+
+
 def apply(changes: Iterable[Change], say=print) -> Result:
     """Do the renames, and say what happened to each.
 
-    Two files can want each other's names, which a straight rename would
-    resolve by refusing or by overwriting depending on the platform. Any
-    file whose target is another file in this same plan goes to a
-    temporary name first, so the whole set lands whatever order it is in.
+    A file wanting the name of another file in this same plan waits for
+    that one to move first, so each chain of names goes from its free end
+    and every file lands on the name the preview gave it. A rename onto a
+    name still in use would refuse or overwrite depending on the platform,
+    and a file meeting one took a name beside it the preview never gave.
+    When a file of a chain cannot move, those waiting on its name keep
+    their own.
+
+    Files wanting each other's names in a ring, as two swapping names do,
+    have no free end, so one of them goes to a temporary name first. When
+    a rename in a ring is refused, the ring goes back as it was, since a
+    file left partway would sit under a name the ledger gives another
+    file. A file that cannot leave its temporary name is said by name and
+    kept in Result.stranded, and when its own name holds another file by
+    then, Result.mapping gives it the temporary name, so no ledger names
+    the other file for it.
     """
     changes = [c for c in changes if c.renaming and c.new_path]
     result = Result()
-    sources = {str(c.old_path).lower() for c in changes}
-    staged = []
-
+    by_old = {}                       # a file (_file_key) -> its change
     for c in changes:
-        if str(c.new_path).lower() in sources:
-            tmp = c.old_path.with_name(c.old_path.name + ".renaming")
-            n = 0
-            while tmp.exists():
-                n += 1
-                tmp = c.old_path.with_name("%s.renaming%d" % (c.old_path.name, n))
-            try:
-                os.replace(c.old_path, tmp)
-                staged.append((c, tmp))
-                continue
-            except OSError as e:
-                say("  could not move %s (%s)" % (c.old_name, e.__class__.__name__))
-                result.failed += 1
-                continue
-        staged.append((c, c.old_path))
+        # One rename for one file. A second change for a file already in
+        # the plan would move whatever took the file's name after it left.
+        by_old.setdefault(_file_key(c.old_path), c)
+    todo = list(by_old.values())
+    # The file each new name is held by, asked of the disk before anything
+    # moves, so a name spelled in another case is the file's own wherever
+    # the folder ignores case, a share or a USB drive on Linux included.
+    holds = {id(c): by_old.get(_file_key(c.new_path)) if c.new_path.exists() else None
+             for c in todo}
 
-    for c, source in staged:
-        try:
-            # Never over another file, including one that appeared while
-            # this was running.
-            if c.new_path.exists():
-                c.new_path = unique_path(c.new_path.parent, c.new_path.name)
-            source.rename(c.new_path)
-        except OSError as e:
-            say("  could not rename %s (%s)" % (c.old_name, e.__class__.__name__))
-            result.failed += 1
-            try:                                     # put a staged file back
-                if source != c.old_path and not c.old_path.exists():
-                    source.rename(c.old_path)
-            except OSError:
-                pass
-            continue
-        result.renamed += 1
-        result.mapping[str(c.old_path)] = str(c.new_path)
-        result.names[c.old_path.name] = c.new_path.name
-    result.skipped = len(list(changes)) - result.renamed - result.failed
+    def holder(c: Change) -> Optional[Change]:
+        """The change whose file has c's new name now."""
+        return holds[id(c)]
+
+    moved, done = set(), set()        # ids of changes
+    for first in todo:
+        # Follow the names from this file to the end of its chain, or round
+        # to a file already met, which makes a ring.
+        path, at = [], {}
+        c = first
+        while c is not None and id(c) not in done and id(c) not in at:
+            at[id(c)] = len(path)
+            path.append(c)
+            c = holder(c)
+        if c is not None and id(c) in at:
+            ring, path = path[at[id(c)]:], path[:at[id(c)]]
+            _rename_ring(ring, moved, result, say)
+            done.update(id(r) for r in ring)
+        for c in reversed(path):      # the free end first
+            _rename_one(c, holder(c), moved, result, say)
+            done.add(id(c))
+    result.skipped = len(changes) - result.renamed - result.failed
     return result
+
+
+def _rename_one(c: Change, holder: Optional[Change], moved: set, result: Result,
+                say) -> None:
+    """One file of a chain, once the file holding its new name has moved."""
+    if holder is not None and id(holder) not in moved:
+        say("  could not rename %s, since %s could not be renamed first"
+            % (c.old_name, holder.old_name))
+        result.failed += 1
+        return
+    error = _land(c, c.old_path)
+    if error:
+        say("  could not rename %s (%s)" % (c.old_name, error.__class__.__name__))
+        result.failed += 1
+        return
+    moved.add(id(c))
+    _renamed(c, result)
+
+
+def _rename_ring(ring: List[Change], moved: set, result: Result, say) -> None:
+    """Files wanting each other's names, ring[i] the name of ring[i + 1] and
+    the last ring[0]'s. ring[0] goes aside, then each file from the last
+    back takes the name the one after it has left, and ring[0] goes last.
+    A file renamed only in letter case is a ring of one."""
+    first = ring[0]
+    aside = first.old_path.with_name(first.old_path.name + ".renaming")
+    n = 0
+    while aside.exists():
+        n += 1
+        aside = first.old_path.with_name("%s.renaming%d" % (first.old_path.name, n))
+    try:
+        _retried_rename(first.old_path, aside)
+    except OSError as e:
+        say("  could not move %s (%s)" % (first.old_name, e.__class__.__name__))
+        _also_left(ring[1:], say)
+        result.failed += len(ring)
+        return
+
+    went = []
+    for c in list(reversed(ring[1:])) + [first]:
+        error = _land(c, aside if c is first else c.old_path)
+        if not error:
+            went.append(c)
+            continue
+        say("  could not rename %s (%s)" % (c.old_name, error.__class__.__name__))
+        # Back as it was, the last to move first, each into the name the
+        # one after it has just given back. One that cannot go back keeps
+        # its new name, and so do those that moved before it, whose old
+        # names it holds.
+        kept = []
+        for w in reversed(went):
+            if kept or not _put(w.new_path, w.old_path):
+                kept.append(w)
+        for w in kept:
+            say("  %s stays renamed to %s, since it could not be renamed back"
+                % (w.old_name, w.new_path.name))
+            moved.add(id(w))
+            _renamed(w, result)
+        result.failed += len(ring) - len(kept)
+        home = _put(aside, first.old_path)
+        _also_left([r for r in ring if r is not c and r not in kept
+                    and (home or r is not first)], say)
+        if home:
+            return
+        result.stranded[str(aside)] = str(first.old_path)
+        if first.old_path.exists():
+            # Its name holds another file now, so its rows and record
+            # follow it to where it is, never to that file.
+            result.mapping[str(first.old_path)] = str(aside)
+            result.names[first.old_name] = aside.name
+            if kept:
+                why = "%s could not give its name back" % ring[-1].old_name
+            else:
+                why = "another file has taken its name"
+            say("  %s is left as %s, since %s. The index and the run state name it "
+                "there." % (first.old_name, aside.name, why))
+        else:
+            say("  %s is left as %s, since it could not be renamed back. Rename it "
+                "to %s by hand." % (first.old_name, aside.name, first.old_name))
+        return
+    for c in went:
+        moved.add(id(c))
+        _renamed(c, result)
+
+
+def _also_left(left: List[Change], say) -> None:
+    """Say the other files of a ring were left with the names they had."""
+    if len(left) == 1:
+        say("  so %s, which trades names with it, keeps its name" % left[0].old_name)
+    elif left:
+        say("  so %s, which trade names with it, keep their names"
+            % _listed(c.old_name for c in left))
+
+
+def _land(c: Change, source: Path) -> Optional[Exception]:
+    """Rename source to c's new name, and None, or the error that refused it.
+    Never over another file, including one that appeared while this was
+    running, and never past the limit the plan kept to."""
+    try:
+        if c.new_path.exists():
+            c.new_path = unique_path(c.new_path.parent, c.new_path.name,
+                                     c.max_path_length)
+        _retried_rename(source, c.new_path)
+    except (OSError, ValueError) as e:
+        # ValueError when no name beside it fits the folder's limit.
+        return e
+    return None
+
+
+def _put(source: Path, target: Path) -> bool:
+    """Rename source back to target, unless something is there already."""
+    try:
+        if target.exists():
+            return False
+        _retried_rename(source, target)
+    except OSError:
+        return False
+    return True
+
+
+def _retried_rename(source: Path, target: Path) -> None:
+    for attempt in range(_TRIES):
+        # Looked for at every try, since a rename overwrites on Linux and
+        # macOS, and a file can come while this waits.
+        if target.exists():
+            raise FileExistsError(17, "a file has that name", str(target))
+        try:
+            source.rename(target)
+            return
+        except PermissionError:
+            if attempt == _TRIES - 1:
+                raise
+            time.sleep(_RETRY_PAUSE)
+
+
+def _file_key(path: Path):
+    """The file at path, the same for every spelling of its name, or for a
+    name nothing is under, the name as _same_file reads it."""
+    try:
+        stat = os.stat(path)
+        if stat.st_ino:
+            return (stat.st_dev, stat.st_ino)
+    except (OSError, ValueError):
+        pass
+    return _same_file(str(path)) or str(path)
+
+
+def _renamed(c: Change, result: Result) -> None:
+    result.renamed += 1
+    result.mapping[str(c.old_path)] = str(c.new_path)
+    result.names[c.old_path.name] = c.new_path.name
+
+
+def _listed(names) -> str:
+    """"a", "a and b", "a, b and c"."""
+    names = list(names)
+    if len(names) < 2:
+        return "".join(names)
+    return "%s and %s" % (", ".join(names[:-1]), names[-1])
 
 
 def update_rows(rows: Iterable[dict], result: Result, *,
@@ -440,7 +638,26 @@ def _first(row: dict, keys) -> str:
     return ""
 
 
-def run_for(app, apply_changes: bool = False, say=print) -> Result:
+def told_apart_by(record) -> str:
+    """What a download adds to a file's name when another file already has
+    that name (unique_path), read from the file's own record. A purchase is
+    told apart by its order number. A document is told apart by the last
+    six characters of the id its record keeps, which is what the document
+    apps' downloads hand unique_path. Wealthfront's hands it nothing and
+    keeps no id, so the two agree there too. A record with neither adds
+    nothing, and its file was told apart by " (2)". PayPal tells a business
+    statement apart by the first day it covers and hands run_for that rule
+    of its own."""
+    if not isinstance(record, dict):
+        return ""
+    number = str(record.get("order_number") or "").strip()
+    if number:
+        return number
+    return str(record.get("document_id") or "")[-6:]
+
+
+def run_for(app, apply_changes: bool = False, say=print,
+            told_apart: Optional[Callable[[dict], str]] = None) -> Result:
     """Rename this app's files to the names it would give them today.
 
     One function rather than forty-eight, because the ledger is the same
@@ -450,6 +667,10 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
 
     Nothing is downloaded, nothing moves folder, and the identity that
     stops a second download is not touched.
+
+    `told_apart` is handed a document's record and returns what the app's
+    download adds to its name when another file has that name, for an app
+    whose download does not tell its files apart by told_apart_by.
     """
     # Every app holds its index as self.index_csv, and a receipt app holds
     # the order history as self.order_csv as well. That is the same in all
@@ -499,9 +720,43 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
                                   _first(row, _TYPE_KEYS), part=_part_of(row),
                                   record=record)
 
+    rule = told_apart or told_apart_by
+    limit = app.config.get("max_path_length", 240)
+
+    def distinguisher(row):
+        # What the download told this file apart by when its name was
+        # taken, so a file it told apart keeps that, and a file wanting a
+        # name another file has is told apart as a download into that
+        # folder would tell it. A receipt's row carries its order number. A
+        # document's row carries no id, so the record naming the row's own
+        # file is asked, as it was written down when the file was saved,
+        # and a row whose record cannot be told adds only an ending its
+        # name already has (told_apart_in_its_name). The second of
+        # two statements of one day and one summary is saved as
+        # "... Monthly Statement OC2222.pdf", and asking the row alone
+        # offered to rename it to "... (2).pdf" under the very pattern it
+        # was saved by (#43, #49). Asking what a later listing wrote over
+        # the id offered it another id.
+        number = (row.get("Order or Receipt Number") or "").strip()
+        if number:
+            return number
+        record = current.record_for(row, saved=True)
+        if record:
+            return rule(record)
+        # Whose file it is cannot be told. Download again leaves the old copy
+        # of a document so, "... OC2222.pdf" beside the "... OC2222 (2).pdf"
+        # its record now names, and with nothing added it was offered
+        # "... (2).pdf" under the very pattern it was saved by.
+        token = current.told_apart_in_its_name(row, rule) if record == {} else ""
+        # Kept only where it fits whole, a count after it included. Cut to
+        # fit, it no longer read as that ending, so the next Rename moved the
+        # file again, and the one after that moved another into its name.
+        if token and not _fits_whole(row, build_name(row), token, limit):
+            return ""
+        return token
+
     changes = plan(primary_rows, build_name, folders=app.paths.filing_folders(),
-                   distinguisher=lambda row: _first(row, _ID_KEYS),
-                   max_path_length=app.config.get("max_path_length", 240))
+                   distinguisher=distinguisher, max_path_length=limit)
     describe(changes, say=say, limit=0 if apply_changes else 20)
 
     if not apply_changes:
@@ -516,19 +771,40 @@ def run_for(app, apply_changes: bool = False, say=print) -> Result:
                                   getattr(app.progress, "data", None) or {})
     result = apply(changes, say=say)
     result.spellings = spellings
-    if not result.renamed:
+    # A file left under a temporary name while its own name holds another
+    # file is in the mapping too, with nothing renamed perhaps.
+    if not result.mapping:
+        _say_stranded(result, say)
         return result
     numbered = _numbered(changes, result)
     for csv, rows in ledgers:
         if update_rows(rows, result, note="renamed", numbered=numbered):
             csv.rewrite(rows)
     update_progress(app.progress, result)
-    say("")
-    say("Renamed %d file(s). The index and the run state now point at them."
-        % result.renamed)
-    if result.failed:
-        say("%d could not be renamed and were left alone." % result.failed)
+    if result.renamed:
+        say("")
+        say("Renamed %d file(s). The index and the run state now point at them."
+            % result.renamed)
+    if result.renamed and result.failed - len(result.stranded):
+        say("%d could not be renamed and were left alone."
+            % (result.failed - len(result.stranded)))
+    _say_stranded(result, say)
     return result
+
+
+def _fits_whole(row: dict, name: str, token: str, max_path_length: int) -> bool:
+    """Whether `name` with `token` after it and a count after that, as
+    unique_path writes the second file told apart by one ending, fits
+    max_path_length whole in the folder of the row's file."""
+    folder = Path((row.get("PDF Full Path") or "").strip()).parent
+    stem, ext = os.path.splitext(name)
+    return len(str(folder)) + len("/%s %s (99)%s" % (stem, token, ext)) <= max_path_length
+
+
+def _say_stranded(result: Result, say) -> None:
+    if result.stranded:
+        say("%d could not be renamed and %s left under a temporary name, as said above."
+            % (len(result.stranded), "was" if len(result.stranded) == 1 else "were"))
 
 
 def _numbered(changes: Iterable[Change], result: Result) -> dict:
@@ -560,6 +836,10 @@ def _record_key(row: dict):
 
 
 _PART = re.compile(r"\((\d+) of (\d+)\)\.pdf$", re.IGNORECASE)
+
+# The " (2)" unique_path puts after a name, and after what told it apart, when
+# both are taken.
+_NUMBERED = re.compile(r" \(\d+\)$")
 
 
 def _part_of(row: dict):
@@ -628,6 +908,7 @@ class _Known:
 
     def __init__(self, app, rows=()):
         self.records = {}      # the app's key -> what it knows of that document
+        self._saved = {}       # the app's key -> what its records naming a file said
         self._by_file = {}     # a file -> each key whose records name it -> their spellings
         self._by_key = {}      # a row key -> the keys whose records carry it
         self._keys = {}        # the app's key -> the row keys its records carry
@@ -651,6 +932,15 @@ class _Known:
                     # made the same way on every run.
                     self._by_file.setdefault(where, {}).setdefault(name, set()).add(raw)
                     self._named.add(name)
+                    # What was written down when the file was saved, from
+                    # progress first. A later listing refreshes discovery,
+                    # and Capital One, Schwab and Vanguard write a provider's
+                    # id there over the one their download told the file
+                    # apart by.
+                    saved = self._saved.setdefault(name, {})
+                    for k, v in rec.items():
+                        if v not in (None, "") and k not in saved:
+                            saved[k] = v
                 for key in _keys_of_record(rec):
                     self._by_key.setdefault(key, {})[name] = True
                     self._keys.setdefault(name, set()).add(key)
@@ -668,9 +958,12 @@ class _Known:
             self._files[raw] = _same_file(raw)
         return self._files[raw]
 
-    def record_for(self, row: dict):
+    def record_for(self, row: dict, saved: bool = False):
         """The record of the document this row is, {} when that cannot be
-        told, and None when whose file this is cannot be told either."""
+        told, and None when whose file this is cannot be told either. With
+        `saved`, a record that names a file is given as the stores naming
+        that file wrote it down, progress first, without what a later
+        listing has written into discovery since."""
         key = _record_key(row)
         raw = (row.get("PDF Full Path") or "").strip()
         where = self._file(raw)
@@ -692,7 +985,7 @@ class _Known:
             # purchase and the later one's record is gone.
             if key[0] == "order" and key not in self._keys.get(named[0], ()):
                 return None
-            return self.records[named[0]]
+            return self._view(named[0], saved)
         # An order number names one purchase, whichever of its files a row
         # is. A date and a title name a document only when one document has
         # them and no record of that date and title names a file. A record
@@ -703,7 +996,37 @@ class _Known:
         found = list(self._by_key.get(key, ()))
         if key[0] != "order" and any(n in self._named for n in found):
             return {}
-        return self.records[found[0]] if len(found) == 1 else {}
+        return self._view(found[0], saved) if len(found) == 1 else {}
+
+    def told_apart_in_its_name(self, row: dict, rule: Callable[[dict], str]) -> str:
+        """What the file of a row whose record cannot be told was told apart
+        by, when its name already says so, and "" otherwise.
+
+        Each document of the row's date and title is asked what its download
+        adds to a name (`rule`), and the answer is the one of those the
+        file's name ends with, as unique_path writes it, with or without a
+        " (n)" after. Two different ones, or none, give "".
+
+        A name never says whose file it is, and this does not ask it to. The
+        file is still named from its row alone, never for any of these
+        documents. Only what tells it apart is read, and only an ending the
+        name already has, so a rename keeps that ending and can add nothing
+        the name did not say."""
+        stem = Path((row.get("PDF Full Path") or "").strip()).stem
+        stem = _NUMBERED.sub("", stem).lower()
+        ends = set()
+        for name in self._by_key.get(_record_key(row), ()):
+            told = str(rule(self._view(name, True)) or "").strip()
+            token = sanitize_component(told).strip(" .") if told else ""
+            if token and stem.endswith(" " + token.lower()):
+                ends.add(token)
+        return ends.pop() if len(ends) == 1 else ""
+
+    def _view(self, name: str, saved: bool) -> dict:
+        """The record under the app's key `name`, as record_for gives it."""
+        if saved and name in self._saved:
+            return self._saved[name]
+        return self.records[name]
 
     def spellings(self, changes, rows, records) -> dict:
         """Each other spelling, among these rows' and records' paths, of a

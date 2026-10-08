@@ -34,6 +34,25 @@ never found it at all.
 
 A receipt app tells two purchases apart by order number, which its rows
 carry, so for those this shows that what worked before still does.
+
+The second of two files that wanted one name is told apart the way its
+download told it apart, by what the download hands unique_path, the last
+six characters of the id a document's record keeps, the order number for
+a purchase and the first day it covers for a PayPal business statement.
+Rename asked the index row, which carries an order number and never a
+document's id, so under the very pattern the files were saved by, a
+preview offered to rename "... Monthly Statement OC2222.pdf" to
+"... (2).pdf", the complaint of #43 and #49 back again. A document's file
+here is saved where the app's own download_one would save it, taken at
+the moment it asks unique_path, so these hold Rename to what each app's
+download does, and an id a later listing writes over the one the
+download used does not move the file.
+
+Download again takes the second document again and saves it beside its
+first copy, "... OC2222 (2).pdf", and its record names the new copy. No
+record names the old one and two share its date and title, so whose it is
+cannot be told, and the preview offered "... OC2222.pdf" a " (2)". Its
+name keeps the ending one document of its date and title would give it.
 """
 import ast
 import importlib
@@ -150,10 +169,6 @@ class Home:
             "owner": "Dana Example", "output_dir": str(tmp_path / "out"),
             "profile_dir": str(tmp_path / "profile"), "cdp_url": "http://127.0.0.1:9",
             "delay_min_seconds": 0, "delay_max_seconds": 0, "default_start_date": "",
-            # Room enough that no name is cut short. A deep temporary folder
-            # cuts a download's name where Rename's plan does not, which is
-            # a question of its own and not this one.
-            "max_path_length": 1000,
         })
         for key in ("filename_pattern", "filename_pattern_receipts",
                     "filename_pattern_statements"):
@@ -238,17 +253,46 @@ def two_documents(home: Home, with_ids: bool = False, titles=(TITLE, TITLE)):
     return pair if pair[0].key != pair[1].key else None
 
 
+class Saving(BaseException):
+    """Where an app's own download asked unique_path to save a document,
+    raised at that moment so nothing after it, a page or a press, is
+    reached. Not an Exception, so no handler of the app's can take it."""
+
+    def __init__(self, path: Path):
+        super().__init__(str(path))
+        self.path = path
+
+
+def where_its_download_saves(app, doc, filename: str) -> Path:
+    """The path the app's own download_one gives this document, with what
+    it hands unique_path to tell the file apart when its name is taken.
+    Every download_one asks for its session and its folder before that,
+    and the session is all of it that needs a page."""
+    mod = sys.modules[type(app).__module__]
+
+    def asked(*args, **kwargs):
+        raise Saving(core_storage.unique_path(*args, **kwargs))
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(mod, "unique_path", asked)
+        patch.setattr(app, "check_session", lambda *_a, **_kw: None)
+        try:
+            app.download_one(None, doc, filename)
+        except Saving as saving:
+            return saving.path
+    raise AssertionError("%s's download_one saved the document nowhere" % mod.__name__)
+
+
 def downloaded(app, doc, body: bytes = b"") -> Path:
     """One listed document then downloaded, written down by the app's own
-    code, with a file named the way its download names one."""
+    code, with a file where the app's own download saves it, under the
+    name its run hands the download."""
     if app.discovery.get(doc.key) is None:
         listed = doc.to_dict()
         listed["state"] = State.DISCOVERED.value
         app.discovery.update(doc.key, listed, save=False)
     name = core_storage.build_pdf_filename(doc.date, doc.summary, "", record=doc)
-    path = core_storage.unique_path(app.paths.folder_for(doc.category), name,
-                                    app.config["max_path_length"],
-                                    distinguisher=(getattr(doc, "document_id", "") or "")[-6:])
+    path = where_its_download_saves(app, doc, name)
     path.write_bytes(body or body_of(doc.account))
     doc.pdf_path, doc.pdf_filename = str(path), path.name
     doc.downloaded_ok = True
@@ -291,7 +335,9 @@ def test_there_are_apps_to_check():
     found nobody."""
     assert len(APPS) >= 61, IDS
     assert {"amfam", "citi", "target", "wellsfargo"} <= set(IDS)
-    assert len(WITH_IDS) >= 16 and {"capitalone", "chase", "vanguard"} <= {
+    # Fifteen, since AAFMAA, which gives a document no id, stopped keeping
+    # its View control's postback name as one.
+    assert len(WITH_IDS) >= 15 and {"capitalone", "chase", "vanguard"} <= {
         d.name for d in WITH_IDS}, [d.name for d in WITH_IDS]
 
 
@@ -369,7 +415,7 @@ def test_a_name_a_deleted_file_freed_is_never_given_its_old_document(home):
     assert home.browser.asked == 0, "Rename reached for a browser"
 
 
-def purchased(home: Home, app, number: str) -> Path:
+def purchased(home: Home, app, number: str, body: bytes = b"") -> Path:
     """One purchase listed then downloaded, written down by the app's own
     code, of one day and one summary with the other, under its own order
     number."""
@@ -386,7 +432,7 @@ def purchased(home: Home, app, number: str) -> Path:
     path = core_storage.unique_path(app.paths.folder_for(p.purchase_type, p.document_type),
                                     name, app.config["max_path_length"],
                                     distinguisher=p.order_number)
-    path.write_bytes(body_of(number[3:]))
+    path.write_bytes(body or body_of(number[3:]))
     p.pdf_path, p.pdf_filename = str(path), path.name
     app._record_state(p, State.COMPLETED, extra={"downloaded_ok": True})
     app._write_csv_rows(p, "Downloaded", State.COMPLETED.value)
@@ -485,3 +531,304 @@ def test_a_bill_taken_again_beside_one_that_failed_keeps_its_own_account(home):
     # twice, from the pattern's account field and from the summary.
     assert after[again].count(ACCOUNTS[0]) == 2, after[again]
     assert home.browser.asked == 0, "Rename reached for a browser"
+
+
+# -- the second of two files of one name -------------------------------------------
+
+# A pattern under which two documents of one day and one summary want one
+# name, and not the name either has.
+ONE_NAME = "{date:yyyy-mm-dd} {summary}"
+OTHER_TITLE = "Statement - September 12, 2026"
+NEVER_TWO = "its key never tells two documents of one day and one summary apart"
+
+
+def two_of_one_name(home: Home, app):
+    """Two files that wanted one name, the second saved beside the first
+    the way the app's download saves it, each holding its own account's
+    bytes. A document carries the provider's id where the app records one.
+    Two documents of one title where the app's key tells them apart, and of
+    two titles where it does not, as Wealthfront's keeps a document by its
+    date and title alone. None when its key tells them apart by neither."""
+    if not hasattr(home.mod, "Document"):
+        return [purchased(home, app, "ORD" + a) for a in ACCOUNTS]
+    with_ids = home.app in WITH_IDS
+    pair = (two_documents(home, with_ids=with_ids)
+            or two_documents(home, with_ids=with_ids, titles=(TITLE, OTHER_TITLE)))
+    if pair is None:
+        return None
+    return [downloaded(app, doc) for doc in pair]
+
+
+def added_to(plain: str, told: str) -> str:
+    """What the second file's name adds to the name both wanted, the end of
+    an id, an order number or " (2)"."""
+    stem = plain[:-len(".pdf")]
+    assert told.startswith(stem + " ") and told.endswith(".pdf"), (plain, told)
+    return told[len(stem):-len(".pdf")]
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_preview_offers_nothing_for_a_second_file_its_download_told_apart(home):
+    """The second of two documents of one day and one summary was saved with
+    the end of its id in its name, and under the very pattern it was saved
+    by, the preview offered to rename it to " (2)"."""
+    app = home.build()
+    files = two_of_one_name(home, app)
+    if files is None:
+        pytest.skip(NEVER_TWO)
+    first, second = files
+    added = added_to(first.name, second.name)
+    if home.app in WITH_IDS or not hasattr(home.mod, "Document"):
+        assert added != " (2)", (
+            "%s's download told %r apart by nothing" % (home.app.name, second.name))
+    saved(app)
+    before = sorted(p.name for p in home.files().values())
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert sorted(p.name for p in home.files().values()) == before
+    assert home.browser.asked == 0, "Rename reached for a browser"
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_pattern_giving_two_files_one_name_tells_the_second_apart_as_its_download_did(home):
+    """A new pattern can give two documents one name that neither had. The
+    second is told apart by what its download told it apart by, as a
+    download into a folder holding the first would be, and a second Rename
+    has nothing left to do. It was given " (2)", and the next Rename
+    offered to rename it again."""
+    app = home.build()
+    files = two_of_one_name(home, app)
+    if files is None:
+        pytest.skip(NEVER_TWO)
+    added = added_to(files[0].name, files[1].name)
+    saved(app)
+    home.set_pattern(ONE_NAME)
+    said = home.rename("--apply")
+    assert RENAMED_BOTH in said, said[-1500:]
+    after = {body: p.name for body, p in home.files().items()}
+    plain = after[body_of(ACCOUNTS[0])]
+    assert after[body_of(ACCOUNTS[1])] == plain[:-len(".pdf")] + added + ".pdf", (
+        "%s named the second file %r\n%s" % (home.app.name, after[body_of(ACCOUNTS[1])],
+                                             said[-1500:]))
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert home.browser.asked == 0, "Rename reached for a browser"
+
+
+# -- the old copy Download again leaves --------------------------------------------
+
+# The second document's bytes as Download again takes it a second time.
+AGAIN = body_of(ACCOUNTS[1]).replace(b"%%EOF", b"taken again\n%%EOF")
+
+
+def taken_again(home: Home, app):
+    """Two files that wanted one name, then Download again taking the second
+    document again, saved beside its first copy by the app's own download
+    and written down by its own code, so the record names the new copy and
+    no record names the old one. The first file, the old copy and the new,
+    or None when its key never tells two documents of one day and one
+    summary apart."""
+    if not hasattr(home.mod, "Document"):
+        first, old = [purchased(home, app, "ORD" + a) for a in ACCOUNTS]
+        return first, old, purchased(home, app, "ORD" + ACCOUNTS[1], body=AGAIN)
+    with_ids = home.app in WITH_IDS
+    pair = (two_documents(home, with_ids=with_ids)
+            or two_documents(home, with_ids=with_ids, titles=(TITLE, OTHER_TITLE)))
+    if pair is None:
+        return None
+    first, old = [downloaded(app, doc) for doc in pair]
+    return first, old, downloaded(app, pair[1], body=AGAIN)
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_preview_offers_nothing_for_the_old_copy_download_again_left(home):
+    """Download again saved the second document as "... OC2222 (2).pdf"
+    beside "... OC2222.pdf", and its record names the new copy. No record
+    names the old one and two share its date and title, so whose it is
+    cannot be told, and under the very pattern it was saved by the preview
+    offered to rename it to "... (2).pdf" (#43, #49)."""
+    app = home.build()
+    files = taken_again(home, app)
+    if files is None:
+        pytest.skip(NEVER_TWO)
+    first, old, new = files
+    added = added_to(first.name, old.name)
+    if home.app in WITH_IDS or not hasattr(home.mod, "Document"):
+        assert added != " (2)", (
+            "%s's download told %r apart by nothing" % (home.app.name, old.name))
+        assert new.name == old.name[:-len(".pdf")] + " (2).pdf", (old.name, new.name)
+    saved(app)
+    before = sorted(p.name for p in home.files().values())
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert sorted(p.name for p in home.files().values()) == before
+    assert home.browser.asked == 0, "Rename reached for a browser"
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_pattern_change_keeps_what_the_old_copy_was_told_apart_by(home):
+    """Under a pattern giving every file one name, the old copy keeps the end
+    of the id its name carries and the new copy follows it, the names three
+    downloads into an empty folder would give. The old copy was given
+    " (2)", which says nothing of which document it is."""
+    app = home.build()
+    files = taken_again(home, app)
+    if files is None:
+        pytest.skip(NEVER_TWO)
+    first, old, new = files
+    added_old, added_new = added_to(first.name, old.name), added_to(first.name, new.name)
+    saved(app)
+    home.set_pattern(ONE_NAME)
+    said = home.rename("--apply")
+    assert "Renamed 3 file(s)" in said, said[-1500:]
+    after = {body: p.name for body, p in home.files().items()}
+    stem = after[body_of(ACCOUNTS[0])][:-len(".pdf")]
+    assert (after[body_of(ACCOUNTS[1])], after[AGAIN]) == (
+        stem + added_old + ".pdf", stem + added_new + ".pdf"), (
+        "%s named the two copies %r\n%s" % (
+            home.app.name, (after[body_of(ACCOUNTS[1])], after[AGAIN]), said[-1500:]))
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert home.browser.asked == 0, "Rename reached for a browser"
+
+
+def relists_with_a_new_id(app: Path):
+    """The name of the app's method that writes the provider's id a later
+    listing gives a known document over the one its discovery record holds,
+    found by a call updating discovery with a document_id, or None."""
+    tree = ast.parse(entry_of(app).read_text(encoding="utf-8-sig"))
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Call) and ast.unparse(node.func) == "self.discovery.update"
+                    and len(node.args) == 2 and isinstance(node.args[1], ast.Dict)
+                    and any(isinstance(k, ast.Constant) and k.value == "document_id"
+                            for k in node.args[1].keys)):
+                return fn.name
+    return None
+
+
+RELISTS = [d for d in APPS if relists_with_a_new_id(d)]
+# A File names pattern without the summary, under which these apps'
+# statements of one day share a name, since their summaries carry the
+# account.
+NO_SUMMARY = "{date:yyyy-mm-dd} {provider}"
+
+
+def test_there_are_apps_that_write_a_new_id_over_an_old_one():
+    assert {"capitalone", "schwab", "vanguard"} <= {d.name for d in RELISTS}, RELISTS
+
+
+def listing(app, name: str):
+    """The app's own method that writes down a document its list gives it,
+    taking a listed document's fields as a dict."""
+    method = getattr(app, name)
+    others = [set()] * (len(inspect.signature(method).parameters) - 1)
+    return lambda fields: method(dict(fields), *others)
+
+
+@pytest.mark.parametrize("home", RELISTS, ids=[d.name for d in RELISTS], indirect=True)
+def test_an_id_a_later_listing_gives_never_moves_a_file_its_download_told_apart(home):
+    """Capital One, Schwab and Vanguard keep a document under its account,
+    date, title and place, and a later listing that gives it another id
+    writes that over the one in discovery, where progress keeps the one its
+    download told the file apart by. Rename read the newer one, so the
+    preview offered to rename "... OC2222.pdf" to "... OC9999.pdf", and the
+    newer one can be another statement's where the listing's order
+    changed."""
+    home.set_pattern(NO_SUMMARY)
+    app = home.build()
+    lists = listing(app, relists_with_a_new_id(home.app))
+    pair = two_documents(home, with_ids=True)
+    for doc in pair:
+        assert lists(doc.to_dict()) == 1, "the app's own listing kept no record"
+    listed = [home.mod.Document.from_dict(app.discovery.get(doc.key)) for doc in pair]
+    first, second = [downloaded(app, doc) for doc in listed]
+    assert added_to(first.name, second.name) != " (2)", second.name
+    saved(app)
+
+    app = home.build()
+    listing(app, relists_with_a_new_id(home.app))(
+        dict(listed[1].to_dict(), document_id="DOC9999"))
+    assert app.discovery.get(listed[1].key)["document_id"] == "DOC9999", (
+        "the later listing wrote no new id, so this shows nothing")
+    saved(app)
+
+    before = sorted(p.name for p in home.files().values())
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert sorted(p.name for p in home.files().values()) == before
+
+
+# -- PayPal's business statements, told apart by their first days -------------------
+
+PAYPAL = REPO / "apps" / "paypal"
+FIRST_DAYS = ("2026-08-10", "2026-08-15")
+LAST_DAY = "2026-08-31"
+
+
+def business_statements(home: Home):
+    """Two of PayPal's business statements ending on one day, listed by its
+    own code from the days its list gives, as paypal_site.listing_of hands
+    them over, then downloaded, each holding its own first day's bytes."""
+    app = home.build()
+    site = home.mod.site
+    for first in FIRST_DAYS:
+        period = site.Period(start=first, end=LAST_DAY)
+        raw = site.RawDoc(title=period.title(), date_text=period.date, href=period.href(),
+                          text="PayPal " + period.title(), period=period.covers())
+        assert app._record_rawdoc(raw, "https://example.invalid/reports") == 1
+    files = []
+    for rec in list(app.discovery.data.values()):
+        doc = home.mod.Document.from_dict(rec)
+        files.append(downloaded(app, doc, body=body_of(site.business_ref(doc.href).start)))
+    saved(app)
+    first, second = files
+    assert second.name == first.name[:-len(".pdf")] + " " + FIRST_DAYS[1] + ".pdf", (
+        "the download no longer tells the second apart by its first day", second.name)
+    return files
+
+
+@pytest.mark.parametrize("home", [PAYPAL], ids=["paypal"], indirect=True)
+def test_a_preview_offers_nothing_for_a_business_statement_told_apart_by_its_first_day(home):
+    """No id tells two of PayPal's business statements ending on one day
+    apart, so its download adds the first day the second covers to its
+    name. A preview offered to rename it to " (2)"."""
+    business_statements(home)
+    before = sorted(p.name for p in home.files().values())
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert sorted(p.name for p in home.files().values()) == before
+
+
+@pytest.mark.parametrize("home", [PAYPAL], ids=["paypal"], indirect=True)
+def test_a_pattern_change_keeps_a_business_statements_first_day(home):
+    business_statements(home)
+    home.set_pattern(ONE_NAME)
+    said = home.rename("--apply")
+    assert RENAMED_BOTH in said, said[-1500:]
+    after = {body: p.name for body, p in home.files().items()}
+    assert after == {body_of(FIRST_DAYS[0]): "%s Statement.pdf" % LAST_DAY,
+                     body_of(FIRST_DAYS[1]): "%s Statement %s.pdf" % (LAST_DAY, FIRST_DAYS[1])}, (
+        after, said[-1500:])
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert home.browser.asked == 0, "Rename reached for a browser"
+
+
+@pytest.mark.parametrize("home", [PAYPAL], ids=["paypal"], indirect=True)
+def test_a_preview_offers_nothing_for_an_old_business_statement_download_again_left(home):
+    """Download again took the second business statement again, saved as
+    "... 2026-08-15 (2).pdf", and no record names its old copy any more."""
+    first, old = business_statements(home)
+    app = home.build()
+    doc = next(home.mod.Document.from_dict(r) for r in app.discovery.data.values()
+               if home.mod.site.business_ref(r["href"]).start == FIRST_DAYS[1])
+    new = downloaded(app, doc, body=AGAIN)
+    saved(app)
+    assert new.name == old.name[:-len(".pdf")] + " (2).pdf", new.name
+    before = sorted(p.name for p in home.files().values())
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert sorted(p.name for p in home.files().values()) == before

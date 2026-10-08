@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -579,6 +580,11 @@ class App:
         if rec.get("downloaded_ok"):
             return True
         state = rec.get("state")
+        # An older version recorded this final when the receipt page did not
+        # show the receipt, which says nothing about whether there is one,
+        # so it is asked for again (#70).
+        if not_shown.asked_again(rec):
+            return False
         # terminal / already-completed (incl. records made before the
         # downloaded_ok marker existed): done, do not re-download.
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
@@ -602,7 +608,8 @@ class App:
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if self._already_done(purchase):
-                print("  Already completed and PDF verified - skipping.")
+                print(not_shown.skipped(self.progress.get(purchase.key),
+                                        "  Already completed and PDF verified - skipping."))
                 self.stats["skipped_completed"] += 1
                 continue
             # Which document the run is on, so a failure file says how far
@@ -740,18 +747,13 @@ class App:
             site.goto_receipt(page, purchase)
         site.scroll_full_page(page)
 
+        # A page that did not show the receipt says nothing about whether the
+        # purchase has one, and Kroger's own message asks to try again, so
+        # the next run asks for it again (#70).
         if not site.receipt_is_present(page):
             why = "Kroger could not load this receipt" if site.receipt_failed(page) \
                 else "Receipt page did not render"
-            self._record_state(purchase, State.NO_RECEIPT_AVAILABLE, notes=why)
-            self._write_csv_rows(purchase,
-                                 receipt_status="No printable receipt available",
-                                 processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                                 notes_extra=why)
-            self.stats["no_receipt"] += 1
-            self.stats["manual_review"] += 1
-            print(f"  {why} - marked for manual review.")
-            return False
+            return not_shown.tried_again(self, purchase, why)
 
         purchase.document_type = "Receipt"
         folder = self.paths.folder_for(purchase.purchase_type,

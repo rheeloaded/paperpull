@@ -260,7 +260,7 @@ def test_the_apps_that_point_the_browser_at_a_folder_are_found():
     """Not vacuous. These are the ones this was found in."""
     names = {d.name for d in FOLDER_APPS}
     assert {"wellsfargo", "att", "newrez", "verizon", "vanguard"} <= names
-    assert {d.name for d in SCAFFOLD} >= {"adp", "applecard", "att", "etrade", "golden1",
+    assert {d.name for d in SCAFFOLD} >= {"applecard", "att", "etrade", "golden1",
                                           "newrez", "sba", "smud", "statefarm",
                                           "verizonmobile", "wellsfargo"}
 
@@ -368,14 +368,76 @@ def test_vanguard_takes_its_statement_from_the_folder(left, browser_context, pro
 
 DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard"}
 
+# Apps that point the browser at a folder and take nothing from it, so
+# there is no capture here to drive, and why. Each is held to that below.
+TAKES_NOTHING = {
+    "adp": "every document comes from ADP's statement services, fetched inside the page, "
+           "and what the browser saves while a run is attached stays out of the person's "
+           "own downloads, where an exact copy of a saved document goes at the next start",
+}
+
 
 @pytest.mark.parametrize("app", FOLDER_APPS, ids=lambda d: d.name)
 def test_every_app_that_points_the_browser_at_a_folder_is_driven_here(app):
     """A new app that points the browser at a folder has to be driven by
     this file, with its own capture, before it can pass."""
-    assert app in SCAFFOLD or app.name in DRIVEN_ELSEWHERE_HERE, (
+    assert app in SCAFFOLD or app.name in DRIVEN_ELSEWHERE_HERE or app.name in TAKES_NOTHING, (
         "%s points the browser at a folder and nothing here drives its capture. "
         "Add a test like test_verizon_takes_its_bill_from_the_folder." % app.name)
+
+
+# What taking a download looks like in an app's own code. Waiting for one,
+# saving one, reading the folder one lands in, or handing the press to
+# delivery.deliver, which does all of that.
+TAKERS = {"expect_download", "take_download", "take_new_pdf", "save_download", "save_as",
+          "snapshot", "arrived", "deliver"}
+
+# Listening for one, or waiting for one by the event's name.
+LISTENERS = {"on", "once", "wait_for_event", "expect_event"}
+
+
+def takes_from_a_folder(app: Path) -> list:
+    """Every call in the app's own modules that takes a download, by file
+    and line, a download listener included."""
+    found = []
+    for path in app_modules(app):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8", errors="ignore"))):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            name = (f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")).lstrip("_")
+            listens = (name in LISTENERS and node.args
+                       and isinstance(node.args[0], ast.Constant) and node.args[0].value == "download")
+            if name in TAKERS or listens:
+                found.append((path.name, node.lineno))
+    return found
+
+
+@pytest.mark.parametrize("name", sorted(TAKES_NOTHING))
+def test_an_app_that_takes_nothing_from_its_folder_has_nothing_that_could(name):
+    """An app let off driving takes no download at all, and still points the
+    browser at a folder, or its entry has to go."""
+    app = REPO / "apps" / name
+    assert app in FOLDER_APPS, "%s no longer points the browser at a folder" % name
+    assert app not in SCAFFOLD
+    assert takes_from_a_folder(app) == []
+
+
+def test_what_takes_a_download_is_found(tmp_path):
+    """The reader under the test above, on a made-up app."""
+    app = tmp_path / "made"
+    app.mkdir()
+    (app / "made_site.py").write_text(
+        "def a(page, dl, d, s):\n    page.on('download', s.append)\n"
+        "def b(dl, d, out):\n    capture.take_download(dl, d, set(), out)\n"
+        "def c(d, out):\n    _take_new_pdf(d, set(), out)\n"
+        "def e(page):\n    page.on('response', print)\n"
+        "def f(page, req, out, d):\n    delivery.deliver(page, req, out, is_safe_url=ok, dl_dir=d)\n"
+        "def g(page):\n    with page.expect_event('download'):\n        pass\n"
+        "def h(page):\n    page.wait_for_event('popup')\n", encoding="utf-8")
+    assert takes_from_a_folder(app) == [("made_site.py", 2), ("made_site.py", 4),
+                                        ("made_site.py", 6), ("made_site.py", 10),
+                                        ("made_site.py", 12)]
 
 
 # -- what the source has to say ------------------------------------------------

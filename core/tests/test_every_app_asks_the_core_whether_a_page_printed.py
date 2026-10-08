@@ -38,7 +38,10 @@ CORE = REPO / "core" / "paperpull_core"
 # belong to, whatever a copy of the hook called them.
 PRINT_MARK = re.compile(r"__\w*Print\w*")
 
-SKIPPED_DIRS = {".venv", "node_modules", "__pycache__", "tests", ".git"}
+# Tests, environments, and the folders a build or an install makes, whose
+# copies of what ships are never what a run reads from this tree.
+SKIPPED_DIRS = {".venv", "node_modules", "__pycache__", "tests", ".git", "build", "dist",
+                "site-packages"}
 
 
 def python_files(root: Path):

@@ -358,3 +358,67 @@ def test_a_dry_run_leaves_the_records_in_memory_alone(tmp_path):
     before = (inst / "progress.json").read_text(encoding="utf-8")
     migrate.do_import(archive, new, dry_run=True, assume_yes=True)
     assert (inst / "progress.json").read_text(encoding="utf-8") == before
+
+
+# -- a receipt an older version gave up on (#70) ------------------------------
+
+def _gave_up(note="Kroger could not load this receipt"):
+    """A record 0.44.0 left when the receipt page did not show the receipt.
+    Its receipt is asked for again (paperpull_core.not_shown)."""
+    return {"state": "No Receipt Available", "pdf_path": "", "summary": "Groceries",
+            "notes": "Listed by an invented step; " + note}
+
+
+def test_a_receipt_an_older_version_gave_up_on_is_still_asked_for_after_a_move(tmp_path):
+    from paperpull_core.not_shown import asked_again
+    for minimal in (False, True):
+        old = tmp_path / ("old%d" % minimal)
+        _install(old, "Kroger Receipts", "Kroger", {"k:1": _gave_up(), "k:2": _rec()},
+                 kind="RECEIPT")
+        archive = tmp_path / ("h%d.ppz" % minimal)
+        migrate.export(old, archive, minimal=minimal)
+        with zipfile.ZipFile(archive) as z:
+            manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+            blob = z.read("apps/Kroger Receipts/progress.json").decode("utf-8")
+        assert manifest["apps"][0]["already_downloaded"] == 1, "it was never downloaded"
+        if minimal:
+            assert "invented step" not in blob, "only the fixed words travel"
+
+        new = tmp_path / ("new%d" % minimal)
+        _install(new, "Kroger Receipts", "Kroger", {}, kind="RECEIPT")
+        migrate.do_import(archive, new, assume_yes=True)
+        got = json.loads((new / "Kroger Receipts" / "progress.json").read_text(encoding="utf-8"))
+        assert asked_again(got["k:1"]), (minimal, got["k:1"])
+        assert not asked_again(got["k:2"])
+
+
+def test_an_import_does_not_finish_a_receipt_this_install_asks_for_again(tmp_path):
+    """This install recorded the receipt as tried again. An older export that
+    gave up on it does not make it final, which would keep its notes, so
+    nothing would ever ask for it again."""
+    old = tmp_path / "old"
+    _install(old, "Kroger Receipts", "Kroger", {"k:1": _gave_up()}, kind="RECEIPT")
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+
+    new = tmp_path / "new"
+    tried = {"state": "Failed", "pdf_path": "",
+             "notes": "Kroger could not load this receipt, tried again next run"}
+    _install(new, "Kroger Receipts", "Kroger", {"k:1": tried}, kind="RECEIPT")
+    migrate.do_import(archive, new, assume_yes=True)
+
+    got = json.loads((new / "Kroger Receipts" / "progress.json").read_text(encoding="utf-8"))
+    assert got["k:1"]["state"] == "Failed", got["k:1"]
+
+
+def test_the_core_beside_the_tool_comes_before_an_older_one_installed(tmp_path):
+    """An app's environment can hold an older core, one without the module
+    this tool reads, and the tool then failed before it could say a word."""
+    import subprocess
+    old = tmp_path / "old-core" / "paperpull_core"
+    old.mkdir(parents=True)
+    (old / "__init__.py").write_text("", encoding="utf-8")
+    tool = Path(__file__).resolve().parents[2] / "tools" / "migrate.py"
+    env = dict(__import__("os").environ, PYTHONPATH=str(tmp_path / "old-core"))
+    r = subprocess.run([sys.executable, str(tool), "--help"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr

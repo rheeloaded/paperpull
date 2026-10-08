@@ -1119,6 +1119,9 @@ def main(argv=None) -> int:
                     help="suites run at once, %d here by default" % default_jobs())
     ap.add_argument("--shard", default=None, metavar="K/N",
                     help="only part K of N, balanced by tools/suite_times.json")
+    ap.add_argument("--suites", default=None, metavar="NAMES",
+                    help="only these suites, by name, separated by commas, which is not "
+                         "a full run (worktree.py land runs the ones a change touches)")
     ap.add_argument("--stop", action="store_true",
                     help="stop a run of this checkout that is still going")
     ap.add_argument("--replace", action="store_true",
@@ -1126,6 +1129,8 @@ def main(argv=None) -> int:
     ap.add_argument("--write-times", action="store_true",
                     help="keep the times of the suites that passed in tools/suite_times.json")
     args = ap.parse_args(argv)
+    if args.suites is not None and (args.shard or args.quick):
+        ap.error("--suites names the suites itself, so it takes neither --shard nor --quick")
 
     try:
         # A character the console cannot show is written escaped, not
@@ -1157,6 +1162,16 @@ def run(args, lock=None) -> int:
     kept = load_times(record) if record else {}
     times = longer_of(entries, kept)
     plan = suites(args.quick)
+    every = len(plan)
+    if getattr(args, "suites", None) is not None:
+        named = [n for n in re.split(r"[,\s]+", args.suites) if n]
+        unknown = [n for n in named if n not in {name for name, _, _ in plan}]
+        if unknown:
+            print("no suite is named %s" % ", ".join(unknown), flush=True)
+            return 2
+        plan = [s for s in plan if s[0] in named]
+        print("%d of the %d suites, %s, which is not a full run"
+              % (len(plan), every, ", ".join(name for name, _, _ in plan)), flush=True)
     if args.shard:
         k, n = parse_shard(args.shard)
         mine = set(shard_of([name for name, _, _ in plan], times, k, n))
@@ -1357,7 +1372,7 @@ def run(args, lock=None) -> int:
     measured = {} if refused else {name: seconds for name, seconds in took.items()
                                    if codes.get(name) == 0 and name not in wanting
                                    and seconds <= limit_of(name, times)}
-    full = not args.quick and not args.shard
+    full = not args.quick and not args.shard and getattr(args, "suites", None) is None
     write = args.write_times and full
     far = [] if write else behind(measured, entries)
     if far:
@@ -1373,6 +1388,10 @@ def run(args, lock=None) -> int:
 
     if refused or broken:
         return 1
+    if canary_folder is not None and getattr(args, "suites", None) is not None:
+        print("\nthe %d suites named passed, privacy canary included, which is not a full run"
+              % len(plan))
+        return 0
     if canary_folder is not None:
         print("\nall suites passed, privacy canary included")
         return 0
@@ -1383,6 +1402,8 @@ def run(args, lock=None) -> int:
     if home:
         print("\nall suites passed, and the privacy canary runs in part %d of %d, "
               "which holds the %s suite" % (home, parts, CANARY_SUITE))
+    elif getattr(args, "suites", None) is not None:
+        print("\nthe %d suites named passed, and the privacy canary was not among them" % len(plan))
     else:
         print("\nall suites passed, and the privacy canary was not among them")
     return 0
