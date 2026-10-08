@@ -6,7 +6,7 @@ Available, which is final, whether the page showed an invoice in its place
 or nothing at all. A page that had not drawn yet shows nothing at all, so
 its order was never asked for again, the failure a tester met on Kroger.
 Now such an order is a failure the next run asks for again, and only once
-three separate runs have found nothing is it set aside. An order that shows
+three separate days have found nothing is it set aside. An order that shows
 only an invoice, with invoices turned off, has no receipt to print and is
 recorded as before.
 
@@ -60,7 +60,7 @@ def a_run(tmp_path, include_invoices=True):
     path = tmp_path / "config.json"
     path.write_text(json.dumps(cfg), encoding="utf-8")
     app = target_receipts.App(target_receipts.build_parser().parse_args(["--config", str(path)]))
-    app.stats["started"] = "2031-04-02T12:00:%02d" % next(RUNS)
+    app.stats["started"] = "2031-04-%02dT12:00:00" % next(RUNS)       # a day each
     return app
 
 
@@ -93,7 +93,7 @@ def test_a_page_that_showed_nothing_is_asked_for_again(page, tmp_path, capsys):
         app = a_run(tmp_path)
         assert app._handle_no_receipt(page, p) is False
         out = said(capsys)
-        assert "Neither a receipt nor an invoice showed, on %d of 3 separate runs. " \
+        assert "Neither a receipt nor an invoice showed, on %d of 3 separate days. " \
                "It is tried again next run." % n in out, out
         rec = app.progress.get(p.key)
         assert rec["state"] == State.FAILED.value, rec
@@ -103,7 +103,7 @@ def test_a_page_that_showed_nothing_is_asked_for_again(page, tmp_path, capsys):
     app = a_run(tmp_path)
     app._handle_no_receipt(page, p)
     out = said(capsys)
-    assert "on 3 of 3 separate runs. It is not asked for again" in out, out
+    assert "on 3 of 3 separate days. It is set aside for review" in out, out
     assert app.progress.get(p.key)["state"] == State.NO_RECEIPT_AVAILABLE.value
     assert rows(app) == 2, "written down once, a row in each CSV"
     assert a_run(tmp_path)._already_done(p), "set aside after three runs"
@@ -115,8 +115,8 @@ def test_one_run_that_asks_twice_counts_once(page, tmp_path, capsys):
     app = a_run(tmp_path)
     app._handle_no_receipt(page, p)
     app._handle_no_receipt(page, p)
-    assert "on 1 of 3 separate runs" in said(capsys)
-    assert app.progress.get(p.key)["not_shown_runs"] == [app.stats["started"]]
+    assert "on 1 of 3 separate days" in said(capsys)
+    assert app.progress.get(p.key)["not_shown_days"] == [app.stats["started"][:10]]
 
 
 def test_an_order_with_only_an_invoice_has_no_receipt_as_before(page, tmp_path, capsys):

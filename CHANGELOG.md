@@ -284,8 +284,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   tried. Such a purchase is now a failure that says it is tried again next
   run, the panel counts it, and nothing goes into the CSVs until a run
   saves the receipt. One whose receipt has not shown on three separate
-  runs is set aside for review, written into the CSVs once, and skipped
-  with a line that says so, and Download again still asks for it.
+  days is set aside for review, written into the CSVs once, and skipped
+  with a line that says so. The days are counted, not the runs, so a bad
+  evening of runs during a store's outage sets nothing aside, and in the
+  desktop app Download again still asks for it.
   Purchases an earlier version left that way are fetched on the next run
   as well, found by the words it noted them with. The rows it wrote for
   them stay in the CSVs, and the All Purchases workbook leaves out an

@@ -675,8 +675,8 @@ class App:
         # (_listed_again).
         if state == State.NO_LONGER_LISTED.value:
             return True
-        # Its receipt page showed nothing on three separate runs, so it was
-        # set aside (#70). Download again still asks for it.
+        # Its receipt page showed nothing on three separate days, so it was
+        # set aside for review (#70).
         if not_shown.set_aside(rec):
             return True
         # A copy put aside for review counts as done while it is still in

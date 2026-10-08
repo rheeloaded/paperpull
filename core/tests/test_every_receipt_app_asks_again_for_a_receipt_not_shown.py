@@ -24,6 +24,7 @@ Every name, number and address is invented.
 import argparse
 import ast
 import collections
+import datetime
 import importlib
 import itertools
 import inspect
@@ -158,10 +159,11 @@ class _SiteThatShowsNothing:
 RUNS = itertools.count(1)
 
 
-def app_in(mod, out: Path, redownload: bool = False):
+def app_in(mod, out: Path, redownload: bool = False, day: int = None):
     """The app's own downloader over an output folder on disk, without its
     __init__, which would want a config file and a console. A new one is a
-    new run, started a second after the one before."""
+    new run, started a day after the one before, unless `day` says which.
+    A run is counted by the day it started."""
     storage = sys.modules["storage"]            # the app's own, loaded with it
     inst = object.__new__(mod.App)
     inst.config = {"max_path_length": 240, "min_pdf_bytes": 2000, "owner": ""}
@@ -180,7 +182,10 @@ def app_in(mod, out: Path, redownload: bool = False):
     inst.stats = collections.defaultdict(int)
     inst.stats["new_files"] = []
     inst.stats["dates_processed"] = []
-    inst.stats["started"] = "2031-04-02T12:%02d:%02d" % divmod(next(RUNS) % 3600, 60)
+    n = next(RUNS)
+    inst.stats["started"] = (datetime.datetime(2031, 1, 1, 12)
+                             + datetime.timedelta(days=n if day is None else day, minutes=n % 600)
+                             ).isoformat(timespec="seconds")
     inst.write_failure = lambda *a, **k: None
     inst.check_session = lambda *a, **k: False
     inst._journal = _Anything()                 # the journal property makes one otherwise
@@ -235,10 +240,11 @@ def test_only_those_records_are_asked_for_again(app, tmp_path):
                     dict(rec, notes=note, downloaded_ok=True)), (app.name, note)
 
 
-def look(mod, out: Path, method: str, redownload: bool = False, rec: dict = None):
+def look(mod, out: Path, method: str, redownload: bool = False, rec: dict = None,
+         day: int = None):
     """One run's look for the receipt on a page that never shows it, by the
     app's own method. The run, and what it printed is read off capsys."""
-    inst = app_in(mod, out, redownload)
+    inst = app_in(mod, out, redownload, day)
     p = purchase()
     inst.discovery.update(p.key, p.to_dict())
     if rec:
@@ -268,7 +274,7 @@ def test_a_page_that_did_not_show_the_receipt_is_asked_for_again(app, method, tm
         rec = inst.progress.get(p.key) or {}
         assert rec.get("state") not in (State.NO_RECEIPT_AVAILABLE.value, State.COMPLETED.value,
                                         State.CANCELED.value), (app.name, rec.get("state"))
-        assert "on %d of 3 separate runs. It is tried again next run." % n in said, said
+        assert "on %d of 3 separate days. It is tried again next run." % n in said, said
         assert "marked for manual review" not in said, said
         assert not done_already(mod, tmp_path, p),             "%s's next run skips a purchase whose receipt page did not show it" % app.name
         # The panel counts it as something to look at.
@@ -280,7 +286,7 @@ def test_a_page_that_did_not_show_the_receipt_is_asked_for_again(app, method, tm
     # The third run that finds nothing sets it aside, and writes it down once.
     inst = look(mod, tmp_path, method)
     said = " ".join(capsys.readouterr().out.split())
-    assert "on 3 of 3 separate runs. It is not asked for again" in said, said
+    assert "on 3 of 3 separate days. It is set aside for review" in said, said
     assert (inst.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
     assert inst.stats["manual_review"] >= 1
     rows = written_down(inst)
@@ -354,9 +360,9 @@ def test_a_purchase_set_aside_is_never_said_to_be_completed(app):
 
 def test_the_words_for_a_purchase_set_aside():
     from paperpull_core import not_shown
-    aside = {"state": State.NO_RECEIPT_AVAILABLE.value, "not_shown_runs": ["a", "b", "c"]}
-    assert "did not show on 3 separate runs" in not_shown.skipped(aside, "done")
-    assert not_shown.skipped(dict(aside, not_shown_runs=["a", "b"]), "done") == "done"
+    aside = {"state": State.NO_RECEIPT_AVAILABLE.value, "not_shown_days": ["a", "b", "c"]}
+    assert "did not show on 3 separate days" in not_shown.skipped(aside, "done")
+    assert not_shown.skipped(dict(aside, not_shown_days=["a", "b"]), "done") == "done"
     assert not_shown.skipped(dict(aside, downloaded_ok=True), "done") == "done"
     assert not_shown.skipped({"state": State.COMPLETED.value}, "done") == "done"
     assert not_shown.skipped(None, "done") == "done"
@@ -416,3 +422,20 @@ def test_a_history_that_cannot_be_written_leaves_it_to_the_next_run(app, method,
     assert (inst.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
     assert written_down(inst) >= 2
     assert done_already(mod, tmp_path, p)
+
+
+@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+def test_every_run_of_one_day_counts_once(app, method, tmp_path, monkeypatch, capsys):
+    """Pilot, Run All and Resume one after another, or a server running every
+    hour through a provider's outage, are many runs on one bad day. They
+    count as one, so a receipt is never set aside in an evening."""
+    mod = load(app)
+    monkeypatch.setattr(mod, "site", _SiteThatShowsNothing())
+    p = purchase()
+    for _ in range(4):
+        inst = look(mod, tmp_path, method, day=7)
+    said = " ".join(capsys.readouterr().out.split())
+    assert said.count("on 1 of 3 separate days. It is tried again next run.") == 4, said
+    assert (inst.progress.get(p.key) or {}).get("state") != State.NO_RECEIPT_AVAILABLE.value
+    assert not done_already(mod, tmp_path, p)
+    assert not written_down(inst)

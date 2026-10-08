@@ -220,11 +220,14 @@ def config_for(tmp_path, cdp_url):
     return cfg
 
 
-def run_all(tmp_path, cdp_url, capsys):
+def run_all(tmp_path, cdp_url, capsys, day=None, monkeypatch=None):
     """A Run All, which has to finish. What it printed, with its line breaks
     read as spaces, and the counts the panel reads off the line the core
-    prints for it."""
+    prints for it. With a day, the run starts on that day of April 2031,
+    since a receipt that did not show is counted by the day."""
     SITE.seen.clear()
+    if day is not None:
+        monkeypatch.setattr(app_mod, "now_iso", lambda: "2031-04-%02dT12:00:00" % day)
     assert app_mod.main(["--all", "--yes", "--config", str(config_for(tmp_path, cdp_url))]) == 0
     out = capsys.readouterr().out
     for line in out.splitlines():
@@ -271,7 +274,7 @@ def test_a_receipt_that_did_not_show_is_fetched_on_the_next_run(attached, shown,
     said, panel = run_all(tmp_path, attached, capsys)
 
     assert downloaded(tmp_path) == [STORE], "the receipt that showed is saved"
-    assert "%s, on 1 of 3 separate runs. It is tried again next run." % why in said, said
+    assert "%s, on 1 of 3 separate days. It is tried again next run." % why in said, said
     assert "marked for manual review" not in said, said
     assert panel["failed"] == 1, "the panel says one receipt was not saved"
     rec = progress(tmp_path)[OTHER]
@@ -290,24 +293,27 @@ def test_a_receipt_that_did_not_show_is_fetched_on_the_next_run(attached, shown,
     assert rows_naming(tmp_path, OTHER)["receipt_index_csv"] == 1, "written down once, when saved"
 
 
-def test_a_receipt_that_never_shows_is_set_aside_after_three_runs(attached, tmp_path, capsys):
-    """Each run asks for it, and on the third that finds nothing it is set
-    aside, written down once and counted for review. The next run skips it
-    and says why, rather than calling it completed."""
+def test_a_receipt_that_never_shows_is_set_aside_after_three_days(attached, tmp_path, capsys,
+                                                                    monkeypatch):
+    """Each run asks for it, and on the third day that finds nothing it is
+    set aside, written down once and counted for review. The next run skips
+    it and says why, rather than calling it completed."""
     SITE.failing = {OTHER_KEY: COULD_NOT_LOAD}
     for n in (1, 2):
-        said, panel = run_all(tmp_path, attached, capsys)
-        assert "on %d of 3 separate runs. It is tried again next run." % n in said, said
+        said, panel = run_all(tmp_path, attached, capsys, day=n, monkeypatch=monkeypatch)
+        assert "on %d of 3 separate days. It is tried again next run." % n in said, said
         assert receipts_opened() == ([OTHER_KEY, STORE_KEY] if n == 1 else [OTHER_KEY])
-    said, panel = run_all(tmp_path, attached, capsys)
-    assert "on 3 of 3 separate runs. It is not asked for again, and Download again still "            "asks for it." in said, said
+    said, panel = run_all(tmp_path, attached, capsys, day=3, monkeypatch=monkeypatch)
+    assert ("on 3 of 3 separate days. It is set aside for review and not asked for "
+            "again.") in said, said
     assert panel["failed"] == 0 and panel["manual_review"] >= 1, panel
     assert progress(tmp_path)[OTHER]["state"] == "No Receipt Available"
     assert rows_naming(tmp_path, OTHER) == {"receipt_index_csv": 1, "order_history_csv": 1}
 
-    said, panel = run_all(tmp_path, attached, capsys)
+    said, panel = run_all(tmp_path, attached, capsys, day=4, monkeypatch=monkeypatch)
     assert receipts_opened() == [], said
-    assert "Its receipt did not show on 3 separate runs, so it is skipped. Download again "            "asks for it." in said, said
+    assert ("Its receipt did not show on 3 separate days, so it is set aside for review "
+            "and skipped.") in said, said
     assert rows_naming(tmp_path, OTHER) == {"receipt_index_csv": 1, "order_history_csv": 1}
     assert downloaded(tmp_path) == [STORE]
 

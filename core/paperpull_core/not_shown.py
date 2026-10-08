@@ -15,11 +15,14 @@ Now each of them records it with tried_again(), as a failure the next run
 asks for again, the way Uber records a receipt that never came and Meijer a
 row that gave none. It writes no CSV rows then, since the CSVs only ever
 take rows on the end and the run that saves the receipt writes the
-purchase down. A receipt whose page has not shown it on RUNS separate runs
+purchase down. A receipt whose page has not shown it on DAYS separate days
 is set aside as No Receipt Available, written into the CSVs once and
 counted for review, as Apple sets aside a receipt it refused, so a page
-that never shows costs a few runs rather than every run. Download again
-still asks for it.
+that never shows costs a few days of runs rather than every run. The days
+are counted, not the runs, since Pilot, Run All and Resume one after
+another, or a server running every hour through a provider's outage, are
+many runs on one bad day, and PaperPull Server offers no Download again to
+ask for a receipt once more after it is set aside.
 
 asked_again() is for the records the older versions left. A No Receipt
 Available record whose note is one of the words they wrote for a page that
@@ -31,7 +34,8 @@ whose row has no receipt link, keeps its record.
 """
 from __future__ import annotations
 
-import uuid
+import re
+from datetime import date
 
 from .models import State
 
@@ -49,21 +53,28 @@ OLD_NOTES = frozenset({
 
 TRIED_AGAIN = "tried again next run"
 
-# How many separate runs ask for a receipt whose page did not show it before
-# it is set aside, and where the record keeps those runs.
-RUNS = 3
-RUNS_KEY = "not_shown_runs"
+# On how many separate days a receipt's page may show nothing before it is
+# set aside, and where the record keeps those days.
+DAYS = 3
+DAYS_KEY = "not_shown_days"
+
+_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
-def _this_run(app) -> str:
-    """The run, the same for every purchase it takes, so a purchase asked
-    for twice in one run counts once."""
-    key = getattr(app, "_not_shown_run", "")
+def _this_day(app) -> str:
+    """The day the run started, the same for every purchase it takes, so
+    every run of one day counts once."""
+    key = getattr(app, "_not_shown_day", "")
     if not key:
         stats = getattr(app, "stats", None) or {}
-        key = str(stats.get("started") or "") or uuid.uuid4().hex
-        app._not_shown_run = key
+        started = str(stats.get("started") or "")
+        key = started[:10] if _DAY_RE.match(started) else date.today().isoformat()
+        app._not_shown_day = key
     return key
+
+
+def _days(rec) -> list:
+    return [d for d in (rec.get(DAYS_KEY) or []) if isinstance(d, str) and d]
 
 
 def written_down(app, purchase) -> bool:
@@ -91,17 +102,17 @@ def tried_again(app, purchase, why: str) -> bool:
         app.stats["failed"] += 1
         print("  %s. The receipt saved before is kept." % why)
         return False
-    runs = [r for r in (rec.get(RUNS_KEY) or []) if isinstance(r, str) and r]
-    if _this_run(app) not in runs:
-        runs.append(_this_run(app))
-    if len(runs) < RUNS:
+    days = _days(rec)
+    if _this_day(app) not in days:
+        days.append(_this_day(app))
+    if len(days) < DAYS:
         app._record_state(purchase, State.FAILED, notes="%s, %s" % (why, TRIED_AGAIN),
-                          extra={RUNS_KEY: runs})
+                          extra={DAYS_KEY: days})
         app.stats["failed"] += 1
-        print("  %s, on %d of %d separate runs. It is tried again next run."
-              % (why, len(runs), RUNS))
+        print("  %s, on %d of %d separate days. It is tried again next run."
+              % (why, len(days), DAYS))
         return False
-    said = "%s on %d separate runs, so it is not asked for again" % (why, len(runs))
+    said = "%s on %d separate days, so it is not asked for again" % (why, len(days))
     # Written down once. An older version that recorded the purchase as
     # having no receipt wrote it down then, and a Download again after it
     # was set aside finds it written. The rows go first, so a history that
@@ -110,23 +121,22 @@ def tried_again(app, purchase, why: str) -> bool:
     if not written_down(app, purchase):
         app._write_csv_rows(purchase, receipt_status="No printable receipt available",
                             processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                            notes_extra="The receipt did not show on %d separate runs" % RUNS)
-    app._record_state(purchase, State.NO_RECEIPT_AVAILABLE, notes=said, extra={RUNS_KEY: runs})
+                            notes_extra="The receipt did not show on %d separate days" % DAYS)
+    app._record_state(purchase, State.NO_RECEIPT_AVAILABLE, notes=said, extra={DAYS_KEY: days})
     app.stats["no_receipt"] += 1
     app.stats["manual_review"] += 1
-    print("  %s, on %d of %d separate runs. It is not asked for again, and Download "
-          "again still asks for it." % (why, min(len(runs), RUNS), RUNS))
+    print("  %s, on %d of %d separate days. It is set aside for review and not asked "
+          "for again." % (why, min(len(days), DAYS), DAYS))
     return False
 
 
 def set_aside(rec) -> bool:
     """True for a record tried_again() set aside, its receipt page having
-    shown nothing on RUNS separate runs. Final, as No Receipt Available is,
+    shown nothing on DAYS separate days. Final, as No Receipt Available is,
     in an app that does not hold that state final otherwise (Meijer)."""
     if not isinstance(rec, dict) or rec.get("state") != State.NO_RECEIPT_AVAILABLE.value:
         return False
-    runs = [r for r in (rec.get(RUNS_KEY) or []) if isinstance(r, str) and r]
-    return len(runs) >= RUNS
+    return len(_days(rec)) >= DAYS
 
 
 def skipped(rec, otherwise: str) -> str:
@@ -134,8 +144,8 @@ def skipped(rec, otherwise: str) -> str:
     never saved, and a tester was told such a purchase was "Already
     completed and PDF verified" with no file anywhere (#70)."""
     if set_aside(rec) and not rec.get("downloaded_ok"):
-        return ("  Its receipt did not show on %d separate runs, so it is skipped. "
-                "Download again asks for it." % RUNS)
+        return ("  Its receipt did not show on %d separate days, so it is set aside "
+                "for review and skipped." % DAYS)
     return otherwise
 
 
