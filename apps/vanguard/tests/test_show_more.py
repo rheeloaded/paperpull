@@ -1,6 +1,6 @@
 """Vanguard's statements table keeps older rows behind a "Show More" control, and the app presses it when the row it was asked for is not on the page.
 
-A made-up table: the first rows are shown, the row asked for appears only after "Show More" is pressed, and a second control on the page, "Show More
+A made-up table. The first rows are shown, the row asked for appears only after "Show More" is pressed, and a second control on the page, "Show More
 Options", is not one the app may press. Everything here is made up and nothing leaves this machine.
 """
 import sys
@@ -24,7 +24,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</ti
 <script>
 function said(what) { navigator.sendBeacon('/pressed/' + what); }
 function more() { said('more'); document.getElementById('older').style.display = 'table-row-group';
-                  document.getElementById('more').style.display = %(after)s; }
+                  document.getElementById('more').style.display = %(after)s; %(then)s }
 </script><style>td { height: 64px; } td a { display: inline-block; width: 120px; height: 36px; }</style></head><body>
 <table><tr><th>Account</th><th>Date</th><th></th></tr>
 <tbody><tr><td>%(account)s</td><td>08/31/2026</td><td></td></tr></tbody>
@@ -33,9 +33,13 @@ function more() { said('more'); document.getElementById('older').style.display =
 <td><a title="Pdf download icon" href="/doc"
  aria-label="Download a pdf statement generated on February 28, 2025 with description %(account)s">pdf</a></td></tr>
 </tbody></table>
-<button id="more" onclick="more()">Show More</button>
+%(button)s
 <button onclick="said('options')">Show More Options</button>
+%(extra)s
 </body></html>"""
+
+SHOW_MORE = '<button id="more" onclick="more()">Show More</button>'
+
 
 
 class Fake:
@@ -43,9 +47,13 @@ class Fake:
         self.pressed, self.asked = [], []
         self.hidden = rows_behind
         self.after = "'none'"          # what Show More does once pressed, goes away
+        self.then = ""                 # and anything else it does then
+        self.button = SHOW_MORE
+        self.extra = ""
 
     def page(self):
-        return PAGE % {"account": ACCOUNT, "after": self.after}
+        return PAGE % {"account": ACCOUNT, "after": self.after, "then": self.then,
+                       "button": self.button, "extra": self.extra}
 
 
 def _handler(fake):
@@ -177,3 +185,41 @@ def test_a_show_more_that_stays_is_pressed_once_more_and_no_further(page, vangua
     assert got is False and not out.exists()
     assert vanguard.pressed == ["more", "more"], vanguard.pressed
     assert vanguard.asked == []
+
+
+def test_a_show_more_turned_off_once_the_list_is_shown_ends_the_looking(page, vanguard, tmp_path,
+                                                                        monkeypatch):
+    """A list shown in full can leave its control on the page, turned off.
+    Pressed, it would not go through and the run would stop, where a row
+    not there leaves that one statement for review and the run goes on."""
+    monkeypatch.setattr(site, "SHOW_MORE_WAIT_MS", 1500)
+    vanguard.after = "'inline-block'"
+    vanguard.then = "document.getElementById('more').disabled = true;"
+    page.goto("http://127.0.0.1:%d/" % vanguard.port)
+    got, out = _download(page, tmp_path, "2019-05-31")
+    assert got is False and not out.exists()
+    assert vanguard.pressed == ["more"], vanguard.pressed
+
+
+def test_a_control_named_show_more_whose_words_the_guard_refuses_is_not_pressed(
+        page, vanguard, tmp_path):
+    """Its name is Show More and its words are not, so the guard, which reads
+    the words, refuses it."""
+    vanguard.button = ('<button id="more" aria-label="Show More" onclick="more()">'
+                       'Transfer money</button>')
+    page.goto("http://127.0.0.1:%d/" % vanguard.port)
+    got, out = _download(page, tmp_path, "2025-02-28")
+    assert got is False and not out.exists()
+    assert vanguard.pressed == [], vanguard.pressed
+
+
+def test_a_covered_show_more_is_never_pressed(page, vanguard, tmp_path):
+    """Something drawn over the control would take the press, so nothing is
+    pressed and the run stops, as at every press (paperpull_core.pressing)."""
+    from paperpull_core import pressing
+    vanguard.extra = ('<div style="position: fixed; left: 0; top: 0; width: 100vw; '
+                      'height: 100vh; background: rgba(0, 0, 0, .3)">Chat with us</div>')
+    page.goto("http://127.0.0.1:%d/" % vanguard.port)
+    with pytest.raises(pressing.Stop):
+        _download(page, tmp_path, "2025-02-28")
+    assert vanguard.pressed == [], vanguard.pressed

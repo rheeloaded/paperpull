@@ -506,6 +506,11 @@ def show_more(page) -> bool:
             label = loc.first.inner_text(timeout=1000) or ""
             if not is_safe_control(label):
                 continue
+            # A list shown in full can leave its control on the page, turned
+            # off. Pressing it would not go through and would stop the run,
+            # where a row not there leaves only that statement for review.
+            if not loc.first.is_enabled(timeout=1000):
+                return False
             before = page.evaluate(_DRAWN_ROWS_JS)
             pressing.click(page, loc.first, css="button, a, [role=button], [role=link]",
                            what="the control that shows more statements", words=_words(),
@@ -651,7 +656,9 @@ def download_document(page, account_id: str, charitable: bool,
     if staging:
         _set_download_dir(page, staging)
     before = _snapshot(staging)
-    row = page.locator("table tr, [role=row]").filter(
+    # A drawn row, as _ROW_JS found it. A copy of the row kept in the page
+    # and not drawn has no box to press, and the press would stop the run.
+    row = page.locator("table tr:visible, [role=row]:visible").filter(
         has_text=re.compile(escape_for_locator(needle["account"])))\
         .filter(has_text=needle["dateText"]).first
     icon = row.get_by_title("Pdf download icon").first
