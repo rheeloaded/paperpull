@@ -470,6 +470,14 @@ def test_a_page_of_another_host_is_never_read_for_the_documents_list(server):
             read.append((self.url, selector))
             return SimpleNamespace(count=lambda: 5)
 
+        def evaluate(self, script):
+            read.append((self.url, "the header row"))
+            return True
+
+        def get_by_role(self, role, **kw):
+            read.append((self.url, role))
+            return SimpleNamespace(count=lambda: 1)
+
     elsewhere = Tab(address(server, ELSEWHERE_HOST, "/Documents/statement.pdf"))
     assert site.showing_documents_list(elsewhere) is False
     assert not read, "another host's page was read, %s" % read

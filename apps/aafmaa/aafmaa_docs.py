@@ -472,13 +472,11 @@ class App:
             if not site.goto_documents(page):
                 print("Could not open your Armed Forces Mutual documents. Sign in and open your")
                 print("Documents page in the browser, then try again.")
-                print("If it shows no documents yet, there is nothing to download")
-                print("until the first one is posted.")
                 # Nothing was listed, so this run stops here rather than finish
                 # clean, as a Resume after it does (paperpull_core.listing).
-                # The page counts as open only once its table shows more than
-                # one row, so an account with no documents yet stops here every
-                # run, and is told why, and one with a single document may too.
+                # The page is known by its header row or its MY DOCUMENTS
+                # section, not by its rows, so an account with one document or
+                # none gets here only when the page truly did not open.
                 raise SystemExit(0)
         self.check_session(page)
 

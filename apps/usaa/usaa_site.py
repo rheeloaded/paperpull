@@ -28,9 +28,11 @@ import html as _html
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
@@ -259,30 +261,79 @@ def is_safe_control(name: str) -> bool:
 # Documents page
 # ---------------------------------------------------------------------------
 
+# How long the collector waits for USAA's first answer with the list, once
+# the page has drawn, and how long a page that was asked for may take to draw.
+ANSWER_WAIT_S = 30
+DRAW_WAIT_S = 12
+
+# The document center's own address, its heading and its table's header row,
+# as the probe of 2026-07-24 saw them (Diagnostics/diagnose-documents.json).
+DOCUMENTS_PATH = "/my/documents"
+_DOCUMENTS_HEADING_RE = re.compile(r"^\s*my\s+documents\s*$", re.I)
+_HEADER_ROW_JS = r"""() => [...document.querySelectorAll('table tr')].some(tr => {
+  const cells = [...tr.children].map(c => (c.innerText || '').trim().toLowerCase());
+  return cells.some(c => c.startsWith('document title'))
+      && cells.some(c => c.startsWith('date delivered'));
+})"""
+
+
+def documents_page_drawn(page) -> bool:
+    """The signed-in document center, drawn, known by what it is.
+
+    It used to count as open once more than one row matched a broad row
+    selector, so an account with one document, or none yet, could read as a
+    page that never opened, and Discover stops on that. Nothing is listed
+    from the rows anyway, since the list comes from USAA's own answer to the
+    page (collect_documents_via_api). So the page is known by its address
+    and its "My Documents" heading or its table's header row, and another
+    page of the site with rows of its own does not count. A page that cannot
+    be read, or of another host, does not count either."""
+    try:
+        url = page.url or ""
+        if not is_safe_url(url) or looks_signed_out(page):
+            return False
+        if urlsplit(url).path.rstrip("/").lower() != DOCUMENTS_PATH:
+            return False
+        if page.get_by_role("heading", name=_DOCUMENTS_HEADING_RE).count() > 0:
+            return True
+        return bool(page.evaluate(_HEADER_ROW_JS))
+    except Exception:
+        return False
+
+
+def _drawn_within(page) -> bool:
+    """documents_page_drawn, given the page a few seconds to draw."""
+    deadline = time.monotonic() + DRAW_WAIT_S
+    while True:
+        if documents_page_drawn(page):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            return False
+
+
 def goto_documents(page) -> bool:
     """Navigate to a document area. The page already open is checked
     FIRST, so one the person navigated to by hand is read as it is. The
     candidate loop used to run unconditionally, which replaced a hand
     opened page and, when every candidate missed, left the browser on a
     dead page outside the signed-in app (#30, found on Navy Federal, the
-    same shape here)."""
-    try:
-        if (is_safe_url(page.url or "") and not looks_signed_out(page)
-                and page.locator(FALLBACK["doc_row"]).count() > 1):
-            return True
-    except Exception:
-        pass
+    same shape here).
+
+    Because a page already showing is kept, this is never how a caller gets
+    the page loaded afresh. The list and a row download load it themselves."""
+    if documents_page_drawn(page):
+        return True
     for url in DOCUMENT_URL_CANDIDATES:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3500)
             if looks_signed_out(page):
                 return False
-            try:
-                page.wait_for_selector(FALLBACK["page_ready"], timeout=12000)
-            except Exception:
-                pass
-            if page.locator(FALLBACK["doc_row"]).count() > 1:
+            if _drawn_within(page):
                 return True
         except Exception as e:
             log.info("documents URL %s failed: %s", url, e)
@@ -295,11 +346,11 @@ def goto_documents(page) -> bool:
             if not FORBIDDEN_CONTROL_RE.search(label):
                 link.first.click()
                 page.wait_for_timeout(3000)
-                return page.locator(FALLBACK["doc_row"]).count() > 1
+                return _drawn_within(page)
     except Exception:
         pass
     # fall back to the current page
-    return page.locator(FALLBACK["doc_row"]).count() > 1
+    return documents_page_drawn(page)
 
 
 def scroll_full_page(page, rounds: int = 6, delay_ms: int = 700) -> None:
@@ -410,7 +461,7 @@ _BLOB_FETCH_JS = r"""async () => {
 }"""
 
 
-def collect_documents_via_api(page) -> List[dict]:
+def collect_documents_via_api(page) -> Optional[List[dict]]:
     """Enumerate EVERY document by capturing the USAA documents JSON API as the
     page loads/pages, rather than scraping the visible table.
 
@@ -419,7 +470,16 @@ def collect_documents_via_api(page) -> List[dict]:
     returning {"documents":[{title, displayDate, accountName, category,
     subCategory, documentId, documentDate, ...}]} newest-first, in pages. We
     capture every such response while scrolling + clicking through the pager,
-    then de-duplicate by documentId. Returns the raw document dicts.
+    then de-duplicate by documentId. Returns the raw document dicts, an
+    empty list when USAA answered with none, and None when no answer came,
+    since then nothing was read and the list must not count as empty.
+
+    The page asks for its whole list as it loads (the probe heard eight
+    answers of a hundred for 724 documents, all before the table paged), so
+    the page is loaded HERE, while listening. This called goto_documents,
+    which keeps a page already showing since 70c3256a, and Discover had just
+    opened the page, so the listener heard nothing and every Discover from
+    0.26.0 on listed no document and said the list was read.
     """
     batches: List[list] = []
 
@@ -438,7 +498,19 @@ def collect_documents_via_api(page) -> List[dict]:
 
     page.on("response", on_resp)
     try:
-        goto_documents(page)
+        try:
+            page.goto(URLS["documents_alt"], wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            log.info("documents page did not load: %s", str(e).splitlines()[0][:90])
+        if not _drawn_within(page):
+            return None
+        deadline = time.monotonic() + ANSWER_WAIT_S
+        while not batches and time.monotonic() < deadline:
+            page.wait_for_timeout(500)
+        if not batches:
+            log.warning("the documents page drew, and no list of documents arrived "
+                        "within %d s", ANSWER_WAIT_S)
+            return None
         page.wait_for_timeout(3500)
         last_total = -1
         stagnant = 0
@@ -553,8 +625,23 @@ def download_document_row(page, title: str, date_text: str, account: str,
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # fresh list -> guarantees no leftover PDF iframe from the previous doc
-    goto_documents(page)
+    # fresh list -> guarantees no leftover PDF iframe from the previous doc.
+    # Loaded here, since goto_documents keeps a page already showing, and a
+    # document's own address shows the table beside its PDF.
+    try:
+        page.goto(URLS["documents_alt"], wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        log.info("documents page did not load: %s", str(e).splitlines()[0][:90])
+    if not _drawn_within(page):
+        log.info("no fresh document list to find %r in", title)
+        return False
+    try:
+        page.wait_for_selector("[data-testid^='readDocument-']", timeout=15000)
+    except Exception:
+        pass
+    if page.locator("iframe[src^='blob:']").count():
+        log.info("a PDF still shows beside the list, so %r is not pressed", title)
+        return False
     scroll_full_page(page, rounds=2)
     rd = _find_doc_row(page, title, date_text, account)
     if rd is None:

@@ -10,6 +10,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **USAA's Discover listed no document from 0.26.0 on.** USAA's documents
+  page asks USAA for its whole list as it loads, and the app reads the list
+  from those answers. Since 0.26.0 the app opened the page first and then
+  listened to a page that asked for nothing more, so every Discover found
+  no new document and called the list read, and Pilot and Run All worked
+  only through documents an earlier version had listed. The app now loads
+  the page while it listens, and a page whose list never arrives stops the
+  run rather than pass for an empty one. Proven against a made-up page
+  built from the July probe of USAA's own, not yet run against USAA.
+- **USAA and Armed Forces Mutual know their documents page by what it is,
+  not by how many rows it shows.** Each counted the page as open only once
+  more than one row showed, and Discover stops on a page that will not
+  open, so an account with one document, or none yet, could stop every
+  Pilot and Run All. USAA's page is now known by its address and its My
+  Documents heading or its table's header row, and Armed Forces Mutual's by
+  its documents table's header row or its MY DOCUMENTS section. A page that
+  never drew still stops the run. On Armed Forces Mutual the header row and
+  the membership letters already counted as rows, so only an account with
+  no document yet and no letters stopped there.
+- **USAA's download by row loads the list afresh before it presses.** It is
+  used for a record with no document id. Since 0.26.0 it kept a page
+  already showing, which at a document's own address still shows that
+  document's PDF, so the capture could save it under the next document's
+  name.
 - **A receipt saved since its page last showed nothing starts its days
   again.** The days a receipt page showed nothing stayed on the purchase's
   record after a run saved something for it. That mattered where the save
