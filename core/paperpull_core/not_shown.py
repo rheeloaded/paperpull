@@ -90,11 +90,13 @@ SAVED_STATES = frozenset({State.PDF_SAVED.value, State.PDF_VERIFIED.value})
 def let_go_on_save(app, purchase, state, rec: dict) -> None:
     """Every receipt app's _record_state hands this the record it is about
     to write. When the state says a file was just saved for the purchase,
-    its page showed something, so the days it showed nothing count no
-    longer and the record lets them go. A saved receipt is never asked for
-    again anyway, but a copy put aside for review, or a Target order with
-    one of its invoices saved and another missing, has no downloaded_ok,
-    and one more day of an empty page used to set it aside."""
+    the days its page showed nothing count no longer and the record lets
+    them go. A saved receipt is never asked for again anyway, but a copy put
+    aside for review, or a Target order with one of its invoices saved and
+    another missing, has no downloaded_ok, and one more day of an empty page
+    used to set it aside. It is a save that lets them go, not a page that
+    showed. A page that showed and saved nothing new, a print that failed or
+    a Target walk that found only invoices already on file, keeps them."""
     if getattr(state, "value", state) not in SAVED_STATES:
         return
     if _days(app.progress.get(purchase.key) or {}):

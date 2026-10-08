@@ -479,7 +479,7 @@ def test_a_run_that_saves_the_receipt_lets_the_days_it_did_not_show_go(app, line
 
 @pytest.mark.parametrize("app", APPS, ids=IDS)
 def test_a_record_with_no_days_gets_none_from_a_save(app, tmp_path):
-    """Every saved record does not grow an empty list of days."""
+    """No saved record grows an empty list of days."""
     from paperpull_core import testkit
     mod = load(app)
     inst = app_in(mod, tmp_path)
