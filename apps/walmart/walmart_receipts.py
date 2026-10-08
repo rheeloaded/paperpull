@@ -1103,6 +1103,7 @@ class App:
         rec = purchase.to_dict()
         if extra:
             rec.update(extra)
+        not_shown.let_go_on_save(self, purchase, state, rec)
         self.progress.update(purchase.key, rec)  # atomic save on every update
         found = {"state": state.value}
         if purchase.purchase_date:

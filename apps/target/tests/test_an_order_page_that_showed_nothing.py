@@ -24,7 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
 import target_receipts
+from paperpull_core import receipt_pdf
 from paperpull_core.models import ONLINE, Item, Purchase, State
+from paperpull_core.testkit import text_pdf
 
 APP_DIR = Path(__file__).resolve().parents[1]
 
@@ -106,7 +108,7 @@ def test_a_page_that_showed_nothing_is_asked_for_again(page, tmp_path, capsys):
     assert "on 3 of 3 separate days. It is set aside for review" in out, out
     assert app.progress.get(p.key)["state"] == State.NO_RECEIPT_AVAILABLE.value
     assert rows(app) == 2, "written down once, a row in each CSV"
-    assert a_run(tmp_path)._already_done(p), "set aside after three runs"
+    assert a_run(tmp_path)._already_done(p), "set aside on the third separate day"
 
 
 def test_one_run_that_asks_twice_counts_once(page, tmp_path, capsys):
@@ -128,3 +130,40 @@ def test_an_order_with_only_an_invoice_has_no_receipt_as_before(page, tmp_path, 
     assert rows(app) == 2
     assert a_run(tmp_path, include_invoices=False)._already_done(p)
     assert "No printable receipt available - marked for manual review." in said(capsys)
+
+
+def test_a_short_invoice_walk_starts_the_days_again(page, tmp_path, capsys):
+    """The page showed nothing on two days. On the third it showed the
+    order's invoices and one of its two was saved before the other failed,
+    which leaves the record without downloaded_ok. On the fourth it showed
+    nothing again. That is one day of nothing since the page showed, so the
+    order is asked for again with its second invoice still missing, not set
+    aside."""
+    page.set_content(NOTHING)
+    p = purchase()
+    for _ in range(2):
+        a_run(tmp_path)._handle_no_receipt(page, p)
+
+    app = a_run(tmp_path)
+    text = "Invoice 1 of 2 Invoice number: 10000000000000051 Invented thing Order 102000222"
+    staged = app.paths.invoices / "staged.pdf"
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_bytes(text_pdf([text]))
+    walk = {"tokens": receipt_pdf.expected_tokens_for(p), "held": [], "missed": [],
+            "count": 2, "list_page": None, "saved": []}
+    app._place_invoice(staged, p, (1, 2), (1, 2), "10000000000000051",
+                       receipt_pdf.validate_pdf(staged, 2000, walk["tokens"]), text, walk)
+    assert app._file_invoices(p, walk) is False
+    rec = app.progress.get(p.key)
+    assert rec["downloaded_ok"] is False and len(rec["invoices"]) == 1, rec
+    assert not rec.get("not_shown_days"), rec
+    capsys.readouterr()
+
+    app = a_run(tmp_path)
+    app._handle_no_receipt(page, p)
+    out = said(capsys)
+    assert "on 1 of 3 separate days. It is tried again next run." in out, out
+    rec = app.progress.get(p.key)
+    assert rec["state"] == State.FAILED.value, rec
+    assert len(rec["invoices"]) == 1, "the invoice saved stays on the record"
+    assert not a_run(tmp_path)._already_done(p), "the missing invoice is asked for again"

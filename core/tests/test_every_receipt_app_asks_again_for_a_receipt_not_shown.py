@@ -439,3 +439,72 @@ def test_every_run_of_one_day_counts_once(app, method, tmp_path, monkeypatch, ca
     assert (inst.progress.get(p.key) or {}).get("state") != State.NO_RECEIPT_AVAILABLE.value
     assert not done_already(mod, tmp_path, p)
     assert not written_down(inst)
+
+
+# A receipt page shown, saved as a receipt names its purchase, and another
+# purchase's page, which is put aside in Manual Review.
+THIS_RECEIPT = ["Order " + ORDER, "Placed " + DATE, "Garden Hose  1  $12.34", "Total $12.34"]
+ANOTHER_PAGE = ["Order ORDER-0999", "Placed 2026-02-03", "Folding Lawn Chair  2  $45.00",
+                "Patio Umbrella  1  $60.00", "Subtotal $150.00", "Tax $9.00",
+                "Total $159.00", "Paid with a card ending 0000", "Thank you for shopping"]
+
+TWO_DAYS = ["2031-02-01", "2031-02-02"]
+
+
+def _days_left(inst, p) -> list:
+    return (inst.progress.get(p.key) or {}).get("not_shown_days") or []
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+@pytest.mark.parametrize("lines", [THIS_RECEIPT, ANOTHER_PAGE], ids=["kept", "put aside"])
+def test_a_run_that_saves_the_receipt_lets_the_days_it_did_not_show_go(app, lines, tmp_path):
+    """The days a receipt page showed nothing count toward setting the
+    purchase aside only until a run saves something for it. That page showed
+    something. A copy put aside in Manual Review counts too, since its page
+    showed, and the record of one has no downloaded_ok to say so."""
+    from paperpull_core import testkit
+    mod = load(app)
+    inst = app_in(mod, tmp_path)
+    p = purchase()
+    inst.progress.update(p.key, dict(p.to_dict(), state=State.FAILED.value,
+                                     not_shown_days=list(TWO_DAYS)))
+    filed = testkit.file_a_receipt(inst, p, lines)
+    assert filed.kept is (lines is THIS_RECEIPT), (app.name, filed)
+    assert filed.path.exists(), "something was saved"
+    assert not _days_left(inst, p), "%s keeps %s after saving %s" % (
+        app.name, _days_left(inst, p), filed.path.name)
+    # Read back from disk, as the next run reads it.
+    assert not _days_left(app_in(mod, tmp_path), p), app.name
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_a_record_with_no_days_gets_none_from_a_save(app, tmp_path):
+    """Every saved record does not grow an empty list of days."""
+    from paperpull_core import testkit
+    mod = load(app)
+    inst = app_in(mod, tmp_path)
+    p = purchase()
+    filed = testkit.file_a_receipt(inst, p, THIS_RECEIPT)
+    assert filed.kept, app.name
+    assert "not_shown_days" not in filed.record, filed.record
+
+
+@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+def test_after_a_copy_put_aside_the_days_count_again_from_one(app, method, tmp_path,
+                                                             monkeypatch, capsys):
+    """The page showed nothing on two days, then showed a page that was put
+    aside, then nothing again. That is one day of nothing since the page
+    showed, and the purchase is asked for again, not set aside."""
+    from paperpull_core import testkit
+    mod = load(app)
+    monkeypatch.setattr(mod, "site", _SiteThatShowsNothing())
+    p = purchase()
+    for _ in range(2):
+        look(mod, tmp_path, method)
+    testkit.file_a_receipt(app_in(mod, tmp_path), purchase(), ANOTHER_PAGE)
+    capsys.readouterr()
+    inst = look(mod, tmp_path, method)
+    said = " ".join(capsys.readouterr().out.split())
+    assert "on 1 of 3 separate days. It is tried again next run." in said, said
+    assert (inst.progress.get(p.key) or {}).get("state") != State.NO_RECEIPT_AVAILABLE.value
+    assert not done_already(mod, tmp_path, p)

@@ -7,6 +7,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A receipt saved since its page last showed nothing starts its days
+  again.** The days a receipt page showed nothing stayed on the purchase's
+  record after a run saved something for it. That mattered where the save
+  did not finish the purchase, a copy put aside in Manual Review, or a
+  Target order with one invoice saved and another still missing. One more
+  day of an empty page then set the purchase aside for review, as though
+  its page had shown nothing three days running, and Target's missing
+  invoice was never asked for again. Any save for a purchase now lets those
+  days go, in all fourteen receipt apps.
+
 ## [0.45.0] - 2026-10-07
 
 A receipt whose page did not show it is fetched on the next run, in

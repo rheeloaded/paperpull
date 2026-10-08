@@ -1368,6 +1368,7 @@ class App:
                 rec[name] = found[name]
         if extra:
             rec.update(extra)
+        not_shown.let_go_on_save(self, purchase, state, rec)
         self.progress.update(purchase.key, rec)  # atomic save on every update
         self.discovery.update(purchase.key, {"state": state.value})
 

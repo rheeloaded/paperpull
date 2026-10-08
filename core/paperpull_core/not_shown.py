@@ -31,6 +31,11 @@ are kept here exactly as they were written and never change, since records
 on disk carry them. A purchase recorded No Receipt Available for what the
 provider showed, a Target order with only an invoice or a GitHub payment
 whose row has no receipt link, keeps its record.
+
+The rows such a purchase was written down with, by an older version or
+when it was set aside, stay in the CSVs once a later run saves it, beside
+that run's rows. The CSVs are the person's own files, only ever added to,
+and the All Purchases workbook leaves those rows out (export_purchases).
 """
 from __future__ import annotations
 
@@ -75,6 +80,27 @@ def _this_day(app) -> str:
 
 def _days(rec) -> list:
     return [d for d in (rec.get(DAYS_KEY) or []) if isinstance(d, str) and d]
+
+
+# What a receipt app records the moment it has saved a file for a purchase,
+# a receipt, one invoice of an order, or a copy put aside for review.
+SAVED_STATES = frozenset({State.PDF_SAVED.value, State.PDF_VERIFIED.value})
+
+
+def let_go_on_save(app, purchase, state, rec: dict) -> None:
+    """Every receipt app's _record_state hands this the record it is about
+    to write. When the state says a file was just saved for the purchase,
+    its page showed something, so the days it showed nothing count no
+    longer and the record lets them go. A saved receipt is never asked for
+    again anyway, but a copy put aside for review, or a Target order with
+    one of its invoices saved and another missing, has no downloaded_ok,
+    and one more day of an empty page used to set it aside."""
+    if getattr(state, "value", state) not in SAVED_STATES:
+        return
+    if _days(app.progress.get(purchase.key) or {}):
+        # The store merges a record into the one it has, so the days are
+        # written empty rather than left out.
+        rec[DAYS_KEY] = []
 
 
 def written_down(app, purchase) -> bool:
