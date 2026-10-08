@@ -294,6 +294,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   invoice or a GitHub payment whose row has no receipt link, stays as it
   was, and moving a download history to another computer keeps the rest
   asked for.
+- **Vanguard downloads the statements its table keeps behind Show More
+  (#71).** The statements table shows a year's newest rows and keeps the
+  older ones behind a Show More control, which the app never pressed, so
+  those statements were recorded as having no row and left for manual
+  review without a download. Now the statement's own year is picked
+  first and Show More is pressed until its row is drawn, each press
+  judged by the guard as every other control is, never Show More Options,
+  at most thirty times and no further once a press draws nothing new. A
+  row counts only once its download icon is drawn, where one in the
+  page's text that was not drawn used to count. Contributed by tylerverry.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never
