@@ -422,6 +422,13 @@ class App:
         # Enumerate EVERY document via USAA's documents JSON API (stable
         # documentIds, full history), not by scraping the visible table.
         api_docs = site.collect_documents_via_api(page)
+        if api_docs is None and (site.looks_signed_out(page)
+                                 or site.detect_security_challenge(page)):
+            # The collector loads the page again, and the session can end or
+            # a check come up in between, so this asks for what the page
+            # needs, and once it is given, reads the list again.
+            self.check_session(page)
+            api_docs = site.collect_documents_via_api(page)
         if api_docs is None:
             print("Your USAA documents page opened, and the list of documents it")
             print("asks USAA for never arrived, so nothing was listed. Try again")

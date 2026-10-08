@@ -267,7 +267,7 @@ ANSWER_WAIT_S = 30
 DRAW_WAIT_S = 12
 
 # The document center's own address, its heading and its table's header row,
-# as the probe of 2026-07-24 saw them (Diagnostics/diagnose-documents.json).
+# as the July probe saw them (Diagnostics/diagnose-documents.json).
 DOCUMENTS_PATH = "/my/documents"
 _DOCUMENTS_HEADING_RE = re.compile(r"^\s*my\s+documents\s*$", re.I)
 _HEADER_ROW_JS = r"""() => [...document.querySelectorAll('table tr')].some(tr => {
@@ -475,11 +475,13 @@ def collect_documents_via_api(page) -> Optional[List[dict]]:
     since then nothing was read and the list must not count as empty.
 
     The page asks for its whole list as it loads (the probe heard eight
-    answers of a hundred for 724 documents, all before the table paged), so
-    the page is loaded HERE, while listening. This called goto_documents,
-    which keeps a page already showing since 70c3256a, and Discover had just
-    opened the page, so the listener heard nothing and every Discover from
-    0.26.0 on listed no document and said the list was read.
+    answers of a hundred documents each, far more than the eighteen months
+    its table shows), so the page is loaded HERE, while listening. This
+    called goto_documents, which keeps a page already showing since
+    70c3256a, and Discover had just opened the page and waited on it, so
+    the listener heard only answers that came later than those waits, and
+    a Discover from 0.26.0 on could list few documents or none and still
+    say the list was read.
     """
     batches: List[list] = []
 
@@ -639,9 +641,6 @@ def download_document_row(page, title: str, date_text: str, account: str,
         page.wait_for_selector("[data-testid^='readDocument-']", timeout=15000)
     except Exception:
         pass
-    if page.locator("iframe[src^='blob:']").count():
-        log.info("a PDF still shows beside the list, so %r is not pressed", title)
-        return False
     scroll_full_page(page, rounds=2)
     rd = _find_doc_row(page, title, date_text, account)
     if rd is None:

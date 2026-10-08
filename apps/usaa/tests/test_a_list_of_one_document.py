@@ -5,18 +5,19 @@ The page counted as open only once more than one row matched a broad row
 selector, so an account with a single document, or none yet, could stop
 every Pilot and Run All since Discover stops when the page will not open.
 The page is now known by its address and its own heading or its table's
-header row, as the probe of 2026-07-24 saw them, and a page that never drew
+header row, as the July probe saw them, and a page that never drew
 still stops the run.
 
 The list itself was never read from the rows. USAA's page asks its
 documents API for every document once, as it loads, and pages its table in
-the browser (the probe heard eight answers of a hundred for 724 documents
-while the table showed eighteen months in pages of ten). The collector
-listens for those answers, and it loaded the page itself until the opener
-learned to keep a page already showing (70c3256a, in 0.26.0). From then on
-Discover opened the page, the collector found it open and listened to a
-page that asked nothing more, so every Discover listed nothing and said the
-list was read. The collector now loads the page while it listens, and a
+the browser (the probe heard eight answers of a hundred documents each,
+far more than the eighteen months the table showed in pages of ten). The
+collector listens for those answers, and it loaded the page itself until
+the opener learned to keep a page already showing (70c3256a, in 0.26.0).
+From then on Discover opened the page and waited on it, the collector found
+it open and heard only answers that came later than that, and the list was
+called read however little was heard. The made-up page answers at once, so
+there it heard nothing. The collector now loads the page while it listens, and a
 page whose list never arrives stops the run rather than count as empty.
 
 The row fallback, for a record with no document id, loads the list afresh
@@ -31,6 +32,7 @@ invented.
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit, urlunsplit
@@ -49,7 +51,7 @@ USAA_HOST = "www.usaa.test"
 HOSTS = ("--host-resolver-rules=MAP %s 127.0.0.1, MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
          % USAA_HOST)
 
-API = "/v1/enterprise/my-documents/experience/individuals/example/documents"
+API = "/v1/enterprise/my-documents/example/documents"
 
 # Every document the made-up account could hold, newest first, as the API
 # lists them.
@@ -66,10 +68,11 @@ DOCS = [
 ]
 PDFS = {}
 
-# The documents page. It asks the API for every document as it loads, then
-# draws the heading, the table's header row and one row per document, ten
-# to a page. Asked, it draws its heading as plain text rather than as a
-# heading, or an empty account's list with no table at all. A title opens its document at the page's own address with
+# The documents page. It draws its heading at once and asks the API for
+# every document as it loads, then draws the table's header row and one row
+# per document, ten to a page. Asked, it draws its heading as plain text
+# rather than as a heading, or an empty account's list with no table at
+# all. A title opens its document at the page's own address with
 # ?documentId=, where the PDF shows in a blob: iframe beside the table, as
 # it does at a deep link. The PDF takes a moment to arrive, as USAA's does.
 DOCUMENTS_PAGE = """<!doctype html><html><head><title>My Documents | USAA</title></head>
@@ -88,13 +91,14 @@ function shown(id) {
 }
 function draw(docs, failed) {
   const root = document.getElementById('root');
+  const list = document.getElementById('list');
   const table = docs.length || TABLE_WHEN_EMPTY;
-  root.innerHTML = '<main><' + HEADING + ' class="title">My Documents</' + HEADING + '>' + (failed
-    ? '<p>We are unable to show your documents right now.</p>'
+  list.innerHTML = failed ? '<p>We are unable to show your documents right now.</p>'
     : !table ? '<p>You have no documents.</p>'
     : '<table><thead><tr><th>Document title</th><th>Date delivered</th>' +
       '<th>Account</th><th>Actions</th></tr></thead><tbody></tbody></table>' +
-      (docs.length ? '' : '<p>You have no documents.</p>')) + '</main>';
+      (docs.length ? '' : '<p>You have no documents.</p>');
+  root.dataset.done = '1';
   if (failed || !table) return;
   const body = root.querySelector('tbody');
   docs.slice(0, 10).forEach((d, n) => {
@@ -113,12 +117,19 @@ function draw(docs, failed) {
   if (asked) shown(asked);
 }
 if (DRAWS) {
+  document.getElementById('root').innerHTML = '<main><' + HEADING +
+    ' class="title">My Documents</' + HEADING + '><div id="list"></div></main>';
   fetch('%(api)s?limit=100').then(r => {
     if (!r.ok) throw new Error('refused');
     return r.json();
   }).then(j => draw(j.documents, false), () => draw([], true));
 }
 </script></body></html>"""
+
+# USAA's sign-in page, drawn at the address asked for once the session ends.
+SIGN_IN_PAGE = """<!doctype html><html><head><title>Log On | USAA</title></head><body>
+<main><h1>Log On</h1><input type="text" aria-label="Online ID">
+<input type="password" aria-label="Password"></main></body></html>"""
 
 # Another page of the signed-in site, with a table of rows of its own.
 ACCOUNTS_PAGE = """<!doctype html><html><head><title>Accounts | USAA</title></head><body>
@@ -143,8 +154,13 @@ class FakeUsaa:
         # list still draws its table.
         self.heading = "h1"
         self.table_when_empty = True
-        # How many times the API was asked.
+        # How long the API takes to answer, and how many loads of the
+        # documents page are drawn before the session ends.
+        self.answer_delay = 0.0
+        self.signed_in_loads = None
+        # How many times the API was asked, and the documents page loaded.
         self.asked = 0
+        self.loads = 0
 
 
 SITE = FakeUsaa()
@@ -167,6 +183,10 @@ class _Handler(BaseHTTPRequestHandler):
         if host != USAA_HOST:
             self.send_error(404)
         elif path == "/my/documents":
+            SITE.loads += 1
+            if SITE.signed_in_loads is not None and SITE.loads > SITE.signed_in_loads:
+                self._send(SIGN_IN_PAGE.encode("utf-8"), "text/html; charset=utf-8")
+                return
             page = DOCUMENTS_PAGE % {"draws": "true" if SITE.draws else "false", "api": API,
                                      "heading": SITE.heading,
                                      "table_when_empty": "true" if SITE.table_when_empty
@@ -176,6 +196,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(ACCOUNTS_PAGE.encode("utf-8"), "text/html; charset=utf-8")
         elif path == API:
             SITE.asked += 1
+            time.sleep(SITE.answer_delay)
             if SITE.api_status != 200:
                 self._send(b'{"error":"unavailable"}', "application/json", SITE.api_status)
                 return
@@ -273,7 +294,7 @@ def tab(attached, server):
 def drawn(tab, server, path="/my/documents"):
     tab.goto(address(server, path))
     if SITE.draws and path.startswith("/my/documents"):
-        tab.wait_for_function("document.querySelector('.title') !== null", timeout=10000)
+        tab.wait_for_function("document.getElementById('root').dataset.done", timeout=10000)
 
 
 # -- what counts as the documents page -----------------------------------
@@ -347,14 +368,12 @@ def their_tab(attached, server, path, title):
 
 
 @pytest.mark.parametrize("held", [0, 1, 3], ids=["no document", "one document", "three"])
-@pytest.mark.parametrize("path, title", [
-    ("/my/documents", "My Documents | USAA"),
-    ("/my/accounts", "Accounts | USAA"),
-], ids=["their tab on the documents", "their tab elsewhere"])
 def test_discover_lists_every_document_the_page_was_given(server, attached, tmp_path, capsys,
-                                                          held, path, title):
+                                                          held):
+    """USAA's Discover opens the page in a tab of its own, so where the
+    person's tab is makes no difference."""
     SITE.held = held
-    their_tab(attached, server, path, title)
+    their_tab(attached, server, "/my/accounts", "Accounts | USAA")
     ended, said, whole, listed = run_discover(tmp_path, attached, capsys)
     assert ended == ("returned", 0) and whole is True, said[-1500:]
     assert "Could not open your USAA documents" not in said, said[-1500:]
@@ -378,6 +397,30 @@ def test_discover_stops_when_the_list_never_arrives(server, attached, tmp_path, 
     ended, said, whole, listed = run_discover(tmp_path, attached, capsys)
     assert SITE.asked >= 1
     assert ended == ("exit", 0) and whole is False, said[-1500:]
+    assert "the list of documents it asks USAA for never arrived" in said, said[-1500:]
+    assert listed == []
+
+
+def test_discover_waits_for_a_list_that_comes_after_the_page(server, attached, tmp_path,
+                                                           capsys):
+    """The heading shows at once and the list a few seconds later."""
+    SITE.answer_delay = 3.0
+    their_tab(attached, server, "/my/accounts", "Accounts | USAA")
+    ended, said, whole, listed = run_discover(tmp_path, attached, capsys)
+    assert ended == ("returned", 0) and whole is True, said[-1500:]
+    assert listed == sorted(d["documentId"] for d in DOCS), said[-1500:]
+
+
+def test_discover_says_to_sign_in_when_the_list_load_meets_a_sign_in(server, attached,
+                                                                     tmp_path, capsys):
+    """The session ends between the opener's load of the page and the
+    collector's, so the collector meets USAA's sign-in page there. The run
+    stops and asks for a sign-in, never calls the list read."""
+    SITE.signed_in_loads = 1
+    their_tab(attached, server, "/my/accounts", "Accounts | USAA")
+    ended, said, whole, listed = run_discover(tmp_path, attached, capsys)
+    assert ended == ("exit", 0) and whole is False, said[-1500:]
+    assert "appears to have signed you out" in said, said[-1500:]
     assert listed == []
 
 
@@ -395,3 +438,4 @@ def test_the_row_fallback_never_saves_the_document_still_showing(tab, server, tm
     assert site.download_document_row(tab, other["title"], other["displayDate"],
                                       other["accountName"], out)
     assert out.read_bytes() == PDFS[other["documentId"]]
+

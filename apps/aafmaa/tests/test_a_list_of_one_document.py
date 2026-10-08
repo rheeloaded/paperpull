@@ -2,14 +2,17 @@
 in a real browser.
 
 The page counted as open only once more than one row matched a broad row
-selector, and Discover stops when the page will not open. The live page of
-2026-08-21 drew three membership letters and the table's header row among
+selector, and Discover stops when the page will not open. The live page
+seen in August drew three membership letters and the table's header row among
 those rows, so an account with one document or none passed while they were
 there. A member shown no letters, with no document yet, stopped every Pilot
 and Run All, and anything that changed those rows decided it. The page is
 now known by its address and by the documents table's header row (Date,
-Document, Policy) or the MY DOCUMENTS section control, both as the live
-page drew them. A page that never drew, or a PDF shown at the page's own
+Document, Policy), or right after the app loads the address, which opens
+on MY DOCUMENTS, by that section control, both as the live page drew them.
+Digital Vault and Insurance Documents are views of the same address with
+the same section controls, so a tab left on one of them is loaded again
+rather than read. A page that never drew, or a PDF shown at the page's own
 address, still does not count, and Discover stops there.
 
 In a real browser attached over CDP, as at home. AAFMAA is a made-up host
@@ -22,7 +25,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -65,6 +68,12 @@ ROW = """<tr><td>{date}</td><td>{title}</td><td>{policy}</td><td>{insured}</td>
 <td><a href="javascript:__doPostBack('{target}','')">View in Browser</a></td>
 <td><a href="javascript:__doPostBack('{copy}','')">Download a Copy</a></td><td></td></tr>"""
 
+# The Digital Vault, the view a postback of its section control shows at the
+# same address, asked for here with ?view=vault. Its table is the person's
+# own uploads.
+VAULT = """<table><tr><th>File name</th><th>Uploaded</th></tr>
+<tr><td>example-upload.pdf</td><td>5/1/2031</td></tr></table>"""
+
 PAGE = """<!doctype html><html><head><title>Member Center</title></head><body>
 <form method="post" action="/Documents/default.aspx"><main>%s</main></form>
 <script>function __doPostBack() {}</script></body></html>"""
@@ -88,9 +97,11 @@ class FakeAafmaa:
 SITE = FakeAafmaa()
 
 
-def documents_page():
+def documents_page(view=""):
     if not SITE.draws:
         return PAGE % ""
+    if view == "vault":
+        return PAGE % ((SECTIONS if SITE.sections else "") + VAULT)
     rows = "".join(ROW.format(date=d, title=t, policy=p, insured=i, target=tg,
                               copy=tg.replace("lnkViewDocument", "lnkDownloadCopy"))
                    for d, t, p, i, tg in ROWS[:SITE.held])
@@ -105,9 +116,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         host = (self.headers.get("Host") or "").split(":")[0]
-        path = urlsplit(self.path).path
+        parts = urlsplit(self.path)
+        path = parts.path
         if host == AAFMAA_HOST and path == "/Documents/default.aspx":
-            data = documents_page().encode("utf-8")
+            data = documents_page(parse_qs(parts.query).get("view", [""])[0]).encode("utf-8")
         elif host == AAFMAA_HOST and path == "/Home/default.aspx":
             data = (PAGE % "<h1>Welcome back</h1><p>Your coverage at a glance.</p>").encode("utf-8")
         else:
@@ -210,12 +222,29 @@ def account(name):
 
 @pytest.mark.parametrize("name", list(ACCOUNTS))
 def test_the_page_counts_as_open_whatever_it_holds(tab, server, name):
+    """Opened by its address, every layout counts, and one found with its
+    header row showing is kept as it is."""
     account(name)
-    tab.goto(address(server, "/Documents/default.aspx"))
+    tab.goto(address(server, "/Home/default.aspx"))
+    assert site.goto_documents(tab)
     assert len(site.collect_document_index(tab)) == SITE.held
-    assert site.showing_documents_list(tab)
-    before = tab.url
-    assert site.goto_documents(tab) and tab.url == before
+    header = SITE.held > 0 or SITE.header_when_empty
+    assert site.showing_documents_list(tab) is header
+    if header:
+        before = tab.url
+        assert site.goto_documents(tab) and tab.url == before
+
+
+def test_another_section_at_the_same_address_is_loaded_again(tab, server):
+    """A tab left on the Digital Vault shows the section controls at the
+    documents page's own address, and is not the list."""
+    account("one document, no letters")
+    tab.goto(address(server, "/Documents/default.aspx?view=vault"))
+    assert tab.get_by_role("link", name="MY DOCUMENTS").count() == 1
+    assert not site.showing_documents_list(tab)
+    assert site.goto_documents(tab)
+    assert urlsplit(tab.url).query == ""
+    assert len(site.collect_document_index(tab)) == 1
 
 
 def test_a_page_that_never_drew_does_not_count(tab, server):
@@ -268,6 +297,17 @@ def their_tab(attached, server, path):
 def test_discover_reads_the_list_whatever_it_holds(server, attached, tmp_path, capsys, name):
     account(name)
     their_tab(attached, server, "/Home/default.aspx")
+    ended, said, whole, listed = run_discover(tmp_path, attached, capsys)
+    assert ended == ("returned", 0) and whole is True, said[-1500:]
+    assert "Could not open your Armed Forces Mutual documents" not in said, said[-1500:]
+    assert listed == SITE.held, said[-1500:]
+
+
+@pytest.mark.parametrize("name", ["one document, no letters", "no document, no letters or header"])
+def test_discover_from_their_tab_on_another_section_reads_my_documents(server, attached,
+                                                                       tmp_path, capsys, name):
+    account(name)
+    their_tab(attached, server, "/Documents/default.aspx?view=vault")
     ended, said, whole, listed = run_discover(tmp_path, attached, capsys)
     assert ended == ("returned", 0) and whole is True, said[-1500:]
     assert "Could not open your Armed Forces Mutual documents" not in said, said[-1500:]
