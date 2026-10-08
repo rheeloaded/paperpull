@@ -485,11 +485,19 @@ _ROW_JS = r"""(needle) => {
 # there, one press at a time, each judged by the guard like every other control.
 SHOW_MORE_RE = re.compile(r"^\s*show\s+more\s*$", re.I)
 SHOW_MORE_PRESSES = 30
+# How long one press of Show More is given to draw its rows. A press that
+# draws none in that time leaves nothing more to show.
+SHOW_MORE_WAIT_MS = 6000
+
+_DRAWN_ROWS_JS = r"""() => [...document.querySelectorAll('table tr, [role=row]')]
+  .filter(r => r.getClientRects().length).length"""
 
 
 def show_more(page) -> bool:
     """Press one visible "Show More" control, if the guard allows its label.
-    True when one was pressed, so the table may now hold more rows."""
+    True when it was pressed and the table then drew more rows. A control
+    that stays on the page once every row is shown is pressed once more and
+    no further, where it was pressed thirty times for a row not there."""
     for role in ("button", "link"):
         try:
             loc = page.get_by_role(role, name=SHOW_MORE_RE)
@@ -498,15 +506,31 @@ def show_more(page) -> bool:
             label = loc.first.inner_text(timeout=1000) or ""
             if not is_safe_control(label):
                 continue
+            before = page.evaluate(_DRAWN_ROWS_JS)
             pressing.click(page, loc.first, css="button, a, [role=button], [role=link]",
                            what="the control that shows more statements", words=_words(),
                            step="show more of the list")
-            page.wait_for_timeout(1600)
-            return True
         except pressing.Stop:
             raise
         except Exception:
             continue
+        return _drew_more(page, before)
+    return False
+
+
+def _drew_more(page, before: int) -> bool:
+    """Whether the table drew more rows than `before` after a press, waiting
+    for them as long as SHOW_MORE_WAIT_MS."""
+    waited = 0
+    while waited < SHOW_MORE_WAIT_MS:
+        page.wait_for_timeout(250)
+        waited += 250
+        try:
+            if page.evaluate(_DRAWN_ROWS_JS) > before:
+                page.wait_for_timeout(400)          # the rest of the batch
+                return True
+        except Exception:
+            return False
     return False
 
 
@@ -603,14 +627,16 @@ def download_document(page, account_id: str, charitable: bool,
     if not needle["account"]:
         log.info("no account number in title %r", (title or "")[:60])
         return False
-    if not row_is_shown(page, needle):
-        # The row for this (account, date) is not on the current year's
-        # table, even after showing more — select the statement's year and
-        # re-check.
-        if not select_year(page, (date or "")[:4]):
+    if not page.evaluate(_ROW_JS, needle):
+        # The row for this (account, date) is not drawn on the table as it
+        # stands. The statement's own year is picked first, so Show More is
+        # pressed only through the year the row belongs to, never through
+        # the whole of another. Without a picker the table as it stands is
+        # the one shown more of.
+        if select_year(page, (date or "")[:4]):
+            page.wait_for_timeout(2500)
+        else:
             log.info("could not select year %s", (date or "")[:4])
-            return False
-        page.wait_for_timeout(2500)
         if not row_is_shown(page, needle):
             log.info("no row for account %s on %s",
                      needle["account"], needle["dateText"])

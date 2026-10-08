@@ -42,9 +42,10 @@ class Fake:
     def __init__(self, rows_behind=True):
         self.pressed, self.asked = [], []
         self.hidden = rows_behind
+        self.after = "'none'"          # what Show More does once pressed, goes away
 
     def page(self):
-        return PAGE % {"account": ACCOUNT, "after": "'none'"}
+        return PAGE % {"account": ACCOUNT, "after": self.after}
 
 
 def _handler(fake):
@@ -139,3 +140,40 @@ def test_a_row_that_is_not_there_stops_after_the_list_runs_out(page, vanguard, t
     got, out = _download(page, tmp_path, "2019-05-31")
     assert got is False and not out.exists()
     assert vanguard.pressed == ["more"] and vanguard.asked == []
+
+
+def test_a_row_of_another_year_picks_its_year_before_showing_more(page, vanguard, tmp_path,
+                                                                  monkeypatch):
+    """The table as it stands is one year. A statement of another has its
+    own year picked first, so Show More is never pressed through a year the
+    row is not in."""
+    page.goto("http://127.0.0.1:%d/" % vanguard.port)
+    picked = []
+
+    def pick(p, year):
+        picked.append(year)
+        p.evaluate("""() => {
+          document.getElementById('older').style.display = 'table-row-group';
+          document.getElementById('more').style.display = 'none';
+        }""")
+        return True
+
+    monkeypatch.setattr(site, "select_year", pick)
+    got, out = _download(page, tmp_path, "2025-02-28")
+    assert got is True and out.read_bytes() == PDF
+    assert picked == ["2025"]
+    assert vanguard.pressed == [], vanguard.pressed
+
+
+def test_a_show_more_that_stays_is_pressed_once_more_and_no_further(page, vanguard, tmp_path,
+                                                                    monkeypatch):
+    """A control left on the page once every row is drawn draws nothing when
+    pressed, and the list is taken as shown in full there, where it was
+    pressed thirty times for a row the table does not have."""
+    monkeypatch.setattr(site, "SHOW_MORE_WAIT_MS", 1500)
+    vanguard.after = "'inline-block'"
+    page.goto("http://127.0.0.1:%d/" % vanguard.port)
+    got, out = _download(page, tmp_path, "2019-05-31")
+    assert got is False and not out.exists()
+    assert vanguard.pressed == ["more", "more"], vanguard.pressed
+    assert vanguard.asked == []
