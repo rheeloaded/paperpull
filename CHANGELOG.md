@@ -7,7 +7,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.45.0] - 2026-10-07
+
+A receipt whose page did not show it is fetched on the next run, in
+every receipt app, after a tester's Kroger receipts were skipped as
+completed with no file anywhere, and the receipts earlier versions gave
+up on that way are asked for again. Nelnet is the 62nd app, with student
+loan statements, the 1098-E and notices, and Vanguard presses Show More
+for its older statements, both from tylerverry. Rename names each file
+for its own record and as its download did, renames only what its app
+holds, and puts back a swap it cannot finish. Twelve apps and ADP press
+through the page only when nothing covers the control, Review Names
+leaves a receipt that failed its check to be fetched again, and Pilot,
+Run All and Resume no longer finish clean after a page or a list they
+did not read.
 
 ### Added
 - **Nelnet, the 62nd app, student loan statements, the 1098-E and notices

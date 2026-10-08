@@ -587,7 +587,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 - ✅ All **sixty-two** apps pass their tests, the fifty-four that are
   supported, the one with a known issue and the seven still waiting for a
-  tester, 15,171 of them across the repo. Most are in regular use by the author. The rest were built or
+  tester, 16,859 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with
