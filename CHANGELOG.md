@@ -9,6 +9,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Optum Bank, HSA statements and tax forms.** From the member site's Forms & documents page and each product's statements page: the newest statements as links, the older ones as the options of the page's date selector, and the 5498-SA and 1099-SA as links, each fetched by GET of its own path on the member host with no redirect followed. No control is pressed anywhere. HealthSafe ID identity hosts are never allowed or download hosts; a tab that lands on one stops the run. A pilot now exits nonzero unless its one document landed as a valid PDF. Full run on a contributor's account saved 21 statements and the 5498-SA.
+
 ### Fixed
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
   documents page asks USAA for its whole list as it loads, and the app
