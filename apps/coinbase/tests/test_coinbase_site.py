@@ -31,21 +31,25 @@ class Guard(unittest.TestCase):
 
 
 class Hosts(unittest.TestCase):
-    def test_exact_hosts_and_paths(self):
-        for u in ["https://accounts.coinbase.com/statements", "https://accounts.coinbase.com/taxes/documents",
-                  "https://accounts.coinbase.com/v2/tax/forms?types=1099-DA&year=2025",
-                  "https://accounts.coinbase.com/v2/tax/owner-info", "https://www.coinbase.com/",
-                  "https://www.coinbase.com/home"]:
+    def test_exact_hosts(self):
+        for u in ["https://accounts.coinbase.com/statements", "https://accounts.coinbase.com/a/b.pdf",
+                  "https://accounts.coinbase.com/", "https://www.coinbase.com/", "https://www.coinbase.com/home"]:
             self.assertTrue(site.is_safe_url(u), u)
         for u in ["http://accounts.coinbase.com/statements", "https://accounts.coinbase.com:8443/statements",
                   "https://coinbase.com/statements", "https://login.coinbase.com/signin",
                   "https://api.coinbase.com/v2/accounts", "https://accounts.coinbase.com.evil.test/statements",
-                  "https://accounts.coinbase.com@evil.test/statements", "https://notcoinbase.com/",
-                  "https://accounts.coinbase.com/settings", "https://accounts.coinbase.com/v2/tax/forms/abc/mark-read",
-                  "https://accounts.coinbase.com/v2/tax/transactions", "", None,
-                  "https://www.coinbase.com/advanced-markets", "https://www.coinbase.com/advanced-trade/history/orders",
-                  "https://www.coinbase.com/settings"]:
+                  "https://accounts.coinbase.com@evil.test/statements", "https://notcoinbase.com/", "", None]:
             self.assertFalse(site.is_safe_url(u), repr(u))
+
+    def test_list_calls_keep_to_their_paths(self):
+        for u in ["https://accounts.coinbase.com/statements", "https://accounts.coinbase.com/taxes/documents",
+                  "https://accounts.coinbase.com/v2/tax/forms?types=1099-DA&year=2025",
+                  "https://accounts.coinbase.com/v2/tax/owner-info", "https://www.coinbase.com/"]:
+            self.assertTrue(site.is_list_url(u), u)
+        for u in ["https://accounts.coinbase.com/settings", "https://accounts.coinbase.com/v2/tax/forms/abc/mark-read",
+                  "https://accounts.coinbase.com/v2/tax/transactions", "https://www.coinbase.com/advanced-markets",
+                  "https://www.coinbase.com/settings", "https://login.coinbase.com/signin", ""]:
+            self.assertFalse(site.is_list_url(u), repr(u))
 
     def test_download_hosts_exact(self):
         self.assertTrue(site.is_download_url("https://statements-report-persistent-production.s3.amazonaws.com/a_b__pdf.pdf"))
@@ -251,7 +255,7 @@ class StatementDownload(unittest.TestCase):
             self.assertTrue(ok); self.assertEqual(page.load_more_presses, 0)
         self.assertEqual(page.handlers, [], "the download listener was removed")
 
-    def test_empty_event_file_falls_back_to_fetching_the_events_own_address(self):
+    def test_empty_event_file_is_not_a_document_and_nothing_else_is_taken(self):
         page, dl = self.make_page("https://statements-report-persistent-production.s3.amazonaws.com/a__pdf.pdf")
         dl.event_bytes = b""
         with tempfile.TemporaryDirectory() as td:
@@ -259,11 +263,10 @@ class StatementDownload(unittest.TestCase):
             (dl_dir / "stray.pdf").write_bytes(b"%PDF-1.4 not ours")
             trace = []
             ok = site._catch_statement(page, dl_dir, "September 2026", Path(td) / "out.pdf", trace)
-            self.assertTrue(ok)
-            self.assertEqual((Path(td) / "out.pdf").read_bytes(), b"%PDF-1.4 fetched")
-            self.assertEqual(page.context.request.asked, [(dl.url, 0)])
-            self.assertEqual(trace[-1]["how"], "fetch")
-            self.assertTrue((dl_dir / "stray.pdf").exists(), "nothing in the folder is taken or touched")
+            self.assertFalse(ok, "an empty event file and a stranger in the folder: nothing is taken")
+            self.assertFalse((Path(td) / "out.pdf").exists())
+            self.assertEqual(page.context.request.asked, [], "the document is never asked for a second time")
+            self.assertTrue((dl_dir / "stray.pdf").exists())
 
     def test_off_host_event_is_never_fetched(self):
         page, dl = self.make_page("https://evil.example/a.pdf")

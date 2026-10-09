@@ -76,6 +76,7 @@ from paperpull_core.dates import full_year as _full_year
 # re-exported: the docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
+from paperpull_core.capture import take_download as _take_download
 from paperpull_core.capture import clear_copies as _clear_copies
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.words import words_for as _words_for
@@ -324,22 +325,24 @@ ALLOWED_PATH_RE = re.compile(
 
 
 def is_safe_url(url: str) -> bool:
-    """True only for an https URL on exactly one of this provider's hosts,
-    and only for a path this app has business with: on accounts.coinbase.com
-    the two document pages and the list calls, on www.coinbase.com the
-    sign-in landing alone. Nothing on www is ever fetched."""
-    if not _host_allows(url, ALLOWED_HOSTS, subdomains=False):
+    """True only for an https URL on exactly one of this provider's hosts.
+    Where this app itself asks for something, is_list_url holds the path to
+    the list calls as well."""
+    return _host_allows(url, ALLOWED_HOSTS, subdomains=False)
+
+
+def is_list_url(url: str) -> bool:
+    """is_safe_url, and on accounts.coinbase.com only a path this app reads
+    itself: the two document pages and the tax list calls. Every GET this
+    app makes goes through it, and redirects.get asks it about each hop."""
+    if not is_safe_url(url):
         return False
     try:
         parts = urlsplit(url)
     except ValueError:
         return False
-    host = (parts.hostname or "").lower()
-    if host == "accounts.coinbase.com":
+    if (parts.hostname or "").lower() == "accounts.coinbase.com":
         return bool(ALLOWED_PATH_RE.match(parts.path or ""))
-    # www.coinbase.com is where the sign-in window opens and lands. Any
-    # other page there, the markets, a trade screen, is not this app's and
-    # is never chosen as its tab.
     return (parts.path or "/").rstrip("/") in ("", "/home")
 
 
@@ -529,9 +532,9 @@ def _collect_statements(page) -> List[RawDoc]:
 def _get_json(page, url: str):
     """GET an allowed address with the signed-in session, every redirect hop
     checked. The JSON, or None when the answer was not ok or not JSON."""
-    if not is_safe_url(url):
-        raise RuntimeError("refusing to ask an address off the app's own hosts")
-    resp = redirects.get(page.context.request, url, is_safe_url, timeout=60000)
+    if not is_list_url(url):
+        raise RuntimeError("refusing to ask an address off the app's own list calls")
+    resp = redirects.get(page.context.request, url, is_list_url, timeout=60000)
     if not resp.ok:
         log.warning("%s answered %s", redact(url.split("?")[0]), resp.status)
         return None
@@ -779,10 +782,10 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
             el.click(timeout=8000)
         except Exception as e:
             if trace is not None:
-                trace.append({"note": "click failed", "control": btn_label[:40], "error": str(e)[:160]})
+                trace.append({"note": "click failed", "control": redact(btn_label)[:40], "error": str(e)[:160]})
             return False
         if trace is not None:
-            trace.append({"note": "clicked", "control": btn_label[:40]})
+            trace.append({"note": "clicked", "control": redact(btn_label)[:40]})
         # The page asks Coinbase to build the month's PDF and polls for it;
         # measured at well under a minute.
         for _ in range(120):
@@ -791,7 +794,7 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
             page.wait_for_timeout(1000)
         if not downloads:
             if trace is not None:
-                trace.append({"note": "no download event within two minutes"})
+                trace.append({"note": "no download in two minutes"})
             return False
         dl = downloads[0]
         host = urlsplit(dl.url or "").hostname or ""
@@ -804,7 +807,7 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
             except Exception:
                 pass
             return False
-        how = _take_event(page, dl, out_path)
+        how = _take_event(dl, dl_dir, before, out_path)
         if trace is not None:
             trace.append({"note": "download taken" if how else "download not taken", "host": host, "how": how})
         return bool(how)
@@ -819,48 +822,20 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
             pass
 
 
-def _take_event(page, dl, out_path: Path) -> str:
-    """The bytes of a download whose address passed is_download_url: the
-    event's own file when the browser gives one, else a GET of that same
-    address with the session's cookies and no redirect. Says "event" or
-    "fetch", or "" when neither held a PDF. A file found in the download
-    folder is never taken, since nothing ties a file there to this press
-    (round-3 review, finding 2)."""
+def _take_event(dl, dl_dir, before, out_path: Path) -> str:
+    """The download whose address passed is_download_url, saved through the
+    core: the event's own file when the browser gives one, else the file
+    the browser wrote into the folder it was pointed at, taken only when the
+    folder can say it is this download's (capture.take_download). Says
+    "event" or "folder", or "" when neither held a PDF. The document is
+    never asked for a second time. Whatever copy the browser left in the
+    folder, an exact one of what was saved, goes (capture.clear_copies)."""
+    how = _take_download(dl, dl_dir, before, out_path)
     try:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        dl.save_as(str(out_path))
-        if out_path.exists() and out_path.read_bytes()[:5] == b"%PDF-":
-            return "event"
-    except Exception as e:
-        log.info("saving the download event failed: %s", e)
-    try:
-        if out_path.exists():
-            out_path.unlink()
-    except OSError:
+        _clear_copies(dl_dir, before, out_path)
+    except Exception:
         pass
-    # Asked up to three times: the bucket hung up on two of sixty-six asks
-    # in the first full run, right after the browser had taken its own copy.
-    # Only the error's kind is logged, since Playwright's message carries
-    # the whole presigned address.
-    body = b""
-    for attempt in range(3):
-        try:
-            resp = page.context.request.get(dl.url, max_redirects=0, timeout=60000)
-            body = resp.body() if resp.ok else b""
-            if body[:5] == b"%PDF-":
-                break
-            log.info("the download's own address answered %s without a PDF", resp.status)
-        except Exception as e:
-            log.info("fetching the download's own address failed (%s), try %d of 3",
-                     type(e).__name__, attempt + 1)
-        try:
-            page.wait_for_timeout(2000)
-        except Exception:
-            pass
-    if body[:5] != b"%PDF-":
-        return ""
-    out_path.write_bytes(body)
-    return "fetch"
+    return how
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
