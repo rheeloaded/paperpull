@@ -1,0 +1,3 @@
+Optum Bank HSA statements and tax forms (5498-SA, 1099-SA)
+
+See README.md for setup and supervised pilot instructions.

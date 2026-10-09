@@ -1,0 +1,48 @@
+{
+  "_comment": "Editable rules mapping Optum Bank HSA document titles to filename summaries. Checked in order: tax, then insurance (unused), then statement. Repair after diagnose against the real documents page.",
+  "tax_rules": [
+    {
+      "pattern": "\\b1099-?SA\\b",
+      "summary": "1099-SA Tax Form"
+    },
+    {
+      "pattern": "\\b5498-?SA\\b",
+      "summary": "5498-SA Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "\\b5498\\b",
+      "summary": "5498 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement|summary)",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "year[-\\s]?end\\s+(statement|summary)|annual\\s+statement",
+      "summary": "Annual Statement"
+    },
+    {
+      "pattern": "quarterly\\s+statement",
+      "summary": "Quarterly Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Monthly Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "\\bfaq\\b",
+    "fee\\s+schedule",
+    "custodial\\s+agreement",
+    "disclosure"
+  ]
+}

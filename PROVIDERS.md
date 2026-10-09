@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (51, plus two with a known issue and eight built and waiting for a tester)
+## Supported (52, plus two with a known issue and eight built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -76,6 +76,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #27 | Bank / card / mortgage |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | Brokerage |
+| [`optum`](apps/optum) | Optum Bank (HSA) | Monthly HSA statements and tax forms (5498-SA, and the 1099-SA in a year with distributions), every one a plain link on the member site fetched by its own address; nothing is ever pressed. Built and run on a contributor's own account, 21 statements and a 5498-SA | HSA custodian |
 
 ## Requested / in progress
 

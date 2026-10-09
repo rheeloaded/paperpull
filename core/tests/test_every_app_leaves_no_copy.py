@@ -371,6 +371,9 @@ DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard"}
 # Apps that point the browser at a folder and take nothing from it, so
 # there is no capture here to drive, and why. Each is held to that below.
 TAKES_NOTHING = {
+    "optum": "every document is a plain link on the member site, fetched by GET of its own "
+             "path with no redirect followed; nothing is pressed and no download event or "
+             "response is ever listened for",
     "adp": "every document comes from ADP's statement services, fetched inside the page, "
            "and what the browser saves while a run is attached stays out of the person's "
            "own downloads, where an exact copy of a saved document goes at the next start",
