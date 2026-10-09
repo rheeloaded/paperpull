@@ -56,7 +56,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements. Contributed by @appchamp. Repaired in 0.37.1 and confirmed on a real account by @watling777 (#33) | Utility |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |
-| [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | Brokerage |
+| [`robinhood`](apps/robinhood) | Robinhood | Account statements for the individual, retirement and crypto accounts, tax docs. A statement Robinhood serves only as HTML (seen for three recent months) is left for manual review | Brokerage |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098. UNTESTED, built without an account. Have an SBA loan? Run Diagnose and attach the file to issue #28 | Government loan servicing |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Brokerage |
 | [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills. Confirmed by @watling777 on issue #34, whose Pilot took the newest five and whose full run took the rest of the history | Utility |

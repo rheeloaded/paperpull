@@ -35,6 +35,7 @@ from paperpull_core import doc_types  # noqa: E402
 from paperpull_core import storage as core_storage  # noqa: E402
 
 INDIVIDUAL = "https://robinhood.com/account/reports-statements/individual"
+RETIREMENT = "https://robinhood.com/account/reports-statements/retirement"
 CRYPTO = "https://robinhood.com/account/reports-statements/crypto"
 TAX = "https://robinhood.com/account/reports-statements/tax"
 
@@ -72,7 +73,7 @@ def _docs(app):
 
 def test_the_crypto_statements_page_is_read():
     urls = [u for u, _label in site.document_source_urls()]
-    assert urls == [INDIVIDUAL, CRYPTO, TAX]
+    assert urls == [INDIVIDUAL, RETIREMENT, CRYPTO, TAX]
     for u in urls:
         assert site.is_safe_url(u), u
     assert site.account_for(CRYPTO) == "Crypto"
