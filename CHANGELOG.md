@@ -10,6 +10,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **Robinhood took half a minute per statement, and read no retirement statements at all.** Documents are now taken page by page, the individual page's, then the retirement page's, then crypto, then tax, newest first within each, where before they were taken by date across pages, so each one opened and expanded a different page than the one before. A page already open that still shows the document's control is not opened again, and the control is found in one pass in the page and marked, then read once more from the live element before it is pressed, where it used to be looked for by asking the browser about each of up to four hundred controls. The retirement statements page joins the pages read; an account with an IRA got none of its statements before. View More that cannot be pressed ends the expanding instead of being asked sixty times over; the kept page is checked for a sign-in prompt anywhere in its text before it is pressed on again; and the tab is brought forward first, since a press waits on animation frames a background tab does not get. Measured on one account: 22-26 seconds per document before, 4-6 after, 136 of 139 documents saved, the three others being statements Robinhood offers only as HTML.
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
   documents page asks USAA for its whole list as it loads, and the app
   reads the list from those answers. Since 0.26.0 the app opened the page

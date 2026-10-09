@@ -137,6 +137,32 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+def source_rank(source_url: str) -> int:
+    """The order documents are taken in, by the page they are on: the
+    statements pages in the order the site layer lists them, the tax page
+    last, and a document without a page after everything."""
+    pages = list(site.STATEMENT_URLS) + [site.TAX_URL]
+    return pages.index(source_url) if source_url in pages else len(pages)
+
+
+def date_desc_key(date: str) -> str:
+    """A sort key that puts the newest ISO date first and an undated
+    document last, as the old newest-first order did."""
+    d = (date or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+        return "9999-99-99"
+    return "".join(chr(ord("9") - (ord(c) - ord("0"))) if c.isdigit() else c for c in d)
+
+
+def is_crypto_duplicate(source_url: str, key, individual_listed) -> bool:
+    """Whether a document the crypto page lists is one the individual page
+    listed in this run, title and date alike (#62). The crypto page alone:
+    the retirement page lists its own statements, which can share a title
+    and a date with the individual account's and are that account's own."""
+    return (site.account_for(source_url) == "Crypto"
+            and individual_listed is not None and key in individual_listed)
+
+
 def _clear(path) -> None:
     """Remove a file this run made and is not keeping."""
     if not path:
@@ -514,7 +540,7 @@ class App:
         if self._individual_listed is not None:
             if source_url == site.STATEMENT_URLS[0]:
                 self._individual_listed.add((title, date))
-            elif site.account_for(source_url) and (title, date) in self._individual_listed:
+            elif is_crypto_duplicate(source_url, (title, date), self._individual_listed):
                 self.stats["crypto_refused"] = self.stats.get("crypto_refused", 0) + 1
                 log.warning("refused %r from the %s page, the individual page lists "
                             "it too", title, site.account_for(source_url))
@@ -690,10 +716,22 @@ class App:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
 
-    def _select(self, limit: Optional[int] = None) -> List[Document]:
+    def _select(self, limit: Optional[int] = None, grouped: bool = True) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         docs = [d for d in docs if self._in_scope(d)]
-        docs.sort(key=lambda d: d.date or "0000", reverse=True)
+        if not grouped:
+            # The pilot's few: the newest across every page, as documented,
+            # so a pilot sees more than one account's page.
+            docs.sort(key=lambda d: date_desc_key(d.date))
+            limit = limit if limit is not None else self.args.max_docs
+            return docs[:limit] if limit else docs
+        # Newest first, but page by page: every document of the individual
+        # page, then the retirement page, then crypto, then tax. Sorted by
+        # date alone, December's individual, retirement and crypto statements
+        # came one after another, so each document opened and expanded a
+        # different page than the one before, and the run paid the open and
+        # the View More presses for every single document.
+        docs.sort(key=lambda d: (source_rank(d.source_url), date_desc_key(d.date)))
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
 
@@ -865,7 +903,7 @@ class App:
     def download_one(self, page, doc: Document, filename: str):
         """Download one document PDF by navigating to the page that holds its
         download link and clicking it (Robinhood fires a real download event)."""
-        self.check_session(page)
+        asked = self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
         # Two documents on one day used to differ by " (2)", which says
@@ -879,7 +917,17 @@ class App:
         # Go to the section page that holds this document's download link, then
         # click the link matching its title.
         source = doc.source_url or site.STATEMENT_URLS[0]
-        try:
+        # The page this document is on, already open and expanded by the
+        # last download, is left as it is when it still shows this
+        # document's control. Opening and expanding it again for every one
+        # of a hundred documents was a quarter of a minute each.
+        year = getattr(doc, "tax_year", "") or ""
+        if not asked and site.at_address(page.url or "", source) \
+                and not site.looks_signed_out(page) and site.challenge_text(page) is None \
+                and site.has_control(page, doc.title, year):
+            pass
+        else:
+          try:
             page.goto(source, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
             # Signing in again at a console leaves the page on the first
@@ -894,7 +942,7 @@ class App:
             site.expand_all(page)
             site.scroll_full_page(page, rounds=6)
             site.expand_all(page)
-        except Exception as e:
+          except Exception as e:
             log.info("could not open source page %s: %s", source, e)
         # A tax form lands beside its place first, and is put in place only
         # once the year it prints has been read against what it was listed as.
@@ -902,8 +950,7 @@ class App:
         if doc.category == doc_types.TAX:
             out_path = target.with_name(target.name + ".delivering")
             _clear(out_path)
-        saved = site.download_named(page, doc.title, out_path,
-                                    year=getattr(doc, "tax_year", "") or "")
+        saved = site.download_named(page, doc.title, out_path, year=year)
         if not saved:
             _clear(out_path if out_path != target else None)
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
@@ -1108,7 +1155,7 @@ class App:
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.\n")
         self.cmd_discover()
-        docs = self._select(limit=self.config.get("pilot_count", 5))
+        docs = self._select(limit=self.config.get("pilot_count", 5), grouped=False)
         if not docs:
             print("\nNo documents in scope to pilot. Run --diagnose.")
             return
