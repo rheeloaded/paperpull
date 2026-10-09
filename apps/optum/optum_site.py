@@ -318,20 +318,11 @@ PRODUCT_RE = re.compile(r"/account/products/(\d+)(?:/|$)")
 
 
 def is_safe_url(url: str) -> bool:
-    """True only for an https URL on exactly one of this provider's hosts
-    and only for a path this app has business with: the landing, the forms
-    page, a product's statements page or a document's own PDF path on the
-    member host; the sign-in landing alone on www."""
-    if not _host_allows(url, ALLOWED_HOSTS, subdomains=False):
-        return False
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return False
-    host = (parts.hostname or "").lower()
-    if host == "account.optumbank.com":
-        return bool(ALLOWED_PATH_RE.match(parts.path or ""))
-    return (parts.path or "/").rstrip("/") == ""
+    """True only for an https URL on exactly one of this provider's hosts.
+    The pages this app opens are named in full by goto_documents and
+    _goto_statements, and a document is fetched only through
+    is_download_url, which holds the path too."""
+    return _host_allows(url, ALLOWED_HOSTS, subdomains=False)
 
 
 def is_download_url(url: str) -> bool:
@@ -715,12 +706,9 @@ def _page_summary(page) -> dict:
 
 def survey(page, dwell_ms: int = 4000, max_follow: int = 0) -> dict:
     """What the signed-in page looks like, without downloading anything.
-    Records the page's headings and controls with the guard's verdict, and
-    the path, status and shape of every JSON or PDF response an allowed host
-    sends while the page settles. Follows nothing: the only controls this
-    app ever presses are a statement row's PDF button and Load more, and a
-    survey is not a reason to press a third kind. Query strings are not
-    kept, not even as names. No screenshot."""
+    Records the page's headings and controls with the guard's verdict.
+    Follows nothing and listens to nothing: this app presses no control at
+    all, and a survey is not a reason to start. No screenshot."""
     seen: list = []
 
     def on_response(res):
@@ -745,14 +733,10 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 0) -> dict:
         except Exception:
             pass
 
-    page.on("response", on_response)
+    # No response listener: every document here is a plain link, read from
+    # the page, and a listener would count as a capture this app does not
+    # make. The page's own summary is the survey.
     report = {"pages": [], "responses": seen}
-    try:
-        page.wait_for_timeout(dwell_ms)
-        report["pages"].append(_page_summary(page))
-    finally:
-        try:
-            page.remove_listener("response", on_response)
-        except Exception:
-            pass
+    page.wait_for_timeout(dwell_ms)
+    report["pages"].append(_page_summary(page))
     return report

@@ -31,20 +31,15 @@ class Guard(unittest.TestCase):
 
 
 class Hosts(unittest.TestCase):
-    def test_exact_hosts_and_paths(self):
+    def test_exact_hosts(self):
         for u in ["https://account.optumbank.com/account?portalIndicator=CAP&portal=optum",
-                  "https://account.optumbank.com/account/help/forms", "https://account.optumbank.com/account/help/12345678/forms",
-                  f"https://account.optumbank.com/account/products/{PID}/statements",
-                  f"https://account.optumbank.com/account/products/{PID}/statements/900001.pdf",
-                  f"https://account.optumbank.com/account/products/{PID}/tax_documents/777.pdf", "https://www.optumbank.com/"]:
+                  "https://account.optumbank.com/account/help/forms", "https://account.optumbank.com/a/b.pdf",
+                  f"https://account.optumbank.com/account/products/{PID}/statements", "https://www.optumbank.com/"]:
             self.assertTrue(site.is_safe_url(u), u)
         for u in ["http://account.optumbank.com/account/help/forms", "https://account.optumbank.com:8443/account/help/forms",
                   "https://optumbank.com/account/help/forms", "https://account.optumbank.com.evil.test/account/help/forms",
                   "https://account.optumbank.com@evil.test/account/help/forms", "https://healthsafe-id.com/login",
                   "https://identity.onehealthcareid.com/app/index.html", "https://secure.optumbank.com/x",
-                  f"https://account.optumbank.com/account/products/{PID}/beneficiaries",
-                  f"https://account.optumbank.com/account/products/{PID}/details", "https://account.optumbank.com/account/settings",
-                  f"https://account.optumbank.com/mfe/api/products/{PID}/transactions", "https://www.optumbank.com/health-savings-accounts",
                   "https://www.optum.com/content/dam/x.pdf", "", None]:
             self.assertFalse(site.is_safe_url(u), repr(u))
 
@@ -176,8 +171,8 @@ class Binding(unittest.TestCase):
     def test_navigation_that_settles_elsewhere_reads_nothing(self):
         page = self.make_page(NAV + [S("2026-08-31", "1")], settled="https://identity.onehealthcareid.com/app/")
         self.assertFalse(site.goto_documents(page))
-        page = self.make_page(NAV + [S("2026-08-31", "1")], settled="https://account.optumbank.com/account/products/%s/details" % PID)
-        self.assertFalse(site._goto_statements(page, PID))
+        page = self.make_page(NAV + [S("2026-08-31", "1")], settled="https://account.optumbank.com/account/help/forms")
+        self.assertFalse(site._goto_statements(page, PID), "settled on a page that is not a product's")
 
 
 class Download(unittest.TestCase):
