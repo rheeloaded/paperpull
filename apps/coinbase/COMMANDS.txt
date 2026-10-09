@@ -1,0 +1,3 @@
+Coinbase statements and 1098-E
+
+See README.md for setup and supervised pilot instructions.

@@ -1,0 +1,51 @@
+{
+  "_comment": "Editable rules mapping Coinbase document titles to filename summaries. Checked in order: tax, then insurance (unused), then statement. Statements are monthly account statements from Settings > Statements; tax documents are from Coinbase Taxes > Documents. Repair after reading a recording or diagnose output.",
+  "tax_rules": [
+    {
+      "pattern": "\\b1099-?DA\\b",
+      "summary": "1099-DA Tax Form"
+    },
+    {
+      "pattern": "\\b1099-?MISC\\b",
+      "summary": "1099-MISC Tax Form"
+    },
+    {
+      "pattern": "\\b1099-?B\\b",
+      "summary": "1099-B Tax Form"
+    },
+    {
+      "pattern": "\\b1099-?K\\b",
+      "summary": "1099-K Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "gain(s)?\\s*(/|and|&)?\\s*loss(es)?",
+      "summary": "Gain Loss Report"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement|report|summary)",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Monthly Statement"
+    },
+    {
+      "pattern": "transaction\\s+history",
+      "summary": "Transaction History"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "\\bfaq\\b",
+    "custom\\s+statement",
+    "generate"
+  ]
+}
