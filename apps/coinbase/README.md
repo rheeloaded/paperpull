@@ -1,7 +1,7 @@
 # Coinbase statement and tax-document downloader
 
 Mapped against a signed-in retail account on 2026-10-09. Read-only, delete-safe, part of PaperPull.
-You sign in yourself in the browser PaperPull opens on port 9290; the tool attaches afterwards and
+You sign in yourself in the browser PaperPull opens on the port named in config.json (see config.example.json); the tool attaches afterwards and
 never handles credentials.
 
 Two document areas, both on accounts.coinbase.com:

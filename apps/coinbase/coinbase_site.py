@@ -604,6 +604,21 @@ def tax_rawdocs(forms_by_year: dict, reports: list) -> List[RawDoc]:
     so a corrected form is not lost under the original's title. href holds
     the API path and the opaque id only, never a link."""
     out: List[RawDoc] = []
+    # A form or a report without an id of its own, or two sharing one, is a
+    # list this cannot tell apart, and a report without a year one it cannot
+    # date. Either stops the listing rather than being skipped or merged,
+    # since a document skipped here would be called complete.
+    ids: set = set()
+
+    def _id_of(item, what: str) -> str:
+        did = str(item.get("id") or "").strip()
+        if not did:
+            raise ListStopped("a tax %s lists no id" % what)
+        if did in ids:
+            raise ListStopped("two tax documents share one id")
+        ids.add(did)
+        return did
+
     counts: dict = {}
     for year, items in forms_by_year.items():
         for it in items:
@@ -612,29 +627,29 @@ def tax_rawdocs(forms_by_year: dict, reports: list) -> List[RawDoc]:
     for year, items in sorted(forms_by_year.items(), reverse=True):
         for it in items:
             ft = str(it.get("form_type") or "Tax Form").strip()
-            did = str(it.get("id") or "")
+            did = _id_of(it, "form")
             title = f"{ft} Tax Year {year}"
-            if counts[(ft, year)] > 1 and did:
+            if counts[(ft, year)] > 1:
                 title += f" (#{_short(did)})"
             out.append(RawDoc(title=title, date_text=f"{year}-12-31",
-                              href=f"/v2/tax/forms/{did}" if did else "/v2/tax/forms",
+                              href=f"/v2/tax/forms/{did}",
                               text=f"Coinbase {title}", kind="tax"))
     rcounts: dict = {}
     for r in reports:
         year = r.get("year") or r.get("timeframe_year")
+        if not year:
+            raise ListStopped("a tax report names no year")
         key = (_report_summary(r.get("name")), year)
         rcounts[key] = rcounts.get(key, 0) + 1
     for r in reports:
         year = r.get("year") or r.get("timeframe_year")
-        if not year:
-            continue
-        did = str(r.get("id") or "")
+        did = _id_of(r, "report")
         summary = _report_summary(r.get("name"))
         title = f"{summary} Tax Year {year}"
-        if rcounts[(summary, year)] > 1 and did:
+        if rcounts[(summary, year)] > 1:
             title += f" (#{_short(did)})"
         out.append(RawDoc(title=title, date_text=f"{year}-12-31",
-                          href=f"/v2/tax/tax-reports/{did}" if did else "/v2/tax/tax-reports",
+                          href=f"/v2/tax/tax-reports/{did}",
                           text=f"Coinbase {title}", kind="tax"))
     return out
 

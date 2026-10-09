@@ -145,6 +145,16 @@ class TaxList(unittest.TestCase):
         answers[:] = [{"data": [{"id": "a"}], "next_cursor": "c1"}, {"data": [{"id": "b"}], "next_cursor": ""}]
         self.assertEqual([i["id"] for i in site._tax_forms_for(Page(), 2025)], ["a", "b"])
 
+    def test_documents_without_an_id_or_a_year_stop_the_list(self):
+        with self.assertRaises(site.ListStopped):
+            site.tax_rawdocs({2025: [{"id": "", "form_type": "1099-DA"}]}, [])
+        with self.assertRaises(site.ListStopped):
+            site.tax_rawdocs({2025: [{"id": "same", "form_type": "1099-DA"}, {"id": "same", "form_type": "1099-MISC"}]}, [])
+        with self.assertRaises(site.ListStopped):
+            site.tax_rawdocs({}, [{"id": "r1", "name": "PregeneratedGainLossPDF", "file": {"file_type": "PDF", "url": "x"}}])
+        with self.assertRaises(site.ListStopped):
+            site.tax_rawdocs({}, [{"id": "", "name": "PregeneratedGainLossPDF", "year": 2021}])
+
     def test_unreadable_year_stops_the_list(self):
         class Resp:
             ok, status, url, headers = False, 500, "", {}
