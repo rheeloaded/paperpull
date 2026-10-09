@@ -9,6 +9,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Coinbase, monthly statements and tax documents.** Statements from accounts.coinbase.com/statements, one per complete month, each taken by pressing its row's PDF button once and accepting the download only from Coinbase's own statements bucket; tax forms (1099-DA) and pregenerated gain/loss reports from the Taxes page's own list call, fetched by their short-lived link with nothing pressed, so the page's mark-read and mark-downloaded calls never happen. Exact hosts and a path contract; a list it cannot read whole stops the run. Full run on a retail account saved 66 statements and 2 tax documents, every one a valid PDF.
+
 ### Fixed
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
   documents page asks USAA for its whole list as it loads, and the app

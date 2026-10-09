@@ -366,7 +366,37 @@ def test_vanguard_takes_its_statement_from_the_folder(left, browser_context, pro
         pg.close()
 
 
-DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard"}
+COINBASE_PAGE = (b"<!doctype html><meta charset='utf-8'>"
+                 b"<div>September 2026<div><button>HTML</button>"
+                 b"<button data-testid='statements-pdf-v2' onclick=\"location.href='/doc'\">PDF</button>"
+                 b"<button>CSV</button></div></div>")
+
+
+@pytest.mark.parametrize("left", [False, True], ids=["empty folder", "same name already there"])
+def test_coinbase_takes_its_statement_from_the_folder(left, browser_context, provider,
+                                                     tmp_path, monkeypatch):
+    """Coinbase presses the row's own PDF button and takes the download
+    event, through the core, only from its exact document host. Here the
+    document comes from the test's provider, so that host stands in for
+    the bucket, and the statements page is this page."""
+    site = site_of(REPO / "apps" / "coinbase")
+    monkeypatch.setattr(site, "goto_documents", lambda page: True)
+    monkeypatch.setattr(site, "is_download_url", lambda url: url.startswith(provider.base + "/"))
+    provider.pages["/coinbase"] = COINBASE_PAGE
+    pg = browser_context.new_page()
+    try:
+        pg.goto(provider.base + "/coinbase")
+        staging, out = folder_for(tmp_path, "coinbase", left)
+        site.set_download_dir(pg, staging)
+        provider.reset()
+        got = site.download_bill(pg, staging, "2026-09-30", out,
+                                 title="Monthly Statement September 2026", trace=[])
+        check("coinbase", got, provider, out, staging)
+    finally:
+        pg.close()
+
+
+DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard", "coinbase"}
 
 # Apps that point the browser at a folder and take nothing from it, so
 # there is no capture here to drive, and why. Each is held to that below.

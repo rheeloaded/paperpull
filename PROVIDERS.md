@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (51, plus two with a known issue and eight built and waiting for a tester)
+## Supported (52, plus two with a known issue and eight built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -76,6 +76,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #27 | Bank / card / mortgage |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | Brokerage |
+| [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements back to the account's first month, and tax documents (1099-DA, pregenerated gain/loss PDF reports). A statement row's own PDF button is pressed and the download taken only from Coinbase's statements bucket; tax PDFs are fetched from the list call the Taxes page makes, nothing pressed. Built and run on a contributor's own retail account, 66 statements and 2 tax documents | Crypto exchange |
 
 ## Requested / in progress
 

@@ -1,0 +1,3 @@
+Coinbase monthly statements, 1099 tax forms and gain/loss reports
+
+See README.md for setup and supervised pilot instructions.
