@@ -468,9 +468,8 @@ def documents_of(entries: list, pid: str, suffix: str = "") -> List[RawDoc]:
                 # An option is a statement or an explicit placeholder; anything
                 # else, an absolute address, a query, a changed value, is a list
                 # this cannot read.
-                if not (e.get("path") or "") and (e.get("disabled") or not (e.get("text") or "")
-                                                   or not valid_iso(e.get("text") or "")):
-                    continue
+                if not (e.get("path") or "") and (e.get("disabled") or not (e.get("text") or "")):
+                    continue   # an explicit placeholder: no value, and disabled or blank
                 raise ListStopped("a statement option reads %r" % (e.get("text") or e.get("path") or "")[:30])
             continue
         if (e.get("host") or "") != "account.optumbank.com":

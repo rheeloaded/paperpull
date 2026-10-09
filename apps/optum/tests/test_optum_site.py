@@ -95,8 +95,11 @@ class Listing(unittest.TestCase):
             site.documents_of(NAV + [S("2026-02-30")], PID)
         with self.assertRaises(site.ListStopped):
             site.documents_of(NAV + [{**S("2026-02-30", "3"), "how": "option"}], PID)
-        ph = {"text": "2026-02-30", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False}
-        self.assertEqual(site.documents_of(NAV + [ph], PID), [], "an empty, non-date option is a placeholder")
+        live = {"text": "2026-02-30", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False}
+        with self.assertRaises(site.ListStopped, msg="an enabled option with text and no value is not a placeholder"):
+            site.documents_of(NAV + [live], PID)
+        blank = {"text": "", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False}
+        self.assertEqual(site.documents_of(NAV + [blank], PID), [], "a blank option is a placeholder")
 
     def test_select_options_are_documents_or_placeholders(self):
         ph = {"text": "Select a statement", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": True}
@@ -105,6 +108,7 @@ class Listing(unittest.TestCase):
         for bad in ({**S("2026-02-28"), "how": "option", "path": f"https://account.optumbank.com/account/products/{PID}/statements/3.pdf"},
                     {**S("2026-02-28"), "how": "option", "path": f"/account/products/{PID}/statements/3.pdf?token=1"},
                     {"text": "2026-02-28", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False},
+                    {"text": "Select a statement", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False},
                     {**S("2026-02-28"), "how": "option", "path": f"/account/products/{PID}/statements/3"}):
             with self.assertRaises(site.ListStopped, msg=str(bad)):
                 site.documents_of(NAV + [bad], PID)

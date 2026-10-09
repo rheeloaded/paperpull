@@ -1,7 +1,7 @@
 # Optum Bank HSA statement and tax-form downloader
 
 Mapped against a signed-in account on 2026-10-09. Read-only, delete-safe, part of PaperPull. You
-sign in yourself (HealthSafe ID) in the browser PaperPull opens on port 9291; the tool attaches
+sign in yourself (HealthSafe ID) in the browser PaperPull opens on the port named in config.json (see config.example.json); the tool attaches
 afterwards and never handles credentials.
 
 Nothing is ever clicked. Statements and tax forms are plain links on the member site,
