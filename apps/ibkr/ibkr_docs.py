@@ -586,23 +586,6 @@ class App:
             print("  Could not capture this document - marked for manual review.")
             return
 
-
-        # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
-        # else is the document. Anything more is kept whole for a person to
-        # open, since which file is this document cannot be told
-        # (receipt_pdf.open_zip).
-        if receipt_pdf.is_zip(out_path):
-            opened = receipt_pdf.open_zip(out_path, self.paths.manual_review)
-            if opened.pdf is None:
-                self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=opened.reason)
-                self._write_row(doc, "Archive kept for review", "Needs Manual Review")
-                self.write_failure('open the downloaded archive', opened.failure)
-                self.stats["manual_review"] += 1
-                print(f"  !! {opened.reason}. Marked for manual review.")
-                return
-            out_path = opened.pdf
-            log.info("Opened the ZIP for %s", doc.title)
-
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         self._record(doc, State.PDF_SAVED)
 
