@@ -366,7 +366,35 @@ def test_vanguard_takes_its_statement_from_the_folder(left, browser_context, pro
         pg.close()
 
 
-DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard"}
+IBKR_PAGE = (b"<!doctype html><meta charset='utf-8'><div role='dialog'>"
+             b"<select><option>August, 2026</option><option>July, 2026</option></select>"
+             b"<button onclick=\"location.href='/doc'\">Download PDF</button></div>")
+
+
+@pytest.mark.parametrize("left", [False, True], ids=["empty folder", "same name already there"])
+def test_ibkr_takes_its_statement_from_the_folder(left, browser_context, provider,
+                                                  tmp_path, monkeypatch):
+    """Interactive Brokers chooses the month in the Activity Statement
+    dialog and presses Download PDF. Only the walk to that dialog is stood
+    in for, since the page is not on its host."""
+    site = site_of(REPO / "apps" / "ibkr")
+    monkeypatch.setattr(site, "ensure_statements", lambda page: True)
+    monkeypatch.setattr(site, "open_activity_dialog", lambda page: True)
+    provider.pages["/ibkr"] = IBKR_PAGE
+    pg = browser_context.new_page()
+    try:
+        pg.goto(provider.base + "/ibkr")
+        staging, out = folder_for(tmp_path, "ibkr", left)
+        provider.reset()
+        got = site.download_document(pg, account_id="U1234567", doc_type="Activity Statement",
+                                     title="Activity Statement - August 2026",
+                                     date="2026-08-31", out_path=out, dl_dir=staging)
+        check("ibkr", got, provider, out, staging)
+    finally:
+        pg.close()
+
+
+DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard", "ibkr"}
 
 # Apps that point the browser at a folder and take nothing from it, so
 # there is no capture here to drive, and why. Each is held to that below.
