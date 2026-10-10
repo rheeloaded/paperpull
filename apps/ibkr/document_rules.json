@@ -1,0 +1,23 @@
+{
+  "_comment": "Editable rules mapping Interactive Brokers document titles to filename summaries. Patterns are case-insensitive regexes matched against the document title. First match wins. Only the monthly Activity Statement is downloaded today.",
+  "tax_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "activity\\s+statement",
+      "summary": "Activity Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Statement"
+    }
+  ],
+  "skip_patterns": [
+    "\\bagreement\\b",
+    "disclosure",
+    "privacy\\s+(pledge|notice|policy|statement)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "promotional"
+  ]
+}

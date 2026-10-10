@@ -1,0 +1,3 @@
+Interactive Brokers statements
+
+See README.md for setup and supervised pilot instructions.
