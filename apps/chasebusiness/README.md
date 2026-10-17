@@ -32,13 +32,20 @@ The app opens the document center by its address and waits for its
 account menu and its Statements section. For each business account in the
 menu it chooses the account, opens Statements, and chooses each year the
 "View:" picker offers, reading the list Chase's own page asks for and
-checking it against the rows the page draws. A statement is saved by
-pressing its row's "Opens menu to save document" and then "Save as PDF",
-and the browser's download is kept only when it is one PDF from Chase.
+checking it against the rows the page draws. A checking statement is
+saved by pressing its row's "Opens menu to save document" and then "Save
+as PDF". A business card's row has no such menu, only "Oct 13, 2026 ,
+opens document" and "Oct 13, 2026 Saves document" links, and its
+statement is saved by pressing "Saves document" once. "opens document" is
+never pressed, and a row that shows both ways or neither is left for
+review. Either way the browser's download is kept only when it is one PDF
+from Chase, and a card statement only when it also prints the row's date
+as its statement date, the closing date of its "Opening/Closing Date"
+or the date after a "Statement Date" label.
 
-Only six kinds of control are ever pressed, an account in the menu, the
+Only seven kinds of control are ever pressed, an account in the menu, the
 Statements section, the year picker, a year in it, a statement's save
-menu and its Save as PDF. Payments, transfers, wires, Zelle, ACH,
+menu, its Save as PDF, and a card statement's Saves document. Payments, transfers, wires, Zelle, ACH,
 collections, deposits, approvals, users, paperless, offers, settings and
 sign-out are never touched.
 
@@ -89,9 +96,12 @@ yet seen or known:
   passed over only when it shows no Statements.
 - Two statements of one account on one date stop the list on every run,
   since nothing on a row tells them apart. None has been seen.
-- The business card's statements. The card showed no statements in the
-  document center when it was surveyed, and whether they appear there is
-  still an open question.
+- The business card's statements appear in the document center once the
+  card has cycled, seen live on 2026-10-17 with one statement, which
+  Discover listed as Business Card. Its row has no save menu, only the
+  "opens document" and "Saves document" links, and pressing "Saves
+  document" downloaded the PDF. No card statement has yet been saved by
+  this app's own run.
 - Tax documents, notices, ATM receipts and check images are not collected.
 
 ## Help test it, no programming needed

@@ -609,6 +609,43 @@ def test_chasebusiness_takes_its_statement_from_the_folder(left, browser_context
         pg.close()
 
 
+# A business card's statement row as the same document center draws it,
+# every word made up: no save menu, an "opens document" link that is never
+# pressed, and the row's own "Saves document" link, which downloads.
+CHASEBUSINESS_CARD_PAGE = (
+    b"<!doctype html><meta charset='utf-8'><table><tr id='accountsTable-STATEMENTS-row1'>"
+    b"<td>Oct 13, 2026</td><td>Statement</td><td>4 pages</td><td>"
+    b"<a id='accountsTable-STATEMENTS-row1-cell3-requestThisDocumentAnchor-pdf'"
+    b" href='javascript:void(0);' onclick=\"document.title='opened'\">Oct 13, 2026 , opens document</a> "
+    b"<a id='accountsTable-STATEMENTS-row1-cell3-requestThisDocumentAnchor-download'"
+    b" href='javascript:void(0);' onclick=\"location.href='/doc'\">Oct 13, 2026 Saves document</a>"
+    b"</td></tr></table>")
+
+
+@pytest.mark.parametrize("left", [False, True], ids=["empty folder", "same name already there"])
+def test_chasebusiness_takes_its_card_statement_from_the_folder(left, browser_context, provider,
+                                                               tmp_path, monkeypatch):
+    """Chase Business presses a business card row's own Saves document link
+    once, through the guard, and takes the one download that brings through
+    the core. Chase's PDF address is stood in for by the test's provider,
+    and the date check by a yes, since the provider's PDF prints nothing."""
+    site = site_of(REPO / "apps" / "chasebusiness")
+    monkeypatch.setattr(site, "is_download_url", lambda url: url.startswith(provider.base + "/"))
+    monkeypatch.setattr(site, "names_date", lambda text, iso: True)
+    provider.pages["/chasebusiness-card"] = CHASEBUSINESS_CARD_PAGE
+    pg = browser_context.new_page()
+    try:
+        pg.goto(provider.base + "/chasebusiness-card")
+        staging, out = folder_for(tmp_path, "chasebusiness", left)
+        site.set_download_dir(pg, staging)
+        provider.reset()
+        got = site._catch_statement(pg, site.Run(), staging, 1, "2026-10-13", out, trace=[])
+        check("chasebusiness", got, provider, out, staging)
+        assert pg.title() != "opened", "the opens document link was pressed"
+    finally:
+        pg.close()
+
+
 # A document row as Simmons Bank's Banno page draws it, every word made up:
 # the row's own button inside its list item, which here asks the test's
 # provider for the document, as the live page asks the bank for its PDF.

@@ -51,6 +51,21 @@ def _pdf(tail: str = "") -> bytes:
 PDF = _pdf("4321")
 
 
+def _card_pdf(tail: str, iso: str) -> bytes:
+    """A card statement PDF, its number masked and its closing date in the
+    two-digit year form a card statement prints."""
+    from paperpull_core import testkit
+    d = site._date.fromisoformat(iso)
+    return testkit.text_pdf(["Ink Business Unlimited", "Account Number: XXXX XXXX XXXX %s" % tail,
+                             "Opening/Closing Date 09/14/26 - %02d/%02d/%02d"
+                             % (d.month, d.day, d.year % 100)])
+
+
+def anchor_css(n):
+    return ("#accountsTable-STATEMENTS-row%d a#accountsTable-STATEMENTS-row%d"
+            "-cell3-requestThisDocumentAnchor-download" % (n, n))
+
+
 def item(doc_id, iso, pages=2, kind="Statement"):
     return {"documentId": doc_id, "documentDate": iso.replace("-", ""), "pageCount": pages,
             "documentTypeDesc": kind, "inserts": [], "adaVersionAvailable": True}
@@ -133,7 +148,7 @@ class Center:
         self.years = list(years)
         self.initial = selected
         self.url = DASHBOARD
-        self.listeners = {"response": [], "download": []}
+        self.listeners = {"response": [], "download": [], "popup": []}
         self.emitted, self.downloads, self.presses = [], [], []
         self.dialog = self.password = False
         self.duplicate_answers = False
@@ -150,6 +165,11 @@ class Center:
         self.folder_copy = None       # a folder to drop the browser's own file in
         self.state_hook = None
         self.closed = False
+        # The card row's Saves document link: its labels when not its own
+        # date and words, and whether its press opens a new tab too.
+        self.anchor_labels = None
+        self.popup_on_save = False
+        self.saving = None
         self.reset()
 
     # -- the page's own behavior -------------------------------------------
@@ -188,8 +208,17 @@ class Center:
         if self.duplicate_answers:
             self._emit(self.answer())
 
+    def shape(self):
+        """How the current account's rows save: "menu" (checking),
+        "anchor" (a business card's Saves document link), "both" or
+        "neither"."""
+        return self.acct().get("shape", "menu")
+
     def _download(self):
         body = self.download_body
+        if body is None and self.saving is not None:
+            iso = site.answer_date(self.items()[self.saving]["documentDate"])
+            body = _card_pdf(site.label_tail(self.acct()["label"]), iso)
         if body is None:
             body = _pdf(site.label_tail(self.acct()["label"]))
         dl = Download(self.download_url, body)
@@ -234,6 +263,14 @@ class Center:
         elif css.endswith("-downloadPDFOption"):
             for _ in range(self.downloads_per_save):
                 self._download()
+        elif css.endswith("-requestThisDocumentAnchor-download"):
+            self.saving = int(css.rsplit("-row", 1)[1].split("-")[0])
+            if self.popup_on_save:
+                for f in list(self.listeners["popup"]):
+                    f(object())
+            for _ in range(self.downloads_per_save):
+                self._download()
+            self.saving = None
         else:
             raise AssertionError("pressed something else: " + css)
 
@@ -246,10 +283,12 @@ class Center:
         out = []
         for n, it in enumerate(self.items()):
             iso = site.answer_date(it["documentDate"])
+            save = "%s Opens menu to save document" % label_date(iso)
+            if self.shape() == "anchor":
+                save = "%s , opens document %s Saves document" % (label_date(iso), label_date(iso))
             out.append({"id": "accountsTable-STATEMENTS-row%d" % n, "shown": True,
                         "cells": [label_date(iso), it["documentTypeDesc"],
-                                  "%d pages" % it["pageCount"],
-                                  "%s Opens menu to save document" % label_date(iso)]})
+                                  "%d pages" % it["pageCount"], save]})
         return out
 
     def state(self):
@@ -295,7 +334,17 @@ class Center:
         if "downloadDocumentDropdown" in css:
             n = int(css.rsplit("-row", 1)[1].split("-")[0])
             hits = [r for r in st["rows"] if r["id"] == "accountsTable-STATEMENTS-row%d" % n]
-            return [hits[0]["cells"][3]] if hits else None
+            if not hits or self.shape() not in ("menu", "both"):
+                return None
+            return ["%s Opens menu to save document" % hits[0]["cells"][0]]
+        if css.endswith("-requestThisDocumentAnchor-download"):
+            n = int(css.rsplit("-row", 1)[1].split("-")[0])
+            hits = [r for r in st["rows"] if r["id"] == "accountsTable-STATEMENTS-row%d" % n]
+            if not hits or self.shape() not in ("anchor", "both"):
+                return None
+            if self.anchor_labels is not None:
+                return list(self.anchor_labels)
+            return ["%s Saves document" % hits[0]["cells"][0]]
         if css.endswith("-downloadPDFOption"):
             n = int(css.rsplit("item-0-", 1)[1].split("-")[0])
             return ["Save as PDF"] if self.menu_open == n else None
@@ -376,7 +425,7 @@ def chk_years():
 
 def center(**kw):
     return Center([dict(CHK, years=chk_years()),
-                   dict(CARD, years={2026: [item("DOCQXC0926", "2026-09-28", 4)]}),
+                   dict(CARD, years={2026: [item("DOCQXC0926", "2026-09-28", 4)]}, shape="anchor"),
                    dict(DEBIT, years=None), dict(HOLDER, years=None)],
                   years=[2026, 2025, 2024], **kw)
 
@@ -407,7 +456,7 @@ def test_business_words_are_refused_by_every_guard(label):
         assert not guard(label), (guard.__name__, label)
 
 
-def test_the_six_shapes_are_taken_each_by_its_own_predicate():
+def test_the_seven_shapes_are_taken_each_by_its_own_predicate():
     assert site.is_account_entry("BUS COMPLETE CHK (...4321)")
     assert site.is_account_entry("BUSINESS CARD (...8765), current selection")
     assert site.is_statements_accordion("Statements")
@@ -415,7 +464,9 @@ def test_the_six_shapes_are_taken_each_by_its_own_predicate():
     assert site.is_year_option("2025") and site.is_year_option("2019, you've reached the end of the list")
     assert site.is_save_menu("Sep 30, 2026 Opens menu to save document", "Sep 30, 2026")
     assert site.is_save_as_pdf("Save as PDF")
+    assert site.is_saves_document("Oct 13, 2026 Saves document", "Oct 13, 2026")
     for good in ("Statements", "Save as PDF", "2025", "Sep 30, 2026 Opens menu to save document",
+                 "Oct 13, 2026 Saves document",
                  "Bank Statement", "View Bank Statement", "Download statement"):
         assert site.is_safe_control(good), good
 
@@ -1166,8 +1217,8 @@ def test_nothing_private_leaves_on_runs_that_stop(tmp_path):
 # ---------------------------------------------------------------------------
 
 SITE = ast.parse((HERE / "chasebusiness_site.py").read_text(encoding="utf-8"))
-SIX = {"is_account_entry", "is_statements_accordion", "is_year_picker", "is_year_option",
-       "is_save_menu", "is_save_as_pdf"}
+SEVEN = {"is_account_entry", "is_statements_accordion", "is_year_picker", "is_year_option",
+         "is_save_menu", "is_save_as_pdf", "is_saves_document"}
 
 
 def test_the_site_layer_presses_nothing_itself():
@@ -1185,7 +1236,7 @@ def test_the_site_layer_presses_nothing_itself():
     assert "dismiss_timeout" not in {f.name for f in ast.walk(SITE) if isinstance(f, ast.FunctionDef)}
 
 
-def test_the_one_press_is_the_cores_inside_press_and_every_press_names_one_of_six():
+def test_the_one_press_is_the_cores_inside_press_and_every_press_names_one_of_seven():
     clicks = []
     for fn in [n for n in ast.walk(SITE) if isinstance(n, ast.FunctionDef)]:
         for c in ast.walk(fn):
@@ -1198,11 +1249,12 @@ def test_the_one_press_is_the_cores_inside_press_and_every_press_names_one_of_si
             g = [k.value for k in c.keywords if k.arg == "guard"]
             assert len(g) == 1 and isinstance(g[0], ast.Name), ast.unparse(c)
             guards[c.func.id].append(g[0].id)
-    # The four that reach a list stop the run when turned off, and the two a
-    # statement's own row carries leave that statement.
-    assert sorted(guards["_press"]) == sorted(SIX - {"is_save_menu", "is_save_as_pdf"})
-    assert sorted(guards["_press_row"]) == ["is_save_as_pdf", "is_save_menu"]
-    assert {g.__name__ for g in site.PRESS_GUARDS} == SIX
+    # The four that reach a list stop the run when turned off, and the three
+    # a statement's own row carries leave that statement.
+    assert sorted(guards["_press"]) == sorted(SEVEN - {"is_save_menu", "is_save_as_pdf",
+                                                       "is_saves_document"})
+    assert sorted(guards["_press_row"]) == ["is_save_as_pdf", "is_save_menu", "is_saves_document"]
+    assert {g.__name__ for g in site.PRESS_GUARDS} == SEVEN
     # The JavaScript handed to the page reads; it presses nothing.
     for js in (site._STATE_JS, site._LABELS_JS):
         assert ".click" not in js and "dispatchEvent" not in js and ".submit" not in js
@@ -1780,3 +1832,274 @@ def test_the_account_digest_is_its_own_field_and_survives_without_the_ref():
     moved = {k: v for k, v in rec.items() if k not in ("account_ref", "document_id")}
     assert docs.Document.from_dict(moved).key == d.key
     assert docs.told_apart_by(moved) == docs.told_apart_by(rec) == d.account_digest[:6]
+
+
+# ---------------------------------------------------------------------------
+# The business card's row: no save menu, a "<date> Saves document" link
+# (live survey 2026-10-17)
+# ---------------------------------------------------------------------------
+
+CARD_DIGEST = site.account_digest("Business Card", "8765")
+
+
+def take_card(page, tmp_path, **kw):
+    kw.setdefault("doc_id", "DOCQXC0926")
+    kw.setdefault("iso", "2026-09-28")
+    kw.setdefault("pages", 4)
+    return take(page, tmp_path, digest=CARD_DIGEST, **kw)
+
+
+def test_the_saves_document_guard_takes_its_own_row_and_words_only():
+    assert site.is_saves_document("Oct 13, 2026 Saves document")
+    assert site.is_saves_document("Oct 13, 2026 Saves document", "Oct 13, 2026")
+    assert site.is_saves_document("Oct 03, 2026 Saves document", "Oct 3, 2026")
+    assert not site.is_saves_document("Oct 13, 2026 Saves document", "Sep 13, 2026")
+    for bad in ("Oct 13, 2026 , opens document", "Oct 13, 2026 opens document", "Saves document",
+                "Oct 13, 2026 Saves document Sign out", "Oct 13, 2026 Opens menu to save document",
+                "Save as PDF", "Oct 13, 2026 Saves document menu", ""):
+        assert not site.is_saves_document(bad, "Oct 13, 2026"), bad
+    assert not site.is_save_menu("Oct 13, 2026 Saves document")
+    assert not site.is_save_as_pdf("Oct 13, 2026 Saves document")
+
+
+def test_a_card_statement_is_taken_through_its_saves_document_link(tmp_path):
+    page = center()
+    trace: list = []
+    got, out = take_card(page, tmp_path, trace=trace)
+    assert got and out.read_bytes()[:5] == b"%PDF-"
+    assert "#" + CARD["id"] in page.presses
+    assert page.presses[-1] == anchor_css(0)
+    assert not any("downloadDocumentDropdown" in p or "downloadPDFOption" in p for p in page.presses)
+    assert not any(p.endswith("-requestThisDocumentAnchor-pdf") for p in page.presses)
+    assert len(page.downloads) == 1
+
+
+def test_a_checking_statement_is_still_taken_through_its_save_menu(tmp_path):
+    page = center()
+    got, _out = take(page, tmp_path)
+    assert got
+    assert not any("requestThisDocumentAnchor" in p for p in page.presses)
+
+
+@pytest.mark.parametrize("shape, why", [("both", "both a save menu and a Saves document link"),
+                                        ("neither", "neither a save menu nor a Saves document link")])
+@pytest.mark.parametrize("which", ["checking", "card"])
+def test_a_row_with_both_shapes_or_neither_presses_nothing_on_the_row(tmp_path, shape, why, which):
+    page = center()
+    page.accounts[0 if which == "checking" else 1]["shape"] = shape
+    trace: list = []
+    if which == "checking":
+        got, out = take(page, tmp_path, trace=trace)
+    else:
+        got, out = take_card(page, tmp_path, trace=trace)
+    assert got is False and not out.exists()
+    assert not any("cell3" in p or "downloadPDFOption" in p for p in page.presses)
+    assert page.downloads == []
+    assert any(why in str(t.get("why")) for t in trace), trace
+
+
+@pytest.mark.parametrize("labels", [["Sep 28, 2026 , opens document"],
+                                    ["Sep 30, 2026 Saves document"],
+                                    ["Sep 28, 2026 Saves document", "Sign out"],
+                                    ["Sep 28, 2026 Saves document", "Oct 13, 2026 Saves document"],
+                                    []])
+def test_a_saves_document_link_that_is_not_the_rows_own_is_never_pressed(tmp_path, labels):
+    page = center()
+    page.anchor_labels = labels
+    got, out = take_card(page, tmp_path)
+    assert got is False and not out.exists()
+    assert not any("requestThisDocumentAnchor" in p for p in page.presses)
+    assert page.downloads == []
+
+
+def test_the_saves_document_link_is_named_by_its_exact_id_before_any_press():
+    import inspect
+    src = inspect.getsource(site._catch_statement)
+    assert 'a#accountsTable-STATEMENTS-row%d-cell3-requestThisDocumentAnchor-download' in src
+    for fn in (site._catch_statement, site._catch_by_anchor, site._row_shape_of):
+        assert "requestThisDocumentAnchor-pdf" not in inspect.getsource(fn)
+
+
+def test_the_card_download_is_bound_to_its_own_row(tmp_path):
+    page = center()
+    page.accounts[1]["years"] = {2026: [item("DOCQXC0926", "2026-09-28", 4),
+                                        item("DOCQXC0826", "2026-08-28", 3)]}
+    got, out = take_card(page, tmp_path, doc_id="DOCQXC0826", iso="2026-08-28", pages=3)
+    assert got and out.exists()
+    assert page.presses[-1] == anchor_css(1)
+    assert anchor_css(0) not in page.presses
+
+
+@pytest.mark.parametrize("change, reason", [
+    ({"downloads_per_save": 2}, "more than one download came"),
+    ({"download_url": "https://www.chase.com/svc/rr/documents/secure/idal/v5/pdfdoc/star/list"},
+     "the download came from elsewhere"),
+    ({"download_url": BASE + "/svc/rr/documents/secure/idal/v2/dockey/list"},
+     "the download came from elsewhere"),
+    ({"download_body": b"<html>signed out</html>"}, "the download was not a pdf"),
+    ({"downloads_per_save": 0}, "no download came"),
+    ({"popup_on_save": True}, "a new tab opened"),
+])
+def test_a_card_download_that_is_not_one_pdf_from_chase_stops_the_run(tmp_path, change, reason):
+    page = center()
+    for k, v in change.items():
+        setattr(page, k, v)
+    with pytest.raises(site.pressing.Stop) as stop:
+        take_card(page, tmp_path)
+    assert stop.value.reason == reason
+    assert not (tmp_path / "out.pdf").exists()
+    assert [p for p in page.presses if "requestThisDocumentAnchor" in p] == [anchor_css(0)]
+
+
+def test_a_card_pdf_that_does_not_print_its_date_is_not_kept(tmp_path):
+    page = center()
+    page.download_body = _pdf("8765")
+    trace: list = []
+    got, out = take_card(page, tmp_path, trace=trace)
+    assert got is False and not out.exists()
+    assert {"note": "the pdf does not print the statement's date"} in trace
+
+
+def test_a_card_pdf_that_does_not_print_the_cards_last_four_is_not_kept(tmp_path):
+    page = center()
+    page.download_body = _card_pdf("9999", "2026-09-28")
+    trace: list = []
+    got, out = take_card(page, tmp_path, trace=trace)
+    assert got is False and not out.exists()
+    assert {"note": "the pdf does not print the account's last four"} in trace
+
+
+def test_a_turned_off_saves_document_leaves_its_statement(tmp_path, monkeypatch):
+    page = center()
+
+    def click(pg, locator, *, css, what, words, step="press a control", **kw):
+        if "requestThisDocumentAnchor" in css:
+            raise site.pressing.TurnedOff(step, "the control is turned off", ["turned off"])
+        pg.click(css)
+    monkeypatch.setattr(site.pressing, "click", click)
+    trace: list = []
+    got, out = take_card(page, tmp_path, trace=trace)
+    assert got is False and not out.exists() and page.downloads == []
+    assert {"note": "saves document is turned off"} in trace
+
+
+def test_a_late_second_card_download_stops_the_next_statement(tmp_path):
+    page = center()
+    page.late_download = True
+    r = run()
+    got, _out = take_card(page, tmp_path, r=r)
+    assert got
+    before = list(page.presses)
+    with pytest.raises(site.pressing.Stop) as stop:
+        take_card(page, tmp_path, r=r, name="next.pdf")
+    assert stop.value.reason == "a download came that no press took"
+    assert not any("cell3" in p for p in page.presses[len(before):])
+
+
+@pytest.mark.parametrize("text, ok", [
+    ("Opening/Closing Date 09/14/26 - 10/13/26", True),
+    ("Opening/Closing Date\n09/14/2026 - 10/13/2026", True),
+    ("Opening / Closing Date: Sep 14, 2026 - Oct 13, 2026", True),
+    ("Statement Date 10/13/2026", True),
+    ("Statement date: Oct 13, 2026", True),
+    ("Closing Date October 13, 2026", True),
+    ("Statement Date 2026-10-13", True),
+    # The date printed anywhere else, a purchase's say, is not the statement's.
+    ("Opening/Closing Date 08/14/26 - 09/13/26 10/13 COFFEE 10/13/26 4.50", False),
+    ("10/13/26 OFFICE SUPPLIES 12.00", False),
+    ("October 13, 2026", False),
+    ("Payment Due Date 10/13/26", False),
+    # The opening date is not the statement's.
+    ("Opening/Closing Date 10/13/26 - 11/12/26", False),
+    ("Opening/Closing Date 09/14/26 - 10/12/26", False),
+    ("Statement Date 110/13/26", False),
+    ("Statement Date 10/13/261", False),
+    ("Statement Date Oct 13, 20261", False),
+    ("Statement Date Octopus 13, 2026", False),
+    ("Statement Date Octobe 13, 2026", False),
+    ("Statement Date Octo 13, 2026", False),
+    ("Statement Date 02/30/26", False),
+    ("", False),
+])
+def test_a_card_statement_names_its_date(text, ok):
+    assert site.names_date(text, "2026-10-13") is ok
+    assert site.names_date(text, "not a date") is False
+
+
+def test_another_statement_of_the_card_that_lists_a_purchase_on_this_date_is_not_kept(tmp_path):
+    from paperpull_core import testkit
+    page = center()
+    page.download_body = testkit.text_pdf([
+        "Ink Business Unlimited", "Account Number: XXXX XXXX XXXX 8765",
+        "Opening/Closing Date 09/29/26 - 10/28/26", "09/28/26 OFFICE SUPPLIES 12.00"])
+    trace: list = []
+    got, out = take_card(page, tmp_path, trace=trace)
+    assert got is False and not out.exists()
+    assert {"note": "the pdf does not print the statement's date"} in trace
+
+
+def test_a_new_tab_that_opens_late_stops_the_next_statement(tmp_path):
+    page = center()
+    page.accounts[1]["years"] = {2026: [item("DOCQXC0926", "2026-09-28", 4),
+                                        item("DOCQXC0826", "2026-08-28", 3)]}
+    r = run()
+    got, _out = take_card(page, tmp_path, r=r)
+    assert got
+    for f in list(page.listeners["popup"]):
+        f(object())
+    before = list(page.presses)
+    with pytest.raises(site.pressing.Stop) as stop:
+        take_card(page, tmp_path, r=r, doc_id="DOCQXC0826", iso="2026-08-28", pages=3,
+                  name="next.pdf")
+    assert stop.value.reason == "a new tab opened"
+    assert not any("cell3" in p for p in page.presses[len(before):])
+    assert not (tmp_path / "next.pdf").exists()
+    # A checking statement after it is not pressed either.
+    with pytest.raises(site.pressing.Stop):
+        take(page, tmp_path, r=r, name="chk.pdf")
+    assert not any("cell3" in p or "downloadPDFOption" in p for p in page.presses[len(before):])
+
+
+def test_a_run_of_checking_statements_alone_watches_no_new_tabs(tmp_path):
+    page = center()
+    got, _out = take(page, tmp_path)
+    assert got and page.listeners["popup"] == []
+
+
+def test_the_failure_file_counts_the_card_rows_saves_document_links():
+    sel = site.FALLBACK["card_download"]
+    assert 'id$="-cell3-requestThisDocumentAnchor-download"' in sel
+    assert "requestThisDocumentAnchor-pdf" not in sel
+
+
+def test_a_september_statement_reads_with_sept_too():
+    assert site.names_date("Statement Date Sept 28, 2026", "2026-09-28")
+    assert site.names_date("Statement Date September 28, 2026", "2026-09-28")
+    assert not site.names_date("Statement Date Septe 28, 2026", "2026-09-28")
+
+
+@pytest.mark.parametrize("when", ["after the save menu", "after save as pdf"])
+def test_a_checking_row_after_a_card_is_held_to_new_tabs_too(tmp_path, monkeypatch, when):
+    page = center()
+    r = run()
+    got, _out = take_card(page, tmp_path, r=r)
+    assert got and page.listeners["popup"]
+    real = page.click
+
+    def click(css):
+        if when == "after save as pdf" and css.endswith("-downloadPDFOption"):
+            real(css)
+            for f in list(page.listeners["popup"]):
+                f(object())
+            return
+        real(css)
+        if when == "after the save menu" and "downloadDocumentDropdown" in css:
+            for f in list(page.listeners["popup"]):
+                f(object())
+    monkeypatch.setattr(page, "click", click)
+    with pytest.raises(site.pressing.Stop) as stop:
+        take(page, tmp_path, r=r, name="chk.pdf")
+    assert stop.value.reason == "a new tab opened"
+    assert not (tmp_path / "chk.pdf").exists()
+    if when == "after the save menu":
+        assert not any(p.endswith("-downloadPDFOption") for p in page.presses)

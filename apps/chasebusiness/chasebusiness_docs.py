@@ -657,7 +657,8 @@ class App:
         """Save one statement. The site layer opens the document center
         again, chooses the record's account and year, binds the record to
         exactly one answered statement and one row, and only then presses
-        that row's save menu and its Save as PDF, taking the download."""
+        that row's save menu and its Save as PDF, or a business card row's
+        Saves document link, taking the download."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # Only a name already taken in the folder gets the account's

@@ -5,7 +5,8 @@ When Chase changes its business document center, repair this file only.
 
 STATUS: built from the account owner's survey of a signed-in business
 profile on 2026-10-12 and run live on it on 2026-10-13 (10 statements,
-Discover, Pilot and Run All, every PDF opened).
+Discover, Pilot and Run All, every PDF opened). The business card's row
+shape was surveyed live on 2026-10-17, when its first statement came.
 
 WHAT THE SURVEY ESTABLISHED
   * Everything is on one host, https://secure.chase.com. The document center
@@ -24,19 +25,24 @@ WHAT THE SURVEY ESTABLISHED
     "Sep 30, 2026 | Statement | 2 pages". An empty year leaves idaldocRefs
     out. Rows do NOT name the account, so a statement's account is the menu
     entry proven current before its list was read.
-  * Saving is a two-step menu on the row: "<date> Opens menu to save
-    document" opens it, and "Save as PDF" makes the browser download the PDF
-    from secure.chase.com. Its address carries a per-click key and a csrf
-    token, so it is never built here. The press is made and the download
-    taken.
+  * A row saves its statement one of two ways. A checking row carries a
+    two-step menu: "<date> Opens menu to save document" opens it, and "Save
+    as PDF" makes the browser download the PDF from secure.chase.com. A
+    business card row carries no menu. Its third cell holds two links,
+    a#accountsTable-STATEMENTS-row<N>-cell3-requestThisDocumentAnchor-pdf
+    "<date> , opens document" and the same id ending -download, "<date>
+    Saves document", and the second makes the browser download the PDF
+    from the same path, with no new tab. The address carries a per-click
+    key and a csrf token, so it is never built here. The press is made and
+    the download taken. A row with both shapes or neither stops the list.
 
-THE SIX PRESSES. Nothing else is ever pressed. Each is proven by _guarded,
+THE SEVEN PRESSES. Nothing else is ever pressed. Each is proven by _guarded,
 which reads every label the control carries and asks this module's own
 predicate for that kind of control, and only then handed to the core
 (pressing.click), which presses nothing that something covers and stops the
 run instead. The first four go through _press, and a turned off one stops
 the run, since every statement after it is reached through it. The last
-two are a statement's own and go through _press_row, which leaves that
+three are a statement's own and go through _press_row, which leaves that
 statement for review when the site has turned its control off:
   1. an account menu entry (is_account_entry)
   2. the STATEMENTS accordion, only while it is closed (is_statements_accordion)
@@ -44,6 +50,8 @@ statement for review when the site has turned its control off:
   4. one year's option in it, never the year already selected (is_year_option)
   5. the bound row's save menu (is_save_menu)
   6. its "Save as PDF", never the accessible variant (is_save_as_pdf)
+  7. a card row's "<date> Saves document", never its "opens document"
+     (is_saves_document)
 Every press that changes the list is made while the page's own answer is
 awaited (page.expect_response) and counted (_Heard): exactly one answer for
 that account and that year, or the list stops. Nothing here closes a dialog,
@@ -53,7 +61,7 @@ SAFETY (a business bank account that can pay, wire, collect and approve):
   This module is strictly READ-ONLY. FORBIDDEN_CONTROL_RE and the core's
   settings and sign-in guards refuse any label that could pay, transfer,
   wire, send, collect, deposit, approve, order, enroll, change a setting or
-  sign out. A control must also match one of the six anchored shapes above,
+  sign out. A control must also match one of the seven anchored shapes above,
   whole, on every label it carries.
 
 PRIVACY: every menu label, element id and account id is registered as a
@@ -91,8 +99,13 @@ KNOWN CEILINGS (ponytail: left until a live run shows otherwise)
     live run that leaves every statement for review should look here
     first.
   * Tax documents, notices, ATM receipts, check images and branch documents
-    are never opened. The business card's statements were not in the center
-    when it was surveyed, and the card is listed like any account.
+    are never opened. The business card is listed like any account, and its
+    rows are saved by their Saves document link. A card statement is kept
+    only when its text also prints the row's date as its statement date,
+    the closing date of its "Opening/Closing Date" or the date after a
+    "Statement Date" label (names_date). No card statement had been saved
+    by that path when it was written, so a live run that leaves the card's
+    statement for review should look here first.
   * Only rows typed "Statement" are read, and any other type stops the list.
 """
 from __future__ import annotations
@@ -208,7 +221,7 @@ ACCOUNT_ACTION_RE = re.compile(
 _MONTH = (r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)")
 _ROW_DATE = rf"{_MONTH}\s+\d{{1,2}},\s+\d{{4}}"
 
-# The six controls this app presses, each anchored whole.
+# The seven controls this app presses, each anchored whole.
 ACCOUNT_ENTRY_RE = re.compile(
     r"[A-Za-z0-9 .&'-]+ \(\.\.\.\d{4}\)(\s*,\s*current selection)?", re.I)
 STATEMENTS_ACCORDION_RE = re.compile(r"statements", re.I)
@@ -221,13 +234,17 @@ SAVE_MENU_RE = re.compile(rf"({_ROW_DATE}) opens menu to save document", re.I)
 # Live, the option reads "Save as PDF 1 of 2 items": the menu adds the
 # item's place to its name. That tail alone is allowed.
 SAVE_AS_PDF_RE = re.compile(r"save as pdf(\s*\d{1,2} of \d{1,2} items?)?", re.I)
+# A business card's row carries no save menu. Its own link reads "Oct 13,
+# 2026 Saves document" live, beside "Oct 13, 2026 , opens document", which
+# is never pressed.
+SAVES_DOCUMENT_RE = re.compile(rf"({_ROW_DATE}) saves document", re.I)
 
 # What the general guard takes, for the survey and the repo-wide tests: the
-# six shapes, and the rules' own summary under a document verb. Nothing on
+# seven shapes, and the rules' own summary under a document verb. Nothing on
 # the document center reads like the last one.
 SAFE_DOC_CONTROL_RES = (
     ACCOUNT_ENTRY_RE, STATEMENTS_ACCORDION_RE, YEAR_OPTION_RE, SAVE_MENU_RE,
-    SAVE_AS_PDF_RE,
+    SAVE_AS_PDF_RE, SAVES_DOCUMENT_RE,
     re.compile(r"view:?(\s*\d{4})?", re.I),
     re.compile(r"((view|download)\s+)?(bank\s+)?statements?", re.I),
 )
@@ -277,6 +294,9 @@ FALLBACK = {
     "doc_row": STATEMENT_ROW,
     "doc_link": '[id$="-downloadPDFOption"]',
     "download_control": 'a[id^="header-"][id$="-cell3-downloadDocumentDropdown"]',
+    # A business card row's own Saves document link, which it has in place
+    # of the save menu.
+    "card_download": 'a[id^="accountsTable-STATEMENTS-row"][id$="-cell3-requestThisDocumentAnchor-download"]',
     # Live, a wrapper div carries the same id without the header- prefix, and the
     # anchor is the control.
     "page_ready": f"{MENU_ENTRY}, #{STATEMENTS_ACCORDION_ID}",
@@ -491,7 +511,7 @@ def is_safe_control(name: str) -> bool:
     return any(rx.fullmatch(name) for rx in SAFE_DOC_CONTROL_RES)
 
 
-# -- the six predicates, one for each control this app presses ---------------
+# -- the seven predicates, one for each control this app presses -------------
 
 def is_account_entry(label: str) -> bool:
     """An account menu entry, "BUS COMPLETE CHK (...1234)", with or without
@@ -542,8 +562,21 @@ def is_save_as_pdf(label: str) -> bool:
     return bool(label) and not _refused(label) and bool(SAVE_AS_PDF_RE.fullmatch(label))
 
 
+def is_saves_document(label: str, row_date_label: str = "") -> bool:
+    """A business card row's own "<date> Saves document" link, for that
+    date only when one is given. The row's "<date> , opens document" beside
+    it is refused, and so is any other words."""
+    label = _tidy(label)
+    if not label or _refused(label):
+        return False
+    m = SAVES_DOCUMENT_RE.fullmatch(label)
+    if not m:
+        return False
+    return not row_date_label or row_date(m.group(1)) == row_date(row_date_label)
+
+
 PRESS_GUARDS = (is_account_entry, is_statements_accordion, is_year_picker,
-                is_year_option, is_save_menu, is_save_as_pdf)
+                is_year_option, is_save_menu, is_save_as_pdf, is_saves_document)
 
 
 # ---------------------------------------------------------------------------
@@ -620,6 +653,11 @@ class Run:
         self.downloads: list = []
         self.taken = 0
         self._watched: list = []
+        # Every new tab a watched tab opens from a card's first Saves
+        # document on. One is never what a press should bring, so nothing
+        # more is pressed once one has come.
+        self.popups: list = []
+        self._popup_watched: list = []
 
     def watch(self, page) -> None:
         """Listen for downloads on this tab for the rest of the run."""
@@ -630,6 +668,16 @@ class Run:
 
     def _on_download(self, dl) -> None:
         self.downloads.append(dl)
+
+    def watch_popups(self, page) -> None:
+        """Listen for new tabs this tab opens for the rest of the run."""
+        if any(p is page for p in self._popup_watched):
+            return
+        page.on("popup", self._on_popup)
+        self._popup_watched.append(page)
+
+    def _on_popup(self, tab) -> None:
+        self.popups.append(tab)
 
     def untied(self) -> int:
         """Downloads that came and that no Save as PDF of this run took."""
@@ -1150,7 +1198,8 @@ def _cross_check(page, items: List[Item]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Pressing. Every press goes through _press, with one of the six predicates.
+# Pressing. Every press goes through _press or _press_row, with one of the
+# seven predicates.
 # ---------------------------------------------------------------------------
 
 def _labels_of(locator) -> List[str]:
@@ -1572,7 +1621,7 @@ def scroll_full_page(page, rounds: int = 0, delay_ms: int = 0) -> None:
 
 
 def expand_all(page) -> None:
-    """Nothing to press beyond the six controls in the module docstring."""
+    """Nothing to press beyond the seven controls in the module docstring."""
     return None
 
 
@@ -1727,26 +1776,95 @@ def _own_pdf_option(page, n: int) -> str:
 
 
 class _LeftTurnedOff(Exception):
-    """Save as PDF was turned off and not pressed (_press_row)."""
+    """The row's last control was turned off and not pressed (_press_row)."""
+
+
+def _row_shape_of(page, menu_css: str, anchor_css: str) -> str:
+    """Which way the bound row saves its statement: "menu" for a checking
+    row's save menu, "anchor" for a business card row's own Saves document
+    link. Read only. A row that shows both, or neither, stops the list,
+    since this cannot tell which of them is the statement's own."""
+    try:
+        has_menu = page.locator(menu_css).count() > 0
+        has_anchor = page.locator(anchor_css).count() > 0
+    except Exception as e:
+        raise ListStopped("the statement's row could not be read (%s)" % type(e).__name__)
+    if has_menu and has_anchor:
+        raise ListStopped("the statement's row shows both a save menu and a Saves document link")
+    if not has_menu and not has_anchor:
+        raise ListStopped("the statement's row shows neither a save menu nor a Saves document link")
+    return "menu" if has_menu else "anchor"
+
+
+def _take_arrived(page, run: Run, dl, start: int, dl_dir, before, out_path: Path,
+                  trace: Optional[list], name: str, popups_from: Optional[int] = None) -> bool:
+    """Take the one download the last press, `name`, brought, once the page
+    has had a moment to raise a second one. More than one download, a new
+    tab since `popups_from` when new tabs are watched (Run.watch_popups), a
+    download from anywhere but Chase's PDF path, or one that is not a PDF
+    stops the run with nothing taken."""
+    check_signed_in(page)
+    page.wait_for_timeout(SECOND_DOWNLOAD_WAIT_MS)
+    check_signed_in(page)
+    came = run.downloads[start:]
+    if len(came) != 1:
+        _cancel_all(came)
+        raise _stop("More than one download came after one %s, so none was taken." % name,
+                    "more than one download came")
+    run.taken = len(run.downloads)
+    if popups_from is not None and len(run.popups) > popups_from:
+        _cancel_all([dl])
+        raise _stop("A new tab opened after %s was pressed, so nothing was taken." % name,
+                    "a new tab opened")
+    if not is_download_url(getattr(dl, "url", "") or ""):
+        _cancel_all([dl])
+        raise _stop("The download did not come from Chase's statement address, so it was "
+                    "not taken.", "the download came from elsewhere")
+    try:
+        how = _take_download(dl, dl_dir, before, out_path)
+        if trace is not None:
+            trace.append({"note": "download taken" if how else "download not taken", "how": how})
+        if not how or not out_path.exists() or out_path.read_bytes()[:5] != b"%PDF-":
+            try:
+                out_path.unlink()
+            except OSError:
+                pass
+            raise _stop("The download was not a PDF, so it was not kept.", "the download was not a pdf")
+        return True
+    finally:
+        # The browser's own copy, whichever way the take went.
+        try:
+            _clear_copies(dl_dir, before, out_path)
+        except Exception:
+            pass
 
 
 def _catch_statement(page, run: Run, dl_dir, n: int, iso_date: str, out_path: Path,
                      trace: Optional[list]) -> bool:
-    """Press row `n`'s save menu and then its own Save as PDF, once each,
-    and take the one download that brings, through the core.
+    """Save row `n`'s statement, the one way the row offers, and take the
+    one download that brings, through the core.
+
+    A checking row carries a save menu: it is pressed, and then its own Save
+    as PDF, once each. A business card row carries no menu, only "<date> ,
+    opens document" and "<date> Saves document" links, and its Saves
+    document is pressed once (_catch_by_anchor). A row with both or neither
+    stops the list with nothing pressed (_row_shape_of).
 
     A download already on its way or one no press of this run took, a Save
     as PDF that is not the bound menu's own, none in time, a second
-    download, one from anywhere but Chase's PDF path, or one that is not a
-    PDF stops the run: nothing more is pressed for this or any later
-    statement. The run listens for downloads from its first save to its
+    download, one from anywhere but Chase's PDF path, one that is not a
+    PDF, or a new tab once a card's press has made the run watch for them
+    (Run.watch_popups) stops the run: nothing more is pressed for this or
+    any later statement. The run listens for downloads from its first save to its
     end (Run.watch), so a second download that comes late still stops the
     next statement before anything is pressed for it."""
     out_path = Path(out_path)
     row_css = "#accountsTable-STATEMENTS-row%d" % n
-    # The one exact anchor the survey found, named before the press: a
-    # lookalike with the same words and a longer id is never pressed.
+    # The one exact anchor of each shape the surveys found, named before the
+    # press: a lookalike with the same words and a longer id is never
+    # pressed.
     menu_css = "%s a#header-accountsTable-STATEMENTS-row%d-cell3-downloadDocumentDropdown" % (row_css, n)
+    anchor_css = "%s a#accountsTable-STATEMENTS-row%d-cell3-requestThisDocumentAnchor-download" % (row_css, n)
     run.watch(page)
     before = _snapshot(dl_dir)
     try:
@@ -1756,6 +1874,15 @@ def _catch_statement(page, run: Run, dl_dir, n: int, iso_date: str, out_path: Pa
         if run.untied():
             raise _stop("A download came that no Save as PDF of this run took, so nothing "
                         "more is pressed.", "a download came that no press took")
+        if run.popups:
+            raise _stop("A new tab opened after a statement was saved, so nothing more is "
+                        "pressed.", "a new tab opened")
+        # New tabs are watched only once a card's Saves document has been
+        # pressed in this run (Run.watch_popups), so a checking-only run
+        # never has one, and a checking row after a card is held to it too.
+        popups_from = len(run.popups)
+        if _row_shape_of(page, menu_css, anchor_css) == "anchor":
+            return _catch_by_anchor(page, run, dl_dir, before, anchor_css, iso_date, out_path, trace)
         if not _press_row(page, page.locator(menu_css), css=menu_css,
                           what="the statement's save menu", guard=is_save_menu,
                           expect=_row_label_date(iso_date), step="open the save menu", run=run):
@@ -1778,6 +1905,9 @@ def _catch_statement(page, run: Run, dl_dir, n: int, iso_date: str, out_path: Pa
             _cancel_all(run.downloads[run.taken:])
             raise _stop("A download came before Save as PDF was pressed, so it was not pressed.",
                         "a download came before the press")
+        if len(run.popups) > popups_from:
+            raise _stop("A new tab opened after the save menu was pressed, so Save as PDF was "
+                        "not pressed.", "a new tab opened")
         start = len(run.downloads)
         try:
             with page.expect_download(timeout=DOWNLOAD_WAIT_MS) as info:
@@ -1799,34 +1929,121 @@ def _catch_statement(page, run: Run, dl_dir, n: int, iso_date: str, out_path: Pa
             if trace is not None:
                 trace.append({"note": "no download came", "error": type(e).__name__})
             raise _stop("Save as PDF was pressed and no download came.", "no download came")
-        check_signed_in(page)
-        page.wait_for_timeout(SECOND_DOWNLOAD_WAIT_MS)
-        check_signed_in(page)
-        came = run.downloads[start:]
-        if len(came) != 1:
-            _cancel_all(came)
-            raise _stop("More than one download came after one Save as PDF, so none was taken.",
-                        "more than one download came")
-        run.taken = len(run.downloads)
-        if not is_download_url(getattr(dl, "url", "") or ""):
-            _cancel_all([dl])
-            raise _stop("The download did not come from Chase's statement address, so it was "
-                        "not taken.", "the download came from elsewhere")
-        how = _take_download(dl, dl_dir, before, out_path)
-        if trace is not None:
-            trace.append({"note": "download taken" if how else "download not taken", "how": how})
-        if not how or not out_path.exists() or out_path.read_bytes()[:5] != b"%PDF-":
-            try:
-                out_path.unlink()
-            except OSError:
-                pass
-            raise _stop("The download was not a PDF, so it was not kept.", "the download was not a pdf")
-        return True
+        return _take_arrived(page, run, dl, start, dl_dir, before, out_path, trace, "Save as PDF",
+                             popups_from=popups_from)
     finally:
         try:
             _clear_copies(dl_dir, before, out_path)
         except Exception:
             pass
+
+
+def _catch_by_anchor(page, run: Run, dl_dir, before, anchor_css: str, iso_date: str,
+                     out_path: Path, trace: Optional[list]) -> bool:
+    """Press a business card row's own "<date> Saves document" link once,
+    its label proven to be that row's date and those words alone, and take
+    the one download it brings. Live, the press makes the page fetch the PDF
+    from Chase's PDF path and the browser download it, with no new tab and
+    no new address. A new tab, a second download, one from elsewhere, none,
+    or one that is not a PDF stops the run as the save menu's do. A PDF
+    that does not print the row's date as its statement date is not kept,
+    and the statement is left for review (names_date)."""
+    # Watched from here to the run's end, so a tab that opens late still
+    # stops the next statement before anything is pressed for it.
+    run.watch_popups(page)
+    popups_from = len(run.popups)
+    start = len(run.downloads)
+    try:
+        with page.expect_download(timeout=DOWNLOAD_WAIT_MS) as info:
+            if not _press_row(page, page.locator(anchor_css), css=anchor_css,
+                              what="the statement's Saves document link",
+                              guard=is_saves_document, expect=_row_label_date(iso_date),
+                              step="save the statement", run=run):
+                raise _LeftTurnedOff()
+        dl = info.value
+    except _LeftTurnedOff:
+        if trace is not None:
+            trace.append({"note": "saves document is turned off"})
+        return False
+    except (SessionExpired, ListStopped):
+        raise
+    except Exception as e:
+        check_signed_in(page)
+        if trace is not None:
+            trace.append({"note": "no download came", "error": type(e).__name__})
+        raise _stop("Saves document was pressed and no download came.", "no download came")
+    _take_arrived(page, run, dl, start, dl_dir, before, out_path, trace, "Saves document",
+                  popups_from=popups_from)
+    if not names_date(_pdf_text(out_path), iso_date):
+        log.info("the statement dated %s does not print that date as its statement date, so "
+                 "it is not kept", iso_date)
+        if trace is not None:
+            trace.append({"note": "the pdf does not print the statement's date"})
+        try:
+            out_path.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
+# A date as a statement prints one: "10/13/26", "10/13/2026", "Oct 13, 2026",
+# "October 13, 2026" or "2026-10-13".
+_DATE_TOKEN = (r"(?:\d{1,2}/\d{1,2}/(?:\d{4}|\d{2})(?![\d/])|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}(?!\d)"
+               r"|\d{4}-\d{2}-\d{2}(?!\d))")
+# A card statement's period, "Opening/Closing Date 09/14/26 - 10/13/26",
+# whose second date is the statement's.
+_PERIOD_RE = re.compile(r"Opening\s*/\s*Closing\s+Date\s*:?\s*(%s)\s*(?:-|–|to|through)\s*(%s)"
+                        % (_DATE_TOKEN, _DATE_TOKEN), re.I)
+# "Statement Date: 10/13/26" or "Closing Date 10/13/26", not the "Closing
+# Date" inside "Opening/Closing Date", which the opening date follows.
+_STATEMENT_DATE_RE = re.compile(r"(?<![/\w])(?<!/ )(?:Statement|Closing)\s+Date\s*:?\s*(%s)"
+                                % _DATE_TOKEN, re.I)
+
+
+def _token_iso(token: str) -> Optional[str]:
+    """A _DATE_TOKEN as YYYY-MM-DD, or None for a day that does not exist.
+    A two-digit year is in this century."""
+    token = _tidy(token)
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})", token)
+    try:
+        if m:
+            year = int(m.group(3)) + (2000 if len(m.group(3)) == 2 else 0)
+            return _date(year, int(m.group(1)), int(m.group(2))).isoformat()
+        m = re.fullmatch(r"([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})", token)
+        if m:
+            name = m.group(1).lower()
+            month = _MONTHS.get(name[:3])
+            full = ("january", "february", "march", "april", "may", "june", "july", "august",
+                    "september", "october", "november", "december")
+            # The month's three letters, its whole name, or "Sept", and no
+            # other spelling.
+            if month is None or name not in (name[:3], full[month - 1], "sept") \
+                    or (name == "sept" and month != 9):
+                return None
+            return _date(int(m.group(3)), month, int(m.group(2))).isoformat()
+        return answer_date(token)
+    except ValueError:
+        return None
+
+
+def names_date(text: str, iso: str) -> bool:
+    """Whether the text prints `iso` as its statement's own date: the
+    closing date of an "Opening/Closing Date" period, as a card statement
+    prints it, or the date after a "Statement Date" or "Closing Date"
+    label. Only one date is judged, the first period's when the text
+    prints one, else the first labeled date, as names_tail judges one
+    number. A date printed anywhere else, a transaction's say, is not read,
+    so another statement of the same card that lists a purchase on this
+    date is not taken for this one."""
+    if answer_date(iso) != iso:
+        return False
+    text = text or ""
+    m = _PERIOD_RE.search(text)
+    if m:
+        return _token_iso(m.group(2)) == iso
+    m = _STATEMENT_DATE_RE.search(text)
+    return bool(m) and _token_iso(m.group(1)) == iso
 
 
 def download_statement(page, run: Run, dl_dir, out_path, *, account_digest: str, document_id: str,

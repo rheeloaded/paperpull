@@ -7,6 +7,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Chase Business saves the business card's statements.** A business
+  card's statement row has no "Opens menu to save document" menu, only an
+  "opens document" link and a "Saves document" link, so every card
+  statement went to Manual Review with "Could not capture the document
+  PDF". The app now presses the row's own "Saves document" once and keeps
+  the one PDF Chase sends, when it prints the card's last four and the
+  row's date as its statement date. "opens document" is never pressed, checking
+  statements are saved through their menu as before, and a row that shows
+  both or neither is left for review.
+
 ## [0.55.0] - 2026-10-17
 
 Invest529 downloads your 529 college-savings statements and 1099-Q tax
