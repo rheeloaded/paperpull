@@ -250,6 +250,23 @@ def test_the_documents_url_is_not_read_as_signed_out():
     assert site.looks_signed_out(_Q())
 
 
+def test_the_statements_page_is_recognised_at_its_retail_address():
+    # Schwab moved Statements & Tax Forms from /app/ to /retail/, and the
+    # old address now redirects there. Read as some other page, every run
+    # stopped saying it could not open the statements page.
+    class _P:
+        title = staticmethod(lambda: "Statements and Tax Forms | Charles Schwab")
+        def locator(self, _s):
+            class _L:
+                def count(self): return 0
+            return _L()
+    for url in ["https://client.schwab.com/app/accounts/statements/",
+                "https://client.schwab.com/retail/accounts/statements/#/"]:
+        page = _P(); page.url = url
+        assert site.on_documents_page(page), url
+    page = _P(); page.url = "https://client.schwab.com/retail/accounts/summary/"
+    assert not site.on_documents_page(page)
+
 def test_a_verb_stem_inside_another_word_is_not_a_refusal():
     # "edit" sits inside "Credit" and "update" inside nothing common, but the
     # unanchored stems refused any label containing them. The verbs

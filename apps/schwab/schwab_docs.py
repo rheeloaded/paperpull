@@ -435,7 +435,7 @@ class App:
         # under before its place, and a row that cannot be told apart from
         # one saved is not taken for it (paperpull_core.keys.told_apart).
         self._placed = {}
-        alike = ("doc_type", "title", "date")
+        alike = ("doc_type", "title", "date", "account")
         for d, (occ, sure), place in zip(raw, _told_apart(
                 raw, self.discovery.data, fields=alike, saved=self.progress.data),
                 _places(raw, fields=alike)):

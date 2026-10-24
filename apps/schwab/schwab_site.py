@@ -278,7 +278,10 @@ def dismiss_timeout(page) -> None:
 def on_documents_page(page) -> bool:
     try:
         url = (page.url or "").lower()
-        if "/app/accounts/statements" not in url:
+        # Schwab moved Statements & Tax Forms from /app/ to /retail/ in
+        # October 2026; either path is the same page.
+        if not any(p in url for p in ("/app/accounts/statements",
+                                      "/retail/accounts/statements")):
             return False
         if looks_signed_out(page):
             return False
