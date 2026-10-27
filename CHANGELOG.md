@@ -19,8 +19,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   port, so the sign-in step said no debugging port answered for a browser
   that had opened, and a sign-in with that browser already open said
   something silent held its port. Every request PaperPull sends to this
-  computer, from the sign-in, the server's self-test and the tests, now
-  leaves the proxy out, and a check finds any new one by what it does.
+  computer through Python's own urllib, from the sign-in, the server's
+  self-test and the tests, now leaves the proxy out, and a check finds any
+  new one by what it does.
 
 ## [0.59.0] - 2026-10-26
 

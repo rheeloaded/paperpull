@@ -23,8 +23,10 @@ its imports are followed to what they bind, under any name, so urlopen is
 found however it is reached, and an opener is judged where it is built.
 http.client and sockets never read a proxy setting and are left alone.
 Another HTTP client would read one, so its import has to be named here
-too. The one request meant for the internet, where a proxy the person set
-should carry it, is named below with its reason.
+too. Names are followed within one file only, so urlopen handed on by
+another module of this repository would not be seen, and none is. The one
+request meant for the internet, where a proxy the person set should carry
+it, is named below with its reason.
 
 It needs no browser.
 """
@@ -48,7 +50,8 @@ READS_PROXIES = {"urllib.request.urlopen", "urllib.request.urlretrieve",
                  "urllib.request.URLopener", "urllib.request.FancyURLopener"}
 OPENERS = {"urllib.request.build_opener"}
 PROXY_HANDLER = "urllib.request.ProxyHandler"
-OTHER_CLIENTS = {"requests", "httpx", "urllib3", "aiohttp", "pycurl"}
+# websockets' client among them, since its 15.0.
+OTHER_CLIENTS = {"requests", "httpx", "urllib3", "aiohttp", "pycurl", "websockets"}
 
 HOW = ("Send a request to this computer through paperpull_core.browser.open_local, or build "
        "its opener with urllib.request.ProxyHandler({}). A request meant for the internet "
@@ -109,13 +112,21 @@ class Requests(ast.NodeVisitor):
         if isinstance(node, ast.Name):
             base = self.names.get(node.id) or (node.id if node.id in ("__import__", "getattr")
                                                else None)
+        elif isinstance(node, ast.Call) and node.args and self.resolve(node.func) == "__import__":
+            # The top package, or the module itself once a fromlist names
+            # something in it.
+            name = node.args[0]
+            if isinstance(name, ast.Constant) and isinstance(name.value, str):
+                fromlist = node.args[3:4] + [k.value for k in node.keywords if k.arg == "fromlist"]
+                named = any(not (isinstance(f, ast.Constant) and not f.value)
+                            and not (isinstance(f, (ast.List, ast.Tuple)) and not f.elts)
+                            for f in fromlist)
+                base = name.value if named else name.value.split(".")[0]
         elif isinstance(node, ast.Call) and node.args and isinstance(node.args[-1], ast.Constant):
             called = self.resolve(node.func)
             given = node.args[-1].value
             if called == "importlib.import_module" and isinstance(given, str):
                 base = given
-            elif called == "__import__" and isinstance(given, str):
-                base = given.split(".")[0]
             elif called == "getattr" and len(node.args) == 2 and isinstance(given, str):
                 owner = self.resolve(node.args[0])
                 base = owner and owner + "." + given
@@ -125,12 +136,14 @@ class Requests(ast.NodeVisitor):
 
     def visit_Assign(self, node):
         # A name given to urlopen, or to functools.partial(urlopen, ...), is
-        # urlopen from then on.
+        # urlopen from then on, and one given a module imported by its name
+        # (importlib.import_module("urllib.request")) is that module.
         value = node.value
         if isinstance(value, ast.Call) and self.resolve(value.func) == "functools.partial" \
                 and value.args:
             value = value.args[0]
-        target = self.resolve(value) if isinstance(value, (ast.Name, ast.Attribute)) else None
+        target = self.resolve(value) if isinstance(value, (ast.Name, ast.Attribute, ast.Call)) \
+            else None
         if target:
             for t in node.targets:
                 if isinstance(t, ast.Name):
@@ -221,6 +234,11 @@ SAMPLES = [
     ("from urllib import request\nrequest.urlopen(u, timeout=2)", True),
     ("import importlib\nimportlib.import_module('urllib.request').urlopen(u)", True),
     ("__import__('urllib.request').request.urlopen(u)", True),
+    ("__import__('urllib.request', fromlist=['urlopen']).urlopen(u)", True),
+    ("__import__('urllib.request', None, None, ['urlopen']).urlopen(u)", True),
+    ("import importlib\nm = importlib.import_module('urllib.request')\nm.urlopen(u)", True),
+    ("m = __import__('urllib.request', fromlist=['urlopen'])\nm.urlopen(u)", True),
+    ("from websockets.sync.client import connect\nconnect(u)", True),
     ("import urllib.request\ngetattr(urllib.request, 'urlopen')(u)", True),
     ("import urllib.request\nask = urllib.request.urlopen\n", True),
     ("import functools, urllib.request\nask = functools.partial(urllib.request.urlopen, timeout=2)\n"
@@ -245,6 +263,8 @@ SAMPLES = [
     ("import http.client\nhttp.client.HTTPConnection('127.0.0.1', 1).request('GET', '/')", False),
     ("import socket\nsocket.create_connection(('127.0.0.1', 1))", False),
     ("def urlopen(u):\n    return u\nurlopen(u)", False),
+    ("import importlib\nm = importlib.import_module('json')\nm.loads(u)", False),
+    ("m = __import__('urllib.request', fromlist=[])\nm.request.Request(u)", False),
 ]
 
 
