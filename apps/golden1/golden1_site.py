@@ -1105,6 +1105,15 @@ DRAWN_SAME = "drawn again the same"
 SHOWN = "shown without being drawn again"
 BEFORE = "the list read before"
 NO_LIST = "no list"
+# The panel's Statement History showed, could be pressed and read as one,
+# and the press on it raised, so the panel's list was never asked for. Every
+# other way a history does not show can be a page that works. A heading the
+# guard refuses and a link that reads otherwise are the page as it is, an
+# account with no statements shows no list or a link turned off, two
+# accounts billed on the same days show the list before, and a hidden copy
+# of a Statement History, a phone layout's say, never shows however its
+# heading is pressed (review).
+PRESS_FAILED = "the press failed"
 
 # A control drawn as an <input> of type button, submit, image or reset, which
 # Playwright gives a button's role. A dated statement and a Statement History
@@ -1486,8 +1495,11 @@ def open_panel_history(page, panel: dict, trace: Optional[list] = None,
     Every control is marked right before the press, and when the list read
     last on this page was another account's, the new one must not be it, so
     a list left over from the account before is never read as this one's
-    (#35). `facts` gets how the list came, as _wait_for_new_list says it."""
+    (#35). `facts` gets how the list came, as _wait_for_new_list says it,
+    or PRESS_FAILED when the press on a link that showed, could be pressed
+    and read as Statement History raised."""
     i = panel["i"]
+    pressable = False
     try:
         if panel.get("expanded") == "false":
             if not _panel_opens_safely(panel):
@@ -1511,12 +1523,15 @@ def open_panel_history(page, panel: dict, trace: Optional[list] = None,
             return False
         last = _last_read(page)
         _mark_seen(page)
+        pressable = link.is_enabled() and not _looks_disabled(link)
         link.click(timeout=5000)
     except Exception as e:
         log.info("could not open a panel's statement history: %s", e)
         if trace is not None:
             trace.append({"note": "a panel's statement history would not open", "panel": i,
                           "error": _error_word(e)})
+        if facts is not None and pressable:
+            facts["list"] = PRESS_FAILED
         return False
     # Only another account's list is one this account's must not be. The
     # same account's, opened again, is waited on to be drawn again, since it
@@ -1694,19 +1709,31 @@ def _read_dated_list(page, kind: str, account: str, seen: set,
     return docs
 
 
-def _read_every_panel(page, panels: List[dict], trace: Optional[list]) -> List[RawDoc]:
+class Listed(list):
+    """The statements a read of the account panels found. passed_over is
+    how many panels' Statement History press failed, so the list is not
+    whole however much was read."""
+    passed_over: int = 0
+
+
+def _read_every_panel(page, panels: List[dict], trace: Optional[list]) -> Listed:
     """Every panel's history, every page of it, closed again after.
 
     The trace says, for each panel, how its first list came, how many pages
     were read and why the paging stopped, and which words from a fixed list
     its heading carries, so the next file says what NEXT did and what the
-    vendor calls a card (#35)."""
+    vendor calls a card (#35).
+
+    A panel whose Statement History press failed was passed over, and the
+    list was noted whole without it. passed_over counts those now. Every
+    other way a history does not show is left as it was, since a page that
+    works can show each of them (PRESS_FAILED)."""
     if trace is not None:
         trace.append({"note": "discovery found the account panels", "panels": len(panels),
                       "cards": sum(1 for p in panels if p["card"]),
                       "closed": sum(1 for p in panels if p.get("expanded") == "false"),
                       "headings": [_panel_facts(p) for p in panels[:6]]})
-    docs: List[RawDoc] = []
+    docs = Listed()
     seen: set = set()
     for first in panels:
         now = history_panels(page)
@@ -1721,6 +1748,8 @@ def _read_every_panel(page, panels: List[dict], trace: Optional[list]) -> List[R
                 trace.append({"note": "a panel's statement history did not show",
                               "panel": panel["i"], "card": panel["card"],
                               "list": opened.get("list", "")})
+            if opened.get("list") == PRESS_FAILED:
+                docs.passed_over += 1
             continue
         expand_all(page)
         kind = CARD_TITLE if panel["card"] else ACCOUNT_TITLE
@@ -1802,6 +1831,7 @@ _HOW_SAID = {
     SHOWN: "Its list showed without being drawn again.",
     BEFORE: "Only the list read before it showed.",
     NO_LIST: "No list came.",
+    PRESS_FAILED: "Its Statement History showed and the press on it failed.",
 }
 
 

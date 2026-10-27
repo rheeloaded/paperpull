@@ -7,6 +7,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Golden 1 never calls its statement list whole with an account's
+  history left out.** Each account's statements show through its own
+  Statement History. An account whose Statement History showed and failed
+  when pressed was passed over, and the list was still noted as read
+  whole. Now the run keeps what it read and takes it, writes a failure
+  file and stops at its end rather than finish, so the next run reads the
+  list again. The account passed over keeps the statements an earlier run
+  listed. An account with no statements, one that shows only the list of
+  the account before, one whose heading opens nothing and a hidden copy of
+  a Statement History are left as they were, since a page that works can
+  show each of them.
+
 ## [0.59.0] - 2026-10-26
 
 Bank of America downloads checking, savings and credit card statements,
