@@ -323,7 +323,7 @@ def open_tab_at(cdp_url, address, seconds=15):
     the tab at its address with no title at all until the PDF is showing,
     then names it after the address (measured on Chromium 153), so the tab
     is taken as there once it is named."""
-    made = json.loads(urllib.request.urlopen(urllib.request.Request(
+    made = json.loads(browser_launcher.open_local(urllib.request.Request(
         "%s/json/new?%s" % (cdp_url, address), method="PUT"), timeout=15).read().decode("utf-8"))
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:

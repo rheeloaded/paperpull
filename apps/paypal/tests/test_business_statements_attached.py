@@ -26,7 +26,6 @@ import json
 import ssl
 import sys
 import threading
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -188,7 +187,7 @@ def attached(browser_exe, server, certificate, saved_by_the_browser, tmp_path_fa
 
 
 def _tabs(cdp_url):
-    with urllib.request.urlopen(cdp_url + "/json/list", timeout=10) as r:
+    with browser_launcher.open_local(cdp_url + "/json/list", timeout=10) as r:
         return [t for t in json.loads(r.read()) if t.get("type") == "page"]
 
 
@@ -199,8 +198,8 @@ def no_tab_left_on_paypal(attached):
     def close_them():
         for tab in _tabs(attached):
             if urlsplit(tab.get("url") or "").hostname == "www.paypal.com":
-                urllib.request.urlopen("%s/json/close/%s" % (attached, tab["id"]),
-                                       timeout=10).read()
+                browser_launcher.open_local("%s/json/close/%s" % (attached, tab["id"]),
+                                            timeout=10).read()
     close_them()
     yield
     close_them()

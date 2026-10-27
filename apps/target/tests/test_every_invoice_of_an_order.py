@@ -327,7 +327,7 @@ def _start_browser(exe, profile):
 
 
 def _page_targets(cdp_url):
-    with urllib.request.urlopen(cdp_url + "/json/list", timeout=10) as r:
+    with browser_launcher.open_local(cdp_url + "/json/list", timeout=10) as r:
         return [t for t in json.loads(r.read().decode("utf-8")) if t.get("type") == "page"]
 
 
@@ -336,7 +336,7 @@ def _addresses(cdp_url):
 
 
 def _close_tab(cdp_url, target_id):
-    urllib.request.urlopen(cdp_url + "/json/close/" + target_id, timeout=10).read()
+    browser_launcher.open_local(cdp_url + "/json/close/" + target_id, timeout=10).read()
 
 
 def _gone(cdp_url, target_id, seconds=10):
@@ -381,7 +381,7 @@ def _open_drawn(cdp_url, server):
         name = "tab%d" % next(_TAB_NAMES)
         address = "%s/drawn/%s" % (server, name)
         request = urllib.request.Request(cdp_url + "/json/new?" + address, method="PUT")
-        with urllib.request.urlopen(request, timeout=10) as r:
+        with browser_launcher.open_local(request, timeout=10) as r:
             tab = json.loads(r.read().decode("utf-8"))
         if _drawn(name, 10):
             return {"id": tab["id"], "address": address}

@@ -7,6 +7,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Signing in finds a browser that opened fine on a computer with a proxy
+  set.** Each request PaperPull sent to a browser's debugging port on this
+  computer went through the proxy the computer names, HTTP_PROXY or the
+  proxy in the Windows or macOS settings. Nothing there leaves out
+  127.0.0.1 unless the person listed it, and the Windows box for local
+  addresses covers only names without a dot. A proxy cannot reach that
+  port, so the sign-in step said no debugging port answered for a browser
+  that had opened, and a sign-in with that browser already open said
+  something silent held its port. Every request PaperPull sends to this
+  computer, from the sign-in, the server's self-test and the tests, now
+  leaves the proxy out, and a check finds any new one by what it does.
+
 ## [0.59.0] - 2026-10-26
 
 Bank of America downloads checking, savings and credit card statements,

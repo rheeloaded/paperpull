@@ -508,9 +508,9 @@ def _draws(url, address, tries):
 
 
 def _page_tabs(url) -> list:
-    import urllib.request
+    from .browser import open_local
 
-    with urllib.request.urlopen(url + "/json/list", timeout=10) as r:
+    with open_local(url + "/json/list", timeout=10) as r:
         return [t for t in json.loads(r.read().decode("utf-8")) if t.get("type") == "page"]
 
 
@@ -543,13 +543,15 @@ def _draws_alone(url, ready, tries):
     import http.client
     import urllib.request
 
+    from .browser import open_local
+
     did = []
     for _try in range(tries):
         name = "tab%d" % next(_TAB_NAMES)
         try:
             opened = urllib.request.Request("%s/json/new?%sdrawn/%s" % (url, ready.address, name),
                                             method="PUT")
-            with urllib.request.urlopen(opened, timeout=10) as r:
+            with open_local(opened, timeout=10) as r:
                 tab = json.loads(r.read().decode("utf-8"))["id"]
             if _within(10, lambda: name in ready.drawn):
                 if _within(10, lambda: [t["id"] for t in _page_tabs(url)] == [tab]):
@@ -558,7 +560,7 @@ def _draws_alone(url, ready, tries):
                            % [t.get("url") for t in _page_tabs(url)])
                 return False, did
             did.append("a tab never drew")
-            urllib.request.urlopen("%s/json/close/%s" % (url, tab), timeout=10).read()
+            open_local("%s/json/close/%s" % (url, tab), timeout=10).read()
             _within(10, lambda: all(t["id"] != tab for t in _page_tabs(url)))
         except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException) as e:
             did.append("the debugging address failed, %s" % e)
@@ -581,7 +583,9 @@ def open_tab(url, address, title, seconds=15) -> str:
     import html
     import urllib.request
 
-    made = json.loads(urllib.request.urlopen(urllib.request.Request(
+    from .browser import open_local
+
+    made = json.loads(open_local(urllib.request.Request(
         "%s/json/new?%s" % (url, address.replace("#", "%23")), method="PUT"),
         timeout=15).read().decode("utf-8"))
     if not _within(seconds, lambda: any(
@@ -593,9 +597,9 @@ def open_tab(url, address, title, seconds=15) -> str:
 
 def close_tab(url, tab_id, seconds=10) -> None:
     """Close one tab through the debugging address, and wait for it to go."""
-    import urllib.request
+    from .browser import open_local
 
-    urllib.request.urlopen("%s/json/close/%s" % (url, tab_id), timeout=10).read()
+    open_local("%s/json/close/%s" % (url, tab_id), timeout=10).read()
     _within(seconds, lambda: all(t.get("id") != tab_id for t in _page_tabs(url)))
 
 
