@@ -59,7 +59,7 @@ and message your care team. This tool does none of it. Concretely:
   is `claimType|claimId|docKind`: the claim type and kind must be ones this app
   knows and the claim number is validated to Anthem's alphanumeric shape, so the
   request is built from values this app recognizes rather than any stored string.
-- **The opaque per-document token never leaves the page.** Anthem authorises a
+- **The opaque per-document token never leaves the page.** Anthem authorizes a
   PDF fetch with a per-document `eobId` token minted into the page. It is read
   and spent inside the page in one expression and is **never stored**; the
   identity above is looked up fresh at download time.

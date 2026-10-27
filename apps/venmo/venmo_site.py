@@ -91,7 +91,7 @@ heard, never asked.
 
 SAFETY (an account that moves money):
   This module is strictly READ-ONLY. It presses exactly one kind of
-  control, the completed list's own pager labelled exactly "Show more"
+  control, the completed list's own pager labeled exactly "Show more"
   (is_show_more, through pressing.click, which stops the run if anything
   covers it), changes no input, and fills nothing. It must NEVER activate
   any control that pays,
@@ -197,7 +197,7 @@ TX_ROW = ":scope > a[class*='transactionItem']"
 # start rolling in, we'll list them here."
 EMPTY_MONTH_RE = re.compile(r"No transactions yet for this month")
 # The one control this app ever presses: the completed list's own pager,
-# labelled exactly "Show more", seen live 2026-10-13 under a busy month's
+# labeled exactly "Show more", seen live 2026-10-13 under a busy month's
 # first ten rows. Pressed only by show_all, before a month is printed, at
 # most SHOW_MORE_PRESSES times, and only when each press draws more rows.
 SHOW_MORE_LABEL_RE = re.compile(r"show more", re.I)

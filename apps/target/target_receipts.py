@@ -820,7 +820,7 @@ class App:
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
         # The number the purchase was listed under. extract_details takes a
-        # labelled number off the page in its place, so a wrong page would
+        # labeled number off the page in its place, so a wrong page would
         # otherwise be checked against its own number.
         listed = purchase.order_number
 

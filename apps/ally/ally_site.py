@@ -328,7 +328,7 @@ def is_safe_control(name: str) -> bool:
     # The shared core guard is consulted as well as this app's own blocklist.
     # A repo-wide review found each app had drifted its own way and every one
     # of them let settings controls through ("Save Changes", "Document
-    # Removal", "Turn off"). Centralising it means the next gap is fixed once
+    # Removal", "Turn off"). Centralizing it means the next gap is fixed once
     # rather than nineteen times.
     try:
         from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE

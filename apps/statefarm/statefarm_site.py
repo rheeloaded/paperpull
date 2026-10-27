@@ -1047,7 +1047,7 @@ def _visible_named(page, text: str, whole: bool = False) -> list:
 # Every name a screen reader may give the node, aria-label, the text of the
 # elements aria-labelledby points at, and title, each asked of the guard. The
 # node is found by any of them, so reading aria-label alone let a control
-# labelled elsewhere as one that pays through (#37).
+# labeled elsewhere as one that pays through (#37).
 _DOC_NAME_JS = r"""el => {
   const by = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
     .map(id => { const n = document.getElementById(id); return n ? (n.textContent || '') : ''; })

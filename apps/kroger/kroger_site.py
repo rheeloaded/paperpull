@@ -46,7 +46,7 @@ of 2026-09-23, which saved receipts that read properly. A record carries
 createdDateTime.value, handoffStoreId, total ("USD 21.48"), purchaseType,
 receiptKey, lineItems holding a upc and nothing else, and status
 ("COMPLETED"), and never the store's name. The receipt page reads, from the
-top, the order's labelled lines (Order Type, Order Date, Order Number,
+top, the order's labeled lines (Order Type, Order Date, Order Number,
 Loyalty Card), the store, its street and its town, then Rewards, Order
 Summary, Item Details with each item's name, price, a "3 x $2.33 each"
 line and its UPC, and Payment Details. The header is
@@ -557,7 +557,7 @@ _ITEM_LINE_RE = re.compile(
 
 
 # RECORDED (#41). The receipt page's header names the store the purchase was
-# made at, the banner and not Kroger, on the line after the order's labelled
+# made at, the banner and not Kroger, on the line after the order's labeled
 # lines and before its street and town. A tester's Metro Market receipt read
 # "Order Type: In Store", "Order Date", "Order Number", "Loyalty Card (last
 # 4)", then "Metro Market", then the address. The banners are the ones the
@@ -592,7 +592,7 @@ _HEADER_END_WORDS = ("rewards", "ordersummary", "itemdetails", "totalsavings",
 # What sits where a store's name could, and is not one. A purchase type, the
 # value of "Order Type:" when a page prints it on a line of its own.
 _NOT_A_STORE = {"instore", "pickup", "delivery", "shiptohome", "fuelcenter", "print"}
-# The order's own labelled lines in the header, "Order Date: ..." and the like.
+# The order's own labeled lines in the header, "Order Date: ..." and the like.
 _LABELLED_RE = re.compile(r"^[A-Za-z][A-Za-z ()0-9]{0,40}:", re.I)
 # What a store's name looks like, words and nothing a street or a town has.
 _NAME_LINE_RE = re.compile(r"^[A-Za-z][A-Za-z'\u2019&.\- ]{1,38}[A-Za-z.]$")
@@ -621,7 +621,7 @@ def banner_from_lines(lines) -> str:
     the header is read, since the items below it include Kroger's own brand,
     "Kroger White Corn Tortilla Chips", which is not where it was bought. A
     banner this app does not list is taken from where the store's name sits,
-    the first plain line after the order's labelled ones."""
+    the first plain line after the order's labeled ones."""
     head = []
     for ln in lines or []:
         ln = (ln or "").strip()

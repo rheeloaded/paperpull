@@ -19,7 +19,7 @@
   "//refuse2": "its row date got a yes from the wrong one, and eight dates",
   "//refuse3": "here carry a statement per account. The check compares rows",
   "//refuse4": "now, and the account name separates them. Measured over all",
-  "//refuse5": "64 statements: none refused, 303 of 372 neighbour swaps",
+  "//refuse5": "64 statements: none refused, 303 of 372 neighbor swaps",
   "//refuse6": "caught. A statement naming no account is left unchecked",
   "//refuse7": "rather than thrown away.",
   "refuse_wrong_documents": true

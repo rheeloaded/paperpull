@@ -712,7 +712,7 @@ _ROW_OF_JS = r"""(el, arg) => {
 
 # Every word a control shows or announces, its label, what its labelledby
 # names, its title, an image's alt, its visible text, and text a style puts
-# before or after it. Each has to pass the guard. A button labelled "View
+# before or after it. Each has to pass the guard. A button labeled "View
 # bill" that showed "Go paperless", and one announced as "Enroll in
 # paperless billing" that showed "View bill", were pressed (review of
 # 0.41.0).
@@ -755,7 +755,7 @@ _WORDS_OF_JS = r"""el => {
 }"""
 
 # Where a press would land, which has to be the control itself. A card
-# labelled "View bill for September 12, 2026" with a "Set up autopay"
+# labeled "View bill for September 12, 2026" with a "Set up autopay"
 # button at its center pressed the button (review of 0.41.0).
 _CENTER_JS = r"""el => {
   const r = el.getBoundingClientRect();

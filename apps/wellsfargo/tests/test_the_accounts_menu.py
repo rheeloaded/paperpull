@@ -494,7 +494,7 @@ WHOLE_BY_NAME = {
     "and for a screen reader, the ampersand hidden from one": _link(
         'View Statements <span aria-hidden="true">&amp;</span><span style="%s">and</span> '
         'Documents' % SR_ONLY),
-    "labelled by its own part, with a note for a screen reader": _link(
+    "labeled by its own part, with a note for a screen reader": _link(
         '<span id="own-name">%s</span><span style="%s"> opens the page</span>' % (NAME, SR_ONLY),
         ' aria-labelledby="own-name"'),
 }

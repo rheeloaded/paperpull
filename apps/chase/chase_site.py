@@ -37,7 +37,7 @@ WHAT THE LIVE PROBE ESTABLISHED (2026-08-18):
   * History comes from the page's "View:" year picker (2019..2026 here). It is
     NOT a <select> but a styled <input id*="filterstyledselect">, which is why
     a select-based lookup finds nothing. Driving it is what makes Chase send
-    CURRENT_YEAR_MINUS_n; this app never synthesises a filter value the UI
+    CURRENT_YEAR_MINUS_n; this app never synthesizes a filter value the UI
     would not have sent.
   * Documents are attributed from the ROW, not from the API reply. Every row
     names itself in full - "Aug 09, 2026 Statement SAPPHIRE RESERVE (...1234)
@@ -307,7 +307,7 @@ def is_safe_control(name: str) -> bool:
     # The shared core guard is consulted as well as this app's own blocklist.
     # A repo-wide review found each app had drifted its own way and every one
     # of them let settings controls through ("Save Changes", "Document
-    # Removal", "Turn off"). Centralising it means the next gap is fixed once
+    # Removal", "Turn off"). Centralizing it means the next gap is fixed once
     # rather than nineteen times.
     try:
         from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -1156,7 +1156,7 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
 # The year comes from the page's "View:" picker. Selecting a year makes the
 # SPA send idalDateFilterType=CURRENT_YEAR / CURRENT_YEAR_MINUS_1 / ... We
 # drive the picker and let Chase compose that value; this app never
-# synthesises a filter the UI would not have sent.
+# synthesizes a filter the UI would not have sent.
 # ===========================================================================
 # "FREEDOM (...5678)" - a card accordion header
 CARD_RE = re.compile(r"\(\s*\.{2,}\s*\d{4}\s*\)")

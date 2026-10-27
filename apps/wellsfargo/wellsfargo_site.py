@@ -631,7 +631,7 @@ def _reads_as_documents_link(words: Optional[dict]) -> bool:
     Account is refused. A control with a label takes its label, which has
     to be the link's whole name, as it always did, and one without takes
     its text when that is the whole name. Otherwise its name read the ways
-    a screen reader makes it, said or labelled by its own parts, has to be
+    a screen reader makes it, said or labeled by its own parts, has to be
     the whole name, and what it shows has to name statements and documents,
     so a mark hidden from a screen reader or a word put there for one alone
     does not refuse the link, while a control that shows View Check Copies

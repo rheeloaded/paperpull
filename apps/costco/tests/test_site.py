@@ -345,7 +345,7 @@ def test_the_waiting_room_and_the_bot_check_are_both_called_out_by_name():
 
 def test_a_receipt_is_on_screen_when_a_dialog_is_up():
     """SEEN. A warehouse receipt opens in a dialog on the same page and
-    never navigates, so there is no address to recognise it by."""
+    never navigates, so there is no address to recognize it by."""
     assert site.on_receipt_page(_Page("Total $49.83"))
     assert not site.on_receipt_page(_Page("Orders", has_dialog=False))
 

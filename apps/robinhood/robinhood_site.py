@@ -263,7 +263,7 @@ def is_safe_control(name: str) -> bool:
     # The shared core guard is consulted as well as this app's own blocklist.
     # A repo-wide review found each app had drifted its own way and every one
     # of them let settings controls through ("Save Changes", "Document
-    # Removal", "Turn off"). Centralising it means the next gap is fixed once
+    # Removal", "Turn off"). Centralizing it means the next gap is fixed once
     # rather than nineteen times.
     try:
         from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -1473,7 +1473,7 @@ def rendered_names_statement(path, title: str) -> bool:
 
 def keep_fetched(page, data: bytes, title: str, out_path, label: str = "", render=None, check=None):
     """Keep what the pre-signed link answered: a PDF as it is, or, behind a
-    control labelled "Download HTML", the HTML statement rendered to one.
+    control labeled "Download HTML", the HTML statement rendered to one.
     Anything else is refused and nothing is left behind. Answers True for a
     PDF, RENDERED for a rendered statement, False when nothing was kept.
     `render` and `check` stand in for the core's print path and the text

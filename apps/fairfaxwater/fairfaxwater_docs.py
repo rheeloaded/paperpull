@@ -552,7 +552,7 @@ class App:
             # history and finds this bill's View control. Catching what
             # the click opens on docsight.net, the portal's third-party
             # document host, is the interceptor's, with this app's own
-            # allowlist travelling with the request.
+            # allowlist traveling with the request.
             request = site.bill_request(page, doc.title, doc.date,
                                         item_hint=doc.item_id,
                                         client_hint=doc.client_id,

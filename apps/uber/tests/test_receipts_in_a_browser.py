@@ -477,10 +477,10 @@ def test_an_older_eats_receipt_is_filed_by_its_own_date_and_total(browser, tmp_p
         "/_p/api/getReceiptByWorkflowUuidV1": eats_receipt("<p>Thanks for ordering</p>", stamp),
         download: lambda request: pdf_answer(served["pdf"])})
     app = _app(tmp_path, fake.context, eats=page)
-    neighbour = Purchase(purchase_type="Uber Eats", purchase_date="2025-10-31",
+    neighbor = Purchase(purchase_type="Uber Eats", purchase_date="2025-10-31",
                          order_number=ORDER_B, total="$18.40",
                          items=[Item(name="Dan Dan Noodles")])
-    app.discovery.update(neighbour.key, neighbour.to_dict(), save=False)
+    app.discovery.update(neighbor.key, neighbor.to_dict(), save=False)
     purchase = Purchase(purchase_type="Uber Eats", purchase_date="2025-10-30",
                         order_number=ORDER_C, total="$22.91")
     app.discovery.update(purchase.key, purchase.to_dict(), save=False)

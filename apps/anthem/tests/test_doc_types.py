@@ -1,6 +1,6 @@
 """Anthem BCBS document classification + the READ-ONLY safety guard.
 
-Classification cases reflect the titles this app synthesises from the EOB API
+Classification cases reflect the titles this app synthesizes from the EOB API
 (claim type + "Explanation of Benefits"). The SAFETY cases are not provisional:
 the Anthem member portal can change a PCP, enroll in paperless, appeal a claim,
 refill a prescription and message care teams, so the guard is the reason this
