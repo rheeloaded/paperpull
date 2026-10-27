@@ -140,10 +140,11 @@ password manager.
   A kernel built without user namespaces, as some NAS kernels are, leaves
   Chrome's namespace sandbox unable to start, and the browser is refused
   rather than run without one. Its setuid sandbox is offered there
-  instead, as an opt-in, two commented `cap_add: SYS_ADMIN` lines in the
-  compose files, see "On Synology" in [SERVER.md](SERVER.md). With
-  them, Chrome's setuid helper in the browser volume is made setuid root at
-  each start, and without them the bit is taken off every copy. The bit is
+  instead, as an opt-in, see "On Synology" in [SERVER.md](SERVER.md). It
+  takes two changes in the compose file, the `#` taken off a `SYS_ADMIN`
+  line under `cap_add` and put in front of `no-new-privileges`. With both,
+  Chrome's setuid helper in the browser volume is made setuid root at each
+  start, and without them the bit is taken off every copy. The bit is
   set only where root alone could have put the helper, a plain file of
   root's with one name, in folders of root's that nobody else may write to
   and that are not links, from the volume's top folder down. The volume
@@ -163,14 +164,53 @@ password manager.
   further. The helper is itself a program that runs as root, so a flaw in
   it would be one way to that root. Either first takes running code inside
   the container, past Chrome's sandbox or the panel's password. Do not pair
-  it with `privileged`, which grants far more than the sandbox needs, nor with
-  `no-new-privileges`, which would turn the setuid bit off. On a kernel
+  it with `privileged`, which grants far more than the sandbox needs. It
+  needs `no-new-privileges` taken out, since that turns the setuid bit off,
+  and where it is left in, no helper is set up and the container's log
+  says why. On a kernel
   built without seccomp, as Synology's 4.4 kernels are, the helper is never
   set up, since Chrome would have only half its sandbox there. Nor is
   Chrome started on such a kernel at all, even one with user namespaces
   and the container's profile removed by hand, where it would otherwise run
   with its namespaces and no filter on its system calls. The panel stays up
   and says why.
+- **Nothing more than it needs.** Both compose files start the container
+  with `no-new-privileges`, so no program started inside it gains a
+  privilege from a setuid bit or a file capability. The image holds the same
+  for everything it starts as its user, so a compose file from an older
+  release has that part too, unless Chrome's setuid sandbox is on. And the
+  image has no setuid or setgid program at all, since the nine setuid and
+  three setgid programs its packages bring, `su`, `mount` and `passwd` among
+  them, have their bits taken off when it is built. Of the fourteen
+  capabilities Docker gives a container, it keeps the seven its start needs
+  while it runs as root, before it hands everything to that user. `CHOWN`,
+  `DAC_OVERRIDE` and `FOWNER` give the user its folders, `SETUID` and
+  `SETGID` become it, `KILL` passes a stop on to the panel, and `SYS_CHROOT`
+  is what lets Docker's security profile allow the chroot Chrome's sandbox
+  makes. After the start only the container's small init process, which
+  passes a stop on, a `docker exec` you run yourself as root and, with the
+  setuid sandbox on, Chrome's helper while it builds a sandbox hold them.
+  Everything else runs as that user with none, and `NET_RAW`, `MKNOD`,
+  `SETFCAP`, `SETPCAP`, `FSETID`, `AUDIT_WRITE` and `NET_BIND_SERVICE` are
+  gone. The root file system is read-only, so nothing in the container can
+  change the image's programs. `/tmp`, `/run` and `/home/pp`, where the
+  virtual screen, Chrome's own files and downloads on their way to the data
+  folder go, are kept in memory and start empty each time, so something
+  planted there, such as a certificate authority added to Chrome's list in
+  `/home/pp`, is gone at the next start rather than kept until the container
+  is made anew. Only the volumes and folders mounted into it keep anything
+  from one start to the next. The user and group files are written into
+  `/run` at each start for that reason. Docker itself reads the image's
+  own copies, which have root and the image's groups, so a compose file
+  may still name them in `user` or `group_add`, but no `pp`, so Docker's
+  own `docker exec -u pp` finds none, which the self-test and the password
+  reset do not need, since they become `pp` inside the container
+  themselves. At the start, a
+  file in `/home/pp` or the volumes that has a second name keeps its owner,
+  so a name given there to a file of root's cannot make it `pp`'s. Limits on
+  processes and memory, `pids_limit` and `mem_limit`, are in the compose
+  files as commented examples. With three sign-in windows open it used about
+  680 processes and threads and 1.2 GB.
 - **Only the panel is on the network.** Each provider's browser debugging
   port and the screen sharing server listen inside the container only. The
   sign-in window reaches you through the panel, behind the password, on the

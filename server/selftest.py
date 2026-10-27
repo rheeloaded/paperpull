@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -323,14 +324,24 @@ def network_checks() -> None:
         check("network", False, "%s: %s" % (type(e).__name__, e))
 
 
+HELPER = "/browser/current/opt/google/chrome/chrome-sandbox"
+
+
 def as_pp() -> None:
     """Chrome refuses to run as root with its sandbox on, and `docker exec`
     starts as root, so the test hands itself to pp, as everything else in
-    the container runs."""
+    the container runs, and with no-new-privileges as the entrypoint gives
+    it, unless Chrome's setuid helper is in use, which works only through
+    its setuid bit."""
     if os.geteuid() == 0:
-        os.execvp("setpriv", ["setpriv", "--reuid=pp", "--regid=pp", "--init-groups",
-                              "env", "HOME=/home/pp", "USER=pp", sys.executable,
-                              os.path.abspath(__file__)])
+        try:
+            st = os.stat(HELPER)
+            setuid_helper = st.st_uid == 0 and bool(st.st_mode & stat.S_ISUID)
+        except OSError:
+            setuid_helper = False
+        os.execvp("setpriv", ["setpriv", "--reuid=pp", "--regid=pp", "--init-groups"]
+                  + ([] if setuid_helper else ["--no-new-privs"])
+                  + ["env", "HOME=/home/pp", "USER=pp", sys.executable, os.path.abspath(__file__)])
 
 
 def graphics_check() -> None:

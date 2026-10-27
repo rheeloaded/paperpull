@@ -113,16 +113,55 @@ UNKNOWN = Sandbox("unknown", "unknown", "unknown")
 HELPER = "/browser/current/opt/google/chrome/chrome-sandbox"
 
 
+PR_GET_NO_NEW_PRIVS = 39
+
+
+def _asked_no_new_privs():
+    """1 or 0, prctl(PR_GET_NO_NEW_PRIVS) for this process, or None where it
+    cannot be asked."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        zero = ctypes.c_ulong(0)
+        answer = libc.prctl(ctypes.c_int(PR_GET_NO_NEW_PRIVS), zero, zero, zero, zero)
+    except Exception:
+        return None
+    return answer if answer in (0, 1) else None
+
+
+def no_new_privs(status: str = "") -> bool:
+    """Whether no-new-privileges holds for this process and so for what it
+    starts, which has the kernel ignore every setuid bit. Asked of the
+    kernel with prctl, which Linux has had since 3.5. The NoNewPrivs line of
+    /proc/self/status (status, or read here), which came only in 4.10,
+    later than some of the kernels the setuid helper is for, answers only
+    where prctl cannot be asked."""
+    asked = _asked_no_new_privs()
+    if asked is not None:
+        return asked == 1
+    for line in str(status or _status()).splitlines():
+        name, sep, value = line.partition(":")
+        if sep and name.strip() == "NoNewPrivs":
+            return value.strip() not in ("", "0")
+    return False
+
+
 def suid_helper(status: str, path: str = HELPER) -> str:
     """Whether the setuid helper is ready, "yes" or "no". It needs its bit,
     root as its owner, a file system that does not ignore the bit, and
     CAP_SYS_ADMIN, bit 21 of CapBnd in status, to make the sandbox's
-    namespaces."""
+    namespaces. no-new-privileges has the kernel ignore the bit, so the
+    helper never runs as root under it (measured with Chrome 155, whose
+    sandbox then does not start)."""
     caps = ""
     for line in str(status or "").splitlines():
         name, sep, value = line.partition(":")
         if sep and name.strip() == "CapBnd":
             caps = value.strip()
+    if no_new_privs(status):
+        return "no"
     try:
         admin = bool((int(caps, 16) >> 21) & 1)
         st = os.stat(path)

@@ -51,17 +51,52 @@ services:
     # Chrome's own sandbox needs the container to allow user namespaces,
     # which Docker's default security profile forbids. This profile is
     # Docker's default with that one thing allowed, see seccomp-chrome.json.
+    # And no program started in the container gains a privilege from a
+    # setuid bit, see "What runs inside the container" in SECURITY-SERVER.md.
     security_opt:
       - seccomp=./seccomp-chrome.json
-    # On a NAS whose kernel has seccomp but no user namespaces, Chrome's usual
-    # sandbox cannot start and the sign-in window is refused, as it should
-    # be. Remove the # from the next two lines and Chrome uses its setuid
-    # sandbox instead, which builds the same sandbox without user namespaces.
-    # The sandbox stays on either way. This is not --no-sandbox, and not
-    # privileged. "On Synology" in SERVER.md says how to tell, and
-    # which kernels cannot run PaperPull Server at all.
-    #cap_add:
-    #  - SYS_ADMIN
+      - no-new-privileges:true
+    # Of the powers Docker gives a container, it keeps the seven its start
+    # needs, as root, before it hands everything to the user your documents
+    # belong to. Five hand that user its folders and become it, KILL passes a
+    # stop on to the panel, and SYS_CHROOT is what lets the security profile
+    # allow the chroot Chrome's sandbox makes. After the start only the
+    # container's small init process, which passes a stop on, keeps them.
+    # Everything else runs as that user, with none of them.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+      - KILL
+      - SYS_CHROOT
+      # On a NAS whose kernel has seccomp but no user namespaces, Chrome's
+      # usual sandbox cannot start and the sign-in window is refused, as it
+      # should be. Remove the # from the next line, and put a # in front of
+      # no-new-privileges above, and Chrome uses its setuid sandbox instead,
+      # which builds the same sandbox without user namespaces. The sandbox
+      # stays on either way. This is not --no-sandbox, and not privileged.
+      # "On Synology" in SERVER.md says how to tell, and which kernels
+      # cannot run PaperPull Server at all.
+      #- SYS_ADMIN
+    # The image's own files cannot be changed. What the container writes
+    # outside its volumes, the virtual screen, downloads on their way to
+    # /data and the like, is kept in memory and starts afresh each time.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /home/pp
+    # To cap what it may use, remove the # from these two lines. With three
+    # sign-in windows open it used about 680 processes and threads and
+    # 1.2 GB, so these should leave room for about six. Past either limit
+    # Linux refuses a new process or ends one, which may be a sign-in window
+    # or the panel itself, so leave room.
+    #pids_limit: 2048
+    #mem_limit: 4g
     # No ports. Only Caddy reaches the panel, on this project's own network.
     environment:
       TZ: America/New_York

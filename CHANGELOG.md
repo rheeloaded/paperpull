@@ -7,6 +7,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Security
+- **PaperPull Server's container runs with only what it needs.** Both
+  compose files now start it with `no-new-privileges`, so no program in it
+  gains a privilege from a setuid bit. They keep seven of the fourteen
+  capabilities Docker gives a container, the ones its start needs before
+  everything runs as your NAS user, one to pass a stop on and one Chrome's
+  sandbox needs. And they make its root file system read-only, with
+  `/tmp`, `/run` and `/home/pp` kept in memory and emptied at each start.
+  The image has no setuid or setgid program left, and gives what it starts
+  `no-new-privileges` under an older compose file too, unless Chrome's
+  setuid sandbox is on. It writes its user and group files into `/run` at
+  each start, so `PUID` and `PGID` still work with the image's files
+  read-only, and a compose file may still name a group in `group_add` or
+  `root` in `user`. A `PUID` of 0, or one Linux takes as -1, now stops the
+  start rather than leave the panel running as root, and the start no
+  longer gives `pp` a file with a second name, which `pp` could have given
+  to a file of root's under an older compose file. Commented `pids_limit`
+  and `mem_limit` lines show how to cap what it may use. Chrome's setuid
+  sandbox, for kernels without user namespaces, now takes two changes, the
+  `#` taken off `SYS_ADMIN` and put in front of `no-new-privileges`, and
+  where the second is missed the container's log says why no helper was
+  set up. The new image works with the compose file you have. To take the
+  new settings, copy them into it as a set, and if you turned on the
+  setuid sandbox before, move its `SYS_ADMIN` into the new `cap_add` list,
+  see "Updating" in SERVER.md.
+
 ## [0.59.0] - 2026-10-26
 
 Bank of America downloads checking, savings and credit card statements,

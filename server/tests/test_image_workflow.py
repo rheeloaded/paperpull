@@ -219,15 +219,26 @@ def test_taking_the_smoke_run_down_can_only_reach_its_own_project(tmp_path, monk
 
 
 def test_the_smoke_run_turns_on_the_setuid_sandbox_as_a_person_does():
-    """Only the # comes off the two cap_add lines SERVER.md names, nothing
-    else in the file changes, and a file without them is not run at all."""
+    """Only the # comes off the SYS_ADMIN line SERVER.md names and goes in
+    front of the panel's no-new-privileges line, never Caddy's, nothing else
+    in the file changes, and a file without them is not run at all. Left
+    with no-new-privileges, as a person might, only the SYS_ADMIN line
+    changes."""
     for name in ("compose.yaml", "compose.https.yaml"):
         text = (SERVER / name).read_text(encoding="utf-8")
         before, after = text.splitlines(), smoke.with_setuid_sandbox(text).splitlines()
         assert len(before) == len(after), name
         assert [(a, b) for a, b in zip(before, after) if a != b] == [
-            ("    #cap_add:", "    cap_add:"), ("    #  - SYS_ADMIN", "      - SYS_ADMIN")], name
+            ("      - no-new-privileges:true", "      #- no-new-privileges:true"),
+            ("      #- SYS_ADMIN", "      - SYS_ADMIN")], name
+        missed = smoke.with_setuid_sandbox(text, keep_no_new_privileges=True).splitlines()
+        assert [(a, b) for a, b in zip(before, missed) if a != b] == [
+            ("      #- SYS_ADMIN", "      - SYS_ADMIN")], name
         # A Windows checkout's line endings come through as they were.
         crlf = text.replace("\n", "\r\n")
         assert smoke.with_setuid_sandbox(crlf).count("\r\n") == crlf.count("\r\n"), name
+    # Caddy keeps its own no-new-privileges.
+    https = smoke.with_setuid_sandbox((SERVER / "compose.https.yaml").read_text(encoding="utf-8"))
+    proxy = https[https.index("\n  proxy:"):]
+    assert "      - no-new-privileges:true" in proxy.splitlines()
     assert smoke.with_setuid_sandbox("services:\n  paperpull:\n") == ""

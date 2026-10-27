@@ -106,10 +106,11 @@ def test_compose_uses_it_and_never_switches_the_filter_off():
     assert "seccomp=./seccomp-chrome.json" in text
     assert "unconfined" not in text
     # The Synology setuid-sandbox fallback is offered as a commented-out
-    # opt-in (cap_add: SYS_ADMIN, see the test below), so those words appear
-    # in a comment. Nothing the file acts on by default weakens the sandbox.
+    # opt-in (SYS_ADMIN in cap_add, see the test below), so that word
+    # appears in a comment. Nothing the file acts on by default weakens the
+    # sandbox.
     on = active(text)
-    assert "SYS_ADMIN" not in on and "privileged" not in on and "cap_add" not in on
+    assert "SYS_ADMIN" not in on and "privileged" not in on
 
 
 def test_the_synology_fallback_is_offered_but_off_by_default():
@@ -117,13 +118,24 @@ def test_the_synology_fallback_is_offered_but_off_by_default():
     namespace sandbox, so both compose files offer Chrome's setuid sandbox to
     turn on, commented out until then. It keeps the sandbox on, adding a
     capability rather than taking the filter away, and removing the # leaves
-    valid YAML, the trap the graphics block met once."""
+    valid YAML, the trap the graphics block met once. It also needs
+    no-new-privileges off, which a # in front of its line does, leaving
+    valid YAML too."""
     for name in ("compose.yaml", "compose.https.yaml"):
         lines = (SERVER / name).read_text(encoding="utf-8").splitlines()
-        for commented, uncommented in (("    #cap_add:", "    cap_add:"),
-                                        ("    #  - SYS_ADMIN", "      - SYS_ADMIN")):
-            assert commented in lines, (name, commented)
-            assert commented.replace("#", "", 1) == uncommented
+        assert lines.count("      #- SYS_ADMIN") == 1, name
+        assert "      #- SYS_ADMIN".replace("#", "", 1) == "      - SYS_ADMIN"
+        at = lines.index("      #- SYS_ADMIN")
+        # In the paperpull service's cap_add, under the seven it keeps, with
+        # only its own comment between.
+        kept = lines.index("    cap_add:")
+        assert lines[kept + 1:kept + 8] == [
+            "      - %s" % cap for cap in ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID",
+                                          "KILL", "SYS_CHROOT")], name
+        assert all(line.startswith("      # ") for line in lines[kept + 8:at]), name
+        nnp = lines.index("      - no-new-privileges:true")
+        assert lines[nnp - 2:nnp] == ["    security_opt:", "      - seccomp=./seccomp-chrome.json"]
+        assert nnp < at
 
 
 def test_the_setuid_helper_follows_the_capability():
@@ -138,7 +150,7 @@ def test_the_setuid_helper_follows_the_capability():
     # Only beside the seccomp-bpf filter, asked of the server's one host
     # check, so Chrome never gets half its sandbox through the helper.
     gate = script.index("check().seccomp_bpf == 'yes'")
-    assert gate < script.index("if kernel_has_seccomp; then") < script.index("SETUID_SANDBOX=1")
+    assert gate < script.index("if ! kernel_has_seccomp; then") < script.index("SETUID_SANDBOX=1")
     helpers = script[script.index("sandbox_helpers() {"):]
     assert helpers.index('chmod u-s,g-s "$helper"') < helpers.index('may_be_setuid "$1"')
     assert helpers.index('may_be_setuid "$1"') < helpers.index("chmod 4755")
