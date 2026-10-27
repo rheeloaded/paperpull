@@ -86,6 +86,9 @@ class FakeWalmart:
 
     def reset(self):
         self.orders = DECIDING
+        # The order list at an address with this query, a filtered list or
+        # a later page, in place of the one /orders shows.
+        self.by_query = {}
         self.decided = threading.Event()
         self.seen = []
 
@@ -99,10 +102,10 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
-        path = urlsplit(self.path).path
+        path, query = urlsplit(self.path).path, urlsplit(self.path).query
         SITE.seen.append(path)
         if path == "/orders":
-            body, kind = SITE.orders, "text/html; charset=utf-8"
+            body, kind = SITE.by_query.get(query, SITE.orders), "text/html; charset=utf-8"
         elif path == "/blocked":
             body, kind = BLOCKED, "text/html; charset=utf-8"
         elif path == "/":
@@ -248,6 +251,7 @@ def fake_walmart(server, monkeypatch):
     monkeypatch.setattr(site, "ORDERS_WAIT_MS", 800)
     monkeypatch.setattr(site, "SETTLE_MS", 0)
     monkeypatch.setattr(site, "CHALLENGE_WAIT_MS", 1500)
+    monkeypatch.setattr(site, "CARDS_WAIT_MS", 800, raising=False)
     return SITE
 
 
@@ -454,3 +458,189 @@ def test_a_challenge_word_on_a_listed_page_is_asked_about_once_as_before(attache
 
     assert len(asked) == 2, asked
     assert sorted(known(tmp_path)) == ["In-Store:" + STORE_ORDER, "Online:" + ONLINE_ORDER]
+
+
+# -- a list that ends where it never came ------------------------------------------
+#
+# The unfiltered list came, and the run went on to the filtered one, Online
+# or In-store, and through its pages. When one of those turned into the bot
+# check, the run read no cards there, took that as the end of the list,
+# noted the list as read whole and finished clean. Resume then carried on
+# from what it knew without reading the list again.
+
+def noted_whole(tmp_path):
+    """What the last listing noted, True for a list read to its end."""
+    path = tmp_path / "out" / "last-listing.json"
+    return json.loads(path.read_text(encoding="utf-8"))["complete"]
+
+
+LISTED_WITH_A_NEXT_PAGE = LISTED.replace(
+    "</body>", '<nav><a href="/orders?filterIds=online&amp;page=2" aria-label="Next page">'
+               "Next</a></nav></body>")
+
+
+def test_an_in_store_list_that_turns_into_the_check_stops_the_run(attached, tmp_path, capsys):
+    SITE.orders = LISTED
+    SITE.by_query["filterIds=in-store"] = BLOCKED
+    out = stopped_run(tmp_path, attached, capsys, "--discover")
+
+    assert "Security challenge detected: 'robot or human'" in out, out
+    assert noted_whole(tmp_path) is False
+    assert sorted(known(tmp_path)) == ["Online:" + ONLINE_ORDER], \
+        "the online list read before the check is kept"
+
+
+def test_a_later_page_that_turns_into_the_check_stops_the_run(attached, tmp_path, capsys):
+    SITE.orders = LISTED_WITH_A_NEXT_PAGE
+    SITE.by_query["filterIds=online&page=2"] = BLOCKED
+    out = stopped_run(tmp_path, attached, capsys, "--discover")
+
+    assert "Security challenge detected: 'robot or human'" in out, out
+    assert noted_whole(tmp_path) is False
+    assert sorted(known(tmp_path)) == ["Online:" + ONLINE_ORDER], \
+        "the first page, read before the check, is kept"
+
+
+# The order list's own heading and nothing under it, no card, no check.
+NOTHING_DRAWN = """<!doctype html><html><head><title>Purchase History</title></head><body>
+<h1>Purchase history</h1>
+</body></html>"""
+
+
+def test_an_in_store_list_that_never_draws_is_not_read_whole(attached, tmp_path, capsys):
+    """The order list showed a store purchase, so the In-store list has one
+    to show, and a page with none on it is a list that never came."""
+    SITE.orders = LISTED
+    SITE.by_query["filterIds=in-store"] = NOTHING_DRAWN
+    cfg = config_for(tmp_path, attached)
+    try:
+        app_mod.main(["--discover", "--config", str(cfg)])
+    except SystemExit:
+        pass
+
+    assert noted_whole(tmp_path) is False, printed(capsys)
+    assert sorted(known(tmp_path)) == ["Online:" + ONLINE_ORDER]
+
+
+def test_a_later_page_that_never_draws_is_not_read_whole(attached, tmp_path, capsys):
+    """The page before it had a Next control, so there was a page to read."""
+    SITE.orders = LISTED_WITH_A_NEXT_PAGE
+    SITE.by_query["filterIds=online&page=2"] = NOTHING_DRAWN
+    cfg = config_for(tmp_path, attached)
+    try:
+        app_mod.main(["--discover", "--config", str(cfg)])
+    except SystemExit:
+        pass
+    out = printed(capsys)
+
+    assert noted_whole(tmp_path) is False, out
+    assert "Online:" + ONLINE_ORDER in known(tmp_path), "the first page is kept"
+    assert "it was not read whole" in out, out
+    [failure] = list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    report = json.loads(failure.read_text(encoding="utf-8"))
+    assert (report["step"], report["reason"]) == ("read the order list",
+                                                  "some of the list never came")
+
+
+# The order list with no store purchase on it.
+LISTED_ONLINE_ONLY = LISTED.replace(
+    LISTED[LISTED.index('<div data-testid="order-0">'):LISTED.index('<div data-testid="order-1">')],
+    "")
+
+
+def test_an_in_store_list_with_none_when_the_order_list_shows_none_is_whole(attached, tmp_path,
+                                                                           capsys):
+    """Somebody who only shops online. Their In-store list may draw nothing
+    at all, and that is no part of the list missing."""
+    SITE.orders = LISTED_ONLINE_ONLY
+    SITE.by_query["filterIds=in-store"] = NOTHING_DRAWN
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert sorted(known(tmp_path)) == ["Online:" + ONLINE_ORDER]
+    assert noted_whole(tmp_path) is True, printed(capsys)
+
+
+# An online order picked up at a store, whose card has words a store
+# purchase has too, and no other purchase.
+PICKED_UP_ONLY = LISTED_ONLINE_ONLY.replace("<p>Delivered</p>", "<p>Picked up in store</p>")
+
+
+def test_a_card_that_may_be_either_kind_is_not_taken_for_a_store_purchase(attached, tmp_path,
+                                                                         capsys):
+    """The order list shows no card that is plainly a store purchase, so an
+    In-store list that draws nothing is no part of the list missing."""
+    SITE.orders = PICKED_UP_ONLY
+    SITE.by_query["filterIds=in-store"] = NOTHING_DRAWN
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert noted_whole(tmp_path) is True, printed(capsys)
+
+
+def test_a_pilot_of_a_list_cut_short_stops_at_its_end(attached, tmp_path, capsys, monkeypatch):
+    """It takes what the list read, and stops at its end rather than
+    finish. A Resume after it reads the list again, and stops too."""
+    SITE.orders = LISTED
+    SITE.by_query["filterIds=in-store"] = NOTHING_DRAWN
+    taken = []
+
+    def process(self, purchases, dry_run=False, **kw):
+        taken.extend(purchases)
+        return purchases
+    monkeypatch.setattr(app_mod.App, "process_purchases", process)
+    out = stopped_run(tmp_path, attached, capsys, "--pilot")
+
+    assert [p.key for p in taken] == ["Online:" + ONLINE_ORDER], out
+    assert "Not all of Walmart's order list was read, so this run stops here" in out, out
+    assert noted_whole(tmp_path) is False, out
+
+    out = stopped_run(tmp_path, attached, capsys, "--resume")
+    assert "Not all of Walmart's order list was read" in out, out
+    assert noted_whole(tmp_path) is False
+
+
+def test_with_somebody_there_a_filtered_list_that_turns_into_the_check_is_opened_again(
+        attached, tmp_path, capsys, monkeypatch):
+    """At a console the person deals with the check, and the In-store list
+    is opened again after it rather than read as one with nothing in it."""
+    SITE.orders = LISTED
+    SITE.by_query["filterIds=in-store"] = BLOCKED
+
+    def dealt_with_it():
+        SITE.by_query["filterIds=in-store"] = LISTED
+    asked = answering(monkeypatch, then=dealt_with_it)
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert len(asked) == 1 and "looks normal again" in asked[0], asked
+    assert sorted(known(tmp_path)) == ["In-Store:" + STORE_ORDER, "Online:" + ONLINE_ORDER]
+    assert noted_whole(tmp_path) is True
+
+
+ANOTHER_ONLINE_ORDER = "10000000000000000003"
+SECOND_PAGE = """<!doctype html><html><head><title>Purchase History</title></head><body>
+<h1>Purchase history</h1>
+<div data-testid="order-0">
+  <p>Delivered</p><p>May 21, 2026</p><p>$16.45</p>
+  <a href="#" data-automation-id="view-order-details-link-%s">View details</a>
+</div>
+</body></html>""" % ANOTHER_ONLINE_ORDER
+
+
+def test_with_somebody_there_a_later_page_that_turns_into_the_check_is_read_again(
+        attached, tmp_path, capsys, monkeypatch):
+    """At a console the person deals with the check, and the list is read
+    again from its first page rather than ended where the check was."""
+    SITE.orders = LISTED_WITH_A_NEXT_PAGE
+    SITE.by_query["filterIds=online&page=2"] = BLOCKED
+
+    def dealt_with_it():
+        SITE.by_query["filterIds=online&page=2"] = SECOND_PAGE
+    asked = answering(monkeypatch, then=dealt_with_it)
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert len(asked) == 1 and "looks normal again" in asked[0], asked
+    assert "Online:" + ANOTHER_ONLINE_ORDER in known(tmp_path), printed(capsys)
+    assert noted_whole(tmp_path) is True

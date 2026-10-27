@@ -108,6 +108,10 @@ def ask(prompt: str) -> str:
 class App:
     _journal = None
     _requests = None
+    # Set when discovery met a filtered list or a later page of it that
+    # never came, so the run goes on with what it read and stops at its end
+    # rather than finish (_stop_if_cut_short).
+    _list_cut_short = False
     # What became of Walmart's own invoice at this purchase's last print
     # (site.InvoiceBlock), None before the first.
     _block = None
@@ -361,6 +365,22 @@ class App:
                 raise SystemExit(0)
         self.check_session(page)
 
+    def _open_filtered_list(self, page, ptype: str) -> bool:
+        """Open the order list filtered to one kind of purchase. True once
+        it is there.
+
+        False is a filtered list that did not come, which the caller weighs
+        against what the order list showed. A check that held it blank and
+        showed itself a moment later is asked about, or under the panel the
+        run stops there, and the list is opened again once it is dealt with.
+        It used to be read as a list with nothing in it."""
+        listed = site.select_history_tab(page, ptype)
+        while not listed and (site.challenge_after_a_moment(page)
+                              or site.looks_signed_out(page)):
+            self.check_session(page)
+            listed = site.select_history_tab(page, ptype)
+        return listed or site.orders_listed(page)
+
     def cmd_login(self):
         if self.config.get("cdp_url"):
             # CDP mode: the browser is launched by login.bat (not here). This
@@ -412,53 +432,74 @@ class App:
             print("asks there yourself, then run --login again.")
         self.close()
 
-    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
-        """Discovery pass over one or both history sections. Saves discovery.json."""
+    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False,
+                     finish: bool = True) -> dict:
+        """Discovery pass over one or both history sections. Saves discovery.json.
+
+        A list read only in part (a filtered list or a later page of it that
+        never came) keeps the purchases it found, and Pilot, Run All and
+        Resume go on with them, but the run stops at its end rather than
+        finish. With finish=False the caller does that once it has used
+        them."""
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, so Resume reads the list again (paperpull_core.listing).
         listing.started(self)
         types = types or [ONLINE, IN_STORE]
         page = self.page()
         counts = {}
+        passed_over = []
         for ptype in types:
             self._open_orders(page)
-            found_tab = site.select_history_tab(page, ptype)
-            if ptype == IN_STORE and not found_tab:
-                log.warning("In-store tab not found; recording zero in-store purchases "
-                            "(run --diagnose to inspect the page).")
+            # The order list shows both kinds together, so a kind it shows
+            # has a purchase for the filtered list to show.
+            shown = ptype in site.kinds_shown(page)
+            if not self._open_filtered_list(page, ptype):
+                if shown:
+                    # A filtered list with none of what the order list just
+                    # showed never came.
+                    self._passed_over(passed_over, "%s list" % ptype)
+                else:
+                    # May be a kind this account has none of, read as none
+                    # as it always was.
+                    log.info("%s: the filtered list shows none", ptype)
                 counts[ptype] = 0
                 continue
             n_new = 0
-            log.info("%s: url=%s", ptype, page.url)
-            raw_cards = site.iter_all_cards(page, ptype, delay_ms=int(
-                self.config["delay_min_seconds"] * 1000))
-            log.info("%s: %d cards collected across all pages", ptype, len(raw_cards))
-            for card in raw_cards:
-                purchase = site.card_to_purchase(card, ptype)
-                if not purchase:
-                    log.info("%s: unparseable card id=%r text=%r",
-                             ptype, getattr(card, "order_id", ""), (card.text or "")[:120])
-                    continue
-                key = purchase.key
-                if self.discovery.get(key) is None:
-                    rec = purchase.to_dict()
-                    rec["state"] = State.DISCOVERED.value
-                    self.discovery.update(key, rec, save=False)
-                    n_new += 1
-                else:
-                    # refresh volatile fields
-                    self.discovery.update(key, {
-                        "details_url": purchase.details_url,
-                        "total": purchase.total or self.discovery.get(key).get("total", ""),
-                        "status": purchase.status or self.discovery.get(key).get("status", ""),
-                    }, save=False)
-            self.discovery.save()
+            while True:
+                log.info("%s: url=%s", ptype, page.url)
+                facts = {}
+                raw_cards = site.iter_all_cards(page, ptype, delay_ms=int(
+                    self.config["delay_min_seconds"] * 1000), facts=facts)
+                log.info("%s: %d cards collected across all pages", ptype, len(raw_cards))
+                n_new += self._note_cards(raw_cards, ptype)
+                self.discovery.save()
+                if not facts.get("page_not_drawn"):
+                    break
+                # The cards before it are kept. A page that never came is
+                # not read, and the list is not read whole.
+                if not (site.challenge_after_a_moment(page) or site.looks_signed_out(page)):
+                    self._passed_over(passed_over, "later page of the %s list" % ptype)
+                    break
+                # A check held the page blank and showed itself a moment
+                # later. It is asked about, or under the panel the run stops
+                # there, and the list is read again from its first page.
+                self.check_session(page)
+                if not self._open_filtered_list(page, ptype):
+                    self._passed_over(passed_over, "%s list" % ptype)
+                    break
             counts[ptype] = n_new
             self._delay()
 
+        if passed_over:
+            log.info("Order list: the %s never came", " and the ".join(passed_over))
+            print("\n!! Some of your Walmart order list never came, so it was not read whole.")
+            print("What was read is kept, and this run stops at its end rather than finish.")
+            print("The next run reads the list again.")
         # The whole list is in, and only now may a Resume carry on from it
-        # without reading it again (paperpull_core.listing).
-        listing.read_whole(self)
+        # without reading it again (paperpull_core.listing). A list read in
+        # part is not, and the listing stays one that stopped.
+        if not self._list_cut_short:
+            listing.read_whole(self)
 
         all_recs = list(self.discovery.data.values())
         online = [r for r in all_recs if r.get("purchase_type") == ONLINE]
@@ -467,7 +508,9 @@ class App:
         self.stats["instore_discovered"] = len(instore)
 
         if not quiet:
-            print(f"\nDiscovery complete. Total known purchases: {len(all_recs)}")
+            print("\nDiscovery %s. Total known purchases: %d"
+                  % ("read part of the order list" if self._list_cut_short else "complete",
+                     len(all_recs)))
             for label, group in ((ONLINE, online), (IN_STORE, instore)):
                 by_year = {}
                 for r in group:
@@ -480,7 +523,54 @@ class App:
                 print(f"  Earliest available purchase date: {dates[0]}")
                 print("  (If Walmart limits history depth, older purchases simply were")
                 print("   not shown by Walmart and are NOT included.)")
+        if finish:
+            self._stop_if_cut_short()
         return counts
+
+    def _passed_over(self, passed_over: list, what: str) -> None:
+        """Name a part of the order list that never came. The run goes on
+        with the rest and stops at its end rather than finish
+        (_stop_if_cut_short). The first such page is kept in a failure file
+        while it is still the one in front of the run."""
+        if not passed_over:
+            self._list_cut_short = True
+            self.write_failure("read the order list", "some of the list never came")
+        passed_over.append(what)
+
+    def _note_cards(self, raw_cards, ptype: str) -> int:
+        """Write down the purchases a list's cards show, and how many of
+        them are new. One already known has its changing fields refreshed."""
+        n_new = 0
+        for card in raw_cards:
+            purchase = site.card_to_purchase(card, ptype)
+            if not purchase:
+                log.info("%s: unparseable card id=%r text=%r",
+                         ptype, getattr(card, "order_id", ""), (card.text or "")[:120])
+                continue
+            key = purchase.key
+            if self.discovery.get(key) is None:
+                rec = purchase.to_dict()
+                rec["state"] = State.DISCOVERED.value
+                self.discovery.update(key, rec, save=False)
+                n_new += 1
+            else:
+                # refresh volatile fields
+                self.discovery.update(key, {
+                    "details_url": purchase.details_url,
+                    "total": purchase.total or self.discovery.get(key).get("total", ""),
+                    "status": purchase.status or self.discovery.get(key).get("status", ""),
+                }, save=False)
+        return n_new
+
+    def _stop_if_cut_short(self) -> None:
+        """A run that did not read the whole order list did not finish, and
+        must not read as a clean one. Once it has used what came, it leaves
+        on SystemExit the way a run leaves on a sign-out, which the panel
+        reports as stopped after Pilot, Run All and Resume."""
+        if self._list_cut_short:
+            print("\nNot all of Walmart's order list was read, so this run stops here rather")
+            print("than finish. Run it again later to read the rest.")
+            raise SystemExit(0)
 
     # -- selection ----------------------------------------------------------
 
@@ -1189,7 +1279,7 @@ class App:
         self.stats["mode"] = "pilot"
         types = ([ONLINE] if online else []) + ([IN_STORE] if instore else [])
         print("PILOT MODE - limited supervised test run.")
-        self.cmd_discover(types=types, quiet=False)
+        self.cmd_discover(types=types, quiet=False, finish=False)
         selected: List[Purchase] = []
         limits = {}
         if online:
@@ -1200,6 +1290,7 @@ class App:
             selected += self._select_purchases(IN_STORE, limit=limits[IN_STORE])
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
+            self._stop_if_cut_short()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
         by_dates = self._dates_asked()
@@ -1207,6 +1298,7 @@ class App:
         reached = self.process_purchases(selected, dry_run=self.args.dry_run,
                                          limits=limits, by_dates=by_dates)
         self._pilot_report(reached)
+        self._stop_if_cut_short()
 
     @staticmethod
     def _about_undated(selected: List[Purchase], by_dates: bool) -> None:
@@ -1304,7 +1396,7 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover(types=types, quiet=False)
+        self.cmd_discover(types=types, quiet=False, finish=False)
         selected: List[Purchase] = []
         for t in types:
             selected += self._select_purchases(t)
@@ -1316,6 +1408,7 @@ class App:
                                limits={t: cap for t in types} if cap else None,
                                by_dates=by_dates)
         self._say_left_alone()
+        self._stop_if_cut_short()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
@@ -1323,9 +1416,10 @@ class App:
         # stopped before the list was read whole, that is some of them or none,
         # and Resume finished clean with the rest never looked for. So the list
         # is read before anything else, and a listing that stops again stops
-        # the run (paperpull_core.listing).
+        # the run (paperpull_core.listing). A list read again only in part
+        # still goes on with what it found, and the run stops at its end.
         if listing.read_again_first(self):
-            self.cmd_discover(quiet=True)
+            self.cmd_discover(quiet=True, finish=False)
         # Only the purchases inside the run's scope, chosen as Pilot and Run
         # All choose them, so a Resume with a year chosen takes that year
         # alone. The limit waits until the done ones are left out.
@@ -1354,6 +1448,7 @@ class App:
                   "Nothing to resume - everything in scope is complete."
                   if listing.scoped(self) else
                   "Nothing to resume - all discovered purchases are complete.")
+            self._stop_if_cut_short()
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self._about_undated(pend, by_dates)
@@ -1362,6 +1457,7 @@ class App:
         self.process_purchases(pend, dry_run=self.args.dry_run, by_dates=by_dates,
                                limit=self.args.max_purchases)
         self._say_left_alone()
+        self._stop_if_cut_short()
 
     def _say_put_aside(self, aside: List[Purchase]) -> None:
         """How many purchases an earlier run put aside, which a run skips, how
@@ -1523,7 +1619,8 @@ class App:
         words = words_for('Walmart', site)
         page = self.page()
         if not self.discovery.data:
-            self.cmd_discover(quiet=True)
+            # A survey, which goes on with whatever the list read.
+            self.cmd_discover(quiet=True, finish=False)
         for ptype in (ONLINE, IN_STORE):
             candidates = self._select_purchases(ptype, limit=1)
             if self.args.order_number:

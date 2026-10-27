@@ -178,7 +178,8 @@ def the_invented_site(monkeypatch):
     real = site.scroll_full_page
     monkeypatch.setattr(site, "scroll_full_page",
                         lambda page, rounds=1, delay_ms=50: real(page, rounds, delay_ms))
-    monkeypatch.setattr(app_mod.App, "cmd_discover", lambda self, types=None, quiet=False: {})
+    monkeypatch.setattr(app_mod.App, "cmd_discover",
+                        lambda self, types=None, quiet=False, finish=True: {})
 
 
 def discovered(tmp_path, orders=ORDERS, card_text="Delivered\n$19.69"):

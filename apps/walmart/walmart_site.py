@@ -68,6 +68,10 @@ DETAIL_LINK_AUTO_RE = re.compile(r"view-order-details-link-([0-9]{10,})")
 STORE_MARKER_RE = re.compile(
     r"(store\s+purchase|storePurchase=true|in[\s\-]?store|walmart\s+pay|"
     r"purchased\s+at|store\s+trip)", re.I)
+# A card that says it is a store purchase in so many words, as every store
+# card did on the account the selectors below were mapped on. STORE_MARKER_RE
+# is wider, and an online order picked up in a store may match it.
+STORE_PURCHASE_RE = re.compile(r"store\s+purchase", re.I)
 
 # ---------------------------------------------------------------------------
 # Accessible names / labels
@@ -322,14 +326,22 @@ FILTER_URL = {
 
 def select_history_tab(page, purchase_type: str) -> bool:
     """Show only Online or In-store purchases by navigating to the filtered
-    order-list URL."""
+    order-list URL. True when the filtered list appeared.
+
+    False is not a kind with no purchases in it, and it is not a list that
+    never came either. The caller tells those apart (cmd_discover). It used
+    to be True whatever came, and a filtered list that turned into the bot
+    check was read as one with nothing in it."""
     page.goto(FILTER_URL[purchase_type], wait_until="domcontentloaded", timeout=60000)
     try:
-        page.wait_for_selector(FALLBACK["page_ready"], timeout=30000)
+        page.wait_for_selector(FALLBACK["page_ready"], timeout=ORDERS_WAIT_MS)
+        listed = True
     except Exception:
-        log.warning("%s filtered order list did not render within 30s", purchase_type)
+        log.warning("%s filtered order list did not render within %gs",
+                    purchase_type, ORDERS_WAIT_MS / 1000)
+        listed = False
     page.wait_for_timeout(SETTLE_MS)
-    return True
+    return listed
 
 
 def _go_next_page(page) -> bool:
@@ -348,13 +360,17 @@ def _go_next_page(page) -> bool:
     return False
 
 
+# How long a page of the order list gets to draw its cards.
+CARDS_WAIT_MS = 15000
+
+
 def load_all_cards(page, purchase_type: str = ONLINE,
                    delay_ms: int = 1500, max_rounds: int = 200) -> int:
     """Walmart paginates the order list. collect_cards() is called per page
     by the caller via iter_all_cards(); here we just ensure the first page's
     cards are present and return the visible count."""
     try:
-        page.wait_for_selector(FALLBACK["order_card"], timeout=15000)
+        page.wait_for_selector(FALLBACK["order_card"], timeout=CARDS_WAIT_MS)
     except Exception:
         pass
     for _ in range(3):
@@ -364,12 +380,23 @@ def load_all_cards(page, purchase_type: str = ONLINE,
 
 
 def iter_all_cards(page, purchase_type: str, delay_ms: int = 1500,
-                   max_pages: int = 100) -> List["RawCard"]:
-    """Collect cards of the requested type across every paginated page."""
+                   max_pages: int = 100, facts: Optional[dict] = None) -> List["RawCard"]:
+    """Collect cards of the requested type across every paginated page.
+
+    A page the Next control led to that drew no order list at all, no card
+    of either kind, is a page that never came, where this used to find no
+    cards, end there and have the list taken as read whole. `facts`, when
+    given, says so as "page_not_drawn". The cards read before it are kept,
+    and the page is left as it is, so the caller can look at it for a
+    check."""
     all_cards: List[RawCard] = []
     seen = set()
-    for _ in range(max_pages):
+    for page_no in range(max_pages):
         load_all_cards(page, purchase_type, delay_ms)
+        if page_no and not orders_listed(page):
+            if facts is not None:
+                facts["page_not_drawn"] = True
+            break
         for card in collect_cards(page, purchase_type):
             key = card.href or card.text[:60]
             if key in seen:
@@ -434,6 +461,21 @@ def collect_cards(page, purchase_type: str = ONLINE) -> List[RawCard]:
         except Exception:
             continue
     return cards
+
+
+def kinds_shown(page) -> set:
+    """The kinds of purchase the order list on the page shows, each told
+    only by a card that is plainly that kind. One that says store purchase
+    is a store purchase, and one with none of STORE_MARKER_RE's words is an
+    online order. Any other card is neither, since it may be read as
+    either."""
+    kinds = set()
+    for card in collect_cards(page, ONLINE) + collect_cards(page, IN_STORE):
+        if STORE_PURCHASE_RE.search(card.text):
+            kinds.add(IN_STORE)
+        elif not STORE_MARKER_RE.search(card.text):
+            kinds.add(ONLINE)
+    return kinds
 
 
 def card_to_purchase(card: RawCard, purchase_type: str,
