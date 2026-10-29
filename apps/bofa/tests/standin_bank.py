@@ -21,8 +21,8 @@ gives. Asking with that call from inside the page is answered by
 `answer_pdf_call`.
 
 Every value is invented. The account keys, the docIds, the account names
-and every address are made up, and the list's address is not the bank's,
-whose words the recordings kept only as shapes.
+and every address but SECOND_PAGE_URL are made up, and the list's address
+is not the bank's, whose words the recordings kept only as shapes.
 """
 import base64
 import json

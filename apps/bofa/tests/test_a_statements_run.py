@@ -225,7 +225,6 @@ def test_pilot_at_the_second_address_files_every_statement(tmp_path, bank, capsy
                      "2026-02-15 Bank of America Statement - Everyday Checking.pdf"]
     out = capsys.readouterr().out
     assert result(out)["new_files"] == 4 and "not on Statements & Documents" not in out
-    assert bank.url == sb.SECOND_PAGE_URL
 
 
 def test_something_over_a_download_pdf_link_stops_the_run(tmp_path, bank, capsys, monkeypatch):

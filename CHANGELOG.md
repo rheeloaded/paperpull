@@ -15,10 +15,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   /statements-documents/home/ on secure.bankofamerica.com, and the run
   said the tab was not on it and asked nothing, since the app knew the
   page only by the address the first tester's recordings showed. That
-  whole path now counts as the page too. Only that path does, so a page
-  below it, a tab of another host, or the path inside another address
-  is still not taken for it, and a tab a press takes below it is taken
-  back as before.
+  path, letter for letter, now counts as the page too. A page below it,
+  the same path on another host, or the path inside another address is
+  not taken for it, and a press that takes the tab to a page below it is
+  followed by going back, as at the first address.
 
 ## [0.59.1] - 2026-10-27
 

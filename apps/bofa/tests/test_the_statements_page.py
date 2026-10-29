@@ -67,7 +67,7 @@ def test_a_page_of_another_site_is_not_the_statements_page():
 @pytest.mark.parametrize("url", [
     sb.PAGE_URL,
     sb.SECOND_PAGE_URL,
-    "https://secure.bankofamerica.com/statements-documents/home",
+    "https://secure.bankofamerica.com/statements-documents/home/",
 ])
 def test_both_addresses_of_the_statements_page_are_it(url):
     """A second tester's window was on Statements & Documents at
@@ -82,6 +82,9 @@ def test_both_addresses_of_the_statements_page_are_it(url):
     "https://secure.bankofamerica.com.evil.test/statements-documents/home/",
     "http://secure.bankofamerica.com/statements-documents/home/",
     "https://secure.bankofamerica.com/statements-documents/",
+    # Only the path as the screenshot showed it, letter for letter.
+    "https://secure.bankofamerica.com/statements-documents/home",
+    "https://secure.bankofamerica.com/Statements-Documents/Home/",
     "https://secure.bankofamerica.com/statements-documents/home/viewdoc",
     "https://secure.bankofamerica.com/statements-documents/home/settings/",
     "https://secure.bankofamerica.com/sample/statements-documents/home/",

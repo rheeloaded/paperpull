@@ -11,7 +11,7 @@ recordings showed stops the run rather than being guessed at.
 HOW THE STATEMENTS PAGE WORKS, as the recordings showed it
 
   Statements & Documents is a page on secure.bankofamerica.com whose path
-  ends in "stmts-docs", or for a second tester (#121, 2026-10-28) the
+  holds "stmts-docs", or for a second tester (#121, 2026-10-28) the
   same page at /statements-documents/home/. It fills its list from one
   call of its own.
 
@@ -124,10 +124,12 @@ URLS = {
 }
 
 # The statements page, by the part of its path the recordings kept, or by
-# the whole path of the address a second tester's window showed for the
-# same page (#121). Only that path, so a page below it, which the tab is
-# taken back from after a press, is never taken for the statements page.
-STATEMENTS_PAGE_RE = re.compile(r"stmts-docs|^/statements-documents/home/?$", re.I)
+# the whole path, letter for letter, of the address a second tester's
+# window showed for the same page (#121). A page below that path is not the
+# second address, so a press that takes the tab there is followed by going
+# back. Only the path is read, so a move by query or fragment alone is not
+# seen at either address.
+STATEMENTS_PAGE_RE = re.compile(r"stmts-docs|(?-i:^/statements-documents/home/$)", re.I)
 # The list call, by the shape both recordings showed, letter for letter.
 # Words of eight, fifteen and four letters, then statements/v1/ and a word
 # of six letters before Documents.
