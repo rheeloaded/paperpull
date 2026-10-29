@@ -29,6 +29,9 @@ import json
 
 LIST_URL = "https://secure.bankofamerica.com/samplepg/standinsamplezz/zone/statements/v1/lookupDocuments"
 PAGE_URL = "https://secure.bankofamerica.com/sample-zz-stmts-docs/?k=STANDINTOKEN&request_locale=en-us"
+# The same page at the second address a tester's window showed (#121). This
+# path is the bank's own, since the app knows it by the whole path.
+SECOND_PAGE_URL = "https://secure.bankofamerica.com/statements-documents/home/?request_locale=en-us"
 LINK_BASE = "https://secure.bankofamerica.com/sample/getpdf?doc="
 # Where a press of a link whose address is "#" asks for its PDF.
 PDF_CALL_URL = "https://secure.bankofamerica.com/samplepg/standinsamplezz/zone/statements/v1/retrieveDoc"
