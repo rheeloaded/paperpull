@@ -415,7 +415,7 @@ _ALLOWLIST_NAMES = {"is_safe_control", "SAFE_DOC_CONTROL_RE", "SAFE_DOC_CONTROL_
 CLICK_NOTHING = {
     "affirm", "anthem", "apple", "citi", "ezpassva", "fedex", "fidelity", "gap", "github",
     "homedepot", "invest529", "irs", "kroger", "lowes", "myecp", "mypay", "netbenefits",
-    "optum", "paylocity", "sdge", "stripe", "tsp", "uber", "ukg", "ups",
+    "optum", "paylocity", "portlandgeneral", "sdge", "stripe", "tsp", "uber", "ukg", "ups",
 }
 # Apps that press only controls they find by a selector or by words written
 # in the app, and keep is_safe_control() for Diagnose, SECURITY.md's second

@@ -120,6 +120,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked for a personal account, and three years are online |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |
+| [`portlandgeneral`](apps/portlandgeneral) | Portland General Electric (Oregon) | Monthly bills, the Detailed Bill PDF | **Built and run on a contributor's own account, 36 bills listed and the newest saved by a Pilot.** The list and each PDF are asked of PGE's own account API from inside the signed-in page, nothing clicked. One account at a time |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |

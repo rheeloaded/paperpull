@@ -60,6 +60,7 @@
     "paylocity": {"gets": "Pay statements", "group": "pay"},
     "paypal": {"gets": "Monthly statements, about three years online", "group": "banks", "note": "Business accounts not tested yet"},
     "pge": {"gets": "Billing statements", "group": "bills"},
+    "portlandgeneral": {"gets": "Monthly bills, about three years online", "group": "bills", "note": "Reads one account"},
     "redcard": {"gets": "Target RedCard and Circle Card statements", "group": "banks"},
     "robinhood": {"gets": "Statements for individual, retirement and crypto accounts, tax documents", "group": "investing"},
     "sba": {"gets": "Loan statements, 1098", "group": "loans", "tested": false},
