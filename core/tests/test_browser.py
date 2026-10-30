@@ -457,14 +457,17 @@ def test_the_newer_build_comes_first_when_its_folder_was_renamed(monkeypatch, tm
     newer = str(_install(tmp_path, *new[2:]))
     assert browser._bundled_chromium() == [newer, older]
     assert browser.browser_candidates(mode=browser.BUNDLED) == [(browser.CHROMIUM, newer)]
+    assert browser._headless_shells(tmp_path) == [str(_shell_of(tmp_path, new[2], new[4])),
+                                                  str(_shell_of(tmp_path, old[2], old[4]))]
 
 
 # Playwright's names for the platforms, and the sys.platform of each
 _PLAYWRIGHT_PLATFORMS = (("linux", "linux"), ("mac", "darwin"), ("win", "win32"))
 
 
-def _installed_chromium_folders():
-    """Where the installed Playwright unpacks Chromium on each platform it
+def _installed_chromium_folders(name="chromium"):
+    """Where the installed Playwright unpacks Chromium, or with
+    name="chromium-headless-shell" its headless shell, on each platform it
     names, read from its own EXECUTABLE_PATHS, for example "linux-x64" and
     "chrome-linux64/chrome". Returns (its version, that table)."""
     playwright = pytest.importorskip("playwright")
@@ -478,15 +481,15 @@ def _installed_chromium_folders():
             continue
         # Its comments go first, since a brace in one would end the table early
         region = re.sub(r"/\*.*?\*/|//[^\n]*", "", text[at.end():at.end() + 20000], flags=re.S)
-        table = re.search(r"[\"']chromium[\"']\s*:\s*\{([^}]*)\}", region)
+        table = re.search(r"[\"']%s[\"']\s*:\s*\{([^}]*)\}" % re.escape(name), region)
         if table:
             entries = re.findall(r"[\"']([\w.-]+)[\"']\s*:\s*\[([^\]]*)\]", table.group(1))
             return version("playwright"), {
                 key: "/".join(re.findall(r"[\"']([^\"']+)[\"']", parts))
                 for key, parts in entries}
-    pytest.fail("Playwright %s names no chromium folders in an EXECUTABLE_PATHS table "
-                "under %s. Find where it says where Chromium goes inside "
-                "chromium-<build> and read it from there." % (version("playwright"), lib))
+    pytest.fail("Playwright %s names no %s folders in an EXECUTABLE_PATHS table "
+                "under %s. Find where it says where %s goes inside its build's folder "
+                "and read it from there." % (version("playwright"), name, lib, name))
 
 
 def test_the_installed_playwright_puts_chromium_where_it_is_looked_for(monkeypatch, tmp_path):
@@ -516,6 +519,168 @@ def test_the_installed_playwright_puts_chromium_where_it_is_looked_for(monkeypat
             missed.append("%s %s" % (key, inner))
     assert not missed, "Playwright %s puts Chromium where it is not looked for, %s" % (
         release, ", ".join(missed))
+
+
+def test_the_installed_playwright_puts_the_headless_shell_where_it_is_looked_for(
+        monkeypatch, tmp_path):
+    """A headless launch with only an older build on disk is handed that
+    build's headless shell, found in the folders Playwright names for it."""
+    release, folders = _installed_chromium_folders("chromium-headless-shell")
+    named = {prefix for key in folders for prefix, _p in _PLAYWRIGHT_PLATFORMS
+             if key.startswith(prefix)}
+    assert named == {"linux", "mac", "win"}, (
+        "Playwright %s's table was not read whole, it names only %s" % (
+            release, ", ".join(sorted(folders)) or "nothing"))
+    missed = []
+    for key, inner in sorted(folders.items()):
+        platform = next((p for prefix, p in _PLAYWRIGHT_PLATFORMS if key.startswith(prefix)), None)
+        assert platform, "Playwright %s names a platform this test does not know, %s" % (
+            release, key)
+        root = tmp_path / key
+        exe = root / "chromium_headless_shell-1243" / inner
+        exe.parent.mkdir(parents=True)
+        exe.write_text("")
+        monkeypatch.setattr(browser.sys, "platform", platform)
+        if browser._headless_shells(root) != [str(exe)]:
+            missed.append("%s %s" % (key, inner))
+    assert not missed, "Playwright %s puts its headless shell where it is not looked for, %s" % (
+        release, ", ".join(missed))
+
+
+# -- a launch takes a Chromium that is on disk ------------------------------------
+#
+# A launch that names no executable_path starts the build the installed
+# Playwright was made for. An install upgraded from 0.59.1 (Playwright
+# 1.63.0, build 1243) to 0.59.2 (1.64.1, build 1248) can hold only build
+# 1243, and every app's own browser (a config with no cdp_url) and the
+# receipt renderer failed there with "Executable doesn't exist", while the
+# download was never offered, since a build was on disk.
+
+class _Chromium:
+    """Playwright's browser type as a stand-in, made for the build at
+    `own`, noting what each launch is handed."""
+
+    def __init__(self, own):
+        self.executable_path = str(own)
+        self.asked = []
+
+    def launch(self, **kwargs):
+        self.asked.append(kwargs)
+        return "browser"
+
+    def launch_persistent_context(self, user_data_dir, **kwargs):
+        self.asked.append(kwargs)
+        return "context"
+
+
+def _shell_of(root, build, shell):
+    return root / ("chromium_headless_shell-" + build) / shell
+
+
+def _launch_each_way(c):
+    """A window, an app's own browser, a headless launch and one that names
+    no headless, which Playwright starts headless. Returns the
+    executable_path each was handed."""
+    browser.sandboxed_persistent_context(c, "/x/profile", headless=False)
+    browser.launch_own_browser(c, "/x/profile", headless=False, accept_downloads=True)
+    browser.sandboxed_launch(c, headless=True, args=["--lang=en-US"])
+    browser.sandboxed_launch(c)
+    return [asked.get("executable_path") for asked in c.asked]
+
+
+@pytest.mark.parametrize("platform,releases,build,chromium,shell", PLAYWRIGHT_LAYOUTS,
+                         ids=[_layout_id(layout) for layout in PLAYWRIGHT_LAYOUTS])
+def test_with_only_an_older_build_on_disk_every_launch_takes_it(
+        monkeypatch, tmp_path, capsys, platform, releases, build, chromium, shell):
+    """The Playwright installed was made for build 1248, and only an older
+    one is on disk, with its headless shell and a tip-of-tree build, which
+    is never taken."""
+    monkeypatch.setattr(browser.sys, "platform", platform)
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    older = _install(tmp_path, build, chromium, shell)
+    c = _Chromium(tmp_path / "chromium-1248" / chromium)
+    assert _launch_each_way(c) == [str(older), str(older), str(_shell_of(tmp_path, build, shell)),
+                                   str(_shell_of(tmp_path, build, shell))]
+    said = capsys.readouterr().out
+    assert said.count("Chromium build 1248, the one this Playwright starts, is not on this "
+                      "computer, so build %s, the newest one here, is started instead." % build) == 2
+    assert not [line for line in said.splitlines() if ";" in line or "—" in line]
+
+
+def test_playwrights_own_build_is_left_to_playwright(monkeypatch, tmp_path, capsys):
+    """Where the build Playwright starts is on disk nothing is handed over,
+    an older build and a newer one beside it included, so nobody who could
+    start a browser before is moved."""
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    inner, shell = "chrome-win64/chrome.exe", "chrome-headless-shell-win64/chrome-headless-shell.exe"
+    for build in ("1243", "1248", "1250"):
+        _install(tmp_path, build, inner, shell)
+    c = _Chromium(tmp_path / "chromium-1248" / inner)
+    assert _launch_each_way(c) == [None] * 4
+    assert "is started instead" not in capsys.readouterr().out
+
+
+def _lay_out(root, paths):
+    for path in paths:
+        exe = root / path
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        exe.write_text("")
+
+
+_WIN = "chrome-win64/chrome.exe"
+_WIN_SHELL = "chrome-headless-shell-win64/chrome-headless-shell.exe"
+
+
+@pytest.mark.parametrize("on_disk, expected", [
+    # Installed without its headless shell, so a headless launch takes the
+    # full build of Playwright's own number, newer than an older shell.
+    (["chromium-1248/" + _WIN, "chromium_headless_shell-1243/" + _WIN_SHELL],
+     [None, None, "chromium-1248/" + _WIN, "chromium-1248/" + _WIN]),
+    # An older build with no headless shell, which starts headless all the same.
+    (["chromium-1243/" + _WIN], ["chromium-1243/" + _WIN] * 4),
+    # Only headless shells, which have no window, so a window is left to
+    # Playwright to say what is missing.
+    (["chromium_headless_shell-1243/" + _WIN_SHELL, "chromium_headless_shell-1234/" + _WIN_SHELL],
+     [None, None, "chromium_headless_shell-1243/" + _WIN_SHELL,
+      "chromium_headless_shell-1243/" + _WIN_SHELL]),
+    # A newer build than Playwright's own, an older one, and the newest wins
+    (["chromium-1250/" + _WIN, "chromium-1243/" + _WIN, "chromium_headless_shell-1243/" + _WIN_SHELL],
+     ["chromium-1250/" + _WIN] * 4),
+    # Nothing at all, and Playwright says what is missing as it always did
+    ([], [None] * 4),
+], ids=["no headless shell of its own", "an older build without its shell", "only shells",
+        "the newest of several", "nothing"])
+def test_a_launch_takes_the_newest_build_that_fits_it(monkeypatch, tmp_path, on_disk, expected):
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    _lay_out(tmp_path, on_disk)
+    c = _Chromium(tmp_path / "chromium-1248" / _WIN)
+    assert _launch_each_way(c) == [str(tmp_path / p) if p else None for p in expected]
+
+
+@pytest.mark.parametrize("named", [{"executable_path": "/x/msedge.exe"}, {"channel": "msedge"}])
+def test_a_launch_that_names_its_browser_keeps_it(monkeypatch, tmp_path, named):
+    """Target hands its launch the person's own Edge or Chrome where the
+    sign-in would put that first, and that is never replaced."""
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    _install(tmp_path, "1243", _WIN, _WIN_SHELL)
+    c = _Chromium(tmp_path / "chromium-1248" / _WIN)
+    browser.launch_own_browser(c, "/x/profile", headless=False, **named)
+    browser.sandboxed_launch(c, headless=True, **named)
+    assert c.asked == [dict(named, headless=False, chromium_sandbox=True),
+                       dict(named, headless=True, chromium_sandbox=True)]
+
+
+@pytest.mark.parametrize("own", [None, "", "/x/chrome/chrome.exe"],
+                         ids=["no answer", "no build here", "no build folder"])
+def test_a_playwright_that_names_no_build_is_left_as_it_is(monkeypatch, tmp_path, own):
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    _install(tmp_path, "1243", _WIN, _WIN_SHELL)
+    c = _Chromium("")
+    c.executable_path = own
+    assert _launch_each_way(c) == [None] * 4
 
 
 

@@ -102,8 +102,21 @@ def _playwright_root() -> Optional[Path]:
     return root
 
 
-def _bundled_chromium() -> List[str]:
-    root = _playwright_root()
+def _build_of(path: str, root: Path) -> int:
+    """The build number of the folder under root that path is in,
+    chromium-1248 or chromium_headless_shell-1248, or -1."""
+    try:
+        folder = Path(path).relative_to(root).parts[0]
+    except (ValueError, IndexError):
+        return -1
+    m = re.fullmatch(r"chromium(?:_headless_shell)?-(\d+)", folder)
+    return int(m.group(1)) if m else -1
+
+
+def _bundled_chromium(root: Optional[Path] = None) -> List[str]:
+    """Every full Chromium build of Playwright's on disk, newest first, in
+    root or else in the folder Playwright keeps its browsers in."""
+    root = root or _playwright_root()
     if root is None:
         return []
     if sys.platform == "win32":
@@ -140,11 +153,35 @@ def _bundled_chromium() -> List[str]:
     # first" can hand back a build older than the installed playwright
     # expects. Sort on the build NUMBER, not the string, since
     # "chromium-1000" sorts before "chromium-999" as text.
-    def build_number(path: str) -> int:
-        m = re.search(r"chromium-(\d+)", path)
-        return int(m.group(1)) if m else -1
+    return sorted(found, key=lambda path: _build_of(path, root), reverse=True)
 
-    return sorted(found, key=build_number, reverse=True)
+
+# Where the headless shell sits inside chromium_headless_shell-<build>,
+# as Playwright's EXECUTABLE_PATHS names it for "chromium-headless-shell".
+# Up to 1.56 it was a headless_shell beside Chromium's own files, from 1.57
+# Chrome for Testing's chrome-headless-shell in a folder of its own.
+# core/tests/test_browser.py reads the installed Playwright's table, so a
+# folder it renames fails there.
+_HEADLESS_SHELLS = {
+    "win32": ("chrome-headless-shell-win64/chrome-headless-shell.exe",
+              "chrome-win/headless_shell.exe"),
+    "darwin": ("chrome-headless-shell-mac-x64/chrome-headless-shell",
+               "chrome-headless-shell-mac-arm64/chrome-headless-shell",
+               "chrome-mac/headless_shell"),
+    "linux": ("chrome-headless-shell-linux64/chrome-headless-shell",
+              "chrome-headless-shell-linux-arm64/chrome-headless-shell",
+              "chrome-linux/headless_shell"),
+}
+
+
+def _headless_shells(root: Path) -> List[str]:
+    """Every headless shell build of Playwright's in root, newest first.
+    Each has no window, so it is only ever handed to a headless launch."""
+    inner = _HEADLESS_SHELLS.get(sys.platform, _HEADLESS_SHELLS["linux"])
+    found: List[str] = []
+    for pattern in inner:
+        found += glob.glob(str(root / "chromium_headless_shell-*" / pattern))
+    return sorted(found, key=lambda path: _build_of(path, root), reverse=True)
 
 
 # Where each brand registers its executable under App Paths, and the
@@ -356,6 +393,9 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
 
 
 def bundled_chromium_present() -> bool:
+    """Whether a Chromium of Playwright's is on disk. Any build will do, an
+    older one than the installed Playwright's included, since a launch
+    takes the newest one there when Playwright's own is missing (_on_disk)."""
     return bool(_bundled_chromium())
 
 
@@ -678,15 +718,93 @@ def _started(launch, *args, **kwargs):
 def sandboxed_launch(chromium, **kwargs):
     """Playwright's chromium.launch, always inside the browser's sandbox.
     Raises ValueError for keywords that ask for less, and SandboxRefused,
-    never a browser without it, when the sandbox cannot start."""
-    return _started(chromium.launch, **_sandboxed(kwargs))
+    never a browser without it, when the sandbox cannot start. It starts
+    a Chromium that is on disk (_on_disk)."""
+    return _started(chromium.launch, **_on_disk(chromium, _sandboxed(kwargs)))
 
 
 def sandboxed_persistent_context(chromium, user_data_dir, **kwargs):
     """Playwright's chromium.launch_persistent_context, always inside the
     browser's sandbox, as sandboxed_launch."""
     return _started(chromium.launch_persistent_context, user_data_dir,
-                    **_sandboxed(kwargs))
+                    **_on_disk(chromium, _sandboxed(kwargs)))
+
+
+# -- the Chromium build a launch starts -----------------------------------------
+#
+# A launch that names no executable_path starts the build the installed
+# Playwright was made for, chromium-<build> for a window and
+# chromium_headless_shell-<build> headless, and fails with "Executable
+# doesn't exist" when that one is not on disk. Each Playwright upgrade
+# brings a new build, and an install upgraded from 0.59.1 (Playwright
+# 1.63.0, build 1243) to 0.59.2 (1.64.1, build 1248) can hold only the old
+# one, since the packages carry no Chromium and nothing downloads the new
+# build. So every app's own browser (a config with no cdp_url) and the
+# receipt renderer failed there, while the download was never offered,
+# because some build was on disk. The sign-in was not hurt, since it starts
+# the newest build on disk itself.
+#
+# Such a launch is now handed the newest Chromium on disk, the same build
+# the sign-in starts. Measured on 2026-10-30, Playwright 1.64.1 drove
+# builds 1234 and 1228 (Chrome 151 and 149) in a window, headless and
+# printing a PDF, through the headless shell and the full build alike.
+# Where Playwright's own build is on disk nothing is handed over and
+# nothing changes, and no browser of the person's own is ever taken here,
+# so nobody is moved off the browser they had.
+
+# The builds already said, so a renderer started for each receipt says it once
+_SAID_ON_DISK = set()
+
+
+def _playwrights_own(chromium) -> Optional[Path]:
+    """The Chromium executable the Playwright that `chromium` belongs to
+    starts in a window, by its own answer, or None when it gives none."""
+    try:
+        own = chromium.executable_path
+    except Exception:
+        return None
+    return Path(own) if isinstance(own, str) and own else None
+
+
+def _on_disk(chromium, kwargs: dict) -> dict:
+    """A launch's keywords, with the newest Chromium on disk named when the
+    build Playwright would start is not there. A launch that names its own
+    executable_path or channel is left as it is, and so is one whose
+    Playwright's own build is on disk, or with nothing at all on disk, so
+    Playwright says what is missing as it always did. A headless launch
+    takes the newest build, its headless shell ahead of the full build of
+    the same number, and a launch with a window takes only a full build."""
+    if kwargs.get("executable_path") or kwargs.get("channel"):
+        return kwargs
+    own = _playwrights_own(chromium)
+    # chromium-<build> in the folder Playwright keeps its browsers in
+    folder = next((p for p in (own.parents if own else ())
+                   if re.fullmatch(r"chromium-\d+", p.name)), None)
+    if folder is None:
+        return kwargs
+    root, build = folder.parent, int(folder.name.split("-")[1])
+    headless = kwargs.get("headless")
+    headless = True if headless is None else bool(headless)
+    if headless:
+        shells = _headless_shells(root)
+        if any(_build_of(s, root) == build for s in shells):
+            return kwargs
+        found = sorted([(_build_of(s, root), 1, s) for s in shells]
+                       + [(_build_of(c, root), 0, c) for c in _bundled_chromium(root)],
+                       reverse=True)
+        found = [path for _b, _shell, path in found]
+    else:
+        if own.is_file():
+            return kwargs
+        found = _bundled_chromium(root)
+    if not found:
+        return kwargs
+    if found[0] not in _SAID_ON_DISK:
+        _SAID_ON_DISK.add(found[0])
+        print("Chromium build %d, the one this Playwright starts, is not on this computer, "
+              "so build %d, the newest one here, is started instead."
+              % (build, _build_of(found[0], root)))
+    return dict(kwargs, executable_path=found[0])
 
 
 def debug_port_holder(port: str, timeout: float = 1.5) -> Optional[str]:
