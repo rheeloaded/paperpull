@@ -182,7 +182,7 @@ def _headless_shells(root: Path) -> List[str]:
     inner = _HEADLESS_SHELLS.get(sys.platform, _HEADLESS_SHELLS["linux"])
     found: List[str] = []
     for pattern in inner:
-        found += glob.glob(str(root / "chromium_headless_shell-*" / pattern))
+        found += sorted(glob.glob(str(root / "chromium_headless_shell-*" / pattern)))
     return sorted(found, key=_build_number, reverse=True)
 
 
