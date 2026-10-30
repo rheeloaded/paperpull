@@ -40,7 +40,7 @@ lack, see [On Synology](#on-synology).
 ## Get the image
 
 `compose.yaml` names the image a PaperPull release publishes, by that
-release's version, such as `ghcr.io/rheeloaded/paperpull-server:0.59.1`,
+release's version, such as `ghcr.io/rheeloaded/paperpull-server:0.59.2`,
 and Docker downloads it from GitHub the first time the project starts.
 Before a release publishes it, the image is built from that release's
 code, started the way this page describes and checked, and only that very

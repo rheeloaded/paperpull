@@ -7,7 +7,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.59.2] - 2026-10-30
+
+Bank of America knows Statements & Documents at the second address a
+tester's window showed. Continue no longer goes round and round after a
+list that was not read to its end, and the panel offers Get new
+documents in its place.
 
 ### Fixed
 - **Bank of America knows Statements & Documents at its second address

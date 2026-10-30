@@ -19,7 +19,7 @@ services:
     # version you run changes only when you change this line. To update,
     # write the newer version here, see "Updating" in SERVER.md. For an
     # image built with server/build.py, write paperpull-server:dev instead.
-    image: ghcr.io/rheeloaded/paperpull-server:0.59.1
+    image: ghcr.io/rheeloaded/paperpull-server:0.59.2
     container_name: paperpull
     init: true
     # Time for the sign-in browsers to close properly and keep their sessions.
