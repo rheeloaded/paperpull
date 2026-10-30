@@ -75,6 +75,7 @@
     "tmobile": {"gets": "Bill statements", "group": "bills"},
     "treasurydirect": {"gets": "Current Holdings, Security and Payment History, saved from its pages", "group": "investing", "note": "Tested on one account so far, 1099s not yet"},
     "tsp": {"gets": "Participant statements, 1099-R", "group": "investing"},
+    "tualatin": {"gets": "Monthly water and sewer bills, about two years online", "group": "bills"},
     "uber": {"gets": "Ride and Uber Eats receipts", "group": "shopping"},
     "ukg": {"gets": "Pay statements", "group": "pay"},
     "ups": {"gets": "Shipping invoices from the Billing Center", "group": "bills"},
