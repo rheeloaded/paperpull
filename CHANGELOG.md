@@ -7,6 +7,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Invest529 is set up on a port of its own.** It shipped on 9298, the
+  debugging port Simmons Bank already had, so with both set up each
+  attached to the other's browser and signed in to the other's profile. A
+  new Invest529 install takes 9296. One set up earlier keeps the port its
+  config.json names, and where Simmons Bank is set up too, changing either
+  one's cdp_url to a port no other app uses keeps them apart. A test now
+  fails when two apps' examples name the same port.
+
 ## [0.59.1] - 2026-10-27
 
 Bank of America saves statements when the page's Download PDF links have
