@@ -91,7 +91,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     they need.
   - **Apps that click nothing at all during a run** (Affirm, Amazon, Anthem,
     Apple, Citi, E-ZPass Virginia, FedEx, Fidelity, Gap, GitHub, Home Depot,
-    Invest529, IRS, Kroger, Lowe's, MILITARY STAR, myPay, NetBenefits, Optum
+    Invest529, IRS, Kroger, Lowe's, MILITARY STAR, myPay, NetBenefits, NW Natural, Optum
     Bank, Paylocity, SDG&E, Stripe, TSP, Uber, UKG and UPS) open the provider's
     pages by their address and read them, or ask for the same lists and
     files the provider's own page asks for, from inside the signed-in page or
