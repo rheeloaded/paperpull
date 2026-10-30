@@ -401,6 +401,19 @@ def test_resume_carries_on_with_what_is_known_and_then_stops(home, monkeypatch):
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_resume_that_stops_for_want_of_its_browser_is_still_continued(home):
+    """The other side, for every app. A whole list with one document left
+    and no browser to take it in, as after a sign-out or a closed window.
+    That Resume stops some other way, and pressing Continue again is right,
+    so it is never told to list (#124)."""
+    home.listed_before(done=False)
+    said, result, _ended = home.run(*RESUME)
+    assert home.browser.asked > 0, said[-1500:]
+    assert stopped(result), said[-1500:]
+    assert not told_to_list(said, result), said[-1500:]
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
 def test_resume_after_a_whole_list_still_finishes_clean(home):
     """The other side. A listing read whole with everything done is a clean
     finish, as it always was, and so is an install from before the note.

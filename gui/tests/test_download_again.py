@@ -429,7 +429,9 @@ def test_a_restore_that_ends_early_says_continue_will_not_download_again():
     assert "act: again ? restore : {label: 'Continue', run: 'resume', primary: true}" in present
     assert "!(r.last_run && r.last_run.redownload)" in function("queueTargets")
     account = " ".join(function("renderAccount").split())
-    assert "r.state === 'stopped' && !stoppedHere && !SERVER && !inSample() ?" in account
+    assert "const again = r.state === 'stopped' && Boolean(r.last_run && r.last_run.redownload);" in account
+    assert "const stoppedHere = continues(r) && !again;" in account
+    assert "(again && !SERVER && !inSample() ?" in account
 
 
 def test_a_refusal_is_shown_rather_than_a_lost_connection():

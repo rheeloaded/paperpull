@@ -200,3 +200,39 @@ def test_get_new_for_all_reads_the_list_of_each_such_account(panel, shop):
     tab.click("#view-home [data-do=queue]")
     tab.wait_for_function("() => QUEUE && QUEUE.finished", timeout=120000)
     assert started(shop) == [["--all", "--yes"]] and started(bank) == [["--all", "--yes"]]
+
+
+def test_a_round_that_meets_one_tries_it_again_as_get_new(panel, shop):
+    """The review's case. The row stopped the ordinary way, so the round
+    Continues it, and that Continue has nothing more to carry on with. Try
+    it again used to start the same Continue, which stopped the same way
+    every time."""
+    tab = panel.tab
+    bank = shop.with_name("Bank Docs")
+    bank.mkdir()
+    (bank / "bank_docs.py").write_text(APP, encoding="utf-8")
+    for folder in (shop, bank):
+        (folder / "unread").write_text("", encoding="utf-8")
+        root = app_module._account_root({"dir": str(folder)}, "primary")
+        root.mkdir(parents=True, exist_ok=True)
+        (root / app_module.RUN_LOG).write_text(json.dumps([
+            {"action": "all", "exit_code": 0, "ended": "2026-10-28T09:00:00",
+             "result": {"stopped": 1}}]), encoding="utf-8")
+    tab.evaluate("location.hash = '#/'")
+    tab.reload()
+    tab.wait_for_selector("#view-home [data-do=queue]")
+    tab.click("#view-home [data-do=queue]")
+    tab.wait_for_function("() => QUEUE && QUEUE.held && RUN.state === 'done'", timeout=60000)
+    first = shop if started(shop) else bank
+    assert started(first) == [["--resume", "--yes"]]
+    assert "Trying it again reads the list first" in tab.inner_text("#view-run")
+    tab.click("[data-do=queue-retry]")
+    tab.wait_for_function("() => QUEUE && QUEUE.i === 1 && QUEUE.held && RUN.state === 'done'",
+                          timeout=60000)
+    assert started(first) == [["--resume", "--yes"], ["--all", "--yes"]]
+
+
+def test_a_provider_whose_name_owns_is_not_given_a_second_owner(panel):
+    """Lowe's list, never Lowe's's list, as the core says it."""
+    assert panel.tab.evaluate("whose(\"Lowe's\")") == "Lowe's"
+    assert panel.tab.evaluate("whose('Chase')") == "Chase's"

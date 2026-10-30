@@ -100,6 +100,9 @@ function when(iso) {
 }
 function many(n, one, more) { return n + ' ' + (n === 1 ? one : (more || one + 's')); }
 function noun(r) { return r && r.kind === 'RECEIPT' ? 'receipt' : 'document'; }
+// A provider's name as an owner, Lowe's for Lowe's, never Lowe's's, as the
+// core says it (paperpull_core.listing).
+function whose(name) { return /'s$/.test(name) ? name : name + "'s"; }
 const CADENCE = {'weekly': 'every week', '2x month': 'twice a month', 'monthly': 'every month',
                  'quarterly': 'every three months', '2x year': 'twice a year', 'yearly': 'once a year'};
 function whoOf(r) { return r.owner || (r.account !== 'primary' ? r.account : ''); }
@@ -157,7 +160,7 @@ function present(r) {
       const restore = SERVER || inSample() ? {label: 'Open', nav: true}
         : {label: 'Restore the rest', dialog: 'restore', primary: true};
       if (!continues(r)) return {chip: {cls: 'info', text: 'Stopped partway'},
-        say: 'The last run' + (lastAt ? ' on ' + lastAt : '') + ' stopped because ' + r.provider + "'s list was not read " +
+        say: 'The last run' + (lastAt ? ' on ' + lastAt : '') + ' stopped because ' + whose(r.provider) + ' list was not read ' +
           'to its end, and Continue carries on only from what is listed. Get new reads the list again. Nothing was lost.',
         act: {label: 'Get new', run: 'all', primary: true}};
       return {chip: {cls: 'info', text: 'Stopped partway'},
@@ -445,7 +448,7 @@ function renderAccount() {
   if (!r.runnable) html += '<p class="callout warn" style="margin-bottom:20px">This folder does not match a provider PaperPull ships, so it will not run. Its folder must hold exactly one provider script whose name is one PaperPull ships.</p>';
   const band = {stopped: 'info', attention: 'attention', unreadable: 'bad', overdue: 'bad', due: 'due', gap: 'gap', current: 'ok'}[r.state] || '';
   const loginSay = SERVER
-    ? 'Opens ' + r.provider + "'s sign-in page in the sign-in window, docked beside this page. You type your password there and PaperPull never sees it. Leave it signed in while documents download."
+    ? 'Opens ' + whose(r.provider) + " sign-in page in the sign-in window, docked beside this page. You type your password there and PaperPull never sees it. Leave it signed in while documents download."
     : 'Opens ' + r.provider + ' in its own browser window. You type your password there and PaperPull never sees it. Leave the window open while documents download.';
   html += '<div class="cols"><div class="main-col"><section class="card" aria-labelledby="getdocs">' +
     '<div class="band ' + band + '"><span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span><span class="say">' +
@@ -541,9 +544,9 @@ function openMenu(btn) {
     html += menuItem('review', k, P.tag, 'Review names', 'Give a better name to receipts PaperPull was unsure of', sample);
   }
   html += menuItem('run', k, P.shield, 'Check saved files', 'Re-check every PDF already saved. Downloads nothing');
-  if (!SERVER && !sample) html += menuItem('reveal', k, P.folder, 'Open folder', 'Where ' + r.provider + "'s files are saved");
+  if (!SERVER && !sample) html += menuItem('reveal', k, P.folder, 'Open folder', 'Where ' + whose(r.provider) + ' files are saved');
   html += '<div class="rule"></div><div class="grp">Get help</div>' +
-    menuItem('support', k, P.report, 'Make a support report', "Reads " + r.provider + "'s page and saves a file with no account details, to attach to an issue") +
+    menuItem('support', k, P.report, 'Make a support report', "Reads " + whose(r.provider) + " page and saves a file with no account details, to attach to an issue") +
     menuItem('record', k, P.record, 'Record steps for support', 'Watches while you click your way to a document. Downloads nothing and records no typing');
   if (!sample) {
     html += '<div class="rule"></div><div class="grp">This provider</div>' +
@@ -766,7 +769,7 @@ function runOutcome() {
   // saved, since a row cannot be bound to either. They are said here, but
   // never make a run one that needs a look, which it would then be for good.
   const alike = res && res.alike ? ' ' + many(res.alike, n) + ' that share a type and a date with another ' +
-    'could not be told apart and were left unsaved. Take any you need from ' + who + "'s own page." : '';
+    'could not be told apart and were left unsaved. Take any you need from ' + whose(who) + ' own page.' : '';
   // Continue picks up a run that downloads. A Discover that stopped is
   // pressed again, since it was asked only to see what is there, and a
   // restore that stopped is chosen again for the dates it did not reach.
@@ -788,7 +791,7 @@ function runOutcome() {
   // to its end. Continue would stop here again, so the next step is a run
   // that reads the list (#124).
   if (res && res.stopped && res.list_not_read) return {tone: 'info', title: 'Stopped before finishing',
-    say: who + "'s list was not read to its end, so there was nothing more to carry on with. Get new documents " +
+    say: whose(who) + " list was not read to its end, so there was nothing more to carry on with. Get new documents " +
       'reads the list again. Nothing already saved is lost.', clean: false, relist: true};
   if (res && res.stopped) return {tone: 'info', title: 'Stopped before finishing',
     say: RUN.again ? AGAIN_LEFT + '.' : who + ' may have signed you out partway. Nothing is lost. Sign in again, then ' +
@@ -904,7 +907,7 @@ function renderRun() {
   if (RUN.state === 'running') {
     html = '<section class="card" aria-labelledby="r-title"><div class="outcome"><span class="spinner" aria-hidden="true"></span>' +
       '<div class="text"><h1 id="r-title" tabindex="-1">' + esc((RUN.again ? 'Restoring files from %s' : ACTION_DOING[RUN.action] || '%s').replace('%s', RUN.provider)) + '</h1>' +
-      '<p>' + (RUN.action === 'record' ? 'Click your way to a document in ' + esc(RUN.provider) + "'s window, then stop the recording here."
+      '<p>' + (RUN.action === 'record' ? 'Click your way to a document in ' + esc(whose(RUN.provider)) + ' window, then stop the recording here.'
         : 'Usually takes a minute or two.') + '</p></div></div>' +
       '<div class="live"><div class="now"><b id="r-state" role="status">' + esc(runStateText()) + '</b>' +
       '<span class="bar wide' + (RUN.total ? '' : ' indeterminate') + '" id="r-bar"><span style="width:' + runPercent() + '%"></span></span></div>' +
@@ -932,8 +935,8 @@ function renderRun() {
         '<button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' + key + '">Open sign-in window</button></li>' +
         (o.resume ? '<li><div class="stepnum on">2</div><div class="body"><b>Continue where it stopped</b><span>Picks up what is left, without asking again for what is already saved</span></div>' +
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' + key + '">' + PLAY + 'Continue</button></li>' : '') +
-        (o.relist ? '<li><div class="stepnum on">2</div><div class="body"><b>Get new documents</b><span>Reads ' + esc(RUN.provider) +
-          "'s list again, then saves what you do not have yet</span></div>" +
+        (o.relist ? '<li><div class="stepnum on">2</div><div class="body"><b>Get new documents</b><span>Reads ' + esc(whose(RUN.provider)) +
+          ' list again, then saves what you do not have yet</span></div>' +
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="all" data-key="' + key + '">' + PLAY +
           'Get new documents</button></li>' : '') +
         (o.recheck ? '<li><div class="stepnum on">2</div><div class="body"><b>Check again</b><span>Lists what ' + esc(RUN.provider) +
@@ -958,7 +961,7 @@ function renderRun() {
         (o.names ? '<button type="button" class="btn btn-s" data-do="review" data-key="' + key + '">' + sv(P.tag) +
           'Review names</button>' : '') +
         (folder ? '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' +
-          sv(P.folder) + 'Open ' + esc(RUN.provider) + "'s folder</button>" : '') +
+          sv(P.folder) + 'Open ' + esc(whose(RUN.provider)) + ' folder</button>' : '') +
         (aside ? '<button type="button" class="btn btn-s" data-do="aside-download" data-key="' + key + '">' +
           sv(P.download) + 'Download what was set aside</button>' : '') + '</div>' : '') + '</div></section>';
     }
@@ -1043,6 +1046,9 @@ function queueStep() {
   } else {
     it.said = 'held';
     QUEUE.held = true;
+    // A Continue with nothing more to carry on with would only stop the same
+    // way again, so trying it again reads the list, with no dates set (#124).
+    if (o.relist) Object.assign(it, {action: 'all', scope: {year: '', start: '', end: ''}, relist: true});
   }
 }
 function renderQueueList() {
@@ -1066,7 +1072,9 @@ function queueHeld() {
     '. The next starts on its own when this one finishes.') + '</p>';
   const it = QUEUE.items[QUEUE.i];
   return '<section class="callout warn" style="margin-top:20px"><div class="text"><h2>Paused at ' + esc(it.provider) + '</h2>' +
-    '<p>This one did not finish, so the round waits for you. Sign in again and try it once more, or move on.</p>' +
+    '<p>' + esc(it.relist ? 'This one had nothing more to carry on with, since its list was not read to its end, so the round ' +
+      'waits for you. Trying it again reads the list first, or move on.' :
+      'This one did not finish, so the round waits for you. Sign in again and try it once more, or move on.') + '</p>' +
     '<div class="row-actions"><button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' + esc(it.key) +
     '">Open sign-in window</button><button type="button" class="btn btn-p starts" data-do="queue-retry">Try it again</button>' +
     '<button type="button" class="btn btn-s starts" data-do="queue-skip">Skip to the next</button>' +
@@ -1280,7 +1288,7 @@ document.addEventListener('keydown', e => {
 function openDock(provider) {
   if (!SERVER) return;
   $('dock-title').textContent = provider ? provider + ' sign-in window' : 'Sign-in window';
-  $('dock-say').textContent = 'Sign in below the way you would on ' + (provider ? provider + "'s" : "the provider's") +
+  $('dock-say').textContent = 'Sign in below the way you would on ' + (provider ? whose(provider) : "the provider's") +
     ' own site. Your password goes to the provider, never to PaperPull. Leave it signed in when you are done.';
   // Opened again unless noVNC shows the screen now, since one that closed
   // after going unused asks for the password once its page is opened.

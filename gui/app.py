@@ -1410,7 +1410,8 @@ STATE_ORDER = ("stopped", "attention", "unreadable", "overdue", "due", "gap",
 
 def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
     """One word for where an account stands. A run that did not finish
-    comes first, since the next step is to continue it. Then what the last
+    comes first, since the next step is to continue it, or to read the list
+    again after a Resume with nothing more to carry on with. Then what the last
     run left to look at, then how current the archive is, then gaps. An
     archive whose status could not be read is never called not started."""
     if outcome in ("closed", "interrupted", "failed", "stopped", "unlisted"):

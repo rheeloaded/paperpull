@@ -231,12 +231,16 @@ def test_a_resume_with_nothing_more_to_carry_on_with_says_only_a_listing_can(tmp
 
 
 def test_a_resume_that_carries_on_and_then_stops_says_only_a_listing_can(tmp_path, capsys):
-    app = _app(tmp_path, known=["one", "two"])
+    app, process = _app(tmp_path, known=["one", "two"]), Process()
     listing.started(app)
-    with pytest.raises(listing.ListNotRead):
-        listing.resume(app, ["two"], Process())
-    with pytest.raises(listing.ListNotRead):
-        listing.after_resume(app)
+    with pytest.raises(listing.ListNotRead) as stop:
+        listing.resume(app, ["two"], process)
+    assert process.handed == [["two"]]
+    capsys.readouterr()
+    _summary(stop.value)
+    result, said = _result_and_said(capsys)
+    assert result["stopped"] == 1 and result["list_not_read"] == 1
+    assert "Resume would only stop here again" in said and "Resume carries on" not in said
 
 
 def test_a_scoped_resume_is_told_to_run_with_no_dates(tmp_path, capsys):

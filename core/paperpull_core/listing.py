@@ -33,7 +33,7 @@ does more than carry on with the list.
 A receipt app's Resume reads the purchase list again after a listing that
 did not end whole, before it takes anything (read_again_first), as six of
 them did by a mark of their own since Target's review of 0.41.0. The panel
-says to press Resume after any run that stopped, and a purchase list is a
+offers Continue after a run that stopped, and a purchase list is a
 few pages where the receipts are a page each, so that Resume finishes the
 job. When the list does not come this time either, the run stops with it.
 

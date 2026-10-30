@@ -181,6 +181,7 @@ def test_a_resume_only_a_listing_carries_on_from_is_its_own_outcome(root):
          {"action": "resume", "exit_code": 0, "result": {"stopped": 1, "list_not_read": 1}})
     row = _rows()[("Bank Statements", "second")]
     assert (row["state"], row["last_outcome"]) == ("stopped", "unlisted")
+    assert app_module.account_rows()[0]["account"] == "second"
     _log(root / "Bank Statements - second",
          {"action": "resume", "exit_code": 0, "result": {"stopped": 1, "list_not_read": 0}})
     row = _rows()[("Bank Statements", "second")]
