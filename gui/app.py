@@ -1802,14 +1802,40 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
     example = dst / "config.example.json"
     if example.is_file():
         # The example IS the config for a fresh install. Its output_dir and
-        # profile_dir are relative to the install folder, and its port is
-        # already unique to this app.
+        # profile_dir are relative to the install folder. Its port is no
+        # other app's example port, but it can still be a second person's.
         shutil.copy2(example, dst / "config.json")
+        _set_free_port(dst / "config.json")
     if owner:
         _set_owner(dst / "config.json", owner)
     if server_mode.enabled():
         _set_profile(dst / "config.json", server_mode.profile_for(dst.name))
     return "created"
+
+
+def _set_free_port(config: Path) -> None:
+    """A debugging port for a new install that no install or person beside
+    it uses. A second person is given their app's port plus 10, moved past
+    only the ports in use when they were added, so Chase Business's 9290
+    becomes 9300, the port the next new app takes. Copied from that app's
+    example, its config named 9300 too, and the two attached to one
+    browser, each signing in to the other's profile. add_account picks the
+    port, by the rule it gives a second person theirs."""
+    mod = _account_module()
+    free = getattr(mod, "free_cdp_url", None)
+    if free is None or not server_mode.own_file(config):
+        return
+    with _CONFIG_WRITES:
+        try:
+            data = json.loads(config.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+        url = free(config.parent, data.get("cdp_url"))
+        if url:
+            data["cdp_url"] = url
+            _write_text(config, json.dumps(data, indent=2))
 
 
 def _set_profile(config: Path, profile: str) -> None:
