@@ -7,6 +7,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Bank of America knows Statements & Documents at its second address
+  (#121).** A second tester's window was on Statements & Documents at
+  /statements-documents/home/ on secure.bankofamerica.com, and the run
+  said the tab was not on it and asked nothing, since the app knew the
+  page only by the address the first tester's recordings showed. That
+  path, letter for letter, now counts as the page too. A page below it,
+  the same path on another host, or the path inside another address is
+  not taken for it, and a press that takes the tab to a page below it is
+  followed by going back, as at the first address.
+
 ## [0.59.1] - 2026-10-27
 
 Bank of America saves statements when the page's Download PDF links have

@@ -210,6 +210,23 @@ def test_pilot_on_a_page_whose_links_open_by_a_script_files_every_statement(tmp_
     assert not bank.pdfs and not list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
 
 
+def test_pilot_at_the_second_address_files_every_statement(tmp_path, bank, capsys):
+    """crazyhorse90210's run (#121, 2026-10-28) stopped on "The Bank of
+    America tab is not on Statements & Documents" with the window on it, at
+    /statements-documents/home/. The same page there files its statements,
+    by the press its links need when they open by a script."""
+    bank.url = sb.SECOND_PAGE_URL
+    bank.links = sb.script_links(bank.listed["documentList"])
+    assert run(tmp_path, "--pilot") == 0
+    saved = sorted(p.name for p in (tmp_path / "out").rglob("*.pdf"))
+    assert saved == ["2025-12-15 Bank of America Statement - Everyday Checking.pdf",
+                     "2026-01-15 Bank of America Statement - Everyday Checking.pdf",
+                     "2026-01-15 Bank of America Statement - Travel Card.pdf",
+                     "2026-02-15 Bank of America Statement - Everyday Checking.pdf"]
+    out = capsys.readouterr().out
+    assert result(out)["new_files"] == 4 and "not on Statements & Documents" not in out
+
+
 def test_something_over_a_download_pdf_link_stops_the_run(tmp_path, bank, capsys, monkeypatch):
     bank.links = sb.script_links(bank.listed["documentList"])
 
@@ -566,6 +583,21 @@ def test_the_tab_on_statements_and_documents_is_the_one_worked_in(tmp_path, monk
     overview, statements = sb.Bank(url=OVERVIEW), sb.Bank()
     attached(monkeypatch, sb.Bank(url=ELSEWHERE), overview, statements)
     assert an_app(tmp_path).page() is statements
+
+
+def test_the_tab_at_the_second_address_is_the_one_worked_in(tmp_path, monkeypatch):
+    """A second tester's Statements & Documents was at /statements-documents/home/,
+    and 0.59.1 worked in another tab on the site, or stopped (#121)."""
+    overview, statements = sb.Bank(url=OVERVIEW), sb.Bank(url=sb.SECOND_PAGE_URL)
+    attached(monkeypatch, sb.Bank(url=ELSEWHERE), overview, statements)
+    assert an_app(tmp_path).page() is statements
+
+
+def test_a_tab_at_each_address_takes_neither(tmp_path, monkeypatch):
+    attached(monkeypatch, sb.Bank(), sb.Bank(url=sb.SECOND_PAGE_URL))
+    with pytest.raises(pressing.Stop) as stopped:
+        an_app(tmp_path).page()
+    assert stopped.value.facts == {"tabs_on_the_statements_page": 2}
 
 
 def test_a_tab_on_the_site_is_still_taken_when_none_is_on_the_statements_page(tmp_path, monkeypatch):

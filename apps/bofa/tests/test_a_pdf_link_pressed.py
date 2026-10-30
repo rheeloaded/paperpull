@@ -162,6 +162,19 @@ def test_a_press_that_takes_the_tab_to_its_pdf_goes_back_to_the_statements_page(
     assert ("back", page.press_goes_to) in page.asked and site.on_statements_page(page)
 
 
+def test_a_press_that_takes_the_tab_below_the_second_address_goes_back_to_it():
+    """The second address is known by its whole path, so a page below it,
+    where a PDF could open, is never taken for the statements page and the
+    tab goes back."""
+    page = script_page()
+    page.url = sb.SECOND_PAGE_URL
+    page.press_goes_to = "https://secure.bankofamerica.com/statements-documents/home/viewdoc"
+    call = site.learn(page)
+    assert call.pdf is not None and call.facts["back_to_the_page"] is True
+    assert ("back", page.press_goes_to) in page.asked
+    assert page.url == sb.SECOND_PAGE_URL and site.on_statements_page(page)
+
+
 def test_a_tab_the_press_left_off_the_statements_page_stops_the_run(monkeypatch):
     page = script_page()
     page.press_goes_to = "https://secure.bankofamerica.com/sample/viewdoc?doc=DOC000000000101"
