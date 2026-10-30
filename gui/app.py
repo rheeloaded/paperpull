@@ -1483,12 +1483,98 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     }
 
 
+# -- two accounts on one debugging port ------------------------------------------
+#
+# A sign-in on a port a browser already holds joins that browser, so two
+# accounts whose configs name one port sign in to one browser, one profile.
+# A second person is given their app's port plus 10, moved past only the
+# ports in use then, so an app set up after them can come with that port.
+# The account's row and page say so, from paperpull_core.ports, which Login
+# asks too, so the two never disagree. Nothing is stopped for it.
+
+_PORTS = None
+
+
+def _ports():
+    """paperpull_core.ports, from the core the panel ships beside, or None,
+    in which case no row says a port is shared and nothing else changes."""
+    global _PORTS
+    if _PORTS is None:
+        core = HERE.parent / "core"
+        if (core / "paperpull_core" / "ports.py").is_file() and str(core) not in sys.path:
+            sys.path.insert(0, str(core))
+        try:
+            from paperpull_core import ports as mod
+            _PORTS = mod
+        except Exception:
+            _PORTS = False
+    return _PORTS or None
+
+
+def _shared_ports() -> dict:
+    """Every account's config under the root whose port another one names
+    (ports.findings), read once for all the rows, or {}. The providers this
+    copy ships are passed too, so a moved account is never told the port of
+    one set up later, as Login is never told it."""
+    mod = _ports()
+    try:
+        if mod is None:
+            return {}
+        templates = _templates_root()
+        shipped = ([templates] if templates else []) + mod.shipped_folders()
+        return mod.findings(mod.installs_in(apps_root()), shipped)
+    except Exception:
+        return {}
+
+
+def _and(items: list) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _port_note(shared: dict, meta: dict, account: str):
+    """What an account's row and page say when another account beside it
+    names its debugging port, or None. Every name and address in it is one
+    line of text (ports.one_line), so a config with a stray character in it
+    cannot keep the page from reading its rows."""
+    mod = _ports()
+    if not shared or mod is None:
+        return None
+    config = _account_config(meta, account)
+    found = shared.get(mod.key_of(config))
+    if found is None:
+        return None
+    names = [mod.who(n) for n in found.others]
+    named = _and(names)
+
+    def change(n, to):
+        where = "%s in the %s folder" % (mod.one_line(n.config.name),
+                                         mod.one_line(n.config.parent.name))
+        if mod.key_of(n.config) == mod.key_of(config):
+            return "in this account's config, %s, to %s" % (where, mod.one_line(to))
+        return "in %s to %s" % (where, mod.one_line(to))
+    what = "change cdp_url " + _and([change(n, to) for n, to in found.moves])
+    return {
+        "port": found.port,
+        "with": names,
+        "say": ("%s %s debugging port %d too. A sign-in joins the browser already on its "
+                "port, so these accounts sign in to one browser, and a run of any of them "
+                "reads whichever account that browser is signed in to. To keep them apart, "
+                "%s, %s no other account here names and no provider PaperPull ships comes "
+                "with. Nothing is stopped for this."
+                % (named[:1].upper() + named[1:], "names" if len(names) == 1 else "name",
+                   found.port, what, "a port" if len(found.moves) == 1 else "ports")),
+        "short": ("Shares debugging port %d with %s. Open it to see the setting to change."
+                  % (found.port, named if len(names) == 1 else "%d other accounts" % len(names))),
+    }
+
+
 def account_rows() -> list:
     """Every provider and person, with where each stands. One account that
     cannot be read, a config written by hand say, gets a row that says so
     and never takes the others' rows down with it."""
     mod = _status_module()
     cards = _provider_notes()
+    shared = _shared_ports()
     rows = []
     for name, meta in discover_apps().items():
         provider, kind = _provider_of(meta)
@@ -1497,10 +1583,10 @@ def account_rows() -> list:
         slug = str(meta.get("script_name") or "").rsplit("_", 1)[0]
         for account in meta["accounts"]:
             try:
-                rows.append(_account_row(mod, cards, name, meta, provider, kind, slug, account))
+                row = _account_row(mod, cards, name, meta, provider, kind, slug, account)
             except Exception:
                 running = _RUNS.get((name, account))
-                rows.append({
+                row = {
                     "app": name, "account": account, "provider": provider, "owner": "",
                     "gets": cards.get(slug, {}).get("documents", ""), "kind": kind,
                     "state": "nostatus", "documents": 0, "newest": None, "checked": None,
@@ -1508,7 +1594,12 @@ def account_rows() -> list:
                     "last_run": None, "last_outcome": "", "runs": [], "latest": [],
                     "running": dict(running) if running else None,
                     "runnable": meta.get("runnable", True),
-                    "needs_setup": meta.get("needs_setup", False)})
+                    "needs_setup": meta.get("needs_setup", False)}
+            try:
+                row["shared_port"] = _port_note(shared, meta, account)
+            except Exception:
+                row["shared_port"] = None
+            rows.append(row)
     order = {s: i for i, s in enumerate(STATE_ORDER)}
     rows.sort(key=lambda r: (order.get(r["state"], len(order)), -(r["age_days"] or 0),
                              r["provider"].lower(), r["account"] != "primary", r["account"]))
