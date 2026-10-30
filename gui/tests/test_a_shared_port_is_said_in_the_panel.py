@@ -149,18 +149,19 @@ def test_both_rows_of_a_tie_say_the_same_one_moves(root):
 
 
 def test_a_stray_character_in_an_address_keeps_every_row(pair):
-    """A cdp_url holding half of a character, written by hand or left in the
-    shared folder on the server. The page's rows are sent as UTF-8, which
-    cannot hold it, and the home page said only that it could not read the
-    accounts."""
+    """A cdp_url holding half of a character and a line break, written by
+    hand or left in the shared folder on the server. The page's rows are
+    sent as UTF-8, which cannot hold the half, and the home page said only
+    that it could not read the accounts. The half is made whole as the
+    config is read, and the line break is written as its escape."""
     grocer, _ = pair
     (grocer / "config.spouse.json").write_text(
-        '{"output_dir": ".", "cdp_url": "http://127.0.0.1:9262/\\ud800"}', encoding="utf-8")
+        '{"output_dir": ".", "cdp_url": "http://127.0.0.1:9262/a\\nb\\ud800"}', encoding="utf-8")
     got = app_module.account_rows()
     body = responses.JSONResponse({"accounts": got}).body
     said = json.loads(body)["accounts"]
     card = next(r for r in said if r["app"] == "Card Statements")["shared_port"]["say"]
-    assert "http://127.0.0.1:9264/\\ud800" in card
+    assert "http://127.0.0.1:9264/a\\nb�" in card
 
 
 def test_a_port_it_cannot_read_takes_no_row_down(pair, monkeypatch):

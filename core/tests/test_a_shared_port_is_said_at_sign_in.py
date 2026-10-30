@@ -183,6 +183,31 @@ def test_a_moved_config_is_never_told_a_port_a_shipped_provider_comes_with(pair,
         in launches[0]
 
 
+def test_the_shipped_providers_are_read_once_until_one_is_added(pair, shipped, monkeypatch):
+    """The panel asks on every page it loads, and reading every shipped
+    example each time made its rows late. They are read once, and again
+    only when a provider is added to the folder."""
+    from paperpull_core import ports
+    install(shipped, "deli", "deli_receipts.py", "http://127.0.0.1:9264")
+    _, card = pair
+    real, read = ports._url_in, []
+
+    def counted(path):
+        read.append(path.parent.name)
+        return real(path)
+    monkeypatch.setattr(ports, "_url_in", counted)
+    installs = ports.installs_in(card.parent)
+    first = ports.findings(installs, [shipped])
+    second = ports.findings(installs, [shipped])
+    assert read.count("deli") == 1
+    assert first[ports.key_of(card / "config.json")].moves[0][1] == "http://127.0.0.1:9265"
+    assert second == first
+    install(shipped, "fuel", "fuel_docs.py", "http://127.0.0.1:9265")
+    third = ports.findings(installs, [shipped])
+    assert read.count("fuel") == 1
+    assert third[ports.key_of(card / "config.json")].moves[0][1] == "http://127.0.0.1:9266"
+
+
 def test_a_config_moved_off_its_own_example_is_told_that_port_again(tmp_path, launches):
     """Plan's example moved to 9296 once Bank had taken 9298, the port Plan
     shipped on, and a Plan set up before then still names 9298. Plan's own

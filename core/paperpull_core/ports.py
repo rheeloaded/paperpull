@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
 from urllib.parse import urlsplit
 
+from .characters import whole_json
 from .run_reporting import one_line
 
 # How the launcher finds an install (paperpull.py list_apps and
@@ -105,8 +106,10 @@ def shipped_folders() -> List[Path]:
     exe = Path(sys.executable).resolve()
     places = [here.parents[2] / "apps"]
     places += [base / "templates" / "apps" for base in exe.parents[1:3]]
+    # The running app's code, from the spec its storage bound. Only an app
+    # run has one, and the control panel, which has none, never loads it.
+    storage = sys.modules.get(__package__ + ".storage")
     try:
-        from . import storage
         places.append(storage.spec().project_dir.parent)
     except Exception:
         pass
@@ -135,7 +138,7 @@ def _url_in(path: Path):
         st = path.stat()
         if not stat.S_ISREG(st.st_mode) or st.st_size > _MOST_BYTES:
             return None
-        cfg = json.loads(path.read_text(encoding="utf-8-sig"))
+        cfg = whole_json(json.loads(path.read_text(encoding="utf-8-sig")))
     except (OSError, ValueError, RecursionError):
         return None
     return cfg.get("cdp_url") if isinstance(cfg, dict) else None
@@ -169,11 +172,9 @@ def findings(installs: Iterable[Path], shipped: Iterable[Path] = ()) -> Dict[str
     # and each install's own example port.
     shipping: Dict[int, set] = {}
     examples = {}
-    for folder in shipped:
-        for template in installs_in(folder):
-            example = port_of(_url_in(template / EXAMPLE))
-            if example:
-                shipping.setdefault(example, set()).add(_entry(template))
+    for folder in {_key(f): f for f in shipped}.values():
+        for example, entries in _shipping_in(folder).items():
+            shipping.setdefault(example, set()).update(entries)
     for install in installs:
         example = port_of(_url_in(install / EXAMPLE))
         if example:
@@ -201,6 +202,31 @@ def findings(installs: Iterable[Path], shipped: Iterable[Path] = ()) -> Dict[str
         for this in group:
             found[_key(this.config)] = Shared(port, [n for n in group if n is not this], moves)
     return found
+
+
+# The ports the providers in a shipped folder come with, by the folder and
+# the names in it. Shipped code changes only with an update, and the
+# control panel asks on every page it loads, where reading 78 providers'
+# examples each time made its rows late. Listing the names is quick, and
+# they change as soon as a provider is added or taken out, which a
+# folder's time on a coarse clock need not.
+_SHIPPED: Dict[Tuple[str, Tuple[str, ...]], Dict[int, set]] = {}
+
+
+def _shipping_in(folder: Path) -> Dict[int, set]:
+    try:
+        names = tuple(sorted(p.name for p in Path(folder).iterdir()))
+    except OSError:
+        return {}
+    key = (_key(folder), names)
+    if key not in _SHIPPED:
+        found: Dict[int, set] = {}
+        for template in installs_in(folder):
+            example = port_of(_url_in(template / EXAMPLE))
+            if example:
+                found.setdefault(example, set()).add(_entry(template))
+        _SHIPPED[key] = found
+    return _SHIPPED[key]
 
 
 def _keeper(group: List[Named], examples: dict) -> Named:
