@@ -140,11 +140,18 @@ def _errors(exc, own: tuple) -> list:
     return out
 
 
-def _as_summarized(node, nodeid: str) -> str:
+def _as_summarized(node, report) -> str:
+    """The test as pytest's summary line names it, which pytest has
+    cwd_relative_nodeid work out. To 9.1.1 that took the report's nodeid
+    and gave back a string. Since 9.2.0 it takes the report's structured
+    id, report.id, which 9.1.1's reports do not have, and gives back
+    another, whose str() is the summary's form. Given the string it
+    raises, which under 9.2.0 left each failure named from the checkout's
+    root alone, so the runner printed it a second time from the summary."""
     try:
-        return node.config.cwd_relative_nodeid(nodeid)
+        return str(node.config.cwd_relative_nodeid(getattr(report, "id", None) or report.nodeid))
     except Exception:
-        return nodeid
+        return report.nodeid
 
 
 def _append(path: str, record: dict) -> None:
@@ -166,7 +173,7 @@ def pytest_exception_interact(node, call, report):
             "nodeid": report.nodeid,
             # The same test as pytest's summary line names it, relative to
             # the folder the suite ran in, which is not the checkout's root.
-            "as_summarized": _as_summarized(node, report.nodeid),
+            "as_summarized": _as_summarized(node, report),
             "when": getattr(report, "when", None) or "collect",
             "errors": _errors(exc, _own_dirs()),
             "libraries": _libraries(),
