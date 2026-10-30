@@ -82,10 +82,13 @@ jobs:
         # on exactly the versions the package ships and tools/release.sh
         # waits for a run of them. pytest is the one thing the package does
         # not carry, and the core is built with the lock's setuptools.
+        # pytest is pinned to the version the suites run on here, since the
+        # runner reads pytest's output, and 9.2.0 (2026-10-27) prints each
+        # failure under two paths and failed the runner's own tests.
         run: |
           python -m pip install --upgrade pip
           python -m pip install --require-hashes --only-binary :all: -r packaging/requirements-windows-x64.txt
-          python -m pip install pytest
+          python -m pip install pytest==9.1.1
           python -m pip install --no-deps --no-build-isolation ./core
 
       - name: Install the browser the privacy canary needs
@@ -127,8 +130,9 @@ jobs:
 
       - name: Install pytest
         # These tests need nothing else. Each fake suite they start runs in
-        # a pytest of its own and imports only the standard library.
-        run: python -m pip install pytest
+        # a pytest of its own and imports only the standard library. The
+        # same pytest as the suites above, since these tests read its output.
+        run: python -m pip install pytest==9.1.1
 
       - name: Run the runner's own tests
         # Verbose, so the log names every test that ran here. A test that

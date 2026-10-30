@@ -55,10 +55,20 @@ def test_the_tests_run_on_the_versions_the_windows_package_ships():
     assert lines == [
         "python -m pip install --upgrade pip",
         "python -m pip install --require-hashes --only-binary :all: -r packaging/requirements-windows-x64.txt",
-        "python -m pip install pytest",
+        "python -m pip install pytest==9.1.1",
         "python -m pip install --no-deps --no-build-isolation ./core",
     ]
     assert (REPO / "packaging" / "requirements-windows-x64.txt").is_file()
+
+
+def test_every_pytest_the_tests_install_is_one_pinned_version():
+    """The runner reads pytest's output, so a pytest that came out after the
+    last run here is not taken unseen. 9.2.0 printed each failure under two
+    paths and failed the runner's own tests on a tag (2026-10-30)."""
+    text = (REPO / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    installs = re.findall(r"pip install (?:\S+ )*pytest\S*", text)
+    assert len(installs) == 2, installs
+    assert set(installs) == {"pip install pytest==9.1.1"}, installs
 
 
 def test_each_package_workflow_checks_the_python_it_installed():

@@ -13,7 +13,7 @@ openpyxl==3.1.5
 pdfplumber==0.11.10
 # [crypto] as the shared core asks for it, so an AES-encrypted PDF opens.
 pypdf[crypto]==6.21.2
-playwright==1.63.0
+playwright==1.64.1
 # What builds paperpull-core inside the package's own Python, taken from the
 # lock rather than fetched unchecked at build time (--no-build-isolation in
 # packaging/build_windows.py). The build removes it again.

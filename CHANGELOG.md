@@ -12,7 +12,29 @@ All notable changes to PaperPull are recorded here. Versioning follows
 Bank of America knows Statements & Documents at the second address a
 tester's window showed. Continue no longer goes round and round after a
 list that was not read to its end, and the panel offers Get new
-documents in its place.
+documents in its place. The packages and the server image take
+Playwright 1.64.1, past a hole known to be exploited in the Node it
+carries, and the server image's base takes Python 3.12.16.
+
+### Security
+- **The packages and the server image take Playwright 1.64.1, past four
+  holes in the Node it carries.** Playwright 1.63.0's driver, which every
+  browser the apps open and the requests many of them make go through,
+  carries Node 24.21.0. That Node has CVE-2026-111497, a Critical
+  out-of-bounds write in its Brotli decoder that is on CISA's list of
+  holes known to be exploited, and three High advisories
+  (CVE-2026-105482, CVE-2026-105483 and CVE-2026-106069). Playwright
+  1.64.1 carries Node 24.22.1, which fixes all four, and Chromium 156
+  (build 1248) in place of 153. The Windows and Mac packages and the
+  server image carry it alike. The server image's own check found it
+  after 0.59.2 was first tagged and stopped that image from being
+  published, and 0.59.2 was tagged again with these fixes.
+- **The server image's base takes Python 3.12.16 and Debian's newest
+  OpenSSL.** The image's base, python:3.12-slim-bookworm, is named at the
+  digest that tag points at now, which brings Python 3.12.16, past
+  CVE-2026-115557 (Critical) in 3.12.15, and OpenSSL 3.0.22-1~deb12u2,
+  past CVE-2026-84782 (High). The Windows and Mac packages carry a Python
+  of their own, 3.12.14, which a later release moves to 3.12.16.
 
 ### Fixed
 - **Bank of America knows Statements & Documents at its second address
