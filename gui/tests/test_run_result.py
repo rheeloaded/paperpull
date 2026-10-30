@@ -217,3 +217,15 @@ def test_a_discover_that_stopped_offers_to_check_again():
     assert "const recheck = RUN.action === 'discover';" in js
     assert "recheck ? 'Check again when you are ready'" in js
     assert 'data-action="discover"' in js and "Check again</button>" in js
+
+
+def test_a_resume_only_a_listing_carries_on_from_is_carried_to_the_panel():
+    """A Resume that stopped because no run read the list to its end says
+    so, and the panel offers Get new documents rather than Continue, which
+    would stop the same way again (#124). An app from before it sends no
+    count, which reads as no such stop."""
+    stop = run_result.parse(line(stopped=1, list_not_read=1), MARK)
+    assert stop["list_not_read"] == 1 and stop["stopped"] == 1
+    assert run_result.parse(line(stopped=1), MARK)["list_not_read"] == 0
+    assert run_result.parse(line(list_not_read=-1), MARK) is None
+    assert run_result.parse(line(list_not_read="1"), MARK) is None

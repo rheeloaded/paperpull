@@ -62,6 +62,26 @@ def stopped_early() -> bool:
     return sys.exc_info()[1] is not None
 
 
+class ListNotRead(SystemExit):
+    """A Resume stopping because no run has read the provider's list to its
+    end, so it has nothing more to carry on with (paperpull_core.listing).
+    Only a run that lists can, and pressing Resume again would stop here
+    again, which is how Chase's Continue went round and round (#124). So the
+    run's summary says so, and the panel offers Get new documents instead.
+    `whole_run` is what to run, as the stop has just said it."""
+
+    def __init__(self, whole_run: str):
+        super().__init__(0)
+        self.whole_run = whole_run
+
+
+def list_not_read() -> str:
+    """What to run instead, while the run is on its way out on a
+    ListNotRead, or "" for any other way out."""
+    stop = sys.exc_info()[1]
+    return stop.whole_run if isinstance(stop, ListNotRead) else ""
+
+
 # The runs that write a run summary yet save nothing. Verify checks the
 # files already saved, a dry run (--dry-run, alone or with a download mode)
 # plans names and saves none, and Amazon's --reparse-items reads its saved
@@ -118,6 +138,10 @@ def report_run_result(stats):
     from .storage import unsaved_on_leaving
     unsaved = unsaved_on_leaving()
     result["stopped"] = int(stopped_early() or bool(unsaved))
+    whole_run = list_not_read()
+    if whole_run:
+        # Sent only when it is so, as an app from before it sends nothing.
+        result["list_not_read"] = 1
     if unsaved and not stopped_early():
         print("\nThis run did its work, but its run state could not be written, so "
               "the next run may download again what this one saved. Close the "
@@ -130,6 +154,12 @@ def report_run_result(stats):
         # Resume downloads, and Discover was run only to see what is there.
         print("\nThis run stopped before it finished. Discover downloads nothing, "
               "so press Discover again rather than Resume.", flush=True)
+    elif result["stopped"] and whole_run:
+        # Resume has just said the list was not read to its end. Saying here
+        # that Resume carries on is what sent people round again (#124).
+        print("\nThis run stopped before it finished. Whatever it saved is kept. "
+              "Resume would only stop here again, so run %s, either of which "
+              "reads the list first." % whole_run, flush=True)
     elif result["stopped"]:
         print("\nThis run stopped before it finished. Whatever it saved is kept, "
               "and Resume carries on from where it stopped.", flush=True)

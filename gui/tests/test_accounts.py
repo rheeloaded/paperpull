@@ -174,6 +174,20 @@ def test_a_run_that_did_not_finish_puts_its_row_first(root):
         assert app_module.account_rows()[0]["account"] == "second"
 
 
+def test_a_resume_only_a_listing_carries_on_from_is_its_own_outcome(root):
+    """Still a run that did not finish, so the row comes first, but one the
+    page offers Get new for rather than Continue (#124)."""
+    _log(root / "Bank Statements - second",
+         {"action": "resume", "exit_code": 0, "result": {"stopped": 1, "list_not_read": 1}})
+    row = _rows()[("Bank Statements", "second")]
+    assert (row["state"], row["last_outcome"]) == ("stopped", "unlisted")
+    assert app_module.account_rows()[0]["account"] == "second"
+    _log(root / "Bank Statements - second",
+         {"action": "resume", "exit_code": 0, "result": {"stopped": 1, "list_not_read": 0}})
+    row = _rows()[("Bank Statements", "second")]
+    assert (row["state"], row["last_outcome"]) == ("stopped", "stopped")
+
+
 def test_a_clean_run_after_a_stop_clears_it(root):
     _log(root / "Bank Statements - second",
          {"action": "all", "exit_code": 0, "result": {"stopped": 0, "attention": False}},

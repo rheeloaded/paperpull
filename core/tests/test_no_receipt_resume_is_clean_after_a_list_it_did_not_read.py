@@ -453,6 +453,14 @@ def finished(result) -> bool:
     return bool(result) and result.get("stopped") == 0
 
 
+def told_to_list(result) -> bool:
+    """Whether the run stopped as one only a run that lists carries on
+    from. A receipt Resume reads the list again itself, so that is only a
+    new install's, and pressing Resume again is right after any other stop
+    (#124)."""
+    return bool(result) and result.get("list_not_read") == 1
+
+
 # -- every receipt app ------------------------------------------------------------
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
@@ -463,6 +471,7 @@ def test_resume_with_nothing_ever_listed_is_not_clean(home):
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
     assert NOTHING_LISTED in said and stopped(result), said[-1500:]
+    assert told_to_list(result), said[-1500:]
     assert home.browser.asked == 0 and home.did == [], (
         "Resume reached for the browser with nothing to carry on from")
 
@@ -477,6 +486,7 @@ def test_resume_after_a_run_that_listed_nothing_reads_the_list(home):
     assert COMPLETE not in said and NOTHING_LISTED not in said, said[-1500:]
     assert home.did[:1] == [LIST], "Resume did not read the list %s" % home.did
     assert home.browser.asked > asked and stopped(result), said[-1500:]
+    assert not told_to_list(result), said[-1500:]
 
 
 @pytest.mark.parametrize("by", list(READS_THE_LIST))
@@ -491,7 +501,7 @@ def test_resume_after_a_run_that_stopped_listing_reads_the_list_again(home, by):
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
     assert home.did[:1] == [LIST], "Resume did not read the list again %s" % home.did
-    assert stopped(result), said[-1500:]
+    assert stopped(result) and not told_to_list(result), said[-1500:]
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
@@ -504,7 +514,7 @@ def test_resume_reads_the_list_before_it_takes_anything(home):
     home.stopped_while_listing()
     said, result, _ended = home.run(*RESUME)
     assert home.did[:1] == [LIST], "Resume took purchases before it read the list %s" % home.did
-    assert stopped(result), said[-1500:]
+    assert stopped(result) and not told_to_list(result), said[-1500:]
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)

@@ -19,6 +19,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the same path on another host, or the path inside another address is
   not taken for it, and a press that takes the tab to a page below it is
   followed by going back, as at the first address.
+- **Continue no longer goes round and round after a list that was not
+  read to its end (#124).** A Chase run stopped before it read the whole
+  list, and every Continue after it said the list was not read to its end
+  and to run Pilot or Run All, and then stopped. The summary under that
+  said Resume carries on, and the panel offered Continue again, so pressing
+  it could never get anywhere. Such a stop now says so in the run's result,
+  and the panel offers Get new documents in its place, on the account's
+  row, on its page, on the run's own page and in Get new for all, where
+  trying such an account again reads the list rather than continuing the
+  same way. The run's last line says to run Pilot or Run All. It is the
+  same for every provider whose Continue carries on from what is listed,
+  63 document apps and Anthem, and for a receipt app's Continue on an
+  install that never listed anything. Any other stop, a sign-in, a page
+  that would not open, or a Continue that reads the list again itself, is
+  continued as before.
 
 ## [0.59.1] - 2026-10-27
 

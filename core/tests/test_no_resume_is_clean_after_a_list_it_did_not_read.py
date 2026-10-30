@@ -298,6 +298,17 @@ def stopped(result) -> bool:
     return bool(result) and result.get("stopped") == 1
 
 
+def told_to_list(said, result) -> bool:
+    """Whether the run stopped as one only a run that lists carries on
+    from, with its words and its result line agreeing. The words said to
+    run Pilot or Run All, the line said nothing of it, and the panel
+    offered Continue, which stopped the same way again (#124)."""
+    flagged = bool(result) and result.get("list_not_read") == 1
+    worded = NOTHING_LISTED in said or STOPS_HERE in said
+    assert flagged == worded, said[-1500:]
+    return flagged
+
+
 # -- every app that resumes from a list -------------------------------------------
 
 def test_there_are_apps_to_check():
@@ -315,6 +326,7 @@ def test_resume_with_nothing_ever_listed_is_not_clean(home):
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
     assert NOTHING_LISTED in said and stopped(result), said[-1500:]
+    assert told_to_list(said, result), said[-1500:]
     assert home.browser.asked == 0, "Resume reached for the browser with nothing to carry on from"
 
 
@@ -324,6 +336,7 @@ def test_resume_after_a_run_that_listed_nothing_is_not_clean(home):
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
     assert NOTHING_LISTED in said and stopped(result), said[-1500:]
+    assert told_to_list(said, result), said[-1500:]
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
@@ -339,6 +352,7 @@ def test_resume_after_a_run_that_stopped_listing_is_not_clean(home):
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
     assert CUT_SHORT in said and stopped(result), said[-1500:]
+    told_to_list(said, result)
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
@@ -349,6 +363,7 @@ def test_resume_stops_at_its_end_after_a_list_cut_short(home):
     said, result, _ended = home.run(*RESUME, "--dry-run")
     assert COMPLETE not in said and CUT_SHORT in said, said[-1500:]
     assert STOPS_HERE in said and stopped(result), said[-1500:]
+    assert told_to_list(said, result), said[-1500:]
     assert home.browser.asked == 0, "a dry run reached for the browser"
 
 
@@ -374,11 +389,28 @@ def test_resume_carries_on_with_what_is_known_and_then_stops(home, monkeypatch):
     assert CUT_SHORT in said and stopped(result), said[-1500:]
     if home.listings:
         assert not handed and (home.noted() or {}).get("complete") is False, said[-1500:]
+        # Its Resume reads the list itself, so pressing Resume again is
+        # right, and the panel offers it.
+        assert not told_to_list(said, result), said[-1500:]
         return
     assert handed == [doc.key], (
         "the document the list held was not carried on with\n" + said[-1500:])
     assert home.browser.asked == 0, "a dry run reached for the browser\n" + said[-1500:]
     assert returned and "DRY RUN" in said and STOPS_HERE in said, said[-1500:]
+    assert told_to_list(said, result), said[-1500:]
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_resume_that_stops_for_want_of_its_browser_is_still_continued(home):
+    """The other side, for every app. A whole list with one document left
+    and no browser to take it in, as after a sign-out or a closed window.
+    That Resume stops some other way, and pressing Continue again is right,
+    so it is never told to list (#124)."""
+    home.listed_before(done=False)
+    said, result, _ended = home.run(*RESUME)
+    assert home.browser.asked > 0, said[-1500:]
+    assert stopped(result), said[-1500:]
+    assert not told_to_list(said, result), said[-1500:]
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
@@ -391,6 +423,7 @@ def test_resume_after_a_whole_list_still_finishes_clean(home):
     said, result, _ended = home.run(*RESUME, "--dry-run")
     assert result is not None and result["stopped"] == 0, said[-1500:]
     assert CUT_SHORT not in said and NOTHING_LISTED not in said and STOPS_HERE not in said
+    assert not told_to_list(said, result)
     (home.out / "last-listing.json").unlink()
     said, result, _ended = home.run(*RESUME, "--dry-run")
     assert result is not None and result["stopped"] == 0, said[-1500:]
