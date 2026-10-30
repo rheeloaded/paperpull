@@ -18,12 +18,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Chromium. Every run of an app whose config names no cdp_url, and
   Target's headless print after its first way failed, stopped there with
   "Executable doesn't exist", and the download was never offered, since a
-  build was on disk. Such a launch now takes the newest Chromium on disk,
-  the same build the sign-in opens, and Playwright 1.64.1 was measured
-  driving builds 1234 and 1228 in a window and printing a PDF with each.
-  Where Playwright's own build is on disk nothing changes, and no browser
-  of the person's own is taken in its place. A sign-in, and a run that
-  attaches to it through cdp_url, were never affected.
+  build was on disk. Such a launch now takes the newest Chromium on disk.
+  Playwright 1.64.1 was measured driving the older builds 1234 and 1228,
+  and Playwright 1.62.0 the newer build 1248, in a window and printing a
+  PDF with each. Where Playwright's own build is on disk nothing changes,
+  and no browser of the person's own is taken in its place. A sign-in,
+  and a run that attaches to it through cdp_url, were never affected.
 
 ## [0.59.2] - 2026-10-30
 

@@ -683,6 +683,49 @@ def test_a_playwright_that_names_no_build_is_left_as_it_is(monkeypatch, tmp_path
     assert _launch_each_way(c) == [None] * 4
 
 
+def test_a_missing_headless_shell_alone_is_said_as_such(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    _lay_out(tmp_path, ["chromium-1248/" + _WIN])
+    c = _Chromium(tmp_path / "chromium-1248" / _WIN)
+    browser.sandboxed_launch(c, headless=True)
+    assert c.asked[0]["executable_path"] == str(tmp_path / "chromium-1248" / _WIN)
+    assert capsys.readouterr().out.strip() == (
+        "The headless shell of Chromium build 1248 is not on this computer, so its full "
+        "build is started headless instead.")
+
+
+@pytest.mark.parametrize("copy", ["chromium-1248 - Copy", "chromium-1248.bak"])
+def test_a_copied_build_folder_keeps_the_sign_ins_order(monkeypatch, tmp_path, copy):
+    """A folder copied beside a build is read as it always was, so the
+    sign-in's browser does not change, and a window handed a build takes
+    the sign-in's."""
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    _lay_out(tmp_path, ["chromium-1243/" + _WIN, copy + "/" + _WIN])
+    assert browser._bundled_chromium() == [str(tmp_path / copy / _WIN),
+                                           str(tmp_path / "chromium-1243" / _WIN)]
+    c = _Chromium(tmp_path / "chromium-1250" / _WIN)
+    browser.sandboxed_persistent_context(c, "/x/profile", headless=False)
+    assert c.asked[0]["executable_path"] == browser._bundled_chromium()[0]
+
+
+def test_the_headless_shell_is_named_for_chromiums_own_build():
+    """A headless launch knows Playwright's own shell by Chromium's build
+    number, which is the shell's revision in every release so far. A
+    release that gives the shell a revision of its own, or a platform
+    override, fails here, and _on_disk has to read browsers.json then."""
+    import json
+    playwright = pytest.importorskip("playwright")
+    listed = json.loads((Path(playwright.__file__).parent / "driver" / "package"
+                         / "browsers.json").read_text(encoding="utf-8"))["browsers"]
+    each = {b["name"]: b for b in listed}
+    assert each["chromium-headless-shell"]["revision"] == each["chromium"]["revision"]
+    assert "revisionOverrides" not in each["chromium-headless-shell"]
+    assert "revisionOverrides" not in each["chromium"]
+
+
 
 class _EndedProcess:
     """What subprocess.Popen hands back for a browser that has already

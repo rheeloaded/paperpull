@@ -102,15 +102,12 @@ def _playwright_root() -> Optional[Path]:
     return root
 
 
-def _build_of(path: str, root: Path) -> int:
-    """The build number of the folder under root that path is in,
-    chromium-1248 or chromium_headless_shell-1248, or -1."""
-    try:
-        folder = Path(path).relative_to(root).parts[0]
-    except (ValueError, IndexError):
-        return -1
-    m = re.fullmatch(r"chromium(?:_headless_shell)?-(\d+)", folder)
-    return int(m.group(1)) if m else -1
+def _build_number(path: str) -> int:
+    """The build in a path to a Chromium or a headless shell of
+    Playwright's, the last chromium-1248 or chromium_headless_shell-1248 in
+    it, so a folder of that name above Playwright's own is not read, or -1."""
+    found = re.findall(r"chromium(?:_headless_shell)?-(\d+)", path)
+    return int(found[-1]) if found else -1
 
 
 def _bundled_chromium(root: Optional[Path] = None) -> List[str]:
@@ -152,8 +149,13 @@ def _bundled_chromium(root: Optional[Path] = None) -> List[str]:
     # venv on an older Playwright, for example), so "whatever glob returned
     # first" can hand back a build older than the installed playwright
     # expects. Sort on the build NUMBER, not the string, since
-    # "chromium-1000" sorts before "chromium-999" as text.
-    return sorted(found, key=lambda path: _build_of(path, root), reverse=True)
+    # "chromium-1000" sorts before "chromium-999" as text. This order is the
+    # sign-in's, and so is left as it was (_on_disk).
+    def build_number(path: str) -> int:
+        m = re.search(r"chromium-(\d+)", path)
+        return int(m.group(1)) if m else -1
+
+    return sorted(found, key=build_number, reverse=True)
 
 
 # Where the headless shell sits inside chromium_headless_shell-<build>,
@@ -181,7 +183,7 @@ def _headless_shells(root: Path) -> List[str]:
     found: List[str] = []
     for pattern in inner:
         found += glob.glob(str(root / "chromium_headless_shell-*" / pattern))
-    return sorted(found, key=lambda path: _build_of(path, root), reverse=True)
+    return sorted(found, key=_build_number, reverse=True)
 
 
 # Where each brand registers its executable under App Paths, and the
@@ -744,13 +746,19 @@ def sandboxed_persistent_context(chromium, user_data_dir, **kwargs):
 # because some build was on disk. The sign-in was not hurt, since it starts
 # the newest build on disk itself.
 #
-# Such a launch is now handed the newest Chromium on disk, the same build
-# the sign-in starts. Measured on 2026-10-30, Playwright 1.64.1 drove
-# builds 1234 and 1228 (Chrome 151 and 149) in a window, headless and
-# printing a PDF, through the headless shell and the full build alike.
-# Where Playwright's own build is on disk nothing is handed over and
-# nothing changes, and no browser of the person's own is ever taken here,
-# so nobody is moved off the browser they had.
+# Such a launch is now handed the newest Chromium on disk, the build the
+# sign-in starts whenever it starts Playwright's Chromium, in the sign-in's
+# own order (_bundled_chromium). Measured on 2026-10-30, Playwright 1.64.1
+# drove the older builds 1234 and 1228 (Chrome 151 and 149), and
+# Playwright 1.62.0 the newer build 1248 (Chrome 156), each in a window,
+# headless and printing a PDF, through the headless shell and the full
+# build alike. Where Playwright's own build is on disk nothing is handed
+# over and nothing changes, and no browser of the person's own is ever
+# taken here, so nobody is moved off the browser they had.
+#
+# The headless shell's folder is named for its own revision in
+# Playwright's browsers.json, the same as Chromium's in every release so
+# far, which core/tests/test_browser.py holds.
 
 # The builds already said, so a renderer started for each receipt says it once
 _SAID_ON_DISK = set()
@@ -787,10 +795,11 @@ def _on_disk(chromium, kwargs: dict) -> dict:
     headless = True if headless is None else bool(headless)
     if headless:
         shells = _headless_shells(root)
-        if any(_build_of(s, root) == build for s in shells):
+        own_shell = "chromium_headless_shell-%d" % build
+        if any(Path(s).relative_to(root).parts[0] == own_shell for s in shells):
             return kwargs
-        found = sorted([(_build_of(s, root), 1, s) for s in shells]
-                       + [(_build_of(c, root), 0, c) for c in _bundled_chromium(root)],
+        found = sorted([(_build_number(s), 1, s) for s in shells]
+                       + [(_build_number(c), 0, c) for c in _bundled_chromium(root)],
                        reverse=True)
         found = [path for _b, _shell, path in found]
     else:
@@ -801,9 +810,13 @@ def _on_disk(chromium, kwargs: dict) -> dict:
         return kwargs
     if found[0] not in _SAID_ON_DISK:
         _SAID_ON_DISK.add(found[0])
-        print("Chromium build %d, the one this Playwright starts, is not on this computer, "
-              "so build %d, the newest one here, is started instead."
-              % (build, _build_of(found[0], root)))
+        if headless and _build_number(found[0]) == build:
+            print("The headless shell of Chromium build %d is not on this computer, so its "
+                  "full build is started headless instead." % build)
+        else:
+            print("Chromium build %d, the one this Playwright starts, is not on this computer, "
+                  "so build %d, the newest one here, is started instead."
+                  % (build, _build_number(found[0])))
     return dict(kwargs, executable_path=found[0])
 
 
