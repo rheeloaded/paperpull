@@ -36,8 +36,10 @@ here = Path(__file__).resolve().parent
 with open(here / "argv.jsonl", "a", encoding="utf-8") as f:
     print(json.dumps(sys.argv[1:]), file=f)
 resume = "--resume" in sys.argv
+# A Run All stops too, as for a sign-in, when a file named stops sits beside it.
+stops = resume or (here / "stops").exists()
 counts = {"manual_review": 0, "failed": 0, "validation_failures": 0, "new_files": 0,
-          "stopped": 1 if resume else 0}
+          "stopped": 1 if stops else 0}
 if resume and (here / "unread").exists():
     counts["list_not_read"] = 1
 print("PAPERPULL_RUN_RESULT " + os.environ.get("PAPERPULL_RUN_MARK", "") + " " + json.dumps(counts))
@@ -225,14 +227,50 @@ def test_a_round_that_meets_one_tries_it_again_as_get_new(panel, shop):
     tab.wait_for_function("() => QUEUE && QUEUE.held && RUN.state === 'done'", timeout=60000)
     first = shop if started(shop) else bank
     assert started(first) == [["--resume", "--yes"]]
-    assert "Trying it again reads the list first" in tab.inner_text("#view-run")
+    assert "Try it again to read the list first" in tab.inner_text("#view-run")
     tab.click("[data-do=queue-retry]")
     tab.wait_for_function("() => QUEUE && QUEUE.i === 1 && QUEUE.held && RUN.state === 'done'",
                           timeout=60000)
     assert started(first) == [["--resume", "--yes"], ["--all", "--yes"]]
 
 
+def test_a_retry_that_stops_for_a_sign_in_says_so_at_the_pause(panel, shop):
+    """The second review's case. The round tried such an account again as
+    Get new documents, that run stopped for a sign-in, and the pause still
+    said there was nothing more to carry on with."""
+    tab = panel.tab
+    bank = shop.with_name("Bank Docs")
+    bank.mkdir()
+    (bank / "bank_docs.py").write_text(APP, encoding="utf-8")
+    for folder in (shop, bank):
+        (folder / "unread").write_text("", encoding="utf-8")
+        (folder / "stops").write_text("", encoding="utf-8")
+        root = app_module._account_root({"dir": str(folder)}, "primary")
+        root.mkdir(parents=True, exist_ok=True)
+        (root / app_module.RUN_LOG).write_text(json.dumps([
+            {"action": "all", "exit_code": 0, "ended": "2026-10-28T09:00:00",
+             "result": {"stopped": 1}}]), encoding="utf-8")
+    tab.evaluate("location.hash = '#/'")
+    tab.reload()
+    tab.wait_for_selector("#view-home [data-do=queue]")
+    tab.click("#view-home [data-do=queue]")
+    tab.wait_for_function("() => QUEUE && QUEUE.held && RUN.state === 'done'", timeout=60000)
+    assert "Try it again to read the list first" in tab.inner_text("#view-run")
+    tab.click("[data-do=queue-retry]")
+    tab.wait_for_function("() => QUEUE && QUEUE.held && RUN.state === 'done' && RUN.action === 'all'",
+                          timeout=60000)
+    said = tab.inner_text("#view-run")
+    assert "Sign in again and try it once more" in said and "read the list first" not in said
+    first = shop if len(started(shop)) == 2 else bank
+    assert started(first) == [["--resume", "--yes"], ["--all", "--yes"]]
+
+
 def test_a_provider_whose_name_owns_is_not_given_a_second_owner(panel):
-    """Lowe's list, never Lowe's's list, as the core says it."""
+    """Lowe's list, never Lowe's's list, as the core says it. The helper
+    says it, and the page's script builds no owner's name any other way."""
     assert panel.tab.evaluate("whose(\"Lowe's\")") == "Lowe's"
     assert panel.tab.evaluate("whose('Chase')") == "Chase's"
+    script = (Path(app_module.__file__).resolve().parent / "static" / "app.js").read_text(encoding="utf-8")
+    built = [line.strip() for line in script.splitlines()
+             if "\"'s" in line and "function whose(" not in line and "the provider's" not in line]
+    assert built == [], built

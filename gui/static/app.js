@@ -1048,7 +1048,10 @@ function queueStep() {
     QUEUE.held = true;
     // A Continue with nothing more to carry on with would only stop the same
     // way again, so trying it again reads the list, with no dates set (#124).
-    if (o.relist) Object.assign(it, {action: 'all', scope: {year: '', start: '', end: ''}, relist: true});
+    // What the pause says follows this run, so a retry that stops for a
+    // sign-in says that.
+    it.relist = Boolean(o.relist);
+    if (o.relist) Object.assign(it, {action: 'all', scope: {year: '', start: '', end: ''}});
   }
 }
 function renderQueueList() {
@@ -1073,7 +1076,7 @@ function queueHeld() {
   const it = QUEUE.items[QUEUE.i];
   return '<section class="callout warn" style="margin-top:20px"><div class="text"><h2>Paused at ' + esc(it.provider) + '</h2>' +
     '<p>' + esc(it.relist ? 'This one had nothing more to carry on with, since its list was not read to its end, so the round ' +
-      'waits for you. Trying it again reads the list first, or move on.' :
+      'waits for you. Try it again to read the list first, or move on.' :
       'This one did not finish, so the round waits for you. Sign in again and try it once more, or move on.') + '</p>' +
     '<div class="row-actions"><button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' + esc(it.key) +
     '">Open sign-in window</button><button type="button" class="btn btn-p starts" data-do="queue-retry">Try it again</button>' +
