@@ -2016,6 +2016,13 @@ def _add_settings(dst: Path, example: Path, live: Path, stamp: str) -> list:
     merged = dict(current)
     for key in added:
         merged[key] = template[key]
+    if "cdp_url" in added:
+        # Target had no port before 0.34.0, so a person added beside an
+        # install from then could already hold the one the example brings.
+        free = getattr(_account_module(), "free_cdp_url", None)
+        url = free(dst, merged["cdp_url"]) if free else None
+        if url:
+            merged["cdp_url"] = url
     try:
         bak = dst / "Backups" / ("code-" + (stamp or "settings")) / "config.json"
         _make_folder(bak.parent)

@@ -75,6 +75,26 @@ def test_the_port_it_moves_to_is_past_every_port_in_use(tmp_path):
     assert len(used) == len(set(used)), used
 
 
+def test_a_port_an_update_adds_moves_off_one_in_use(tmp_path):
+    """Target had no port before 0.34.0. An install from then has none in
+    its config.json, so a person added beside it could take 9269, and the
+    update that brought Target's port copied 9269 in from the example."""
+    root = tmp_path / "installs"
+    root.mkdir()
+    target = _install(root, "target")
+    cfg = json.loads((target / "config.json").read_text(encoding="utf-8-sig"))
+    del cfg["cdp_url"]
+    (target / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    other = root / "Someone Else Statements"
+    other.mkdir()
+    (other / "someone_docs.py").write_text("", encoding="utf-8")
+    (other / "config.spouse.json").write_text(
+        json.dumps({"cdp_url": "http://127.0.0.1:9269"}), encoding="utf-8")
+
+    assert "cdp_url" in app_module.ensure_settings(target)
+    assert _port(target / "config.json") == 9270
+
+
 def test_every_provider_installed_beside_a_person_on_its_port_moves_off_it(tmp_path):
     """Every template, since the port is read from each one's own example,
     and a cdp_url written another way would keep the port it shares."""

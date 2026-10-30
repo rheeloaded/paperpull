@@ -20,9 +20,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   attached to one browser and each signed in to the other's profile. A new
   install now moves up to the first port no install or person beside it
   uses, the way a second person's port is chosen, and Import history sets
-  providers up the same way. An app and a person that already share a
-  port are left as they are, and changing one's cdp_url to a free port
-  keeps them apart.
+  providers up the same way. So does an update that brings a port to an
+  install that had none, a Target install from before 0.34.0 among them.
+  An app and a person that already share a port are left as they are, and
+  changing one's cdp_url to a free port keeps them apart.
 - **Invest529 is set up on a port of its own.** It shipped on 9298, the
   debugging port Simmons Bank already had, so with both set up each
   attached to the other's browser and signed in to the other's profile. A
