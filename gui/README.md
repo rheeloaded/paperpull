@@ -92,7 +92,7 @@ step.
 
 | Status | Means | The button |
 |--------|-------|------------|
-| Stopped partway | The last run that downloads ended early, a page closed, a sign-out, an error | Continue |
+| Stopped partway | The last run that downloads ended early, a page closed, a sign-out, an error | Continue, or Get new when the last run was a Continue that stopped because no run had read the provider's whole list, which only a run that lists can carry on from |
 | Needs a look | The last run set something aside, a document in Manual Review, a wrong document refused, a failure | See what to check |
 | Overdue | The newest document is far past how often this provider sends one | Get new |
 | New one likely | The newest document is past its usual date | Get new |

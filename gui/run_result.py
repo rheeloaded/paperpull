@@ -19,7 +19,7 @@ FIELDS = ("manual_review", "failed", "validation_failures", "new_files")
 # Counts an app from before they existed does not send. Absent is zero,
 # present has to be a count like the rest, so an install the panel has
 # not refreshed yet still reports its run.
-OPTIONAL = ("wrong_document", "stopped", "name_review", "alike")
+OPTIONAL = ("wrong_document", "stopped", "name_review", "alike", "list_not_read")
 # Counts the panel says but that never make a run one to look at.
 # Documents that share a type and a date with another are listed again on
 # every run and can never be saved, even once taken by hand from the

@@ -130,6 +130,10 @@ const ACTION_DOING = {login: 'Opening the sign-in window for %s', discover: 'Che
 const NEEDS = ['stopped', 'attention', 'unreadable', 'overdue', 'due', 'gap'];
 const FRESH = ['never', 'not_started'];
 function groupOf(r) { return NEEDS.includes(r.state) ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
+// Whether a stopped account is carried on with Continue. Not after a Resume
+// that stopped because no run read the list to its end, since only a run
+// that lists carries on from that, and Continue would stop there again (#124).
+function continues(r) { return r.state === 'stopped' && r.last_outcome !== 'unlisted'; }
 function present(r) {
   const n = noun(r), latest = when(r.newest);
   // The panel's own log first, then the time the app last wrote its run
@@ -152,6 +156,10 @@ function present(r) {
       // restore's row opens the account instead of a button that does nothing.
       const restore = SERVER || inSample() ? {label: 'Open', nav: true}
         : {label: 'Restore the rest', dialog: 'restore', primary: true};
+      if (!continues(r)) return {chip: {cls: 'info', text: 'Stopped partway'},
+        say: 'The last run' + (lastAt ? ' on ' + lastAt : '') + ' stopped because ' + r.provider + "'s list was not read " +
+          'to its end, and Continue carries on only from what is listed. Get new reads the list again. Nothing was lost.',
+        act: {label: 'Get new', run: 'all', primary: true}};
       return {chip: {cls: 'info', text: 'Stopped partway'},
         say: (again ? 'The restore' : 'The last run') + (lastAt ? ' on ' + lastAt : '') + ' ' + why + '. Nothing was lost.',
         act: again ? restore : {label: 'Continue', run: 'resume', primary: true}};
@@ -360,7 +368,7 @@ function renderHome() {
       '. Nothing is ever downloaded twice, so getting new is always safe.</p></div>' +
       (targets.length > 1 ? '<button type="button" class="btn btn-p starts" data-do="queue">Get new for all ' +
         targets.length + ', one by one</button>' :
-        actButton(targets[0], {label: 'Get new', run: targets[0].state === 'stopped' ? 'resume' : 'all', primary: true,
+        actButton(targets[0], {label: 'Get new', run: continues(targets[0]) ? 'resume' : 'all', primary: true,
                                scope: present(targets[0]).act.scope})) + '</section>';
   } else if (n && !groups.needs.length && !groups.ok.length) {
     html += '<section class="card summary" aria-label="Summary"><div class="icon due">' + sv(P.lock, 24) + '</div>' +
@@ -424,7 +432,8 @@ function renderAccount() {
   $('a-crumb').textContent = r.provider + (whoOf(r) ? ' · ' + whoOf(r) : '');
   const p = present(r);
   const saved = scopeSaved();
-  const stoppedHere = r.state === 'stopped' && !(r.last_run && r.last_run.redownload);
+  const again = r.state === 'stopped' && Boolean(r.last_run && r.last_run.redownload);
+  const stoppedHere = continues(r) && !again;
   let html = '<div class="head" style="align-items:center">' + mono(r, true) +
     '<div><h1 id="a-title" tabindex="-1">' + esc(r.provider) + '</h1><p>' + esc(subOf(r)) + ' · ' +
     esc(many(r.documents, noun(r))) + ' saved</p></div><div class="row-actions">' +
@@ -442,7 +451,7 @@ function renderAccount() {
     '<div class="band ' + band + '"><span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span><span class="say">' +
     esc(p.say) + '</span>' + (stoppedHere ? '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' +
     esc(keyOf(r)) + '">' + PLAY + 'Continue where it stopped</button>' : '') +
-    (r.state === 'stopped' && !stoppedHere && !SERVER && !inSample() ? '<button type="button" class="btn btn-p starts" data-do="restore" data-key="' + esc(keyOf(r)) + '">Restore the rest</button>' : '') +
+    (again && !SERVER && !inSample() ? '<button type="button" class="btn btn-p starts" data-do="restore" data-key="' + esc(keyOf(r)) + '">Restore the rest</button>' : '') +
     '</div>' + gapList(r) +
     '<div class="steps"><h2 id="getdocs" style="margin-bottom:18px">Get your documents</h2>' +
     '<div class="step"><div class="stepnum">1</div><div class="body"><h3>Sign in to ' + esc(r.provider) + '</h3><p id="steplogin">' +
@@ -775,6 +784,12 @@ function runOutcome() {
   if (code !== '0') return {tone: 'bad', title: 'This run ended with a problem',
     say: 'It exited with code ' + code + '. Progress is saved, and the technical details below say what happened. ' +
       next + '.', clean: false, resume: downloads, recheck};
+  // A Resume with nothing more to carry on with, since no run read the list
+  // to its end. Continue would stop here again, so the next step is a run
+  // that reads the list (#124).
+  if (res && res.stopped && res.list_not_read) return {tone: 'info', title: 'Stopped before finishing',
+    say: who + "'s list was not read to its end, so there was nothing more to carry on with. Get new documents " +
+      'reads the list again. Nothing already saved is lost.', clean: false, relist: true};
   if (res && res.stopped) return {tone: 'info', title: 'Stopped before finishing',
     say: RUN.again ? AGAIN_LEFT + '.' : who + ' may have signed you out partway. Nothing is lost. Sign in again, then ' +
       (downloads ? 'continue.' : recheck ? 'check again.' : 'run it again.'),
@@ -911,12 +926,16 @@ function renderRun() {
       html += '<ul class="saved" aria-label="Saved this run">' + RUN.saved.slice(0, 50).map(n => '<li>' + sv(P.check, 16, 3) +
         '<span>' + esc(n) + '</span></li>').join('') + (RUN.saved.length > 50 ? '<li>and ' + (RUN.saved.length - 50) + ' more</li>' : '') + '</ul>';
     }
-    if (r && (o.resume || o.recheck || o.signin)) {
+    if (r && (o.resume || o.recheck || o.signin || o.relist)) {
       html += '<ol class="nextsteps">' +
         '<li><div class="stepnum">1</div><div class="body"><b>Sign in to ' + esc(RUN.provider) + ' again</b><span>In its window, or open a new one</span></div>' +
         '<button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' + key + '">Open sign-in window</button></li>' +
         (o.resume ? '<li><div class="stepnum on">2</div><div class="body"><b>Continue where it stopped</b><span>Picks up what is left, without asking again for what is already saved</span></div>' +
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' + key + '">' + PLAY + 'Continue</button></li>' : '') +
+        (o.relist ? '<li><div class="stepnum on">2</div><div class="body"><b>Get new documents</b><span>Reads ' + esc(RUN.provider) +
+          "'s list again, then saves what you do not have yet</span></div>" +
+          '<button type="button" class="btn btn-p starts" data-do="run" data-action="all" data-key="' + key + '">' + PLAY +
+          'Get new documents</button></li>' : '') +
         (o.recheck ? '<li><div class="stepnum on">2</div><div class="body"><b>Check again</b><span>Lists what ' + esc(RUN.provider) +
           ' has once more. Nothing is downloaded</span></div><button type="button" class="btn btn-p starts" data-do="run" data-action="discover" data-key="' +
           key + '">Check again</button></li>' : '') + '</ol>';
@@ -990,7 +1009,7 @@ function startQueue() {
   const items = queueTargets().map(r => {
     const p = present(r);
     return {key: keyOf(r), provider: r.provider + (whoOf(r) ? ' (' + whoOf(r) + ')' : ''),
-            action: r.state === 'stopped' ? 'resume' : 'all', scope: p.act.scope || {year: '', start: '', end: ''}, said: ''};
+            action: continues(r) ? 'resume' : 'all', scope: p.act.scope || {year: '', start: '', end: ''}, said: ''};
   });
   if (!items.length) return;
   QUEUE = {items, i: 0, held: false, finished: false};

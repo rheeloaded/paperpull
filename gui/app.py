@@ -1394,7 +1394,10 @@ def _last_outcome(entry) -> str:
     if code not in (0, None):
         return "failed"
     if result and result.get("stopped"):
-        return "stopped"
+        # A Resume that stopped because no run read the list to its end,
+        # which only Pilot or Run All carries on from. Continue would only
+        # stop there again (#124).
+        return "unlisted" if result.get("list_not_read") else "stopped"
     if result and result.get("attention"):
         return "attention"
     return ""
@@ -1410,7 +1413,7 @@ def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
     comes first, since the next step is to continue it. Then what the last
     run left to look at, then how current the archive is, then gaps. An
     archive whose status could not be read is never called not started."""
-    if outcome in ("closed", "interrupted", "failed", "stopped"):
+    if outcome in ("closed", "interrupted", "failed", "stopped", "unlisted"):
         return "stopped"
     if outcome == "attention":
         return "attention"

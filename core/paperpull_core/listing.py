@@ -20,8 +20,12 @@ remember to say that it was not.
 resume() is Resume itself, for an app whose Resume works from that list.
 With nothing known and no listing read whole it says so and stops at once.
 After a listing that stopped it says so first, carries on with what is
-known, and then stops. Both leave on SystemExit, which the panel reports
-as a run that stopped (run_reporting.stopped_early). A listing read whole,
+known, and then stops. Both leave on run_reporting.ListNotRead, a
+SystemExit the panel reports as a run that stopped (stopped_early) and
+that only a run that lists can carry on from, so the panel offers Get new
+documents rather than Continue, which would stop here again (#124). A
+Resume that stops in a listing of its own, or for a sign-in, leaves any
+other way and is continued as before. A listing read whole,
 or an install from before this existed, resumes as it always did.
 before_resume() and after_resume() are its two halves, for a Resume that
 does more than carry on with the list.
@@ -47,6 +51,7 @@ import json
 import logging
 import textwrap
 
+from .run_reporting import ListNotRead
 from .storage import atomic_write_json, now_iso, spec
 
 COMPLETE = "complete"
@@ -195,7 +200,7 @@ def _nothing_listed(app, noun: str) -> None:
     _say("Nothing to resume. No %s %s have been listed yet, because no run "
          "has read %s list to its end. Run %s, which read the list first."
          % (provider, noun, _whose(provider), _whole_run(app)))
-    raise SystemExit(0)
+    raise ListNotRead(_whole_run(app))
 
 
 def before_resume(app, noun: str = "documents") -> bool:
@@ -223,7 +228,7 @@ def after_resume(app) -> None:
     if last(app) == STOPPED:
         _say("This run stops here, because %s list was not read to its end. "
              "Run %s to read it again." % (_whose(spec().provider), _whole_run(app)))
-        raise SystemExit(0)
+        raise ListNotRead(_whole_run(app))
 
 
 def resume(app, remaining, process, noun: str = "documents") -> None:

@@ -196,6 +196,76 @@ def test_the_panel_hears_a_run_that_stopped(tmp_path, capsys):
     assert json.loads(out.split(PREFIX, 1)[1].splitlines()[0])["stopped"] == 1
 
 
+def _summary(stop):
+    """The result line and the words a run summary says on the way out on
+    `stop`, as main's finally writes them."""
+    with pytest.raises(SystemExit):
+        try:
+            raise stop
+        finally:
+            report_run_result({"new_files": []})
+
+
+def _result_and_said(capsys):
+    out = capsys.readouterr().out
+    return json.loads(out.split(PREFIX, 1)[1].splitlines()[0]), " ".join(out.split(PREFIX, 1)[0].split())
+
+
+@pytest.mark.parametrize("known", [[], ["one"]], ids=["nothing listed", "everything known done"])
+def test_a_resume_with_nothing_more_to_carry_on_with_says_only_a_listing_can(tmp_path, capsys, known):
+    """Chase's Continue went round and round (#124). The stop said to run
+    Pilot or Run All, the summary under it said Resume carries on, and the
+    panel offered Continue again. The stop is one of its own, the summary
+    says so, and its words no longer send the person to Resume."""
+    app = _app(tmp_path, known=known)
+    listing.started(app)
+    with pytest.raises(listing.ListNotRead) as stop:
+        listing.resume(app, [], Process())
+    assert stop.value.code == 0 and stop.value.whole_run == "Pilot or Run All"
+    capsys.readouterr()
+    _summary(stop.value)
+    result, said = _result_and_said(capsys)
+    assert result["stopped"] == 1 and result["list_not_read"] == 1
+    assert "Resume carries on" not in said
+    assert "Resume would only stop here again, so run Pilot or Run All" in said
+
+
+def test_a_resume_that_carries_on_and_then_stops_says_only_a_listing_can(tmp_path, capsys):
+    app = _app(tmp_path, known=["one", "two"])
+    listing.started(app)
+    with pytest.raises(listing.ListNotRead):
+        listing.resume(app, ["two"], Process())
+    with pytest.raises(listing.ListNotRead):
+        listing.after_resume(app)
+
+
+def test_a_scoped_resume_is_told_to_run_with_no_dates(tmp_path, capsys):
+    app = _app(tmp_path, known=["one"])
+    _run(app, ("year", 2026), whole=False)
+    with pytest.raises(listing.ListNotRead) as stop:
+        listing.after_resume(app)
+    assert stop.value.whole_run == "Pilot or Run All with no year or dates set"
+    capsys.readouterr()
+    _summary(stop.value)
+    _result, said = _result_and_said(capsys)
+    assert "so run Pilot or Run All with no year or dates set, either of which" in said
+
+
+def test_any_other_stop_is_still_continued(capsys):
+    """A sign-in or a page that would not open leaves on a SystemExit of its
+    own, and Resume carries on from there as it always did."""
+    _summary(SystemExit(0))
+    result, said = _result_and_said(capsys)
+    assert result["stopped"] == 1 and "list_not_read" not in result
+    assert "Resume carries on from where it stopped" in said
+
+
+def test_a_run_that_finishes_sends_no_list_not_read(capsys):
+    report_run_result({"new_files": []})
+    result, _said_ = _result_and_said(capsys)
+    assert result["stopped"] == 0 and "list_not_read" not in result
+
+
 # -- a receipt app's Resume, which reads the list again ----------------------------------
 
 def test_a_receipt_resume_reads_the_list_again_after_a_listing_that_stopped(tmp_path, capsys):
@@ -218,7 +288,7 @@ def test_a_receipt_resume_reads_a_list_that_stopped_before_it_found_anything(tmp
 
 def test_a_receipt_resume_with_nothing_ever_listed_stops_at_once(tmp_path, capsys):
     app = _app(tmp_path)
-    with pytest.raises(SystemExit) as stop:
+    with pytest.raises(listing.ListNotRead) as stop:
         listing.read_again_first(app)
     assert stop.value.code == 0
     said = _said(capsys)
