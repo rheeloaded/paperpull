@@ -123,13 +123,14 @@ URLS = {
     "login": BASE + "/",
 }
 
-# The statements page, by the part of its path the recordings kept, or by
-# the whole path, letter for letter, of the address a second tester's
-# window showed for the same page (#121). A page below that path is not the
-# second address, so a press that takes the tab there is followed by going
-# back. Only the path is read, so a move by query or fragment alone is not
-# seen at either address.
-STATEMENTS_PAGE_RE = re.compile(r"stmts-docs|(?-i:^/statements-documents/home/$)", re.I)
+# The statements page, by the part of its path the first recording kept, or
+# by the whole path, letter for letter, of the credit card address in the
+# second recording or the address a second tester's window showed for the
+# same page (#121). A page below those paths is not the statements page, so
+# a press that takes the tab there is followed by going back. Only the path
+# is read, so a move by query or fragment alone is not seen at any address.
+STATEMENTS_PAGE_RE = re.compile(
+    r"stmts-docs|(?-i:^(/statements-documents/home/|/mycommunications/statements/statement\.go)$)", re.I)
 # The list call, by the shape both recordings showed, letter for letter.
 # Words of eight, fifteen and four letters, then statements/v1/ and a word
 # of six letters before Documents.
@@ -557,16 +558,36 @@ def account_key_of(body: dict, answer: dict) -> str:
     return k
 
 
-# Each "Download PDF for ..." link, its address as the browser reads it, the
-# address as the page wrote it, and the values of its data- fields, which
-# only link_facts reads, to count the links whose statement's id is there.
-_LINKS_JS = r"""() => Array.from(document.querySelectorAll('a[href]')).map(a => ({
-  name: ((a.getAttribute('aria-label') || a.innerText || '').replace(/\s+/g, ' ').trim()).slice(0, 300),
-  href: String(a.href || '').slice(0, 2000),
-  raw: String(a.getAttribute('href') || '').slice(0, 2000),
-  data: Array.from(a.attributes).filter(x => x.name.indexOf('data-') === 0)
-    .map(x => String(x.value || '').slice(0, 300)).slice(0, 12)
-})).filter(x => /^\s*Download PDF for\b/i.test(x.name)).slice(0, 200)"""
+# Whether a link and every element around it up to the body are shown on
+# the page, not inside a hidden or zero-height panel.
+_SHOWN_LINK_JS = r"""a => {
+  const ar = a.getBoundingClientRect(), my = ar.top + ar.height / 2;
+  if (ar.width < 1 || ar.height < 1) return false;
+  for (let n = a; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+    if (n.hidden || n.hasAttribute('hidden')) return false;
+    const r = n.getBoundingClientRect(), s = getComputedStyle(n);
+    if (r.width < 1 || r.height < 1 || s.display === 'none' || s.visibility === 'hidden') return false;
+    if ((s.overflowY === 'hidden' || s.overflowY === 'clip') && (my < r.top || my > r.bottom))
+      return false;
+  }
+  return true;
+}"""
+
+# Each shown "Download PDF for ..." link, its address as the browser reads
+# it, the address as the page wrote it, and the values of its data- fields,
+# which only link_facts reads, to count the links whose statement's id is
+# there. Links inside a hidden or zero-height panel under a shut heading are
+# left out, while links inside a shown row with aria-hidden="true" are kept.
+_LINKS_JS = r"""() => {
+  const shown = %s;
+  return Array.from(document.querySelectorAll('a[href]')).filter(shown).map(a => ({
+    name: ((a.getAttribute('aria-label') || a.innerText || '').replace(/\s+/g, ' ').trim()).slice(0, 300),
+    href: String(a.href || '').slice(0, 2000),
+    raw: String(a.getAttribute('href') || '').slice(0, 2000),
+    data: Array.from(a.attributes).filter(x => x.name.indexOf('data-') === 0)
+      .map(x => String(x.value || '').slice(0, 300)).slice(0, 12)
+  })).filter(x => /^\s*Download PDF for\b/i.test(x.name)).slice(0, 200);
+}""" % _SHOWN_LINK_JS
 
 
 def drawn_links(page) -> list:
@@ -886,24 +907,39 @@ def _a_link_to_press(el, names) -> bool:
             and not _any_refuses([_beside_names(x, names) for x in labels]))
 
 
+def _shown_link(el) -> bool:
+    """Whether a link and every element around it up to the body are shown
+    on the page, not inside a hidden or zero-height panel."""
+    try:
+        return (el is not None and bool(el.is_visible())
+                and bool(el.evaluate(_SHOWN_LINK_JS)))
+    except Exception:
+        return False
+
+
 def pdf_link_to_press(page, drawn: list, names) -> Tuple[Optional[object], str]:
     """The one Download PDF link to press, as an element, and how it stood,
     "chosen", or with nothing to press, "refused" (no link this app
     presses), "several" (each it would press shares its name with another
-    link) or "not found". The first link in the page's order that fits."""
+    shown link) or "not found". The first link in the page's order that
+    fits. Both recordings wrap each row's links in a shown div with
+    aria-hidden="true", so include_hidden=True finds them while _shown_link
+    leaves out any link inside a hidden panel."""
     took = [x for x in drawn if _opens_by_script(x.get("raw")) and is_pdf_link(x.get("name"), names)]
     if not took:
         return None, "refused"
     several = False
     for x in took:
         try:
-            loc = page.get_by_role("link", name=x["name"], exact=True)
+            loc = page.get_by_role("link", name=x["name"], exact=True, include_hidden=True)
             n = loc.count()
-            if n > 1:
+            shown = [el for i in range(min(n, 6))
+                     for el in [loc.nth(i).element_handle(timeout=5000)] if _shown_link(el)]
+            if n > 6 or len(shown) > 1:
                 # Which of them Playwright would press cannot be told.
                 several = True
                 continue
-            el = loc.first.element_handle(timeout=5000) if n == 1 else None
+            el = shown[0] if len(shown) == 1 else None
         except Exception as e:
             log.info("a Download PDF link could not be read: %s", type(e).__name__)
             continue
@@ -993,6 +1029,13 @@ def _press_and_hear(page, el, names) -> dict:
         if not _a_link_to_press(el, names):
             heard["refused_late"] = True
             return heard
+        # Each statement card sits under its own .front div until a link in
+        # its .overlay receives focus, which triggers the page's focus handler
+        # to add .show-overlay and bring the link to the top.
+        try:
+            el.focus()
+        except Exception:
+            pass
         # Pressed for this run from here on, whatever happens after, so it is
         # never pressed twice in one run.
         _pdf_learned["pressed"] = True

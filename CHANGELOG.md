@@ -7,6 +7,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Bank of America statement download links find their element and bring their overlay to the top (#121).**
+  The credit card Statements & Documents page at
+  /mycommunications/statements/statement.go is now recognized as a
+  statements address. Download PDF links inside rows wrapped in
+  aria-hidden="true" are found via include_hidden=True while links inside
+  hidden or zero-height panels are ignored. Focusing the link before
+  clicking activates the tile's focus listener to toggle .show-overlay,
+  bringing the link above the card's front layer for an unforced click.
+
 ## [0.59.2] - 2026-10-30
 
 Bank of America knows Statements & Documents at the second address a
