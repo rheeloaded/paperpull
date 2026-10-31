@@ -86,6 +86,7 @@
     "verizonmobile": {"gets": "Wireless monthly bills", "group": "bills", "tested": false},
     "walmart": {"gets": "Receipts", "group": "shopping"},
     "wealthfront": {"gets": "Statements, tax documents", "group": "investing"},
+    "ziply": {"gets": "Monthly internet bills, the whole history My Account lists", "group": "bills"},
     "wellsfargo": {"gets": "Account statements, tax documents", "group": "banks", "note": "Tested on credit card statements, not yet on checking, savings, mortgage or tax forms"}
   }
 }

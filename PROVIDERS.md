@@ -92,6 +92,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents. Credit card statements confirmed on a real account by @appchamp (#27). Checking, savings, mortgage and tax documents are untested | Bank / card / mortgage |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | Brokerage |
+| [`ziply`](apps/ziply) | Ziply Fiber | Monthly internet bills, the whole history My Account lists, from the page's own billStatements query asked from inside the signed-in page, nothing clicked. Built and run on a contributor's own account, 17 bills | Telecom |
 
 ## Requested / in progress
 

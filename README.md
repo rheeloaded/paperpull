@@ -146,6 +146,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/verizonmobile/README.md#help-test-it-no-programming-needed)** |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents | **Confirmed by [@appchamp](https://github.com/appchamp)** on a real account's credit card statements ([#27](https://github.com/rheeloaded/paperpull/issues/27)). Checking, savings, mortgage and tax documents are untested. Have one? [Help test it](apps/wellsfargo/README.md#help-test-it-no-programming-needed) |
+| [`ziply`](apps/ziply) | Ziply Fiber | Monthly internet bills, the whole history My Account lists | **Built and run on a contributor's own account, 17 bills listed and the newest saved by a Pilot.** The page's own bill-list query asked for every bill, each PDF fetched from inside the signed-in page, nothing clicked |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | |
 
 > ⚠️ **Read this first:** these tools drive real, signed-in financial accounts.
