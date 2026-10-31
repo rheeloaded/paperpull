@@ -21,17 +21,21 @@ gives. Asking with that call from inside the page is answered by
 `answer_pdf_call`.
 
 Every value is invented. The account keys, the docIds, the account names
-and every address but SECOND_PAGE_URL are made up, and the list's address
-is not the bank's, whose words the recordings kept only as shapes.
+and every address but SECOND_PAGE_URL and THIRD_PAGE_URL are made up, and
+the list's address is not the bank's, whose words the recordings kept only
+as shapes.
 """
 import base64
 import json
 
 LIST_URL = "https://secure.bankofamerica.com/samplepg/standinsamplezz/zone/statements/v1/lookupDocuments"
 PAGE_URL = "https://secure.bankofamerica.com/sample-zz-stmts-docs/?k=STANDINTOKEN&request_locale=en-us"
-# The same page at the second address a tester's window showed (#121). This
-# path is the bank's own, since the app knows it by the whole path.
+# The same page at the second address a tester's window showed (#121), and
+# at the credit card address in the second recording (#121). Both paths are
+# the bank's own, since the app knows them by the whole path.
 SECOND_PAGE_URL = "https://secure.bankofamerica.com/statements-documents/home/?request_locale=en-us"
+THIRD_PAGE_URL = ("https://secure.bankofamerica.com/mycommunications/statements/statement.go"
+                  "?request_locale=en-us&adx=STANDIN0&source=adc&returnSiteIndicator=GAIMW")
 LINK_BASE = "https://secure.bankofamerica.com/sample/getpdf?doc="
 # Where a press of a link whose address is "#" asks for its PDF.
 PDF_CALL_URL = "https://secure.bankofamerica.com/samplepg/standinsamplezz/zone/statements/v1/retrieveDoc"
@@ -157,10 +161,15 @@ class Link:
     def evaluate(self, script, *args):
         if "tagName" in script:
             return self.tag
-        raise AttributeError("the stand-in link answers only its tag")
+        if "parentElement" in script:
+            return self.is_visible()
+        raise AttributeError("the stand-in link answers only its tag and whether it is shown")
 
     def inner_text(self, timeout=None):
         return self.entry["name"]
+
+    def is_visible(self):
+        return bool(self.entry.get("visible", True))
 
     def get_attribute(self, name):
         return {"href": self.entry.get("raw", self.entry.get("href")),
@@ -168,24 +177,40 @@ class Link:
 
 
 class Links:
-    """page.get_by_role("link", name=..., exact=True)."""
+    """page.get_by_role("link", name=..., exact=True, include_hidden=True)."""
 
     def __init__(self, page, name):
         self.page, self.name = page, name
 
     def _found(self):
-        return [x for x in self.page.drawn_links() if x["name"] == self.name]
+        pool = self.page.role_links if self.page.role_links is not None else self.page.drawn_links()
+        return [x for x in pool if x["name"] == self.name]
 
     def count(self):
         return len(self._found())
 
     @property
     def first(self):
-        return self
+        return self.nth(0)
+
+    def nth(self, i):
+        return _OneLink(self, i)
 
     def element_handle(self, timeout=None):
-        found = self._found()
-        return Link(self.page, found[0], self.page.link_tag) if found else None
+        return self.first.element_handle(timeout=timeout)
+
+
+class _OneLink:
+    """One of the links get_by_role found, by its place."""
+
+    def __init__(self, links, i):
+        self.links, self.i = links, i
+
+    def element_handle(self, timeout=None):
+        found = self.links._found()
+        if self.i >= len(found):
+            return None
+        return Link(self.links.page, found[self.i], self.links.page.link_tag)
 
 
 def json_call(row):
@@ -338,6 +363,7 @@ class Bank:
                         "cookie": "SESSION=secret", "user-agent": "UA", "sec-fetch-mode": "cors"}
         self.listed = answer(STATEMENTS[("K-ALPHA-0001", "2026")])
         self.links = None        # None draws one link per listed row
+        self.role_links = None   # Given, what get_by_role("link", ..., include_hidden=True) sees
         self.pdf_status = 200
         self.pdf_final_url = None
         self.pdf_disposition = 'attachment; filename="eStmt_%s.pdf"'
@@ -398,7 +424,7 @@ class Bank:
             assert k.get("exact") is True and k.get("expanded") in (True, False), k
             return Headings(self, k["expanded"])
         if role == "link" and "name" in k:
-            assert k.get("exact") is True, k
+            assert k.get("exact") is True and k.get("include_hidden") is True, k
             return Links(self, k["name"])
         return Locator(self, role, 1, "Download PDF for January Statement for Everyday Checking")
 

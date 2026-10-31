@@ -46,6 +46,12 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Statements &am
 .cover { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 10;
          background: rgba(0, 0, 0, .25); }</style></head>
 <body><main><h1>Statements &amp; Documents</h1>
+<div id="cat-tax"><button type="button" aria-label="Tax Documents" aria-expanded="false"
+    aria-controls="panel-tax"><span>Tax Documents</span></button><div id="panel-tax" hidden
+    style="display: block; height: 0px; overflow: hidden;">
+  <div class="row" tabindex="0"><div aria-hidden="true"><a href="#"><span>Download PDF</span><span
+      class="sr"> for January Statement for Everyday Checking</span></a></div></div>
+</div></div>
 <div id="cat-stmt"><button type="button" aria-label="Statements" aria-expanded="true"
     aria-controls="panel-stmt"><span>Statements</span></button><div id="panel-stmt"></div></div>
 </main>
@@ -84,9 +90,11 @@ ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-STMT', lang: 'en', year: '20
   const panel = document.getElementById('panel-stmt');
   got.documentList.forEach(r => {
     const row = document.createElement('div');
-    row.innerHTML = '<a href="#"><span>Download PDF</span><span class="sr"> for ' +
-      r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a>';
-    row.querySelector('a').addEventListener('click', e => { e.preventDefault(); openPdf(r); });
+    row.setAttribute('tabindex', '0');
+    row.innerHTML = '<div aria-hidden="true"><span>' + r.date + '</span></div>' +
+      '<div aria-hidden="true"><a href="#">View PDF</a><a href="#"><span>Download PDF</span><span class="sr"> for ' +
+      r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a></div>';
+    row.querySelectorAll('a')[1].addEventListener('click', e => { e.preventDefault(); openPdf(r); });
     panel.appendChild(row);
   });
 });

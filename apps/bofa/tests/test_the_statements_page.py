@@ -68,11 +68,13 @@ def test_a_page_of_another_site_is_not_the_statements_page():
     sb.PAGE_URL,
     sb.SECOND_PAGE_URL,
     "https://secure.bankofamerica.com/statements-documents/home/",
+    sb.THIRD_PAGE_URL,
+    "https://secure.bankofamerica.com/mycommunications/statements/statement.go",
 ])
 def test_both_addresses_of_the_statements_page_are_it(url):
     """A second tester's window was on Statements & Documents at
-    /statements-documents/home/, and 0.59.1 told by the address alone that
-    it was not, so it asked nothing of the page (#121, 2026-10-28)."""
+    /statements-documents/home/, and the credit card statements page in the
+    second recording is at /mycommunications/statements/statement.go (#121)."""
     assert site.is_statements_address(url)
     assert site.on_statements_page(sb.Bank(url=url))
 
@@ -82,7 +84,7 @@ def test_both_addresses_of_the_statements_page_are_it(url):
     "https://secure.bankofamerica.com.evil.test/statements-documents/home/",
     "http://secure.bankofamerica.com/statements-documents/home/",
     "https://secure.bankofamerica.com/statements-documents/",
-    # Only the path as the screenshot showed it, letter for letter.
+    # Only the path as the screenshot and recording showed it, letter for letter.
     "https://secure.bankofamerica.com/statements-documents/home",
     "https://secure.bankofamerica.com/Statements-Documents/Home/",
     "https://secure.bankofamerica.com/statements-documents/home/viewdoc",
@@ -91,6 +93,14 @@ def test_both_addresses_of_the_statements_page_are_it(url):
     "https://secure.bankofamerica.com/statements-documents-old/home/",
     "https://secure.bankofamerica.com/myaccounts/overview/?next=/statements-documents/home/",
     "https://secure.bankofamerica.com/myaccounts/overview/#/statements-documents/home/",
+    "https://www.bankofamerica.com/mycommunications/statements/statement.go",
+    "http://secure.bankofamerica.com/mycommunications/statements/statement.go",
+    "https://secure.bankofamerica.com/mycommunications/statements/",
+    "https://secure.bankofamerica.com/mycommunications/statements/statement.go/",
+    "https://secure.bankofamerica.com/mycommunications/statements/statement.go/viewdoc",
+    "https://secure.bankofamerica.com/MyCommunications/Statements/statement.go",
+    "https://secure.bankofamerica.com/mycommunications/statements/statementXgo",
+    "https://secure.bankofamerica.com/myaccounts/overview/?next=/mycommunications/statements/statement.go",
 ])
 def test_no_other_address_is_taken_for_the_second_one(url):
     assert not site.is_statements_address(url)
@@ -98,12 +108,14 @@ def test_no_other_address_is_taken_for_the_second_one(url):
 
 
 def test_the_second_address_is_reloaded_once_and_its_list_call_learned():
-    page = sb.Bank(url=sb.SECOND_PAGE_URL)
-    call = site.learn(page)
-    assert page.reloads == 1 and call.url == sb.LIST_URL
-    assert call.template is not None and call.links == 2
-    no_presses(page)
-    assert not site.on_statements_page(sb.Bank(url=sb.SECOND_PAGE_URL, password=1))
+    for url in (sb.SECOND_PAGE_URL, sb.THIRD_PAGE_URL):
+        site.forget()
+        page = sb.Bank(url=url)
+        call = site.learn(page)
+        assert page.reloads == 1 and call.url == sb.LIST_URL
+        assert call.template is not None and call.links == 2
+        no_presses(page)
+        assert not site.on_statements_page(sb.Bank(url=url, password=1))
 
 
 def test_a_page_that_makes_no_list_call_is_not_guessed_at():
