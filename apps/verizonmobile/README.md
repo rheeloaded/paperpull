@@ -3,13 +3,11 @@
 The wireless side of My Verizon. Fios and Home Internet bills have their own
 app, [apps/verizon](../verizon), which does work.
 
-**Not yet tested against a real account.** This app was built without a
-Verizon Mobile account, so that someone who holds one can test it without writing
-code. It runs, its guards are tested, and every guess about verizon.com is
-marked in `verizonmobile_site.py`. What it needs is a survey from a signed-in
-account, which the Diagnose button produces and which contains no personal
-data. If you have a Verizon wireless account, the steps are below, and the conversation is
-[issue #31](https://github.com/rheeloaded/paperpull/issues/31).
+**Confirmed on a real account** (24 bills, 2026-10-29, [issue #31](https://github.com/rheeloaded/paperpull/issues/31)).
+It reads Bill & payment history's own bill list, which holds every cycle My
+Verizon keeps, and asks each bill's PDF from inside the signed-in page, the
+way the page's own "Review bill PDF" does. Nothing is clicked. See the notes
+at the top of `verizonmobile_site.py`.
 
 Downloads your Verizon wireless monthly **bills** as PDFs from My Verizon. Read-only,
 delete-safe, part of [PaperPull](../../README.md).

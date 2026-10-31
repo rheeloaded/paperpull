@@ -220,7 +220,7 @@ def test_every_app_that_presses_through_pressing_stops_its_run_on_a_stop():
         assert any("pressing.stop_run(app, " in ast.unparse(h) for h in handlers), \
             "%s catches pressing.Stop without pressing.stop_run" % app.name
     assert {"amex", "vanguard", "adp", "amfam", "applecard", "att", "etrade", "golden1",
-            "newrez", "pge", "sba", "smud", "statefarm", "verizonmobile",
+            "newrez", "pge", "sba", "smud", "statefarm",
             "wellsfargo"} <= set(users), users
 
 

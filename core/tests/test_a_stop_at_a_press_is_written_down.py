@@ -64,7 +64,7 @@ def test_every_app_that_presses_through_pressing_is_here():
     pressing.click, found by what their code calls."""
     assert {d.name for d in APPS} >= {
         "amex", "vanguard", "adp", "amfam", "applecard", "att", "etrade", "golden1",
-        "newrez", "pge", "sba", "smud", "statefarm", "verizonmobile", "wellsfargo", "mtb"}
+        "newrez", "pge", "sba", "smud", "statefarm", "wellsfargo", "mtb"}
 
 
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)

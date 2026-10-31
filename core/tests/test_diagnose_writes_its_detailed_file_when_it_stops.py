@@ -45,7 +45,7 @@ APPS = sorted(d for d in (REPO / "apps").iterdir()
 NAMED_GOTO = {"alpaca", "bilt", "chasebusiness", "firsthorizon", "irs", "sdge", "shelbycounty",
               "simmons", "spectrum", "venmo", "coinbase", "nelnet", "optum", "wellsfargo",
               "adp", "amfam", "applecard", "att", "etrade", "golden1", "newrez", "sba", "smud",
-              "statefarm", "treasurydirect", "verizonmobile", "pge"}
+              "statefarm", "treasurydirect", "pge"}
 NAMED_STEPS = {("bestbuy", "capture_history_query"), ("bestbuy", "year_choices"),
                ("bestbuy", "cmd_discover"), ("coinbase", "shown_documents"),
                ("mtb", "collect_statement_rows"), ("nelnet", "collect_download_docs"),

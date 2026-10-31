@@ -271,7 +271,7 @@ def test_the_apps_that_point_the_browser_at_a_folder_are_found():
     assert {"wellsfargo", "att", "newrez", "verizon", "vanguard"} <= names
     assert {d.name for d in SCAFFOLD} >= {"applecard", "att", "etrade", "golden1",
                                           "newrez", "sba", "smud", "statefarm",
-                                          "verizonmobile", "wellsfargo"}
+                                          "wellsfargo"}
 
 
 @pytest.mark.parametrize("left", [False, True], ids=["empty folder", "same name already there"])

@@ -83,7 +83,7 @@
     "vanguard": {"gets": "Statements for every account, a 401(k) included", "group": "investing"},
     "venmo": {"gets": "Monthly account statements, printed from the statement page", "group": "banks", "note": "Run on one personal account so far"},
     "verizon": {"gets": "Fios bill statements", "group": "bills"},
-    "verizonmobile": {"gets": "Wireless monthly bills", "group": "bills", "tested": false},
+    "verizonmobile": {"gets": "Wireless monthly bills, about two years online", "group": "bills"},
     "walmart": {"gets": "Receipts", "group": "shopping"},
     "wealthfront": {"gets": "Statements, tax documents", "group": "investing"},
     "wellsfargo": {"gets": "Account statements, tax documents", "group": "banks", "note": "Tested on credit card statements, not yet on checking, savings, mortgage or tax forms"}

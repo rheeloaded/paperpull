@@ -152,7 +152,7 @@ LEAVES = {
     ("newrez", "_catch_pdf"), ("pge", "_press_once"), ("sba", "_catch_pdf"),
     ("simmons", "_catch_document"), ("smud", "_catch_pdf"), ("statefarm", "_catch_pdf"),
     ("vanguard", "download_document"),
-    ("venmo", "show_all"), ("verizonmobile", "_catch_pdf"), ("wellsfargo", "_catch_pdf")}
+    ("venmo", "show_all"), ("wellsfargo", "_catch_pdf")}
 
 
 # ---------------------------------------------------------------------------

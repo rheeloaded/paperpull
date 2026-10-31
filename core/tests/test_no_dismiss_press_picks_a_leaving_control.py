@@ -292,7 +292,7 @@ def test_every_dismiss_press_is_here():
     apps = {name.split("/")[1] for name, _ in HELPERS}
     assert ("apps/golden1/golden1_site.py", "close_history") in HELPERS, HELPERS
     assert apps >= {"adp", "amfam", "applecard", "att", "etrade", "golden1", "nelnet", "newrez",
-                    "sba", "smud", "statefarm", "tmobile", "verizon", "verizonmobile",
+                    "sba", "smud", "statefarm", "tmobile", "verizon",
                     "wellsfargo"} | ({"costco"} if hasattr(controls, "dismiss_overlays") else set()), sorted(apps)
 
 

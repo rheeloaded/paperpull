@@ -381,7 +381,7 @@ def test_a_tab_on_a_document_asks_its_own_address_and_nothing_further(page, serv
 # session on, the second time it is asked.
 
 SCAFFOLD = ["amfam", "applecard", "etrade", "golden1", "newrez", "sba", "smud",
-            "statefarm", "verizonmobile", "wellsfargo"]
+            "statefarm", "wellsfargo"]
 
 
 @pytest.fixture()

@@ -124,11 +124,11 @@ def test_only_att_hosts():
     assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
 
 
-def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
+def test_the_confirmed_status_is_stated_where_a_reader_will_read_it():
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "UNVERIFIED" in src.split('"""')[1]
+    assert "CONFIRMED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "Not yet tested against a real account" in readme
+    assert "Confirmed on a real account" in readme
 
 
 def test_this_is_the_wireless_side_and_the_fios_app_is_separate():

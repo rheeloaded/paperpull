@@ -676,7 +676,6 @@ ANSWERS = {
     ("apps/usbank/usbank_site.py", "on_resp"): PAGE_ANSWER,
     ("apps/vanguard/vanguard_site.py", "on_resp"): PAGE_ANSWER,
     ("apps/venmo/venmo_site.py", "_read_pending"): PAGE_ANSWER,
-    ("apps/verizonmobile/verizonmobile_site.py", "on_response"): PAGE_ANSWER,
     ("apps/wellsfargo/wellsfargo_site.py", "on_response"): PAGE_ANSWER,
     ("core/paperpull_core/api_census.py", "_record"): PAGE_ANSWER,
     ("core/paperpull_core/recorder.py", "_on_response"): PAGE_ANSWER,

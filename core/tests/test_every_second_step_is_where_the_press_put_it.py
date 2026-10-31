@@ -248,7 +248,7 @@ def test_the_census_is_not_vacuous():
     """Every app cut from the scaffold, and AT&T's own menu."""
     captures = {app for app, fn, _, _ in CENSUS if fn == "_catch_pdf"}
     assert captures >= {"amfam", "applecard", "att", "etrade", "golden1", "nelnet", "newrez",
-                        "sba", "smud", "statefarm", "verizonmobile", "wellsfargo"}, captures
+                        "sba", "smud", "statefarm", "wellsfargo"}, captures
 
 
 @pytest.mark.parametrize("entry", [e for e in CENSUS], ids=lambda e: "%s.%s" % (e[0], e[1]))
@@ -708,7 +708,7 @@ def capture(site, tmp_path, monkeypatch):
 
 def test_every_app_with_a_second_step_is_driven():
     assert set(APPS) >= {"amfam", "applecard", "att", "etrade", "golden1", "nelnet", "newrez",
-                         "sba", "smud", "statefarm", "verizonmobile", "wellsfargo"}, APPS
+                         "sba", "smud", "statefarm", "wellsfargo"}, APPS
 
 
 @pytest.mark.parametrize("shape", [s for s in EACH_APP if s in SHOWN_ELSEWHERE])
