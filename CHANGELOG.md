@@ -7,6 +7,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Security
+- **The Windows and Mac packages take Python 3.12.16.** They carried
+  python-build-standalone's CPython 3.12.14, which 0.59.2 said a later
+  release would move to the 3.12.16 the server image's base already
+  had. 3.12.16's ssl module refuses certificate chains that carry any of
+  a set of compromised eMudhra intermediate CA keys, CVE-2026-115557
+  (Critical). 3.12.15 and 3.12.16 also fix holes in tarfile
+  (CVE-2026-82049 and CVE-2026-114583), tempfile (CVE-2026-12345),
+  http.cookiejar and urllib's password manager (CVE-2026-15806), and take
+  libexpat 2.9.0. The browsers the apps open, and the requests made
+  through them, use their own TLS and not Python's. Every other package
+  in both packages stays at the version it was, and the Windows package
+  signs the same 29 interpreter files as before. It leaves out the
+  zlib1.dll the new Python brings for Tcl and Tk, which the package has
+  never carried.
+
 ## [0.59.2] - 2026-10-30
 
 Bank of America knows Statements & Documents at the second address a

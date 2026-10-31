@@ -76,8 +76,8 @@ MACOS = CONTENTS / "MacOS"
 # folder called python/ that is a complete, relocatable CPython with pip. The
 # same release and Python as packaging/build_windows.py, and core/tests holds
 # the two to each other.
-PBS_TAG = "20260901"
-PY_VERSION = "3.12.14"
+PBS_TAG = "20261026"
+PY_VERSION = "3.12.16"
 
 # The oldest macOS the bundle opens on. Info.plist and the launcher say so,
 # and packaging/lock.py takes only wheels that run on it.
@@ -94,8 +94,8 @@ ARCH = "arm64"
 # download must match before anything is built from it. A new PBS_TAG or
 # PY_VERSION takes both lines again from that release's SHA256SUMS.
 PBS_SHA256 = {
-    "arm64": "81a359f1cfadd4da11766534c5913791cea55f26e1bb902cacd2a531bb1e4b2b",
-    "x86_64": "65b195c9cedc1fef6767f044f9822069adbd1bd9204d424ece4628776fdc04bb",
+    "arm64": "353d5f1b4fd2715e7053f12f068435d5bbad16b91e057006b5d01e0925709a7e",
+    "x86_64": "37c38fda76fec1fbf310adcbafb7f0d96af13b5511bf8ea954c3aa8eec185734",
 }
 
 # stapler fetches the ticket from Apple's ticket server, which dropped the
