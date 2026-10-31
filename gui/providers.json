@@ -25,6 +25,7 @@
     "bilt": {"gets": "Bilt Card statements from the wallet", "group": "banks"},
     "bofa": {"gets": "Checking, savings and credit card statements", "group": "banks", "tested": false},
     "capitalone": {"gets": "Bank and card statements, tax forms, letters", "group": "banks"},
+    "cetera": {"gets": "Brokerage statements, quarterly performance reports", "group": "investing"},
     "chase": {"gets": "Credit card statements", "group": "banks"},
     "chasebusiness": {"gets": "Business checking and business card statements, up to seven years", "group": "banks", "note": "Tested on one profile"},
     "citi": {"gets": "Credit card statements, about two years online", "group": "banks"},

@@ -413,7 +413,7 @@ _ALLOWLIST_NAMES = {"is_safe_control", "SAFE_DOC_CONTROL_RE", "SAFE_DOC_CONTROL_
 # third list. Amazon defines no guard, so it is not here, and Gap only its
 # document allowlist.
 CLICK_NOTHING = {
-    "affirm", "anthem", "apple", "citi", "ezpassva", "fedex", "fidelity", "gap", "github",
+    "affirm", "anthem", "apple", "cetera", "citi", "ezpassva", "fedex", "fidelity", "gap", "github",
     "homedepot", "invest529", "irs", "kroger", "lowes", "myecp", "mypay", "netbenefits",
     "optum", "paylocity", "sdge", "stripe", "tsp", "uber", "ukg", "ups",
 }
