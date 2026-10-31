@@ -44,10 +44,11 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Statements &am
 <section>
   <div id="cat-stmt"><button type="button" name="stmts" aria-label="Statements"
       aria-expanded="false" aria-controls="panel-stmt"><span class="i"></span><span>Statements</span><span
-      class="i"></span></button><div id="panel-stmt" hidden></div></div>
+      class="i"></span></button><div id="panel-stmt" hidden
+      style="display: block; height: 0px; overflow: hidden;"></div></div>
   <div id="cat-tax"><button type="button" name="tax" aria-label="Tax Documents"
       aria-expanded="false" aria-controls="panel-tax"><span>Tax Documents</span></button><div
-      id="panel-tax" hidden></div></div>
+      id="panel-tax" hidden style="display: block; height: 0px; overflow: hidden;"></div></div>
 </section></main>
 %(extra)s
 <script>
@@ -58,17 +59,23 @@ async function ask(body) {
     headers: {'content-type': 'application/json', 'x-standin-csrf': 'TOKEN-T'}});
   return r.json();
 }
-ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-TAX', year: '2026'});
+ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-TAX', year: '2026'}).then(got => {
+  const tax = document.getElementById('panel-tax');
+  tax.innerHTML = got.documentList.map(r =>
+    '<div class="row" tabindex="0"><div aria-hidden="true"><a href="#"><span>Download PDF</span><span class="sr"> for ' +
+    r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a></div></div>').join('');
+});
 document.querySelector('[aria-controls=panel-stmt]').addEventListener('click', async (e) => {
   const b = e.currentTarget;
   b.setAttribute('aria-expanded', 'true');
   const got = await ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-STMT', lang: 'en', year: '2026'});
   const panel = document.getElementById('panel-stmt');
   panel.hidden = false;
+  panel.style.height = 'auto';
   panel.innerHTML = got.documentList.map(r =>
-    '<div class="row" tabindex="0"><a href="%(link)s' + r.docId + '" id="d' + r.docId +
+    '<div class="row" tabindex="0"><div aria-hidden="true"><a href="%(link)s' + r.docId + '" id="d' + r.docId +
     '" data-a="x" data-b="' + r.docId + '"><span>Download PDF</span><span class="sr"> for ' +
-    r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a></div>').join('');
+    r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a></div></div>').join('');
 });
 </script></body></html>"""
 
@@ -97,8 +104,8 @@ def statements_page(browser, extra="", in_a_form=False):
     if in_a_form:
         html = html.replace('<div id="cat-stmt"><button type="button"',
                             '<div id="cat-stmt"><form method="post" action="/paperless"><button', 1)
-        html = html.replace('</button><div id="panel-stmt" hidden></div></div>',
-                            '</button></form><div id="panel-stmt" hidden></div></div>', 1)
+        html = html.replace('</button><div id="panel-stmt" hidden',
+                            '</button></form><div id="panel-stmt" hidden', 1)
         assert '<form method="post"' in html and '</button></form>' in html
 
     def serve(route):
