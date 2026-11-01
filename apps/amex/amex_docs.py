@@ -120,13 +120,30 @@ class Document:
 
 
 def migrate_legacy_keys(records: dict) -> int:
-    """Move records written while the account was cut to forty characters.
-
-    Only a record whose key is exactly the new one with the last four taken
-    off is moved, so nothing is guessed. An archive whose account names were
-    short enough to fit has no such records and nothing happens.
+    """Move records written while the account was cut to forty characters,
+    or clean up legacy records that were stored without an account (:Unnamed)
+    when matching records with the card account now exist.
     """
-    return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
+    changed = _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
+    unnamed = [k for k in list(records.keys())
+               if k.endswith(":Unnamed") or not records[k].get("account")]
+    for uk in unnamed:
+        ur = records[uk]
+        cat, dt = ur.get("category"), ur.get("date")
+        named = [k for k, v in records.items()
+                 if k != uk and v.get("category") == cat and v.get("date") == dt and v.get("account")]
+        if named:
+            target = named[0]
+            if ur.get("state") == State.COMPLETED.value or ur.get("downloaded_ok"):
+                records[target]["state"] = ur.get("state")
+                records[target]["downloaded_ok"] = ur.get("downloaded_ok", True)
+                if ur.get("pdf_filename"):
+                    records[target]["pdf_filename"] = ur["pdf_filename"]
+                if ur.get("pdf_path"):
+                    records[target]["pdf_path"] = ur["pdf_path"]
+            del records[uk]
+            changed += 1
+    return changed
 
 
 class App:
@@ -366,8 +383,8 @@ class App:
         doc = Document(title=r.title, category=category, summary=full_summary,
                        date=date or "", period=period, href=r.href,
                        row_index=r.row_index, confidence=confidence,
+                       account=acct,
                        date_text=getattr(r, "date_text", ""))
-        doc.account = acct
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -378,7 +395,7 @@ class App:
         return 0
 
     def _record_rawdoc(self, r, source_url: str) -> int:
-        """Record one scraped document (a RawDoc) from a American Express page.
+        """Record one scraped document (a RawDoc) from an American Express page.
         Returns 1 if new."""
         title = re.sub(r"\s+", " ", (r.title or "")).strip()
         if not title:
@@ -398,15 +415,19 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+        acct = (r.account or "").strip()
+        full_summary = f"{summary} {acct}".strip() if acct else summary
+        doc = Document(title=title, category=category, summary=full_summary,
+                       date=date, confidence=confidence, source_url=source_url,
+                       account=acct, href=r.href or "", date_text=r.date_text or date)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
         # refresh which page the doc's download link lives on
-        self.discovery.update(doc.key, {"source_url": source_url}, save=False)
+        self.discovery.update(doc.key, {"source_url": source_url, "href": r.href or "",
+                                        "account": acct}, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
@@ -423,11 +444,25 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
-        for r in docs:
-            n_new += self._record_rawdoc(r, page.url)
+
+        cards = site.list_cards(page)
+        total_controls = 0
+        if len(cards) > 1:
+            for card in cards:
+                site.select_card(page, card)
+                docs = site.collect_download_docs(page, account=card["label"])
+                total_controls += len(docs)
+                for r in docs:
+                    n_new += self._record_rawdoc(r, page.url)
+        else:
+            account = cards[0]["label"] if cards else site.current_card_label(page)
+            docs = site.collect_download_docs(page, account=account)
+            total_controls += len(docs)
+            for r in docs:
+                n_new += self._record_rawdoc(r, page.url)
+
         self.discovery.save()
-        log.info("statements page: %d download controls, %d new", len(docs), n_new)
+        log.info("statements page: %d download controls, %d new", total_controls, n_new)
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -437,6 +472,14 @@ class App:
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
             print(f"\nDiscovery complete. Documents known: {len(docs)}")
+            accounts = {}
+            for d in docs:
+                if d.account:
+                    accounts[d.account] = accounts.get(d.account, 0) + 1
+            if accounts:
+                print(f"  Accounts with statements ({len(accounts)}):")
+                for acct, count in sorted(accounts.items(), key=lambda x: -x[1]):
+                    print(f"    {count:7d}  {acct}")
             by_cat = {}
             for d in docs:
                 by_cat.setdefault(d.category, []).append(d)
@@ -457,7 +500,11 @@ class App:
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         docs = [d for d in docs if self._in_scope(d)]
+        # Sort newest-to-oldest, then group by card account.
+        # Python's stable sort ensures all statements for a single card are
+        # downloaded consecutively before switching to the next card.
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
+        docs.sort(key=lambda d: d.account or "")
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
 
@@ -548,6 +595,8 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
+        if doc.account:
+            site.ensure_card(page, doc.account)
         saved = site.download_document(page, doc.category, doc.date, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
@@ -865,6 +914,10 @@ class App:
             info["challenge"] = site.detect_security_challenge(page)
             site.expand_all(page)
             site.scroll_full_page(page)
+            cards = site.list_cards(page)
+            info["cards"] = cards
+            cur_card = site.current_card_label(page)
+            info["current_card"] = cur_card
             info["row_counts"] = {}
             for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
                               ("table rows", "table tbody tr"),
@@ -874,7 +927,7 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            docs = site.collect_download_docs(page)
+            docs = site.collect_download_docs(page, account=cur_card)
             info["collected"] = len(docs)
             info["samples"] = []
             for d in docs[:8]:

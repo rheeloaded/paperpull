@@ -397,6 +397,27 @@ def _arrived(page, part: str, waited_ms: int, shown: str = "") -> bool:
     return False
 
 
+def dismiss_offer(page) -> None:
+    """Close an offer overlay/modal or banner if one covers the page.
+
+    Marketing modals (e.g. 'Apply for Blue Business Cash') can sit over the
+    navigation bar or statement controls. If visible, dismiss them via the
+    close button or by pressing Escape.
+    """
+    try:
+        modals = page.locator("[role='dialog'], [role='alertdialog'], [class*='modal'], [class*='banner'], [class*='offer']")
+        if modals.count() and any(modals.nth(i).is_visible() for i in range(min(modals.count(), 5))):
+            close_btn = page.get_by_role("button", name=re.compile(r"^\s*(close|dismiss|no thanks)\s*$", re.I))
+            if close_btn.count() and close_btn.first.is_visible():
+                close_btn.first.click()
+                page.wait_for_timeout(500)
+            else:
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(500)
+    except Exception:
+        pass
+
+
 def goto_documents(page) -> bool:
     """Reach the PDF Statements page ('Statements and Year End Summaries') by
     CLICKING within the SPA. Amex holds the session in an in-memory token, so a
@@ -411,8 +432,25 @@ def goto_documents(page) -> bool:
     try:
         url = page.url or ""
         if "/activity/statements" not in url:
+            dismiss_offer(page)
+            # Multi-card sign-ins frequently land on /overview rather than /dashboard.
+            # /overview does not draw the 'Statements & Activity' top-nav link until
+            # a specific card product is selected from the switcher.
+            if "/overview" in (page.url or ""):
+                cb = page.locator("[data-testid='simple_switcher_combobox']")
+                if cb.count() and cb.first.is_visible():
+                    cb.first.click()
+                    page.wait_for_timeout(500)
+                    opts = page.locator("[data-testid^='simple_switcher_product_option_']")
+                    if opts.count() and opts.first.is_visible():
+                        opts.first.click()
+                        _arrived(page, "/dashboard", LINK_WAIT_MS)
+                elif page.locator("[data-testid='product-button']").count():
+                    page.locator("[data-testid='product-button']").first.click()
+                    _arrived(page, "/dashboard", LINK_WAIT_MS)
             pressed = ""
-            if "/activity" not in url:
+            if "/activity" not in (page.url or ""):
+                dismiss_offer(page)
                 link, want = _english_link(page), "/activity"
                 if link is None:
                     # The PDF statements themselves, which a dashboard in
@@ -433,6 +471,7 @@ def goto_documents(page) -> bool:
                             "The link on the way to the statements was pressed once and "
                             "the page it leads to did not open.")
             if "/activity/statements" not in (page.url or ""):
+                dismiss_offer(page)
                 pdf = page.locator(_PDF_LINK_SEL)
                 if pdf.count() == 0:
                     pdf = page.get_by_role("link", name=_PDF_LINK_WORDS)
@@ -630,7 +669,126 @@ _STMT_TESTID_RE = re.compile(r"/(recent|older)-statements/(\d{4}-\d{2}-\d{2})/do
 _YE_TESTID_RE = re.compile(r"/year-end-summary/(\d{4})/download-button")
 
 
-def collect_download_docs(page) -> List[RawDoc]:
+def clean_account_name(raw: str) -> str:
+    """Strip trademark symbols and extra whitespace from account name."""
+    s = re.sub(r"[®™]", "", raw or "")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def list_cards(page) -> List[dict]:
+    """List every card/account available in the switcher.
+
+    Amex disables eval on its pages, so locators and attributes are used
+    directly instead of page.evaluate(). Each card option in the switcher
+    combobox provides a display name and the masked card number (e.g. ••••12345).
+    The card label is formatted as '<name> (<last_digits>)' so cards of the
+    same product type do not collide.
+
+    Returns list of dicts: [{'index': int, 'tid': str, 'label': str, 'digits': str, 'name': str}]
+    """
+    cb = page.locator("[data-testid='simple_switcher_combobox']")
+    if not (cb.count() and cb.first.is_visible()):
+        return []
+    try:
+        cb.first.click()
+        page.wait_for_timeout(500)
+        opts = page.locator("[data-testid^='simple_switcher_product_option_']")
+        cards = []
+        for i in range(opts.count()):
+            opt = opts.nth(i)
+            tid = opt.get_attribute("data-testid") or ""
+            name_el = opt.locator("[data-testid='simple_switcher_display_name']")
+            num_el = opt.locator("[data-testid='simple_switcher_display_number']")
+            name = clean_account_name(name_el.inner_text()) if name_el.count() else ""
+            num = (num_el.inner_text() if num_el.count() else "").strip()
+            digits = re.sub(r"\D", "", num)
+            label = f"{name} ({digits})" if digits else name
+            cards.append({"index": i, "tid": tid, "label": label, "digits": digits, "name": name})
+        if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
+            cb.first.click()
+            page.wait_for_timeout(300)
+        return cards
+    except Exception as e:
+        log.info("list_cards failed: %s", e)
+        return []
+
+
+def current_card_label(page) -> str:
+    """The label of the currently selected card in the switcher, or ''."""
+    try:
+        name_el = page.locator("[data-testid='simple_switcher_display_name']").first
+        num_el = page.locator("[data-testid='simple_switcher_display_number']").first
+        if name_el.count() and name_el.is_visible():
+            name = clean_account_name(name_el.inner_text())
+            num = num_el.inner_text() if num_el.count() and num_el.is_visible() else ""
+            digits = re.sub(r"\D", "", num)
+            return f"{name} ({digits})" if digits else name
+        disp = page.locator("[data-testid='simple_switcher_selected_option_display']")
+        if disp.count() and disp.first.is_visible():
+            txt = disp.first.inner_text().strip()
+            lines = [l.strip() for l in txt.splitlines() if l.strip()]
+            if lines:
+                name = clean_account_name(lines[0])
+                num = lines[1] if len(lines) > 1 else ""
+                digits = re.sub(r"\D", "", num)
+                return f"{name} ({digits})" if digits else name
+    except Exception:
+        pass
+    return ""
+
+
+def select_card(page, card: dict) -> bool:
+    """Switch to the card specified by dict.
+    Returns True if successfully switched or already on that card."""
+    cb = page.locator("[data-testid='simple_switcher_combobox']")
+    if not (cb.count() and cb.first.is_visible()):
+        return False
+    digits = card.get("digits", "")
+    disp = page.locator("[data-testid='simple_switcher_selected_option_display']")
+    if disp.count() and digits and digits in disp.first.inner_text():
+        return True
+    try:
+        cb.first.click()
+        page.wait_for_timeout(500)
+        tid = card.get("tid", "")
+        opt = page.locator(f"[data-testid='{tid}']") if tid else None
+        if not opt or not opt.count() or not opt.first.is_visible():
+            idx = card.get("index", 0)
+            opts = page.locator("[data-testid^='simple_switcher_product_option_']")
+            opt = opts.nth(idx) if idx < opts.count() else None
+        if opt and opt.count() and opt.first.is_visible():
+            opt.first.click()
+            page.wait_for_timeout(2500)
+            try:
+                page.wait_for_selector(_DOWNLOAD_BUTTONS, timeout=LIST_WAIT_MS)
+            except Exception:
+                pass
+            expand_sections(page)
+            return True
+        else:
+            if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
+                cb.first.click()
+    except Exception as e:
+        log.info("select_card failed: %s", e)
+    return False
+
+
+def ensure_card(page, account: str) -> bool:
+    """Ensure that the page is on the card matching `account`."""
+    if not account:
+        return True
+    current = current_card_label(page)
+    if current and (current == account or account in current or current in account):
+        return True
+    digits = re.sub(r"\D", "", account)
+    cards = list_cards(page)
+    for c in cards:
+        if c["label"] == account or (digits and c["digits"] == digits):
+            return select_card(page, c)
+    return False
+
+
+def collect_download_docs(page, account: str = "") -> List[RawDoc]:
     """Every downloadable statement + year-end summary on the statements page,
     read from the download-button testids (deduped by category+date)."""
     docs: List[RawDoc] = []
@@ -671,10 +829,11 @@ def collect_download_docs(page) -> List[RawDoc]:
                 human = _human_date(when)
                 docs.append(RawDoc(title=f"Monthly Statement - {human}", date_text=when,
                                    href=tid, text=f"Monthly Statement {human}",
-                                   kind="statement"))
+                                   kind="statement", account=account))
             else:
                 docs.append(RawDoc(title=f"{when} Year-End Summary", date_text=f"{when}-12-31",
-                                   href=tid, text=f"{when} Year-End Summary", kind="year-end"))
+                                   href=tid, text=f"{when} Year-End Summary",
+                                   kind="year-end", account=account))
     return docs
 
 
