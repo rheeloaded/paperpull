@@ -74,8 +74,10 @@ core/dist/
 build/
 
 # Python
-.venv/
-venv/
+# No trailing slash. Off Windows a worktree's .venv is a symlink, and a
+# pattern ending in / matches only a real folder.
+.venv
+venv
 env/
 __pycache__/
 *.py[cod]
