@@ -728,6 +728,12 @@ class App:
                 self.not_live()
             except site.DeadlineReached:
                 self.deadline_reached()
+            except site.ListStopped:
+                # The documents page could not be read again for this
+                # document, or its list changed before the press. Every
+                # document after it reads the same list, so the run stops
+                # here rather than send each one to review.
+                self.list_changed()
             except Exception as e:
                 # Neither the record's key nor the error's words are said:
                 # both can carry a document id or a page's words.
@@ -767,6 +773,19 @@ class App:
             "This run has been at Alpaca for %d minutes, so it stops before the next press."
             % (site.DEADLINE_S // 60),
             "Everything saved so far is kept. Run Resume to carry on from where this stopped.",
+        ])
+
+    def list_changed(self) -> None:
+        """Stop the run because the documents list could not be read again,
+        or changed, while a document was sought. The listing is noted as one
+        that stopped (paperpull_core.listing), so neither this run nor a
+        Resume calls it whole. Nothing is recorded against the document."""
+        listing.started(self)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        tabs.stop(self, [
+            "The Alpaca documents list could not be read again, so this run stops here.",
+            "Everything saved so far is kept. Look at the browser window, then run",
+            "Download again to read the list afresh.",
         ])
 
     def download_one(self, page, doc: Document, filename: str):

@@ -1173,7 +1173,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     transactions is refused. `dl_dir` is unused: nothing here goes through
     the browser's downloads. Nothing but the list's own "Show more" is
     pressed. SessionExpired, and ProfileChanged when the browser is on
-    another profile, propagate to the run, and so does a pressing.Stop."""
+    another profile, propagate to the run, and so does a pressing.Stop.
+    So does ListStopped when Statements itself does not settle on a
+    statement address of this app's account type (_where), since every
+    month after this one opens the same page first. A month's own page
+    that does not show as asked is that month's matter, False."""
     out_path = Path(out_path)
     month = (document_id or "").strip()
     today = today or _date.today()
@@ -1186,10 +1190,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     heard = _month_heard(month)
     heard.listen(page)
     try:
+        where = _where(page)
+        if profile_tag(where.profile_id) != profile:
+            raise ProfileChanged("the browser is on another Venmo profile than the one listed")
         try:
-            where = _where(page)
-            if profile_tag(where.profile_id) != profile:
-                raise ProfileChanged("the browser is on another Venmo profile than the one listed")
             if not _open_month(page, where, month, heard=heard):
                 raise ListStopped("the month now shows no transactions")
             rows = show_all(page, where, month, heard)

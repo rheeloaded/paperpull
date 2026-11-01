@@ -622,6 +622,12 @@ class App:
                 # after it would get the same answer, so the run stops here,
                 # with nothing recorded against this one.
                 self.session_ended()
+            except site.ListStopped:
+                # The document center, the account or its statements could
+                # not be read again on the way to this statement's row.
+                # Every statement after it goes the same way, so the run
+                # stops here rather than send each one to review.
+                self.list_changed()
             except Exception as e:
                 # Neither the record's key nor the error's words are said:
                 # both can carry a statement id or a page's words.
@@ -651,6 +657,19 @@ class App:
             "This run has been at Chase for %d minutes, so it stops before the next statement."
             % (site.DEADLINE_S // 60),
             "Everything saved so far is kept. Run Resume to carry on from where this stopped.",
+        ])
+
+    def list_changed(self) -> None:
+        """Stop the run because the statements list could not be read again
+        while a statement was sought. The listing is noted as one that
+        stopped (paperpull_core.listing), so neither this run nor a Resume
+        calls it whole. Nothing is recorded against the statement."""
+        listing.started(self)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        tabs.stop(self, [
+            "The Chase business statements list could not be read again, so this run stops here.",
+            "Everything saved so far is kept. Look at the browser window, then run",
+            "Download again to read the list afresh.",
         ])
 
     def download_one(self, page, doc: Document, filename: str):

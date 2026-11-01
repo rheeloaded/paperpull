@@ -649,6 +649,12 @@ class App:
                 self.session_ended()
             except site.OtpRequired:
                 self.otp_required()
+            except site.ListStopped:
+                # Statements, or the Mobile list, could not be read again
+                # for this statement. Every statement after it reads the
+                # same list, so the run stops here rather than send each one
+                # to review.
+                self.list_changed()
             except Exception as e:
                 # The kind of failure only. Its message or traceback can
                 # carry an address with a statement id, or words off the
@@ -675,6 +681,19 @@ class App:
             "Spectrum asks for a one-time passcode, so this run stops here.",
             "Nothing was typed into it. Answer it yourself in the open browser",
             "window, then run Resume to carry on from where this stopped.",
+        ])
+
+    def list_changed(self) -> None:
+        """Stop the run because the statement list could not be read again
+        while a statement was sought. The listing is noted as one that
+        stopped (paperpull_core.listing), so neither this run nor a Resume
+        calls it whole. Nothing is recorded against the statement."""
+        listing.started(self)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        tabs.stop(self, [
+            "The Spectrum statement list could not be read again, so this run stops here.",
+            "Everything saved so far is kept. Look at the browser window, then run",
+            "Download again to read the list afresh.",
         ])
 
     def download_one(self, page, doc: Document, filename: str):

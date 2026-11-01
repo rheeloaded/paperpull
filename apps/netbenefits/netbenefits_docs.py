@@ -757,13 +757,19 @@ class App:
                 # Already explained by download_one. Stop rather than grind
                 # through the rest producing empty "manual review" entries.
                 print("Stopped. Everything downloaded so far is saved.")
-                return
+                # Left with the stop in flight, which is what the core
+                # reports as a run that stopped. A return here finished
+                # the run clean, with documents still to download.
+                raise SystemExit(0)
             except site.PlanListUnavailable as e:
                 # Every document after this one belongs to a plan that cannot
                 # be opened either, so none is marked failed. They wait.
                 self._say_plans_unlisted(unclear=isinstance(e, site.PlanListUnclear))
                 print("Stopped. Everything downloaded so far is saved.")
-                return
+                # Left with the stop in flight, which is what the core
+                # reports as a run that stopped. A return here finished
+                # the run clean, with documents still to download.
+                raise SystemExit(0)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))

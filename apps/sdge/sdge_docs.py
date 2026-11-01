@@ -594,6 +594,11 @@ class App:
                 # bill after it would get the same answer, so the run stops
                 # here, with nothing recorded against this one.
                 self.session_ended()
+            except site.ListStopped:
+                # Billing History could not be read again for this bill.
+                # Every bill after it reads the same list, so the run stops
+                # here rather than send each one to review.
+                self.list_changed()
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -608,6 +613,19 @@ class App:
             "My Energy Center answered as signed out, so this run stops here.",
             "Everything saved so far is kept. Sign in again in the open browser",
             "window, then run Resume to carry on from where this stopped.",
+        ])
+
+    def list_changed(self) -> None:
+        """Stop the run because Billing History could not be read again
+        while a bill was sought. The listing is noted as one that stopped
+        (paperpull_core.listing), so neither this run nor a Resume calls it
+        whole. Nothing is recorded against the bill."""
+        listing.started(self)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        tabs.stop(self, [
+            "The SDG&E billing history could not be read again, so this run stops here.",
+            "Everything saved so far is kept. Look at the browser window, then run",
+            "Download again to read the list afresh.",
         ])
 
     def download_one(self, page, doc: Document, filename: str):

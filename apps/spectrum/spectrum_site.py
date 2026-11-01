@@ -1809,8 +1809,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     address, any other statement is chosen by pressing its row there.
     False, nothing pressed, when it is not found. SessionExpired and
     OtpRequired propagate to the run, and a press that brought anything but
-    the statement stops it. `own_files` are the statement's own copies
-    saved before, as take_statement says."""
+    the statement stops it. So does ListStopped when Statements cannot be
+    read again, since every statement after this one reads the same list.
+    `own_files` are the statement's own copies saved before, as
+    take_statement says."""
     out_path = Path(out_path)
     m = DOCUMENT_ID_RE.fullmatch((document_id or "").strip())
     if not m or m.group(2) != (iso_date or "") or not valid_iso(iso_date):
@@ -1823,8 +1825,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         entries = read_statement_list(page)
     except ListStopped as stop:
         log.info("the statement list stopped while looking for the statement dated %s: %s", iso_date, stop)
-        _note(trace, note="list stopped", why=str(stop))
-        return False
+        raise
     found = [e for e in entries if e.family == m.group(1) and e.date == iso_date]
     if len(found) != 1:
         log.info("%d entries match the recorded statement dated %s, none taken", len(found), iso_date)
@@ -2638,18 +2639,19 @@ def take_mobile(page, day: str, out_path: Path, dl_dir, trace=None, own_files=()
     receipt_pdf.print_page_to_pdf (never the page's own Print). The tab
     must be at the same address and read the statement's date and Mobile
     just before and just after the print, and no Mobile answer heard while
-    it printed may fail. False, nothing more pressed, when the list or the
-    row is not as expected before a press, Expand All is missing or did not
-    expand every section, or the print fails. A printed page not bound to
-    the statement (bind_mobile) stops the run."""
+    it printed may fail. False, nothing more pressed, when the row is not
+    as expected before a press, Expand All is missing or did not expand
+    every section, or the print fails. A Mobile list that cannot be read
+    again raises ListStopped, since every Mobile statement after this one
+    reads the same list, and a printed page not bound to the statement
+    (bind_mobile) stops the run."""
     if not dl_dir:
         raise no_folder()
     try:
         days = open_mobile_list(page, dl_dir, trace)
     except ListStopped as stop:
         log.info("the Mobile list stopped while looking for the statement dated %s: %s", day, stop)
-        _note(trace, note="Mobile list stopped", why=str(stop))
-        return False
+        raise
     if not days or days.count(day) != 1:
         _note(trace, note="no single Mobile row matches the record")
         return False

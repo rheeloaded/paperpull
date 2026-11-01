@@ -677,6 +677,12 @@ class App:
                 # statement after it would get the same answer, so the run stops
                 # here, with nothing recorded against this one.
                 self.session_ended()
+            except site.ListStopped:
+                # Statements itself did not settle on a statement address of
+                # this account type. Every month after this one opens the
+                # same page first, so the run stops here rather than send
+                # each one to review.
+                self.list_changed()
             except Exception as e:
                 # Only the error's kind: a browser error's text can carry the
                 # page's address, the profile id in its query among it.
@@ -693,6 +699,19 @@ class App:
             "Venmo answered as signed out, so this run stops here.",
             "Everything saved so far is kept. Sign in again in the open browser",
             "window, then run Resume to carry on from where this stopped.",
+        ])
+
+    def list_changed(self) -> None:
+        """Stop the run because Statements could not be read again while a
+        month was sought. The listing is noted as one that stopped
+        (paperpull_core.listing), so neither this run nor a Resume calls it
+        whole. Nothing is recorded against the month."""
+        listing.started(self)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        tabs.stop(self, [
+            "The Venmo Statements page could not be read again, so this run stops here.",
+            "Everything saved so far is kept. Look at the browser window, then run",
+            "Download again to read the list afresh.",
         ])
 
     def download_one(self, page, doc: Document, filename: str):

@@ -1992,12 +1992,21 @@ class MobileTaking(WithFakeClick):
             self.assertNotIn(mobile_sid("2026-08-13"), json.dumps(t))
 
     def test_a_statement_not_in_the_list_is_not_pressed(self):
-        for page in (Page(mobile=mobile_rows(["2026-09-13"])), Page(),
-                     Page(mobile=mobile_rows(["2026-08-13", "2026-08-13"]))):
+        for page in (Page(mobile=mobile_rows(["2026-09-13"])), Page()):
             ok, out, _ = self.take(page)
             self.assertFalse(ok)
             self.assertEqual(page.mobile_row_presses, [])
             self.assertFalse(out.exists())
+
+    def test_a_mobile_list_that_cannot_be_read_again_stops_the_run(self):
+        """The Mobile list read again for a statement is the list every
+        Mobile statement after it reads too, so one that cannot be read
+        whole, here two statements of one date, is raised to the run."""
+        page = Page(mobile=mobile_rows(["2026-08-13", "2026-08-13"]))
+        with self.assertRaises(site.ListStopped):
+            self.take(page)
+        self.assertEqual(page.mobile_row_presses, [])
+        self.assertFalse((self.tmp / "2026-08-13 Spectrum Mobile Statement.pdf").exists())
 
     def test_nothing_is_pressed_without_the_download_folder(self):
         page = Page(mobile=mobile_rows())
@@ -2006,9 +2015,12 @@ class MobileTaking(WithFakeClick):
         self.assertEqual(page.clicks, [])
 
     def test_a_row_that_changed_or_is_turned_off_is_left(self):
+        # Billing's Mobile link reads otherwise by the time it is pressed,
+        # which every Mobile statement meets, so the run stops.
         page = Page(mobile=mobile_rows())
         page.row_changes[("m", 3)] = "Statement August 13, 2026 Make a Payment"
-        self.assertFalse(self.take(page)[0])
+        with self.assertRaises(site.ListStopped):
+            self.take(page)
         self.assertEqual(page.mobile_row_presses, [])
 
         def off(p, i):

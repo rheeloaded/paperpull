@@ -937,21 +937,26 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     """Save one document: a receipt by its tax year and date, found again on
     its bill's Transaction page and taken by pressing its own Print Receipt
     under the blob hook; or the notice by pressing Print Notice on the
-    parcel page while a balance is due."""
+    parcel page while a balance is due.
+
+    A parcel page that will not open again, a billing history with no bill
+    or a table that cannot be read whole raises ListStopped, as it does for
+    discovery, since every document after this one reads the same pages."""
     out_path = Path(out_path)
     t = (title or "").strip()
     try:
         m = _NOTICE_TITLE_RE.match(t)
         if m:
-            if not goto_documents(page):
-                return False
+            _back_to_parcel(page)
             if not balance_due(page):
                 log.info("no balance is due, so there is no notice to print")
                 return False
             # Print Notice prints the newest bill's notice, so a notice
             # listed for an older year is not pressed for.
             bills = bill_rows(read_whole_table(page, "billing history"))
-            if not bills or max(b["year"] for b in bills) != m.group(1):
+            if not bills:
+                raise ListStopped("the parcel's billing history shows no bill")
+            if max(b["year"] for b in bills) != m.group(1):
                 log.info("the newest bill is not this notice's tax year, none pressed")
                 if trace is not None:
                     trace.append({"note": "notice year is not the newest bill's"})
@@ -967,8 +972,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             log.info("not a title and date this app knows how to fetch")
             return False
         year, last4 = m.group(1), m.group(2) or ""
-        if not goto_documents(page):
-            return False
+        _back_to_parcel(page)
         bill_idx = _bill_index(page, year)
         _open_bill(page, bill_idx)
         # The whole payment history, read through its footer, has to carry
@@ -983,8 +987,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             return False
         # Then the page is opened again at its first page and the row found
         # on the page it sits on, since a row's index is its own page's.
-        if not goto_documents(page):
-            return False
+        _back_to_parcel(page)
         _open_bill(page, _bill_index(page, year))
         row_idx = _receipt_index(page, iso_date, last4)
         link = page.locator("table tbody tr").nth(row_idx).get_by_role("link", name=re.compile(r"^\s*print\s+receipt\s*$", re.I))
@@ -995,9 +998,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                                css=pressing.LINKS, expect=lambda d: pdf_names_receipt(d, cells[2], cells[1]))
     except ListStopped as stop:
         log.info("the list stopped while looking for the document: %s", stop)
-        if trace is not None:
-            trace.append({"note": "stopped", "why": str(stop)})
-        return False
+        raise
 
 
 # ---------------------------------------------------------------------------

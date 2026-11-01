@@ -626,7 +626,8 @@ def test_a_plan_missing_from_the_list_stops_the_run_and_fails_nothing(monkeypatc
     (tmp_path / "out" / "plans.json").unlink()
     page.links = None
     app = app_on(tmp_path, page)
-    app.process(app._select())
+    with pytest.raises(SystemExit):
+        app.process(app._select())
     assert app.stats["plans_unlisted"] == 1 and app.stats["failed"] == 0
     assert not app.progress.data
 
@@ -1584,7 +1585,8 @@ def test_a_run_that_stops_still_judges_what_it_held_and_the_next_one_files_it(mo
             raise site.SessionExpired("NetBenefits signed this session out")
         return made(pg, date_range, want_html)
     monkeypatch.setattr(site, "make_statement", signed_out_on_the_combined_one)
-    app.process(his_457_first(app))
+    with pytest.raises(SystemExit):
+        app.process(his_457_first(app))
     assert app.stats["session_expired"] == 1
     assert_his_457_held(app, tmp_path)
     monkeypatch.setattr(site, "make_statement", made)

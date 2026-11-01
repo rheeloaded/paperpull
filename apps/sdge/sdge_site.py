@@ -823,7 +823,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     `iso_date`. Billing History is opened again and the bill is fetched only
     when exactly one row there carries that same invoice id and statement
     date. `dl_dir` is unused: nothing here goes through the browser's
-    downloads. Nothing is pressed. SessionExpired propagates to the run."""
+    downloads. Nothing is pressed. SessionExpired propagates to the run, and
+    so does ListStopped when Billing History cannot be read again, since
+    every bill after this one would read the same list."""
     out_path = Path(out_path)
     inv = (document_id or "").strip()
     if href != DOWNLOAD_PATH or not INVOICE_ID_RE.fullmatch(inv):
@@ -836,7 +838,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         found = [d for d in _bills(page) if d.document_id == inv and d.date_text == (iso_date or "")]
     except ListStopped as stop:
         log.info("the bill list stopped while looking for the bill dated %s: %s", iso_date, stop)
-        return False
+        raise
     if len(found) != 1:
         log.info("%d rows match the recorded invoice id and date %s, none taken", len(found), iso_date)
         if trace is not None:

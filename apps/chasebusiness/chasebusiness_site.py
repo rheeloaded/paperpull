@@ -2055,11 +2055,14 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_digest: str,
     (account_digest) and chosen and proven current, Statements
     opened, its year chosen, and the record bound to exactly one answered
     statement and one shown row before anything is pressed on the row.
-    False, with nothing pressed on the row, when any of that does not hold.
-    False too when a control on the row is turned off, and when the PDF that
-    came does not print the account's last four, since rows do not name
-    their account. Such a PDF is not kept. SessionExpired and a stop of the
-    run propagate."""
+    False, with nothing pressed on the row, when the list does not hold the
+    record once. False too when a control on the row is turned off or
+    refused, and when the PDF that came does not print the account's last
+    four, since rows do not name their account. Such a PDF is not kept.
+    SessionExpired and a stop of the run propagate, and so does ListStopped
+    when the document center, the account or its statements cannot be read
+    again on the way to the row, since every statement after this one goes
+    the same way."""
     out_path = Path(out_path)
     # The documentId is not required: Chase mints it anew each session, so
     # a record keeps none (see bind).
@@ -2073,9 +2076,7 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_digest: str,
                              int(page_count), trace)
     except ListStopped as stop:
         log.info("the list stopped while looking for the statement dated %s: %s", iso_date, stop)
-        if trace is not None:
-            trace.append({"note": "the list stopped", "why": str(stop)})
-        return False
+        raise
     if n < 0:
         return False
     try:

@@ -1194,11 +1194,12 @@ def test_nothing_private_leaves_on_runs_that_stop(tmp_path):
         attach(app, center())
         app.cmd_discover()
         app.check_session = lambda p: None
-        # A list that stops on the way to the statement.
+        # A list that stops on the way to the statement stops the run.
         bad = center()
         bad.rows_override = []
         attach(app, bad)
-        app.process(app._select(limit=1))
+        with pytest.raises(SystemExit):
+            app.process(app._select(limit=1))
         # A download that is not a PDF stops the run.
         worse = center()
         worse.download_body = b"<html>BUS COMPLETE CHK (...4321)</html>"
@@ -1223,7 +1224,8 @@ def test_nothing_private_leaves_on_runs_that_stop(tmp_path):
         trace = []
         take(center(), tmp_path, doc_id="DOCQXNOPE", trace=trace)
         traces.append(json.dumps(trace))
-    assert app.stats["manual_review"] >= 1
+    assert "could not be read again" in seen.getvalue()
+    assert app.stats["failure_files"] == 1
     assert_private(without_what_a_run_makes(seen.getvalue() + written(app) + " ".join(traces), tmp_path))
 
 
