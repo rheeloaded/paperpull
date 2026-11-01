@@ -556,10 +556,14 @@ def test_every_invoice_of_an_order_split_into_several_moves(tmp_path, monkeypatc
     assert all(Path(e["file"]).is_file() for e in invoices[:2])
 
 
+@pytest.mark.skipif(os.name != "nt", reason="only Windows keeps a read-only file from being deleted, "
+                                            "elsewhere its folder decides and the move goes ahead")
 def test_a_read_only_file_on_its_way_to_another_drive_stays_where_it_was(
         office, monkeypatch):
     """Its copy carries none of its attributes, so when the file itself
-    cannot be taken away, the copy can, and there are never two."""
+    cannot be taken away, the copy can, and there are never two.
+    test_a_copy_to_another_drive_that_cannot_leave_its_first_place_goes_again
+    refuses the delete on every system."""
     import stat as stat_module
     across(monkeypatch, office.docs)
     first = office.out / "Statements" / FIRST
