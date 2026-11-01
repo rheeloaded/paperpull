@@ -51,40 +51,30 @@ def test_document_key_and_summary_differ_by_card():
     assert doc2.key.endswith(":Amex EveryDay Card (67890)")
 
 
-def test_migrate_legacy_unnamed_records():
+def test_migrate_legacy_keys():
+    # Test migration of records where the account exceeded 40 chars and was cut
+    long_acct = "Delta SkyMiles Reserve American Express Card (12345)"
+    doc = Document(
+        title="Monthly Statement - October 11, 2026",
+        category="Statement",
+        date="2026-10-11",
+        account=long_acct,
+    )
+    old_cut_key = f"Statement:2026-10-11:Monthly Statement - October 11, 2026:{long_acct[:40]}"
     records = {
-        "Statement:2026-10-11:Monthly Statement - October 11, 2026:Unnamed": {
+        old_cut_key: {
             "title": "Monthly Statement - October 11, 2026",
-            "account": "",
+            "account": long_acct,
             "category": "Statement",
-            "summary": "Monthly Statement",
             "date": "2026-10-11",
             "state": "Completed",
             "downloaded_ok": True,
-            "pdf_filename": "2026-10-11 Statement.pdf",
-            "pdf_path": "/path/to/2026-10-11 Statement.pdf",
-        },
-        "Statement:2026-10-11:Monthly Statement - October 11, 2026:Blue Cash Everyday (12345)": {
-            "title": "Monthly Statement - October 11, 2026",
-            "account": "Blue Cash Everyday (12345)",
-            "category": "Statement",
-            "summary": "Monthly Statement Blue Cash Everyday (12345)",
-            "date": "2026-10-11",
-            "state": "Discovered",
-            "downloaded_ok": False,
-        },
+        }
     }
-
     changed = migrate_legacy_keys(records)
-    assert changed >= 1
-    # Legacy Unnamed record should be removed
-    assert "Statement:2026-10-11:Monthly Statement - October 11, 2026:Unnamed" not in records
-    # Named record should inherit completion and PDF information
-    named = records["Statement:2026-10-11:Monthly Statement - October 11, 2026:Blue Cash Everyday (12345)"]
-    assert named["state"] == "Completed"
-    assert named["downloaded_ok"] is True
-    assert named["pdf_filename"] == "2026-10-11 Statement.pdf"
-    assert named["account"] == "Blue Cash Everyday (12345)"
+    assert changed == 1
+    assert doc.key in records
+    assert old_cut_key not in records
 
 
 def test_select_groups_by_card_account():

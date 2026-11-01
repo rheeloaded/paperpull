@@ -120,30 +120,13 @@ class Document:
 
 
 def migrate_legacy_keys(records: dict) -> int:
-    """Move records written while the account was cut to forty characters,
-    or clean up legacy records that were stored without an account (:Unnamed)
-    when matching records with the card account now exist.
+    """Move records written while the account was cut to forty characters.
+
+    Only a record whose key is exactly the new one with the last four taken
+    off is moved, so nothing is guessed. An archive whose account names were
+    short enough to fit has no such records and nothing happens.
     """
-    changed = _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
-    unnamed = [k for k in list(records.keys())
-               if k.endswith(":Unnamed") or not records[k].get("account")]
-    for uk in unnamed:
-        ur = records[uk]
-        cat, dt = ur.get("category"), ur.get("date")
-        named = [k for k, v in records.items()
-                 if k != uk and v.get("category") == cat and v.get("date") == dt and v.get("account")]
-        if named:
-            target = named[0]
-            if ur.get("state") == State.COMPLETED.value or ur.get("downloaded_ok"):
-                records[target]["state"] = ur.get("state")
-                records[target]["downloaded_ok"] = ur.get("downloaded_ok", True)
-                if ur.get("pdf_filename"):
-                    records[target]["pdf_filename"] = ur["pdf_filename"]
-                if ur.get("pdf_path"):
-                    records[target]["pdf_path"] = ur["pdf_path"]
-            del records[uk]
-            changed += 1
-    return changed
+    return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
 class App:
