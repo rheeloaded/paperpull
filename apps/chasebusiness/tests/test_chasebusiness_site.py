@@ -1915,6 +1915,26 @@ def test_a_row_with_both_shapes_or_neither_presses_nothing_on_the_row(tmp_path, 
     assert any(why in str(t.get("why")) for t in trace), trace
 
 
+def test_a_refusal_once_the_save_menu_was_pressed_stops_the_run(tmp_path):
+    """A row's own control refused before anything on it is pressed leaves
+    that statement for review. Once its save menu was pressed, a Save as PDF
+    the guard refuses stops the run, as a press that brought nothing does."""
+    page = center()
+    real = page.labels_for
+
+    def refused(css):
+        if css.endswith("-downloadPDFOption") and page.menu_open is not None:
+            return ["Save as PDF", "Sign out"]
+        return real(css)
+    page.labels_for = refused
+    with pytest.raises(site.pressing.Stop) as stop:
+        take(page, tmp_path)
+    assert "was pressed and then" in " ".join(stop.value.lines)
+    assert any("downloadDocumentDropdown" in p for p in page.presses)
+    assert not any("downloadPDFOption" in p for p in page.presses)
+    assert page.downloads == [] and not (tmp_path / "out.pdf").exists()
+
+
 @pytest.mark.parametrize("labels", [["Sep 28, 2026 , opens document"],
                                     ["Sep 30, 2026 Saves document"],
                                     ["Sep 28, 2026 Saves document", "Sign out"],

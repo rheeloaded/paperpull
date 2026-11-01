@@ -569,30 +569,28 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
-            except site.ListStopped:
+            except site.ListStopped as stop:
                 # Inbox & Statements could not be read again for this
                 # document. Every inbox document after it reads the same
                 # list, so the run stops here rather than send each one to
                 # review.
-                self.list_changed()
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
 
-    def list_changed(self) -> None:
-        """Stop the run because the inbox list could not be read again while
-        a document was sought. The listing is noted as one that stopped
-        (paperpull_core.listing), so neither this run nor a Resume calls it
-        whole. Nothing is recorded against the document."""
-        listing.started(self)
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        document was sought. Nothing is recorded against the document, and
+        the run leaves as one whose list did not end whole, which only a run
+        that lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
         self.write_failure("read the documents list again", "the list changed or stopped")
-        tabs.stop(self, [
-            "The Nelnet Inbox & Statements list could not be read again, so this run stops here.",
-            "Everything saved so far is kept. Look at the browser window, then run",
-            "Download again to read the list afresh.",
-        ])
+        listing.read_again_stopped(self, (
+            "The Nelnet Inbox & Statements list could not be read again, "
+            "so this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one document. The site layer fetches the row's PDF link from

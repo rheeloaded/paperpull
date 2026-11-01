@@ -360,6 +360,7 @@ def test_an_inbox_notice_about_the_1098e_is_taken_from_its_own_row(monkeypatch, 
         raise AssertionError("an inbox notice was looked for on Tax Info")
     monkeypatch.setattr(site, "_goto_tax", never)
     monkeypatch.setattr(site, "goto_documents", lambda page: False)
+    monkeypatch.setattr(site, "looks_signed_out", lambda page: False)
     # Inbox & Statements does not open here, which stops the run, and Tax
     # Info is never asked.
     with pytest.raises(site.ListStopped):

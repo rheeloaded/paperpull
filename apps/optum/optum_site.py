@@ -668,6 +668,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         return False
     pid = m.group(1)
     if not goto_documents(page):
+        if looks_signed_out(page):
+            # A sign-out, which the next document's session check stops on.
+            log.info("the forms page answered as signed out")
+            return False
         raise ListStopped("the Forms & documents page did not open")
     pids = product_ids(_entries(page))
     if not pids:
@@ -676,6 +680,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         log.info("the recorded product is not on the Forms & documents page")
         return False
     if not _goto_statements(page, pid):
+        if looks_signed_out(page):
+            log.info("a product's statements page answered as signed out")
+            return False
         raise ListStopped("a product's statements page did not open")
     try:
         listed = documents_of(_entries(page), pid)

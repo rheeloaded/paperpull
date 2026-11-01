@@ -1281,6 +1281,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             return False
         # Afresh, as for a monthly statement, and the card list heard anew.
         if not load_statements_for_card(page):
+            if looks_signed_out(page):
+                raise SessionExpired("the statements page answered as signed out")
             raise ListStopped("the statements page did not open")
         return _take_card_statement(page, c.group(1), iso_date, out_path, trace)
     m = _STATEMENT_TITLE_RE.match(t)
@@ -1293,6 +1295,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     # Afresh before every press, so no earlier month's page is still
     # polling for its PDF (reload_statements).
     if not reload_statements(page):
+        if looks_signed_out(page):
+            raise SessionExpired("the statements page answered as signed out")
         raise ListStopped("the statements page did not open")
     return _catch_statement(page, dl_dir, m.group(1), out_path, trace)
 

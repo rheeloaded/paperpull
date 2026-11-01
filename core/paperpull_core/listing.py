@@ -246,6 +246,31 @@ def resume(app, remaining, process, noun: str = "documents") -> None:
     after_resume(app)
 
 
+def read_again_stopped(app, said: str) -> None:
+    """Stop a run whose list, read again while it took the documents, could
+    not be read. `said` is the app's own first line, which names the list.
+
+    Many apps read their list again for each document and take it only when
+    the list still holds it once. When that list stops, every document after
+    it would read the same list, so the run stops at the first. The listing
+    is noted as one that stopped, so neither this run nor a Resume calls it
+    whole, and the run leaves on ListNotRead, as a Resume with nothing left
+    to carry on with does. A Resume reads no list of its own, so it would
+    read the same list again for its first document and stop there again,
+    and the panel offers a run that lists first instead of Continue (#124)."""
+    started(app)
+    try:
+        app.progress.save(backup=True)
+    except Exception:
+        pass
+    whole_run = _whole_run(app)
+    print()
+    print("!! " + said)
+    print("   Everything saved so far is kept. Look at the browser window, then run")
+    print("   %s, either of which reads the list first." % whole_run)
+    raise ListNotRead(whole_run)
+
+
 def read_again_first(app, noun: str = "purchases") -> bool:
     """Whether a receipt app's Resume reads the list before it takes
     anything, answered before the browser is asked for anything.

@@ -498,7 +498,9 @@ class Orchestrator(unittest.TestCase):
         app._on_its_site = later
         bills = app._select()
         self.assertGreater(len(bills), 1)
-        with redirect_stdout(io.StringIO()) as said, self.assertRaises(SystemExit):
+        # A stop only a run that lists carries on from, so the panel offers
+        # that, not Continue, which would read the same list and stop again.
+        with redirect_stdout(io.StringIO()) as said, self.assertRaises(listing.ListNotRead):
             app.process(bills)
         self.assertEqual(len(pages), 1, "one list read, for the first bill only")
         self.assertEqual(pages[0].context.request.asked, [])

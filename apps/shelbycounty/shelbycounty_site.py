@@ -748,17 +748,25 @@ def _receipt_index(page, iso: str, last4: str = "") -> int:
     raise ListStopped("no receipt dated %s in the payment history" % iso)
 
 
-def _bill_index(page, year: str) -> int:
+def _bill_index(page, year: str, missing: Optional[int] = None) -> int:
     """The current billing-table row index for tax year `year`, paging to
-    it with NEXT. Exactly one row must carry the year."""
-    for _ in range(50):
-        hits = [r for r in _rows(page) if len(r.get("cells") or []) > 1 and r["cells"][1].strip() == year]
+    it with NEXT. Exactly one row must carry the year. A table that shows
+    no row raises ListStopped. A year no page carries answers `missing`
+    when one is given, as a download does for a record whose year has left
+    the billing history, and raises ListStopped otherwise."""
+    for page_no in range(50):
+        rows = _rows(page)
+        if not rows and page_no == 0:
+            raise ListStopped("the parcel's billing history shows no bill")
+        hits = [r for r in rows if len(r.get("cells") or []) > 1 and r["cells"][1].strip() == year]
         if len(hits) > 1:
             raise ListStopped("two bills for tax year %s" % year)
         if hits:
             return int(hits[0]["i"])
         if not _press_next(page):
             break
+    if missing is not None:
+        return missing
     raise ListStopped("no bill for tax year %s on the billing history" % year)
 
 
@@ -903,9 +911,13 @@ def _press_for_blob(page, control, label: str, out_path: Path, trace: Optional[l
     try:
         settled_here(page, "the press", tabs)
     except ListStopped as stop:
+        # A tab the press opened may be the payment site (settled_here), so
+        # nothing more is pressed for this or any later document.
         if trace is not None:
             trace.append({"note": "stopped after the press", "why": str(stop)})
-        return False
+        raise pressing.Stop("press a document's print control", "the page changed after the press", [
+            "A document's print control was pressed and %s, so the run stops here." % stop,
+            "Nothing more was pressed.", pressing.AGAIN], after_a_press=True)
     try:
         result = intake.evaluate(page, _RESULT_JS)
     except Exception as e:
@@ -973,7 +985,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             return False
         year, last4 = m.group(1), m.group(2) or ""
         _back_to_parcel(page)
-        bill_idx = _bill_index(page, year)
+        bill_idx = _bill_index(page, year, missing=-1)
+        if bill_idx < 0:
+            log.info("the billing history no longer shows tax year %s", year)
+            if trace is not None:
+                trace.append({"note": "no bill for the record's tax year"})
+            return False
         _open_bill(page, bill_idx)
         # The whole payment history, read through its footer, has to carry
         # the date (and receipt-number ending) exactly once before anything

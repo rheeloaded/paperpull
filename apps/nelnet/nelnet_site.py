@@ -1006,6 +1006,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             return False
         return _print_tax_form(page, el, label, out_path, trace)
     if not goto_documents(page):
+        if looks_signed_out(page):
+            # A sign-out, which the next document's session check stops on.
+            log.info("Inbox & Statements answered as signed out")
+            return False
         raise ListStopped("Inbox & Statements did not open")
     el, label = _inbox_control(page, iso_date, title)
     if el is None:

@@ -573,18 +573,16 @@ class App:
             "window, then run Resume to carry on from where this stopped.",
         ])
 
-    def list_changed(self) -> None:
-        """Stop the run because a list of documents could not be read again
-        while a document was sought. The listing is noted as one that
-        stopped (paperpull_core.listing), so neither this run nor a Resume
-        calls it whole. Nothing is recorded against the document."""
-        listing.started(self)
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        document was sought. Nothing is recorded against the document, and
+        the run leaves as one whose list did not end whole, which only a run
+        that lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
         self.write_failure("read the documents list again", "the list changed or stopped")
-        tabs.stop(self, [
-            "The Coinbase documents list could not be read again, so this run stops here.",
-            "Everything saved so far is kept. Look at the browser window, then run",
-            "Download again to read the list afresh.",
-        ])
+        listing.read_again_stopped(self, (
+            "The Coinbase documents list could not be read again, so "
+            "this run stops here."))
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -665,12 +663,12 @@ class App:
                 # Signed out on the way to a card statement, which the
                 # account holder answers by signing in again.
                 self.session_ended()
-            except site.ListStopped:
+            except site.ListStopped as stop:
                 # The statements page or the tax list could not be read
                 # again for this document. Every document after it reads the
                 # same list, so the run stops here rather than send each one
                 # to review.
-                self.list_changed()
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))

@@ -10,28 +10,34 @@ reads no list of its own, so after a whole listing a list that now stops
 500) sent every pending bill to review, each after a read of the whole list
 against the provider's bot protection, and the run ended looking clean. An
 independent review proved it on PR #126 (NW Natural, a copy of SDG&E), and
-eleven apps on main had the same shape in one form or another. Nine more
-answered a sign-out in their loop with a return, so the run ended with no
-stop in flight and was reported as finished.
+eleven apps on main had the same shape in one form or another. Sixteen more
+answered a sign-out in their loop with a return, so the run left with no
+stop in flight and was reported as finished, or as failed where main
+returned 2 for it. PayPal alone had been mended (review of #61).
 
 So in every document app, what stops Discover stops a download too. The
 stops are found by what the code does, the exception classes of the app's
-site module that a method Discover reaches catches as site.X, with their
-subclasses. The download path is every site function that App.download_one
-reaches and neither Discover, the session check nor Login does, with every
-function those reach. Where in that path, or in the App methods download_one
-reaches, or in the loop that calls download_one, a handler can catch such a
-stop escaping its try, it has to leave by raising or by a stop of the run
-(SystemExit, tabs.stop or a method that always does one of them). An
-except Exception counts too, since it catches a stop as surely as a handler
-that names it. IRS was the worked example, list_changed in its loop.
+site module that a method Discover reaches catches as site.X, and those the
+loop around download_one names, with their subclasses. The download path is
+every site function that App.download_one reaches and neither Discover, the
+session check nor Login does, with every function those reach. Where in
+that path, or in the App methods download_one reaches, or in the loop that
+calls download_one, a handler can catch such a stop escaping its try, it
+has to leave by a stop of the run (SystemExit, tabs.stop, ListNotRead or a
+method that always does one of them) or by raising something that still
+stops it. An except Exception counts too, since it catches a stop as surely
+as a handler that names it, and so does a raise of a built-in exception,
+which the loop's except Exception records as one document's failure. A list
+that stops leaves on ListNotRead (listing.read_again_stopped), so the panel
+offers a run that reads the list first, not Continue, which would read the
+same list for its first document and stop there again (#124).
 
 A handler that turns a stop into a document's own failure on purpose is
-named below with the site functions its try calls and why, since the stop
-it catches there is about that one document (its own page, its own row's
-control, one account's one year) and not the list every later document
-reads. A change to what that try calls fails this until it is looked at
-again.
+named below with the site functions its try calls directly and why, since
+the stop it catches there is about that one document (its own page, one
+plan, one account's one year) and not the list every later document reads.
+A change to the functions that try calls directly fails this until it is
+looked at again. A call added further down is not seen.
 
 Two checks read the code. A third drives each app's own loop with a
 download that raises each stop its path can let out, and the run has to
@@ -39,12 +45,17 @@ stop at the first document with nothing recorded against either.
 
 What this cannot see. About thirty older apps signal a list that did not
 show by returning False or None from the very function that also says the
-record is gone, so no exception marks the difference. Their download paths
-fail each document when the list page will not open or reads empty, and
-each needs a distinct signal from its list reader before a rule can hold
-it. They are listed in the branch notes, not here.
+record is gone, so no exception marks the difference, and their Discover
+and loop name no class. Their download paths fail each document when the
+list page will not open or reads empty, and each needs a distinct signal
+from its list reader before a rule can hold it. They are listed in the
+branch notes, not here. Nor does it read a stop swallowed by
+contextlib.suppress, an except whose classes are kept in a name, a handler
+inside a match, or a return inside a finally. None is in a download path
+today.
 """
 import ast
+import builtins
 import importlib
 import json
 import sys
@@ -54,6 +65,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from paperpull_core import listing
+from paperpull_core.run_reporting import ListNotRead
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -71,18 +83,11 @@ ITS_OWN = {
         "every document starts from is read before this try, and a stop there reaches "
         "the run",
     ("chasebusiness", "download_statement", ("_catch_statement",)):
-        "a control on the statement's own row that is not one control, or that the guard "
-        "refuses, before anything is pressed on it, leaves that statement for review. "
-        "The list was read whole on the way to the row (_reach_row), and a stop there "
-        "reaches the run",
-    ("alpaca", "download_document", ("_catch_document",)):
-        "the row's own Download refused by the guard, or the row or the list's answer "
-        "changing between finding the row and its press, before anything is pressed, "
-        "leaves that document for review, as Chase Business does. The list was read on "
-        "the way to the row (_open, _find_row), and a stop there reaches the run",
-    ("shelbycounty", "_press_for_blob", ("settled_here",)):
-        "the page moved after this document's own press, which is that press's outcome, "
-        "not a read of the list",
+        "a row whose shape, or whose own save menu or Saves document link, is refused "
+        "before anything on it is pressed leaves that statement for review. Chase draws "
+        "two shapes of row, and a stop there would stop every later run at the same row. "
+        "A refusal once something on the row was pressed stops the run (Run.presses), "
+        "and a stop of the list on the way to the row (_reach_row) reaches the run",
     ("shelbycounty", "goto_documents", ("settled_here",)):
         "the opener's answer, which every caller in the download path turns into "
         "ListStopped itself (_back_to_parcel)",
@@ -105,9 +110,8 @@ ITS_OWN = {
         "this check cannot see, said at the top",
     ("fedex", "download_one", ("download_bill",)):
         "an invoice listed with no download link the app understands is that invoice's "
-        "matter. NeedsPerson also says Billing Online is no longer connected, which "
-        "would leave every invoice for review, and needs a class of its own before it "
-        "can stop the run. FedEx is untested on a connected account",
+        "matter. Billing Online no longer connected is NotConnected, which this handler "
+        "passes on and the loop stops on. FedEx is untested on a connected account",
     ("netbenefits", "download_document", ("make_statement",)):
         "one plan's own statement made to order, which opens that plan alone. Another "
         "plan's documents open their own plan. The plan list itself is read by "
@@ -220,9 +224,20 @@ class App:
             todo.extend(self.bases.get(n, []))
         return out
 
+    def loops(self) -> list:
+        """The App methods that call download_one inside a try."""
+        return [m for m, fn in self.methods.items()
+                if any(isinstance(n, ast.Try) and any(self_attr(c.func) == "download_one"
+                                                      for s in n.body for c in calls(s))
+                       for n in own_nodes(fn))]
+
     def _stops(self) -> set:
+        """The site classes a method Discover reaches catches, and those
+        the loop around download_one names, with their subclasses. A class
+        the loop names is one the app treats as more than one document's
+        failure, a sign-out most often."""
         caught = set()
-        for m in self.reached(["cmd_discover"]):
+        for m in self.reached(["cmd_discover"]) | set(self.loops()):
             for n in ast.walk(self.methods[m]):
                 if isinstance(n, ast.ExceptHandler) and n.type is not None:
                     for t in (n.type.elts if isinstance(n.type, ast.Tuple) else [n.type]):
@@ -250,18 +265,43 @@ class App:
             return isinstance(exc, ast.Name) and exc.id == "SystemExit"
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             func = stmt.value.func
-            return ast.unparse(func) in ("tabs.stop", "pressing.stop_run") \
+            return ast.unparse(func) in ("tabs.stop", "pressing.stop_run",
+                                         "listing.read_again_stopped") \
                 or self_attr(func) in stoppers
         return False
 
-    def leaves(self, body) -> bool:
-        """Whether a handler's body always leaves by raising or by a stop."""
+    def leaves(self, body, name=None) -> bool:
+        """Whether a handler's body always leaves by a stop of the run or by
+        raising something that still stops it. `name` is what the handler
+        calls the exception it caught."""
         for stmt in body:
-            if isinstance(stmt, ast.Raise) or self.stops_run(stmt, self.stoppers):
+            if isinstance(stmt, ast.Raise) and self.still_stops(stmt, name):
                 return True
-            if isinstance(stmt, ast.If) and self.leaves(stmt.body) and self.leaves(stmt.orelse):
+            if self.stops_run(stmt, self.stoppers):
+                return True
+            if isinstance(stmt, ast.If) and self.leaves(stmt.body, name) \
+                    and self.leaves(stmt.orelse, name):
                 return True
         return False
+
+    def still_stops(self, stmt, name) -> bool:
+        """A raise that passes the stop on, raises another stop or a stop of
+        the run, or raises what a function builds (a pressing.Stop, as
+        _page_stopped does). A built-in exception other than SystemExit, or
+        a site class that is no stop, is caught as one document's failure
+        by the loop's except Exception, so it does not count."""
+        if stmt.exc is None:
+            return True
+        if isinstance(stmt.exc, ast.Name) and stmt.exc.id == name:
+            return True
+        target = stmt.exc.func if isinstance(stmt.exc, ast.Call) else stmt.exc
+        label = target.id if isinstance(target, ast.Name) else site_attr(target)
+        known = getattr(builtins, label or "", None)
+        if isinstance(known, type) and issubclass(known, BaseException):
+            return issubclass(known, (SystemExit, KeyboardInterrupt))
+        if label in self.classes:
+            return label in self.stops
+        return True
 
     # the download path
     def download_path(self) -> set:
@@ -294,10 +334,10 @@ class App:
                 return True
         return False
 
-    def raised(self, stmt, rethrown) -> set:
+    def raised(self, stmt, rethrown, name=None) -> set:
         if not isinstance(stmt, ast.Raise):
             return set()
-        if stmt.exc is None:
+        if stmt.exc is None or (isinstance(stmt.exc, ast.Name) and stmt.exc.id == name):
             return set(rethrown)
         exc = stmt.exc.func if isinstance(stmt.exc, ast.Call) else stmt.exc
         name = exc.id if isinstance(exc, ast.Name) else site_attr(exc)
@@ -314,7 +354,7 @@ class App:
                 out |= self.escapes("docs", self_attr(c.func))
         return out
 
-    def visit(self, stmts, where: str, rethrown=frozenset(), found=None) -> set:
+    def visit(self, stmts, where: str, rethrown=frozenset(), found=None, name=None) -> set:
         """The stops that can leave these statements. Each try is read
         against its handlers, and a handler that catches a stop and does
         not leave is put in `found` with the site functions its try calls."""
@@ -323,18 +363,18 @@ class App:
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
             if isinstance(stmt, ast.Try):
-                left = self.visit(stmt.body, where, rethrown, found)
+                left = self.visit(stmt.body, where, rethrown, found, name)
                 for h in stmt.handlers:
                     got = {n for n in left if self.matches(h, n)}
                     left -= got
-                    if got and found is not None and not self.leaves(h.body):
+                    if got and found is not None and not self.leaves(h.body, h.name):
                         found.append((h, sorted(got), self.try_calls(stmt, where)))
-                    out |= self.visit(h.body, where, frozenset(got), found)
+                    out |= self.visit(h.body, where, frozenset(got), found, h.name)
                 out |= left
-                out |= self.visit(stmt.orelse, where, rethrown, found)
-                out |= self.visit(stmt.finalbody, where, rethrown, found)
+                out |= self.visit(stmt.orelse, where, rethrown, found, name)
+                out |= self.visit(stmt.finalbody, where, rethrown, found, name)
                 continue
-            out |= self.raised(stmt, rethrown)
+            out |= self.raised(stmt, rethrown, name)
             heads = [getattr(stmt, f) for f in ("test", "iter", "value", "exc", "context_expr")
                      if getattr(stmt, f, None) is not None]
             heads += [i.context_expr for i in getattr(stmt, "items", [])]
@@ -344,7 +384,7 @@ class App:
             if any(isinstance(b, list) for b in inner):
                 for b in inner:
                     if isinstance(b, list):
-                        out |= self.visit(b, where, rethrown, found)
+                        out |= self.visit(b, where, rethrown, found, name)
             elif not heads:
                 out |= self.called(stmt, where)
         return out
@@ -378,14 +418,26 @@ class App:
             found = []
             self.visit(self.funcs[name].body, "site", found=found)
             out += [(name, got, tried) for _h, got, tried in found]
-        loops = [m for m, fn in self.methods.items()
-                 if any(isinstance(n, ast.Try) and any(self_attr(c.func) == "download_one"
-                                                       for s in n.body for c in calls(s))
-                        for n in own_nodes(fn))]
-        for name in sorted(self.reached(["download_one"]) | set(loops)):
+        for name in sorted(self.reached(["download_one"]) | set(self.loops())):
             found = []
             self.visit(self.methods[name].body, "docs", found=found)
             out += [(name, got, tried) for _h, got, tried in found]
+        # A handler of the loop that names a stop is the app's own word that
+        # it is more than one document's failure, so it stops whether or not
+        # the reading above follows the stop that far.
+        seen = {(name, tuple(got)) for name, got, _tried in out}
+        for name in self.loops():
+            for node in own_nodes(self.methods[name]):
+                if not isinstance(node, ast.Try) or not any(
+                        self_attr(c.func) == "download_one" for s in node.body for c in calls(s)):
+                    continue
+                for h in node.handlers:
+                    named = sorted({site_attr(t) for t in (
+                        h.type.elts if isinstance(h.type, ast.Tuple) else [h.type])}
+                        & self.stops) if h.type is not None else []
+                    if named and not self.leaves(h.body, h.name) \
+                            and (name, tuple(named)) not in seen:
+                        out.append((name, named, self.try_calls(node, "docs")))
         return out
 
     def let_out(self) -> set:
@@ -486,7 +538,7 @@ def test_a_stop_out_of_a_download_stops_the_loop_at_once(name, stop, tmp_path, m
     mod, app = built(REPO / "apps" / name, tmp_path)
     taken = []
 
-    def download_one(page, doc, filename):
+    def download_one(page, doc, filename, *_a, **_kw):
         taken.append(doc.key)
         raise a_stop(getattr(mod.site, stop))
     page = MagicMock()
@@ -500,15 +552,17 @@ def test_a_stop_out_of_a_download_stops_the_loop_at_once(name, stop, tmp_path, m
                          summary="Monthly Statement", date=day)
             for day in ("2026-01-15", "2025-12-15")]
     assert docs[0].key != docs[1].key
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as end:
         app.process(docs)
     assert taken == [docs[0].key], "%s went on past a %s" % (name, stop)
     assert app.stats.get("manual_review", 0) + app.stats.get("failed", 0) == 0
     assert not any(app.progress.get(d.key) for d in docs)
     if stop == "ListStopped" or "ListStopped" in App(REPO / "apps" / name).ancestors(stop):
         # A list that stopped leaves the listing noted as one that did not
-        # end whole, so the panel offers a run that lists, not Resume.
+        # end whole, and the run leaves on ListNotRead, so the panel offers
+        # a run that lists, not Continue, which would stop here again.
         assert listing.last(app) == listing.STOPPED
+        assert isinstance(end.value, ListNotRead), type(end.value)
 
 
 # -- the rule, on samples --------------------------------------------------------------
@@ -667,3 +721,29 @@ def goto_documents(page):
     app = sample(tmp_path, docs=docs, site=site)
     assert "goto_documents" in app.funcs
     assert "goto_documents" not in app.download_path()
+
+
+def test_a_loop_that_answers_a_sign_out_with_a_return_is_found(tmp_path):
+    """Sixteen loops printed Stopped and returned, and the run left with no
+    stop in flight. The loop's own handler names the class, so it is read
+    even where Discover catches no such class and nothing shows the stop
+    leaving download_one."""
+    docs = STOPS.replace("        except site.SessionExpired:\n            self.session_ended()\n", "").replace(
+        "            except site.SessionExpired:\n                self.session_ended()\n",
+        "            except site.SessionExpired:\n                print('Stopped.')\n                return\n")
+    app = sample(tmp_path, docs=docs, site=RERAISED)
+    assert "SessionExpired" in app.stops
+    assert wrong(app) == ["process catches SessionExpired and goes on"]
+
+
+def test_a_stop_raised_again_as_another_exception_is_found(tmp_path):
+    site = SITE.replace("        return False\n    return bool",
+                        "        raise RuntimeError('stopped')\n    return bool")
+    assert wrong(sample(tmp_path, docs=STOPS, site=site)) == [
+        "download_bill catches ListStopped and goes on"]
+
+
+def test_a_stop_raised_again_by_its_name_passes(tmp_path):
+    site = SITE.replace("        return False\n    return bool", "        raise stop\n    return bool")
+    app = sample(tmp_path, docs=STOPS, site=site)
+    assert wrong(app) == [] and app.let_out() == {"ListStopped"}

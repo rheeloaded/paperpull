@@ -642,6 +642,9 @@ class Run:
         self.limit_s = limit_s
         self.today = today
         self.first_press: Optional[float] = None
+        # How many presses this run has made, so a refusal can be told to
+        # come before or after something on a statement's row was pressed.
+        self.presses = 0
         self.success_code = None
         # The codes of empty years answered before any non-empty list did.
         # Each is checked against the success code once one is known, and a
@@ -685,6 +688,7 @@ class Run:
         return len(self.downloads) - self.taken
 
     def pressed(self) -> None:
+        self.presses += 1
         if self.first_press is None:
             self.first_press = self.clock()
 
@@ -1671,7 +1675,15 @@ def _reach_row(page, run: Run, digest: str, document_id: str, iso_date: str,
     items, current_year = arrived
     year = int(iso_date[:4])
     if year != current_year:
-        items = _choose_year(page, run, acct, current_year, year, _open_picker(page, run))
+        options = _open_picker(page, run)
+        if not any(y == year for y, _css, _cur in options):
+            # The picker shows its years and not the record's, as when the
+            # year has left the ones Chase keeps. That is this record's
+            # matter, not the list's.
+            if trace is not None:
+                trace.append({"note": "the picker does not offer the record's year"})
+            return -1, ""
+        items = _choose_year(page, run, acct, current_year, year, options)
     n = bind(items, _read(page).get("rows") or [], document_id, iso_date, doc_type, pages)
     if n < 0 and trace is not None:
         trace.append({"note": "no single statement and row match the record"})
@@ -2056,13 +2068,17 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_digest: str,
     opened, its year chosen, and the record bound to exactly one answered
     statement and one shown row before anything is pressed on the row.
     False, with nothing pressed on the row, when the list does not hold the
-    record once. False too when a control on the row is turned off or
-    refused, and when the PDF that came does not print the account's last
-    four, since rows do not name their account. Such a PDF is not kept.
-    SessionExpired and a stop of the run propagate, and so does ListStopped
-    when the document center, the account or its statements cannot be read
-    again on the way to the row, since every statement after this one goes
-    the same way."""
+    record once or the picker no longer offers its year, or when the row's
+    shape or its own control is refused before anything on it is pressed.
+    A stop there would stop every later run at the same row. False too when
+    a control on the row is turned off, and when the PDF that came does not
+    print the account's last four, since rows do not name their account.
+    Such a PDF is not kept. SessionExpired and a stop of the run propagate,
+    and so does ListStopped when the document center, the account or its
+    statements cannot be read again on the way to the row, since every
+    statement after this one goes the same way. A refusal once the row's
+    save menu was pressed stops the run, as a press that brought nothing
+    does."""
     out_path = Path(out_path)
     # The documentId is not required: Chase mints it anew each session, so
     # a record keeps none (see bind).
@@ -2079,13 +2095,15 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_digest: str,
         raise
     if n < 0:
         return False
+    presses = run.presses
     try:
         if not _catch_statement(page, run, dl_dir, n, iso_date, out_path, trace):
             return False
     except ListStopped as stop:
-        # A control on the row the guard refused, or not one control: it
-        # was not pressed, and the statement is left for review.
         log.info("the statement dated %s was not saved: %s", iso_date, stop)
+        if run.presses != presses:
+            raise _stop("Something on the statement's row was pressed and then %s, so nothing "
+                        "more was pressed." % stop, "a control was refused after a press")
         if trace is not None:
             trace.append({"note": "the row's control was not pressed", "why": str(stop)})
         return False
