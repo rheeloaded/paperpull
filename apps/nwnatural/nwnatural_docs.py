@@ -62,6 +62,13 @@ from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("nwnatural_docs")
 
+# What a run and Login say when the portal's bot protection answers.
+CHALLENGED = [
+    "NW Natural's payment portal asked to check the browser, so this run stops here.",
+    "Everything saved so far is kept. Answer it yourself in the open browser",
+    "window, then run Resume to carry on from where this stopped.",
+]
+
 
 def pilot_failed(progress: dict, docs) -> bool:
     """True unless every document the pilot chose is recorded as completed.
@@ -298,7 +305,7 @@ class App:
             # matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
             dom = sorted((p for p in live if site.is_safe_url(p.url or "")),
-                         key=lambda p: 0 if site.PORTAL_HOST in (p.url or "") else 1)
+                         key=lambda p: 0 if site.on_portal(p) else 1)
             self._work_page = dom[0] if dom else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -387,7 +394,13 @@ class App:
         print("Checking the connection to your signed-in nwnatural.com browser...\n")
         page = self.page()
         # What only a signed-in portal tab shows, Bill History's own list.
-        listed = site.bill_list_opens(page)
+        try:
+            listed = site.bill_list_opens(page)
+        except site.Challenged:
+            print("!! " + CHALLENGED[0])
+            print("   Answer it yourself in the open browser window, then re-run --login.")
+            self.close()
+            return
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
@@ -499,10 +512,14 @@ class App:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
         log.info("bill history: %d bills, %d new", len(docs), n_new)
-        twice = site.colliding_dates(docs)
-        if twice:
-            print(f"\n!! Two bills carry the due date {', '.join(twice)}, so neither can be told apart")
-            print("   from the other. That date is left for Manual Review; every other bill is read.")
+        for day in site.colliding_dates(docs):
+            # Both bills are known by the one key bill-<date>.
+            done = self._already_done(Document(document_id=f"bill-{day}", date=day))
+            print(f"\n!! Two bills carry the due date {day}, so neither can be told apart from the other.")
+            if done:
+                print("   The bill already saved for that date is kept, and the other is not fetched.")
+            else:
+                print("   That date is left for Manual Review. Every other bill is read.")
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -615,6 +632,8 @@ class App:
                 self.session_ended()
             except site.Challenged:
                 self.challenged()
+            except site.ListStopped as stop:
+                self.list_stopped(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -635,10 +654,18 @@ class App:
         """Stop the run because the portal's bot protection answered in its
         place. Progress is saved and nothing is recorded for review
         (tabs.stop)."""
+        tabs.stop(self, CHALLENGED)
+
+    def list_stopped(self, stop) -> None:
+        """Stop the run because Bill History, read again for a bill, could
+        not be read whole. Every bill after it would read it again and
+        fail the same way, so the run stops once. Progress is saved and
+        nothing is recorded for review (tabs.stop)."""
+        self.write_failure("read the documents list", "the list stopped partway")
         tabs.stop(self, [
-            "NW Natural's payment portal asked to check the browser, so this run stops here.",
-            "Everything saved so far is kept. Answer it yourself in the open browser",
-            "window, then run Resume to carry on from where this stopped.",
+            f"The NW Natural bill history stopped while bills were being fetched, since {stop}.",
+            "So this run stops here. Everything saved so far is kept, and nothing was",
+            "sent to Manual Review. Run Discover to read the list again, then Resume.",
         ])
 
     def download_one(self, page, doc: Document, filename: str):

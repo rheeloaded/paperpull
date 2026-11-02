@@ -453,10 +453,14 @@ _LIST_JS = r"""async ([url]) => {
   }
   // A count the page gives of its own rows, as "Showing 1 to 84 of 84" or
   // "Page 1 of 3".
-  const all = text(doc.body);
+  // Text nodes joined with a space, since textContent runs neighbors
+  // together ("Next" and "Page 1 of 3" read as "NextPage 1 of 3").
+  const parts = [], walk = doc.createTreeWalker(doc.body || doc, NodeFilter.SHOW_TEXT);
+  while (walk.nextNode()) parts.push(walk.currentNode.nodeValue);
+  const all = parts.join(' ').replace(/\s+/g, ' ');
   let count = null, m;
   if ((m = all.match(/showing\s+([0-9]+)\s*(?:to|-|–)\s*([0-9]+)\s+of\s+([0-9]+)/i))) count = +m[3];
-  if ((m = all.match(/\bpage\s+([0-9]+)\s+of\s+([0-9]+)/i)) && +m[2] > 1) pager = true;
+  if ((m = all.match(/page\s+([0-9]+)\s+of\s+([0-9]+)/i)) && +m[2] > 1) pager = true;
   return {status: r.status, table: true, heads: heads, rows: rows, password: password,
           pager: pager, count: count};
 }"""
@@ -598,7 +602,8 @@ def goto_documents(page) -> bool:
 
 def bill_list_opens(page) -> bool:
     """Whether the bill history could be read whole, which only the signed-in
-    portal tab allows."""
+    portal tab allows. The portal's bot protection raises Challenged, for
+    the caller to say so."""
     try:
         collect_download_docs(page)
         return True
@@ -628,7 +633,9 @@ _RUN: dict = {}
 
 
 def _read(page) -> List[RawDoc]:
-    _RUN.clear()
+    """Read the bill history and keep it for the run. A read that fails
+    leaves the list already kept as it was."""
+    _RUN.pop("facts", None)
     bills = _all_bills(page)
     _RUN["bills"] = bills
     return bills
@@ -719,10 +726,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     read is used when there is one; it is read again when there is none,
     and once more when the bill is not in it or is not answered with a PDF,
     since a View address lasts only as long as the session's token. The
-    bill is fetched only when exactly one bill there carries that date.
-    `dl_dir` is unused: nothing goes through the browser's downloads.
-    Nothing is pressed. Challenged, and SessionExpired from a list just
-    read, propagate to the run."""
+    bill is fetched only when exactly one bill there carries that date;
+    two bills of one date are not read for again. `dl_dir` is unused:
+    nothing goes through the browser's downloads. Nothing is pressed.
+    Challenged, and SessionExpired and ListStopped from reading the list,
+    propagate to the run, so a list that stops stops the run once. A
+    refusal of the bill itself right after the list was read and answered
+    fails this bill alone, since the session plainly works."""
     out_path = Path(out_path)
     if href != DOWNLOAD_PATH or not BILL_ID_RE.fullmatch(document_id or "") \
             or document_id != f"bill-{iso_date}":
@@ -733,24 +743,25 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     why = ""
     for fresh in ((False, True) if _RUN.get("bills") is not None else (True,)):
         if fresh:
-            try:
-                _read(page)
-            except ListStopped as stop:
-                log.info("the bill list stopped while looking for the bill dated %s: %s", iso_date, stop)
-                return False
+            _read(page)
         found = [d for d in _RUN["bills"] if d.document_id == document_id]
-        if len(found) != 1:
+        if len(found) > 1:
+            # Reading the list again would show the same two.
             why = f"{len(found)} bills carry this bill's due date"
+            break
+        if not found:
+            why = "no bill carries this bill's due date"
             continue
         try:
             if _fetch(page, found[0], out_path, trace):
                 return True
+            why = "the bill was not answered with a PDF"
         except SessionExpired:
             # A refusal of a View address this run read earlier may be its
-            # token running out, so the list is read again first.
-            if fresh:
-                raise
-        why = "the bill was not answered with a PDF"
+            # token running out, so the list is read again first. Refused
+            # right after a list that answered, it is this bill's alone.
+            why = "the bill was refused right after the list was read" if fresh \
+                else "the bill was refused"
     log.info("the bill dated %s was not taken: %s", iso_date, why)
     if trace is not None:
         trace.append({"note": "not taken", "why": why})

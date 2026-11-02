@@ -45,18 +45,24 @@ stops the run once.
   When the Account column holds more than one account, the run says so and
   lists nothing, since two accounts' bills could not be told apart. Two
   bills of one due date, a corrected bill reissued under the first one's
-  date say, are both listed, and only that date goes to Manual Review.
+  date say, are both listed, and Discover names the date. When a bill of
+  that date is already saved, it is kept and the other is not fetched.
+  Otherwise only that date goes to Manual Review.
 - **The PDF.** Each bill is its View address, fetched from inside the page
   with the portal's cookie, no redirect followed, and kept only when it is
   a PDF. The View addresses carry the session's token, so they are kept in
   memory for the run and never written.
 - **Once a run.** The list is read once a run. It is read again only when
-  a bill is not in it or is not answered with a PDF.
-- **Signing out.** A redirect, a 401 or a 403 stops the run and keeps what
-  it saved. Sign in again and run Resume. A 403 from the portal's bot
-  protection (DataDome) stops the run too, saying so, so you can answer it
-  in the browser. Any other answer that is not a PDF, an HTML page among
-  them, fails that one bill.
+  a bill is not in it or is not answered with a PDF. When that read stops
+  the list, the run stops there once, saying why, and nothing goes to
+  Manual Review. Run Discover, then Resume.
+- **Signing out.** A redirect, a 401 or a 403 on Bill History stops the
+  run and keeps what it saved. Sign in again and run Resume. A bill refused
+  that way is read for again in a fresh list, and refused right after a
+  list that answered, it fails that one bill, since the session plainly
+  works. A 403 from the portal's bot protection (DataDome) stops the run
+  too, or Login, saying so, so you can answer it in the browser. Any other
+  answer that is not a PDF, an HTML page among them, fails that one bill.
 
 ## Validation status
 

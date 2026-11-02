@@ -62,6 +62,9 @@ ONE_PAGE_PAGER = """<div class="dataTables_paginate"><a class="paginate_button p
 MORE_PAGES_PAGER = """<div class="dataTables_paginate"><a class="paginate_button previous disabled">Previous</a>
 <span><a class="paginate_button current">1</a><a class="paginate_button">2</a></span>
 <a class="paginate_button next">Next</a></div>"""
+# "Page 1 of 3" in an element of its own, touching the text before it,
+# outside any pager box.
+PAGE_LINE = """<div><a href="#">Next</a><span>Page 1 of 3</span></div>"""
 
 
 class FakePortal:
@@ -80,6 +83,12 @@ class FakePortal:
         # "redirect", "datadome", or "html" for the bill dated html_for.
         self.instead = ""
         self.html_for = ""
+        # What Bill History answers in place of its table: "datadome" or "500".
+        self.list_instead = ""
+        # The session ends once Bill History has been read this many times.
+        self.lists_until_signed_out = None
+        # A second bill on the first bill's due date, as a reissue would be.
+        self.reissue = False
 
 
 SITE = FakePortal()
@@ -88,6 +97,8 @@ SITE = FakePortal()
 def _bill_rows():
     rows = []
     bills = [] if SITE.empty else list(BILLS)
+    if SITE.reissue and bills:
+        bills.append(bills[0])
     for n, (shown, iso) in enumerate(bills):
         ref = "000000000%d/00000" % n
         SITE.issued[ref] = iso
@@ -133,9 +144,17 @@ class _Handler(BaseHTTPRequestHandler):
         signed_in = COOKIE in (self.headers.get("Cookie") or "") and q.get("CSRF_TOKEN") == [TOKEN]
         if not signed_in:
             return self._send(403, b"forbidden", "text/plain")
+        until = SITE.lists_until_signed_out
+        before = sum(1 for s in SITE.seen[:-1] if s[2] == "/cp/bills.action")
+        if until is not None and before >= until:
+            return self._redirect()
         if parts.path == "/cp/bills.action":
             if q.get("dateFrom.year") != ["2000"]:
                 return self.send_error(400)
+            if SITE.list_instead == "datadome":
+                return self._datadome()
+            if SITE.list_instead == "500":
+                return self._send(500, b"error", "text/plain")
             return self._html("""<!doctype html><title>Bill History</title><h2>Bill History</h2>
 <table><thead><tr><th>Account</th><th>Due Amount</th><th>Due Date</th><th>Action</th></tr></thead>
 <tbody>%s</tbody></table>%s""" % (_bill_rows(), SITE.pager))
@@ -144,17 +163,25 @@ class _Handler(BaseHTTPRequestHandler):
             if not iso:
                 return self.send_error(404)
             if SITE.instead == "redirect":
-                self.send_response(302)
-                self.send_header("Location", "/cp/login")
-                self.send_header("Content-Length", "0")
-                return self.end_headers()
+                return self._redirect()
             if SITE.instead == "datadome":
-                return self._send(403, b'{"url":"https://geo.captcha-delivery.test/captcha/"}',
-                                  "application/json", [("X-DataDome", "protected")])
+                return self._datadome()
+            if SITE.instead == "refused":
+                return self._send(403, b"forbidden", "text/plain")
             if SITE.instead == "html" and iso == SITE.html_for:
                 return self._html("<!doctype html><title>Error</title><p>Something went wrong.</p>")
             return self._send(200, PDFS[iso], "application/pdf")
         self.send_error(404)
+
+    def _redirect(self):
+        self.send_response(302)
+        self.send_header("Location", "/cp/login")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _datadome(self):
+        self._send(403, b'{"url":"https://geo.captcha-delivery.test/captcha/"}',
+                   "application/json", [("X-DataDome", "protected")])
 
     def log_message(self, *args):
         pass
@@ -311,11 +338,16 @@ def test_an_html_answer_fails_that_bill_and_the_rest_are_saved(attached, server,
     assert out.count("marked for manual review") == 1, folded(out)
 
 
-@pytest.mark.parametrize("instead, said", [("redirect", "answered as signed out"),
+@pytest.mark.parametrize("instead, said", [("signed out", "answered as signed out"),
                                            ("datadome", "asked to check the browser")])
-def test_a_redirect_or_the_bot_protection_stops_the_run_once(attached, server, tmp_path, capsys,
-                                                            instead, said):
-    SITE.instead = instead
+def test_a_session_that_ends_or_the_bot_protection_stops_the_run_once(attached, server, tmp_path,
+                                                                     capsys, instead, said):
+    """A session that ends after Discover: the bill is redirected, and so is
+    the list read again for it."""
+    if instead == "signed out":
+        SITE.lists_until_signed_out = 1
+    else:
+        SITE.instead = instead
     their_tab(attached, server)
 
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
@@ -334,3 +366,95 @@ def test_a_tab_on_nwnatural_com_stops_once(attached, server, tmp_path, capsys):
 
     assert "not its payment portal" in folded(out), folded(out)
     assert not any(s[1] == PORTAL for s in SITE.seen), SITE.seen
+
+
+def test_login_says_to_answer_the_bot_protection(attached, server, tmp_path, capsys):
+    SITE.list_instead = "datadome"
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--login")
+
+    assert "asked to check the browser" in folded(out), folded(out)
+    assert "re-run --login" in folded(out), folded(out)
+    assert "Success" not in out
+
+
+def test_bills_refused_right_after_the_list_answered_fail_alone(attached, server, tmp_path, capsys):
+    """The list answers, so the session works, and every bill is refused.
+    Each fails alone and the run goes on, so a Resume never loops on the
+    first."""
+    SITE.instead = "refused"
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert "signed out" not in out, folded(out)
+    assert out.count("marked for manual review") == len(BILLS), folded(out)
+    assert saved(tmp_path) == []
+
+
+@pytest.mark.parametrize("change", ["second account", "empty", "500"])
+def test_a_list_that_stops_during_resume_stops_once(attached, server, tmp_path, capsys, change):
+    """Discover read the whole list. Resume reads none of its own, so the
+    first bill reads it, and when it stops the run stops there."""
+    their_tab(attached, server)
+    ended, out = run(tmp_path, attached, capsys, "--discover")
+    assert discovered(tmp_path) == LISTED, folded(out)
+    SITE.second_account = change == "second account"
+    SITE.empty = change == "empty"
+    SITE.list_instead = "500" if change == "500" else ""
+    SITE.seen.clear()
+    site._RUN.clear()
+
+    ended, out = run(tmp_path, attached, capsys, "--resume")
+
+    assert "stopped while bills were being fetched" in folded(out), folded(out)
+    assert "marked for manual review" not in out, folded(out)
+    assert lists_read() == 1, SITE.seen
+    assert saved(tmp_path) == []
+
+
+def test_page_n_of_m_touching_the_text_before_it_stops_discover(attached, server, tmp_path, capsys):
+    SITE.pager = PAGE_LINE
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--discover")
+
+    assert ended == ("exit", 1), folded(out)
+    assert "shows a pager" in folded(out), folded(out)
+
+
+def test_the_portal_tab_is_taken_over_a_main_site_tab_naming_the_portal(attached, server, tmp_path,
+                                                                        capsys):
+    main = testkit.open_tab(attached, address(server, MAIN, "/account?next=%s:%d" % (PORTAL, server)),
+                            "NW Natural")
+    portal = testkit.open_tab(attached, address(server, PORTAL, "/cp/home.action?CSRF_TOKEN=" + TOKEN),
+                              "Paymentus")
+    testkit.keep_only(attached, {main, portal})
+
+    ended, out = run(tmp_path, attached, capsys, "--discover")
+
+    assert "Discovery complete" in out, folded(out)
+    assert discovered(tmp_path) == LISTED
+
+
+def test_a_reissued_bill_is_named_for_what_happens(attached, server, tmp_path, capsys):
+    """Not yet saved, the date goes to Manual Review and the list is read
+    once. Already saved, the saved bill is kept and the other not fetched."""
+    SITE.reissue = True
+    their_tab(attached, server)
+    ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+    assert "left for Manual Review" in folded(out), folded(out)
+    assert out.count("marked for manual review") == 1, folded(out)
+    assert lists_read() == 1, SITE.seen
+
+    later = tmp_path / "later"
+    later.mkdir()
+    SITE.reset()
+    site._RUN.clear()
+    their_tab(attached, server)
+    run(later, attached, capsys, "--all", "--yes")
+    SITE.reissue = True
+    ended, out = run(later, attached, capsys, "--discover")
+    assert "already saved for that date is kept, and the other is not fetched" in folded(out), \
+        folded(out)

@@ -7,6 +7,7 @@ import json
 import logging
 import sys
 import tempfile
+import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -28,8 +29,8 @@ def view(n):
             f"&accountNumber={FAKE_ACCOUNT}&docRef=000000000{n}/00000&hashedDocRef=h{n}&target=_blank")
 
 
-def row(due, n):
-    return {"cells": [FAKE_ACCOUNT, "$10.00", due, "View"], "views": [view(n)]}
+def row(due, n, account=None):
+    return {"cells": [account or FAKE_ACCOUNT, "$10.00", due, "View"], "views": [view(n)]}
 
 
 ROWS = [row("Oct 21, 2026", 1), row("Sep 22, 2026", 2), row("Aug 21, 2026", 3)]
@@ -280,13 +281,46 @@ class Download(unittest.TestCase):
         self.assertFalse(any("view-external-bill" in u for u in page.asked))
         self.assertFalse(self.out.exists())
 
-    def test_a_refusal_on_a_list_just_read_ends_the_session(self):
-        for page in (Page(pdf_status=401), Page(pdf_status=403)):
+    def test_a_refusal_right_after_a_list_that_answered_fails_that_bill_alone(self):
+        """The list just answered 200, so the session works. A Resume that
+        stopped on this bill would stop on it every time."""
+        for status in (401, 403):
+            for kept in (False, True):
+                site._RUN.clear()
+                page = Page(pdf_status=status)
+                if kept:
+                    site.collect_download_docs(page)
+                self.assertFalse(fetch(page, self.out), (status, kept))
+                self.assertFalse(self.out.exists())
+                self.assertEqual(lists(page), 2 if kept else 1, (status, kept))
+
+    def test_a_signed_out_list_read_for_a_bill_ends_the_session(self):
+        page = Page(pdf_status=403)
+        site.collect_download_docs(page)
+        page.listing = {"status": 200, "redirected": True}
+        with self.assertRaises(site.SessionExpired):
+            fetch(page, self.out)
+
+    def test_a_list_that_stops_for_a_bill_goes_to_the_run_and_the_kept_list_stays(self):
+        for stopped in ({"status": 500}, {"status": 200, "table": True, "heads": HEADS, "rows": []},
+                        {"status": 200, "table": True, "heads": HEADS,
+                         "rows": ROWS + [row("Jul 21, 2026", 9, account="1234567-8")]}):
             site._RUN.clear()
-            with self.assertRaises(site.SessionExpired):
-                site.download_bill(page, None, "2026-09-22", self.out,
-                                   href=site.DOWNLOAD_PATH, document_id="bill-2026-09-22")
-            self.assertFalse(self.out.exists())
+            page = Page(pdf=b"<html>x</html>")
+            kept = site.collect_download_docs(page)
+            page.listing = stopped
+            with self.assertRaises(site.ListStopped):
+                fetch(page, self.out)
+            self.assertIs(site._RUN.get("bills"), kept, stopped)
+        site._RUN.clear()
+        with self.assertRaises(site.ListStopped):
+            fetch(Page(listing={"status": 500}), self.out)
+
+    def test_a_date_two_bills_carry_is_not_read_for_again(self):
+        page = Page(rows=ROWS + [row("Sep 22, 2026", 7)])
+        site.collect_download_docs(page)
+        self.assertFalse(fetch(page, self.out))
+        self.assertEqual(lists(page), 1)
 
     def test_other_non_pdfs_are_refused_without_a_file(self):
         for page in (Page(pdf=b"GIF89a"), Page(pdf_status=500)):
@@ -307,6 +341,24 @@ def make_app(tmp, *args):
 class Orchestrator(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
+
+    def test_the_portal_tab_is_taken_by_its_parsed_host(self):
+        """A tab on nwnatural.com naming the portal in its address is not the
+        portal tab, whichever comes first."""
+        class Tab:
+            def __init__(self, url):
+                self.url = url
+
+            def is_closed(self):
+                return False
+
+        main = Tab("https://www.nwnatural.com/account?next=https://ipn2.paymentus.com/cp/")
+        portal = Tab(PORTAL + "/home.action")
+        for order in ([main, portal], [portal, main]):
+            app = make_app(self.tmp, "--discover")
+            app.browser = lambda: types.SimpleNamespace(pages=order)
+            app._cdp_mode, app._requests = True, object()
+            self.assertIs(app.page(), portal)
 
     def test_persisted_record_holds_no_view_address_and_is_keyed_by_the_day(self):
         app = make_app(self.tmp, "--discover")
