@@ -39,9 +39,24 @@ plan, one account's one year) and not the list every later document reads.
 A change to the functions that try calls directly fails this until it is
 looked at again. A call added further down is not seen.
 
-Two checks read the code. A third drives each app's own loop with a
+A list stop (ListStopped or a class built on it) that a handler turns into
+a stop of the run has to leave the list unread too. Simmons, Bilt, First
+Horizon and Coinbase's card statements made one into a pressing.Stop, which
+pressing.stop_run ended with a plain SystemExit, so the panel offered
+Continue and Continue stopped at the same list again. So every way out of
+such a handler passes the stop on, raises a stop class the reading follows,
+calls listing.read_again_stopped (or a method that always does), or raises
+a pressing stop made with list_unread=True, which stop_run turns into
+ListNotRead. A function that builds the stop is followed to what each of
+its returns builds. A handler whose ListStopped comes from a check made
+after the document's own control was pressed is about that press, not the
+list, and is named below with why.
+
+Three checks read the code. A fourth drives each app's own loop with a
 download that raises each stop its path can let out, and the run has to
-stop at the first document with nothing recorded against either.
+stop at the first document with nothing recorded against either. A fifth
+drives each app's main with a download that raises each stop a list stop is
+made into, and the run has to leave the list unread.
 
 What this cannot see. About thirty older apps signal a list that did not
 show by returning False or None from the very function that also says the
@@ -57,6 +72,7 @@ today.
 import ast
 import builtins
 import importlib
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -65,9 +81,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from paperpull_core import listing
-from paperpull_core.run_reporting import ListNotRead
+from paperpull_core.run_reporting import PREFIX, ListNotRead
 
 REPO = Path(__file__).resolve().parents[2]
+
+# How a stop of the run that leaves the list unread is raised.
+LIST_NOT_READ = ("ListNotRead", "run_reporting.ListNotRead", "listing.ListNotRead")
 
 # A handler in a download path that turns a stop into the one document's
 # failure, by (app, function, the functions its try calls), and why.
@@ -125,6 +144,24 @@ ITS_OWN = {
         "the run that follows this handler at once",
 }
 
+# A handler in a download path that turns a list stop into a stop of the run
+# the panel continues from, by (app, function, the functions its try calls),
+# and why. Each catches a ListStopped raised by a check made after the
+# document's own control was pressed, about what the press brought and not
+# the list. It stops as any press does, and Continue reads the list again
+# before it presses anything, which stops with the list unread when the
+# list will not read.
+AT_A_PRESS = {
+    ("bilt", "_take", ("read_details",)):
+        "the details answer the statement's own button brought, which does not name "
+        "this statement",
+    ("chasebusiness", "download_statement", ("_catch_statement",)):
+        "a refusal once something on the statement's row was pressed (Run.presses). A "
+        "refusal before any press is that statement's review, named in ITS_OWN",
+    ("shelbycounty", "_press_for_blob", ("settled_here",)):
+        "the page a document's print control left behind, which may be the payment site",
+}
+
 
 def entry_of(app: Path):
     found = sorted(app.glob("*_docs.py"))
@@ -178,7 +215,12 @@ def calls(node):
 def own_nodes(fn):
     """The nodes of fn, functions and classes defined inside it left out,
     since they are not run where they are written."""
-    todo = list(ast.iter_child_nodes(fn))
+    return nodes_of(list(ast.iter_child_nodes(fn)))
+
+
+def nodes_of(stmts):
+    """The nodes of these statements, with what own_nodes leaves out."""
+    todo = list(stmts)
     while todo:
         n = todo.pop()
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
@@ -200,7 +242,9 @@ class App:
         self.bases = {name: [b.id for b in c.bases if isinstance(b, ast.Name)]
                       for name, c in self.classes.items()}
         self.stops = self._stops()
+        self.list_stops = {c for c in self.stops if "ListStopped" in self.ancestors(c)}
         self.stoppers = self._stoppers()
+        self.list_stoppers = self._list_stoppers()
         self._escapes = {}
 
     # what Discover stops on
@@ -269,6 +313,70 @@ class App:
                                          "listing.read_again_stopped") \
                 or self_attr(func) in stoppers
         return False
+
+    # what leaves a list unread
+    def _list_stoppers(self) -> set:
+        """The App methods that always stop the run as one whose list was
+        not read, through listing.read_again_stopped, ListNotRead or
+        another such method, with no return of their own."""
+        found = set()
+        while True:
+            more = {name for name, fn in self.methods.items() if name not in found
+                    and not any(isinstance(n, ast.Return) for n in own_nodes(fn))
+                    and any(self.stops_unread(s, found) for s in fn.body)}
+            if not more:
+                return found
+            found |= more
+
+    @staticmethod
+    def stops_unread(stmt, list_stoppers) -> bool:
+        if isinstance(stmt, ast.Raise) and stmt.exc is not None:
+            exc = stmt.exc.func if isinstance(stmt.exc, ast.Call) else stmt.exc
+            return ast.unparse(exc) in LIST_NOT_READ
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            func = stmt.value.func
+            return ast.unparse(func) == "listing.read_again_stopped" \
+                or self_attr(func) in list_stoppers
+        return False
+
+    def builds(self, expr, seen=frozenset()) -> set:
+        """What raising `expr` raises, as far as the site module shows it,
+        "unread" for a pressing stop made with list_unread=True, "stop" for
+        any other pressing stop, "other" for anything this cannot follow. A
+        site function is followed to what each of its returns builds."""
+        if isinstance(expr, ast.Call):
+            func = expr.func
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
+                    and func.value.id == "pressing":
+                unread = any(k.arg == "list_unread" and isinstance(k.value, ast.Constant)
+                             and k.value.value is True for k in expr.keywords)
+                return {"unread" if unread else "stop"}
+            if isinstance(func, ast.Name) and func.id in self.funcs and func.id not in seen:
+                returns = [n for n in own_nodes(self.funcs[func.id]) if isinstance(n, ast.Return)]
+                if not returns or any(r.value is None for r in returns):
+                    return {"other"}
+                return set().union(*(self.builds(r.value, seen | {func.id}) for r in returns))
+        return {"other"}
+
+    def exits(self, body) -> list:
+        """The ways out of a handler's body by a raise or a stop of the run."""
+        return [n for n in nodes_of(body) if isinstance(n, ast.Raise)
+                or (isinstance(n, ast.Expr) and self.stops_run(n, self.stoppers))]
+
+    def leaves_unread(self, stmt, name) -> bool:
+        """Whether a way out of a handler that caught a list stop leaves the
+        list unread. The stop passed on, or a stop class raised, is followed
+        by the reading on its way up. A pressing stop has to be made with
+        list_unread=True, and a stop of the run has to be one of a list."""
+        if isinstance(stmt, ast.Raise):
+            if stmt.exc is None or (isinstance(stmt.exc, ast.Name) and stmt.exc.id == name):
+                return True
+            target = stmt.exc.func if isinstance(stmt.exc, ast.Call) else stmt.exc
+            label = target.id if isinstance(target, ast.Name) else site_attr(target)
+            if label in self.stops or self.stops_unread(stmt, self.list_stoppers):
+                return True
+            return self.builds(stmt.exc) == {"unread"}
+        return self.stops_unread(stmt, self.list_stoppers)
 
     def leaves(self, body, name=None) -> bool:
         """Whether a handler's body always leaves by a stop of the run or by
@@ -356,8 +464,8 @@ class App:
 
     def visit(self, stmts, where: str, rethrown=frozenset(), found=None, name=None) -> set:
         """The stops that can leave these statements. Each try is read
-        against its handlers, and a handler that catches a stop and does
-        not leave is put in `found` with the site functions its try calls."""
+        against its handlers, and a handler that catches a stop is put in
+        `found` with the stops and the site functions its try calls."""
         out = set()
         for stmt in stmts:
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -367,7 +475,7 @@ class App:
                 for h in stmt.handlers:
                     got = {n for n in left if self.matches(h, n)}
                     left -= got
-                    if got and found is not None and not self.leaves(h.body, h.name):
+                    if got and found is not None:
                         found.append((h, sorted(got), self.try_calls(stmt, where)))
                     out |= self.visit(h.body, where, frozenset(got), found, h.name)
                 out |= left
@@ -407,25 +515,25 @@ class App:
             self._escapes[key] = self.visit(fn.body, where)
         return self._escapes[key]
 
-    def swallowed(self) -> list:
+    def caught(self) -> list:
         """Each handler in the download path, the App methods download_one
-        reaches and the loop around download_one, that catches a stop and
-        does not leave, as (function, stops, the calls of its try)."""
+        reaches and the loop around download_one, that catches a stop, as
+        (handler, function, stops, the calls of its try)."""
         if not self.stops:
             return []
         out = []
         for name in sorted(self.download_path()):
             found = []
             self.visit(self.funcs[name].body, "site", found=found)
-            out += [(name, got, tried) for _h, got, tried in found]
+            out += [[h, name, got, tried] for h, got, tried in found]
         for name in sorted(self.reached(["download_one"]) | set(self.loops())):
             found = []
             self.visit(self.methods[name].body, "docs", found=found)
-            out += [(name, got, tried) for _h, got, tried in found]
+            out += [[h, name, got, tried] for h, got, tried in found]
         # A handler of the loop that names a stop is the app's own word that
-        # it is more than one document's failure, so it stops whether or not
-        # the reading above follows the stop that far.
-        seen = {(name, tuple(got)) for name, got, _tried in out}
+        # it is more than one document's failure, so it is read for what it
+        # names whether or not the reading above follows the stop that far.
+        seen = {id(entry[0]): entry for entry in out}
         for name in self.loops():
             for node in own_nodes(self.methods[name]):
                 if not isinstance(node, ast.Try) or not any(
@@ -435,9 +543,44 @@ class App:
                     named = sorted({site_attr(t) for t in (
                         h.type.elts if isinstance(h.type, ast.Tuple) else [h.type])}
                         & self.stops) if h.type is not None else []
-                    if named and not self.leaves(h.body, h.name) \
-                            and (name, tuple(named)) not in seen:
-                        out.append((name, named, self.try_calls(node, "docs")))
+                    if named and id(h) in seen:
+                        seen[id(h)][2] = sorted(set(seen[id(h)][2]) | set(named))
+                    elif named:
+                        out.append([h, name, named, self.try_calls(node, "docs")])
+        return [tuple(entry) for entry in out]
+
+    def swallowed(self) -> list:
+        """Each handler that catches a stop and does not leave, as
+        (function, stops, the calls of its try)."""
+        return [(name, got, tried) for h, name, got, tried in self.caught()
+                if not self.leaves(h.body, h.name)]
+
+    def continued(self) -> list:
+        """Each handler that catches a list stop and has a way out that does
+        not leave the list unread, a pressing stop made without list_unread,
+        a SystemExit, tabs.stop or a raise this cannot follow, as (function,
+        list stops, the calls of its try). The panel offers Continue after
+        such a stop, and Continue reads the same list for its first document
+        (#124)."""
+        out = []
+        for h, name, got, tried in self.caught():
+            lists = [g for g in got if g in self.list_stops]
+            if lists and not all(self.leaves_unread(s, h.name) for s in self.exits(h.body)):
+                out.append((name, lists, tried))
+        return out
+
+    def made_into(self) -> set:
+        """The site functions a list stop is made into a stop of the run
+        through, raised by a handler that caught one and is not named in
+        AT_A_PRESS."""
+        out = set()
+        for h, name, got, tried in self.caught():
+            if not set(got) & self.list_stops or (self.name, name, tried) in AT_A_PRESS:
+                continue
+            for stmt in self.exits(h.body):
+                if isinstance(stmt, ast.Raise) and isinstance(stmt.exc, ast.Call) \
+                        and isinstance(stmt.exc.func, ast.Name) and stmt.exc.func.id in self.funcs:
+                    out.add(stmt.exc.func.id)
         return out
 
     def let_out(self) -> set:
@@ -449,6 +592,12 @@ def wrong(app: App) -> list:
     return ["%s catches %s and goes on" % (fn, "/".join(got))
             for fn, got, tried in app.swallowed()
             if (app.name, fn, tried) not in ITS_OWN]
+
+
+def continued_from(app: App) -> list:
+    return ["%s turns %s into a stop the panel offers Continue after" % (fn, "/".join(got))
+            for fn, got, tried in app.continued()
+            if (app.name, fn, tried) not in AT_A_PRESS]
 
 
 @pytest.fixture(scope="module")
@@ -473,6 +622,31 @@ def test_each_named_handler_is_still_there(read):
     seen = {(name, fn, tried) for name, app in read.items()
             for fn, _got, tried in app.swallowed()}
     assert not set(ITS_OWN) - seen, sorted(set(ITS_OWN) - seen)
+
+
+@pytest.mark.parametrize("app", IDS)
+def test_no_list_stop_becomes_a_stop_the_panel_continues_from(read, app):
+    assert not continued_from(read[app])
+
+
+def test_each_handler_named_at_a_press_is_still_there(read):
+    seen = {(name, fn, tried) for name, app in read.items()
+            for fn, _got, tried in app.continued()}
+    assert not set(AT_A_PRESS) - seen, sorted(set(AT_A_PRESS) - seen)
+
+
+def test_the_list_stops_made_into_stops_of_the_run_are_read(read):
+    """Not vacuous. The handlers that make a list stop into a pressing.Stop
+    are read as ones that caught a list stop, and the function each raises
+    through is followed to a stop made with list_unread=True."""
+    for name, fn, helper in [("simmons", "download_document", "_page_stopped"),
+                             ("bilt", "download_statement", "_page_stopped"),
+                             ("firsthorizon", "download_statement", "_page_stopped"),
+                             ("coinbase", "_take_card_statement", "_list_changed")]:
+        app = read[name]
+        assert any(f == fn and "ListStopped" in got for _h, f, got, _t in app.caught()), (name, fn)
+        assert helper in app.made_into(), (name, helper)
+        assert app.builds(ast.parse("%s(stop)" % helper, mode="eval").body) == {"unread"}, name
 
 
 def test_the_apps_with_the_shape_are_read(read):
@@ -505,8 +679,7 @@ def load(app: Path):
         sys.path.pop(0)
 
 
-def built(app: Path, tmp_path: Path):
-    mod = load(app)
+def configured(app: Path, tmp_path: Path) -> Path:
     example = app / "config.example.json"
     config = json.loads(example.read_text(encoding="utf-8")) if example.exists() else {}
     config.update({
@@ -516,7 +689,22 @@ def built(app: Path, tmp_path: Path):
     })
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(config), encoding="utf-8")
+    return cfg
+
+
+def built(app: Path, tmp_path: Path):
+    mod = load(app)
+    cfg = configured(app, tmp_path)
     return mod, mod.App(mod.build_parser().parse_args(["--config", str(cfg), "--all"]))
+
+
+def two_documents(mod, config: dict) -> list:
+    kinds = config.get("document_types") or ["Statement"]
+    docs = [mod.Document(title="Monthly Statement", category=kinds[0],
+                         summary="Monthly Statement", date=day)
+            for day in ("2026-01-15", "2025-12-15")]
+    assert docs[0].key != docs[1].key
+    return docs
 
 
 def a_stop(cls):
@@ -547,11 +735,7 @@ def test_a_stop_out_of_a_download_stops_the_loop_at_once(name, stop, tmp_path, m
                         "_delay": lambda *a, **k: None, "_on_its_site": lambda *a, **k: page,
                         "page": lambda *a, **k: page}.items():
         monkeypatch.setattr(app, attr, value, raising=False)
-    kinds = app.config.get("document_types") or ["Statement"]
-    docs = [mod.Document(title="Monthly Statement", category=kinds[0],
-                         summary="Monthly Statement", date=day)
-            for day in ("2026-01-15", "2025-12-15")]
-    assert docs[0].key != docs[1].key
+    docs = two_documents(mod, app.config)
     with pytest.raises(SystemExit) as end:
         app.process(docs)
     assert taken == [docs[0].key], "%s went on past a %s" % (name, stop)
@@ -563,6 +747,82 @@ def test_a_stop_out_of_a_download_stops_the_loop_at_once(name, stop, tmp_path, m
         # a run that lists, not Continue, which would stop here again.
         assert listing.last(app) == listing.STOPPED
         assert isinstance(end.value, ListNotRead), type(end.value)
+
+
+MADE_INTO = sorted((d.name, helper) for d in APPS for helper in sorted(App(d).made_into()))
+
+
+def test_there_are_list_stops_made_into_stops_of_the_run():
+    assert {("simmons", "_page_stopped"), ("bilt", "_page_stopped"),
+            ("firsthorizon", "_page_stopped"), ("coinbase", "_list_changed")} <= set(MADE_INTO)
+
+
+def made(mod, helper: str):
+    """The stop `helper` makes of a list that answered 500, each argument it
+    needs the list stop itself or a step in fixed words."""
+    fn = getattr(mod.site, helper)
+    stop = a_stop(mod.site.ListStopped)
+    return fn(*[stop if p.name == "stop" or "ListStopped" in str(p.annotation) else "a step"
+                for p in inspect.signature(fn).parameters.values()
+                if p.default is p.empty
+                and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)])
+
+
+@pytest.mark.parametrize("name,helper", MADE_INTO, ids=["%s-%s" % p for p in MADE_INTO])
+def test_a_list_stop_made_into_a_stop_of_the_run_leaves_the_list_unread(
+        name, helper, tmp_path, monkeypatch, capsys):
+    """The app's own main runs Run All, and the first download raises the
+    stop the app makes of a list that stopped. The run stops there with
+    nothing recorded, the listing is noted as one that stopped, the failure
+    file is written, and the run leaves on ListNotRead, so the result line
+    has the panel offer a run that lists first, not Continue."""
+    app_dir = REPO / "apps" / name
+    mod = load(app_dir)
+    cfg = configured(app_dir, tmp_path)
+    import playwright.sync_api as sync_api
+
+    def no_browser(*_args, **_kwargs):
+        raise AssertionError("nothing here starts a browser")
+    monkeypatch.setattr(sync_api, "sync_playwright", no_browser)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: (_ for _ in ()).throw(EOFError()))
+    ran, docs, taken = [], [], []
+
+    def cmd_run(self, mode="all", *_a, **_kw):
+        ran.append(self)
+        self.stats["mode"] = mode
+        docs.extend(two_documents(mod, self.config))
+        self.process(list(docs))
+
+    def download_one(self, page, doc, filename, *_a, **_kw):
+        taken.append(doc.key)
+        raise made(mod, helper)
+    page = MagicMock()
+    page.url = "about:blank"
+    for attr, value in {"cmd_run": cmd_run, "download_one": download_one,
+                        "check_session": lambda *a, **k: None, "_delay": lambda *a, **k: None,
+                        "_on_its_site": lambda *a, **k: page, "page": lambda *a, **k: page}.items():
+        monkeypatch.setattr(mod.App, attr, value, raising=False)
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as ended:
+        mod.main(["--config", str(cfg), "--all", "--yes"])
+    out = capsys.readouterr().out
+    said = " ".join(out.split(PREFIX)[0].split())
+    assert isinstance(ended.value, ListNotRead), (type(ended.value), said[-1500:])
+    assert ended.value.code == 0
+    app = ran[0]
+    assert taken == [docs[0].key], "%s went on past the list's stop" % name
+    assert app.stats.get("manual_review", 0) + app.stats.get("failed", 0) == 0
+    assert not any(app.progress.get(d.key) for d in docs)
+    assert listing.last(app) == listing.STOPPED
+    written = sorted((tmp_path / "out").rglob("failure-*.json"))
+    assert len(written) == 1, sorted(p.name for p in (tmp_path / "out").rglob("*"))
+    assert json.loads(written[0].read_text(encoding="utf-8"))["step"] == made(mod, helper).step
+    results = [json.loads(line[len(PREFIX):]) for line in out.splitlines()
+               if line.startswith(PREFIX)]
+    assert results and results[-1]["stopped"] == 1 and results[-1].get("list_not_read") == 1
+    assert "then run Pilot or Run All, either of which reads the list first." in said
+    for words in ("press resume", "resume carries on", "run this again"):
+        assert words not in said.lower(), said[-1500:]
 
 
 # -- the rule, on samples --------------------------------------------------------------
@@ -644,8 +904,7 @@ STOPS = DOCS.replace("            except Exception as e:",
                      "                self.list_changed()\n"
                      "            except Exception as e:") + '''
     def list_changed(self):
-        listing.started(self)
-        tabs.stop(self, ["the list stopped"])
+        listing.read_again_stopped(self, "the list stopped")
 '''
 
 
@@ -665,9 +924,83 @@ def test_a_stop_let_out_and_stopped_in_the_loop_passes(tmp_path):
 
 def test_a_stop_turned_into_a_stop_of_the_run_passes(tmp_path):
     site = SITE.replace("        return False\n    return bool",
-                        "        raise pressing.Stop('find', 'stopped', ['stopped'])\n    return bool")
+                        "        raise pressing.Stop('find', 'stopped', ['stopped'], "
+                        "list_unread=True)\n    return bool")
     app = sample(tmp_path, site=site)
     assert wrong(app) == [] and app.let_out() == set()
+    assert continued_from(app) == []
+
+
+CONTINUED = ["download_bill turns ListStopped into a stop the panel offers Continue after"]
+
+
+def test_a_list_stop_made_into_a_press_stop_the_panel_continues_from_is_found(tmp_path):
+    """Simmons, Bilt and First Horizon, before this. The run stopped, so
+    the first rule passes it, and the panel offered Continue."""
+    site = SITE.replace("        return False\n    return bool",
+                        "        raise pressing.Stop('find', 'stopped', ['stopped'], "
+                        "after_a_press=True)\n    return bool")
+    app = sample(tmp_path, site=site)
+    assert wrong(app) == []
+    assert continued_from(app) == CONTINUED
+
+
+HELPER = SITE.replace("        return False\n    return bool",
+                      "        raise _page_stopped(stop)\n    return bool") + '''
+
+def _page_stopped(stop):
+    return pressing.Stop('find', 'stopped', ['stopped: %s' % stop]{flag})
+'''
+
+
+@pytest.mark.parametrize("flag,found", [("", CONTINUED), (", list_unread=True", []),
+                                        (", list_unread=False", CONTINUED)])
+def test_a_function_that_makes_the_stop_is_followed(tmp_path, flag, found):
+    app = sample(tmp_path, site=HELPER.replace("{flag}", flag))
+    assert wrong(app) == []
+    assert continued_from(app) == found
+    assert app.made_into() == {"_page_stopped"}
+
+
+def test_a_function_followed_to_each_of_its_returns(tmp_path):
+    """Coinbase's _list_changed is raised for three reasons. A function
+    that builds the stop one way on one return and another way on another
+    leaves the list unread only some of the time."""
+    site = HELPER.replace("{flag}", ", list_unread=True").replace(
+        "def _page_stopped(stop):\n",
+        "def _page_stopped(stop):\n    if not stop:\n        return _plain(stop)\n") + '''
+
+def _plain(stop):
+    return pressing.no_answer('find', 'stopped', 'stopped')
+'''
+    assert continued_from(sample(tmp_path, site=site)) == CONTINUED
+
+
+@pytest.mark.parametrize("raised", [
+    "SystemExit(0)", "RuntimeError('stopped')", "_built(stop)", "made"])
+def test_a_list_stop_made_into_anything_this_cannot_follow_is_found(tmp_path, raised):
+    """A SystemExit stops the run with the list noted whole. A function
+    that returns something other than a pressing stop, or a name, cannot be
+    followed, so it does not count as leaving the list unread."""
+    site = SITE.replace("        return False\n    return bool",
+                        "        made = _built(stop)\n        raise %s\n    return bool" % raised) + '''
+
+def _built(stop):
+    return RuntimeError('stopped')
+'''
+    assert continued_from(sample(tmp_path, site=site)) == CONTINUED
+
+
+def test_a_loop_that_stops_a_list_stop_with_tabs_stop_is_found(tmp_path):
+    """tabs.stop stops the run, so the first rule passes it, and the
+    listing stays noted whole."""
+    docs = STOPS.replace('listing.read_again_stopped(self, "the list stopped")',
+                         'tabs.stop(self, ["the list stopped"])')
+    app = sample(tmp_path, docs=docs, site=RERAISED)
+    assert wrong(app) == []
+    assert continued_from(app) == [
+        "process turns ListStopped into a stop the panel offers Continue after"]
+    assert continued_from(sample(tmp_path, docs=STOPS, site=RERAISED)) == []
 
 
 def test_except_exception_around_a_list_read_is_found(tmp_path):

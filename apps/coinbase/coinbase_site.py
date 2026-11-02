@@ -1693,11 +1693,13 @@ def _left_the_list(step: str, why: str) -> pressing.Stop:
 
 def _list_changed(step: str, why: str) -> pressing.Stop:
     """The run's stop for a card list that, read again for one statement,
-    is not the list discovery read whole. Nothing was pressed for it."""
+    is not the list discovery read whole. Nothing was pressed for it. It
+    leaves the list unread, so the panel offers a run that reads it afresh
+    rather than Continue, which would read the same list again (#124)."""
     return pressing.Stop(step, why, [
         "The list of card statements changed since it was read (%s), so the run stops "
         "here rather than leave this statement and go on to the next." % why,
-        "Nothing was pressed for it. Run this again to read the list afresh."])
+        "Nothing was pressed for it."], list_unread=True)
 
 
 def open_card_list(page) -> Optional[CardList]:

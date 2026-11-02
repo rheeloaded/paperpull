@@ -263,12 +263,21 @@ def read_again_stopped(app, said: str) -> None:
         app.progress.save(backup=True)
     except Exception:
         pass
-    whole_run = _whole_run(app)
     print()
     print("!! " + said)
+    raise say_unread(app)
+
+
+def say_unread(app) -> ListNotRead:
+    """The last words of a stop for a list read again while the documents
+    were taken, after the stop's own and once started() has noted the
+    listing as one that stopped, and the ListNotRead to leave on. They say
+    which run reads the list first, as the run's scope has it.
+    pressing.stop_run says them for a stop made with list_unread."""
+    whole_run = _whole_run(app)
     print("   Everything saved so far is kept. Look at the browser window, then run")
     print("   %s, either of which reads the list first." % whole_run)
-    raise ListNotRead(whole_run)
+    return ListNotRead(whole_run)
 
 
 def read_again_first(app, noun: str = "purchases") -> bool:

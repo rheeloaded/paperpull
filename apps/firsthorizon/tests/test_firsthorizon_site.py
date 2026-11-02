@@ -926,6 +926,8 @@ def test_a_page_that_stops_the_list_stops_the_run_while_a_statement_is_sought(mo
     with pytest.raises(site.pressing.Stop) as stop:
         take(bank, tmp_path)
     assert stop.value.reason == "the statements page stopped"
+    # A Resume would open the same page for its first statement (#124).
+    assert stop.value.list_unread
     assert not [p for p in bank.presses if p[0] == "download"]
     assert not (tmp_path / "o.pdf").exists()
 

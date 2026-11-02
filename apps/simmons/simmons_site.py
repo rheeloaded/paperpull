@@ -1675,13 +1675,14 @@ def download_document(page, run: Run, dl_dir, out_path, *, record_id: str, iso_d
 
 
 def _page_stopped(stop: ListStopped) -> pressing.Stop:
-    """A stop of the list while a document was sought, as a stop of the run.
-    Its words are this app's own, never the page's."""
+    """A stop of the list while a document was sought, as a stop of the run
+    that leaves the list unread, so the panel offers a run that reads it
+    first rather than Continue, which would meet the same list (#124). Its
+    words are this app's own, never the page's."""
     return pressing.Stop("find the document", "the documents list stopped", [
         "The documents list stopped before this document was saved, since %s." % stop,
         "Nothing was pressed, and the run stops here rather than meet the same page "
-        "for the next document.",
-        pressing.AGAIN])
+        "for the next document."], list_unread=True)
 
 
 # ---------------------------------------------------------------------------

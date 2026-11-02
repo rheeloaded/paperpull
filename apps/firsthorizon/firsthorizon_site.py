@@ -1634,13 +1634,14 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_id: str, pro
 
 def _page_stopped(stop: ListStopped) -> pressing.Stop:
     """A stop of the statements page while a statement was sought, as a stop
-    of the run. Its words are this app's own, never the page's. A panel may
+    of the run that leaves the list unread, so the panel offers a run that
+    reads it first rather than Continue, which would meet the same page
+    (#124). Its words are this app's own, never the page's. A panel may
     have been pressed on the way, so it counts as a stop after a press."""
     return pressing.Stop("find the statement", "the statements page stopped", [
         "The statements page stopped before this statement was saved, since %s." % stop,
         "Nothing more was pressed, and the run stops here rather than meet the same page "
-        "for the next statement.",
-        pressing.AGAIN], after_a_press=True)
+        "for the next statement."], after_a_press=True, list_unread=True)
 
 
 def record_hash(account_id: str, document_id: str) -> str:

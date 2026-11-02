@@ -122,19 +122,30 @@ class Stop(SystemExit):
     they hold only our own words, counts, yes or no, and words that went
     through the word list. `after_a_press` is true for a stop that came once
     a press had been tried, which may have reached the page or something
-    on it, so nothing may take it for a refusal made before any press."""
+    on it, so nothing may take it for a refusal made before any press.
+
+    `list_unread` is true for a stop of a list read again while the
+    documents were taken, a list that would not read or no longer holds the
+    document once. Every later document would read the same list, and a
+    Resume reads no list of its own, so Continue would stop at the same
+    place again (#124). stop_run notes the listing as one that stopped,
+    says to run Pilot or Run All, which read the list first, and leaves on
+    ListNotRead, so the panel offers that rather than Continue. Its lines
+    say nothing of Resume or of running this again."""
 
     def __init__(self, step: str, reason: str, lines: Iterable[str], facts: Optional[dict] = None,
-                 after_a_press: bool = False):
+                 after_a_press: bool = False, list_unread: bool = False):
         lines = [str(line) for line in lines]
         # What a stop no main() takes says on its way out. The app's own
-        # main() catches it and stops the run with SystemExit(0).
+        # main() catches it and stops the run through stop_run, with
+        # SystemExit(0), or ListNotRead for a stop made with list_unread.
         super().__init__(lines[0] if lines else reason)
         self.step = step
         self.reason = reason
         self.lines = lines
         self.facts = dict(facts or {})
         self.after_a_press = bool(after_a_press)
+        self.list_unread = bool(list_unread)
 
 
 class Covered(Stop):
@@ -214,14 +225,27 @@ def stop_run(app, stop: Stop) -> None:
     An app writes one failure file a run, and a run that wrote one for an
     earlier document would write nothing for the stop. The stop is what a
     tester has to send, so it writes a file of its own all the same, the
-    newest in the folder, and the run says where."""
+    newest in the folder, and the run says where.
+
+    A stop made with list_unread leaves the list unread, as
+    listing.read_again_stopped does. The listing is noted as one that
+    stopped before anything else, so nothing that goes wrong after can
+    leave it noted whole, the run says which run reads the list first, and
+    it leaves on ListNotRead. Diagnose and record list nothing a download
+    reads, so for them it is a stop like any other."""
+    stats = getattr(app, "stats", None)
+    mode = stats.get("mode") if isinstance(stats, dict) else None
+    unread = stop.list_unread and mode not in ("diagnose", "record")
+    if unread:
+        from . import listing
+        listing.started(app)
     try:
         app.progress.save(backup=True)
     except Exception:
         pass
     say(stop)
-    stats = getattr(app, "stats", None)
-    if isinstance(stats, dict) and stats.get("mode") == "diagnose":
+    leave = listing.say_unread(app) if unread else SystemExit(0)
+    if mode == "diagnose":
         write_survey = getattr(app, "write_survey", None)
         if callable(write_survey):
             try:
@@ -232,11 +256,11 @@ def stop_run(app, stop: Stop) -> None:
                     write_survey()
             except Exception:
                 pass
-    elif not isinstance(stats, dict) or stats.get("mode") != "record":
+    elif mode != "record":
         if isinstance(stats, dict):
             stats.pop("failure_files", None)
         app.write_failure(stop.step, stop.reason, extra=stop.facts)
-    raise SystemExit(0)
+    raise leave
 
 
 # ---------------------------------------------------------------------------
