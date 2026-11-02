@@ -561,6 +561,12 @@ def test_a_file_is_filed_where_it_really_is_however_its_path_is_spelled(tmp_path
     statements = bank.paths.statements
     links = set()
     if how == "climbs":
+        if os.name != "nt":
+            # Windows takes each ".." off the spelling and POSIX climbs the
+            # folders themselves, so there a path climbs only through a
+            # folder that is there, as Chase was when the file was saved.
+            (statements / "Chase").mkdir()
+            links = {"Chase"}
         aside = os.path.join(str(statements), "Chase", "..", "..", "Manual Review", "")
         tax = os.path.join(str(statements), "Chase", "..", "..", "Tax Documents", "")
     else:

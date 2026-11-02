@@ -450,10 +450,16 @@ def test_the_worker_ends_with_the_app_that_started_it(tmp_path):
 
 
 def _running(pid: int) -> bool:
+    """Whether the process is there and not a zombie. From /proc on Linux
+    and from ps on macOS, which has no /proc."""
     if os.name == "nt":
         out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH"],
                              capture_output=True, text=True).stdout
         return str(pid) in out
+    if not sys.platform.startswith("linux"):
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                               capture_output=True, text=True).stdout.strip()
+        return bool(state) and not state.startswith("Z")
     try:
         with open("/proc/%d/stat" % pid) as f:
             return f.read().split(") ", 1)[1][:1] != "Z"

@@ -30,6 +30,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -195,6 +196,10 @@ def test_the_pdf_is_still_printed_in_print_media(site, page, tmp_path):
     out = tmp_path / "r.pdf"
     receipt_pdf.print_page_to_pdf(page, out)
     printed = "".join(p.extract_text() or "" for p in PdfReader(str(out)).pages)
+    # Where the page's font maps its "fi" ligature to a character of its
+    # own, Times on macOS and Calibri on Windows among them, the PDF's text
+    # carries that character, so it is read as its letters.
+    printed = unicodedata.normalize("NFKC", printed)
     assert "Printed only first" in printed
     assert "Shown on screen" not in printed
 
