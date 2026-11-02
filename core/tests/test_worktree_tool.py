@@ -51,7 +51,9 @@ def world_once(tmp_path_factory):
     subprocess.run(["git", "clone", "-q", str(origin), str(main)], check=True, capture_output=True)
     git(main, "config", "user.name", "tester")
     git(main, "config", "user.email", "tester@example.invalid")
-    (main / ".gitignore").write_text(".venv/\n", encoding="utf-8")
+    # The repository's own, since off Windows each link is a symlink and
+    # only its pattern decides whether git calls the link untracked work.
+    shutil.copy(REPO / ".gitignore", main / ".gitignore")
     (main / "VERSION").write_text("1.0.0\n", encoding="utf-8")
     (main / "app.py").write_text("x = 1\n", encoding="utf-8")
     for venv in (main / "gui" / ".venv", main / "apps" / "alpha" / ".venv"):

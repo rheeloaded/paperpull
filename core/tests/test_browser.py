@@ -4,6 +4,7 @@ The paths are faked so the same assertions run on any OS, this checks the
 lookup logic and the ordering, which is what actually differs between
 Windows, macOS and Linux.
 """
+import os
 import re
 import sys
 from pathlib import Path
@@ -730,9 +731,12 @@ def test_the_same_install_is_never_offered_twice(monkeypatch, tmp_path):
     edge.parent.mkdir(parents=True)
     edge.write_bytes(b"")
     # The registry names the same file, with different casing, which is the
-    # commonest way one install turns up twice.
-    monkeypatch.setattr(browser, "_registry_browsers",
-                        lambda: [(browser.EDGE, str(edge).upper())])
+    # commonest way one install turns up twice. Off Windows the test only
+    # pretends to be Windows. Its paths are still compared the POSIX way,
+    # case and all, while a Mac's disk opens the upper-cased path as the
+    # same file, so there the registry names it as it is spelled.
+    named = str(edge).upper() if os.name == "nt" else str(edge)
+    monkeypatch.setattr(browser, "_registry_browsers", lambda: [(browser.EDGE, named)])
 
     found = browser._real_browsers()
     assert found, "the fixture browser was not detected at all"
