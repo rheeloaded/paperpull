@@ -42,7 +42,8 @@ KNOWN = {"test_no_app_forces_a_press.sources",
          "test_every_app_asks_the_core_whether_a_page_printed.python_files",
          "test_every_fresh_browser_draws_before_an_app_attaches.files_to_read",
          "test_every_browser_starts_in_its_sandbox.sources",
-         "test_every_intake_has_a_limit.sources"}
+         "test_every_intake_has_a_limit.sources",
+         "test_no_raw_press_in_amex_or_vanguard.sources"}
 
 
 def _walks_for_python(fn: ast.FunctionDef) -> bool:
