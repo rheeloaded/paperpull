@@ -69,6 +69,10 @@ def ask(prompt: str) -> str:
 class App:
     _journal = None
     _requests = None
+    # Set when discovery met a page the pager counts that never came, so the
+    # run goes on with what it read and stops at its end rather than finish
+    # (_stop_if_cut_short).
+    _list_cut_short = False
 
     def __init__(self, args):
         self.args = args
@@ -315,6 +319,28 @@ class App:
                 raise SystemExit(0)
         self.check_session(page)
 
+    def _open_later_page(self, page, page_no: int) -> bool:
+        """Open a later page of the history, one the pager counts. True once
+        the page shows its cards or says there are none.
+
+        False is a page that never came, where the walk used to find nothing
+        new on it, take that for the end of the history and note the list
+        whole. A check that held the page blank and showed itself a moment
+        later is asked about, or under the panel the run stops there, and
+        the page is opened again once it is dealt with."""
+        site.goto_orders(page, page_no)
+        while not site.orders_listed(page) and (site.challenge_after_a_moment(page)
+                                                or site.looks_signed_out(page)):
+            self.check_session(page)
+            site.goto_orders(page, page_no)
+        # Signing in again at a console leaves the page on the first page,
+        # which would be read as this one, hold nothing new and end the
+        # history here, so this page is opened again for as long as the
+        # check had to ask.
+        while self.check_session(page):
+            site.goto_orders(page, page_no)
+        return site.orders_listed(page)
+
     def cmd_login(self):
         if self.config.get("cdp_url"):
             # CDP mode: the browser is launched by login.bat (not here). This
@@ -366,7 +392,8 @@ class App:
             print("anything Lowe's asks there yourself, then run --login again.")
         self.close()
 
-    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
+    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False,
+                     finish: bool = True) -> dict:
         """Discovery pass: the whole purchase history, online orders and
         store purchases together, one page at a time by its own address.
 
@@ -374,7 +401,12 @@ class App:
         so nothing is pressed. A page is waited on until its cards are
         drawn, since one read too soon is empty and would end the walk
         early. The walk stops at the last page the pager shows, or at the
-        first page that holds nothing new."""
+        first page that holds nothing new.
+
+        A list read only in part (a page the pager counts that never came)
+        keeps the purchases it found, and Pilot, Run All and Resume go on
+        with them, but the run stops at its end rather than finish. With
+        finish=False the caller does that once it has used them."""
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, so Resume reads the list again (paperpull_core.listing).
         listing.started(self)
@@ -387,18 +419,31 @@ class App:
         self._open_orders(page)
         showing = site.cards_showing(page)
         last = site.page_count(page)
+        # The page numbers the page in front offers.
+        offered = site.pager_numbers(page)
         for page_no in range(1, max(last, 1) + 1):
             if page_no > 1:
-                # The pager's count is read off every numbered button, and
-                # what a page past the real last one answers has not been
-                # seen, so a later page is read as it always was.
-                showing = site.goto_orders(page, page_no)
-                # Signing in again at a console leaves the page on the
-                # first page, which would be read as this one, hold nothing
-                # new, and end the history here. So this page is opened
-                # again for as long as the check had to ask.
-                while self.check_session(page):
-                    showing = site.goto_orders(page, page_no)
+                # A page the page before offered by its number that drew no
+                # card, no word that there are none and no check is a page
+                # that never came, where the walk used to stop as though the
+                # history ended there. The pager's count is read off every
+                # numbered button, and what a page past the real last one
+                # answers has not been seen, so a page the page before did
+                # not offer is still read as the end.
+                if not self._open_later_page(page, page_no):
+                    if page_no not in offered:
+                        log.info("History page %d drew nothing, and the page before "
+                                 "offered no page %d", page_no, page_no)
+                        break
+                    self._list_cut_short = True
+                    log.info("History page %d of %d never came", page_no, last)
+                    print("\n!! A later page of your Lowe's purchase history never came, so the")
+                    print("history was not read whole. What was read is kept, and this run stops")
+                    print("at its end rather than finish. The next run reads the history again.")
+                    self.write_failure("read the purchase history",
+                                       "a later page of the history never came")
+                    break
+                showing = site.cards_showing(page)
             found = site.collect_cards(page)
             fresh = [c for c in found if c.number not in seen]
             log.info("History page %d of %d: %d showing, %d card(s), %d new",
@@ -417,6 +462,7 @@ class App:
                          if p and p.purchase_date]
                 if dates and max(dates) < floor:
                     break
+            offered = site.pager_numbers(page)
         if not cards and site.history_state(page) != "empty":
             log.warning("No purchase cards found. If you are signed in and do "
                         "have purchases, run --diagnose to inspect the page.")
@@ -445,8 +491,10 @@ class App:
                 }, save=False)
         self.discovery.save()
         # The whole list is in, and only now may a Resume carry on from it
-        # without reading it again (paperpull_core.listing).
-        listing.read_whole(self)
+        # without reading it again (paperpull_core.listing). A list read in
+        # part is not, and the listing stays one that stopped.
+        if not self._list_cut_short:
+            listing.read_whole(self)
 
         all_recs = list(self.discovery.data.values())
         self.stats["online_discovered"] = sum(
@@ -455,7 +503,8 @@ class App:
             1 for r in all_recs if r.get("purchase_type") == IN_STORE)
 
         if not quiet:
-            print(f"\nDiscovery complete. Purchases known: {len(all_recs)} "
+            said = "read part of the purchase history" if self._list_cut_short else "complete"
+            print(f"\nDiscovery {said}. Purchases known: {len(all_recs)} "
                   f"({self.stats['online_discovered']} online, "
                   f"{self.stats['instore_discovered']} in store)")
             if dropped_by_scope:
@@ -469,7 +518,19 @@ class App:
             dates = sorted(r.get("purchase_date") for r in all_recs if r.get("purchase_date"))
             if dates:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
+        if finish:
+            self._stop_if_cut_short()
         return n_new
+
+    def _stop_if_cut_short(self) -> None:
+        """A run that did not read the whole purchase history did not
+        finish, and must not read as a clean one. Once it has used what
+        came, it leaves on SystemExit the way a run leaves on a sign-out,
+        which the panel reports as stopped after Pilot, Run All and Resume."""
+        if self._list_cut_short:
+            print("\nNot all of Lowe's purchase history was read, so this run stops here")
+            print("rather than finish. Run it again later to read the rest.")
+            raise SystemExit(0)
 
     # -- selection ----------------------------------------------------------
 
@@ -864,7 +925,7 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.")
-        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False)
+        self.cmd_discover(types=[ONLINE, IN_STORE], quiet=False, finish=False)
         # Some of each kind, since a store receipt and an online order are
         # two different pages and a pilot of one proves nothing about the
         # other.
@@ -873,10 +934,12 @@ class App:
             + self._select_purchases(ONLINE, limit=self.config.get("pilot_online", 3)))
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
+            self._stop_if_cut_short()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
         self._pilot_report(selected)
+        self._stop_if_cut_short()
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -927,12 +990,13 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover(types=types, quiet=False)
+        self.cmd_discover(types=types, quiet=False, finish=False)
         selected: List[Purchase] = []
         for t in types:
             selected += self._select_purchases(t)
         print(f"\nProcessing {len(selected)} purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
@@ -940,9 +1004,10 @@ class App:
         # stopped before the list was read whole, that is some of them or none,
         # and Resume finished clean with the rest never looked for. So the list
         # is read before anything else, and a listing that stops again stops
-        # the run (paperpull_core.listing).
+        # the run (paperpull_core.listing). A list read again only in part
+        # still goes on with what it found, and the run stops at its end.
         if listing.read_again_first(self):
-            self.cmd_discover(quiet=True)
+            self.cmd_discover(quiet=True, finish=False)
         # Only the purchases inside the run's scope, chosen as Pilot and Run
         # All choose them, so a Resume with a year chosen takes that year
         # alone. The limit waits until the done ones are left out.
@@ -956,9 +1021,11 @@ class App:
             print("Nothing to resume - everything in scope is complete."
                   if listing.scoped(self) else
                   "Nothing to resume - all discovered purchases are complete.")
+            self._stop_if_cut_short()
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
 
     def cmd_rename(self):
@@ -1104,7 +1171,8 @@ class App:
         words = words_for("Lowe's", site)
         page = self.page()
         if not self.discovery.data:
-            self.cmd_discover(quiet=True)
+            # A survey, which goes on with whatever the list read.
+            self.cmd_discover(quiet=True, finish=False)
         # The history first, every page of it, since a purchase missing
         # from the list is invisible from any one receipt.
         try:

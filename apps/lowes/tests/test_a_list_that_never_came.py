@@ -26,7 +26,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -103,6 +103,9 @@ class FakeLowes:
 
     def reset(self):
         self.orders = DECIDING
+        # What a page past the first shows, by its number, in place of the
+        # first page's own.
+        self.later = {}
         self.decided = threading.Event()
         self.seen = []
 
@@ -117,9 +120,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        page_no = int((parse_qs(urlsplit(self.path).query).get("page") or ["1"])[0])
         SITE.seen.append(path)
         if path == HISTORY:
-            body, kind = SITE.orders, "text/html; charset=utf-8"
+            body, kind = SITE.later.get(page_no, SITE.orders), "text/html; charset=utf-8"
         elif path == "/check":
             body, kind = CHECK, "text/html; charset=utf-8"
         elif path == "/decision":
@@ -380,3 +384,131 @@ def test_with_somebody_there_it_asks_them_to_look_and_then_goes_on(attached, tmp
 
     assert len(asked) == 1 and "shows your purchases" in asked[0], asked
     assert sorted(known(tmp_path)) == ["In-Store:" + STORE_PURCHASE, "Online:" + ONLINE_ORDER]
+
+
+# -- a list that ends where it never came ------------------------------------------
+#
+# The pager said how many pages the history has, and a page within that
+# count never drew its cards. The walk took that page for the end, noted
+# the history as read whole and finished clean, and Resume then carried on
+# from what it knew without reading the history again.
+
+def noted_whole(tmp_path):
+    """What the last listing noted, True for a list read to its end."""
+    path = tmp_path / "out" / "last-listing.json"
+    return json.loads(path.read_text(encoding="utf-8"))["complete"]
+
+
+# The first page of two, by the pager under it.
+FIRST_OF_TWO = LISTED.replace("</main>", "<button>1</button><button>2</button></main>")
+
+# A page of the history that drew nothing of it, no card and no word that
+# there are none.
+NOTHING_DRAWN = history("")
+
+
+def test_a_page_the_pager_counts_that_never_draws_is_not_read_whole(attached, tmp_path,
+                                                                    capsys):
+    SITE.orders = FIRST_OF_TWO
+    SITE.later[2] = NOTHING_DRAWN
+    cfg = config_for(tmp_path, attached)
+    try:
+        app_mod.main(["--discover", "--config", str(cfg)])
+    except SystemExit:
+        pass
+    out = printed(capsys)
+
+    assert sorted(known(tmp_path)) == ["In-Store:" + STORE_PURCHASE,
+                                       "Online:" + ONLINE_ORDER], out
+    assert noted_whole(tmp_path) is False, out
+    assert "history was not read whole" in out, out
+    [failure] = list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    report = json.loads(failure.read_text(encoding="utf-8"))
+    assert (report["step"], report["reason"]) == ("read the purchase history",
+                                                  "a later page of the history never came")
+
+
+def test_a_page_the_pager_counts_that_says_there_are_none_ends_the_history(attached, tmp_path,
+                                                                         capsys):
+    """Lowe's own word that there are no purchases is the end of the
+    history wherever it shows."""
+    SITE.orders = FIRST_OF_TWO
+    SITE.later[2] = EMPTY
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert len(known(tmp_path)) == 2
+    assert noted_whole(tmp_path) is True
+
+
+def test_a_pilot_of_a_history_cut_short_stops_at_its_end(attached, tmp_path, capsys,
+                                                         monkeypatch):
+    """It takes what the history read, and stops at its end rather than
+    finish. A Resume after it reads the history again, and stops too."""
+    SITE.orders = FIRST_OF_TWO
+    SITE.later[2] = NOTHING_DRAWN
+    taken = []
+    monkeypatch.setattr(app_mod.App, "process_purchases",
+                        lambda self, purchases, dry_run=False: taken.extend(purchases))
+    out = stopped_run(tmp_path, attached, capsys, "--pilot")
+
+    assert len(taken) == 2, out
+    assert "Not all of Lowe's purchase history was read, so this run stops here" in out, out
+    assert noted_whole(tmp_path) is False, out
+
+    out = stopped_run(tmp_path, attached, capsys, "--resume")
+    assert "Not all of Lowe's purchase history was read" in out, out
+    assert noted_whole(tmp_path) is False
+
+
+ANOTHER_PURCHASE = "555000222"
+SECOND_PAGE = history(
+    head("Jan 29, 2026", "$4.10", "Transaction", ANOTHER_PURCHASE,
+         base64.b64encode(("20260129" + ANOTHER_PURCHASE).encode()).decode())
+    + rows("Sandpaper 5-pk", "Completed"))
+
+
+# A number of its own in the site's header, a cart's count say, on every
+# page, so the pager is read as counting twelve pages where there are two.
+STRAY = "<nav>Shop All Deals <a href=\"/cart\">12</a></nav>"
+FIRST_OF_TWO_AND_A_STRAY = FIRST_OF_TWO.replace("<nav>Shop All Deals</nav>", STRAY)
+SECOND_OF_TWO_AND_A_STRAY = SECOND_PAGE.replace("<nav>Shop All Deals</nav>", STRAY).replace(
+    "</main>", "<button>1</button><button>2</button></main>")
+
+
+def test_a_page_past_the_last_one_the_pager_did_not_offer_ends_the_history(attached, tmp_path,
+                                                                          capsys):
+    """The page before offered no page three, so a page three that draws
+    nothing may be no page at all, and is the end as it always was."""
+    SITE.orders = FIRST_OF_TWO_AND_A_STRAY
+    SITE.later[2] = SECOND_OF_TWO_AND_A_STRAY
+    SITE.later[3] = NOTHING_DRAWN
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert len(known(tmp_path)) == 3
+    assert noted_whole(tmp_path) is True, printed(capsys)
+
+
+def test_with_somebody_there_a_later_page_that_turns_into_the_check_is_opened_again(
+        attached, tmp_path, capsys, monkeypatch):
+    """At a console the person deals with the check, and the page is opened
+    again after it rather than taken for the end of the history."""
+    SITE.orders = FIRST_OF_TWO
+    SITE.later[2] = CHECK
+    asked = []
+
+    def answer(prompt):
+        asked.append(prompt)
+        if len(asked) > 5:
+            raise KeyboardInterrupt
+        SITE.later[2] = SECOND_PAGE
+        return ""
+
+    monkeypatch.setattr(browser_launcher, "ask_or_none", answer)
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert len(asked) == 1 and "looks normal again" in asked[0], asked
+    assert "In-Store:" + ANOTHER_PURCHASE in known(tmp_path), printed(capsys)
+    assert noted_whole(tmp_path) is True

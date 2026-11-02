@@ -377,3 +377,102 @@ def test_with_somebody_there_it_asks_them_to_look_and_then_goes_on(attached, tmp
 
     assert len(asked) == 1 and "shows your payments" in asked[0], asked
     assert sorted(known(tmp_path)) == ["Online:" + FIRST_PAYMENT, "Online:" + SECOND_PAYMENT]
+
+
+# -- a list that ends where it never came ------------------------------------------
+#
+# The first page of the payment history came, and a later page never drew
+# the frame GitHub draws with every page of it, payments or none. The walk
+# took that page for the end, noted the history as read whole and finished
+# clean, and Resume then carried on from what it knew without reading the
+# history again.
+
+def noted_whole(tmp_path):
+    """What the last listing noted, True for a list read to its end."""
+    path = tmp_path / "out" / "last-listing.json"
+    return json.loads(path.read_text(encoding="utf-8"))["complete"]
+
+
+# A page with none of the payment history on it, not even its frame.
+NOTHING_DRAWN = """<!doctype html><html><head><title>GitHub</title></head>
+<body><main></main></body></html>"""
+
+
+def test_a_later_page_that_never_draws_is_not_read_whole(attached, tmp_path, capsys):
+    SITE.first = LISTED
+    SITE.later = NOTHING_DRAWN
+    cfg = config_for(tmp_path, attached)
+    try:
+        app_mod.main(["--discover", "--config", str(cfg)])
+    except SystemExit:
+        pass
+    out = printed(capsys)
+
+    assert len(known(tmp_path)) == 2, out
+    assert noted_whole(tmp_path) is False, out
+    assert "history was not read whole" in out, out
+    [failure] = list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    report = json.loads(failure.read_text(encoding="utf-8"))
+    assert (report["step"], report["reason"]) == ("read the payment history",
+                                                  "a later page of the history never came")
+
+
+def test_a_later_page_that_says_there_are_no_more_ends_the_history(attached, tmp_path,
+                                                                    capsys):
+    """What a page past the last one shows, here, is GitHub's own blank
+    slate inside the frame, and that is still the end of the history."""
+    SITE.first = LISTED
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert len(known(tmp_path)) == 2
+    assert noted_whole(tmp_path) is True
+
+
+def test_a_pilot_of_a_history_cut_short_stops_at_its_end(attached, tmp_path, capsys,
+                                                         monkeypatch):
+    """It takes what the history read, and stops at its end rather than
+    finish. A Resume after it reads the history again, and stops too."""
+    SITE.first = LISTED
+    SITE.later = NOTHING_DRAWN
+    taken = []
+    monkeypatch.setattr(app_mod.App, "process_purchases",
+                        lambda self, purchases, dry_run=False: taken.extend(purchases))
+    out = stopped_run(tmp_path, attached, capsys, "--pilot")
+
+    assert len(taken) == 2, out
+    assert "Not all of GitHub's payment history was read, so this run stops here" in out, out
+    assert noted_whole(tmp_path) is False, out
+
+    out = stopped_run(tmp_path, attached, capsys, "--resume")
+    assert "Not all of GitHub's payment history was read" in out, out
+    assert noted_whole(tmp_path) is False
+
+
+THIRD_PAYMENT = "IJKL9012"
+A_PAGE_WITH_A_THIRD = frame("<table><tbody>%s</tbody></table>"
+                            % ROW % ("2026-07-13", THIRD_PAYMENT, "4.00", THIRD_PAYMENT))
+
+
+def test_with_somebody_there_a_later_page_that_turns_into_the_check_is_opened_again(
+        attached, tmp_path, capsys, monkeypatch):
+    """At a console the person deals with the check, and the page is opened
+    again after it rather than taken for the end of the history."""
+    SITE.first = LISTED
+    SITE.later = CHECK
+    asked = []
+
+    def answer(prompt):
+        asked.append(prompt)
+        if len(asked) > 5:
+            raise KeyboardInterrupt
+        SITE.later = A_PAGE_WITH_A_THIRD
+        return ""
+
+    monkeypatch.setattr(browser_launcher, "ask_or_none", answer)
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert len(asked) == 1 and "looks normal again" in asked[0], asked
+    assert len(known(tmp_path)) == 3, printed(capsys)
+    assert noted_whole(tmp_path) is True

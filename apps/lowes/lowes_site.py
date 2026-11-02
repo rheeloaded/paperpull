@@ -307,15 +307,21 @@ def history_state(page) -> str:
     return "empty" if EMPTY_RE.search(text or "") else ""
 
 
-def page_count(page) -> int:
-    """The highest page number the pager shows, or 1."""
+def pager_numbers(page) -> set:
+    """Every page number the page offers, a button or a link whose whole
+    words are one, from one to three digits."""
     try:
         nums = page.evaluate(
             "() => [...document.querySelectorAll('button,a')]"
             ".map(b => (b.innerText || '').trim()).filter(t => /^\\d{1,3}$/.test(t)).map(Number)")
     except Exception:
         nums = []
-    return max(nums or [1])
+    return set(nums or [])
+
+
+def page_count(page) -> int:
+    """The highest page number the pager shows, or 1."""
+    return max(pager_numbers(page) or [1])
 
 
 @dataclass

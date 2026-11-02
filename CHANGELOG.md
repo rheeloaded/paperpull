@@ -233,6 +233,19 @@ its summary.
   the account before, one whose heading opens nothing and a hidden copy of
   a Statement History are left as they were, since a page that works can
   show each of them.
+- **Walmart, Lowe's and GitHub never call a purchase list whole when a
+  page of it never came.** Walmart reads its order list filtered to Online
+  and to In-store and follows Next through each, Lowe's reads every page
+  its pager counts, and GitHub reads its payment history from ?page=2 on.
+  A filtered list or a later page that turned into the bot check, or
+  never drew its list, was read as one with nothing on it, and the list
+  was still noted as read whole, so Resume carried on without reading it
+  again. Now a check there is asked about at a console and stops a run
+  under the panel. A page that never came keeps what was read before it,
+  and the run writes a failure file and stops at its end rather than
+  finish, so Resume reads the list again. A Walmart list filtered to a
+  kind the order list showed none of may have none, and a Lowe's page the
+  page before did not offer may not be there, so both are read as before.
 
 ## [0.59.0] - 2026-10-26
 
