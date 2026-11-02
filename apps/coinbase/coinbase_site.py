@@ -1019,7 +1019,9 @@ def _fetch_tax_pdf(page, title: str, out_path: Path, trace: Optional[list],
     """Ask the list again for the document titled `title`, with the id
     `document_id` when its record keeps one, then fetch its PDF from its
     short-lived link, only when that link is on an exact download host. The
-    link is used once and written nowhere."""
+    link is used once and written nowhere. A list that cannot be read again
+    raises ListStopped, since every tax document after this one asks the
+    same list."""
     m = _TAX_TITLE_RE.match((title or "").strip())
     if not m:
         return False
@@ -1041,7 +1043,7 @@ def _fetch_tax_pdf(page, title: str, out_path: Path, trace: Optional[list],
             items = []
     except ListStopped as stop:
         log.info("could not read the list for %s: %s", title, stop)
-        return False
+        raise
     if len(items) != 1:
         log.info("no single listed document matches %r (%d)", title, len(items))
         if trace is not None:
@@ -1086,7 +1088,9 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
     the download the browser then makes, only when it is the one download
     that came, none came before the press, and it comes from an exact
     download host. A file that lands with no event, or from any other
-    host, is not taken."""
+    host, is not taken. A list that cannot be read, or stops while it loads
+    more, raises ListStopped, since every statement after this one reads
+    the same list."""
     rows = _read_rows(page)
     idx, btn_label = row_index_for(rows, label)
     try:
@@ -1100,6 +1104,7 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
             idx, btn_label = row_index_for(rows, label)
     except ListStopped as stop:
         log.info("the list stopped while looking for %s: %s", label, stop)
+        raise
     if idx < 0:
         if trace is not None:
             trace.append({"note": "no single row reads this label", "rows": len(rows)})
@@ -1260,7 +1265,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     over. Whether the PDF names its own month is the caller's to check
     (statement_identity). A Coinbase One Card statement is taken on the
     statements page loaded afresh, through its Credit Card tab and its row's
-    own PDF button (_take_card_statement), which checks the PDF itself."""
+    own PDF button (_take_card_statement), which checks the PDF itself.
+    A statements page that will not open, or a list that cannot be read
+    again, raises ListStopped, since every document after this one reads
+    the same page."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     t = (title or "").strip()
@@ -1273,8 +1281,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             return False
         # Afresh, as for a monthly statement, and the card list heard anew.
         if not load_statements_for_card(page):
-            log.info("could not open the statements page for %s", iso_date)
-            return False
+            if looks_signed_out(page):
+                raise SessionExpired("the statements page answered as signed out")
+            raise ListStopped("the statements page did not open")
         return _take_card_statement(page, c.group(1), iso_date, out_path, trace)
     m = _STATEMENT_TITLE_RE.match(t)
     if not m:
@@ -1286,8 +1295,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     # Afresh before every press, so no earlier month's page is still
     # polling for its PDF (reload_statements).
     if not reload_statements(page):
-        log.info("could not open the statements page for %s", iso_date)
-        return False
+        if looks_signed_out(page):
+            raise SessionExpired("the statements page answered as signed out")
+        raise ListStopped("the statements page did not open")
     return _catch_statement(page, dl_dir, m.group(1), out_path, trace)
 
 
@@ -1683,11 +1693,13 @@ def _left_the_list(step: str, why: str) -> pressing.Stop:
 
 def _list_changed(step: str, why: str) -> pressing.Stop:
     """The run's stop for a card list that, read again for one statement,
-    is not the list discovery read whole. Nothing was pressed for it."""
+    is not the list discovery read whole. Nothing was pressed for it. It
+    leaves the list unread, so the panel offers a run that reads it afresh
+    rather than Continue, which would read the same list again (#124)."""
     return pressing.Stop(step, why, [
         "The list of card statements changed since it was read (%s), so the run stops "
         "here rather than leave this statement and go on to the next." % why,
-        "Nothing was pressed for it. Run this again to read the list afresh."])
+        "Nothing was pressed for it."], list_unread=True)
 
 
 def open_card_list(page) -> Optional[CardList]:

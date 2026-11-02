@@ -379,13 +379,22 @@ class Download(unittest.TestCase):
         for page, kw in [(Page(answers=[Resp()]), dict(date="2026-09-11")),
                          (Page(answers=[Resp()]), dict(inv="ISU000000000999")),
                          (Page(answers=[Resp()]), dict(inv="")),
-                         (Page(answers=[Resp()]), dict(href="/portal/BillingHistory/DownloadBillPdf?invoiceId=" + ID1)),
-                         (Page(rows=ROWS + [dict(ROWS[0])], answers=[Resp()]), {}),
-                         (Page(rows=[], empty="No data available in table", answers=[Resp()]), {})]:
+                         (Page(answers=[Resp()]), dict(href="/portal/BillingHistory/DownloadBillPdf?invoiceId=" + ID1))]:
             ok, out = self.fetch(page, **kw)
             self.assertFalse(ok, kw)
             self.assertEqual(page.context.request.asked, [], kw)
             self.assertFalse(out.exists())
+
+    def test_a_list_that_cannot_be_read_again_stops(self):
+        """Billing History read again for a bill is the list every bill
+        after it reads too, so a list that stops is raised to the run, never
+        this bill's False (#126's review)."""
+        for page in [Page(rows=ROWS + [dict(ROWS[0])], answers=[Resp()]),
+                     Page(rows=[], empty="No data available in table", answers=[Resp()]),
+                     Page(ready=False, answers=[Resp()])]:
+            with self.assertRaises(site.ListStopped):
+                self.fetch(page)
+            self.assertEqual(page.context.request.asked, [])
 
     def test_signed_out_answers_raise_and_save_nothing(self):
         for answer in [Resp(302, ctype="text/html", body=b"", location="/portal/PreLogin/Validate"),
@@ -464,6 +473,41 @@ class Orchestrator(unittest.TestCase):
         self.assertIn("signed out", said.getvalue())
         self.assertEqual(app.progress.data, {})
         self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0)
+
+    def test_a_list_that_stops_on_resume_stops_the_run_once(self):
+        """A Resume reads no list of its own. After a listing read whole,
+        Billing History that now stops (here it draws no bill) is read once,
+        for the first bill, and the run stops there as one whose list did
+        not end whole, with nothing recorded against any bill. Each bill
+        used to read the whole list and go to review, and the run ended
+        clean."""
+        from paperpull_core import listing
+        app = make_app(self.tmp, "--resume")
+        listing.started(app)
+        for r in site.bills_of(ROWS, HEADS):
+            app._record_rawdoc(r, site.BILLING_URL)
+        listing.read_whole(app)
+        app.check_session = lambda page: None
+        app._delay = lambda *a, **k: None
+        app.write_failure = lambda *a, **k: None
+        pages = []
+
+        def later():
+            pages.append(Page(rows=[], empty="No data available in table", answers=[Resp()]))
+            return pages[-1]
+        app._on_its_site = later
+        bills = app._select()
+        self.assertGreater(len(bills), 1)
+        # A stop only a run that lists carries on from, so the panel offers
+        # that, not Continue, which would read the same list and stop again.
+        with redirect_stdout(io.StringIO()) as said, self.assertRaises(listing.ListNotRead):
+            app.process(bills)
+        self.assertEqual(len(pages), 1, "one list read, for the first bill only")
+        self.assertEqual(pages[0].context.request.asked, [])
+        self.assertIn("could not be read again", said.getvalue())
+        self.assertEqual(app.progress.data, {})
+        self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0)
+        self.assertEqual(listing.last(app), listing.STOPPED)
 
     def test_an_expired_session_during_discovery_stops_the_run(self):
         # check_session is not stubbed: the list opens and signs out in one

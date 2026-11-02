@@ -241,6 +241,11 @@ class NeedsPerson(RuntimeError):
     connecting the shipping account to Billing Online. Never done here."""
 
 
+class NotConnected(NeedsPerson):
+    """Billing Online is not connected to the shipping account, which every
+    invoice after this one would meet as well, so a run stops on it."""
+
+
 def goto_documents(page) -> bool:
     """Be on a signed-in fedex.com page."""
     try:
@@ -300,7 +305,7 @@ def capture_answers(page, wait_ms: int = 25000, settle_ms: int = 4000) -> List[d
     if looks_signed_out(page):
         raise SessionExpired("FedEx showed a sign-in page")
     if not_connected(page):
-        raise NeedsPerson("FedEx Billing Online is not connected to your shipping account")
+        raise NotConnected("FedEx Billing Online is not connected to your shipping account")
     _captured.update(at=time.monotonic(), answers=got)
     return got
 

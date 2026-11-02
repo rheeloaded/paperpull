@@ -1009,8 +1009,11 @@ def download_document(page, doc_id: str, iso_date: str, out_path,
     rendered. The tab must be on that account before anything is pressed,
     and the page rendered must show it, else OtherAccount is raised and
     nothing is saved. SessionExpired, OtpRequired, NotLive and a press the
-    core refuses (pressing.Stop) propagate to the run. A page that no
-    longer reads as expected is False, for manual review."""
+    core refuses (pressing.Stop) propagate to the run, and so does
+    ListStopped when the page every document starts from cannot tell which
+    account it is on, since every document after this one starts there
+    too. A document's own page that no longer reads as expected is False,
+    for manual review."""
     out_path = Path(out_path)
     m = DOC_ID_RE.fullmatch(doc_id or "")
     if not m or (m.group(1) and m.group(2) != iso_date) or (m.group(3) and iso_date != "%s-12-31" % m.group(3)):
@@ -1028,9 +1031,11 @@ def download_document(page, doc_id: str, iso_date: str, out_path,
             trace.append({"note": "the tax form page is not surveyed"})
         return False
     account = account or ""
+    # The page discovery began on, read the way it read it. One that cannot
+    # be read raises ListStopped to the run.
+    if account_of(_read(page)) != account:
+        raise OtherAccount("the tab is on another account")
     try:
-        if account_of(_read(page)) != account:
-            raise OtherAccount("the tab is on another account")
         if m.group(1) == HOLDINGS:
             _open_tab(page, "Current Holdings")
         elif m.group(1) == SECURITY_HISTORY:

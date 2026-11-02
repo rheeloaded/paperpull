@@ -1194,11 +1194,12 @@ def test_nothing_private_leaves_on_runs_that_stop(tmp_path):
         attach(app, center())
         app.cmd_discover()
         app.check_session = lambda p: None
-        # A list that stops on the way to the statement.
+        # A list that stops on the way to the statement stops the run.
         bad = center()
         bad.rows_override = []
         attach(app, bad)
-        app.process(app._select(limit=1))
+        with pytest.raises(SystemExit):
+            app.process(app._select(limit=1))
         # A download that is not a PDF stops the run.
         worse = center()
         worse.download_body = b"<html>BUS COMPLETE CHK (...4321)</html>"
@@ -1223,7 +1224,8 @@ def test_nothing_private_leaves_on_runs_that_stop(tmp_path):
         trace = []
         take(center(), tmp_path, doc_id="DOCQXNOPE", trace=trace)
         traces.append(json.dumps(trace))
-    assert app.stats["manual_review"] >= 1
+    assert "could not be read again" in seen.getvalue()
+    assert app.stats["failure_files"] == 1
     assert_private(without_what_a_run_makes(seen.getvalue() + written(app) + " ".join(traces), tmp_path))
 
 
@@ -1911,6 +1913,26 @@ def test_a_row_with_both_shapes_or_neither_presses_nothing_on_the_row(tmp_path, 
     assert not any("cell3" in p or "downloadPDFOption" in p for p in page.presses)
     assert page.downloads == []
     assert any(why in str(t.get("why")) for t in trace), trace
+
+
+def test_a_refusal_once_the_save_menu_was_pressed_stops_the_run(tmp_path):
+    """A row's own control refused before anything on it is pressed leaves
+    that statement for review. Once its save menu was pressed, a Save as PDF
+    the guard refuses stops the run, as a press that brought nothing does."""
+    page = center()
+    real = page.labels_for
+
+    def refused(css):
+        if css.endswith("-downloadPDFOption") and page.menu_open is not None:
+            return ["Save as PDF", "Sign out"]
+        return real(css)
+    page.labels_for = refused
+    with pytest.raises(site.pressing.Stop) as stop:
+        take(page, tmp_path)
+    assert "was pressed and then" in " ".join(stop.value.lines)
+    assert any("downloadDocumentDropdown" in p for p in page.presses)
+    assert not any("downloadPDFOption" in p for p in page.presses)
+    assert page.downloads == [] and not (tmp_path / "out.pdf").exists()
 
 
 @pytest.mark.parametrize("labels", [["Sep 28, 2026 , opens document"],

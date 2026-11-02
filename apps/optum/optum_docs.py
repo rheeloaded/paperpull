@@ -673,11 +673,28 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
+            except site.ListStopped as stop:
+                # The forms page or a product's statements page could not be
+                # read again for this document. Every document after it
+                # reads the same pages, so the run stops here rather than
+                # send each one to review.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        document was sought. Nothing is recorded against the document, and
+        the run leaves as one whose list did not end whole, which only a run
+        that lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        listing.read_again_stopped(self, (
+            "The Optum Bank documents list could not be read again, so "
+            "this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one document. The site layer reads the product's statements

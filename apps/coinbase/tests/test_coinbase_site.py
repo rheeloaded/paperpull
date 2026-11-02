@@ -1771,6 +1771,7 @@ class CardDownload(unittest.TestCase):
         with self.assertRaises(site.pressing.Stop) as stop:
             self.take(page, iso="2031-07-04", label="July 2031")
         self.assertFalse(stop.exception.after_a_press)
+        self.assertTrue(stop.exception.list_unread)
         self.assertEqual([c for c in page.clicked if isinstance(c, str)], [])
 
     def test_a_list_that_cannot_be_read_again_stops_the_run(self):
@@ -1781,6 +1782,8 @@ class CardDownload(unittest.TestCase):
         with self.assertRaises(site.pressing.Stop) as stop:
             self.take(page)
         self.assertIn("card statements", stop.exception.lines[0])
+        # A Resume would read the same list for its first statement (#124).
+        self.assertTrue(stop.exception.list_unread)
         self.assertEqual([c for c in page.clicked if isinstance(c, str)], [])
         page = CardPage(links=("Transactions",))
         with self.assertRaises(site.pressing.Stop):

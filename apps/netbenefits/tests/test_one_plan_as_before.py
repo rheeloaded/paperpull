@@ -237,6 +237,8 @@ def test_a_refused_request_when_the_session_is_gone_stops_the_run(tmp_path):
     real = page.evaluate
     page.evaluate = lambda js, arg=None: False if "txnTokenValue" in js and "sodReqIndicator" not in js \
         else real(js, arg)
-    app.process(app._select())
+    # The run stops as one that stopped, with the sign-out in flight.
+    with pytest.raises(SystemExit):
+        app.process(app._select())
     assert app.stats.get("session_expired") == 1
     assert not any(r.get("state") == State.FAILED.value for r in app.progress.data.values())

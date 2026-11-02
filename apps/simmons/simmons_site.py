@@ -1444,11 +1444,9 @@ def empty_download_folder(dl_dir, unfinished: bool = True) -> int:
 
 def _row_button(page, label: str):
     """The one drawn button inside a list item whose whole text is `label`,
-    as an element, or None."""
-    try:
-        buttons = _buttons(page)
-    except ListStopped:
-        return None
+    as an element, or None. Buttons that cannot be read raise ListStopped,
+    as they do when the list is read."""
+    buttons = _buttons(page)
     hits = [i for i, b in enumerate(buttons)
             if b["text"] == label and b["shown"] and isinstance(b["item"], int)
             and not isinstance(b["item"], bool) and b["item"] >= 0]
@@ -1668,17 +1666,23 @@ def download_document(page, run: Run, dl_dir, out_path, *, record_id: str, iso_d
         _note(trace, note="not one row reads this document's text", rows=len(rows))
         return False
     target = Target(label, entry.document_id, entry.filename, listing.user_id)
-    return _catch_document(page, run, dl_dir, target, out_path, trace)
+    try:
+        return _catch_document(page, run, dl_dir, target, out_path, trace)
+    except ListStopped as stop:
+        log.info("the list stopped before the document dated %s was pressed: %s", iso_date, stop)
+        _note(trace, note="the list stopped")
+        raise _page_stopped(stop)
 
 
 def _page_stopped(stop: ListStopped) -> pressing.Stop:
-    """A stop of the list while a document was sought, as a stop of the run.
-    Its words are this app's own, never the page's."""
+    """A stop of the list while a document was sought, as a stop of the run
+    that leaves the list unread, so the panel offers a run that reads it
+    first rather than Continue, which would meet the same list (#124). Its
+    words are this app's own, never the page's."""
     return pressing.Stop("find the document", "the documents list stopped", [
         "The documents list stopped before this document was saved, since %s." % stop,
         "Nothing was pressed, and the run stops here rather than meet the same page "
-        "for the next document.",
-        pressing.AGAIN])
+        "for the next document."], list_unread=True)
 
 
 # ---------------------------------------------------------------------------

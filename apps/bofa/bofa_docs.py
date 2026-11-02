@@ -339,6 +339,25 @@ class App:
                 print(line)
         raise SystemExit(0)
 
+    def list_changed(self, e: Exception) -> None:
+        """Stop the run because the statements list, read again for a
+        statement, did not answer the way this app knows (ListUnread).
+        Nothing is recorded against the statement. A Resume reads
+        no list of its own, so it would read the same list for its first
+        statement and stop again (#124), and the run leaves as one whose
+        list did not end whole, which only a run that lists carries on from
+        (listing.read_again_stopped)."""
+        self.write_failure("download a statement", getattr(e, "reason", "") or str(e),
+                           postmortem=getattr(e, "facts", None) or None)
+        text = ("Bank of America's statements list did not answer the way this app "
+                "knows when it was read again for a statement, because %s. Nothing was "
+                "guessed at and nothing was saved for it. The failure file above says "
+                "what the page did, as counts. Attach it to issue #121." % e)
+        print()
+        for i, line in enumerate(textwrap.wrap(text, width=69)):
+            print(("!! " if i == 0 else "   ") + line)
+        listing.read_again_stopped(self)
+
     # -- commands ----------------------------------------------------------
 
     def cmd_open_browser(self):
@@ -631,6 +650,11 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
+            except site.ListUnread as e:
+                # The list, read again for this statement, did not answer the
+                # way this app knows, and every statement after it reads it
+                # the same way.
+                self.list_changed(e)
             except (site.NotThere, site.NotLearned, site.ListCut) as e:
                 # Every statement would say the same, so the run stops here.
                 self.stop_with("download a statement", e)
@@ -638,7 +662,10 @@ class App:
                 # Already explained by download_one. Stop rather than grind
                 # through the rest producing empty "manual review" entries.
                 print("Stopped. Everything downloaded so far is saved.")
-                return
+                # Left with the stop in flight, which is what the core
+                # reports as a run that stopped. A return here finished
+                # the run clean, with documents still to download.
+                raise SystemExit(0)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))

@@ -1612,10 +1612,14 @@ def download_document(page, run: Run, dl_dir, out_path, *, document_id: str, iso
     afresh, its list read again, the record bound to exactly one listed
     document and one row, and only then is that row's Download pressed, the
     list's listener armed from the opening to the press. False, with
-    nothing pressed on a row, when any of that does not hold.
+    nothing pressed on a row, when the list does not hold the record once.
     DocumentTurnedOff, when the row's Download is turned off on the page,
     SessionExpired, NotLive, DeadlineReached and a stop of the run
-    propagate."""
+    propagate, and so does ListStopped when the documents page will not
+    open, its list cannot be read again, the row's Download is refused or
+    the row or the list's answer changes before the press, since every
+    document after this one meets the same page, as Bilt's and First
+    Horizon's do."""
     out_path = Path(out_path)
     day = iso_date
     if not (isinstance(document_id, str) and UUID_RE.fullmatch(document_id)
@@ -1627,17 +1631,13 @@ def download_document(page, run: Run, dl_dir, out_path, *, document_id: str, iso
         opened = _open(page, run)
     except ListStopped as stop:
         log.info("the list stopped while looking for the document dated %s: %s", day, stop)
-        if trace is not None:
-            trace.append({"note": "the list stopped", "why": str(stop)})
-        return False
+        raise
     try:
         try:
             n = _find_row(page, run, opened, document_id, day, doc_type, trace)
         except ListStopped as stop:
             log.info("the list stopped while looking for the document dated %s: %s", day, stop)
-            if trace is not None:
-                trace.append({"note": "the list stopped", "why": str(stop)})
-            return False
+            raise
         if n < 1:
             return False
         try:
@@ -1645,9 +1645,7 @@ def download_document(page, run: Run, dl_dir, out_path, *, document_id: str, iso
                                    trace, opened=opened)
         except ListStopped as stop:
             log.info("the document dated %s was not saved: %s", day, stop)
-            if trace is not None:
-                trace.append({"note": "the row's Download was not pressed", "why": str(stop)})
-            return False
+            raise
     finally:
         opened.close()
 

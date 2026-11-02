@@ -1076,9 +1076,11 @@ def test_a_record_that_names_no_statement_presses_nothing(tmp_path, card, sid, i
 def test_a_list_that_stops_while_a_statement_is_sought_stops_the_run(tmp_path):
     w = Wallet()
     w.sheet = ["2026-10-06"]
-    with pytest.raises(pressing.Stop):
+    with pytest.raises(pressing.Stop) as stop:
         take(w, tmp_path)
     assert [p for p in w.presses if p.startswith("Download")] == []
+    # A Resume would read the same list for its first statement (#124).
+    assert stop.value.list_unread
 
 
 # ---------------------------------------------------------------------------

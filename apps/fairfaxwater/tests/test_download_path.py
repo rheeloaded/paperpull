@@ -11,6 +11,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
@@ -104,7 +106,9 @@ def test_an_expired_session_stops_the_run_instead_of_failing_every_bill(
 
     spy = StrictDelivery().install(monkeypatch)
     app, failures = _app(tmp_path, monkeypatch, bill_request=expired)
-    app.process(_docs())
+    # The run stops as one that stopped, with the sign-out in flight.
+    with pytest.raises(SystemExit):
+        app.process(_docs())
     assert not spy.calls
     assert app.stats["session_expired"] == 1
     assert app.stats["failed"] == 0 and app.stats["manual_review"] == 0

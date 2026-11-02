@@ -515,7 +515,17 @@ class App:
                 # Already explained by download_one. Stop rather than grind
                 # through the rest producing empty "manual review" entries.
                 print("Stopped. Everything downloaded so far is saved.")
-                return
+                # Left with the stop in flight, which is what the core
+                # reports as a run that stopped. A return here finished
+                # the run clean, with documents still to download.
+                raise SystemExit(0)
+            except site.NotConnected as e:
+                # Every invoice after this one would meet the same, so the
+                # run stops here rather than leave each one for review.
+                print(f"\n!! {e}.")
+                print("   Open FedEx Billing Online in the browser and connect your")
+                print("   shipping account there yourself, then run Resume.")
+                raise SystemExit(0)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -543,6 +553,8 @@ class App:
             saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
                                        href=doc.href, title=doc.title,
                                        document_id=doc.document_id)
+        except site.NotConnected:
+            raise
         except site.NeedsPerson as e:
             # FedEx wants something only the account holder may give,
             # Never done here.

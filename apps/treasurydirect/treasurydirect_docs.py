@@ -630,6 +630,12 @@ class App:
                 self.otp_required()
             except site.NotLive:
                 self.not_live()
+            except site.ListStopped as stop:
+                # The page every document starts from could not tell which
+                # account it is on. Every document after this one starts
+                # there too, so the run stops here rather than send each one
+                # to review.
+                self.list_changed(stop)
             except Exception as e:
                 # Only the kind of error is kept. A browser's message can carry
                 # the page's address with its session id, or the page's words.
@@ -669,6 +675,17 @@ class App:
             "Open your account in that tab yourself (My Account), keep the window",
             "open, and run this again.",
         ])
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        document was sought. Nothing is recorded against the document, and
+        the run leaves as one whose list did not end whole, which only a run
+        that lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        listing.read_again_stopped(self, (
+            "The TreasuryDirect account page could not be read again, so "
+            "this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one document. The site layer moves the person's tab to it by

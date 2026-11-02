@@ -255,6 +255,52 @@ def test_a_scoped_resume_is_told_to_run_with_no_dates(tmp_path, capsys):
     assert "so run Pilot or Run All with no year or dates set, either of which" in said
 
 
+@pytest.mark.parametrize("scope,whole_run", [
+    (None, "Pilot or Run All"), (("year", 2026), "Pilot or Run All with no year or dates set")])
+def test_a_list_read_again_that_stops_says_only_a_listing_can(tmp_path, capsys, scope, whole_run):
+    """A list read again for one document that stopped would stop the same
+    way for a Resume's first document, so the stop leaves the listing
+    unfinished and says only a run that lists carries on."""
+    app = _app(tmp_path, known=["one", "two"])
+    app.args = SimpleNamespace(**dict([scope])) if scope else SimpleNamespace()
+    listing.started(app)
+    listing.read_whole(app)
+    saved = []
+    app.progress = SimpleNamespace(save=lambda **kw: saved.append(kw))
+    with pytest.raises(listing.ListNotRead) as stop:
+        listing.read_again_stopped(app, "The bill list could not be read again, so this run stops here.")
+    assert stop.value.code == 0 and stop.value.whole_run == whole_run
+    assert saved == [{"backup": True}]
+    assert listing.last(app) == listing.STOPPED
+    said = _said(capsys)
+    assert said.startswith("!! The bill list could not be read again")
+    assert "then run %s, either of which reads the list first." % whole_run in said
+    _summary(stop.value)
+    result, said = _result_and_said(capsys)
+    assert result["stopped"] == 1 and result["list_not_read"] == 1
+    assert "Resume carries on" not in said
+
+
+def test_a_list_read_again_that_stops_after_the_app_said_why_says_only_what_to_run(
+        tmp_path, capsys):
+    """PayPal, Bank of America and NetBenefits say in their own lines why
+    their list did not come, so the stop adds only what to run."""
+    app = _app(tmp_path, known=["one"])
+    app.args = SimpleNamespace()
+    app.progress = SimpleNamespace(save=lambda **kw: None)
+    listing.started(app)
+    listing.read_whole(app)
+    with pytest.raises(listing.ListNotRead) as stop:
+        listing.read_again_stopped(app)
+    assert stop.value.whole_run == "Pilot or Run All"
+    assert listing.last(app) == listing.STOPPED
+    said = capsys.readouterr().out
+    assert "!!" not in said
+    assert " ".join(said.split()) == ("Everything saved so far is kept. Look at the browser "
+                                      "window, then run Pilot or Run All, either of which "
+                                      "reads the list first.")
+
+
 def test_any_other_stop_is_still_continued(capsys):
     """A sign-in or a page that would not open leaves on a SystemExit of its
     own, and Resume carries on from there as it always did."""

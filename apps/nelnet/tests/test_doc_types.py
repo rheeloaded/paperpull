@@ -330,9 +330,13 @@ def test_a_list_longer_than_the_reader_goes_stops_the_listing(monkeypatch):
     assert len(stopped.value.docs) == 20
 
 
-def test_a_row_looked_for_on_a_list_that_stopped_is_not_found():
+def test_a_row_looked_for_on_a_list_that_stopped_stops_the_run():
+    """The inbox paged through for a document is the list every inbox
+    document after it pages through, so a page that could not be reached
+    is raised to the run, never this document's not found."""
     page = _stuck_on_next(_Page(_three_pages()))
-    assert site._inbox_control(page, "2024-01-15", "01/15/2024 Statement") == (None, "")
+    with pytest.raises(site.ListStopped):
+        site._inbox_control(page, "2024-01-15", "01/15/2024 Statement")
 
 
 def test_what_was_listed_before_a_stop_is_kept_with_tax_info(monkeypatch):
@@ -356,8 +360,12 @@ def test_an_inbox_notice_about_the_1098e_is_taken_from_its_own_row(monkeypatch, 
         raise AssertionError("an inbox notice was looked for on Tax Info")
     monkeypatch.setattr(site, "_goto_tax", never)
     monkeypatch.setattr(site, "goto_documents", lambda page: False)
-    assert not site.download_bill(object(), None, "2026-01-20", tmp_path / "n.pdf",
-                                  title="Your 2025 1098-E Tax Form Is Available")
+    monkeypatch.setattr(site, "looks_signed_out", lambda page: False)
+    # Inbox & Statements does not open here, which stops the run, and Tax
+    # Info is never asked.
+    with pytest.raises(site.ListStopped):
+        site.download_bill(object(), None, "2026-01-20", tmp_path / "n.pdf",
+                           title="Your 2025 1098-E Tax Form Is Available")
 
 
 def test_the_status_is_stated_where_a_reader_will_find_it():

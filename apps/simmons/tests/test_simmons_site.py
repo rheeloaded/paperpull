@@ -1012,9 +1012,11 @@ def test_two_rows_of_one_title_press_neither(tmp_path):
 
 def test_a_list_that_stops_while_a_document_is_sought_stops_the_run(tmp_path):
     page = Page(rows=[row_text(d) for d in DOCS[1:]])
-    with pytest.raises(pressing.Stop):
+    with pytest.raises(pressing.Stop) as stop:
         take(page, tmp_path)
     assert page.presses == []
+    # A Resume would read the same list for its first document (#124).
+    assert stop.value.list_unread
 
 
 # ---------------------------------------------------------------------------

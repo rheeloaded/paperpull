@@ -762,12 +762,14 @@ def test_a_list_answer_that_comes_late_while_paging_stops_the_list():
 
 
 def test_a_list_answer_that_comes_late_on_the_way_to_a_row_presses_no_download(tmp_path):
+    """The list read again on the way to a row is the list every later
+    document reads, so a list that stops there stops the run."""
     page = Center()
     page.on_press = a_late_list_answer
-    trace = []
-    got, out = take(page, tmp_path, trace=trace)
-    assert got is False and not out.exists() and pressed_downloads(page) == []
-    assert any(t.get("note") == "the list stopped" for t in trace)
+    out = tmp_path / "out.pdf"
+    with pytest.raises(site.ListStopped, match="list answers came"):
+        take(page, tmp_path)
+    assert not out.exists() and pressed_downloads(page) == []
     assert page.listeners == {"response": [], "download": []}
 
 
@@ -854,10 +856,9 @@ def test_a_next_the_page_turned_off_stops_the_list():
 def test_a_next_turned_off_on_the_way_to_a_row_presses_no_download(tmp_path):
     page = Center()
     page.on_press = turned_off("button")
-    trace = []
-    got, out = take(page, tmp_path, trace=trace)
-    assert got is False and not out.exists() and page.presses == []
-    assert any(t.get("note") == "the list stopped" for t in trace)
+    with pytest.raises(site.ListStopped, match="turned off"):
+        take(page, tmp_path)
+    assert not (tmp_path / "out.pdf").exists() and page.presses == []
 
 
 def test_a_download_the_page_turned_off_leaves_the_document(tmp_path):
@@ -1127,10 +1128,9 @@ def test_a_list_answer_between_finding_the_row_and_its_press_presses_nothing(tmp
         page._emit(Response(LIST_URL, page.items))
         return real(dl_dir)
     monkeypatch.setattr(site, "_snapshot", answer_again)
-    trace = []
-    got, out = take(page, tmp_path, n=2, day="2026-09-30", kind="account_statement", trace=trace)
-    assert got is False and not out.exists() and pressed_downloads(page) == []
-    assert any(t.get("note") == "the row's Download was not pressed" for t in trace)
+    with pytest.raises(site.ListStopped):
+        take(page, tmp_path, n=2, day="2026-09-30", kind="account_statement")
+    assert not (tmp_path / "out.pdf").exists() and pressed_downloads(page) == []
     assert page.listeners["response"] == []
 
 
@@ -1148,8 +1148,9 @@ def test_a_refusal_before_any_press_leaves_an_unrelated_file_alone(tmp_path, mon
         unrelated(tmp_path).write_bytes(b"%PDF-1.4 not alpaca's")
         return ["Sign out"]
     monkeypatch.setattr(site, "_labels_of", labels)
-    got, _out = take(page, tmp_path, n=2, day="2026-09-30", kind="account_statement")
-    assert got is False and pressed_downloads(page) == []
+    with pytest.raises(site.ListStopped, match="guard refused"):
+        take(page, tmp_path, n=2, day="2026-09-30", kind="account_statement")
+    assert pressed_downloads(page) == []
     assert unrelated(tmp_path).exists()
 
 

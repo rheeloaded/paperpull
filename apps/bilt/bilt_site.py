@@ -1804,13 +1804,14 @@ def download_statement(page, run: Run, out_path, *, card_id: str, statement_id: 
 
 def _page_stopped(stop: ListStopped) -> pressing.Stop:
     """A stop of the wallet while a statement was sought, as a stop of the
-    run. Its words are this app's own, never the page's. An opener may have
-    been pressed on the way, so it counts as a stop after a press."""
+    run that leaves the list unread, so the panel offers a run that reads
+    it first rather than Continue, which would meet the same list (#124).
+    Its words are this app's own, never the page's. An opener may have been
+    pressed on the way, so it counts as a stop after a press."""
     return pressing.Stop("find the statement", "the statements list stopped", [
         "The statements list stopped before this statement was saved, since %s." % stop,
         "Nothing more was pressed, and the run stops here rather than meet the same page "
-        "for the next statement.",
-        pressing.AGAIN], after_a_press=True)
+        "for the next statement."], after_a_press=True, list_unread=True)
 
 
 def record_hash(statement_id: str) -> str:

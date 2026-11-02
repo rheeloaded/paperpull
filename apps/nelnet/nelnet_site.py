@@ -732,7 +732,10 @@ def _print_tax_form(page, el, label: str, out_path: Path,
 
 def _inbox_control(page, iso: str, title: str):
     """The download button of the inbox row dated `iso` whose subject is
-    `title`, found by paging from the first page, or (None, "")."""
+    `title`, found by paging from the first page, or (None, "") when the
+    list holds no such row. A page of the list that could not be reached
+    raises ListStopped, as it does for discovery, since every document
+    after this one pages through the same list."""
     want = re.sub(r"\s+", " ", title or "").strip().lower()
     try:
         _to_first_page(page)
@@ -749,6 +752,7 @@ def _inbox_control(page, iso: str, title: str):
                 break
     except ListStopped as stop:
         log.info("the inbox list stopped while looking for %s, %s", iso, stop)
+        raise
     return None, ""
 
 
@@ -984,7 +988,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     a PDF response, a file in `dl_dir` or a new tab.
 
     `dl_dir` is where the attached browser saves a download, watched
-    after every click."""
+    after every click.
+
+    Inbox & Statements that will not open, or an inbox list a page of
+    which could not be reached, raises ListStopped, since every inbox
+    document after this one reads the same list."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # Only a form listed from Tax Info is taken there, for its own year. An
@@ -997,11 +1005,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             log.info("no safe 1098-E control for tax year %s", tax.group(1))
             return False
         return _print_tax_form(page, el, label, out_path, trace)
-    elif goto_documents(page):
-        el, label = _inbox_control(page, iso_date, title)
-    else:
-        log.info("could not open the statements page for %s", iso_date)
-        return False
+    if not goto_documents(page):
+        if looks_signed_out(page):
+            # A sign-out, which the next document's session check stops on.
+            log.info("Inbox & Statements answered as signed out")
+            return False
+        raise ListStopped("Inbox & Statements did not open")
+    el, label = _inbox_control(page, iso_date, title)
     if el is None:
         log.info("no document control found for %s", iso_date)
         return False

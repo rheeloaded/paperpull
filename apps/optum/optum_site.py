@@ -650,7 +650,14 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     again and the document is fetched only when exactly one entry there
     carries that same path, title and date. The path names the product in
     full, so two products' same-day statements cannot be confused. Nothing
-    is pressed."""
+    is pressed.
+
+    A product the forms page no longer links, or an entry its statements
+    page no longer holds, answers False, so the record goes to review and
+    the run goes on. A forms page or statements page that will not open,
+    links no product, lists nothing or cannot be read raises ListStopped,
+    as it does for discovery, since every document after this one would
+    read the same pages."""
     out_path = Path(out_path)
     t = (title or "").strip()
     m = DOCUMENT_PATH_RE.match(href or "")
@@ -661,21 +668,30 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         return False
     pid = m.group(1)
     if not goto_documents(page):
-        log.info("could not open the Forms & documents page")
-        return False
+        if looks_signed_out(page):
+            # A sign-out, which the next document's session check stops on.
+            log.info("the forms page answered as signed out")
+            return False
+        raise ListStopped("the Forms & documents page did not open")
     pids = product_ids(_entries(page))
+    if not pids:
+        raise ListStopped("the Forms & documents page links no product's statements")
     if pid not in pids:
         log.info("the recorded product is not on the Forms & documents page")
         return False
     if not _goto_statements(page, pid):
-        log.info("a product's statements page did not open")
-        return False
+        if looks_signed_out(page):
+            log.info("a product's statements page answered as signed out")
+            return False
+        raise ListStopped("a product's statements page did not open")
     try:
-        found = [d for d in documents_of(_entries(page), pid)
-                 if d.href == href and d.title == t and d.date_text == (iso_date or "")]
+        listed = documents_of(_entries(page), pid)
     except ListStopped as stop:
         log.info("the list stopped while looking for %r: %s", t, stop)
-        return False
+        raise
+    if not listed and not says_no_statements(page):
+        raise ListStopped("a product's statements page lists no document")
+    found = [d for d in listed if d.href == href and d.title == t and d.date_text == (iso_date or "")]
     if len(found) != 1:
         log.info("%d entries match the recorded path, title and date for %r, none taken", len(found), t)
         if trace is not None:
