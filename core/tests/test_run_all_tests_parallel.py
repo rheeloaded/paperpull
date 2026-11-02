@@ -46,6 +46,15 @@ sys.path.insert(0, str(REPO / "tools"))
 
 rat = pytest.importorskip("run_all_tests")
 
+TESTS_YML = REPO / ".github" / "workflows" / "tests.yml"
+
+
+def ci_parts() -> int:
+    """How many parts CI runs, by the matrix in tests.yml."""
+    m = re.search(r"^\s*part:\s*\[([\d,\s]+)\]\s*$", TESTS_YML.read_text(encoding="utf-8"), re.M)
+    assert m, "tests.yml has no part matrix"
+    return len([p for p in m.group(1).split(",") if p.strip()])
+
 
 def alive(pid: int) -> bool:
     if os.name == "nt":
@@ -192,14 +201,26 @@ def test_side_by_side_the_longest_start_first():
         ["target", "statefarm", "unknown", "core", "gui"]
 
 
+def test_tests_yml_names_one_number_of_parts():
+    """The matrix, the job's name and the --shard it hands the runner say
+    the same number of parts, so a part is never run twice or left out."""
+    n = ci_parts()
+    text = TESTS_YML.read_text(encoding="utf-8")
+    assert re.search(r"^\s*part:\s*\[%s\]\s*$" % r",\s*".join(str(k) for k in range(1, n + 1)), text, re.M)
+    assert "name: tests part ${{ matrix.part }} of %d\n" % n in text
+    assert "--shard ${{ matrix.part }}/%d " % n in text
+    assert len(re.findall(r"--shard \$\{\{ matrix\.part \}\}/\d+", text)) == 1
+
+
 def test_the_parts_cover_every_suite_once_and_finish_close_together():
+    n = ci_parts()
     times = rat.load_times(REPO / "tools" / "suite_times.json")
     names = sorted(times) + ["a_new_app"]
-    parts = [rat.shard_of(names, times, k, 6) for k in range(1, 7)]
-    assert sorted(n for p in parts for n in p) == sorted(names)
-    assert parts == [rat.shard_of(names, times, k, 6) for k in range(1, 7)], "not the same parts twice"
-    loads = [sum(rat.expected(n, times) for n in p) for p in parts]
-    assert max(loads) <= sum(loads) / 6 + max(times.values())
+    parts = [rat.shard_of(names, times, k, n) for k in range(1, n + 1)]
+    assert sorted(x for p in parts for x in p) == sorted(names)
+    assert parts == [rat.shard_of(names, times, k, n) for k in range(1, n + 1)], "not the same parts twice"
+    loads = [sum(rat.expected(x, times) for x in p) for p in parts]
+    assert max(loads) <= sum(loads) / n + max(times.values())
 
 
 def test_no_part_of_ci_plans_far_longer_than_the_others():
@@ -211,12 +232,14 @@ def test_no_part_of_ci_plans_far_longer_than_the_others():
     an average part is the next to split. A new app with no time yet is
     planned as a middling suite, as in the test above, so it needs no entry
     for its first push."""
+    parts = ci_parts()
     times = rat.load_times(REPO / "tools" / "suite_times.json")
     names = [n for n, _d, _kind in rat.suites(False)] + ["a_new_app"]
     assert set(rat.CORE_PARTS) <= set(times), "each core suite is planned by a time of its own"
-    loads = [sum(rat.expected(n, times) for n in rat.shard_of(names, times, k, 6)) for k in range(1, 7)]
-    assert max(loads) <= 1.1 * sum(loads) / 6, loads
-    assert max(rat.expected(n, times) for n in names) < sum(loads) / 6
+    loads = [sum(rat.expected(n, times) for n in rat.shard_of(names, times, k, parts))
+             for k in range(1, parts + 1)]
+    assert max(loads) <= 1.1 * sum(loads) / parts, loads
+    assert max(rat.expected(n, times) for n in names) < sum(loads) / parts
 
 
 def test_a_part_runs_only_its_own_suites(fake_run, tmp_path, monkeypatch, capsys):

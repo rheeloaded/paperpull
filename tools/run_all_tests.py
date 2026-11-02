@@ -3,7 +3,7 @@
     python tools/run_all_tests.py
     python tools/run_all_tests.py --quick     the core's three suites, gui and server only
     python tools/run_all_tests.py --jobs 4    four suites at a time
-    python tools/run_all_tests.py --shard 2/6 the second of six parts, for CI
+    python tools/run_all_tests.py --shard 2/8 the second of eight parts, for CI
     python tools/run_all_tests.py --stop      stop this checkout's run
     python tools/run_all_tests.py --replace   stop it, then run again
 
