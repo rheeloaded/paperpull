@@ -382,7 +382,7 @@ class App:
         print("Checking the connection to your signed-in tualatin.merchanttransact.com browser...\n")
         page = self.page()
         # What only a signed-in page shows, Activity's own table.
-        listed = site.bill_list_opens(page)
+        listed, stopped = site.bill_list_state(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
@@ -392,6 +392,10 @@ class App:
         elif listed:
             print("Success. Connected, and Activity lists your bills.")
             print("Keep that browser window OPEN, then run the diagnostics or pilot.")
+        elif stopped:
+            print("Connected, and Activity's table was read, but not whole, since")
+            print(f"{stopped}. A run stops there rather than miss a bill. Keep the browser")
+            print("window OPEN, run --diagnose, and attach what it writes to an issue.")
         else:
             print("Connected, but Activity could not be read, so this cannot say whether")
             print("you are signed in. Look at the browser window and answer anything")

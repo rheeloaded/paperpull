@@ -4,8 +4,10 @@ import ast
 import io
 import json
 import logging
+import re
 import sys
 import tempfile
+import textwrap
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -15,6 +17,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 import tualatin_site as site  # noqa: E402
 import tualatin_docs as docs  # noqa: E402
+from paperpull_core import testkit  # noqa: E402
 
 FAKE_ACCOUNT = "987654-321"
 HEADS = ["Transaction Date", "Transaction Type", "Description", "Amount", "Balance"]
@@ -61,6 +64,9 @@ class Page:
     def goto(self, url, **k):
         self.url = self.settled
 
+    def wait_for_timeout(self, ms):
+        pass
+
     def wait_for_function(self, js, **k):
         assert js == site._TABLE_DRAWN_JS
         if not self.table:
@@ -80,8 +86,10 @@ class Page:
 
 
 def drawn(page, html, out_path, base=None):
+    """The inert render, drawing the page's text as a real PDF."""
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(out_path).write_bytes(b"%PDF-1.4 drawn " + b"x" * 2000)
+    words = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
+    Path(out_path).write_bytes(testkit.text_pdf(textwrap.wrap(words, 80) or [""], min_bytes=2000))
 
 
 class Hosts(unittest.TestCase):
@@ -131,7 +139,9 @@ class Rows(unittest.TestCase):
             self.assertEqual(len(stop.exception.docs), 3, broken)
 
     def test_a_row_of_a_type_it_does_not_know_stops_the_list_and_is_named(self):
-        for kind, named in (("Adjustment", "'Adjustment'"), ("Final Bill", "'Final Bill'"), ("$9 <b>", "")):
+        """Named through the app's words, so a name in it never prints."""
+        for kind, named in (("Late Fee", "'Late Fee'"), ("Final Bill", "'aaaaa Bill'"),
+                            ("Refund to Dana Smith", "'Refund to aaaa aaaaa'"), ("$9 <b>", "")):
             with self.assertRaises(site.ListStopped) as stop:
                 site.bills_of(HEADS, ROWS + [{"cells": ["06/30/2026", kind, "", "$1", "$1"], "bills": []}])
             self.assertEqual(len(stop.exception.docs), 3, kind)
@@ -158,10 +168,11 @@ class ListReady(unittest.TestCase):
                 site.collect_download_docs(page)
 
     def test_anything_saying_activity_is_not_whole_stops(self):
-        for extra in ({"pager": True}, {"dated": True}, {"accounts": 2}, {"count": 6}, {"count": 4}):
+        for extra in ({"pager": True}, {"dated": True}, {"accounts": 2}, {"count": 6}, {"count": 4},
+                      {"filtered": True}, {"tables": 2}):
             with self.assertRaises(site.ListStopped, msg=extra):
                 site.collect_download_docs(Page(extra=extra))
-        whole = {"pager": False, "dated": False, "accounts": 1, "count": 5}
+        whole = {"pager": False, "dated": False, "accounts": 1, "count": 5, "filtered": False, "tables": 1}
         self.assertEqual(len(site.collect_download_docs(Page(extra=whole))), 3)
 
     def test_an_activity_with_no_bills_stops(self):
@@ -172,7 +183,8 @@ class ListReady(unittest.TestCase):
     def test_what_diagnose_says_of_the_table(self):
         facts = site.table_facts(Page(extra={"dated": True, "accounts": 3}))
         self.assertEqual(facts, {"heads": HEADS, "rows": 5, "pager": False, "count": None,
-                                 "date_filter": True, "account_choices": 3})
+                                 "date_filter": True, "account_choices": 3, "filtered": False,
+                                 "tables": 0})
 
     def test_a_table_that_never_draws_stops(self):
         with self.assertRaises(site.ListStopped):
