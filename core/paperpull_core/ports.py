@@ -4,10 +4,11 @@ Each person's config names the debugging port of the browser they sign in
 with, and a sign-in on a port a browser already holds joins that browser
 (browser.open_signin_browser, #90). So two configs on one port sign in to
 one browser, one profile, and a run of either reads whichever account that
-browser is signed in to. tools/add_account.py gives a second person their
-app's port plus 10, moved past the ports in use when they are added, so an
-app set up after them can come with that same port. A config copied by
-hand can name any port at all.
+browser is signed in to. tools/add_account.py gave a second person their
+app's port plus 10, moved past the ports in use when they were added, so an
+app set up after them could come with that same port. It now gives one a
+port from PEOPLE_PORTS up, which no app comes with, but the people added
+before then keep theirs, and a config copied by hand can name any port.
 
 Nothing here changes a config or stops anything, since a wrong refusal is
 worse than the clash. Login says so before it opens the sign-in window,
@@ -36,6 +37,10 @@ from .run_reporting import one_line
 # reads the ports beside an app from the same folders.
 ENTRY_RE = re.compile(r"[^.].*_(receipts|docs)\.py$")
 EXAMPLE = "config.example.json"
+# Where a moved config goes, the range tools/add_account.py gives each person
+# after the first (its PEOPLE_PORTS, which a test holds to this), above
+# every port an app comes with.
+PEOPLE_PORTS = 9400
 # A config is a few hundred bytes. Anything far larger, or anything that is
 # not a plain file, a pipe or a device say, is not read, since on PaperPull
 # Server another install's folder is in a share other people can write to.
@@ -242,17 +247,18 @@ def _keeper(group: List[Named], examples: dict) -> Named:
 
 
 def _moved(n: Named, told: set, examples: dict, shipping: dict, by_port: dict) -> str:
-    """n's cdp_url on a port of its own. Its app's own example port when no
-    config names it, no other provider comes with it and no moved config
-    has been told it, which is the port a new install of that app takes.
-    Otherwise the first at or above its own that no config or provider
-    names and no moved config has been told, the way tools/add_account.py
-    moves a second person's port past the ones in use. The port goes into
-    told, so no other config is told to move to it."""
+    """n's cdp_url on a port of its own. A first person's config takes its
+    app's own example port when no config names it, no other provider comes
+    with it and no moved config has been told it, which is the port a new
+    install of that app takes. Any other takes the first port from
+    PEOPLE_PORTS up that no config or provider names and no moved config
+    has been told, as tools/add_account.py gives a second person theirs, so
+    the port it is told is never one an app set up later comes with. The
+    port goes into told, so no other config is told to move to it."""
     port, entry = examples.get(_key(n.config.parent), (None, ""))
-    if not (port and port not in by_port and port not in told
-            and shipping.get(port, set()) <= {entry}):
-        port = n.port
+    if not (n.config.name == "config.json" and port and port not in by_port
+            and port not in told and shipping.get(port, set()) <= {entry}):
+        port = PEOPLE_PORTS
         while port in by_port or port in shipping or port in told:
             port += 1
     told.add(port)

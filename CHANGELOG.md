@@ -14,9 +14,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   name one debugging port.** A sign-in on a port a browser already holds
   joins that browser, so two configs on one port sign in to one browser,
   one profile, and a run of either reads whichever account that browser
-  is signed in to. A second person is given their app's port plus 10,
-  moved past the ports in use when they are added, so an app set up after
-  them can come with that same port, and a config copied by hand can name
+  is signed in to. A second person was given their app's port plus 10,
+  moved past the ports in use when they were added, so an app set up after
+  them could come with that same port, and a config copied by hand can name
   any port. Login now names the other install and account before it opens
   the sign-in window, and the account's row and page in the control panel
   say the same. Each says which cdp_url to change and the port to change
@@ -26,18 +26,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   it. An install's own config.example.json and a config that names no
   port never count.
 
+### Changed
+- **A second person's account takes a debugging port from 9400 up.** It
+  was given its app's port plus 10, moved past the ports in use when it
+  was added, while the apps' own ports run up from 9222, one each, so it
+  could hold the port of an app set up later. A person added now, with
+  Add a person, add-account or tools/add_account.py, takes the first free
+  port from 9400 up, which no app comes with, and a test fails once any
+  app's own port reaches 9400. `--port-offset` still gives the old rule to
+  whoever asks for it. People added before keep their ports, and Login
+  and the control panel tell any that share a port where to move.
+
 ### Fixed
 - **A provider set up from the control panel no longer takes a port a
-  second person already has.** A second person's account is given their
-  app's port plus 10, moved past the ports in use when they are added, so
-  it can hold the port of an app set up afterwards. E-ZPass's 9274 plus 10
+  second person already has.** A second person's account was given their
+  app's port plus 10, moved past the ports in use when they were added, so
+  it could hold the port of an app set up afterwards. E-ZPass's 9274 plus 10
   is Interactive Brokers' 9284 until Interactive Brokers is set up, and
   Chase Business's 9290 plus 10 is 9300, the port the next new app takes.
   The new app's config.json was its example, port included, so the two
   attached to one browser and each signed in to the other's profile. A new
   install now moves up to the first port no install or person beside it
-  uses, the way a second person's port is chosen, and Import history sets
-  providers up the same way. So does an update that brings a port to an
+  uses, and Import history sets providers up the same way. So does an update that brings a port to an
   install that had none, a Target install from before 0.34.0 among them.
   An app and a person that already share a port are left as they are, and
   changing one's cdp_url to a free port keeps them apart.

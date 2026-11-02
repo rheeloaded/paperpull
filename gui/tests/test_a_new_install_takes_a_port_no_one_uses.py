@@ -2,12 +2,13 @@
 install or a second person beside it already uses.
 
 An app's example config names a port no other app's example names, and
-that was taken to make it free. But a second person's account is given its
-app's port plus 10, moved past only the ports the installs there use at
-that moment, so it can hold the port of an app installed afterwards.
+that was taken to make it free. But a second person's account was given
+its app's port plus 10, moved past only the ports the installs there used
+at that moment, so it can hold the port of an app installed afterwards.
 E-ZPass's 9274 plus 10 is Interactive Brokers' 9284 while IBKR is not
 installed, and Chase Business's 9290 plus 10 is 9300, the port the next
-new app was given. The new install's config.json was its example, so it
+new app was given. A person added now takes a port from 9400 up, which no
+app comes with, and the people added before then keep theirs. The new install's config.json was its example, so it
 and the second person attached to one browser, and each signed in to the
 other's profile.
 """
@@ -38,11 +39,28 @@ def _install(root: Path, slug: str) -> Path:
     return root / next(p["folder"] for p in app_module.list_providers() if p["slug"] == slug)
 
 
-def test_an_app_installed_after_a_second_person_takes_a_port_of_its_own(tmp_path):
+def _person_by_the_old_rule(install: Path) -> Path:
+    """A second person as add_account made one before people had ports of
+    their own, the app's port plus 10, as installs from then still have."""
+    return app_module._account_module().make_config(install, "spouse", port_offset=10,
+                                                    owner="Jane Doe")
+
+
+def test_a_person_added_now_leaves_every_app_its_own_port(tmp_path):
     root = tmp_path / "installs"
     root.mkdir()
     ezpass = _install(root, "ezpassva")
     spouse = app_module._make_account(ezpass, "spouse", "Jane Doe")
+    assert _port(spouse) == 9400
+    ibkr = _install(root, "ibkr")
+    assert _port(ibkr / "config.json") == 9284    # its example's, no one else's
+
+
+def test_an_app_installed_after_a_second_person_takes_a_port_of_its_own(tmp_path):
+    root = tmp_path / "installs"
+    root.mkdir()
+    ezpass = _install(root, "ezpassva")
+    spouse = _person_by_the_old_rule(ezpass)
     assert _port(spouse) == 9284                    # Interactive Brokers', not installed yet
 
     ibkr = _install(root, "ibkr")
@@ -64,7 +82,7 @@ def test_the_port_it_moves_to_is_past_every_port_in_use(tmp_path):
     root = tmp_path / "installs"
     root.mkdir()
     ezpass = _install(root, "ezpassva")
-    app_module._make_account(ezpass, "spouse", "Jane Doe")      # 9284
+    _person_by_the_old_rule(ezpass)                             # 9284
     optum = _install(root, "optum")                             # 9285, its own
     assert _port(optum / "config.json") == 9285
 

@@ -1,9 +1,9 @@
 """Login says when another config beside this one names its port.
 
 A sign-in on a port a browser already holds joins that browser (#90), so two
-configs on one port sign in to one browser, one profile. A second person is
+configs on one port sign in to one browser, one profile. A second person was
 given their app's port plus 10, moved past only the ports in use then, so an
-app set up after them can come with that same port, and a config copied by
+app set up after them could come with that same port, and a config copied by
 hand can name any port. Login now says which other install and account name
 the port and which cdp_url to change to what, and goes on with the sign-in,
 since a wrong refusal is worse than the clash. An install's own example and
@@ -97,9 +97,9 @@ def test_login_names_the_other_install_and_account_and_the_cdp_url_to_change(pai
     assert "!! Another config beside this one names port 9262 too." in said
     assert 'the "spouse" account of Grocer Receipts (config.spouse.json)' in said
     # The second person's config strayed onto Card's own port, so it is the
-    # one to move, past Store's 9263 to the first free port.
+    # one to move, to the first free port of the people's range.
     assert "give the config below a port of its own by changing its cdp_url" in said
-    assert "     %s\n       http://127.0.0.1:9264\n" % (grocer / "config.spouse.json") in said
+    assert "     %s\n       http://127.0.0.1:9400\n" % (grocer / "config.spouse.json") in said
     assert "(this config)" not in said
     assert "the sign-in goes on" in said
 
@@ -109,7 +109,7 @@ def test_the_second_person_is_told_to_change_their_own(pair, launches):
     assert sign_in(grocer / "config.spouse.json", 9262) == "Chromium"
     said = launches[0]
     assert "the first account of Card Statements (config.json)" in said
-    assert "     %s (this config)\n       http://127.0.0.1:9264\n" % (
+    assert "     %s (this config)\n       http://127.0.0.1:9400\n" % (
         grocer / "config.spouse.json") in said
 
 
@@ -151,35 +151,36 @@ def test_two_people_of_one_install_on_one_port_are_said(tmp_path, launches):
     assert sign_in(chase / "config.json", 9236) == "Chromium"
     said = launches[0]
     assert 'the "spouse" account of Chase Statements (config.spouse.json)' in said
-    assert "     %s\n       http://127.0.0.1:9237\n" % (chase / "config.spouse.json") in said
+    assert "     %s\n       http://127.0.0.1:9400\n" % (chase / "config.spouse.json") in said
 
 
 def test_a_second_person_given_a_later_app_s_port_is_said(tmp_path, launches):
-    """The clash as add_account makes it. E-ZPass's second person is given
-    9274 plus 10, Interactive Brokers' port, before Interactive Brokers is
-    set up, and a config copied from its example then names 9284 too."""
+    """The clash as add_account made it before a second person had a range
+    of their own. E-ZPass's second person was given 9274 plus 10,
+    Interactive Brokers' port, before Interactive Brokers was set up, and a
+    config copied from its example then named 9284 too."""
     root = tmp_path / "PaperPull"
     ezpass = install(root, "E-ZPass Statements", "ezpassva_docs.py", "http://127.0.0.1:9274",
                      primary=at(9274))
-    add_account.make_config(ezpass, "spouse", owner="Jane Doe")
+    add_account.make_config(ezpass, "spouse", port_offset=10, owner="Jane Doe")
     ibkr = install(root, "Interactive Brokers Statements", "ibkr_docs.py",
                    "http://127.0.0.1:9284", primary=at(9284))
     assert sign_in(ibkr / "config.json", 9284) == "Chromium"
     said = launches[0]
     assert 'the "spouse" account of E-ZPass Statements (config.spouse.json)' in said
-    assert "     %s\n       http://127.0.0.1:9285\n" % (ezpass / "config.spouse.json") in said
+    assert "     %s\n       http://127.0.0.1:9400\n" % (ezpass / "config.spouse.json") in said
 
 
 def test_a_moved_config_is_never_told_a_port_a_shipped_provider_comes_with(pair, shipped,
                                                                           launches):
-    """9264 and 9265 belong to providers this copy ships and nobody here has
-    set up yet. Told one of them, the person would meet the same clash the
-    day that provider is set up."""
-    install(shipped, "deli", "deli_receipts.py", "http://127.0.0.1:9264")
-    install(shipped, "fuel", "fuel_docs.py", "http://127.0.0.1:9265")
+    """Were 9400 and 9401 the ports of providers this copy ships and nobody
+    here has set up yet, and told one of them, the person would meet the
+    same clash the day that provider is set up."""
+    install(shipped, "deli", "deli_receipts.py", "http://127.0.0.1:9400")
+    install(shipped, "fuel", "fuel_docs.py", "http://127.0.0.1:9401")
     grocer, card = pair
     assert sign_in(card / "config.json", 9262) == "Chromium"
-    assert "     %s\n       http://127.0.0.1:9266\n" % (grocer / "config.spouse.json") \
+    assert "     %s\n       http://127.0.0.1:9402\n" % (grocer / "config.spouse.json") \
         in launches[0]
 
 
@@ -188,7 +189,7 @@ def test_the_shipped_providers_are_read_once_until_one_is_added(pair, shipped, m
     example each time made its rows late. They are read once, and again
     only when a provider is added to the folder."""
     from paperpull_core import ports
-    install(shipped, "deli", "deli_receipts.py", "http://127.0.0.1:9264")
+    install(shipped, "deli", "deli_receipts.py", "http://127.0.0.1:9400")
     _, card = pair
     real, read = ports._url_in, []
 
@@ -200,12 +201,12 @@ def test_the_shipped_providers_are_read_once_until_one_is_added(pair, shipped, m
     first = ports.findings(installs, [shipped])
     second = ports.findings(installs, [shipped])
     assert read.count("deli") == 1
-    assert first[ports.key_of(card / "config.json")].moves[0][1] == "http://127.0.0.1:9265"
+    assert first[ports.key_of(card / "config.json")].moves[0][1] == "http://127.0.0.1:9401"
     assert second == first
-    install(shipped, "fuel", "fuel_docs.py", "http://127.0.0.1:9265")
+    install(shipped, "fuel", "fuel_docs.py", "http://127.0.0.1:9401")
     third = ports.findings(installs, [shipped])
     assert read.count("fuel") == 1
-    assert third[ports.key_of(card / "config.json")].moves[0][1] == "http://127.0.0.1:9266"
+    assert third[ports.key_of(card / "config.json")].moves[0][1] == "http://127.0.0.1:9402"
 
 
 def test_a_config_moved_off_its_own_example_is_told_that_port_again(tmp_path, launches):
@@ -233,8 +234,8 @@ def test_a_tie_is_told_the_same_way_from_both_sides(tmp_path, launches):
     assert sign_in(alpha / "config.json", 9298) == "Chromium"
     assert sign_in(beta / "config.json", 9298) == "Chromium"
     from_alpha, from_beta = launches
-    assert "     %s\n       http://127.0.0.1:9299\n" % (beta / "config.json") in from_alpha
-    assert "     %s (this config)\n       http://127.0.0.1:9299\n" % (beta / "config.json") \
+    assert "     %s\n       http://127.0.0.1:9400\n" % (beta / "config.json") in from_alpha
+    assert "     %s (this config)\n       http://127.0.0.1:9400\n" % (beta / "config.json") \
         in from_beta
     assert str(alpha / "config.json") not in from_alpha.split("comes with.")[1]
 
@@ -249,8 +250,8 @@ def test_three_on_one_port_are_each_told_where_to_go(pair, launches):
     said = launches[0]
     assert "!! 2 other configs beside this one name port 9262 too." in said
     assert "give each config below a port of its own" in said
-    assert "     %s\n       http://127.0.0.1:9264\n" % (grocer / "config.spouse.json") in said
-    assert "     %s\n       http://127.0.0.1:9265\n" % (store / "config.kid.json") in said
+    assert "     %s\n       http://127.0.0.1:9400\n" % (grocer / "config.spouse.json") in said
+    assert "     %s\n       http://127.0.0.1:9401\n" % (store / "config.kid.json") in said
 
 
 def test_three_pairs_are_each_told_a_port_of_their_own(tmp_path, launches):
@@ -269,7 +270,7 @@ def test_three_pairs_are_each_told_a_port_of_their_own(tmp_path, launches):
         install(root, later, later_script, "http://localhost:%d" % second,
                 primary={"cdp_url": "http://localhost:%d" % second})
         told[second] = first / "config.partner.json"
-    for port, want in zip(sorted(told), (9265, 9266, 9267)):
+    for port, want in zip(sorted(told), (9400, 9401, 9402)):
         assert sign_in(told[port], port) == "Chromium"
         assert "     %s (this config)\n       http://localhost:%d\n" % (told[port], want) \
             in launches[-1]

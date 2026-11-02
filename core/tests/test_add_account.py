@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "tools"))
 add_account = pytest.importorskip("add_account")
 paperpull = add_account.paperpull
 
@@ -40,7 +41,7 @@ def test_the_second_account_shares_nothing_with_the_first(tmp_path):
     cfg = json.loads(dest.read_text(encoding="utf-8"))
     assert cfg["output_dir"].endswith("output - spouse")
     assert cfg["profile_dir"] == str(Path(cfg["output_dir"]) / "browser-profile")
-    assert cfg["cdp_url"] == "http://127.0.0.1:9233"
+    assert cfg["cdp_url"] == "http://127.0.0.1:9400"
     assert cfg["owner"] == "Jane Doe"
     assert Path(cfg["output_dir"]).is_dir()
     assert (chase / "config.json").read_text(encoding="utf-8") == before
@@ -53,24 +54,66 @@ def _port(app_dir, name="spouse"):
 
 def test_a_second_account_never_takes_another_apps_port(tmp_path):
     """E-ZPass's 9274 plus 10 was Interactive Brokers' 9284, so the second
-    account's browser and IBKR's attached to each other."""
+    account's browser and IBKR's attached to each other. A second person is
+    now given a port from 9400 up, where no app's port is."""
     ezpass = _install(tmp_path, "E-ZPass Statements", "ezpassva_docs.py",
                       dict(_config(tmp_path, "E-ZPass Statements"), cdp_url="http://127.0.0.1:9274"))
     _install(tmp_path, "Interactive Brokers Statements", "ibkr_docs.py",
              dict(_config(tmp_path, "Interactive Brokers Statements"), cdp_url="http://127.0.0.1:9284"))
     assert add_account.main(["spouse", "--app", "E-ZPass Statements", "--root", str(tmp_path)]) == 0
-    assert _port(ezpass) == 9285
+    assert _port(ezpass) == 9400
+
+
+def test_a_person_is_never_given_the_port_of_an_app_set_up_later(tmp_path):
+    """The clash the old rule made. E-ZPass's second person was given 9284
+    while Interactive Brokers was not set up, and IBKR set up afterwards
+    came with 9284 too. A person's port is now one no app comes with."""
+    ezpass = _install(tmp_path, "E-ZPass Statements", "ezpassva_docs.py",
+                      dict(_config(tmp_path, "E-ZPass Statements"), cdp_url="http://127.0.0.1:9274"))
+    add_account.make_config(ezpass, "spouse", owner="Jane Doe")
+    examples = [add_account._port_of(json.loads(p.read_text(encoding="utf-8")).get("cdp_url"))
+                for p in (REPO / "apps").glob("*/config.example.json")]
+    assert _port(ezpass) not in examples
 
 
 def test_the_panels_add_a_person_reads_the_apps_beside_it(tmp_path):
     """The panel calls make_config for one app with no set of ports of its
-    own, and the apps beside it are still read."""
+    own, and the people beside it are still read, so a second person takes
+    the next port of the range, not one a person beside it has."""
+    ezpass = _install(tmp_path, "E-ZPass Statements", "ezpassva_docs.py",
+                      dict(_config(tmp_path, "E-ZPass Statements"), cdp_url="http://127.0.0.1:9274"))
+    ibkr = _install(tmp_path, "Interactive Brokers Statements", "ibkr_docs.py",
+                    dict(_config(tmp_path, "Interactive Brokers Statements"),
+                         cdp_url="http://127.0.0.1:9284"))
+    (ibkr / "config.kid.json").write_text(json.dumps({"cdp_url": "http://127.0.0.1:9400"}),
+                                          encoding="utf-8")
+    add_account.make_config(ezpass, "spouse", owner="Jane Doe")
+    assert _port(ezpass) == 9401
+
+
+def test_the_old_rule_is_kept_for_who_asks_for_it(tmp_path):
+    """--port-offset still gives the app's own port plus that many, moved
+    past every port in use, for anyone who keeps their ports that way."""
     ezpass = _install(tmp_path, "E-ZPass Statements", "ezpassva_docs.py",
                       dict(_config(tmp_path, "E-ZPass Statements"), cdp_url="http://127.0.0.1:9274"))
     _install(tmp_path, "Interactive Brokers Statements", "ibkr_docs.py",
              dict(_config(tmp_path, "Interactive Brokers Statements"), cdp_url="http://127.0.0.1:9284"))
-    add_account.make_config(ezpass, "spouse", owner="Jane Doe")
+    add_account.make_config(ezpass, "spouse", port_offset=10)
     assert _port(ezpass) == 9285
+
+
+def test_no_app_comes_with_a_port_in_the_peoples_range():
+    """When the apps' own ports reach 9400, a second person's port could be
+    the port of an app set up after them again. This fails first, so the
+    range moves before that can happen."""
+    high = {}
+    for example in (REPO / "apps").glob("*/config.example.json"):
+        port = add_account._port_of(json.loads(example.read_text(encoding="utf-8")).get("cdp_url"))
+        if port and port >= add_account.PEOPLE_PORTS:
+            high[example.parent.name] = port
+    assert not high, high
+    from paperpull_core import ports
+    assert ports.PEOPLE_PORTS == add_account.PEOPLE_PORTS
 
 
 def test_two_apps_given_accounts_in_one_run_take_two_ports(tmp_path):
@@ -136,4 +179,4 @@ def test_an_install_that_holds_its_own_downloads_gets_a_sibling_folder(tmp_path)
     assert cfg["profile_dir"] == str(Path("..") / "Amazon Receipts - spouse" / "browser-profile")
     assert (home / "Amazon Receipts - spouse").is_dir()
     assert not (amazon / " - spouse").exists()
-    assert cfg["cdp_url"] == "http://127.0.0.1:9233"
+    assert cfg["cdp_url"] == "http://127.0.0.1:9400"

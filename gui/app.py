@@ -1487,10 +1487,11 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
 #
 # A sign-in on a port a browser already holds joins that browser, so two
 # accounts whose configs name one port sign in to one browser, one profile.
-# A second person is given their app's port plus 10, moved past only the
-# ports in use then, so an app set up after them can come with that port.
-# The account's row and page say so, from paperpull_core.ports, which Login
-# asks too, so the two never disagree. Nothing is stopped for it.
+# A second person was given their app's port plus 10, moved past only the
+# ports in use then, so an app set up after them could come with that port.
+# One added now takes a port from 9400 up, but the people added before keep
+# theirs. The account's row and page say so, from paperpull_core.ports,
+# which Login asks too, so the two never disagree. Nothing is stopped for it.
 
 _PORTS = None
 
@@ -1910,12 +1911,13 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
 
 def _set_free_port(config: Path) -> None:
     """A debugging port for a new install that no install or person beside
-    it uses. A second person is given their app's port plus 10, moved past
-    only the ports in use when they were added, so Chase Business's 9290
-    becomes 9300, the port the next new app takes. Copied from that app's
-    example, its config named 9300 too, and the two attached to one
-    browser, each signing in to the other's profile. add_account picks the
-    port, by the rule it gives a second person theirs."""
+    it uses. A second person added before people had ports of their own
+    from 9400 up was given their app's port plus 10, moved past only the
+    ports in use then, so Chase Business's 9290 became 9300, the port the
+    next new app took. Copied from that app's example, its config named
+    9300 too, and the two attached to one browser, each signing in to the
+    other's profile. add_account picks the port, the first free one at or
+    above the example's."""
     mod = _account_module()
     free = getattr(mod, "free_cdp_url", None)
     if free is None or not server_mode.own_file(config):

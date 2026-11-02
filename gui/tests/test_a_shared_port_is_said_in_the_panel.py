@@ -2,9 +2,9 @@
 
 A sign-in on a port a browser already holds joins that browser (#90), so two
 configs on one port sign in to one browser, one profile, and a run of either
-reads whichever account it is signed in to. A second person is given their
+reads whichever account it is signed in to. A second person was given their
 app's port plus 10, moved past only the ports in use then, so an app set up
-after them can come with that same port. The account's row and page now
+after them could come with that same port. The account's row and page now
 name the other install and account and the cdp_url to change to what, the
 same as Login says. Nothing is stopped for it, since a wrong refusal is
 worse than the clash, and an install's own example or a config with no port
@@ -93,7 +93,7 @@ def test_each_account_on_a_shared_port_names_the_other_and_the_cdp_url_to_change
         "joins the browser already on its port, so these accounts sign in to one browser, "
         "and a run of any of them reads whichever account that browser is signed in to. "
         "To keep them apart, change cdp_url in config.spouse.json in the Grocer Receipts "
-        "folder to http://127.0.0.1:9264, a port no other account here names and no "
+        "folder to http://127.0.0.1:9400, a port no other account here names and no "
         "provider PaperPull ships comes with. Nothing is stopped for this.")
     assert card["short"] == ('Shares debugging port 9262 with the "spouse" account of '
                              "Grocer Receipts. Open it to see the setting to change.")
@@ -101,26 +101,26 @@ def test_each_account_on_a_shared_port_names_the_other_and_the_cdp_url_to_change
     assert spouse["say"].startswith("The first account of Card Statements names "
                                     "debugging port 9262 too.")
     assert ("change cdp_url in this account's config, config.spouse.json in the Grocer "
-            "Receipts folder, to http://127.0.0.1:9264, a port") in spouse["say"]
+            "Receipts folder, to http://127.0.0.1:9400, a port") in spouse["say"]
     assert got[("Grocer Receipts", "primary")]["shared_port"] is None
     assert got[("Store Receipts", "primary")]["shared_port"] is None
 
 
 def test_the_panel_and_login_tell_a_person_the_same_thing(pair, capsys, monkeypatch):
     """The panel and Login ask the same core module with the same shipped
-    providers, one of which comes with 9264, so both send the same config
+    providers, one of which comes with 9400, so both send the same config
     past it to the same address."""
     grocer, card = pair
     shipped = app_module._templates_root()
-    install(shipped, "deli", "deli_receipts.py", "Deli", "http://127.0.0.1:9264")
+    install(shipped, "deli", "deli_receipts.py", "Deli", "http://127.0.0.1:9400")
     mod = app_module._ports()
     monkeypatch.setattr(mod, "shipped_folders", lambda: [shipped])
     mod.say_at_sign_in(card / "config.json", "9262")
     login = capsys.readouterr().out
     panel = rows()[("Card Statements", "primary")]["shared_port"]["say"]
-    assert "     %s\n       http://127.0.0.1:9265\n" % (grocer / "config.spouse.json") in login
+    assert "     %s\n       http://127.0.0.1:9401\n" % (grocer / "config.spouse.json") in login
     assert ("change cdp_url in config.spouse.json in the Grocer Receipts folder to "
-            "http://127.0.0.1:9265, a port") in panel
+            "http://127.0.0.1:9401, a port") in panel
 
 
 def test_an_install_s_own_example_and_a_config_with_no_port_are_no_clash(root):
@@ -143,9 +143,9 @@ def test_both_rows_of_a_tie_say_the_same_one_moves(root):
     alpha = got[("Alpha Statements", "primary")]["shared_port"]["say"]
     beta = got[("Beta Statements", "primary")]["shared_port"]["say"]
     assert ("change cdp_url in config.json in the Beta Statements folder to "
-            "http://127.0.0.1:9299, a port") in alpha
+            "http://127.0.0.1:9400, a port") in alpha
     assert ("change cdp_url in this account's config, config.json in the Beta Statements "
-            "folder, to http://127.0.0.1:9299, a port") in beta
+            "folder, to http://127.0.0.1:9400, a port") in beta
 
 
 def test_a_stray_character_in_an_address_keeps_every_row(pair):
@@ -161,7 +161,7 @@ def test_a_stray_character_in_an_address_keeps_every_row(pair):
     body = responses.JSONResponse({"accounts": got}).body
     said = json.loads(body)["accounts"]
     card = next(r for r in said if r["app"] == "Card Statements")["shared_port"]["say"]
-    assert "http://127.0.0.1:9264/a\\nb�" in card
+    assert "http://127.0.0.1:9400/a\\nb�" in card
 
 
 def test_a_port_it_cannot_read_takes_no_row_down(pair, monkeypatch):
@@ -245,7 +245,7 @@ def test_the_account_page_says_it_above_a_sign_in_it_still_offers(pair, base, ta
     tab.wait_for_selector("#view-account [data-do=run][data-action=login]")
     said = tab.inner_text("#view-account .callout.warn")
     assert 'The "spouse" account of Grocer Receipts names debugging port 9262 too.' in said
-    assert "http://127.0.0.1:9264" in said
+    assert "http://127.0.0.1:9400" in said
     assert tab.is_enabled("#view-account [data-do=run][data-action=login]")
 
 
