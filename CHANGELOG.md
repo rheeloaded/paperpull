@@ -9,6 +9,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Login and the control panel say when two accounts beside each other
+  name one debugging port.** A sign-in on a port a browser already holds
+  joins that browser, so two configs on one port sign in to one browser,
+  one profile, and a run of either reads whichever account that browser
+  is signed in to. A second person is given their app's port plus 10,
+  moved past the ports in use when they are added, so an app set up after
+  them can come with that same port, and a config copied by hand can name
+  any port. Login now names the other install and account before it opens
+  the sign-in window, and the account's row and page in the control panel
+  say the same. Each says which cdp_url to change and the port to change
+  it to, one no other config names and no provider PaperPull ships comes
+  with, and two configs to move are never given the same one. Both name
+  the same config to move whichever side is asked. Nothing is stopped for
+  it. An install's own config.example.json and a config that names no
+  port never count.
+
 ### Fixed
 - **A provider set up from the control panel no longer takes a port a
   second person already has.** A second person's account is given their

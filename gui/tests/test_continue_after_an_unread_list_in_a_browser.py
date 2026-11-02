@@ -129,6 +129,13 @@ def finished(tab):
 
 
 def back(panel):
+    # The page reads the rows again once a run is done, and draws the
+    # account from the rows it holds when it opens, so it opens once they
+    # hold the Resume just run. Opened sooner, it drew the rows from before
+    # the run whenever the panel took a few milliseconds longer to answer.
+    panel.tab.wait_for_function(
+        "() => (ROWS || []).some(r => r.last_run && r.last_run.action === 'resume')",
+        timeout=60000)
     panel.tab.evaluate("location.hash = %r" % ACCOUNT[1:])
     panel.tab.wait_for_selector("#view-account [data-do=run][data-action=all]")
 

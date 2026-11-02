@@ -324,6 +324,7 @@ function rowHTML(r) {
   const p = present(r);
   let chip = '<span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span>';
   let say = '<div class="say">' + esc(p.say) + '</div>';
+  const port = r.shared_port ? '<div class="hint warn" style="margin-top:4px">' + esc(r.shared_port.short) + '</div>' : '';
   let act = actButton(r, p.act);
   if (r.running) {
     if (ours(r)) {
@@ -339,7 +340,7 @@ function rowHTML(r) {
   }
   return '<div class="acct" data-key="' + esc(keyOf(r)) + '">' + mono(r) +
     '<div class="who"><a href="' + accountHash(r) + '">' + esc(r.provider) + '</a><div class="sub">' + esc(subOf(r)) + '</div></div>' +
-    '<div class="what">' + chip + say + '</div>' +
+    '<div class="what">' + chip + say + port + '</div>' +
     '<div class="do">' + act + '<span class="menu-wrap"><button type="button" class="ib" data-do="menu" data-key="' +
     esc(keyOf(r)) + '" aria-haspopup="menu" aria-expanded="false" aria-label="More for ' + esc(r.provider) +
     (whoOf(r) ? ', ' + esc(whoOf(r)) : '') + '">' + DOTS + '</button></span></div></div>';
@@ -446,6 +447,8 @@ function renderAccount() {
     '" aria-haspopup="menu" aria-expanded="false">' + DOTS + 'More</button></span></div></div>';
   if (r.needs_setup) html += '<p class="callout warn" style="margin-bottom:20px">This provider is not set up yet. Run setup-all in the PaperPull folder, then reload this page.</p>';
   if (!r.runnable) html += '<p class="callout warn" style="margin-bottom:20px">This folder does not match a provider PaperPull ships, so it will not run. Its folder must hold exactly one provider script whose name is one PaperPull ships.</p>';
+  // Another account beside this one names its debugging port (#90). Said, never refused.
+  if (r.shared_port) html += '<p class="callout warn" style="margin-bottom:20px">' + esc(r.shared_port.say) + '</p>';
   const band = {stopped: 'info', attention: 'attention', unreadable: 'bad', overdue: 'bad', due: 'due', gap: 'gap', current: 'ok'}[r.state] || '';
   const loginSay = SERVER
     ? 'Opens ' + whose(r.provider) + " sign-in page in the sign-in window, docked beside this page. You type your password there and PaperPull never sees it. Leave it signed in while documents download."
