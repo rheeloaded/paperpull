@@ -741,10 +741,26 @@ def make_app(tmp, *args):
     return docs.App(docs.build_parser().parse_args([*args, "--config", str(cfg)]))
 
 
+class HeldDay(date):
+    """The app's own clock, held at TODAY for the runs these tests start. A
+    run walks back from the day the app reads, so on the real clock its
+    newest month moves every month, and on the 1st it holds back one month
+    more (SETTLE_DAYS)."""
+
+    @classmethod
+    def today(cls):
+        return TODAY
+
+
 class Orchestrator(WithPrinter):
     def setUp(self):
         super().setUp()
         self.tmp = tempfile.mkdtemp()
+        self._date, site._date = site._date, HeldDay
+
+    def tearDown(self):
+        site._date = self._date
+        super().tearDown()
 
     def test_config_example_is_unique_and_holds_no_one(self):
         config = json.loads((HERE / "config.example.json").read_text())
@@ -856,7 +872,7 @@ class Orchestrator(WithPrinter):
             app.cmd_discover()
         months = sorted(r["document_id"] for r in app.discovery.data.values())
         self.assertEqual(months[0], "2026-06")
-        self.assertNotIn(docs.datetime.now().strftime("%Y-%m"), months, "the month under way is never listed")
+        self.assertNotIn(f"{TODAY:%Y-%m}", months, "the month under way is never listed")
 
     def capped_app(self, *args):
         """An app whose Venmo has transactions in every month, so a walk
@@ -927,7 +943,7 @@ class Orchestrator(WithPrinter):
         self.assertEqual(len(self.printer.printed), site.MAX_MONTHS, "nothing is taken twice")
 
     def test_discovery_of_one_year_goes_back_to_its_first_month(self):
-        year = date.today().year - 1
+        year = TODAY.year - 1
         app = make_app(self.tmp, "--discover", "--year", str(year))
         page = Page(start=statement_url())
         app.page = lambda: page
@@ -939,16 +955,14 @@ class Orchestrator(WithPrinter):
         self.assertIn("%d-12" % year, months)
 
     def test_discovery_goes_back_to_a_start_date_past_two_years(self):
-        today = date.today()
-        start = date(today.year - 3, today.month, 1).isoformat()
-        app = make_app(self.tmp, "--discover", "--start-date", start)
+        app = make_app(self.tmp, "--discover", "--start-date", "2023-10-01")
         page = Page(start=statement_url())
         app.page = lambda: page
         app.check_session = lambda p: None
         with redirect_stdout(io.StringIO()):
             app.cmd_discover()
         months = sorted(r["document_id"] for r in app.discovery.data.values())
-        self.assertEqual((len(months), months[0]), (36, start[:7]))
+        self.assertEqual((len(months), months[0], months[-1]), (36, "2023-10", "2026-09"))
 
     def test_the_statements_tab_is_preferred_and_a_dead_tab_passed_over(self):
         class Tab:
