@@ -353,6 +353,81 @@ document.querySelector('[data-testid="simple_switcher_product_option_CARD_2"]').
 </body></html>"""
 
 
+HTML_SAME_LABEL_AND_NUMBER = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title></head>
+<body>
+<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;">
+  <div data-testid="simple_switcher_selected_option_display">
+    <span data-testid="simple_switcher_display_name">Blue Cash Everyday</span>
+    <span data-testid="simple_switcher_display_number">••••12345</span>
+  </div>
+</div>
+<div role="listbox">
+  <div data-testid="simple_switcher_product_option_CARD_1" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Blue Cash Everyday</span>
+    <span data-testid="simple_switcher_display_number">••••12345</span>
+  </div>
+  <div data-testid="simple_switcher_product_option_CARD_2" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Blue Cash Everyday</span>
+    <span data-testid="simple_switcher_display_number">••••12345</span>
+  </div>
+</div>
+<script>
+const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
+const opts = document.querySelectorAll('[role="option"]');
+cb.addEventListener('click', () => {
+  const open = cb.getAttribute('aria-expanded') === 'true';
+  cb.setAttribute('aria-expanded', open ? 'false' : 'true');
+  opts.forEach(o => o.style.display = open ? 'none' : 'block');
+});
+</script>
+</body></html>"""
+
+HTML_ONE_CARD_MISSING_DIGITS = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title></head>
+<body>
+<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;">
+  <div data-testid="simple_switcher_selected_option_display">
+    <span data-testid="simple_switcher_display_name">Blue Cash Everyday</span>
+    <span data-testid="simple_switcher_display_number">••••12345</span>
+  </div>
+</div>
+<div role="listbox">
+  <div data-testid="simple_switcher_product_option_CARD_1" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Blue Cash Everyday</span>
+    <span data-testid="simple_switcher_display_number">••••12345</span>
+  </div>
+  <div data-testid="simple_switcher_product_option_CARD_2" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Amex EveryDay</span>
+  </div>
+</div>
+<script>
+const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
+const opts = document.querySelectorAll('[role="option"]');
+cb.addEventListener('click', () => {
+  const open = cb.getAttribute('aria-expanded') === 'true';
+  cb.setAttribute('aria-expanded', open ? 'false' : 'true');
+  opts.forEach(o => o.style.display = open ? 'none' : 'block');
+});
+</script>
+</body></html>"""
+
+HTML_FOOTER_HELP_LINE = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title></head>
+<body>
+<section id="table-area">
+  <p>Statement period: October 2026</p>
+</section>
+<footer>
+  <p>If there are no statements available yet, please contact customer care.</p>
+</footer>
+</body></html>"""
+
+HTML_GERMAN_NO_STATEMENTS = """<!doctype html><html><head><meta charset="utf-8"><title>Abrechnungen</title></head>
+<body>
+<section id="table-area">
+  <p>Es liegen keine Abrechnungen vor.</p>
+</section>
+</body></html>"""
+
+
 class MockAmexServer:
     def __init__(self):
         self.routes = {
@@ -489,3 +564,183 @@ def test_goto_documents_from_overview(open_page):
     # and then reaches /activity/statements.
     assert site.goto_documents(page) is True
     assert "/activity/statements" in page.url
+
+
+def test_select_limit_1_with_two_cards_returns_one():
+    """Verify that --max-docs 1 with 2 cards in discovery returns at most 1 document (#134)."""
+    app = SimpleNamespace()
+    app.args = SimpleNamespace(max_docs=None, start_date=None, end_date=None, doc_types=[])
+    app.config = {"default_start_date": "", "document_types": ["Statement"]}
+    app.discovery = SimpleNamespace(data={
+        "k1": {"category": "Statement", "date": "2026-10-11", "account": "Card A (11111)", "title": "Statement"},
+        "k2": {"category": "Statement", "date": "2026-09-18", "account": "Card B (22222)", "title": "Statement"},
+    })
+    app._in_scope = lambda doc: True
+    selected = app_mod.App._select(app, limit=1)
+    assert len(selected) == 1
+
+
+def test_ensure_card_digits_extraction(monkeypatch):
+    """Verify that ensure_card extracts digits strictly from (digits)
+    rather than mixing in product numbers like 2% (#134)."""
+    fake_page = SimpleNamespace()
+    monkeypatch.setattr(site, "_current_card_digits", lambda p: "12345")
+    assert site.ensure_card(fake_page, "Blue Cash 2% Everyday (12345)") is True
+
+
+def test_two_cards_with_same_label_and_same_number_stops_the_run(browser):
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    pg.set_content(HTML_SAME_LABEL_AND_NUMBER)
+    with pytest.raises(pressing.Stop) as exc_info:
+        site.list_cards(pg)
+    assert exc_info.value.reason == "two cards share a label"
+    ctx.close()
+
+
+def test_multiple_cards_where_one_has_no_digits_stops_the_run(browser):
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    pg.set_content(HTML_ONE_CARD_MISSING_DIGITS)
+    with pytest.raises(pressing.Stop) as exc_info:
+        site.list_cards(pg)
+    assert exc_info.value.reason == "a card has no account number"
+    ctx.close()
+
+
+def test_has_no_statements_ignores_footer_and_detects_german(browser):
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    pg.set_content(HTML_FOOTER_HELP_LINE)
+    # Help text inside <footer> should NOT trigger has_no_statements
+    assert site.has_no_statements(pg) is False
+
+    pg.set_content(HTML_GERMAN_NO_STATEMENTS)
+    # German phrase inside <section> should trigger has_no_statements
+    assert site.has_no_statements(pg) is True
+    ctx.close()
+
+
+def test_cmd_discover_stops_when_statements_page_fails_twice(monkeypatch):
+    """cmd_discover must raise SystemExit(0) when goto_documents fails twice."""
+    app = SimpleNamespace()
+    app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/dashboard")
+    app.check_session = lambda p: None
+    monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
+    monkeypatch.setattr(site, "goto_documents", lambda p: False)
+
+    with pytest.raises(SystemExit) as exc:
+        app_mod.App.cmd_discover(app)
+    assert exc.value.code == 0
+
+
+def test_cmd_discover_stops_when_card_has_zero_buttons_and_no_message(monkeypatch):
+    """cmd_discover must raise SystemExit(0) when a card has 0 buttons and no empty message."""
+    app = SimpleNamespace()
+    app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/activity/statements")
+    app.check_session = lambda p: None
+    monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
+    monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "list_cards", lambda p: [{"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
+                                                        {"index": 1, "tid": "2", "label": "Card 2 (22222)", "digits": "22222", "name": "Card 2"}])
+    monkeypatch.setattr(site, "select_card", lambda p, c: True)
+    monkeypatch.setattr(site, "collect_download_docs", lambda p, account="": [])
+    monkeypatch.setattr(site, "has_no_statements", lambda p: False)
+
+    with pytest.raises(SystemExit) as exc:
+        app_mod.App.cmd_discover(app)
+    assert exc.value.code == 0
+
+
+def test_cmd_discover_single_card_preserves_unnamed_key(monkeypatch):
+    """cmd_discover with one card listed passes account='' to collect_download_docs,
+    preserving the :Unnamed key from main."""
+    app = SimpleNamespace()
+    app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/activity/statements")
+    app.check_session = lambda p: None
+    app.args = SimpleNamespace(start_date=None)
+    app.config = {"default_start_date": "", "document_types": ["Statement"]}
+    app.rules = []
+    app.stats = {"discovered": 0, "skipped_out_of_scope": 0}
+    app._record_rawdoc = lambda r, url: app_mod.App._record_rawdoc(app, r, url)
+    stored_keys = {}
+    app.discovery = SimpleNamespace(
+        data=stored_keys,
+        get=lambda k: stored_keys.get(k),
+        update=lambda k, v, save=False: stored_keys.setdefault(k, v),
+        save=lambda **k: None,
+    )
+    monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
+    monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: None)
+    monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "list_cards", lambda p: [{"index": 0, "tid": "1", "label": "Only Card (12345)", "digits": "12345", "name": "Only Card"}])
+    monkeypatch.setattr(site, "collect_download_docs", lambda p, account="": [
+        site.RawDoc(title="Monthly Statement - October 11, 2026", date_text="2026-10-11", href="tid1", account=account)
+    ])
+    monkeypatch.setattr(app_mod.doc_types, "should_skip", lambda t, r: False)
+    monkeypatch.setattr(app_mod.doc_types, "classify_document", lambda t, r: ("Statement", "Monthly Statement", "high"))
+    monkeypatch.setattr(app_mod.doc_types, "wanted", lambda c, cfg: True)
+
+    n = app_mod.App.cmd_discover(app, quiet=True)
+    assert n == 1
+    assert len(stored_keys) == 1
+    recorded_key = list(stored_keys.keys())[0]
+    assert recorded_key.endswith(":Unnamed")
+
+
+def test_download_one_leaves_missing_card_for_manual_review(monkeypatch):
+    """When a document's card is not found in the switcher, download_one leaves
+    the document in State.NEEDS_MANUAL_REVIEW and returns cleanly without raising."""
+    app = SimpleNamespace()
+    app.paths = SimpleNamespace(
+        folder_for=lambda c: Path("/tmp"),
+        manual_review=Path("/tmp/manual_review"),
+    )
+    app.config = {"max_path_length": 200, "min_pdf_bytes": 100}
+    app.stats = {"duplicate_filenames": 0, "manual_review": 0}
+    app.check_session = lambda p: None
+    recorded = []
+    app._record = lambda doc, st, notes="": recorded.append((st, notes))
+    app._write_row = lambda *a, **k: None
+
+    monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "ensure_card", lambda p, acct: False)  # Card not in switcher
+
+    doc = Document(title="Monthly Statement", category="Statement", date="2026-10-11",
+                   account="Closed Card (99999)")
+    fake_page = SimpleNamespace()
+    app_mod.App.download_one(app, fake_page, doc, "stmt.pdf")
+
+    assert len(recorded) == 1
+    state, notes = recorded[0]
+    assert state == State.NEEDS_MANUAL_REVIEW
+    assert "not found in switcher" in notes
+
+
+def test_download_one_leaves_no_account_on_multicard_for_manual_review(monkeypatch):
+    """When a document has no account on a multi-card login, download_one leaves
+    the document in State.NEEDS_MANUAL_REVIEW and returns cleanly without downloading."""
+    app = SimpleNamespace()
+    app.paths = SimpleNamespace(
+        folder_for=lambda c: Path("/tmp"),
+        manual_review=Path("/tmp/manual_review"),
+    )
+    app.config = {"max_path_length": 200, "min_pdf_bytes": 100}
+    app.stats = {"duplicate_filenames": 0, "manual_review": 0}
+    app.check_session = lambda p: None
+    recorded = []
+    app._record = lambda doc, st, notes="": recorded.append((st, notes))
+    app._write_row = lambda *a, **k: None
+
+    monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "list_cards", lambda p: [{"label": "Card 1"}, {"label": "Card 2"}])
+
+    doc = Document(title="Monthly Statement", category="Statement", date="2026-10-11",
+                   account="")
+    fake_page = SimpleNamespace()
+    app_mod.App.download_one(app, fake_page, doc, "stmt.pdf")
+
+    assert len(recorded) == 1
+    state, notes = recorded[0]
+    assert state == State.NEEDS_MANUAL_REVIEW
+    assert "multiple cards" in notes

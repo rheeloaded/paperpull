@@ -428,7 +428,7 @@ class App:
             if not site.goto_documents(page):
                 log.info("could not reach the statements page after two tries")
                 print("\n!! Could not reach the statements page. Discovery was not completed.")
-                return 0
+                raise SystemExit(0)
         self.check_session(page)
 
         cards = site.list_cards(page)
@@ -442,7 +442,7 @@ class App:
                 if not docs and not site.has_no_statements(page):
                     log.info("card %s has no statements and page did not say so", card["label"])
                     print(f"\n!! Could not find statements for {card['label']}. Discovery was not completed.")
-                    return 0
+                    raise SystemExit(0)
                 total_controls += len(docs)
                 for r in docs:
                     n_new += self._record_rawdoc(r, page.url)
@@ -453,7 +453,7 @@ class App:
             if not docs and not site.has_no_statements(page):
                 log.info("no statements found and page did not say so")
                 print("\n!! Could not find statements. Discovery was not completed.")
-                return 0
+                raise SystemExit(0)
             total_controls += len(docs)
             for r in docs:
                 n_new += self._record_rawdoc(r, page.url)
@@ -461,7 +461,7 @@ class App:
         if total_controls == 0 and not site.has_no_statements(page):
             log.info("no download buttons were ever seen")
             print("\n!! No statement download controls were found. Discovery was not completed.")
-            return 0
+            raise SystemExit(0)
 
         self.discovery.save()
         log.info("statements page: %d download controls, %d new", total_controls, n_new)
@@ -508,7 +508,7 @@ class App:
             by_acct = {}
             for d in docs:
                 by_acct.setdefault(d.account or "", []).append(d)
-            if len(by_acct) > 1:
+            if len(by_acct) > 1 and limit >= len(by_acct):
                 # Take from each card so a Pilot tests card switching,
                 # then fill up to limit with the newest remaining documents.
                 per_card = max(1, limit // len(by_acct))
@@ -520,6 +520,8 @@ class App:
                 docs = chosen
             else:
                 docs = docs[:limit]
+        if limit and len(docs) > limit:
+            docs = docs[:limit]
         # Group by card account so all statements for a single card are
         # downloaded consecutively before switching to the next card.
         docs.sort(key=lambda d: d.account or "")
@@ -611,17 +613,26 @@ class App:
         # Amex's in-memory session).
         if not site.goto_documents(page):
             self.check_session(page)
-            if not site.goto_documents(page):
-                log.info("could not reach the statements page after two tries")
-                raise pressing.no_answer(
-                    "open the statements page", "the statements did not open",
-                    "The Statements and Activity page did not open after two tries.")
-        if doc.account:
+            site.goto_documents(page)
+        if not doc.account:
+            cards = site.list_cards(page)
+            if len(cards) > 1:
+                log.info("record has no account but multiple cards are in switcher")
+                self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                             notes="Record has no account and multiple cards exist in switcher")
+                self._write_row(doc, "Needs Account", "Needs Manual Review")
+                self.stats["manual_review"] += 1
+                print("  Record has no card account on a multi-card account - marked for manual review.")
+                return
+        else:
             if not site.ensure_card(page, doc.account):
-                log.info("could not switch to card %s for download", doc.account)
-                raise pressing.no_answer(
-                    "switch card", "the card did not switch",
-                    f"The switcher was set to {doc.account} and the card's statements did not open.")
+                log.info("could not switch to card %s for download; left for manual review", doc.account)
+                self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                             notes=f"Card {doc.account} not found in switcher")
+                self._write_row(doc, "Card not found", "Needs Manual Review")
+                self.stats["manual_review"] += 1
+                print(f"  Card {doc.account} not found in switcher - marked for manual review.")
+                return
         saved = site.download_document(page, doc.category, doc.date, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,

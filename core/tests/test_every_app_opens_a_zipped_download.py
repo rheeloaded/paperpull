@@ -589,6 +589,11 @@ def _scaffold(site, pg, out_path, dl_dir, provider):
 
 CHASE_NAME = "Jan 31, 2026 Tax Form %s Saves document" % ACCOUNT
 AMEX_PAGE = (b"<!doctype html><meta charset='utf-8'>"
+             b"<div data-testid='simple_switcher_combobox'>"
+             b"<div data-testid='simple_switcher_selected_option_display'>"
+             b"<span data-testid='simple_switcher_display_name'>SAPPHIRE</span>"
+             b"<span data-testid='simple_switcher_display_number'>\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa21234</span>"
+             b"</div></div>"
              b"<button data-testid='statements/2026-01-31/download-button' "
              b"onclick=\"document.getElementById('dlg').hidden=false\">Download</button>"
              b"<div id='dlg' role='dialog' hidden><label>"
