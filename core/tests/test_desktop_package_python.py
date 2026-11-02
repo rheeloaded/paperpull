@@ -127,7 +127,7 @@ def _fake_archive(path: Path) -> str:
         "python/DLLs/_socket.pyd": b"MZ", "python/DLLs/_ssl.pyd": b"MZ",
         "python/DLLs/_testcapi.pyd": b"MZ", "python/DLLs/_ctypes_test.pyd": b"MZ",
         "python/DLLs/_tkinter.pyd": b"MZ", "python/DLLs/tcl86t.dll": b"MZ",
-        "python/DLLs/tk86t.dll": b"MZ",
+        "python/DLLs/tk86t.dll": b"MZ", "python/DLLs/zlib1.dll": b"MZ",
         "python/Lib/os.py": b"", "python/Lib/venv/__init__.py": b"",
         "python/Lib/ensurepip/_bundled/pip-25.0.1-py3-none-any.whl": b"PK",
         "python/Lib/tkinter/__init__.py": b"", "python/Lib/idlelib/idle.py": b"",
@@ -164,8 +164,8 @@ def test_the_staged_python_reads_only_its_own_folders_and_drops_what_it_never_ne
         assert (pydir / kept).exists(), kept
     for gone in ("tcl", "include", "libs", "Lib/tkinter", "Lib/idlelib", "Lib/turtledemo",
                  "Lib/turtle.py", "Lib/ensurepip", "Lib/venv", "DLLs/_tkinter.pyd",
-                 "DLLs/tcl86t.dll", "DLLs/tk86t.dll", "DLLs/_testcapi.pyd",
-                 "DLLs/_ctypes_test.pyd"):
+                 "DLLs/tcl86t.dll", "DLLs/tk86t.dll", "DLLs/zlib1.dll",
+                 "DLLs/_testcapi.pyd", "DLLs/_ctypes_test.pyd"):
         assert not (pydir / gone).exists(), gone
 
 
@@ -239,7 +239,7 @@ SIGNED = (
     "_asyncio", "_bz2", "_ctypes", "_decimal", "_elementtree", "_hashlib", "_lzma", "_msi",
     "_multiprocessing", "_overlapped", "_queue", "_socket", "_sqlite3", "_ssl", "_uuid",
     "_wmi", "_zoneinfo", "pyexpat", "select", "unicodedata", "winsound"))
-SIGNED_FOR = ("20260901", "3.12.14", "x64")     # PBS_TAG, PY_VERSION, ARCH
+SIGNED_FOR = ("20261026", "3.12.16", "x64")     # PBS_TAG, PY_VERSION, ARCH
 
 
 def _windows_steps() -> dict:

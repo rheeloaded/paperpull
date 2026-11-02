@@ -71,8 +71,8 @@ from icons import ico_largest_png  # noqa: E402
 # a folder called python/ holding a complete CPython with pip. Stripped
 # leaves out only its debugging symbols. The same release and Python as
 # packaging/build_macos.py, and core/tests holds the two to each other.
-PBS_TAG = "20260901"
-PY_VERSION = "3.12.14"
+PBS_TAG = "20261026"
+PY_VERSION = "3.12.16"
 
 # The architecture being built, x64, the only one. It runs on ARM64 Windows
 # too, under emulation, and nobody would measure the difference in a program
@@ -94,7 +94,7 @@ ARCH = "x64"
 # and python\DLLs are compared with that list too, which core/tests holds to
 # PBS_TAG.
 PBS_SHA256 = {
-    "x64": "7c45c9622400d578709a9b2cddbe8124cc21d382409d9f13406d706d28e31b14",
+    "x64": "1f2ab53880fc67ea323398c6388e05af28addc99a8e389209f08a51fdff4b149",
 }
 
 
@@ -122,14 +122,15 @@ def lock_file(arch: str | None = None) -> Path:
     return REPO / "packaging" / ("requirements-windows-%s.txt" % (arch or ARCH))
 
 # What python-build-standalone carries that the package has no use for, none
-# of which the embeddable build from python.org had either. Tk and IDLE, the
-# C headers and import libraries for compiling extensions, CPython's own test
-# extensions, and venv with ensurepip, whose bundled pip is older than the one
-# the build uses and then removes. Each is a glob under python/.
+# of which the embeddable build from python.org had either. Tk and IDLE, with
+# the zlib1.dll that only tcl86t.dll loads (20260924 on), the C headers and
+# import libraries for compiling extensions, CPython's own test extensions,
+# and venv with ensurepip, whose bundled pip is older than the one the build
+# uses and then removes. Each is a glob under python/.
 PRUNE = ("tcl", "include", "libs", "Lib/tkinter", "Lib/idlelib", "Lib/turtledemo",
          "Lib/turtle.py", "Lib/__pycache__/turtle.*", "Lib/ensurepip", "Lib/venv",
-         "DLLs/_tkinter.pyd", "DLLs/tcl*.dll", "DLLs/tk*.dll", "DLLs/_test*.pyd",
-         "DLLs/_ctypes_test.pyd")
+         "DLLs/_tkinter.pyd", "DLLs/tcl*.dll", "DLLs/tk*.dll", "DLLs/zlib1.dll",
+         "DLLs/_test*.pyd", "DLLs/_ctypes_test.pyd")
 
 # Top-level paths from the repo that belong in the package. apps/ is filtered
 # further below so only code goes, never a venv or data folder that happens to
