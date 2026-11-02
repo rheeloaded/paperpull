@@ -425,24 +425,43 @@ class App:
         # live on that one page as download-button controls.
         if not site.goto_documents(page):
             self.check_session(page)
-            site.goto_documents(page)
+            if not site.goto_documents(page):
+                log.info("could not reach the statements page after two tries")
+                print("\n!! Could not reach the statements page. Discovery was not completed.")
+                return 0
         self.check_session(page)
 
         cards = site.list_cards(page)
         total_controls = 0
         if len(cards) > 1:
             for card in cards:
-                site.select_card(page, card)
+                if not site.select_card(page, card):
+                    raise pressing.no_answer("switch card", "the card did not switch",
+                                             f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
                 docs = site.collect_download_docs(page, account=card["label"])
+                if not docs and not site.has_no_statements(page):
+                    log.info("card %s has no statements and page did not say so", card["label"])
+                    print(f"\n!! Could not find statements for {card['label']}. Discovery was not completed.")
+                    return 0
                 total_controls += len(docs)
                 for r in docs:
                     n_new += self._record_rawdoc(r, page.url)
         else:
-            account = cards[0]["label"] if cards else site.current_card_label(page)
-            docs = site.collect_download_docs(page, account=account)
+            # When there is only one card (or no switcher), keep account empty ("")
+            # so a one-card archive keeps its keys, file names and summaries as they are.
+            docs = site.collect_download_docs(page, account="")
+            if not docs and not site.has_no_statements(page):
+                log.info("no statements found and page did not say so")
+                print("\n!! Could not find statements. Discovery was not completed.")
+                return 0
             total_controls += len(docs)
             for r in docs:
                 n_new += self._record_rawdoc(r, page.url)
+
+        if total_controls == 0 and not site.has_no_statements(page):
+            log.info("no download buttons were ever seen")
+            print("\n!! No statement download controls were found. Discovery was not completed.")
+            return 0
 
         self.discovery.save()
         log.info("statements page: %d download controls, %d new", total_controls, n_new)
@@ -483,13 +502,28 @@ class App:
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         docs = [d for d in docs if self._in_scope(d)]
-        # Sort newest-to-oldest, then group by card account.
-        # Python's stable sort ensures all statements for a single card are
-        # downloaded consecutively before switching to the next card.
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
-        docs.sort(key=lambda d: d.account or "")
         limit = limit if limit is not None else self.args.max_docs
-        return docs[:limit] if limit else docs
+        if limit and len(docs) > limit:
+            by_acct = {}
+            for d in docs:
+                by_acct.setdefault(d.account or "", []).append(d)
+            if len(by_acct) > 1:
+                # Take from each card so a Pilot tests card switching,
+                # then fill up to limit with the newest remaining documents.
+                per_card = max(1, limit // len(by_acct))
+                chosen = []
+                for acct_docs in by_acct.values():
+                    chosen.extend(acct_docs[:per_card])
+                remaining = [d for d in docs if d not in chosen]
+                chosen.extend(remaining[:max(0, limit - len(chosen))])
+                docs = chosen
+            else:
+                docs = docs[:limit]
+        # Group by card account so all statements for a single card are
+        # downloaded consecutively before switching to the next card.
+        docs.sort(key=lambda d: d.account or "")
+        return docs
 
     def _already_done(self, doc: Document) -> bool:
         """Skip documents already handled. A document that was successfully
@@ -577,9 +611,17 @@ class App:
         # Amex's in-memory session).
         if not site.goto_documents(page):
             self.check_session(page)
-            site.goto_documents(page)
+            if not site.goto_documents(page):
+                log.info("could not reach the statements page after two tries")
+                raise pressing.no_answer(
+                    "open the statements page", "the statements did not open",
+                    "The Statements and Activity page did not open after two tries.")
         if doc.account:
-            site.ensure_card(page, doc.account)
+            if not site.ensure_card(page, doc.account):
+                log.info("could not switch to card %s for download", doc.account)
+                raise pressing.no_answer(
+                    "switch card", "the card did not switch",
+                    f"The switcher was set to {doc.account} and the card's statements did not open.")
         saved = site.download_document(page, doc.category, doc.date, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
