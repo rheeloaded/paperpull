@@ -10,6 +10,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+
 - **Login and the control panel say when two accounts beside each other
   name one debugging port.** A sign-in on a port a browser already holds
   joins that browser, so two configs on one port sign in to one browser,
@@ -27,6 +28,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   port never count.
 
 ### Changed
+
 - **A second person's account takes a debugging port from 9400 up.** It
   was given its app's port plus 10, moved past the ports in use when it
   was added, while the apps' own ports run up from 9222, one each, so it
@@ -38,6 +40,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and the control panel tell any that share a port where to move.
 
 ### Fixed
+
 - **A provider set up from the control panel no longer takes a port a
   second person already has.** A second person's account was given their
   app's port plus 10, moved past the ports in use when they were added, so
@@ -58,21 +61,6 @@ All notable changes to PaperPull are recorded here. Versioning follows
   config.json names, and where Simmons Bank is set up too, changing either
   one's cdp_url to a port no other app uses keeps them apart. A test now
   fails when two apps' examples name the same port.
-### Security
-- **The Windows and Mac packages take Python 3.12.16.** They carried
-  python-build-standalone's CPython 3.12.14, which 0.59.2 said a later
-  release would move to the 3.12.16 the server image's base already
-  had. 3.12.16's ssl module refuses certificate chains that carry any of
-  a set of compromised eMudhra intermediate CA keys, CVE-2026-115557
-  (Critical). 3.12.15 and 3.12.16 also fix holes in tarfile
-  (CVE-2026-82049 and CVE-2026-114583), tempfile (CVE-2026-12345),
-  http.cookiejar and urllib's password manager (CVE-2026-15806), and take
-  libexpat 2.9.0. The browsers the apps open, and the requests made
-  through them, use their own TLS and not Python's. Every other package
-  in both packages stays at the version it was, and the Windows package
-  signs the same 29 interpreter files as before. It leaves out the
-  zlib1.dll the new Python brings for Tcl and Tk, which the package has
-  never carried.
 - **An app's own browser and Target's fallback print start again after a
   Playwright upgrade.** A launch that names no browser starts the Chromium
   build the installed Playwright was made for, and an install upgraded
@@ -87,6 +75,83 @@ All notable changes to PaperPull are recorded here. Versioning follows
   PDF with each. Where Playwright's own build is on disk nothing changes,
   and no browser of the person's own is taken in its place. A sign-in,
   and a run that attaches to it through cdp_url, were never affected.
+- **Signing in finds a browser that opened fine on a computer with a proxy
+  set.** Each request PaperPull sent to a browser's debugging port on this
+  computer went through the proxy the computer names, HTTP_PROXY or the
+  proxy in the Windows or macOS settings. Nothing there leaves out
+  127.0.0.1 unless the person listed it, and the Windows box for local
+  addresses covers only names without a dot. A proxy cannot reach that
+  port, so the sign-in step said no debugging port answered for a browser
+  that had opened, and a sign-in with that browser already open said
+  something silent held its port. Every request PaperPull sends to this
+  computer through Python's own urllib, from the sign-in, the server's
+  self-test and the tests, now leaves the proxy out, and a check finds any
+  new one by what it does.
+- **Golden 1 never calls its statement list whole with an account's
+  history left out.** Each account's statements show through its own
+  Statement History. An account whose Statement History showed and failed
+  when pressed was passed over, and the list was still noted as read
+  whole. Now the run keeps what it read and takes it, writes a failure
+  file and stops at its end rather than finish, so the next run reads the
+  list again. The account passed over keeps the statements an earlier run
+  listed. An account with no statements, one that shows only the list of
+  the account before, one whose heading opens nothing and a hidden copy of
+  a Statement History are left as they were, since a page that works can
+  show each of them.
+- **Walmart, Lowe's and GitHub never call a purchase list whole when a
+  page of it never came.** Walmart reads its order list filtered to Online
+  and to In-store and follows Next through each, Lowe's reads every page
+  its pager counts, and GitHub reads its payment history from ?page=2 on.
+  A filtered list or a later page that turned into the bot check, or
+  never drew its list, was read as one with nothing on it, and the list
+  was still noted as read whole, so Resume carried on without reading it
+  again. Now a check there is asked about at a console and stops a run
+  under the panel. A page that never came keeps what was read before it,
+  and the run writes a failure file and stops at its end rather than
+  finish, so Resume reads the list again. A Walmart list filtered to a
+  kind the order list showed none of may have none, and a Lowe's page the
+  page before did not offer may not be there, so both are read as before.
+
+### Security
+
+- **The Windows and Mac packages take Python 3.12.16.** They carried
+  python-build-standalone's CPython 3.12.14, which 0.59.2 said a later
+  release would move to the 3.12.16 the server image's base already
+  had. 3.12.16's ssl module refuses certificate chains that carry any of
+  a set of compromised eMudhra intermediate CA keys, CVE-2026-115557
+  (Critical). 3.12.15 and 3.12.16 also fix holes in tarfile
+  (CVE-2026-82049 and CVE-2026-114583), tempfile (CVE-2026-12345),
+  http.cookiejar and urllib's password manager (CVE-2026-15806), and take
+  libexpat 2.9.0. The browsers the apps open, and the requests made
+  through them, use their own TLS and not Python's. Every other package
+  in both packages stays at the version it was, and the Windows package
+  signs the same 29 interpreter files as before. It leaves out the
+  zlib1.dll the new Python brings for Tcl and Tk, which the package has
+  never carried.
+- **PaperPull Server's container runs with only what it needs.** Both
+  compose files now start it with `no-new-privileges`, so no program in it
+  gains a privilege from a setuid bit. They keep seven of the fourteen
+  capabilities Docker gives a container, the ones its start needs before
+  everything runs as your NAS user, one to pass a stop on and one Chrome's
+  sandbox needs. And they make its root file system read-only, with
+  `/tmp`, `/run` and `/home/pp` kept in memory and emptied at each start.
+  The image has no setuid or setgid program left, and gives what it starts
+  `no-new-privileges` under an older compose file too, unless Chrome's
+  setuid sandbox is on. It writes its user and group files into `/run` at
+  each start, so `PUID` and `PGID` still work with the image's files
+  read-only, and a compose file may still name a group in `group_add` or
+  `root` in `user`. A `PUID` of 0, or one Linux takes as -1, now stops the
+  start rather than leave the panel running as root, and the start no
+  longer gives `pp` a file with a second name, which `pp` could have given
+  to a file of root's under an older compose file. Commented `pids_limit`
+  and `mem_limit` lines show how to cap what it may use. Chrome's setuid
+  sandbox, for kernels without user namespaces, now takes two changes, the
+  `#` taken off `SYS_ADMIN` and put in front of `no-new-privileges`, and
+  where the second is missed the container's log says why no helper was
+  set up. The new image works with the compose file you have. To take the
+  new settings, copy them into it as a set, and if you turned on the
+  setuid sandbox before, move its `SYS_ADMIN` into the new `cap_add` list,
+  see "Updating" in SERVER.md.
 
 ## [0.59.2] - 2026-10-30
 
@@ -186,66 +251,6 @@ its summary.
   printed none of its sentences. Each part of the summary now reads its
   own fields, and a part that cannot read them says nothing while the
   rest still speak.
-- **PaperPull Server's container runs with only what it needs.** Both
-  compose files now start it with `no-new-privileges`, so no program in it
-  gains a privilege from a setuid bit. They keep seven of the fourteen
-  capabilities Docker gives a container, the ones its start needs before
-  everything runs as your NAS user, one to pass a stop on and one Chrome's
-  sandbox needs. And they make its root file system read-only, with
-  `/tmp`, `/run` and `/home/pp` kept in memory and emptied at each start.
-  The image has no setuid or setgid program left, and gives what it starts
-  `no-new-privileges` under an older compose file too, unless Chrome's
-  setuid sandbox is on. It writes its user and group files into `/run` at
-  each start, so `PUID` and `PGID` still work with the image's files
-  read-only, and a compose file may still name a group in `group_add` or
-  `root` in `user`. A `PUID` of 0, or one Linux takes as -1, now stops the
-  start rather than leave the panel running as root, and the start no
-  longer gives `pp` a file with a second name, which `pp` could have given
-  to a file of root's under an older compose file. Commented `pids_limit`
-  and `mem_limit` lines show how to cap what it may use. Chrome's setuid
-  sandbox, for kernels without user namespaces, now takes two changes, the
-  `#` taken off `SYS_ADMIN` and put in front of `no-new-privileges`, and
-  where the second is missed the container's log says why no helper was
-  set up. The new image works with the compose file you have. To take the
-  new settings, copy them into it as a set, and if you turned on the
-  setuid sandbox before, move its `SYS_ADMIN` into the new `cap_add` list,
-  see "Updating" in SERVER.md.
-- **Signing in finds a browser that opened fine on a computer with a proxy
-  set.** Each request PaperPull sent to a browser's debugging port on this
-  computer went through the proxy the computer names, HTTP_PROXY or the
-  proxy in the Windows or macOS settings. Nothing there leaves out
-  127.0.0.1 unless the person listed it, and the Windows box for local
-  addresses covers only names without a dot. A proxy cannot reach that
-  port, so the sign-in step said no debugging port answered for a browser
-  that had opened, and a sign-in with that browser already open said
-  something silent held its port. Every request PaperPull sends to this
-  computer through Python's own urllib, from the sign-in, the server's
-  self-test and the tests, now leaves the proxy out, and a check finds any
-  new one by what it does.
-- **Golden 1 never calls its statement list whole with an account's
-  history left out.** Each account's statements show through its own
-  Statement History. An account whose Statement History showed and failed
-  when pressed was passed over, and the list was still noted as read
-  whole. Now the run keeps what it read and takes it, writes a failure
-  file and stops at its end rather than finish, so the next run reads the
-  list again. The account passed over keeps the statements an earlier run
-  listed. An account with no statements, one that shows only the list of
-  the account before, one whose heading opens nothing and a hidden copy of
-  a Statement History are left as they were, since a page that works can
-  show each of them.
-- **Walmart, Lowe's and GitHub never call a purchase list whole when a
-  page of it never came.** Walmart reads its order list filtered to Online
-  and to In-store and follows Next through each, Lowe's reads every page
-  its pager counts, and GitHub reads its payment history from ?page=2 on.
-  A filtered list or a later page that turned into the bot check, or
-  never drew its list, was read as one with nothing on it, and the list
-  was still noted as read whole, so Resume carried on without reading it
-  again. Now a check there is asked about at a console and stops a run
-  under the panel. A page that never came keeps what was read before it,
-  and the run writes a failure file and stops at its end rather than
-  finish, so Resume reads the list again. A Walmart list filtered to a
-  kind the order list showed none of may have none, and a Lowe's page the
-  page before did not offer may not be there, so both are read as before.
 
 ## [0.59.0] - 2026-10-26
 
