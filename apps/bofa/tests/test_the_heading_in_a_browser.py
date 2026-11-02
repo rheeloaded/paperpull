@@ -153,6 +153,7 @@ def test_the_shut_heading_is_opened_once_and_the_links_form_learned(browser):
         assert call.facts["statements_heading"] == "opened"
         assert call.template is not None and call.links == 2
         assert call.facts["links_to_other_pages"] == 2 and call.facts["links_with_an_id"] == 2
+        assert call.facts.get("pdf_links_not_shown") == 1
         # The links are of rows only the press's answer lists, so that answer
         # was heard, and the heading says it is open now.
         assert call.facts["list_read_after_the_heading"] is True
@@ -212,10 +213,9 @@ def test_a_chat_bubble_over_the_heading_stops_the_run_with_nothing_pressed(brows
         context.close()
 
 
-def test_the_four_checks_and_parent_cap_in_shown_link_js(browser):
+def test_the_three_checks_in_shown_link_js(browser):
     """Three checks in _SHOWN_LINK_JS (hidden attribute with height,
-    visibility: hidden, and overflow clipping) and the parent traversal
-    cap of six."""
+    visibility: hidden, and overflow clipping)."""
     context = browser.new_context()
     page = context.new_page()
     try:
@@ -252,26 +252,5 @@ def test_the_four_checks_and_parent_cap_in_shown_link_js(browser):
         assert page.evaluate(site._SHOWN_LINK_JS, l3) is False
         assert site.drawn_links(page) == []
         assert site.hidden_pdf_links(page) == 1
-
-        # 4. parent traversal cap of 6:
-        # 6 ancestors up to p6: p1, p2, p3, p4, p5, p6
-        # When p6 has hidden attribute, traversal reaches it (hops=6) -> False
-        # When p7 has hidden attribute, traversal breaks after 6 hops -> True
-        page.set_content(
-            '<style>[hidden] { display: block !important; }</style>'
-            '<div id="p7" style="height: 100px; width: 200px;">'
-            '<div id="p6"><div id="p5"><div id="p4"><div id="p3"><div id="p2"><div id="p1">'
-            '<a id="l4" href="#" style="display: block; height: 20px; width: 100px;">'
-            'Download PDF for January Statement for Checking</a>'
-            '</div></div></div></div></div></div></div>'
-        )
-        l4 = page.locator("#l4").element_handle()
-        assert page.evaluate(site._SHOWN_LINK_JS, l4) is True
-
-        page.evaluate("document.getElementById('p6').hidden = true")
-        assert page.evaluate(site._SHOWN_LINK_JS, l4) is False
-
-        page.evaluate("document.getElementById('p6').hidden = false; document.getElementById('p7').hidden = true")
-        assert page.evaluate(site._SHOWN_LINK_JS, l4) is True
     finally:
         context.close()

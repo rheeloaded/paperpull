@@ -633,6 +633,7 @@ def test_every_reason_the_failure_file_gets_is_one_it_keeps():
     from paperpull_core.words import shape_tree
     from paperpull_core.failure import _step
     cases = [dict(pdf_links=0, pdf_links_not_shown=2),
+             dict(pdf_links=0, pdf_links_not_shown=2, statements_heading="opened"),
              dict(pdf_links=0, statements_heading="opened"),
              dict(pdf_links=0, statements_heading="not found"),
              dict(pdf_links=2, forms=0, statements_heading="opened",
@@ -651,8 +652,11 @@ def test_hidden_pdf_links_are_counted_in_facts_and_reported_in_failure():
     assert facts["pdf_links"] == 0
     assert facts["pdf_links_not_shown"] == 3
     why, reason = site.not_learned_why(facts)
-    assert "drew 3 Download PDF links but none shows, as links behind a closed section would not" in why
+    assert "drew 3 Download PDF links but none shows, and its Statements heading could not be opened (not pressed)" in why
     assert reason == "pdf links not shown"
+    why_open, reason_open = site.not_learned_why(dict(pdf_links=0, pdf_links_not_shown=3, statements_heading="opened"))
+    assert "drew 3 Download PDF links but none shows, even with its Statements heading open, as links behind a closed section would not" in why_open
+    assert reason_open == "pdf links not shown with the heading expanded"
     why_one, _ = site.not_learned_why(dict(pdf_links=0, pdf_links_not_shown=1))
     assert "drew 1 Download PDF link but none shows" in why_one
 

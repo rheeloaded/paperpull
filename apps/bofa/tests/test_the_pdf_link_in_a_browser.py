@@ -111,6 +111,7 @@ ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-STMT', lang: 'en', year: '20
         link.addEventListener('focus', () => { row.classList.add('show-overlay'); });
       } else if (TILE === 'opens_cover') {
         link.addEventListener('focus', () => {
+          row.classList.add('show-overlay');
           const c = document.createElement('div');
           c.className = 'cover';
           c.textContent = 'Help';
@@ -301,7 +302,37 @@ def test_a_tile_focus_handler_that_opens_a_cover_stops_as_covered(browser, monke
         with pytest.raises(pressing.Stop) as stopped:
             site.learn(page)
         assert isinstance(stopped.value, pressing.Covered)
+        assert stopped.value.facts.get("fixed") is True
         assert stopped.value.step == "download a statement"
         assert not seen["pdfs"] and context.pages == [page]
+    finally:
+        context.close()
+
+
+def test_seven_links_sharing_one_name_counts_as_several_with_nothing_pressed(browser):
+    """When more than six links share one name, they count as several and
+    nothing is pressed."""
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        link_html = "".join(
+            '<div class="row" tabindex="0"><div aria-hidden="true">'
+            '<a href="#"><span>Download PDF</span><span class="sr"> for '
+            'January Statement for Checking</span></a></div></div>'
+            for _ in range(7)
+        )
+        page.set_content(
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<style>.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; "
+            "clip: rect(0 0 0 0); white-space: nowrap; }</style></head><body><main>"
+            f"<div id='panel-stmt'>{link_html}</div>"
+            "</main></body></html>"
+        )
+        drawn = site.drawn_links(page)
+        assert len(drawn) == 7
+        names = ["January Statement for Checking"]
+        el, how = site.pdf_link_to_press(page, drawn, names)
+        assert el is None
+        assert how == "several"
     finally:
         context.close()

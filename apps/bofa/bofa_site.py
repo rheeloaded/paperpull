@@ -578,8 +578,7 @@ def account_key_of(body: dict, answer: dict) -> str:
 _SHOWN_LINK_JS = r"""a => {
   const ar = a.getBoundingClientRect(), my = ar.top + ar.height / 2;
   if (ar.width < 1 || ar.height < 1) return false;
-  for (let n = a, hops = 0; n && n !== document.body && n !== document.documentElement; n = n.parentElement, hops++) {
-    if (hops > 6) break;
+  for (let n = a; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
     if (n.hidden || n.hasAttribute('hidden')) return false;
     const r = n.getBoundingClientRect(), s = getComputedStyle(n);
     if (r.width < 1 || r.height < 1 || s.display === 'none' || s.visibility === 'hidden') return false;
@@ -1462,8 +1461,12 @@ def not_learned_why(facts: dict) -> Tuple[str, str]:
         if facts.get("pdf_links_not_shown"):
             n = facts["pdf_links_not_shown"]
             s = "link" if n == 1 else "links"
-            return ("the statements page drew %d Download PDF %s but none shows, as links "
-                    "behind a closed section would not" % (n, s),
+            if heading in ("opened", "already expanded"):
+                return ("the statements page drew %d Download PDF %s but none shows, even with its "
+                        "Statements heading open, as links behind a closed section would not" % (n, s),
+                        "pdf links not shown with the heading expanded")
+            return ("the statements page drew %d Download PDF %s but none shows, and its Statements "
+                    "heading could not be opened (%s)" % (n, s, heading or "not pressed"),
                     "pdf links not shown")
         if heading in ("opened", "already expanded"):
             return ("the statements page drew no Download PDF link, even with its "
