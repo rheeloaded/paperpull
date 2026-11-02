@@ -473,6 +473,19 @@ class Download(unittest.TestCase):
                 fetch(page, self.out)
             self.assertFalse(self.out.exists())
 
+    def test_a_list_that_cannot_be_read_again_stops(self):
+        """The list read for a bill is the list every bill after it reads
+        too, so a list that stops is raised to the run, never this bill's
+        False."""
+        short = Page(limit=2, pages=[{"status": 200, "data": answer([], total=5)}])
+        changed = Page(limit=2, pages=[{"status": 200, "data": answer(ROWS[2:4], total=6)}])
+        for page in (short, changed):
+            site._RUN.clear()
+            with self.assertRaises(site.ListStopped):
+                fetch(page, self.out)
+            self.assertFalse(any(u == site.PDF_URL for u, _, _ in page.asked))
+            self.assertFalse(self.out.exists())
+
     def test_other_non_pdfs_fail_that_bill_alone(self):
         for page in (Page(limit=10, pdf=b"GIF89a"), Page(limit=10, pdf_status=500),
                      Page(limit=10, pdf=b'{"error":"no such bill"}'), Page(limit=10, pdf=b"<html>")):
@@ -560,6 +573,40 @@ class Orchestrator(unittest.TestCase):
         self.assertIn("shows the account ending 0034", text)
         self.assertIn("Choose the account ending 0012", text)
         self.assertIn("run Resume", text)
+        self.assertEqual(app.progress.data, {})
+        self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0)
+
+    def test_a_list_that_stops_on_resume_stops_the_run_once(self):
+        """A Resume reads no list of its own. After a listing read whole,
+        Billing & Payment History that now stops is read once, for the
+        first bill, and the run stops there as one whose list did not end
+        whole, with nothing recorded against any bill. Each bill used to go
+        to review in turn, and the run ended looking finished."""
+        from paperpull_core import listing
+        app = make_app(self.tmp, "--resume")
+        listing.started(app)
+        for r in site.bills_of(ROWS, FAKE_ACCOUNT):
+            app._record_rawdoc(r, site.BILLING_URL)
+        listing.read_whole(app)
+        app.check_session = lambda page: None
+        app._delay = lambda *a, **k: None
+        app.write_failure = lambda *a, **k: None
+        pages = []
+
+        def later():
+            pages.append(Page(limit=2, pages=[{"status": 200, "data": answer([], total=5)}]))
+            return pages[-1]
+        app._on_its_site = later
+        site._RUN.clear()
+        bills = app._select()
+        self.assertGreater(len(bills), 1)
+        # A stop only a run that lists carries on from, so the panel offers
+        # that, not Continue, which would read the same list and stop again.
+        with redirect_stdout(io.StringIO()) as said, self.assertRaises(listing.ListNotRead):
+            app.process(bills)
+        self.assertEqual(len(pages), 1, "one list read, for the first bill only")
+        self.assertFalse(any(u == site.PDF_URL for u, _, _ in pages[0].asked))
+        self.assertIn("could not be read again", said.getvalue())
         self.assertEqual(app.progress.data, {})
         self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0)
 

@@ -151,6 +151,12 @@ ITS_OWN = {
     ("alpaca", "_catch_document", ("_link_of",)):
         "the link of a press that brought no download, read on the way to a stop of "
         "the run that follows this handler at once",
+    ("portlandgeneral", "_readable", ("bills_of",)):
+        "the bills of the rows read before the list stopped, gathered for the "
+        "ListStopped raised next, which reaches the run",
+    ("portlandgeneral", "download_bill", ("_fetch",)):
+        "a refusal of the authorization this run kept from an earlier read, which "
+        "reads the list again once. A refusal of a list just read reaches the run",
 }
 
 # A handler in a download path that turns a list stop into a stop of the run
@@ -225,6 +231,9 @@ NOT_A_LIST = {
     ("usbank", "RowUnread"):
         "a part of one account's one year, read for one statement, which may be that "
         "statement or its twin (#106). The whole list is Discover's",
+    ("portlandgeneral", "OtherAccountShown"):
+        "another account shown on the site than the one a bill was listed under, "
+        "which the person chooses again before Continue",
 }
 
 
@@ -808,10 +817,15 @@ def two_documents(mod, config: dict) -> list:
 
 
 def a_stop(cls):
-    try:
-        return cls("the list answered 500")
-    except TypeError:
-        return cls()
+    """One of the stop class, built with one word, with two (a stop that names
+    two things, such as the account a bill wants and the one shown), or with
+    none."""
+    for args in (("the list answered 500",), ("0012", "0034"), ()):
+        try:
+            return cls(*args)
+        except TypeError:
+            continue
+    raise TypeError(f"{cls.__name__} could not be built with one, two or no arguments")
 
 
 DRIVEN = sorted((d.name, stop) for d in APPS for stop in sorted(App(d).driven()))

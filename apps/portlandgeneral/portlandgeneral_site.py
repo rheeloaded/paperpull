@@ -925,7 +925,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     the bill was recorded under raises OtherAccountShown, with no reread,
     since the account shown is the person's choice on the site. `dl_dir`
     is unused: nothing goes through the browser's downloads. Nothing is
-    pressed. SessionExpired from a list just read propagates to the run."""
+    pressed. SessionExpired from a list just read propagates to the run,
+    and so does ListStopped when the list cannot be read again, since every
+    bill after this one would read the same list."""
     out_path = Path(out_path)
     m = BILL_ID_RE.fullmatch(document_id or "")
     if href != DOWNLOAD_PATH or not m or m.group(2) != iso_date:
@@ -941,7 +943,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                 _read(page)
             except ListStopped as stop:
                 log.info("the bill list stopped while looking for the bill dated %s: %s", iso_date, stop)
-                return False
+                raise
         history, bills = _RUN["history"], _RUN["bills"]
         if history.account[-4:] != last4:
             raise OtherAccountShown(last4, history.account[-4:])

@@ -34,9 +34,10 @@ only what it needs.
   under another account than the one the site shows stops the run once
   and names the account to choose. Contributed by crazyhorse90210 and run
   on the contributor's own account. Before merging, a prompt beside the
-  Two-Step banner was made to stop a run again, and a bill of another
-  account was made to stop the run once rather than read the whole list
-  again for each bill.
+  Two-Step banner was made to stop a run again, a bill of another account
+  was made to stop the run once rather than read the whole list again for
+  each bill, and a list that stops while bills download stops the run once
+  with the list unread, as the other apps now do.
 - **Login and the control panel say when two accounts beside each other
   name one debugging port.** A sign-in on a port a browser already holds
   joins that browser, so two configs on one port sign in to one browser,

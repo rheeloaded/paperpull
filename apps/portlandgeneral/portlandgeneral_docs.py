@@ -613,6 +613,11 @@ class App:
                 # this bill was listed under would meet the same, so the
                 # run stops once, with nothing recorded against this one.
                 self.account_not_shown(e)
+            except site.ListStopped as stop:
+                # Billing & Payment History could not be read again for
+                # this bill. Every bill after it reads the same list, so the
+                # run stops here rather than send each one to review.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -640,6 +645,17 @@ class App:
             f"{shown.wanted} on portlandgeneral.com,",
             "then run Resume to carry on from where this stopped.",
         ])
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        bill was sought. Nothing is recorded against the bill, and the run
+        leaves as one whose list did not end whole, which only a run that
+        lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        listing.read_again_stopped(self, (
+            "The portlandgeneral.com billing history could not be read again, "
+            "so this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one bill. The site layer finds the bill by its account and
