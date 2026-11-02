@@ -73,6 +73,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   signs the same 29 interpreter files as before. It leaves out the
   zlib1.dll the new Python brings for Tcl and Tk, which the package has
   never carried.
+- **An app's own browser and Target's fallback print start again after a
+  Playwright upgrade.** A launch that names no browser starts the Chromium
+  build the installed Playwright was made for, and an install upgraded
+  from 0.59.1 (Playwright 1.63.0, build 1243) to 0.59.2 (1.64.1, build
+  1248) can hold only the old build, since the packages carry no
+  Chromium. Every run of an app whose config names no cdp_url, and
+  Target's headless print after its first way failed, stopped there with
+  "Executable doesn't exist", and the download was never offered, since a
+  build was on disk. Such a launch now takes the newest Chromium on disk.
+  Playwright 1.64.1 was measured driving the older builds 1234 and 1228,
+  and Playwright 1.62.0 the newer build 1248, in a window and printing a
+  PDF with each. Where Playwright's own build is on disk nothing changes,
+  and no browser of the person's own is taken in its place. A sign-in,
+  and a run that attaches to it through cdp_url, were never affected.
 
 ## [0.59.2] - 2026-10-30
 
