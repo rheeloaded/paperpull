@@ -58,7 +58,7 @@ only what's needed to locate and verify a file.
 | Step | Command | What it does |
 |------|---------|--------------|
 | 1 | `setup.bat` | Creates `.venv`, installs Playwright + pypdf (uses a Chromium browser already on this PC - Edge on Windows) |
-| 2 | `login.bat` | Opens a browser (port **9298**); sign in through Okta, open Documents, **leave open** |
+| 2 | `login.bat` | Opens a browser (port **9296**); sign in through Okta, open Documents, **leave open** |
 | 3 | `paperpull invest529 diagnose` | Read-only look at the Documents page; downloads nothing |
 | 4 | `paperpull invest529 pilot` | 5 newest documents, then **stops** for your inspection |
 | 5 | inspect the PDFs/CSV | You approve before anything bigger runs |
@@ -66,7 +66,7 @@ only what's needed to locate and verify a file.
 | any time | `paperpull invest529 resume` | Continue after an interruption; never redoes finished work |
 | any time | `paperpull invest529 verify` | Re-validate every saved PDF |
 
-Port 9298 is unique to this app, so it keeps its own signed-in browser
+Port 9296 is unique to this app, so it keeps its own signed-in browser
 separate from every other provider's - all of them can be open at once.
 
 Useful filters:

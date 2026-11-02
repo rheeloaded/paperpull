@@ -55,6 +55,28 @@ def ports_in_use(app_dirs) -> set:
     return used
 
 
+def free_cdp_url(app_dir: Path, cdp_url) -> str | None:
+    """cdp_url moved up to a port no install beside app_dir uses, or None
+    when its own port is free. The control panel asks this of an install it
+    has just made. An app's example port is no other app's, but a second
+    person's is their app's port plus port_offset, moved past only the
+    ports in use when they were added, so it can be the example port of an
+    app installed afterwards (E-ZPass's 9274 plus 10 is Interactive
+    Brokers' 9284 while IBKR is not installed)."""
+    base = _port_of(cdp_url if isinstance(cdp_url, str) else "")
+    if not base:
+        return None
+    here = Path(app_dir).resolve()
+    taken = ports_in_use([d for d in paperpull.list_apps(Path(app_dir).parent)
+                          if d.resolve() != here])
+    if base not in taken:
+        return None
+    port = base
+    while port in taken:
+        port += 1
+    return re.sub(r":%d\b" % base, ":%d" % port, cdp_url, count=1)
+
+
 def output_dir_for(app_dir: Path, cfg: dict, name: str) -> str:
     """The output_dir a second person's config gets, from the first
     person's config. Their folder sits beside the first one's, named for the

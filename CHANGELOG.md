@@ -7,6 +7,31 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A provider set up from the control panel no longer takes a port a
+  second person already has.** A second person's account is given their
+  app's port plus 10, moved past the ports in use when they are added, so
+  it can hold the port of an app set up afterwards. E-ZPass's 9274 plus 10
+  is Interactive Brokers' 9284 until Interactive Brokers is set up, and
+  Chase Business's 9290 plus 10 is 9300, the port the next new app takes.
+  The new app's config.json was its example, port included, so the two
+  attached to one browser and each signed in to the other's profile. A new
+  install now moves up to the first port no install or person beside it
+  uses, the way a second person's port is chosen, and Import history sets
+  providers up the same way. So does an update that brings a port to an
+  install that had none, a Target install from before 0.34.0 among them.
+  An app and a person that already share a port are left as they are, and
+  changing one's cdp_url to a free port keeps them apart.
+- **Invest529 is set up on a port of its own.** It shipped on 9298, the
+  debugging port Simmons Bank already had, so with both set up each
+  attached to the other's browser and signed in to the other's profile. A
+  new Invest529 install takes 9296. One set up earlier keeps the port its
+  config.json names, and where Simmons Bank is set up too, changing either
+  one's cdp_url to a port no other app uses keeps them apart. A test now
+  fails when two apps' examples name the same port.
+
 ## [0.59.2] - 2026-10-30
 
 Bank of America knows Statements & Documents at the second address a
