@@ -157,6 +157,10 @@ def migrate_legacy_keys(records: dict) -> int:
 class App:
     _journal = None
     _requests = None
+    # Set when an account's Statement History would not open, so the run
+    # goes on with what it read and stops at its end rather than finish
+    # (_stop_if_cut_short).
+    _list_cut_short = False
 
     def __init__(self, args):
         self.args = args
@@ -581,7 +585,11 @@ class App:
         # account's history on a membership with several (#35).
         return list(self._discovery_trace)[:8] + list(trace)[:80]
 
-    def cmd_discover(self, quiet: bool = False) -> int:
+    def cmd_discover(self, quiet: bool = False, finish: bool = True) -> int:
+        # A list read only in part (passed_over) keeps the documents it
+        # found, and Pilot and Run All go on with them, but the run stops at
+        # its end rather than finish. With finish=False the caller does that
+        # once it has used them.
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, for Resume (paperpull_core.listing).
         listing.started(self)
@@ -595,11 +603,28 @@ class App:
         self.check_session(page)
         self._discovery_trace = []
         docs = site.collect_download_docs(page, trace=self._discovery_trace)
+        if getattr(docs, "passed_over", 0):
+            # An account whose Statement History press failed is a part of
+            # the list missing, so the list is not noted whole, and the run
+            # goes on with what it read and stops at its end rather than
+            # finish.
+            self._list_cut_short = True
+            log.info("%d of Golden 1's account histories would not open, so the list was "
+                     "not read whole", docs.passed_over)
+            print("\n  Golden 1's statement list was not read whole, since an account's")
+            print("  Statement History would not open. What was read is kept, and this run")
+            print("  stops at its end rather than finish. The next run reads the list again.")
+            self.write_failure("read the statement list", "some of the list could not be opened",
+                               extra={"panels_passed_over": docs.passed_over})
         self._listed_keys = set()
         self._carried = []
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
-        self._retire_unlisted(docs)
+        # A list read in part is not the vendor's whole list, so nothing is
+        # set aside for not being on it. An account it passed over keeps the
+        # statements an earlier run listed (review).
+        if not self._list_cut_short:
+            self._retire_unlisted(docs)
         # Progress first, since it is the one that says a statement is done.
         # A run stopped before discovery is saved finishes the move next time.
         if self._carried:
@@ -609,13 +634,17 @@ class App:
         log.info("documents page: %d documents, %d new", len(docs), n_new)
 
         # The whole list is in, and only now may a Resume that carries on
-        # from it call the run finished (paperpull_core.listing).
-        listing.read_whole(self)
+        # from it call the run finished (paperpull_core.listing). A list read
+        # in part is not, and the listing stays one that stopped.
+        if not self._list_cut_short:
+            listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
-            print(f"\nDiscovery complete. Documents known: {len(docs)}")
+            print("\nDiscovery %s. Documents known: %d"
+                  % ("read part of the statement list" if self._list_cut_short else "complete",
+                     len(docs)))
             by_cat = {}
             for d in docs:
                 by_cat.setdefault(d.category, []).append(d)
@@ -641,7 +670,20 @@ class App:
                 print(f"  {len(self._carried)} statement(s) now carry their account's new name, "
                       f"{saved} of them already saved. Those are not downloaded again. "
                       f"Rename gives the saved files the new name.")
+        if finish:
+            self._stop_if_cut_short()
         return n_new
+
+    def _stop_if_cut_short(self) -> None:
+        """A run that did not read the whole statement list did not finish,
+        and must not read as a clean one. Once it has used what came, it
+        leaves on SystemExit the way a run leaves on a sign-out, which the
+        panel reports as a run that stopped."""
+        if self._list_cut_short:
+            print("\nNot all of Golden 1's statement list was read, so this run stops here")
+            print("rather than finish. Everything it saved is kept. Run it again later to")
+            print("read the rest.")
+            raise SystemExit(0)
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -900,14 +942,16 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.\n")
-        self.cmd_discover()
+        self.cmd_discover(finish=False)
         docs = self._select(limit=self.config.get("pilot_count", 5))
         if not docs:
             print("\nNo documents in scope to pilot. Run --diagnose.")
+            self._stop_if_cut_short()
             return
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
         self._pilot_report(docs)
+        self._stop_if_cut_short()
 
     def _pilot_report(self, docs: List[Document]):
         print("\n" + "=" * 70)
@@ -947,10 +991,11 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover()
+        self.cmd_discover(finish=False)
         docs = self._select()
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
