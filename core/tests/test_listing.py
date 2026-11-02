@@ -281,6 +281,26 @@ def test_a_list_read_again_that_stops_says_only_a_listing_can(tmp_path, capsys, 
     assert "Resume carries on" not in said
 
 
+def test_a_list_read_again_that_stops_after_the_app_said_why_says_only_what_to_run(
+        tmp_path, capsys):
+    """PayPal, Bank of America and NetBenefits say in their own lines why
+    their list did not come, so the stop adds only what to run."""
+    app = _app(tmp_path, known=["one"])
+    app.args = SimpleNamespace()
+    app.progress = SimpleNamespace(save=lambda **kw: None)
+    listing.started(app)
+    listing.read_whole(app)
+    with pytest.raises(listing.ListNotRead) as stop:
+        listing.read_again_stopped(app)
+    assert stop.value.whole_run == "Pilot or Run All"
+    assert listing.last(app) == listing.STOPPED
+    said = capsys.readouterr().out
+    assert "!!" not in said
+    assert " ".join(said.split()) == ("Everything saved so far is kept. Look at the browser "
+                                      "window, then run Pilot or Run All, either of which "
+                                      "reads the list first.")
+
+
 def test_any_other_stop_is_still_continued(capsys):
     """A sign-in or a page that would not open leaves on a SystemExit of its
     own, and Resume carries on from there as it always did."""

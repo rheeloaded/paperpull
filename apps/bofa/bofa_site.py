@@ -198,6 +198,19 @@ class ListCut(RuntimeError):
     counts only."""
 
 
+class ListUnread(RuntimeError):
+    """The list, learned or posted again for one statement, raised `stop`,
+    a NotLearned or a ListCut. Every statement after it reads the same
+    list, so the run stops as one whose list did not end whole. One
+    statement's own PDF that could not be asked for raises NotLearned or
+    ListCut as it is. The message, `facts` and `reason` are the stop's."""
+
+    def __init__(self, stop):
+        super().__init__(str(stop))
+        self.facts = dict(getattr(stop, "facts", None) or {})
+        self.reason = getattr(stop, "reason", "")
+
+
 def is_safe_url(url: str) -> bool:
     """True only for an https URL on one of this provider's own hosts.
 
@@ -1662,14 +1675,21 @@ def document_bytes(page, *, account_ref: str, date: str, document_id: str,
     """One statement's PDF, asked for at its own row's address in the form
     the page's links came out of, and the day in the file name the bank
     gave it ("" when it gave none). (None, "") when its row is no longer
-    listed. Raises NotThere, SessionExpired or NotLearned."""
-    call = learned(page, form=True)
+    listed. Raises NotThere or SessionExpired, ListUnread for the list read
+    again, and NotLearned or ListCut for this statement's own PDF."""
+    try:
+        call = learned(page, form=True)
+    except (NotLearned, ListCut) as e:
+        raise ListUnread(e) from e
     if call.template is None and call.pdf is None:
         why, reason = not_learned_why(call.facts)
         raise NotLearned(why, call.facts, reason)
     if not (account_ref and document_id and date):
         return None, ""
-    row = fresh_row(page, call, account_ref, year or date[:4], document_id)
+    try:
+        row = fresh_row(page, call, account_ref, year or date[:4], document_id)
+    except ListCut as e:
+        raise ListUnread(e) from e
     if row is None or row_date(row) != date:
         return None, ""
     if call.template is None:

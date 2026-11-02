@@ -39,8 +39,12 @@ plan, one account's one year) and not the list every later document reads.
 A change to the functions that try calls directly fails this until it is
 looked at again. A call added further down is not seen.
 
-A list stop (ListStopped or a class built on it) that a handler turns into
-a stop of the run has to leave the list unread too. Simmons, Bilt, First
+A list stop (ListStopped or a class built on it, or a class of an app's own
+named in LIST_STOPS) that a handler turns into a stop of the run has to
+leave the list unread too. Every stop class is named a list stop or not,
+so a new one is looked at. PayPal, Bank of America and NetBenefits stopped
+on lists of their own that no class named ListStopped marks, and left on a
+plain SystemExit. Simmons, Bilt, First
 Horizon and Coinbase's card statements made one into a pressing.Stop, which
 pressing.stop_run ended with a plain SystemExit, so the panel offered
 Continue and Continue stopped at the same list again. So every way out of
@@ -53,8 +57,9 @@ after the document's own control was pressed is about that press, not the
 list, and is named below with why.
 
 Three checks read the code. A fourth drives each app's own loop with a
-download that raises each stop its path can let out, and the run has to
-stop at the first document with nothing recorded against either. A fifth
+download that raises each stop its path can let out or its loop names, and
+the run has to stop at the first document with nothing recorded against
+either, leaving the list unread for a list stop and only then. A fifth
 drives each app's main with a download that raises each stop a list stop is
 made into, and the run has to leave the list unread.
 
@@ -67,7 +72,11 @@ from its list reader before a rule can hold it. They are listed in the
 branch notes, not here. Nor does it read a stop swallowed by
 contextlib.suppress, an except whose classes are kept in a name, a handler
 inside a match, or a return inside a finally. None is in a download path
-today.
+today. A stop raised by a name (PayPal's raise why) is followed only to
+the loop that names it. A class is a list stop or not, so a class raised
+both for the list and for one document has to be split first, as Bank
+of America's ListUnread was, and a class built on one named here is
+named with it.
 """
 import ast
 import builtins
@@ -162,6 +171,62 @@ AT_A_PRESS = {
         "the page a document's print control left behind, which may be the payment site",
 }
 
+# Every stop is a list stop or not, and each app's stops are named here so a
+# new one is looked at. ListStopped and the classes built on it are list
+# stops. These are too, by (app, class), with why. A list stop leaves the
+# list unread (ListNotRead), since a Resume reads no list of its own and its
+# first document would read the same list again (#124).
+LIST_STOPS = {
+    ("paypal", "ReportsUnread"):
+        "the business statements list, read again for each business statement, that "
+        "never came",
+    ("paypal", "SentElsewhere"):
+        "the statements page the list is read from, which sent the tab to another of "
+        "PayPal's pages, as loading it again would",
+    ("bofa", "ListUnread"):
+        "the page's own list call learned again, or the list posted again, for one "
+        "statement, that did not answer the way this app knows",
+    ("netbenefits", "PlanListUnavailable"):
+        "the plan list, read again for a document whose plan this run has not listed, "
+        "that did not show. A list that shows without the document's plan is that "
+        "document's review",
+    ("coinbase", "CardListUnread"):
+        "the card statements list Discover could not read whole. No download reads it",
+}
+
+# The stops that are not a list, by class for every app or by (app, class),
+# and why. Continue carries on from them once the person has done what the
+# stop asked, or they are one document's.
+NOT_A_LIST = {
+    "SessionExpired": "a sign-in or a check, which the person answers before Continue",
+    "OtpRequired": "a code only the account holder answers, before Continue",
+    "DeadlineReached": "the run's own time at the site, which the next run starts again",
+    ("alpaca", "NotLive"):
+        "the Paper account or another page than the documents page, which the account "
+        "holder changes",
+    ("treasurydirect", "NotLive"):
+        "a tab that is not a signed-in page with its top tabs, which the account holder "
+        "changes",
+    ("bofa", "NotThere"):
+        "a tab that left Statements & Documents, which the person opens again",
+    ("bofa", "NotLearned"):
+        "in a download, one statement's own address or the page's PDF form, which no "
+        "list read again changes. The list read again raises ListUnread",
+    ("bofa", "ListCut"):
+        "in a download, one statement's own PDF the page could not ask for. The list "
+        "read again raises ListUnread",
+    ("fedex", "NeedsPerson"):
+        "something only the account holder may do, connecting Billing Online among them",
+    ("venmo", "ProfileChanged"):
+        "another Venmo profile signed in than the one listed, which the person changes "
+        "back",
+    ("netbenefits", "PlanDidNotOpen"):
+        "one plan that opened earlier would not open again, that plan's documents alone",
+    ("usbank", "RowUnread"):
+        "a part of one account's one year, read for one statement, which may be that "
+        "statement or its twin (#106). The whole list is Discover's",
+}
+
 
 def entry_of(app: Path):
     found = sorted(app.glob("*_docs.py"))
@@ -242,7 +307,8 @@ class App:
         self.bases = {name: [b.id for b in c.bases if isinstance(b, ast.Name)]
                       for name, c in self.classes.items()}
         self.stops = self._stops()
-        self.list_stops = {c for c in self.stops if "ListStopped" in self.ancestors(c)}
+        self.list_stops = {c for c in self.stops if any(
+            a == "ListStopped" or (self.name, a) in LIST_STOPS for a in self.ancestors(c))}
         self.stoppers = self._stoppers()
         self.list_stoppers = self._list_stoppers()
         self._escapes = {}
@@ -534,6 +600,16 @@ class App:
         # it is more than one document's failure, so it is read for what it
         # names whether or not the reading above follows the stop that far.
         seen = {id(entry[0]): entry for entry in out}
+        for name, node, h, named in self.loop_handlers():
+            if named and id(h) in seen:
+                seen[id(h)][2] = sorted(set(seen[id(h)][2]) | set(named))
+            elif named:
+                out.append([h, name, named, self.try_calls(node, "docs")])
+        return [tuple(entry) for entry in out]
+
+    def loop_handlers(self):
+        """Each handler of a try around download_one in the loop, as (loop,
+        the try, the handler, the stops it names)."""
         for name in self.loops():
             for node in own_nodes(self.methods[name]):
                 if not isinstance(node, ast.Try) or not any(
@@ -543,11 +619,13 @@ class App:
                     named = sorted({site_attr(t) for t in (
                         h.type.elts if isinstance(h.type, ast.Tuple) else [h.type])}
                         & self.stops) if h.type is not None else []
-                    if named and id(h) in seen:
-                        seen[id(h)][2] = sorted(set(seen[id(h)][2]) | set(named))
-                    elif named:
-                        out.append([h, name, named, self.try_calls(node, "docs")])
-        return [tuple(entry) for entry in out]
+                    yield name, node, h, named
+
+    def driven(self) -> set:
+        """The stops to drive the loop with, those download_one can let out
+        and those a handler of the loop names. The reading cannot follow a
+        stop raised by a name (PayPal's `raise why`), and the loop names it."""
+        return self.let_out() | {n for *_rest, named in self.loop_handlers() for n in named}
 
     def swallowed(self) -> list:
         """Each handler that catches a stop and does not leave, as
@@ -635,6 +713,28 @@ def test_each_handler_named_at_a_press_is_still_there(read):
     assert not set(AT_A_PRESS) - seen, sorted(set(AT_A_PRESS) - seen)
 
 
+def named_a_list_or_not(app: App, stop: str) -> bool:
+    return any(a == "ListStopped" or (app.name, a) in LIST_STOPS
+               or a in NOT_A_LIST or (app.name, a) in NOT_A_LIST for a in app.ancestors(stop))
+
+
+@pytest.mark.parametrize("app", IDS)
+def test_every_stop_is_named_a_list_or_not(read, app):
+    """PayPal, Bank of America and NetBenefits each stop on a list of their
+    own that no class named ListStopped marks, and their loops left on a
+    plain SystemExit. A stop class nobody has looked at fails here."""
+    assert not [s for s in sorted(read[app].stops) if not named_a_list_or_not(read[app], s)]
+
+
+def test_each_named_stop_is_still_a_stop(read):
+    """A name kept after its class has gone would let a new one through."""
+    gone = [k for k in list(LIST_STOPS) + list(NOT_A_LIST)
+            if (isinstance(k, tuple) and k[1] not in read[k[0]].stops)
+            or (isinstance(k, str) and not any(k in a.stops for a in read.values()))]
+    assert not gone, gone
+    assert not set(LIST_STOPS) & set(NOT_A_LIST)
+
+
 def test_the_list_stops_made_into_stops_of_the_run_are_read(read):
     """Not vacuous. The handlers that make a list stop into a pressing.Stop
     are read as ones that caught a list stop, and the function each raises
@@ -714,14 +814,16 @@ def a_stop(cls):
         return cls()
 
 
-LET_OUT = sorted((d.name, stop) for d in APPS for stop in sorted(App(d).let_out()))
+DRIVEN = sorted((d.name, stop) for d in APPS for stop in sorted(App(d).driven()))
 
 
 def test_there_are_stops_to_drive():
-    assert len(LET_OUT) >= 12, LET_OUT
+    assert len(DRIVEN) >= 12, DRIVEN
+    assert {("paypal", "ReportsUnread"), ("bofa", "ListUnread"), ("bofa", "NotLearned"),
+            ("netbenefits", "PlanListUnavailable")} <= set(DRIVEN)
 
 
-@pytest.mark.parametrize("name,stop", LET_OUT, ids=["%s-%s" % p for p in LET_OUT])
+@pytest.mark.parametrize("name,stop", DRIVEN, ids=["%s-%s" % p for p in DRIVEN])
 def test_a_stop_out_of_a_download_stops_the_loop_at_once(name, stop, tmp_path, monkeypatch):
     mod, app = built(REPO / "apps" / name, tmp_path)
     taken = []
@@ -741,12 +843,15 @@ def test_a_stop_out_of_a_download_stops_the_loop_at_once(name, stop, tmp_path, m
     assert taken == [docs[0].key], "%s went on past a %s" % (name, stop)
     assert app.stats.get("manual_review", 0) + app.stats.get("failed", 0) == 0
     assert not any(app.progress.get(d.key) for d in docs)
-    if stop == "ListStopped" or "ListStopped" in App(REPO / "apps" / name).ancestors(stop):
+    if stop in App(REPO / "apps" / name).list_stops:
         # A list that stopped leaves the listing noted as one that did not
         # end whole, and the run leaves on ListNotRead, so the panel offers
         # a run that lists, not Continue, which would stop here again.
         assert listing.last(app) == listing.STOPPED
         assert isinstance(end.value, ListNotRead), type(end.value)
+    else:
+        # A sign-in or another stop the person answers is continued from.
+        assert not isinstance(end.value, ListNotRead), type(end.value)
 
 
 MADE_INTO = sorted((d.name, helper) for d in APPS for helper in sorted(App(d).made_into()))

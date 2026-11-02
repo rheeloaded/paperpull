@@ -689,6 +689,31 @@ def test_a_statement_the_page_could_not_ask_for_stops_the_run():
                             document_id="DOC000000000101", year="2026")
 
 
+def test_a_list_that_fails_while_a_statement_is_sought_is_the_list_unread():
+    """The list posted again for one statement failed, and every statement
+    after it reads the same list, so the run leaves as one whose list did
+    not end whole. One statement's own PDF that could not be asked for
+    stays ListCut, above."""
+    page = sb.Bank()
+    page.list_raises = RuntimeError("TypeError: Failed to fetch")
+    with pytest.raises(site.ListUnread) as stop:
+        site.document_bytes(page, account_ref="K-ALPHA-0001", date="2026-01-15",
+                            document_id="DOC000000000101", year="2026")
+    assert str(stop.value) == "a list call failed in the page (RuntimeError)"
+    assert not page.pdfs
+
+
+def test_a_list_call_learned_again_that_does_not_fit_is_the_list_unread():
+    page = sb.Bank()
+    keyless = {k: v for k, v in sb.ACCOUNTS[1].items() if k != sb.KEY}
+    page.listed = sb.answer(sb.STATEMENTS[("K-ALPHA-0001", "2026")], accounts=[sb.ACCOUNTS[0], keyless])
+    with pytest.raises(site.ListUnread) as stop:
+        site.document_bytes(page, account_ref="K-ALPHA-0001", date="2026-01-15",
+                            document_id="DOC000000000101", year="2026")
+    assert str(stop.value) == "an account in the list has no key this app can read"
+    assert not page.pdfs
+
+
 def test_a_form_on_another_host_than_the_pages_own_links_is_never_asked():
     page = sb.Bank()
     call = site.learn(page)

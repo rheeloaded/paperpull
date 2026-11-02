@@ -65,6 +65,8 @@ PLAN_FIELDS = ("plan", "covers", "text_sha256", "held", "employer")
 # The note on a statement held in Manual Review until a later statement
 # can tell whether it names its plan (App._hold).
 HELD = "held until a later statement can tell its plan"
+# What App._plan_for answers for a plan the plan list no longer holds.
+PLAN_GONE = object()
 
 
 def _folded(text) -> str:
@@ -457,15 +459,26 @@ class App:
         self._plans_by_digest = {p["digest"]: p for p in plans}
         return plans
 
-    def _say_plans_unlisted(self, unclear: bool = False) -> None:
+    def _say_plans_unlisted(self, unclear: bool = False, downloading: bool = False) -> None:
+        """Why the plans could not be listed. While `downloading`, the
+        documents saved so far are kept, and what to run next is said by the
+        stop that follows (listing.read_again_stopped)."""
         self.stats["plans_unlisted"] = 1
         if unclear:
             print("\n!! NetBenefits' Choose a Plan page shows one plan, and other links that")
             print("   name a plan too, so this app cannot tell whether this login has one")
+            if downloading:
+                print("   plan or several. Please report it on this provider's issue, so the")
+                print("   app can learn that page.")
+                return
             print("   plan or several. Nothing was listed and nothing was downloaded. Please")
             print("   report it on this provider's issue, so the app can learn that page.")
             return
         print("\n!! This NetBenefits login has several plans, and the site did not")
+        if downloading:
+            print("   show their list this time. Log out of NetBenefits in the open browser")
+            print("   and sign in again.")
+            return
         print("   show their list this time. Log out of NetBenefits in the open browser,")
         print("   sign in again, then run Discover, then Resume.")
 
@@ -574,18 +587,19 @@ class App:
         print("  Listed before this login had several plans, so its plan is not known.")
         print("  Not made. Left for review, and Discover lists each plan's own.")
 
-    def _plan_for(self, page, doc: "Document") -> Optional[dict]:
-        """The plan a document belongs to, or None for a login with one.
-        Looked up again when this run has not listed the plans yet, as a
-        Resume has not."""
+    def _plan_for(self, page, doc: "Document"):
+        """The plan a document belongs to, None for a login with one, or
+        PLAN_GONE for a plan the list no longer holds. Looked up again when
+        this run has not listed the plans yet, as a Resume has not. A list
+        that does not show raises PlanListUnavailable, which stops the run.
+        A list that shows without the document's plan is that document's
+        own matter, as a record gone is, since Discover keeps the record and
+        a stop there would stop every later run at it."""
         if not doc.plan:
             return None
         if doc.plan not in self._plans_by_digest:
             self._plan_list(page)
-        plan = self._plans_by_digest.get(doc.plan)
-        if plan is None:
-            raise site.PlanListUnavailable("a document's plan is not on the list")
-        return plan
+        return self._plans_by_digest.get(doc.plan, PLAN_GONE)
 
     def cmd_discover(self, quiet: bool = False) -> int:
         # A listing that stops on the way, however it stops, is noted as one
@@ -763,13 +777,14 @@ class App:
                 raise SystemExit(0)
             except site.PlanListUnavailable as e:
                 # Every document after this one belongs to a plan that cannot
-                # be opened either, so none is marked failed. They wait.
-                self._say_plans_unlisted(unclear=isinstance(e, site.PlanListUnclear))
-                print("Stopped. Everything downloaded so far is saved.")
-                # Left with the stop in flight, which is what the core
-                # reports as a run that stopped. A return here finished
-                # the run clean, with documents still to download.
-                raise SystemExit(0)
+                # be opened either, so none is marked failed. They wait. A
+                # Resume reads no list of its own, so it would read the same
+                # plan list for its first document and stop again (#124), and
+                # the run stops as one whose list did not end whole, which
+                # only a run that lists carries on from.
+                self._say_plans_unlisted(unclear=isinstance(e, site.PlanListUnclear),
+                                         downloading=True)
+                listing.read_again_stopped(self)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -801,13 +816,22 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
+        plan = self._plan_for(page, doc)
+        if plan is PLAN_GONE:
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="Its plan is not on the plan list NetBenefits shows now")
+            self._write_row(doc, "Plan not listed", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print("  This document's plan is not on the list of plans NetBenefits shows")
+            print("  now, so nothing was made for it. It is marked for manual review.")
+            return
         try:
             saved = site.download_document(page, doc.title, doc.date, out_path,
                                            item_hint=doc.item_id,
                                            client_hint=doc.client_id,
                                            occurrence=doc.occurrence,
                                            account=doc.account,
-                                           plan=self._plan_for(page, doc))
+                                           plan=plan)
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as "manual review" and finish looking successful while

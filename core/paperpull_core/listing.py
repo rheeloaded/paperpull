@@ -246,9 +246,10 @@ def resume(app, remaining, process, noun: str = "documents") -> None:
     after_resume(app)
 
 
-def read_again_stopped(app, said: str) -> None:
+def read_again_stopped(app, said: str = "") -> None:
     """Stop a run whose list, read again while it took the documents, could
     not be read. `said` is the app's own first line, which names the list.
+    An app that has said its own lines already passes none.
 
     Many apps read their list again for each document and take it only when
     the list still holds it once. When that list stops, every document after
@@ -263,8 +264,9 @@ def read_again_stopped(app, said: str) -> None:
         app.progress.save(backup=True)
     except Exception:
         pass
-    print()
-    print("!! " + said)
+    if said:
+        print()
+        print("!! " + said)
     raise say_unread(app)
 
 

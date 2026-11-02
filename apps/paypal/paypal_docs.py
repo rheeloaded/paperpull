@@ -716,15 +716,18 @@ class App:
                 print("Stopped. Everything downloaded so far is saved.")
                 raise SystemExit(0)
             except (site.ReportsUnread, site.SentElsewhere) as e:
-                # The business statements list did not come, so none of the
-                # rest can be found either. Said once, and a stop.
+                # The statements list, read again for this statement, did not
+                # come, so none of the rest can be found either. Said once,
+                # and the run stops as one whose list did not end whole. A
+                # Resume reads no list of its own, so it would read the same
+                # list for its first statement and stop again (#124), and only
+                # a run that lists carries on (listing.read_again_stopped).
+                self.write_failure("read the statements list", "the list never arrived")
                 if isinstance(e, site.ReportsUnread):
                     self._say_reports_unread(e)
                 else:
                     self._say_sent_elsewhere(e)
-                self.write_failure("read the statements list", "the list never arrived")
-                print("Stopped. Everything downloaded so far is saved.")
-                raise SystemExit(0)
+                listing.read_again_stopped(self)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))

@@ -23,8 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import storage  # noqa: F401  (binds this provider's AppSpec)
 import netbenefits_site as site
 import netbenefits_docs as docs
-from paperpull_core import intake, receipt_pdf
+from paperpull_core import intake, listing, receipt_pdf
 from paperpull_core.models import State
+from paperpull_core.run_reporting import ListNotRead
 from paperpull_core.testkit import receipt_app, text_pdf
 
 BARE = site.URLS["documents"]
@@ -626,10 +627,36 @@ def test_a_plan_missing_from_the_list_stops_the_run_and_fails_nothing(monkeypatc
     (tmp_path / "out" / "plans.json").unlink()
     page.links = None
     app = app_on(tmp_path, page)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as stop:
         app.process(app._select())
     assert app.stats["plans_unlisted"] == 1 and app.stats["failed"] == 0
     assert not app.progress.data
+    # A Resume would read the same plan list for its first document, so
+    # the run leaves as one whose list did not end whole (#124).
+    assert isinstance(stop.value, ListNotRead)
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_a_plan_the_list_no_longer_shows_is_that_documents_review(monkeypatch, tmp_path):
+    """The site listed its plans whole, without one a document was listed
+    under. That is the document's own matter, as a record gone is. A stop
+    here stopped every later run at the same document, a Run All too,
+    since Discover keeps the document's record."""
+    page = multi_page()
+    monkeypatch.setattr(site, "make_statement", statements_by_plan(page, []))
+    monkeypatch.setattr(receipt_pdf, "print_html_to_pdf", render_text)
+    app_on(tmp_path, page).cmd_discover(quiet=True)
+    gone_plan = plans_of(page)[PXR]["digest"]
+    page.links = chooser_links(P457, P403, PDCP)
+    site._plan_in_use["plan"] = None
+    app = app_on(tmp_path, page)
+    listed = app._select()
+    gone = [d for d in listed if d.plan == gone_plan]
+    assert len(gone) == 1 and len(listed) == 3
+    app.process(listed)
+    assert app.stats["manual_review"] == 1 and app.stats["failed"] == 0
+    assert app.stats["statements"] == 2
+    assert app.progress.data[gone[0].key]["state"] == State.NEEDS_MANUAL_REVIEW.value
 
 
 def test_a_statements_address_that_redirects_is_not_loaded():
