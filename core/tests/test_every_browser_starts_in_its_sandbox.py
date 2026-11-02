@@ -117,6 +117,17 @@ NAMED = {
     ("tools/pytest_plugins/core_part.py", "Playwright launch_persistent_context by name"),
 }
 
+# A browser started with less than its whole sandbox on purpose, by (file,
+# what the census finds), with why, each read by hand. None runs where a
+# provider's page is opened.
+ON_PURPOSE = {
+    ("server/smoke.py", "switch --disable-namespace-sandbox"):
+        "the image check's own Chrome, run inside the built container as pp with "
+        "namespaces turned off so the setuid helper is its only first layer, as on a "
+        "kernel without user namespaces. It proves that layer and seccomp-bpf still "
+        "hold, reads only its own blank page, and never runs in an install",
+}
+
 
 SOURCES = sources()
 
@@ -135,7 +146,7 @@ def test_the_census_reads_every_app_and_the_core():
 def _found(path):
     rel = path.relative_to(REPO).as_posix()
     found = unsandboxed(path.read_text(encoding="utf-8-sig"), rel)
-    return [f for f in found if (rel, f[1]) not in NAMED]
+    return [f for f in found if (rel, f[1]) not in NAMED and (rel, f[1]) not in ON_PURPOSE]
 
 
 def test_every_launch_named_where_nothing_starts_is_still_there():
@@ -143,6 +154,15 @@ def test_every_launch_named_where_nothing_starts_is_still_there():
     for rel, what in NAMED:
         assert what in [w for _l, w in unsandboxed((REPO / rel).read_text(encoding="utf-8-sig"),
                                                    rel)], (rel, what)
+
+
+def test_every_start_with_less_than_its_sandbox_on_purpose_is_still_there():
+    """So the list of starts made on purpose cannot hide one that moved, and
+    each says why."""
+    for (rel, what), why in ON_PURPOSE.items():
+        assert what in [w for _l, w in unsandboxed((REPO / rel).read_text(encoding="utf-8-sig"),
+                                                   rel)], (rel, what)
+        assert len(why.split()) >= 12, (rel, what)
 
 
 @pytest.mark.parametrize("path", SOURCES, ids=lambda p: p.relative_to(REPO).as_posix())
