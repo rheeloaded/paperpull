@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Seventy-one providers are supported today, all built on the same pattern.
+Seventy-two providers are supported today, all built on the same pattern.
 Seven more, SBA, Verizon Mobile,
 Meijer, American Family, Stripe, FedEx and Bank of America, are built and waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -865,7 +865,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **seventy-eight** apps pass their tests, the seventy-one that are
+- ✅ All **seventy-nine** apps pass their tests, the seventy-two that are
   supported and the seven still waiting for a tester, 31,563 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
