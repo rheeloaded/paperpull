@@ -23,6 +23,7 @@ And that the core's tests, run as three suites from one folder, run each
 file in exactly one of them, the canary in core, and that a core-censuses
 or a core-browsers that collects nothing fails.
 """
+import dataclasses
 import fnmatch
 import functools
 import importlib.util
@@ -37,6 +38,7 @@ import sys
 import textwrap
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -192,6 +194,94 @@ def test_each_failure_is_printed_once(walked):
     assert [re.sub(r".*::", "", h) for h in heads] == [
         "test_the_walk", "test_a_parse", "test_a_cause", "test_two_cleanups",
         "test_passes_when_it_should_not"], heads
+
+
+# The summary's name for a test, written down by the plugin for each failure,
+# comes from pytest's cwd_relative_nodeid, whose form changed in 9.2.0
+# (2026-10-27). The tests above ask whichever pytest runs them, the one
+# .github/workflows/tests.yml pins on CI and the one gui/.venv holds here.
+# These ask the plugin of a pytest of each form, so both stay read whichever
+# one is installed.
+
+def _where_plugin():
+    spec = importlib.util.spec_from_file_location("where_it_failed_under_test",
+                                                  rat.PLUGINS / "where_it_failed.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _from_the_suite(path: str) -> str:
+    """A path from the checkout's root made relative to apps/fake, where the
+    suite runs, as bestrelpath makes it, with the system's separator."""
+    return os.path.join(*Path(path).relative_to("apps/fake").parts)
+
+
+class _Config_9_1:
+    """cwd_relative_nodeid as pytest 9.1.1 has it, a string in, a string out."""
+
+    def cwd_relative_nodeid(self, nodeid):
+        base_path_part, *nodeid_part = nodeid.split("::")
+        return "::".join([_from_the_suite(base_path_part), *nodeid_part])
+
+
+@dataclasses.dataclass(frozen=True)
+class _NodeId:
+    """pytest 9.2.0's structured node id, as much of it as the summary uses."""
+    path: str
+    names: tuple = ()
+
+    def __str__(self):
+        return "::".join((self.path, *self.names))
+
+
+class _Config_9_2:
+    """cwd_relative_nodeid as pytest 9.2.0 has it, a structured id in and out.
+    A string has no path, so it raises, as the real one does."""
+
+    def cwd_relative_nodeid(self, nodeid):
+        return dataclasses.replace(nodeid, path=_from_the_suite(nodeid.path))
+
+
+def _report(nodeid: str, structured: bool):
+    """A report as pytest hands it to the plugin. A 9.2.0 report carries its
+    id in both forms, a 9.1.1 report only the string."""
+    if not structured:
+        return SimpleNamespace(nodeid=nodeid)
+    path, *names = nodeid.split("::")
+    return SimpleNamespace(nodeid=nodeid, id=_NodeId(path=path, names=tuple(names)))
+
+
+@pytest.mark.parametrize("config, structured", [(_Config_9_1(), False), (_Config_9_2(), True)],
+                         ids=["pytest 9.1.1", "pytest 9.2.0"])
+@pytest.mark.parametrize("nodeid, summarized", [
+    ("apps/fake/tests/test_walk.py::test_the_walk", ("tests", "test_walk.py::test_the_walk")),
+    ("apps/fake/tests/test_walk.py::TestWalk::test_it[a - b]",
+     ("tests", "test_walk.py::TestWalk::test_it[a - b]")),
+    ("apps/fake/tests/test_walk.py", ("tests", "test_walk.py")),
+], ids=["a test", "a method with a param id", "a module that did not collect"])
+def test_the_plugin_names_a_failure_as_the_summary_does(config, structured, nodeid, summarized):
+    """Each form of pytest gives the name its summary line prints, relative
+    to the suite's folder, so the runner knows that line for one it already
+    printed."""
+    plugin = _where_plugin()
+    got = plugin._as_summarized(SimpleNamespace(config=config), _report(nodeid, structured))
+    assert got == os.path.join(*summarized)
+    assert isinstance(got, str)
+
+
+def test_a_pytest_that_cannot_say_leaves_the_failure_named_from_the_root():
+    """The plugin must never fail a run. When neither form is taken, the
+    failure keeps the name pytest reports it by."""
+    class Refuses:
+        def cwd_relative_nodeid(self, nodeid):
+            raise TypeError("neither")
+
+    plugin = _where_plugin()
+    for structured in (False, True):
+        report = _report("apps/fake/tests/test_walk.py::test_the_walk", structured)
+        assert plugin._as_summarized(SimpleNamespace(config=Refuses()), report) == \
+            "apps/fake/tests/test_walk.py::test_the_walk"
 
 
 def test_nothing_printed_names_a_folder_of_the_machine(walked):
