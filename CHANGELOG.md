@@ -11,6 +11,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ### Added
 
+- **Portland General Electric, the 79th app, monthly bills (#125).** It
+  downloads each month's Detailed Bill PDF from portlandgeneral.com,
+  about three years of them. Nothing is clicked. The app opens Billing &
+  Payment History by its address and reads the list from the page's own
+  answers, asking for the later pages with the page's own query and
+  headers, which stay in memory for the run and are never written down. A
+  list that stops partway, a row of a type it does not know or a page for
+  another account stops the list rather than be read as whole. A bill is
+  known by the account's last four digits and its date, and a bill listed
+  under another account than the one the site shows stops the run once
+  and names the account to choose. Contributed by crazyhorse90210 and run
+  on the contributor's own account. Before merging, a prompt beside the
+  Two-Step banner was made to stop a run again, and a bill of another
+  account was made to stop the run once rather than read the whole list
+  again for each bill.
 - **Login and the control panel say when two accounts beside each other
   name one debugging port.** A sign-in on a port a browser already holds
   joins that browser, so two configs on one port sign in to one browser,
