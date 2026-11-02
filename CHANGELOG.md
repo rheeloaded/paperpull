@@ -65,8 +65,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   The new app's config.json was its example, port included, so the two
   attached to one browser and each signed in to the other's profile. A new
   install now moves up to the first port no install or person beside it
-  uses, and Import history sets providers up the same way. So does an update that brings a port to an
-  install that had none, a Target install from before 0.34.0 among them.
+  uses, and Import history sets providers up the same way. So does an
+  update that brings a port to an install that had none, a Target install
+  from before 0.34.0 among them.
   An app and a person that already share a port are left as they are, and
   changing one's cdp_url to a free port keeps them apart.
 - **Invest529 is set up on a port of its own.** It shipped on 9298, the
@@ -136,7 +137,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a set of compromised eMudhra intermediate CA keys, CVE-2026-115557
   (Critical). 3.12.15 and 3.12.16 also fix holes in tarfile
   (CVE-2026-82049 and CVE-2026-114583), tempfile (CVE-2026-12345),
-  http.cookiejar and urllib's password manager (CVE-2026-15806), and take
+  urllib's password manager (CVE-2026-15806) and http.cookiejar, and take
   libexpat 2.9.0. The browsers the apps open, and the requests made
   through them, use their own TLS and not Python's. Every other package
   in both packages stays at the version it was, and the Windows package
