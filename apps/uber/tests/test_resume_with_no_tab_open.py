@@ -299,7 +299,7 @@ def attached(browser_exe, server, tmp_path_factory):
 
 def tabs(cdp_url):
     """Every tab the browser has, as its own debugging port lists them."""
-    with urllib.request.urlopen(cdp_url + "/json/list", timeout=10) as r:
+    with browser_launcher.open_local(cdp_url + "/json/list", timeout=10) as r:
         return [t for t in json.loads(r.read()) if t.get("type") == "page"]
 
 
@@ -310,13 +310,13 @@ def on_the_sites(cdp_url):
 
 
 def close_tab(cdp_url, tab_id):
-    urllib.request.urlopen("%s/json/close/%s" % (cdp_url, tab_id), timeout=10).read()
+    browser_launcher.open_local("%s/json/close/%s" % (cdp_url, tab_id), timeout=10).read()
 
 
 def open_their_tab(cdp_url, address, title):
     """A tab the person signed in with at home, opened by the browser
     itself the way login.bat's is, once it has drawn its page. Its id."""
-    made = json.loads(urllib.request.urlopen(urllib.request.Request(
+    made = json.loads(browser_launcher.open_local(urllib.request.Request(
         cdp_url + "/json/new?" + address, method="PUT"), timeout=15).read())
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:

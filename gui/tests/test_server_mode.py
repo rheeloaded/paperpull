@@ -92,7 +92,9 @@ def ask(url, method="GET", form=None, headers=None, session=None, body=None, tim
     if session:
         req.add_header("Cookie", "%s=%s" % (server_mode.SESSION_COOKIE, session))
     try:
-        with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as r:
+        # No proxy, the panel is on this computer.
+        opener = urllib.request.build_opener(NoRedirect, urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=timeout) as r:
             return r.status, r.headers, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.headers, e.read().decode("utf-8", "replace")

@@ -18,7 +18,6 @@ this machine.
 """
 import json
 import time
-import urllib.request
 from http.server import BaseHTTPRequestHandler
 
 import pytest
@@ -64,7 +63,7 @@ def listed(url):
     tab still loading before it lists it, once for three minutes."""
     deadline = time.monotonic() + 1
     while True:
-        with urllib.request.urlopen(url + "/json/list", timeout=10) as r:
+        with browser_launcher.open_local(url + "/json/list", timeout=10) as r:
             tabs = [(t.get("url"), t.get("title")) for t in json.loads(r.read().decode("utf-8"))
                     if t.get("type") == "page"]
         if any(title == READY for _, title in tabs) or time.monotonic() > deadline:

@@ -825,13 +825,12 @@ def debug_port_holder(port: str, timeout: float = 1.5) -> Optional[str]:
     name it gives itself ("Chrome/141.0.7390.54"), or None when nothing
     does."""
     import json
-    import urllib.request
     try:
         url = "http://127.0.0.1:%d/json/version" % int(port)
     except (TypeError, ValueError):
         return None
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
+        with open_local(url, timeout=timeout) as r:
             info = json.loads(r.read().decode("utf-8", "replace"))
     except (OSError, ValueError):
         return None
@@ -898,7 +897,7 @@ def _open_tab_in(port: str, url: str) -> bool:
         req = urllib.request.Request(
             "http://127.0.0.1:%d/json/new?%s" % (int(port), urllib.parse.quote(url, safe=":/?=&%")),
             method="PUT")
-        with urllib.request.urlopen(req, timeout=3) as r:
+        with open_local(req, timeout=3) as r:
             return 200 <= r.status < 300
     except (OSError, ValueError, TypeError):
         return False
@@ -1519,6 +1518,25 @@ def _close_quietly(said) -> None:
             pass
 
 
+def open_local(request, timeout: float):
+    """Open a request to an address on this computer, never through a proxy.
+
+    urllib's own urlopen sends every request through the proxy the computer
+    names, HTTP_PROXY in the environment or, when that is empty, the proxy
+    in the system settings of Windows or macOS, and nothing exempts
+    127.0.0.1 unless the person listed it. The Windows box for local
+    addresses ("<local>") covers only names without a dot. A proxy cannot
+    reach a browser's debugging port on this computer, so with one set the
+    sign-in step said no debugging port answered, for a browser that was
+    fine. A request to this computer has no reason to leave it, so no proxy
+    is asked at all.
+    """
+    import urllib.request
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(request, timeout=timeout)
+
+
 def wait_for_debug_port(port: str, timeout: float = 20.0, alive=None) -> bool:
     """True once DevTools answers on the browser's debugging port.
 
@@ -1536,7 +1554,6 @@ def wait_for_debug_port(port: str, timeout: float = 20.0, alive=None) -> bool:
     """
     import json
     import time
-    import urllib.request
     try:
         url = "http://127.0.0.1:%d/json/version" % int(port)
     except (TypeError, ValueError):
@@ -1544,7 +1561,7 @@ def wait_for_debug_port(port: str, timeout: float = 20.0, alive=None) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=2) as r:
+            with open_local(url, timeout=2) as r:
                 info = json.loads(r.read().decode("utf-8", "replace"))
             if isinstance(info, dict) and info.get("webSocketDebuggerUrl"):
                 return True

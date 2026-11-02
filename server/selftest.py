@@ -223,10 +223,17 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def here(*handlers) -> urllib.request.OpenerDirector:
+    """An opener for requests to this container, which never go through a
+    proxy. urllib's own sends each one through HTTP_PROXY when the
+    container's environment has it, and nothing exempts 127.0.0.1."""
+    return urllib.request.build_opener(*handlers, urllib.request.ProxyHandler({}))
+
+
 def status_of(url: str) -> int:
     """The first answer to a request, a redirect not followed."""
     try:
-        with urllib.request.build_opener(_NoRedirect).open(url, timeout=10) as r:
+        with here(_NoRedirect).open(url, timeout=10) as r:
             return r.status
     except urllib.error.HTTPError as e:
         return e.code
@@ -234,9 +241,9 @@ def status_of(url: str) -> int:
 
 def panel_checks() -> None:
     try:
-        with urllib.request.urlopen(PANEL + "/", timeout=10) as r:
+        with here().open(PANEL + "/", timeout=10) as r:
             page, landed = r.read().decode("utf-8", "replace"), r.url
-        with urllib.request.urlopen(PANEL + "/favicon.ico", timeout=10) as r:
+        with here().open(PANEL + "/favicon.ico", timeout=10) as r:
             icon, kind = r.read(), r.headers.get("Content-Type", "")
         check("panel", "<title>PaperPull</title>" in page and icon[:4] == b"\x00\x00\x01\x00",
               "page and tab icon (%s, %d bytes)" % (kind, len(icon)))
@@ -277,7 +284,7 @@ def answer_of(url: str) -> tuple:
     """The first answer to a request and the start of its body, a redirect
     not followed."""
     try:
-        with urllib.request.build_opener(_NoRedirect).open(url, timeout=10) as r:
+        with here(_NoRedirect).open(url, timeout=10) as r:
             return r.status, r.read(2000).decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read(2000).decode("utf-8", "replace")

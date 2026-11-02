@@ -210,6 +210,18 @@ its summary.
   new settings, copy them into it as a set, and if you turned on the
   setuid sandbox before, move its `SYS_ADMIN` into the new `cap_add` list,
   see "Updating" in SERVER.md.
+- **Signing in finds a browser that opened fine on a computer with a proxy
+  set.** Each request PaperPull sent to a browser's debugging port on this
+  computer went through the proxy the computer names, HTTP_PROXY or the
+  proxy in the Windows or macOS settings. Nothing there leaves out
+  127.0.0.1 unless the person listed it, and the Windows box for local
+  addresses covers only names without a dot. A proxy cannot reach that
+  port, so the sign-in step said no debugging port answered for a browser
+  that had opened, and a sign-in with that browser already open said
+  something silent held its port. Every request PaperPull sends to this
+  computer through Python's own urllib, from the sign-in, the server's
+  self-test and the tests, now leaves the proxy out, and a check finds any
+  new one by what it does.
 
 ## [0.59.0] - 2026-10-26
 

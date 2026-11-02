@@ -4,6 +4,7 @@ The paths are faked so the same assertions run on any OS, this checks the
 lookup logic and the ordering, which is what actually differs between
 Windows, macOS and Linux.
 """
+import json
 import os
 import re
 import sys
@@ -1108,6 +1109,8 @@ def _serve(handler_body, status=200):
             self.end_headers()
             self.wfile.write(body)
 
+        do_PUT = do_GET     # /json/new, a tab opened there
+
         def log_message(self, *a):
             pass
 
@@ -1135,6 +1138,116 @@ def test_readiness_means_devtools_answered_not_just_the_port():
         assert browser.wait_for_debug_port(str(srv.server_port), timeout=1) is False
     finally:
         srv.shutdown()
+
+
+# -- a proxy never carries the check -----------------------------------------
+#
+# urllib's urlopen sends a request through whatever proxy the computer names,
+# and it reads the proxies once, when its first request builds its opener. So
+# each check below runs in a Python of its own, where no earlier request can
+# have built that opener before the proxy was set.
+
+_DEVTOOLS = '{"Browser": "Chrome/1", "webSocketDebuggerUrl": "ws://127.0.0.1:1/devtools/browser/x"}'
+
+# Every question a sign-in asks the browser on its port, and then the
+# sign-in itself with that browser already there, which has to use it and
+# never launch another. Its answers are the last line printed.
+_PORT_CHECK = (
+    "import json, sys\n"
+    "from paperpull_core import browser\n"
+    "def no_launch(*a, **kw):\n"
+    "    raise AssertionError('a browser was launched over the one on the port')\n"
+    "browser.browser_candidates = browser._try_each = no_launch\n"
+    "browser._SLOW_START_SECONDS = 1\n"
+    "port, page = sys.argv[1], 'https://bank.example/sign-in'\n"
+    "said = [browser.wait_for_debug_port(port, timeout=6),\n"
+    "        browser.debug_port_holder(port),\n"
+    "        browser._open_tab_in(port, page),\n"
+    "        browser.open_signin_browser(sys.argv[2], port, page)]\n"
+    "print(json.dumps(said))\n")
+
+# What each of those says when the browser on the port is reached.
+_REACHED = [True, "Chrome/1", True, browser.ALREADY_ON_PORT]
+
+# Internet Settings as a company's proxy leaves them, the box for local
+# addresses ticked, which Windows keeps as "<local>". Made up inside the
+# check's own process, so the computer's own settings are never read or
+# changed.
+_WINDOWS_SETTINGS = (
+    "import sys, types\n"
+    "settings = {'ProxyEnable': 1, 'ProxyServer': %r, 'ProxyOverride': '<local>'}\n"
+    "class Key:\n"
+    "    def Close(self):\n"
+    "        pass\n"
+    "def OpenKey(hive, path, *rest):\n"
+    "    if hive == 'HKCU' and path.endswith('Internet Settings'):\n"
+    "        return Key()\n"
+    "    raise OSError(path)\n"
+    "def QueryValueEx(key, name):\n"
+    "    if name in settings:\n"
+    "        return settings[name], 1\n"
+    "    raise OSError(name)\n"
+    "sys.modules['winreg'] = types.SimpleNamespace(\n"
+    "    HKEY_CURRENT_USER='HKCU', OpenKey=OpenKey, QueryValueEx=QueryValueEx)\n")
+
+
+@pytest.fixture
+def dead_proxy():
+    """A proxy address where nothing answers, a port held bound and never
+    listening for as long as the test runs."""
+    import socket
+
+    held = socket.socket()
+    held.bind(("127.0.0.1", 0))
+    yield "127.0.0.1:%d" % held.getsockname()[1]
+    held.close()
+
+
+def _port_check_alone(port, profile, proxy_env, first=""):
+    """What a sign-in's questions answer in a Python of its own, run with
+    these proxy settings and none of this process's."""
+    import os
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
+    env.update(proxy_env)
+    core = str(Path(__file__).resolve().parents[1])
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (core, env.get("PYTHONPATH")) if p)
+    r = subprocess.run([sys.executable, "-c", first + _PORT_CHECK, str(port), str(profile)],
+                       env=env, capture_output=True, text=True, timeout=120)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        return r.stdout + r.stderr
+
+
+def test_a_proxy_in_the_environment_does_not_hide_the_debugging_port(dead_proxy, tmp_path):
+    """With HTTP_PROXY set and nothing exempting 127.0.0.1, each question
+    went to the proxy and never reached the browser, so the sign-in step
+    said no debugging port answered for a browser that was fine, and a
+    sign-in with that browser already open said something silent held its
+    port."""
+    srv = _serve(_DEVTOOLS)
+    try:
+        said = _port_check_alone(srv.server_port, tmp_path / "p",
+                                 {"HTTP_PROXY": "http://" + dead_proxy})
+    finally:
+        srv.shutdown()
+    assert said == _REACHED, said
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="urllib reads Internet Settings on Windows only")
+def test_a_proxy_in_windows_settings_does_not_hide_the_debugging_port(dead_proxy, tmp_path):
+    """With no proxy in the environment, urllib takes the one in Windows
+    settings, and its "<local>" exemption covers only names without a dot,
+    so 127.0.0.1 went to that proxy as well."""
+    srv = _serve(_DEVTOOLS)
+    try:
+        said = _port_check_alone(srv.server_port, tmp_path / "p", {},
+                                 _WINDOWS_SETTINGS % dead_proxy)
+    finally:
+        srv.shutdown()
+    assert said == _REACHED, said
 
 
 # -- a prompt nobody can answer (#48) ----------------------------------------

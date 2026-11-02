@@ -307,11 +307,11 @@ def browser_exe():
 def open_their_tab(cdp_url, address, title):
     """A tab the person signed in with at home, opened by the browser
     itself the way login.bat's is, once it has drawn its page."""
-    urllib.request.urlopen(urllib.request.Request(cdp_url + "/json/new?" + address,
+    browser_launcher.open_local(urllib.request.Request(cdp_url + "/json/new?" + address,
                                                   method="PUT"), timeout=15).read()
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        tabs = json.loads(urllib.request.urlopen(cdp_url + "/json/list", timeout=5).read())
+        tabs = json.loads(browser_launcher.open_local(cdp_url + "/json/list", timeout=5).read())
         if any(t.get("title") == title for t in tabs):
             return
         time.sleep(0.2)

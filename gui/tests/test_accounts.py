@@ -402,7 +402,9 @@ def run(port, body):
                                  data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        # No proxy, the panel is on this computer.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=60) as r:
             return r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.read().decode("utf-8", "replace")

@@ -100,7 +100,10 @@ class _Stay(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_OPENER = urllib.request.build_opener(_Stay)
+# The panel is on this computer, so no request goes through a proxy.
+# urllib's own opener sends every one through HTTP_PROXY when the
+# environment has it.
+_OPENER = urllib.request.build_opener(_Stay, urllib.request.ProxyHandler({}))
 
 
 def http(method: str, path: str, form=None, body=None, cookie: str = ""):

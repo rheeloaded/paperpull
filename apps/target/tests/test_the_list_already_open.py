@@ -254,12 +254,12 @@ def fake_target(server, monkeypatch):
 
 
 def _page_targets(cdp_url):
-    with urllib.request.urlopen(cdp_url + "/json/list", timeout=10) as r:
+    with browser_launcher.open_local(cdp_url + "/json/list", timeout=10) as r:
         return [t for t in json.loads(r.read().decode("utf-8")) if t.get("type") == "page"]
 
 
 def _close_tab(cdp_url, target_id):
-    urllib.request.urlopen(cdp_url + "/json/close/" + target_id, timeout=10).read()
+    browser_launcher.open_local(cdp_url + "/json/close/" + target_id, timeout=10).read()
 
 
 def _gone(cdp_url, target_id, seconds=10):
@@ -302,7 +302,7 @@ def _open_drawn(cdp_url, address, page):
     for _attempt in range(3):
         earlier = SITE.loads(page)
         request = urllib.request.Request(cdp_url + "/json/new?" + address, method="PUT")
-        with urllib.request.urlopen(request, timeout=10) as r:
+        with browser_launcher.open_local(request, timeout=10) as r:
             tab = json.loads(r.read().decode("utf-8"))
         if _drawn_since(earlier, 10, page=page):
             return tab

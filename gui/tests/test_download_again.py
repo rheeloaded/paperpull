@@ -515,7 +515,9 @@ def ask(url, method="GET", body=None, kind="application/json", headers=None):
     if data is not None and kind:
         req.add_header("Content-Type", kind)
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        # No proxy, the panel is on this computer.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=60) as r:
             return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")
