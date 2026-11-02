@@ -410,7 +410,7 @@ def test_a_second_account_is_made_from_the_panel(templates, settings, tmp_path):
     inst = home / "Shop Receipts"
     cfg = json.loads((inst / "config.spouse.json").read_text(encoding="utf-8"))
     assert cfg["owner"] == "Jane Doe"
-    assert cfg["cdp_url"] == "http://127.0.0.1:9309"          # its own port
+    assert cfg["cdp_url"] == "http://127.0.0.1:9400"          # its own port, from 9400 up
     assert (home / "Shop Receipts - spouse").is_dir()          # its own folder, beside the first
     assert app_module.discover_apps()["Shop Receipts"]["accounts"] == ["primary", "spouse"]
     cmd = app_module._build_cmd(app_module.discover_apps()["Shop Receipts"], "spouse", "pilot")
