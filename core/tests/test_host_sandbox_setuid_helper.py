@@ -12,6 +12,7 @@ all, helper or not (refuses_chrome).
 """
 import os
 import stat
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -71,11 +72,16 @@ def test_without_a_ready_helper_nothing_changes():
 def helper_file(monkeypatch):
     """A helper whose owner, mode and file system the test chooses."""
     state = {"uid": 0, "mode": stat.S_IFREG | stat.S_ISUID | 0o755, "flag": 0}
+    # hs.os is the os module itself, so pytest's own reporting calls this
+    # too, with follow_symlinks, when a test here fails.
     monkeypatch.setattr(hs.os, "stat",
-                        lambda path: SimpleNamespace(st_uid=state["uid"], st_mode=state["mode"]))
+                        lambda path, **_: SimpleNamespace(st_uid=state["uid"], st_mode=state["mode"]))
     monkeypatch.setattr(hs.os, "statvfs", lambda path: SimpleNamespace(f_flag=state["flag"]),
                         raising=False)
     monkeypatch.setattr(hs.os, "ST_NOSUID", 2, raising=False)
+    # The kernel is not asked, so the status text decides, as where prctl
+    # cannot be asked.
+    monkeypatch.setattr(hs, "_asked_no_new_privs", lambda: None)
     return state
 
 
@@ -83,9 +89,38 @@ def test_a_setuid_root_helper_with_the_capability_is_ready(helper_file):
     assert hs.suid_helper(ADMIN) == "yes"
 
 
-@pytest.mark.parametrize("change", ["no capability", "no CapBnd", "not root", "no bit", "nosuid"])
+def test_the_helper_is_ready_where_new_privileges_are_allowed(helper_file):
+    assert hs.suid_helper("NoNewPrivs:\t0\n" + ADMIN) == "yes"
+
+
+@pytest.mark.parametrize("asked,ready", [(1, "no"), (0, "yes")])
+def test_the_kernels_own_answer_comes_first(helper_file, monkeypatch, asked, ready):
+    """/proc/self/status has a NoNewPrivs line only from Linux 4.10, and a
+    kernel without user namespaces, the one the helper is for, may be older.
+    prctl answers on every kernel since 3.5, so its answer decides."""
+    monkeypatch.setattr(hs, "_asked_no_new_privs", lambda: asked)
+    assert hs.suid_helper(ADMIN) == ready
+    assert hs.suid_helper("NoNewPrivs:\t%d\n" % (1 - asked) + ADMIN) == ready
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="asks a Linux kernel")
+def test_prctl_says_what_the_status_line_says():
+    line = [l for l in hs._status().splitlines() if l.startswith("NoNewPrivs:")]
+    asked = hs._asked_no_new_privs()
+    assert asked in (0, 1)
+    if line:
+        assert asked == int(line[0].split(":")[1])
+    assert hs.no_new_privs() == (asked == 1)
+
+
+@pytest.mark.parametrize("change", ["no capability", "no CapBnd", "not root", "no bit", "nosuid",
+                                    "no new privileges"])
 def test_anything_less_is_not_ready(helper_file, change):
-    status = {"no capability": NO_ADMIN, "no CapBnd": "Name:\tpython\n"}.get(change, ADMIN)
+    """no-new-privileges has the kernel ignore the setuid bit, and Chrome 155's
+    sandbox did not start under it in a container given SYS_ADMIN, with the
+    helper setuid root and user namespaces refused (measured 2026-10-19)."""
+    status = {"no capability": NO_ADMIN, "no CapBnd": "Name:\tpython\n",
+              "no new privileges": "NoNewPrivs:\t1\n" + ADMIN}.get(change, ADMIN)
     if change == "not root":
         helper_file["uid"] = 1000
     if change == "no bit":
@@ -96,7 +131,7 @@ def test_anything_less_is_not_ready(helper_file, change):
 
 
 def test_a_missing_helper_is_not_ready(monkeypatch):
-    def missing(path):
+    def missing(path, **_):
         raise FileNotFoundError(path)
     monkeypatch.setattr(hs.os, "stat", missing)
     assert hs.suid_helper(ADMIN) == "no"

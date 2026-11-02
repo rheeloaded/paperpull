@@ -13,8 +13,15 @@
 set -eu
 
 BROWSER=/browser
-APT_LOG=/tmp/chrome-apt.log
-APT="-o Dir::Etc::sourcelist=sources.list.d/paperpull-chrome.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 -o APT::Sandbox::User=root"
+# apt's package lists and what it said, kept in root's own /run rather than
+# in the image's /var/lib/apt, so the image's files can stay read-only
+# (read_only in the compose files, with /run in memory), and never at a
+# fixed name in /tmp, where pp may write.
+APT_DIR=/run/paperpull/apt
+APT_LOG=$APT_DIR/apt.log
+APT="-o Dir::Etc::sourcelist=sources.list.d/paperpull-chrome.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 -o APT::Sandbox::User=root -o Dir::State::Lists=$APT_DIR/lists"
+mkdir -p "$APT_DIR/lists/partial"
+chmod 700 "$APT_DIR"
 
 say() { echo "[chrome] $*"; }
 
@@ -37,13 +44,24 @@ kernel_has_seccomp() {
   python -c "import sys; from paperpull_core.host_sandbox import check; sys.exit(0 if check().seccomp_bpf == 'yes' else 1)" 2>/dev/null
 }
 
+# no-new-privileges, on for this container, keeps the kernel from honoring
+# any setuid bit, the helper's among them. Asked of the kernel through the
+# same host check, since the NoNewPrivs line of /proc/self/status came only
+# in Linux 4.10, later than some of the kernels the helper is for.
+no_new_privileges() {
+  python -c "import sys; from paperpull_core.host_sandbox import no_new_privs; sys.exit(0 if no_new_privs() else 1)" 2>/dev/null
+}
+
 SETUID_SANDBOX=0
 if given_sys_admin; then
-  if kernel_has_seccomp; then
-    SETUID_SANDBOX=1
-  else
+  if ! kernel_has_seccomp; then
     say "The container has SYS_ADMIN, but this kernel has no seccomp, so Chrome's setuid sandbox helper"
     say "is not set up, since Chrome would have only half its sandbox. See \"On Synology\" in SERVER.md."
+  elif no_new_privileges; then
+    say "The container has SYS_ADMIN, but no-new-privileges is on, which turns every setuid bit off,"
+    say "so Chrome's setuid sandbox helper is not set up. See \"On Synology\" in SERVER.md."
+  else
+    SETUID_SANDBOX=1
   fi
 fi
 
@@ -55,7 +73,8 @@ fi
 wanted=""
 # shellcheck disable=SC2086
 if apt-get update $APT >"$APT_LOG" 2>&1; then
-  wanted=$(apt-cache policy google-chrome-stable | awk '/Candidate:/ {print $2}')
+  # shellcheck disable=SC2086
+  wanted=$(apt-cache policy $APT google-chrome-stable | awk '/Candidate:/ {print $2}')
   [ "$wanted" = "(none)" ] && wanted=""
 fi
 

@@ -248,23 +248,41 @@ cat /proc/sys/user/max_user_namespaces
   a flaw in it would be one way to that root. Getting there would first
   take running code inside the container, by escaping Chrome's sandbox or
   getting past the panel's password, and then becoming root, which is why
-  the risk is small. It also rules out `no-new-privileges`, another guard
-  Docker offers. Turn it on only on a kernel that needs it. The trade in
-  full is under "Chrome's sandbox stays on" in
-  [SECURITY-SERVER.md](SECURITY-SERVER.md).
+  the risk is small. It also means taking out `no-new-privileges`, another
+  guard the compose files turn on, since it turns the setuid bit off. Turn
+  it on only on a kernel that needs it. The trade in full is under
+  "Chrome's sandbox stays on" in [SECURITY-SERVER.md](SECURITY-SERVER.md).
 
-  If you take it, remove the `#` from the two `cap_add` lines under
-  `security_opt` in `compose.https.yaml`, so that they read
+  If you take it, change two lines in the `paperpull` service of
+  `compose.https.yaml`. Put a `#` in front of `- no-new-privileges:true`
+  under `security_opt`, and remove the `#` from `#- SYS_ADMIN` at the end
+  of `cap_add`, so that they read
+  ```yaml
+      security_opt:
+        - seccomp=./seccomp-chrome.json
+        #- no-new-privileges:true
+  ```
+  and
   ```yaml
       cap_add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETUID
+        - SETGID
+        - KILL
+        - SYS_CHROOT
         - SYS_ADMIN
   ```
-  and recreate the container with
+  with the comment lines between left as they are. Caddy's service has a
+  `no-new-privileges` line of its own, which stays. Then recreate the
+  container with
   `sudo docker compose -f compose.https.yaml up -d`, or from Container
   Manager. The container's log then says Chrome's setuid sandbox helper is
   set up, or why it is not, and the self-test's `sandbox` line says
-  `layer 1 SUID, seccomp on`. This has not been seen on a Synology yet, so
-  tell us how it goes.
+  `layer 1 SUID, seccomp on`. If `no-new-privileges` was left in, the log
+  says so and no helper is set up. This has not been seen on a Synology
+  yet, so tell us how it goes.
 
 Where PaperPull Server cannot run on DSM itself, two ways work on a
 Synology NAS.
@@ -276,10 +294,11 @@ Synology NAS.
   yet.
 - **The desktop app**, on a computer of your own.
 
-At each start, a container given `SYS_ADMIN` on a kernel with seccomp has
-the helper of the Chrome in use made setuid root, so Chrome never gets half
+At each start, a container given `SYS_ADMIN` on a kernel with seccomp, and
+without `no-new-privileges`, has the helper of the Chrome in use made
+setuid root, so Chrome never gets half
 its sandbox through it, and any other container has the bit taken off every
-copy, so removing the two lines again undoes it. The helper is set up only
+copy, so putting the two lines back undoes it. The helper is set up only
 where root alone could have put it, a plain file of root's with one name,
 in folders of root's that nobody else may write to and that are not links,
 from `/browser` down. That is why the `browser` volume belongs to root, and a
@@ -290,9 +309,9 @@ own namespaces and chroot. It is given to the container, never to the
 pages, and the helper gives up every privilege before a page runs. Never
 put `privileged` or `--no-sandbox` in its place, which would leave no
 sandbox at all. Leave `no-new-privileges` off this container, since
-it turns the setuid bit off, and for the same reason keep the `browser`
-volume on a file system mounted without `nosuid`, as Docker's own volumes
-are.
+it turns the setuid bit off, and the image then leaves it off for the
+container's own user too. For the same reason keep the `browser` volume on
+a file system mounted without `nosuid`, as Docker's own volumes are.
 
 ## HTTPS
 
@@ -485,12 +504,31 @@ documents to Paperless".
   run `docker compose pull` and `docker compose up -d` in the project's
   folder, or do the same from your NAS's Docker app. Everything you set up
   is in the volumes and stays. To go back, write the version you had and
-  run the same two commands. Chrome brings itself up to date at every
+  run the same two commands. To go back to a release whose compose file
+  has no `read_only` line, take that line out too. An older image changes
+  its user files in place, so on a read-only root it stops at the start,
+  or with a `PUID` and `PGID` of 1000 starts without bringing Chrome up to
+  date or giving the sign-in window your graphics card. Chrome brings
+  itself up to date at every
   start. If you would rather take every release without editing the file,
   write `latest` in place of the version, which always names the newest
   release, and then the two commands alone update it. With
   `compose.https.yaml`, add `-f compose.https.yaml` to both commands. Its
   `caddy` image line names Caddy's version, which you update the same way.
+  A newer release's compose files can also bring new settings, such as the
+  ones that keep the container to what it needs (see "Nothing more than it
+  needs" in [SECURITY-SERVER.md](SECURITY-SERVER.md)), and a new image line
+  alone does not bring them. When the release notes name one, copy it into
+  your file, or fill in the newer file again. Copy the lines that keep the
+  container to what it needs as a set, `no-new-privileges`, `cap_drop`,
+  all seven `cap_add` lines, `read_only` and the three `tmpfs` lines,
+  since some without the others stop the container at its start. If you
+  turned on Chrome's setuid sandbox in an older file (see
+  [On Synology](#on-synology)), its `SYS_ADMIN` now goes in that same
+  `cap_add` list. Remove your own two `cap_add` lines, take the `#` off
+  `#- SYS_ADMIN` and put one in front of `- no-new-privileges:true`, since
+  Docker Compose refuses a service with two `cap_add` lines and
+  `no-new-privileges` turns the helper off.
 - **Backing up.** Your documents are in the data folder. The `profiles`
   volume holds your live sign-ins, so a backup of it is as sensitive as your
   passwords, and you can always sign in again instead. The `settings` volume
@@ -536,6 +574,18 @@ docker exec paperpull python /opt/paperpull/server/selftest.py
 - **The first start ends at once.** It needs to reach `dl.google.com` once
   to download Chrome. After that it starts without a connection and uses
   the Chrome it has.
+- **The container stops at its start, saying it could not write its user's
+  ids.** With `read_only: true` in the compose file, `/tmp`, `/run` and
+  `/home/pp` all have to be listed under `tmpfs`, as in the compose files
+  PaperPull comes with. The log also says when `PUID` or `PGID` is not an
+  id Linux gives, a number from 1 for `PUID`, or 0 for `PGID`, to
+  4294967294.
+- **The container stops at its start with `Operation not permitted` or
+  `Read-only file system`.** The compose file has some of the lines that
+  keep the container to what it needs and not others. `cap_drop` needs all
+  seven `cap_add` lines beside it, and `read_only` needs all three `tmpfs`
+  lines. Copy them as a set from the compose file of your release, see
+  [Updating](#updating-backing-up-and-removing).
 - **The panel does not load.** Check that nothing else uses port 8765 on the
   server, or publish the panel on another port in `compose.yaml`, or Caddy
   on another in `compose.https.yaml`.

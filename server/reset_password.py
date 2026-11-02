@@ -20,7 +20,7 @@ sys.path.insert(0, "/opt/paperpull/gui")
 def as_pp() -> None:
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         os.execvp("setpriv", ["setpriv", "--reuid=pp", "--regid=pp", "--init-groups",
-                              "env", "HOME=/home/pp", "USER=pp", sys.executable,
+                              "--no-new-privs", "env", "HOME=/home/pp", "USER=pp", sys.executable,
                               os.path.abspath(__file__)])
 
 

@@ -90,6 +90,37 @@ RUN useradd --create-home --uid 1000 pp \
  && mkdir -p /data /profiles /config /browser \
  && chown pp:pp /data /profiles /config
 
+# The user and group files as the image makes them are kept in
+# /etc/paperpull. The entrypoint writes the ones in use from them into
+# /run/paperpull at every start, with pp given PUID and PGID, and
+# /etc/passwd and /etc/group are links there, so the ids can change while
+# the image's own files stay read-only (read_only in the compose files).
+# Docker itself looks up a user or group it is given by name, in a compose
+# file's user or group_add or with `docker exec -u`, in the image's own
+# files rather than in a /run kept in memory. So the image keeps copies in
+# /run/paperpull without pp, where Docker finds root, video and the rest,
+# and finds no pp, who there would have the image's 1000 rather than PUID.
+# The entrypoint writes over them, and a /run in memory hides them.
+RUN mkdir -p /etc/paperpull /run/paperpull \
+ && cp /etc/passwd /etc/group /etc/paperpull/ \
+ && mv /etc/passwd /etc/group /run/paperpull/ \
+ && ln -s /run/paperpull/passwd /etc/passwd \
+ && ln -s /run/paperpull/group /etc/group \
+ && id pp \
+ && grep -v '^pp:' /etc/paperpull/passwd >/run/paperpull/passwd \
+ && grep -v '^pp:' /etc/paperpull/group >/run/paperpull/group \
+ && ! id pp \
+ && id root && getent group video
+
+# The packages above leave nine setuid programs and three setgid ones, su,
+# mount and passwd among them, and nothing here needs any, since the
+# entrypoint runs as root and hands everything to pp itself. Without their
+# bits, nothing pp runs can become another user through them, even where
+# no-new-privileges is off for Chrome's setuid sandbox, whose helper in the
+# browser volume is then the only setuid program in the container.
+RUN find / -xdev -type f -perm /6000 -exec chmod ug-s {} + \
+ && test -z "$(find / -xdev -type f -perm /6000)"
+
 COPY VERSION LICENSE LICENSE-MIT NOTICE.md TRADEMARK.md TERMS.md paperpull.py /opt/paperpull/
 COPY core /opt/paperpull/core
 # The apps as the packaged desktop build keeps them, templates the panel

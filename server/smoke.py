@@ -8,11 +8,21 @@ Compose, under a project and container names of its own, so it can never
 touch a real installation or its volumes. Then it does what a person does
 on the first visit, choosing a password with the setup code from the
 container's log, signs in, sets up a provider, and runs the self-test
-inside the container.
+inside the container. It checks what compose.yaml locks down holds there,
+the seven capabilities the start needs and no more, no_new_privs on every
+process, the image's files read-only and none of them setuid, the scratch
+folders in memory, and pp with the ids PUID and PGID name, while Docker
+still finds root and the image's groups by name. Then it starts the image
+with compose.yaml as an older release had it, without those settings, and
+checks that the image still gives no_new_privs to everything it starts as
+pp.
 
-Then it takes the # off the two cap_add lines of compose.yaml, as SERVER.md
-tells a person with a Synology to, and checks that the sandbox helper of the
-Chrome in use is made setuid root and the self-test still holds. The browser
+Then it takes the # off the SYS_ADMIN line of compose.yaml, first leaving
+no-new-privileges on, as a person might, which sets up no helper and says
+why, and then with a # in front of it, as SERVER.md tells a person with a
+Synology to, and checks that the sandbox helper of the Chrome in use is
+made setuid root, that Chrome builds its sandbox through it when kept from
+user namespaces, and that the self-test still holds. The browser
 volume is root's and pp can put nothing in it, and with the Chrome in use
 given to pp no helper is setuid. With the lines put back, no copy of the
 helper keeps the bit.
@@ -145,13 +155,12 @@ def write_project(folder: Path, image: str) -> None:
     (folder / "data").mkdir()
     lines = ["services:", "  paperpull:", "    image: %s" % image,
              "    container_name: %s" % CONTAINER]
-    ids = []
-    if hasattr(os, "getuid"):
-        # The documents belong to whoever runs this, so the folder can be
-        # cleaned up afterwards, as a person's would belong to them.
-        ids = ['      PUID: "%d"' % os.getuid(), '      PGID: "%d"' % os.getgid()]
-    if ids:
-        lines += ["    environment:"] + ids
+    # The documents belong to whoever runs this, so the folder can be
+    # cleaned up afterwards, as a person's would belong to them. Where this
+    # computer has no such ids, those a Synology gives its first user, so
+    # that the start still gives pp ids other than the image's own.
+    ids = ['      PUID: "%s"' % ids_given()[0], '      PGID: "%s"' % ids_given()[1]]
+    lines += ["    environment:"] + ids
     (folder / "compose.smoke.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
     # The HTTPS file as a person fills it in, with this computer's name and
     # address in place of a NAS's.
@@ -264,17 +273,236 @@ def self_test() -> None:
     report("selftest", r.returncode == 0, "the container's own checks, exit %d" % r.returncode)
 
 
+# -- what the compose files lock down ---------------------------------------------------
+
+# The capabilities the compose files leave the container, each by its bit in
+# CapBnd (linux/capability.h). The start needs them, as root, and after it
+# only the container's init holds them, as root.
+KEPT = {"CHOWN": 0, "DAC_OVERRIDE": 1, "FOWNER": 3, "KILL": 5, "SETGID": 6, "SETUID": 7,
+        "SYS_CHROOT": 18}
+SYS_ADMIN_BIT = 21
+# Docker's own fourteen, which a compose file from before these settings
+# leaves it.
+DOCKER_DEFAULT = 0xA80425FB
+SCRATCH = ("/tmp", "/run", "/home/pp")
+
+# Each process's name, user, bounding set and no_new_privs, the shell that
+# asks and what it starts left out. So is any Chrome, whose sandboxed
+# processes get a whole bounding set of their own namespace from the kernel
+# and set no_new_privs themselves.
+_PROCESSES = r"""
+for p in /proc/[0-9]*; do
+  n=${p#/proc/}
+  [ "$n" = "$$" ] && continue
+  [ "$(cat $p/stat 2>/dev/null | awk '{print $4}')" = "$$" ] && continue
+  [ -r $p/status ] || continue
+  case "$(cat $p/comm 2>/dev/null)" in chrome*) continue ;; esac
+  awk -v name="$(cat $p/comm 2>/dev/null)" '/^Uid:/ {u = $2} /^CapBnd:/ {b = $2}
+    /^NoNewPrivs:/ {n = $2} END {print u, b, n, name}' $p/status
+done
+"""
+
+
+def processes() -> list:
+    """(name, uid, CapBnd, NoNewPrivs) of every process in the container."""
+    r = docker("exec", CONTAINER, "sh", "-c", _PROCESSES, timeout=60)
+    found = [line.split(None, 3) for line in r.stdout.splitlines()]
+    return [(name, uid, bound, nnp) for uid, bound, nnp, name in
+            (fields for fields in found if len(fields) == 4)]
+
+
+def as_pp(found: list) -> bool:
+    """The panel and the virtual screen are there, and both run as PUID."""
+    ids = ids_given()
+    names = {name: uid for name, uid, _, _ in found}
+    return all(names.get(name) == ids[0] for name in ("python", "Xvfb"))
+
+
+# Every file of the image's own that carries file capabilities, which
+# no_new_privs would turn off but the setuid sandbox's container honors.
+_FILE_CAPABILITIES = r"""
+import os
+found = []
+for top, folders, files in os.walk("/"):
+    if top == "/":
+        folders[:] = [f for f in folders if f not in ("proc", "sys", "dev", "browser", "data",
+                                                      "profiles", "config", "run", "tmp")]
+    for name in files:
+        path = os.path.join(top, name)
+        try:
+            os.getxattr(path, "security.capability", follow_symlinks=False)
+            found.append(path)
+        except OSError:
+            pass
+print(" ".join(found) or "none")
+"""
+
+
+def pp_and_files() -> None:
+    """pp has the ids PUID and PGID name, inside the container, and no file
+    of the image is setuid or setgid or carries file capabilities."""
+    r = docker("exec", CONTAINER, "id", "pp", timeout=60)
+    ids = ids_given()
+    report("ids", r.returncode == 0 and ("uid=%s(pp)" % ids[0]) in r.stdout
+           and ("gid=%s" % ids[1]) in r.stdout and as_pp(processes()),
+           "pp is %s" % (r.stdout.strip() or r.stderr.strip()))
+    r = docker("exec", CONTAINER, "find", "/", "-xdev", "-type", "f", "-perm", "/6000", timeout=120)
+    setid = r.stdout.split() if r.returncode == 0 else ["could not be listed"]
+    r = docker("exec", CONTAINER, "python", "-c", _FILE_CAPABILITIES, timeout=300)
+    capable = r.stdout.strip() if r.returncode == 0 else "could not be listed"
+    report("no-setid", not setid and capable == "none",
+           "setuid or setgid files in the image %s, files with capabilities %s"
+           % (" ".join(setid) or "none", capable))
+
+
+def locked_down(setuid_sandbox: bool = False) -> None:
+    """What the compose file locks down holds in the running container.
+    Every process has the seven capabilities in its bounding set and no
+    more, SYS_ADMIN besides for the setuid sandbox, and no_new_privs on,
+    but with the setuid sandbox none has it, or the helper could not work.
+    The image's own files cannot be written, the scratch folders are in
+    memory, and pp has the ids PUID and PGID name."""
+    found = processes()
+    want = sum(1 << bit for bit in KEPT.values()) | (1 << SYS_ADMIN_BIT if setuid_sandbox else 0)
+    bounds = {int(b, 16) for _, _, b, _ in found}
+    privs = {name + ":" + n for name, _, _, n in found}
+    report("caps", as_pp(found) and bounds == {want},
+           "%d processes, every bounding set %s, want %x" % (
+               len(found), " ".join("%x" % b for b in sorted(bounds)) or "none", want))
+    nnp = {n for _, _, _, n in found}
+    report("no-new", as_pp(found) and nnp == ({"0"} if setuid_sandbox else {"1"}),
+           "no_new_privs %s" % " ".join(sorted(privs)))
+    r = docker("exec", CONTAINER, "touch", "/opt/paperpull/smoke-was-here", timeout=60)
+    report("readonly", r.returncode != 0 and "Read-only file system" in r.stderr,
+           "writing into the image's files %s" % (r.stderr.strip() or "worked"))
+    r = docker("exec", CONTAINER, "awk", '$3 == "tmpfs" {print $2}', "/proc/mounts", timeout=60)
+    mounted = set(r.stdout.split())
+    report("tmpfs", all(path in mounted for path in SCRATCH),
+           "in memory %s" % " ".join(sorted(mounted & set(SCRATCH + ("/dev/shm",)))))
+    pp_and_files()
+    # Docker looks a user up in the image's own files, which hold no pp, so
+    # `docker exec -u pp` is refused, where it would otherwise run as the
+    # image's 1000 rather than PUID. Its words differ between Docker's two
+    # image stores.
+    r = docker("exec", "-u", "pp", CONTAINER, "id", "-u", timeout=60)
+    report("exec-u", r.returncode != 0 and r.stdout.strip() != "1000",
+           "docker exec -u pp %s" % ((r.stderr or r.stdout).strip() or "ran"))
+    # Every other name is there, root's among them.
+    r = docker("exec", "-u", "root", CONTAINER, "id", "-u", timeout=60)
+    report("exec-0", r.stdout.strip() == "0",
+           "docker exec -u root runs as %s" % ((r.stdout or r.stderr).strip() or "nothing"))
+
+
+def names_phase(image: str) -> None:
+    """A compose file may name a user or a group for Docker to look up
+    before the entrypoint runs, as `user: root` or `group_add: - video` do,
+    the second a habit from guides for passing a graphics card in. Docker
+    finds both in the image's own files, as it did before those files
+    became links into /run."""
+    r = docker("run", "--rm", "--user", "root", "--group-add", "video", "--entrypoint", "id",
+               image, timeout=120)
+    report("names", r.returncode == 0 and "uid=0(root)" in r.stdout and "(video)" in r.stdout,
+           "user root and group_add video %s" % ((r.stdout or r.stderr).strip() or "gave nothing"))
+
+
+def as_older_release(text: str) -> str:
+    """A compose file as one from before these settings, the panel's
+    no-new-privileges line, cap_drop, cap_add, read_only and tmpfs left
+    out, everything else as it is, or '' when it has none of them."""
+    out, service, dropping, dropped = [], "", False, 0
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        named = re.match(r"^  ([\w-]+):\s*$", bare)
+        if named:
+            service = named.group(1)
+        elif bare and not bare.startswith(" "):
+            service = ""
+        if service == "paperpull":
+            if dropping and (bare.startswith("      ") or not bare.strip()):
+                continue
+            dropping = False
+            if bare in ("    cap_drop:", "    cap_add:", "    tmpfs:"):
+                dropping, dropped = True, dropped + 1
+                continue
+            if bare in ("    read_only: true", NO_NEW_PRIVILEGES_LINE):
+                dropped += 1
+                continue
+        out.append(line)
+    return "".join(out) if dropped == 5 else ""
+
+
+def older_release_phase(folder: Path) -> None:
+    """A compose file from before these settings still starts the new image,
+    which then gives what it starts as pp no_new_privs by itself, though the
+    container's init has none, and the self-test holds."""
+    path = folder / "compose.yaml"
+    plain = path.read_bytes()
+    older = as_older_release(plain.decode("utf-8"))
+    if not report("older", bool(older), "compose.yaml made into one from an older release"):
+        return
+    path.write_bytes(older.encode("utf-8"))
+    try:
+        r = compose(folder, "up", "-d", timeout=600)
+        if not report("old-up", r.returncode == 0, "compose up as an older release %s"
+                      % ("started it" if r.returncode == 0 else "failed")):
+            print(r.stdout + r.stderr, flush=True)
+            return
+        if not wait_for_panel():
+            return
+        found = processes()
+        bounds = {int(b, 16) for _, _, b, _ in found}
+        privs = {name: n for name, _, _, n in found}
+        report("old-nnp", as_pp(found) and bounds == {DOCKER_DEFAULT} and privs.get("docker-init") == "0"
+               and all(n == "1" for name, n in privs.items() if name != "docker-init"),
+               "Docker's own capabilities %s, no_new_privs %s" % (
+                   " ".join("%x" % b for b in sorted(bounds)),
+                   " ".join(sorted("%s:%s" % item for item in privs.items()))))
+        pp_and_files()
+        # With /run in the container's own layer, Docker finds the files the
+        # entrypoint wrote, and pp is PUID.
+        r = docker("exec", "-u", "pp", CONTAINER, "id", "-u", timeout=60)
+        report("old-exec", r.stdout.strip() == ids_given()[0],
+               "docker exec -u pp runs as %s" % ((r.stdout or r.stderr).strip() or "nothing"))
+        self_test()
+    finally:
+        path.write_bytes(plain)
+
+
+def ids_given() -> tuple:
+    """The PUID and PGID the smoke project gives the container."""
+    if hasattr(os, "getuid"):
+        return str(os.getuid()), str(os.getgid())
+    return "1026", "100"
+
+
 # -- the setuid sandbox, for a kernel without user namespaces ---------------------
 
 
-def with_setuid_sandbox(text: str) -> str:
-    """A compose file as a person turns on the setuid sandbox, the # taken
-    off its two cap_add lines and nothing else changed, or '' when the file
-    has no such lines."""
-    out, changed = [], 0
+SYS_ADMIN_LINE = "      #- SYS_ADMIN"
+NO_NEW_PRIVILEGES_LINE = "      - no-new-privileges:true"
+
+
+def with_setuid_sandbox(text: str, keep_no_new_privileges: bool = False) -> str:
+    """A compose file as a person turns on the setuid sandbox, in the
+    paperpull service alone, the # taken off its SYS_ADMIN line and put in
+    front of its no-new-privileges line, which would turn the setuid bit
+    off, and nothing else changed, or '' when the file has no such lines.
+    keep_no_new_privileges leaves that line as it is, as a person who missed
+    it would."""
+    out, changed, service = [], 0, ""
     for line in text.splitlines(keepends=True):
-        if line.rstrip("\r\n") in ("    #cap_add:", "    #  - SYS_ADMIN"):
+        bare = line.rstrip("\r\n")
+        named = re.match(r"^  ([\w-]+):\s*$", bare)
+        if named:
+            service = named.group(1)
+        elif bare and not bare.startswith(" "):
+            service = ""
+        if service == "paperpull" and bare == SYS_ADMIN_LINE:
             line = line.replace("#", "", 1)
+            changed += 1
+        elif service == "paperpull" and bare == NO_NEW_PRIVILEGES_LINE:
+            if not keep_no_new_privileges:
+                line = line.replace("- ", "#- ", 1)
             changed += 1
         out.append(line)
     return "".join(out) if changed == 2 else ""
@@ -296,8 +524,10 @@ def root_alone_phase() -> None:
     r = docker("exec", CONTAINER, "stat", "-c", "%u:%g %a", "/browser", timeout=60)
     report("suid-own", r.stdout.strip() == "0:0 755",
            "the browser volume is root's, %s" % (r.stdout.strip() or r.stderr.strip()))
-    r = docker("exec", "-u", "pp", CONTAINER, "mkdir", "/browser/planted", timeout=60)
-    report("suid-pp", r.returncode != 0, "pp may not put a folder in the browser volume")
+    r = docker("exec", CONTAINER, "setpriv", "--reuid=pp", "--regid=pp", "--init-groups",
+               "mkdir", "/browser/planted", timeout=60)
+    report("suid-pp", r.returncode != 0 and "Permission denied" in r.stderr,
+           "pp may not put a folder in the browser volume, %s" % (r.stderr.strip() or "it did"))
     in_use = docker("exec", CONTAINER, "readlink", "-f", "/browser/current", timeout=60).stdout.strip()
     if not report("suid-use", in_use.startswith("/browser/"), "the Chrome in use is %s" % in_use):
         return
@@ -312,24 +542,105 @@ def root_alone_phase() -> None:
         docker("exec", CONTAINER, "chown", "0:0", in_use, timeout=60)
 
 
+# Chrome as the self-test starts it, as pp, with --disable-namespace-sandbox,
+# which leaves it only the setuid helper for its first layer, as a kernel
+# without user namespaces does. Prints the first layer, the seccomp-bpf
+# filter and a page's own sum, or why Chrome did not start.
+_ONLY_THE_HELPER = r"""
+import shutil, subprocess, tempfile, time
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+profile = Path(tempfile.mkdtemp(prefix="smoke-suid-"))
+said = Path(str(profile) + ".log")
+with open(said, "wb") as err:
+    proc = subprocess.Popen(["/usr/bin/google-chrome-stable", "--user-data-dir=%s" % profile,
+                             "--remote-debugging-port=0", "--no-first-run",
+                             "--no-default-browser-check", "--disable-namespace-sandbox",
+                             "about:blank"], stdout=subprocess.DEVNULL, stderr=err,
+                            start_new_session=True)
+port = profile / "DevToolsActivePort"
+for _ in range(100):
+    if (port.is_file() and port.read_text().strip()) or proc.poll() is not None:
+        break
+    time.sleep(0.2)
+try:
+    if not (port.is_file() and port.read_text().strip()):
+        tail = [line for line in said.read_text(errors="replace").splitlines() if "FATAL" in line]
+        print("did not start, %s" % (tail[0][-160:] if tail else "exit %s" % proc.poll()))
+    else:
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp("http://127.0.0.1:%s" % port.read_text().split()[0])
+            page = browser.contexts[0].new_page()
+            page.goto("chrome://sandbox")
+            lines = []
+            for _ in range(20):
+                lines = [" ".join(line.split()) for line in page.inner_text("body").splitlines()]
+                if any(line.startswith("Seccomp-BPF sandbox") for line in lines):
+                    break
+                page.wait_for_timeout(250)
+            layer1 = next((line[len("Layer 1 Sandbox"):].strip() for line in lines
+                           if line.startswith("Layer 1 Sandbox")), "none")
+            seccomp = "Yes" if "Seccomp-BPF sandbox Yes" in lines else "No"
+            other = browser.contexts[0].new_page()
+            other.set_content("<p id=x></p><script>"
+                              "document.getElementById('x').textContent = 6 * 7</script>")
+            print("layer 1 %s, seccomp %s, page %s" % (layer1, seccomp, other.inner_text("#x")))
+            browser.close()
+finally:
+    proc.kill()
+    shutil.rmtree(profile, ignore_errors=True)
+"""
+
+
+def chrome_with_only_the_helper() -> str:
+    """What Chrome says of its sandbox when only the setuid helper can give
+    it its first layer, with the capabilities the container keeps."""
+    r = subprocess.run(["docker", "exec", "-i", CONTAINER, "setpriv", "--reuid=pp", "--regid=pp",
+                        "--init-groups", "env", "HOME=/home/pp", "DISPLAY=:99", "python", "-"],
+                       input=_ONLY_THE_HELPER.encode("utf-8"), capture_output=True, timeout=300)
+    out = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    return out[-1] if out else "said nothing, %s" % r.stderr.decode("utf-8", "replace").strip()[-200:]
+
+
 def setuid_phase(folder: Path) -> None:
-    """The two cap_add lines taken off their #, as SERVER.md tells a person
-    with a Synology, make the helper of the Chrome in use setuid root, and
-    the self-test still holds. Put back, no copy keeps the bit, not even one
-    in an older Chrome's folder. This computer's kernel has user namespaces,
-    so Chrome still chooses them here, and the setuid sandbox itself shows
-    only on a kernel without them."""
+    """SYS_ADMIN taken off its # and no-new-privileges given one, as
+    SERVER.md tells a person with a Synology, make the helper of the Chrome
+    in use setuid root, and the self-test still holds. With no-new-privileges
+    left on, which turns the bit off, no helper is set up and the log says
+    why. Put back, no copy keeps the bit, not even one in an older Chrome's
+    folder. This computer's kernel has user namespaces, so Chrome still
+    chooses them here. Started with them turned off, Chrome builds its
+    sandbox through the helper, with the capabilities the container keeps,
+    and without the helper refuses to start."""
     report("suid-off", not setuid_helpers(), "by default no sandbox helper in the volume is setuid")
     path = folder / "compose.yaml"
     plain = path.read_bytes()
     turned_on = with_setuid_sandbox(plain.decode("utf-8"))
-    if not report("cap-file", bool(turned_on), "compose.yaml has the two cap_add lines to uncomment"):
+    missed = with_setuid_sandbox(plain.decode("utf-8"), keep_no_new_privileges=True)
+    if not report("cap-file", bool(turned_on) and bool(missed),
+                  "compose.yaml has the SYS_ADMIN and no-new-privileges lines to change"):
         return
-    path.write_bytes(turned_on.encode("utf-8"))
+    path.write_bytes(missed.encode("utf-8"))
     try:
         r = compose(folder, "up", "-d", timeout=600)
-        if not report("cap-up", r.returncode == 0, "compose up with cap_add SYS_ADMIN %s"
-                      % ("started it" if r.returncode == 0 else "failed")):
+        if not report("nnp-up", r.returncode == 0, "compose up with SYS_ADMIN and no-new-privileges "
+                      "%s" % ("started it" if r.returncode == 0 else "failed")):
+            print(r.stdout + r.stderr, flush=True)
+            return
+        if not wait_for_panel():
+            return
+        helpers = setuid_helpers()
+        report("nnp-said", not helpers and "but no-new-privileges is on" in log(),
+               "with no-new-privileges left on, setuid helpers %s, and the log %s"
+               % (", ".join(helpers) or "none",
+                  "says why" if "but no-new-privileges is on" in log() else "does NOT say why"))
+        said = chrome_with_only_the_helper()
+        report("nnp-run", said.startswith("did not start"),
+               "Chrome left only a helper that is not set up %s" % said)
+        path.write_bytes(turned_on.encode("utf-8"))
+        r = compose(folder, "up", "-d", timeout=600)
+        if not report("cap-up", r.returncode == 0, "compose up with SYS_ADMIN and without "
+                      "no-new-privileges %s" % ("started it" if r.returncode == 0 else "failed")):
             print(r.stdout + r.stderr, flush=True)
             return
         if not wait_for_panel():
@@ -338,6 +649,10 @@ def setuid_phase(folder: Path) -> None:
         report("suid-on", len(helpers) == 1 and helpers[0].startswith("4755 root:root ")
                and "setuid sandbox helper is set up" in log(),
                "setuid helpers %s" % (", ".join(helpers) or "none"))
+        said = chrome_with_only_the_helper()
+        report("suid-run", said == "layer 1 SUID, seccomp Yes, page 42",
+               "Chrome with only the setuid helper for its first layer, %s" % said)
+        locked_down(setuid_sandbox=True)
         self_test()
         root_alone_phase()
         # An older Chrome's folder left with its helper setuid, as a version
@@ -349,11 +664,12 @@ def setuid_phase(folder: Path) -> None:
     finally:
         path.write_bytes(plain)
     r = compose(folder, "up", "-d", timeout=600)
-    if report("cap-out", r.returncode == 0, "compose up without cap_add %s"
+    if report("cap-out", r.returncode == 0, "compose up as it came %s"
               % ("started it" if r.returncode == 0 else "failed")) and wait_for_panel():
         helpers = setuid_helpers()
         report("no-suid", not helpers, "with the lines put back no helper is setuid (%s)"
                % (", ".join(helpers) or "none left"))
+        locked_down()
 
 
 # -- the HTTPS file ------------------------------------------------------------------
@@ -567,6 +883,7 @@ def https_phase(folder: Path, image: str, password: str) -> None:
            "wrong passwords from another browser behind Caddy answer %s, and this one still "
            "signs in, %d" % (" ".join(elsewhere) or r.stderr.strip()[-200:], status))
     self_test()
+    locked_down()
 
 
 def server_mode_free_tries() -> int:
@@ -600,6 +917,10 @@ def main(argv=None) -> int:
                     if cookie:
                         set_up_provider(cookie)
                 self_test()
+                locked_down()
+                names_phase(args.image)
+                if not FAILED:
+                    older_release_phase(folder)
                 if not FAILED:
                     setuid_phase(folder)
                 if not FAILED:

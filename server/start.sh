@@ -8,6 +8,14 @@
 # screen reaches it through the panel, on the panel's port and behind the
 # same password (gui/server_mode.py).
 set -u
+
+# Never as root, whatever ids the entrypoint was given. Chrome refuses root
+# anyway, and the panel and the screen have no need of it.
+if [ "$(id -u)" = 0 ]; then
+  echo "PaperPull will not run its panel and browsers as root. Check PUID in the compose file." >&2
+  exit 1
+fi
+
 LOGS=/config/logs
 mkdir -p "$LOGS"
 
