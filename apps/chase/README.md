@@ -90,7 +90,7 @@ corrupted data before it was fixed:
   request, so the same statement fetched twice differs by a few bytes. A
   hash comparison will not catch a duplicate; the card-and-date check will.
 
-The app never synthesises a request. Driving the year picker is what makes
+The app never synthesizes a request. Driving the year picker is what makes
 Chase send `idalDateFilterType=CURRENT_YEAR_MINUS_n`; no filter value is
 invented.
 

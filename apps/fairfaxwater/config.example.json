@@ -19,6 +19,6 @@
   "//refuse3": "The check compares rows now, and July also carries its own",
   "//refuse4": "amount while April does not, so July wins and April is",
   "//refuse5": "refused. Measured over 4 bills: none refused, 10 of 12",
-  "//refuse6": "neighbour swaps caught.",
+  "//refuse6": "neighbor swaps caught.",
   "refuse_wrong_documents": true
 }

@@ -56,7 +56,7 @@ def test_a_row_is_wide_enough_to_carry_its_own_date(page):
 
 def test_it_is_still_one_purchase_per_row(page):
     show(page, [row("09/19/2026", "31.23") for _ in range(5)])
-    assert len(site.collect_cards(page)) == 5, "no row swallowed its neighbours"
+    assert len(site.collect_cards(page)) == 5, "no row swallowed its neighbors"
 
 
 def test_the_receipt_link_survives_the_widening(page):

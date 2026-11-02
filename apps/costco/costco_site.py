@@ -23,7 +23,7 @@ tabs does not navigate, it asks the API and redraws.
 
 HOW FAR BACK
 
-A ``role=combobox`` labelled "Showing", holding quarters rather than
+A ``role=combobox`` labeled "Showing", holding quarters rather than
 years, "2026 April - June" and so on, opening on "Last 3 Months". SEEN.
 So a run that does not touch it sees a quarter at most, and reaching a
 year means walking the options.
@@ -357,7 +357,7 @@ PURCHASE_TYPE_LABELS = {
 
 
 def purchase_kind(purchase_type: str) -> str:
-    """Which folder a Costco purchase belongs in. Anything unrecognised is
+    """Which folder a Costco purchase belongs in. Anything unrecognized is
     filed as an online order, because that is the one a person can always
     get at themselves if this guessed wrong."""
     return PURCHASE_TYPE_LABELS.get((purchase_type or "").upper(), ("", ONLINE))[1]
@@ -1686,7 +1686,7 @@ def scroll_full_page(page, rounds: int = 2, delay_ms: int = 400) -> None:
 # Everything outside the receipt is hidden, a live DOM display change
 # only, discarded on the next navigation. For a warehouse receipt that
 # means the dialog and nothing else, including the backdrop the dialog
-# sits on, which is what would otherwise print as a grey page. The
+# sits on, which is what would otherwise print as a gray page. The
 # dialog's own Print Receipt link and its Close button are hidden too,
 # and never pressed. On the online print view there is nothing to hide,
 # because that page is already only the invoice.
@@ -1727,7 +1727,7 @@ _ISOLATE_RECEIPT_JS = "([area, printText]) => {" + _VISIBLE_JS + r"""
     el.style.position = 'static';
   }
   // A modal locks the page behind it. Left on, printToPDF renders one
-  // blank viewport and stops. The grey it dims the page with, and the
+  // blank viewport and stops. The gray it dims the page with, and the
   // help tab bolted to the window, both print as well if left alone.
   for (const el of [document.documentElement, document.body]) {
     el.style.overflow = 'visible';

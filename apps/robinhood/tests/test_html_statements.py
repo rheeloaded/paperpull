@@ -280,11 +280,11 @@ def test_a_bare_whole_month_range_is_the_period_of_an_html_month():
 
 def test_bare_ranges_that_disagree_name_no_month():
     """Two whole-month ranges of different months on one page, and neither
-    is labelled: nothing says which is the statement's."""
+    is labeled: nothing says which is the statement's."""
     text = "01/01/2026 to 01/31/2026\n02/01/2026 to 02/28/2026"
     assert not site.names_month(text, "January", "2026")
     assert not site.names_month(text, "February", "2026")
-    # A labelled range of another kind is not counted against it.
+    # A labeled range of another kind is not counted against it.
     text = LIVE_FEBRUARY + "\nTrade dates 01/01/2026 to 01/31/2026"
     assert site.names_month(text, "February", "2026")
     assert not site.names_month(text, "January", "2026")

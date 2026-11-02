@@ -398,7 +398,7 @@ def test_a_payments_receipt_is_not_a_statement(billing):
 
 
 def test_a_press_is_refused_where_another_control_sits_at_its_center(billing, tmp_path):
-    """A card labelled for the statement, with a button of its own in the
+    """A card labeled for the statement, with a button of its own in the
     middle, pressed that button. This one has no words, so only where the
     press lands can tell."""
     card = ("<div data-cy='statement-row'><span>Statement date 09/12/2026</span>"

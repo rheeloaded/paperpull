@@ -75,7 +75,7 @@ half nobody else can get at, because Costco keeps it for a matter of
 months and the paper fades. **Online** is costco.com orders. Switching
 tabs does not navigate, it asks the API and redraws.
 
-**How far back you can see is a picker labelled "Showing"**, holding
+**How far back you can see is a picker labeled "Showing"**, holding
 quarters rather than years, "2026 April - June" and so on, opening on
 "Last 3 Months". So a run that never touches it sees a quarter at most.
 This app walks the quarters, and on the account it was built against
@@ -150,7 +150,7 @@ changes.
   slower than asking the API would be.
 - **Classification is best effort.** Costco's till prints short names
   and 113 of them are in `category_rules.json` now. Anything it does not
-  recognise is filed as "Mixed Purchases", which is a true description
+  recognize is filed as "Mixed Purchases", which is a true description
   of most Costco trips and not an error.
 
 ## In-warehouse and online

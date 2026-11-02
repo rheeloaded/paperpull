@@ -799,7 +799,7 @@ def _fetch(page, invoice_id: str, out_path: Path, trace: Optional[list]) -> bool
     except intake.TooLarge:
         return False
     if body[:5] != b"%PDF-":
-        # A sign-in page or a JSON error labelled as a PDF is still the
+        # A sign-in page or a JSON error labeled as a PDF is still the
         # portal saying the session has ended.
         if body.lstrip()[:1] in (b"<", b"{", b"["):
             raise SessionExpired("My Energy Center answered a bill with a sign-in body")

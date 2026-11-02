@@ -813,7 +813,7 @@ class App:
 
         A warehouse receipt is a dialog sitting on top of the whole site,
         so printing the page as-is captures the nav, the banners and a
-        grey backdrop around a letterbox of receipt.
+        gray backdrop around a letterbox of receipt.
         site.isolate_receipt hides everything except the purchase-summary
         block first, which leaves a clean one-page receipt for CDP
         Page.printToPDF.
