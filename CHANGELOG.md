@@ -7,7 +7,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.60.0] - 2026-11-02
+
+Portland General Electric is the 79th app, contributed by
+crazyhorse90210. Login and the control panel say when two accounts share
+one debugging port, and a second person's account takes a port from 9400
+up. A list that stops while documents download stops the run once in
+sixteen apps, so the panel offers a run that reads it again, and Golden 1,
+Walmart, Lowe's and GitHub no longer call a list whole with part of it
+missing. Signing in works on a computer with a proxy set, an app's own
+browser starts again after a Playwright upgrade, the Windows and Mac
+packages take Python 3.12.16, and PaperPull Server's container runs with
+only what it needs.
 
 ### Added
 
@@ -127,6 +138,25 @@ All notable changes to PaperPull are recorded here. Versioning follows
   finish, so Resume reads the list again. A Walmart list filtered to a
   kind the order list showed none of may have none, and a Lowe's page the
   page before did not offer may not be there, so both are read as before.
+
+- **A list that stops while documents download stops the run once, and the
+  panel offers a run that reads it again (#124).** Many apps read their
+  list again for each document they download. When the list stopped
+  answering partway, eleven apps sent that document to Manual Review and
+  went on, so a run after the list changed read the whole list once for
+  every document and still ended clean, and others left the list noted as
+  whole, so the panel offered Continue and the next run stopped on the
+  same list again. Now such a run stops once, writes a failure file, says
+  to run Pilot or Run All and leaves the list noted as not read to its
+  end, so the panel offers Get new documents in place of Continue.
+  SDG&E, Optum, Venmo, Nelnet, Shelby County, Spectrum, TreasuryDirect,
+  Coinbase, Alpaca, Chase Business, Simmons, Bilt, First Horizon, PayPal,
+  Bank of America and NetBenefits do so. A document's own page or its own
+  control stays that document's matter, and a NetBenefits document whose
+  plan is missing from the plan list goes to Manual Review rather than
+  stop every run. Sixteen apps that answered a sign-out in their loop with
+  a return now report the run as one that stopped rather than finished. A
+  check holds every document app to this.
 
 ### Security
 
