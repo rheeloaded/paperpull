@@ -49,6 +49,9 @@ _DOCUMENTS = {}
 # Each documents folder an account's documents were moved to, a JSON list
 # of full paths in its output folder (Paths.documents_roots).
 DOCUMENTS_FOLDERS = "documents-folders.json"
+# The config file load_config last read, which Login asks about, since a
+# sign-in is opened on that config's port (ports.say_at_sign_in).
+_CONFIG_READ = None
 
 
 def _folder_key(path) -> str:
@@ -63,10 +66,12 @@ def documents_dir_for(output_dir) -> str:
 
 def bind(spec) -> None:
     """Attach this process's AppSpec. Called once by the app's storage shim."""
-    global _SPEC
+    global _SPEC, _CONFIG_READ
     _SPEC = spec
-    # A documents folder belongs to the config load_config reads next.
+    # A documents folder belongs to the config load_config reads next, and
+    # so does the file a sign-in asks about.
     _DOCUMENTS.clear()
+    _CONFIG_READ = None
     from . import receipt_pdf
     receipt_pdf.bind(spec)
 
@@ -137,7 +142,14 @@ def load_config(path: Optional[Path] = None) -> dict:
     set_filename_patterns(cfg)
     # Where documents go (#102), read here for the same reason.
     set_documents_dir(cfg, path)
+    global _CONFIG_READ
+    _CONFIG_READ = Path(path).absolute()
     return cfg
+
+
+def config_read() -> Optional[Path]:
+    """The config file load_config last read, or None before it has."""
+    return _CONFIG_READ
 
 
 # The settings that name a folder, which a run prints and puts in the paths

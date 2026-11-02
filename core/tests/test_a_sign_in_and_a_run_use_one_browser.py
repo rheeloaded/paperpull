@@ -97,6 +97,19 @@ def test_every_app_falls_back_to_its_own_port():
     assert checked >= 60, checked
 
 
+def test_no_two_apps_name_the_same_port():
+    """Invest529 shipped on Simmons Bank's 9298, so with both set up from
+    their examples each attached to the other's browser."""
+    names = {}
+    for app in APPS:
+        port = _example_port(app)
+        if port:
+            names.setdefault(port, []).append(app.name)
+    shared = {port: apps for port, apps in names.items() if len(apps) > 1}
+    assert not shared, shared
+    assert len(names) >= 70, len(names)
+
+
 # -- a port another browser holds -----------------------------------------------
 
 class _Browser(BaseHTTPRequestHandler):

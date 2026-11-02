@@ -255,7 +255,9 @@ In the control panel, **add a person** beside the Account box makes the
 second person's account, and the Account box then runs every action against
 it. From a terminal it is `paperpull <app> add-account spouse`, then
 `paperpull <app> all --account spouse`. Either way it gets its own profile,
-port and output folder beside the first one's, so no data mixes. Underneath it is a
+port and output folder beside the first one's, so no data mixes. Its port is
+the first free one from 9400 up, a range no provider comes with, so a provider
+you set up later never lands on it. Underneath it is a
 `config.spouse.json` beside the app's `config.json`, which the app also takes
 directly as `--config`, and the sign-in launcher takes the label too
 (`login.bat spouse` / `./login.command spouse`). `python tools/add_account.py

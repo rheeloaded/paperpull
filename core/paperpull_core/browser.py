@@ -804,7 +804,12 @@ def open_signin_browser(profile_dir, port: str, url: str,
     window and then a Chrome for Testing one opened on profiles of their
     own and closed again, while a Chrome from an earlier sign-in that had
     hung went on holding the port (#90).
+
+    Another config beside this one that names the same port is said
+    first, since a sign-in there joins whichever browser holds the port,
+    the other person's included (ports.say_at_sign_in).
     """
+    _say_shared_port(port)
     held = debug_port_holder(port)
     if not held and _port_taken(port):
         held = debug_port_holder(port, timeout=_SLOW_START_SECONDS)
@@ -854,6 +859,17 @@ def open_signin_browser(profile_dir, port: str, url: str,
             if fresh:
                 return _try_each(fresh, profile_dir, port, url, fallback=True, mode=mode)
     return None
+
+
+def _say_shared_port(port) -> None:
+    """Say which other configs beside the one this run read name the port
+    a sign-in is opened on. Only ever said. Nothing it meets, a folder or
+    file it cannot read included, keeps the sign-in from going on."""
+    try:
+        from . import ports, storage
+        ports.say_at_sign_in(storage.config_read(), port)
+    except Exception:
+        pass
 
 
 def _say_port_silent(port: str) -> None:

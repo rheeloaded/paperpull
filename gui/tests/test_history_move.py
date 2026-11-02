@@ -155,9 +155,11 @@ def test_a_new_computer_gets_every_provider_person_setting_and_history(panel, tm
     assert cfg["cdp_url"] == EXAMPLE["cdp_url"]
     assert cfg["profile_dir"] == EXAMPLE["profile_dir"]
     assert cfg["browser"] == "auto" and cfg["output_dir"] == "."
+    # Both templates name 9299, and Bank was set up first.
+    assert _config(new / "Shop Receipts")["cdp_url"] == "http://127.0.0.1:9300"
     spouse = _config(new / "Shop Receipts", "config.spouse.json")
     assert spouse["owner"] == "Jamie Example"
-    assert spouse["cdp_url"] == "http://127.0.0.1:9309"     # its own port, as add_account gives
+    assert spouse["cdp_url"] == "http://127.0.0.1:9400"     # the people's range, as add_account gives
 
     for folder, n in (("Bank Statements", 3), ("Shop Receipts", 2), ("Shop Receipts - spouse", 4)):
         recs = json.loads((new / folder / "progress.json").read_text(encoding="utf-8"))

@@ -7,7 +7,9 @@
 
 Each account gets its OWN output folder, browser profile and debugging port,
 so progress.json, the CSVs, the PDFs and the sign-in session never mix, and
-nothing already downloaded is affected. What comes out is a
+nothing already downloaded is affected. Its port is the first one from 9400
+up that no config beside it names, a range no app comes with, so a provider
+set up later never arrives on a person's port. What comes out is a
 config.<name>.json beside the app's config.json, which every command then
 takes as --config (or as --account through the launcher).
 
@@ -37,6 +39,15 @@ def _port_of(url: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+# The first debugging port a second person is given. The apps' own ports run
+# up from 9222, one each, so a person given their app's port plus 10, as
+# this did before, could hold the port of an app set up after them
+# (E-ZPass's 9274 plus 10 is Interactive Brokers' 9284). A census
+# fails once any app's example reaches this, and paperpull_core.ports, which
+# tells a person on a shared port where to move, keeps the same number.
+PEOPLE_PORTS = 9400
+
+
 def ports_in_use(app_dirs) -> set:
     """Every debugging port a config of these apps names, each app's
     config.json and config.example.json and every account's
@@ -55,6 +66,28 @@ def ports_in_use(app_dirs) -> set:
     return used
 
 
+def free_cdp_url(app_dir: Path, cdp_url) -> str | None:
+    """cdp_url moved up to a port no install beside app_dir uses, or None
+    when its own port is free. The control panel asks this of an install it
+    has just made. An app's example port is no other app's, but a second
+    person added before PEOPLE_PORTS was given their app's port plus 10,
+    moved past only the ports in use then, so it can be the example port of
+    an app installed afterwards (E-ZPass's 9274 plus 10 is Interactive
+    Brokers' 9284 while IBKR is not installed)."""
+    base = _port_of(cdp_url if isinstance(cdp_url, str) else "")
+    if not base:
+        return None
+    here = Path(app_dir).resolve()
+    taken = ports_in_use([d for d in paperpull.list_apps(Path(app_dir).parent)
+                          if d.resolve() != here])
+    if base not in taken:
+        return None
+    port = base
+    while port in taken:
+        port += 1
+    return re.sub(r":%d\b" % base, ":%d" % port, cdp_url, count=1)
+
+
 def output_dir_for(app_dir: Path, cfg: dict, name: str) -> str:
     """The output_dir a second person's config gets, from the first
     person's config. Their folder sits beside the first one's, named for the
@@ -70,13 +103,15 @@ def output_dir_for(app_dir: Path, cfg: dict, name: str) -> str:
     return str(out.parent / f"{out.name} - {name}")
 
 
-def make_config(app_dir: Path, name: str, port_offset: int = 10,
+def make_config(app_dir: Path, name: str, port_offset: int | None = None,
                 owner: str = "", taken: set | None = None) -> Path | None:
     """Write config.<name>.json for one app. Returns its path, or None when
     the app has no config.json yet (it has not been set up). The new port is
-    the app's own plus `port_offset`, moved up past any port in `taken`,
-    which then holds it too, so a second account never lands on another
-    app's port (E-ZPass's 9274 plus 10 was Interactive Brokers' 9284)."""
+    the first from PEOPLE_PORTS up that is not in `taken`, which then holds
+    it too, so a second account never lands on another app's port, nor on
+    the port of an app set up later. Given a `port_offset`, it is the app's
+    own port plus that many, moved past `taken`, the rule this used before
+    (E-ZPass's 9274 plus 10 was Interactive Brokers' 9284)."""
     base = app_dir / "config.json"
     if not base.is_file():
         return None
@@ -96,7 +131,7 @@ def make_config(app_dir: Path, name: str, port_offset: int = 10,
         # so the apps beside it are read here.
         taken = taken if taken is not None else ports_in_use(
             list(paperpull.list_apps(Path(app_dir).parent)) + [app_dir])
-        port = base + port_offset
+        port = PEOPLE_PORTS if port_offset is None else base + port_offset
         while port in taken or port == base:
             port += 1
         taken.add(port)
@@ -108,7 +143,7 @@ def make_config(app_dir: Path, name: str, port_offset: int = 10,
     return dest
 
 
-def add_account(app_dirs: list[Path], name: str, port_offset: int = 10,
+def add_account(app_dirs: list[Path], name: str, port_offset: int | None = None,
                 owner: str = "") -> list[Path]:
     owner = owner or name.title()
     print(f"Creating '{name}' account configs (holder: {owner}):\n")
@@ -149,9 +184,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", metavar="DIR", help="folder holding the apps")
     ap.add_argument("--owner", default="",
                     help="account holder's display name (default: the label, capitalized)")
-    ap.add_argument("--port-offset", type=int, default=10,
-                    help="added to each app's debugging port, then moved past any port "
-                         "another app or account uses (default 10)")
+    ap.add_argument("--port-offset", type=int, default=None,
+                    help="give each account its app's debugging port plus this many, moved "
+                         "past any port another app or account uses, in place of the first "
+                         "free port from %d up" % PEOPLE_PORTS)
     args = ap.parse_args(argv)
 
     root = paperpull.apps_root(args.root)
