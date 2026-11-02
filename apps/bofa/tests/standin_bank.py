@@ -31,7 +31,7 @@ import json
 LIST_URL = "https://secure.bankofamerica.com/samplepg/standinsamplezz/zone/statements/v1/lookupDocuments"
 PAGE_URL = "https://secure.bankofamerica.com/sample-zz-stmts-docs/?k=STANDINTOKEN&request_locale=en-us"
 # The same page at the second address a tester's window showed (#121), and
-# at the credit card address in the second recording (#121). Both paths are
+# at the credit card address from a tester's window (#121). Both paths are
 # the bank's own, since the app knows them by the whole path.
 SECOND_PAGE_URL = "https://secure.bankofamerica.com/statements-documents/home/?request_locale=en-us"
 THIRD_PAGE_URL = ("https://secure.bankofamerica.com/mycommunications/statements/statement.go"

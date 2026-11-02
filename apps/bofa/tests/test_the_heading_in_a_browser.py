@@ -210,3 +210,68 @@ def test_a_chat_bubble_over_the_heading_stops_the_run_with_nothing_pressed(brows
         assert not seen["pdfs"]
     finally:
         context.close()
+
+
+def test_the_four_checks_and_parent_cap_in_shown_link_js(browser):
+    """Three checks in _SHOWN_LINK_JS (hidden attribute with height,
+    visibility: hidden, and overflow clipping) and the parent traversal
+    cap of six."""
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        # 1. hidden attribute on a panel that has height
+        page.set_content(
+            '<div hidden style="display: block; height: 100px; width: 200px;">'
+            '<a id="l1" href="#" style="display: block; height: 20px; width: 100px;">'
+            'Download PDF for January Statement for Checking</a></div>'
+        )
+        l1 = page.locator("#l1").element_handle()
+        assert page.evaluate(site._SHOWN_LINK_JS, l1) is False
+        assert site.drawn_links(page) == []
+        assert site.hidden_pdf_links(page) == 1
+
+        # 2. visibility: hidden with height
+        page.set_content(
+            '<div style="visibility: hidden; height: 100px; width: 200px;">'
+            '<a id="l2" href="#" style="display: block; height: 20px; width: 100px;">'
+            'Download PDF for January Statement for Checking</a></div>'
+        )
+        l2 = page.locator("#l2").element_handle()
+        assert page.evaluate(site._SHOWN_LINK_JS, l2) is False
+        assert site.drawn_links(page) == []
+        assert site.hidden_pdf_links(page) == 1
+
+        # 3. row clipped by its container's overflow-y
+        page.set_content(
+            '<div style="overflow-y: hidden; height: 50px; width: 200px; position: relative;">'
+            '<div style="position: absolute; top: 120px; height: 30px; width: 150px;">'
+            '<a id="l3" href="#" style="display: block; height: 20px; width: 100px;">'
+            'Download PDF for January Statement for Checking</a></div></div>'
+        )
+        l3 = page.locator("#l3").element_handle()
+        assert page.evaluate(site._SHOWN_LINK_JS, l3) is False
+        assert site.drawn_links(page) == []
+        assert site.hidden_pdf_links(page) == 1
+
+        # 4. parent traversal cap of 6:
+        # 6 ancestors up to p6: p1, p2, p3, p4, p5, p6
+        # When p6 has hidden attribute, traversal reaches it (hops=6) -> False
+        # When p7 has hidden attribute, traversal breaks after 6 hops -> True
+        page.set_content(
+            '<style>[hidden] { display: block !important; }</style>'
+            '<div id="p7" style="height: 100px; width: 200px;">'
+            '<div id="p6"><div id="p5"><div id="p4"><div id="p3"><div id="p2"><div id="p1">'
+            '<a id="l4" href="#" style="display: block; height: 20px; width: 100px;">'
+            'Download PDF for January Statement for Checking</a>'
+            '</div></div></div></div></div></div></div>'
+        )
+        l4 = page.locator("#l4").element_handle()
+        assert page.evaluate(site._SHOWN_LINK_JS, l4) is True
+
+        page.evaluate("document.getElementById('p6').hidden = true")
+        assert page.evaluate(site._SHOWN_LINK_JS, l4) is False
+
+        page.evaluate("document.getElementById('p6').hidden = false; document.getElementById('p7').hidden = true")
+        assert page.evaluate(site._SHOWN_LINK_JS, l4) is True
+    finally:
+        context.close()

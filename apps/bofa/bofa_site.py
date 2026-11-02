@@ -12,8 +12,9 @@ HOW THE STATEMENTS PAGE WORKS, as the recordings showed it
 
   Statements & Documents is a page on secure.bankofamerica.com whose path
   holds "stmts-docs", or for a second tester (#121, 2026-10-28) the
-  same page at /statements-documents/home/. It fills its list from one
-  call of its own.
+  same page at /statements-documents/home/, or for a tester's window on
+  credit cards (#121) at /mycommunications/statements/statement.go. It
+  fills its list from one call of its own.
 
     list   POST https://secure.bankofamerica.com/<three words>/statements/v1/<word>Documents
            body {<account key>, docCategoryId, year, lang}
@@ -84,7 +85,8 @@ and bill pay.
   a statement is to be downloaded and every link's address is a script,
   through is_pdf_link (the guard below on its words beside the bank's own
   names for the statements and accounts it listed), a link and not a
-  button, read again right before the press. Diagnose never presses a
+  button, read again and focused right before the press, so any overlay
+  the page shows on focus is brought up. Diagnose never presses a
   link. Nothing else is clicked, typed, selected, submitted or confirmed.
   The page is reloaded to hear its list call, at the start of a run and
   again when what was heard is FRESH_SECONDS old, a tab the link's press
@@ -124,8 +126,8 @@ URLS = {
 }
 
 # The statements page, by the part of its path the first recording kept, or
-# by the whole path, letter for letter, of the credit card address in the
-# second recording or the address a second tester's window showed for the
+# by the whole path, letter for letter, of the credit card address from a
+# tester's window on #121 or the address a second tester's window showed for the
 # same page (#121). A page below those paths is not the statements page, so
 # a press that takes the tab there is followed by going back. Only the path
 # is read, so a move by query or fragment alone is not seen at any address.
@@ -576,7 +578,8 @@ def account_key_of(body: dict, answer: dict) -> str:
 _SHOWN_LINK_JS = r"""a => {
   const ar = a.getBoundingClientRect(), my = ar.top + ar.height / 2;
   if (ar.width < 1 || ar.height < 1) return false;
-  for (let n = a; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+  for (let n = a, hops = 0; n && n !== document.body && n !== document.documentElement; n = n.parentElement, hops++) {
+    if (hops > 6) break;
     if (n.hidden || n.hasAttribute('hidden')) return false;
     const r = n.getBoundingClientRect(), s = getComputedStyle(n);
     if (r.width < 1 || r.height < 1 || s.display === 'none' || s.visibility === 'hidden') return false;
@@ -586,35 +589,58 @@ _SHOWN_LINK_JS = r"""a => {
   return true;
 }"""
 
-# Each shown "Download PDF for ..." link, its address as the browser reads
-# it, the address as the page wrote it, and the values of its data- fields,
-# which only link_facts reads, to count the links whose statement's id is
-# there. Links inside a hidden or zero-height panel under a shut heading are
-# left out, while links inside a shown row with aria-hidden="true" are kept.
+# Each "Download PDF for ..." link, its address as the browser reads it, the
+# address as the page wrote it, the values of its data- fields, and whether it
+# is shown on the page. Links inside a hidden or zero-height panel under a shut
+# heading have shown: false, while links inside a shown row with aria-hidden="true"
+# have shown: true.
 _LINKS_JS = r"""() => {
   const shown = %s;
-  return Array.from(document.querySelectorAll('a[href]')).filter(shown).map(a => ({
-    name: ((a.getAttribute('aria-label') || a.innerText || '').replace(/\s+/g, ' ').trim()).slice(0, 300),
-    href: String(a.href || '').slice(0, 2000),
-    raw: String(a.getAttribute('href') || '').slice(0, 2000),
-    data: Array.from(a.attributes).filter(x => x.name.indexOf('data-') === 0)
-      .map(x => String(x.value || '').slice(0, 300)).slice(0, 12)
-  })).filter(x => /^\s*Download PDF for\b/i.test(x.name)).slice(0, 200);
+  return Array.from(document.querySelectorAll('a[href]')).map(a => {
+    const name = ((a.getAttribute('aria-label') || a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim()).slice(0, 300);
+    if (!/^\s*Download PDF for\b/i.test(name)) return null;
+    return {
+      name: name,
+      shown: Boolean(shown(a)),
+      href: String(a.href || '').slice(0, 2000),
+      raw: String(a.getAttribute('href') || '').slice(0, 2000),
+      data: Array.from(a.attributes).filter(x => x.name.indexOf('data-') === 0)
+        .map(x => String(x.value || '').slice(0, 300)).slice(0, 12)
+    };
+  }).filter(Boolean).slice(0, 200);
 }""" % _SHOWN_LINK_JS
 
 
-def drawn_links(page) -> list:
+def _read_links(page) -> Tuple[list, int]:
     """Each "Download PDF for ..." link the page drew, wherever its address
-    goes, as {name, href, raw, data}. Read, never pressed."""
+    goes, as {name, href, raw, data}, split into shown links and the count
+    of hidden links. Read, never pressed."""
     try:
         # The page's own links, at most two hundred of them, read in the
         # page. No answer's body is read here.
         got = page.evaluate(_LINKS_JS)
     except Exception as e:
         log.info("the PDF links could not be read: %s", type(e).__name__)
-        return []
-    return [x for x in got or [] if isinstance(x, dict)
-            and DOWNLOAD_LINK_RE.match(str(x.get("name") or ""))]
+        return [], 0
+    all_links = [x for x in got or [] if isinstance(x, dict)
+                 and DOWNLOAD_LINK_RE.match(str(x.get("name") or ""))]
+    shown = [x for x in all_links if x.get("shown", True) is not False]
+    hidden = sum(1 for x in all_links if x.get("shown") is False)
+    return shown, hidden
+
+
+def drawn_links(page) -> list:
+    """Each shown "Download PDF for ..." link the page drew, wherever its address
+    goes, as {name, href, raw, data}. Read, never pressed."""
+    shown, _ = _read_links(page)
+    return shown
+
+
+def hidden_pdf_links(page) -> int:
+    """How many "Download PDF for ..." links the page drew and does not show,
+    a count for the failure file. One held hidden is one behind a section that is closed."""
+    _, hidden = _read_links(page)
+    return hidden
 
 
 def download_links(page) -> list:
@@ -624,7 +650,7 @@ def download_links(page) -> list:
             if is_safe_url(str(x.get("href") or ""))]
 
 
-def link_facts(drawn: list, rows: list) -> dict:
+def link_facts(drawn: list, rows: list, not_shown: int = 0) -> dict:
     """What the page's Download PDF links were, as counts and never an
     address or a value, under names the word list that writes a survey
     keeps whole. How many there were, where their addresses go, how many
@@ -638,9 +664,12 @@ def link_facts(drawn: list, rows: list) -> dict:
         text = str(text or "")
         return any(_whole(i).search(text) or _whole(quote(i, safe="")).search(text) for i in ids)
 
-    out = {"pdf_links": len(drawn), "links_to_other_pages": 0, "links_to_no_page": 0,
-           "links_to_this_page": 0, "links_elsewhere": 0, "links_with_an_id": 0,
-           "links_with_an_id_elsewhere": 0}
+    out = {"pdf_links": len(drawn)}
+    if not drawn or not_shown:
+        out["pdf_links_not_shown"] = not_shown
+    out.update({"links_to_other_pages": 0, "links_to_no_page": 0,
+                "links_to_this_page": 0, "links_elsewhere": 0, "links_with_an_id": 0,
+                "links_with_an_id_elsewhere": 0})
     for x in drawn:
         href = str(x.get("href") or "")
         raw = str(x.get("raw") if x.get("raw") is not None else href).strip()
@@ -1047,8 +1076,8 @@ def _press_and_hear(page, el, names) -> dict:
         # to add .show-overlay and bring the link to the top.
         try:
             el.focus()
-        except Exception:
-            pass
+        except Exception as e:
+            log.info("a Download PDF link could not be focused: %s", type(e).__name__)
         # Pressed for this run from here on, whatever happens after, so it is
         # never pressed twice in one run.
         _pdf_learned["pressed"] = True
@@ -1272,33 +1301,33 @@ def learn_pdf_call(page, drawn: list, rows: list, call: Call) -> Tuple[Optional[
     return pdf, facts
 
 
-def _wait_for_links(page, tries: int) -> list:
+def _wait_for_links(page, tries: int) -> Tuple[list, int]:
     """The page's Download PDF links, once it has drawn any, read every
-    half second for `tries` times. The page draws its rows after its
-    answer comes."""
-    drawn = []
+    half second for `tries` times, as shown links and a count of hidden links.
+    The page draws its rows after its answer comes."""
+    drawn, hidden = [], 0
     for _ in range(tries):
-        drawn = drawn_links(page)
+        drawn, hidden = _read_links(page)
         if drawn:
             break
         page.wait_for_timeout(500)
-    return drawn
+    return drawn, hidden
 
 
-def _wait_after_the_press(page, got: dict, heard: list, before: int) -> list:
+def _wait_after_the_press(page, got: dict, heard: list, before: int) -> Tuple[list, int]:
     """The Download PDF links drawn under the heading just opened, read
     once the list the press asked for has been heard too, or once
     OPEN_WAIT_MS is over, whichever comes first. The rows are drawn from
     that answer, so links read before it is heard could match no row."""
-    drawn = []
+    drawn, hidden = [], 0
     for _ in range(OPEN_WAIT_MS // 500):
         if got.get("refused_later"):
             break
-        drawn = drawn_links(page)
+        drawn, hidden = _read_links(page)
         if drawn and len(heard) > before:
             break
         page.wait_for_timeout(500)
-    return drawn
+    return drawn, hidden
 
 
 def learn(page, wait_ms: int = 25000, form: bool = True, press_link: bool = True) -> Call:
@@ -1380,14 +1409,14 @@ def learn(page, wait_ms: int = 25000, form: bool = True, press_link: bool = True
         heading = "not pressed"
         pressed = {}
         # The page draws its rows after its answer comes.
-        drawn = _wait_for_links(page, 16 if form else 1)
+        drawn, hidden = _wait_for_links(page, 16 if form else 1)
         if not drawn and form:
             # A reload leaves the Statements heading shut, and nothing is
             # drawn under a shut heading.
             before = len(heard)
             heading = open_statements(page)
             if heading == "opened":
-                drawn = _wait_after_the_press(page, got, heard, before)
+                drawn, hidden = _wait_after_the_press(page, got, heard, before)
                 if got.get("refused_later"):
                     raise SessionExpired("Bank of America answered %s" % got["refused_later"])
                 pressed = {"list_read_after_the_heading": len(heard) > before,
@@ -1406,7 +1435,7 @@ def learn(page, wait_ms: int = 25000, form: bool = True, press_link: bool = True
     # Every link comes out of the one form, or none is taken.
     template = next(iter(forms)) if len(forms) == 1 and matched == len(links) else None
     hosts = {(urlsplit(h).hostname or "").lower() for h in links}
-    facts = dict(link_facts(drawn, rows), statements_heading=heading,
+    facts = dict(link_facts(drawn, rows, not_shown=hidden), statements_heading=heading,
                  times_the_list_was_read=len(heard), rows_read=len(rows), forms=len(forms),
                  links_with_no_row=len(links) - matched, **pressed)
     call = Call(got["url"], got["headers"], got["body"], key, got["answer"], template, len(links),
@@ -1430,6 +1459,12 @@ def not_learned_why(facts: dict) -> Tuple[str, str]:
     for the run to say and a reason in the failure file's own words."""
     heading = facts.get("statements_heading")
     if not facts.get("pdf_links"):
+        if facts.get("pdf_links_not_shown"):
+            n = facts["pdf_links_not_shown"]
+            s = "link" if n == 1 else "links"
+            return ("the statements page drew %d Download PDF %s but none shows, as links "
+                    "behind a closed section would not" % (n, s),
+                    "pdf links not shown")
         if heading in ("opened", "already expanded"):
             return ("the statements page drew no Download PDF link, even with its "
                     "Statements heading open", "no pdf link with the heading expanded")

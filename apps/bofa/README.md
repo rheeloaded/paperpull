@@ -89,7 +89,8 @@ whole name is Statements. The other is one statement's Download PDF link,
 once a run, when no link shows an address. It has to be a link, not a
 button, whose words beside the bank's own names for your statements and
 accounts start with Download PDF for and hold nothing the app's blocklists
-refuse, read again right before the press. A
+refuse, read again right before the press. The link is focused first, so
+any overlay the page shows when it receives focus is brought up. A
 download that press starts is cancelled and a tab it opens is closed.
 Login and Discover press nothing, and Diagnose never presses a link. It reloads Statements &
 Documents to hear its list, at the start and every five minutes of a long

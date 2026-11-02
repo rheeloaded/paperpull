@@ -600,6 +600,13 @@ def test_a_tab_at_each_address_takes_neither(tmp_path, monkeypatch):
     assert stopped.value.facts == {"tabs_on_the_statements_page": 2}
 
 
+def test_a_tab_on_statements_and_documents_and_one_on_the_card_page_takes_neither(tmp_path, monkeypatch):
+    attached(monkeypatch, sb.Bank(), sb.Bank(url=sb.THIRD_PAGE_URL))
+    with pytest.raises(pressing.Stop) as stopped:
+        an_app(tmp_path).page()
+    assert stopped.value.facts == {"tabs_on_the_statements_page": 2}
+
+
 def test_a_tab_on_the_site_is_still_taken_when_none_is_on_the_statements_page(tmp_path, monkeypatch):
     overview = sb.Bank(url=OVERVIEW)
     attached(monkeypatch, sb.Bank(url=ELSEWHERE), overview)

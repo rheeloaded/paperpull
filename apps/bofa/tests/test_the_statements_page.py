@@ -71,10 +71,10 @@ def test_a_page_of_another_site_is_not_the_statements_page():
     sb.THIRD_PAGE_URL,
     "https://secure.bankofamerica.com/mycommunications/statements/statement.go",
 ])
-def test_both_addresses_of_the_statements_page_are_it(url):
-    """A second tester's window was on Statements & Documents at
-    /statements-documents/home/, and the credit card statements page in the
-    second recording is at /mycommunications/statements/statement.go (#121)."""
+def test_the_three_addresses_of_the_statements_page_are_it(url):
+    """The first recording's path held stmts-docs, a second tester's window was
+    on Statements & Documents at /statements-documents/home/, and a tester's
+    window on credit card statements was at /mycommunications/statements/statement.go (#121)."""
     assert site.is_statements_address(url)
     assert site.on_statements_page(sb.Bank(url=url))
 
@@ -632,7 +632,8 @@ def test_every_fact_a_survey_writes_keeps_its_name_and_words():
 def test_every_reason_the_failure_file_gets_is_one_it_keeps():
     from paperpull_core.words import shape_tree
     from paperpull_core.failure import _step
-    cases = [dict(pdf_links=0, statements_heading="opened"),
+    cases = [dict(pdf_links=0, pdf_links_not_shown=2),
+             dict(pdf_links=0, statements_heading="opened"),
              dict(pdf_links=0, statements_heading="not found"),
              dict(pdf_links=2, forms=0, statements_heading="opened",
                   list_read_after_the_heading=False),
@@ -643,6 +644,17 @@ def test_every_reason_the_failure_file_gets_is_one_it_keeps():
         assert _step(reason) == reason and shape_tree(reason) == reason, reason
     for key in site.link_facts([], []):
         assert shape_tree(key) == key, key
+
+
+def test_hidden_pdf_links_are_counted_in_facts_and_reported_in_failure():
+    facts = site.link_facts([], [], not_shown=3)
+    assert facts["pdf_links"] == 0
+    assert facts["pdf_links_not_shown"] == 3
+    why, reason = site.not_learned_why(facts)
+    assert "drew 3 Download PDF links but none shows, as links behind a closed section would not" in why
+    assert reason == "pdf links not shown"
+    why_one, _ = site.not_learned_why(dict(pdf_links=0, pdf_links_not_shown=1))
+    assert "drew 1 Download PDF link but none shows" in why_one
 
 
 # -- one statement's PDF --------------------------------------------------------
