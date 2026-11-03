@@ -7,6 +7,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [0.60.1] - 2026-11-02
+
+The Windows and Mac packages and the server image take pypdf 6.21.4,
+which closes seven advisories.
+
+### Security
+- **The Windows and Mac packages and the server image take pypdf 6.21.4.**
+  pypdf 6.21.2 has seven advisories fixed in 6.21.3 and 6.21.4, each a PDF
+  made to keep pypdf reading for a long time or to take a great deal of
+  memory. Four are in what PaperPull does with a PDF it opens, reading a
+  file that ends before its trailer (GHSA-5849-834g-hvw5) or one with
+  cross-reference streams (GHSA-x3rh-gjgm-fmqc), and counting the pages of
+  an encrypted file (GHSA-62m5-6wh8-28x7) or of a page tree with many
+  shared resources (GHSA-cggf-277g-3q54). A fifth is in copying pages
+  (GHSA-mfr5-77xh-9j7h), which PaperPull does to take blank pages off the
+  end of a printed receipt. PaperPull reads each PDF in a process of its
+  own that is stopped after two minutes or 1 GB of memory, so such a PDF
+  was set aside unread and the run went on. The other two are in parts of
+  pypdf PaperPull never calls, page labels (GHSA-42gh-23hr-vphw) and
+  strict mode (GHSA-4vqv-7265-gm2w). Running a checkout's setup again
+  brings in 6.21.4 as well, since the shared core asks for it. The
+  packages also take starlette 1.10.0, which the server image already
+  ran.
+
 ## [0.60.0] - 2026-11-02
 
 Portland General Electric is the 79th app, contributed by

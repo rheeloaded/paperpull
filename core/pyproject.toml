@@ -14,7 +14,7 @@ dependencies = [
     # [crypto] pulls in `cryptography`, without which pypdf cannot open an
     # AES-encrypted PDF - some providers (USAA insurance documents, for one)
     # hand those out, and they would otherwise fail validation forever.
-    "pypdf[crypto]>=6.21.2",
+    "pypdf[crypto]>=6.21.4",
 ]
 
 # What the test suite needs beyond the runtime dependency. Without these
