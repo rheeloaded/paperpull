@@ -22,6 +22,7 @@ import glob
 import importlib.util
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -642,6 +643,55 @@ _SANDBOX_FAILED = ("chromium sandboxing failed", "no usable sandbox",
 
 class SandboxRefused(RuntimeError):
     """The browser could not start its sandbox, and so was not started."""
+
+
+# -- PaperPull's own Chromium, where a step cannot do without it ------------------
+#
+# Sign-in and almost every app use the Edge or Chrome already on the computer,
+# so most installs never download Playwright's Chromium, and nothing asks for
+# it. The receipt renderer is the exception. It prints a page in a headless
+# browser of its own, always Playwright's, so on such an install it met
+# Playwright's "Executable doesn't exist ... playwright install" and that went
+# into the purchase's notes as it stood. `playwright install` means nothing
+# in the packaged app, where there is no `playwright` command, and the words
+# did not say the account and the receipt were fine (#131).
+#
+# What is said instead names the one thing that is missing, says nothing is
+# wrong with anything of the person's, and gives the command that downloads
+# it, the same one fetch_bundled_chromium runs and, in a package, spelled with
+# the package's own Python (browser_install_command).
+
+class NoOwnChromium(RuntimeError):
+    """PaperPull's own Chromium is needed for a step and is not on this
+    computer. The message says what to do about it, in plain words."""
+
+
+def is_missing_chromium(error) -> bool:
+    """Whether `error` is Playwright saying the Chromium it was asked to
+    start is not on this computer. Playwright's words, as of 1.64."""
+    return "executable doesn't exist" in str(error).lower()
+
+
+def _terminal_name() -> str:
+    return {"darwin": "Terminal", "win32": "Command Prompt"}.get(sys.platform, "a terminal")
+
+
+def missing_chromium_words() -> str:
+    """What to tell somebody whose step needed PaperPull's own Chromium and
+    found none: what it is, that nothing of theirs is wrong, and how to get it."""
+    head = ("This step prints the page in PaperPull's own copy of Chromium, and it has "
+            "not been downloaded on this computer. Nothing is wrong with your account or "
+            "with this document. Sign-in does not need it, since it uses the Chrome or "
+            "Edge you already have.")
+    cmd = browser_install_command()
+    if cmd is None:
+        return (head + " This build cannot download it for you, so the document was "
+                "not saved. Ask at https://github.com/rheeloaded/paperpull/issues.")
+    shown = subprocess.list2cmdline(cmd) if sys.platform == "win32" else " ".join(
+        shlex.quote(part) for part in cmd)
+    return (head + " To download it, about 400 MB, kept for PaperPull alone, open "
+            + _terminal_name() + ", run the line below, and then run this again: "
+            + shown)
 
 
 def turns_sandbox_off(arg) -> bool:
