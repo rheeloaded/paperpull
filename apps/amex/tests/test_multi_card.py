@@ -427,6 +427,136 @@ HTML_GERMAN_NO_STATEMENTS = """<!doctype html><html><head><meta charset="utf-8">
 </section>
 </body></html>"""
 
+HTML_GERMAN_PAPERLESS_NOTICE = """<!doctype html><html><head><meta charset="utf-8"><title>Abrechnungen</title></head>
+<body>
+<section id="table-area">
+  <p>Sie erhalten keine Abrechnungen per Post.</p>
+</section>
+</body></html>"""
+
+HTML_EVAL_DISABLED_DELAYED_REDRAW = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title>
+<script>
+window.eval = function () { throw new Error('eval is disabled'); };
+</script>
+</head>
+<body>
+<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;">
+  <div data-testid="simple_switcher_selected_option_display">
+    <span data-testid="simple_switcher_display_name">Blue Cash Everyday</span>
+    <span data-testid="simple_switcher_display_number">••••12345</span>
+  </div>
+</div>
+<div role="listbox">
+  <div data-testid="simple_switcher_product_option_CARD_1" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Blue Cash Everyday</span>
+    <span data-testid="simple_switcher_display_number">••••12345</span>
+  </div>
+  <div data-testid="simple_switcher_product_option_CARD_2" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Amex EveryDay Card</span>
+    <span data-testid="simple_switcher_display_number">••••67890</span>
+  </div>
+</div>
+<section id="table-area">
+  <button id="old-btn" data-testid="axp-pdf-statements/common/Table/recent-statements/2026-10-11/download-button">Download</button>
+</section>
+<script>
+const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
+const opts = document.querySelectorAll('[role="option"]');
+cb.addEventListener('click', () => {
+  const open = cb.getAttribute('aria-expanded') === 'true';
+  cb.setAttribute('aria-expanded', open ? 'false' : 'true');
+  opts.forEach(o => o.style.display = open ? 'none' : 'block');
+});
+document.querySelector('[data-testid="simple_switcher_product_option_CARD_2"]').addEventListener('click', () => {
+  setTimeout(() => {
+    document.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = `
+      <span data-testid="simple_switcher_display_name">Amex EveryDay Card</span>
+      <span data-testid="simple_switcher_display_number">••••67890</span>
+    `;
+  }, 100);
+  setTimeout(() => {
+    document.querySelector('#table-area').innerHTML = `
+      <button data-testid="axp-pdf-statements/common/Table/recent-statements/2026-09-18/download-button">Download</button>
+    `;
+  }, 1200);
+});
+</script>
+</body></html>"""
+
+HTML_EMPTY_CARD_TRANSITION = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title></head>
+<body>
+<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;">
+  <div data-testid="simple_switcher_selected_option_display">
+    <span data-testid="simple_switcher_display_name">Empty Card</span>
+    <span data-testid="simple_switcher_display_number">••••11111</span>
+  </div>
+</div>
+<div role="listbox">
+  <div data-testid="simple_switcher_product_option_CARD_1" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Empty Card</span>
+    <span data-testid="simple_switcher_display_number">••••11111</span>
+  </div>
+  <div data-testid="simple_switcher_product_option_CARD_2" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Full Card</span>
+    <span data-testid="simple_switcher_display_number">••••22222</span>
+  </div>
+</div>
+<section id="table-area">
+  <p id="empty-msg">No billing statements available</p>
+</section>
+<script>
+const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
+const opts = document.querySelectorAll('[role="option"]');
+cb.addEventListener('click', () => {
+  const open = cb.getAttribute('aria-expanded') === 'true';
+  cb.setAttribute('aria-expanded', open ? 'false' : 'true');
+  opts.forEach(o => o.style.display = open ? 'none' : 'block');
+});
+document.querySelector('[data-testid="simple_switcher_product_option_CARD_2"]').addEventListener('click', () => {
+  setTimeout(() => {
+    document.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = `
+      <span data-testid="simple_switcher_display_name">Full Card</span>
+      <span data-testid="simple_switcher_display_number">••••22222</span>
+    `;
+  }, 100);
+  setTimeout(() => {
+    document.querySelector('#table-area').innerHTML = `
+      <button data-testid="axp-pdf-statements/common/Table/recent-statements/2026-09-18/download-button">Download</button>
+    `;
+  }, 1200);
+});
+</script>
+</body></html>"""
+
+HTML_TURNED_OFF_CARD_OPTION = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title></head>
+<body>
+<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;">
+  <div data-testid="simple_switcher_selected_option_display">
+    <span data-testid="simple_switcher_display_name">Active Card</span>
+    <span data-testid="simple_switcher_display_number">••••11111</span>
+  </div>
+</div>
+<div role="listbox">
+  <div data-testid="simple_switcher_product_option_CARD_1" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Active Card</span>
+    <span data-testid="simple_switcher_display_number">••••11111</span>
+  </div>
+  <button disabled data-testid="simple_switcher_product_option_CARD_2" role="option" style="display:none;">
+    <span data-testid="simple_switcher_display_name">Canceled Card</span>
+    <span data-testid="simple_switcher_display_number">••••99999</span>
+  </button>
+</div>
+<script>
+const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
+const opts = document.querySelectorAll('[role="option"]');
+cb.addEventListener('click', () => {
+  const open = cb.getAttribute('aria-expanded') === 'true';
+  cb.setAttribute('aria-expanded', open ? 'false' : 'true');
+  opts.forEach(o => o.style.display = open ? 'none' : 'block');
+});
+</script>
+</body></html>"""
+
 
 class MockAmexServer:
     def __init__(self):
@@ -692,6 +822,8 @@ def test_download_one_leaves_missing_card_for_manual_review(monkeypatch):
     """When a document's card is not found in the switcher, download_one leaves
     the document in State.NEEDS_MANUAL_REVIEW and returns cleanly without raising."""
     app = SimpleNamespace()
+    app._card_count = 2
+    app.discovery = SimpleNamespace(data={})
     app.paths = SimpleNamespace(
         folder_for=lambda c: Path("/tmp"),
         manual_review=Path("/tmp/manual_review"),
@@ -714,13 +846,15 @@ def test_download_one_leaves_missing_card_for_manual_review(monkeypatch):
     assert len(recorded) == 1
     state, notes = recorded[0]
     assert state == State.NEEDS_MANUAL_REVIEW
-    assert "not found in switcher" in notes
+    assert "Could not switch to card" in notes or "not found in switcher" in notes
 
 
 def test_download_one_leaves_no_account_on_multicard_for_manual_review(monkeypatch):
     """When a document has no account on a multi-card login, download_one leaves
     the document in State.NEEDS_MANUAL_REVIEW and returns cleanly without downloading."""
     app = SimpleNamespace()
+    app._card_count = 2
+    app.discovery = SimpleNamespace(data={})
     app.paths = SimpleNamespace(
         folder_for=lambda c: Path("/tmp"),
         manual_review=Path("/tmp/manual_review"),
@@ -733,7 +867,6 @@ def test_download_one_leaves_no_account_on_multicard_for_manual_review(monkeypat
     app._write_row = lambda *a, **k: None
 
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
-    monkeypatch.setattr(site, "list_cards", lambda p: [{"label": "Card 1"}, {"label": "Card 2"}])
 
     doc = Document(title="Monthly Statement", category="Statement", date="2026-10-11",
                    account="")
@@ -744,3 +877,114 @@ def test_download_one_leaves_no_account_on_multicard_for_manual_review(monkeypat
     state, notes = recorded[0]
     assert state == State.NEEDS_MANUAL_REVIEW
     assert "multiple cards" in notes
+
+
+def test_card_switch_with_eval_disabled(browser):
+    """Amex turns window.eval off. select_card must wait for the old button to hide
+    via driver-level wait_for_element_state, not evaluate(), and succeed."""
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    pg.set_content(HTML_EVAL_DISABLED_DELAYED_REDRAW)
+    cards = site.list_cards(pg)
+    assert len(cards) == 2
+    assert site.select_card(pg, cards[1]) is True
+    docs = site.collect_download_docs(pg, account=cards[1]["label"])
+    assert len(docs) == 1
+    assert docs[0].date_text == "2026-09-18"
+    assert docs[0].account == "Amex EveryDay Card (67890)"
+    ctx.close()
+
+
+def test_card_switch_empty_to_full_card(browser):
+    """When switching from an empty card to a full card, select_card must hold the
+    previous card's empty message and wait until it clears, not returning immediately."""
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    pg.set_content(HTML_EMPTY_CARD_TRANSITION)
+    assert site.has_no_statements(pg) is True
+    cards = site.list_cards(pg)
+    assert len(cards) == 2
+    assert site.select_card(pg, cards[1]) is True
+    # Card 2 has statements, not an empty message
+    assert site.has_no_statements(pg) is False
+    docs = site.collect_download_docs(pg, account=cards[1]["label"])
+    assert len(docs) == 1
+    assert docs[0].date_text == "2026-09-18"
+    ctx.close()
+
+
+def test_cmd_discover_one_empty_card_one_full_card(browser, monkeypatch):
+    """cmd_discover on an account with Card 1 empty and Card 2 having statements
+    completes cleanly and records Card 2's statements."""
+    app = SimpleNamespace()
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    pg.set_content(HTML_EMPTY_CARD_TRANSITION)
+    app.page = lambda: pg
+    app.check_session = lambda p: None
+    stored_docs = {}
+    app.discovery = SimpleNamespace(
+        data=stored_docs,
+        update=lambda k, v, save=False: stored_docs.setdefault(k, v),
+        save=lambda **k: None,
+    )
+    app._record_rawdoc = lambda r, url: 1
+    monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
+    monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: None)
+    monkeypatch.setattr(site, "goto_documents", lambda p: True)
+
+    app.stats = {"discovered": 0}
+    n = app_mod.App.cmd_discover(app, quiet=True)
+    assert n == 1
+    ctx.close()
+
+
+def test_card_switch_turned_off_option_returns_false(browser):
+    """A disabled/turned off card option in the switcher catches TurnedOff,
+    closes the switcher, and returns False rather than raising."""
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    pg.set_content(HTML_TURNED_OFF_CARD_OPTION)
+    cards = site.list_cards(pg)
+    assert len(cards) == 2
+    # Card 2 is disabled
+    res = site.select_card(pg, cards[1])
+    assert res is False
+    cb = pg.locator(site._SWITCHER_COMBOBOX_SEL)
+    # The switcher must be closed after failed switch
+    assert (cb.first.get_attribute("aria-expanded") or "").lower() != "true"
+    ctx.close()
+
+
+def test_german_paperless_notice_not_treated_as_no_statements(browser):
+    """The notice 'Sie erhalten keine Abrechnungen per Post' must not match has_no_statements."""
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    pg.set_content(HTML_GERMAN_PAPERLESS_NOTICE)
+    assert site.has_no_statements(pg) is False
+    ctx.close()
+
+
+def test_download_one_on_single_card_does_not_call_list_cards(monkeypatch):
+    """On a single-card account, download_one does not call list_cards when doc.account is empty."""
+    app = SimpleNamespace()
+    app._card_count = 1
+    app.paths = SimpleNamespace(
+        folder_for=lambda c: Path("/tmp"),
+        manual_review=Path("/tmp/manual_review"),
+    )
+    app.config = {"max_path_length": 200, "min_pdf_bytes": 100}
+    app.stats = {"duplicate_filenames": 0, "manual_review": 0}
+    app.check_session = lambda p: None
+    app.discovery = SimpleNamespace(data={})
+
+    called = []
+    monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "list_cards", lambda p: called.append("list_cards") or [])
+    monkeypatch.setattr(site, "download_document", lambda p, c, d, o: True)
+
+    doc = Document(title="Monthly Statement", category="Statement", date="2026-10-11", account="")
+    fake_page = SimpleNamespace()
+    app_mod.App.download_one(app, fake_page, doc, "stmt.pdf")
+
+    assert called == [], "list_cards should not be called for single-card account downloads"

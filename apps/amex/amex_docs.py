@@ -164,6 +164,7 @@ class App:
         self._context = None
         self._work_page = None
         self._cdp_mode = False
+        self._card_count = None
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -432,6 +433,7 @@ class App:
         self.check_session(page)
 
         cards = site.list_cards(page)
+        self._card_count = len(cards)
         total_controls = 0
         if len(cards) > 1:
             for card in cards:
@@ -615,8 +617,12 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         if not doc.account:
-            cards = site.list_cards(page)
-            if len(cards) > 1:
+            card_count = getattr(self, "_card_count", None)
+            if card_count is None:
+                accounts = {d.get("account") for d in self.discovery.data.values() if d.get("account")}
+                card_count = len(accounts) if accounts else 1
+                self._card_count = card_count
+            if card_count > 1:
                 log.info("record has no account but multiple cards are in switcher")
                 self._record(doc, State.NEEDS_MANUAL_REVIEW,
                              notes="Record has no account and multiple cards exist in switcher")
@@ -628,10 +634,10 @@ class App:
             if not site.ensure_card(page, doc.account):
                 log.info("could not switch to card %s for download; left for manual review", doc.account)
                 self._record(doc, State.NEEDS_MANUAL_REVIEW,
-                             notes=f"Card {doc.account} not found in switcher")
-                self._write_row(doc, "Card not found", "Needs Manual Review")
+                             notes=f"Could not switch to card {doc.account}")
+                self._write_row(doc, "Card switch failed", "Needs Manual Review")
                 self.stats["manual_review"] += 1
-                print(f"  Card {doc.account} not found in switcher - marked for manual review.")
+                print(f"  Could not switch to card {doc.account} - marked for manual review.")
                 return
         saved = site.download_document(page, doc.category, doc.date, out_path)
         if not saved:
@@ -796,6 +802,8 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        accounts = {d.get("account") for d in self.discovery.data.values() if d.get("account")}
+        self._card_count = len(accounts) if accounts else 1
         # Resume reads no list of its own. With nothing listed, or after a
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished

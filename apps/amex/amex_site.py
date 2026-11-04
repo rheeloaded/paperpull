@@ -314,33 +314,57 @@ NO_STATEMENTS_RE = re.compile(
     r"you\s+have\s+no\s+statements?|"
     r"no\s+documents?\s+available|"
     r"no\s+billing\s+statements?|"
-    r"keine\s+(abrechnungen|dokumente|kontoausz[üu]ge)|"
-    r"es\s+liegen\s+keine\s+(abrechnungen|dokumente|kontoausz[üu]ge)\s+vor)", re.I)
+    r"keine\s+(abrechnungen|dokumente|kontoausz[üu]ge)\s+(vorhanden|verf[üu]gbar|gefunden|anzuzeigen)|"
+    r"es\s+liegen\s+keine\s+(abrechnungen|dokumente|kontoausz[üu]ge)\s+vor|"
+    r"^\s*keine\s+(abrechnungen|dokumente|kontoausz[üu]ge)\s*[\.\!]?\s*$)", re.I)
+
+_STATEMENTS_AREA_SEL = (
+    "#table-area, #statements-list, "
+    + _by_test_id("*=", "statement") + ", "
+    + _by_test_id("*=", "empty") + ", "
+    + _by_test_id("*=", "no-statement") + ", "
+    + "[class*='empty'], [class*='no-statement'], section#table-area"
+)
 
 
-def has_no_statements(page) -> bool:
-    """Whether the page explicitly states there are no statements."""
+def _get_no_statements_element(page):
+    """Find the specific element declaring no statements, or None."""
     try:
-        # Check statement/content containers first, never the whole body/header/footer
-        for sel in ("#statements-list", "[data-testid*='statement']", "section", "main", "[role='main']", "#main-content"):
+        # Check statement table/area elements first
+        for sel in (_STATEMENTS_AREA_SEL, "table tbody", "section"):
             loc = page.locator(sel)
             for i in range(min(loc.count(), 5)):
                 el = loc.nth(i)
-                if el.is_visible() and NO_STATEMENTS_RE.search(el.inner_text() or ""):
-                    return True
-        # Fallback for bare test pages without section/main: check visible text in non-footer/header elements
-        loc = page.locator("p, div[role='alert'], [class*='empty'], [class*='no-statement']")
+                if not el.is_visible():
+                    continue
+                if el.locator("xpath=ancestor::footer | ancestor::header | ancestor::*[@role='contentinfo']").count() > 0:
+                    continue
+                txt = (el.inner_text() or "").strip()
+                if "per post" in txt.lower():
+                    continue
+                if NO_STATEMENTS_RE.search(txt):
+                    return el
+        # Fallback for bare test pages without container elements
+        loc = page.locator("p, div[role='alert'], [class*='message']")
         for i in range(min(loc.count(), 10)):
             el = loc.nth(i)
             if not el.is_visible():
                 continue
             if el.locator("xpath=ancestor::footer | ancestor::header | ancestor::*[@role='contentinfo']").count() > 0:
                 continue
-            if NO_STATEMENTS_RE.search(el.inner_text() or ""):
-                return True
-        return False
+            txt = (el.inner_text() or "").strip()
+            if "per post" in txt.lower():
+                continue
+            if NO_STATEMENTS_RE.search(txt):
+                return el
+        return None
     except Exception:
-        return False
+        return None
+
+
+def has_no_statements(page) -> bool:
+    """Whether the page explicitly states there are no statements."""
+    return _get_no_statements_element(page) is not None
 
 # How long the tab is given to show a press's page after the wait it was
 # always given, LINK_WAIT_MS after the first link and PDF_LINK_WAIT_MS after
@@ -724,9 +748,10 @@ def list_cards(page) -> List[dict]:
     cb = page.locator(_SWITCHER_COMBOBOX_SEL)
     if not (cb.count() and cb.first.is_visible()):
         return []
-    pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
-                   what="the card switcher",
-                   words=_words(), step="open the card switcher")
+    if (cb.first.get_attribute("aria-expanded") or "").lower() != "true":
+        pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                       what="the card switcher",
+                       words=_words(), step="open the card switcher")
     try:
         page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
     except Exception:
@@ -864,11 +889,22 @@ def select_card(page, card: dict) -> bool:
     old_buttons = page.locator(_DOWNLOAD_BUTTONS)
     has_old = old_buttons.count() > 0 and old_buttons.first.is_visible()
     old_handle = old_buttons.first.element_handle() if has_old else None
+    old_empty = _get_no_statements_element(page) if not has_old else None
+    old_empty_handle = old_empty.element_handle() if old_empty else None
     old_url = page.url or ""
 
-    pressing.click(page, opt, css=opt_css,
-                   what="the card option",
-                   words=_words(), step="switch card")
+    try:
+        pressing.click(page, opt, css=opt_css,
+                       what="the card option",
+                       words=_words(), step="switch card")
+    except pressing.TurnedOff:
+        log.info("card option %s is turned off; leaving card for review", card.get("label"))
+        try:
+            if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
+                cb.first.click(timeout=1000)
+        except Exception:
+            pass
+        return False
 
     # Wait until the selected card display shows exactly that card's digits
     switched = False
@@ -884,32 +920,51 @@ def select_card(page, card: dict) -> bool:
             "switch card", "the card did not switch",
             f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
 
-    # Wait until the previous card's statement buttons are gone / detached
+    # Wait until the previous card's statement buttons are gone / hidden
     if old_handle is not None:
         detached = False
-        for _ in range(int(LINK_WAIT_MS / 250)):
-            page.wait_for_timeout(250)
+        try:
+            old_handle.wait_for_element_state("hidden", timeout=LINK_WAIT_MS)
+            detached = True
+        except Exception:
             try:
-                connected = old_handle.evaluate("el => el.isConnected")
-                if not connected:
+                if not old_handle.is_visible():
                     detached = True
-                    break
             except Exception:
+                pass
+            if not detached and (page.locator(_DOWNLOAD_BUTTONS).count() == 0 or (_card_of(page.url) and _card_of(page.url) != _card_of(old_url))):
                 detached = True
-                break
-            if page.locator(_DOWNLOAD_BUTTONS).count() == 0 or (_card_of(page.url) and _card_of(page.url) != _card_of(old_url)):
-                detached = True
-                break
         if not detached:
             log.info("switched card option but old statements list never cleared")
             raise pressing.no_answer(
                 "switch card", "the statements did not switch",
                 f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
 
-    try:
-        page.wait_for_selector(f"{_DOWNLOAD_BUTTONS}, main, [role='main']", timeout=LIST_WAIT_MS)
-    except Exception:
-        pass
+    # Wait until the previous card's empty message is gone / hidden
+    if old_empty_handle is not None:
+        detached = False
+        try:
+            old_empty_handle.wait_for_element_state("hidden", timeout=LINK_WAIT_MS)
+            detached = True
+        except Exception:
+            try:
+                if not old_empty_handle.is_visible():
+                    detached = True
+            except Exception:
+                pass
+            if not detached and (page.locator(_DOWNLOAD_BUTTONS).count() > 0 or (_card_of(page.url) and _card_of(page.url) != _card_of(old_url))):
+                detached = True
+        if not detached:
+            log.info("switched card option but old empty-statements message never cleared")
+            raise pressing.no_answer(
+                "switch card", "the statements did not switch",
+                f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+
+    # Wait for either new download buttons or a no-statements message to appear
+    for _ in range(int(LIST_WAIT_MS / 250)):
+        if page.locator(_DOWNLOAD_BUTTONS).count() > 0 or has_no_statements(page):
+            break
+        page.wait_for_timeout(250)
     expand_sections(page)
     return True
 
@@ -929,8 +984,8 @@ def ensure_card(page, account: str) -> bool:
     for c in cards:
         if c.get("digits") == digits:
             return select_card(page, c)
-    log.info("card %s was not found in the switcher; nothing was pressed", account)
-    print(f"Card {account} was not found in the switcher; nothing was pressed.")
+    log.info("card %s was not found in the switcher", account)
+    print(f"Card {account} was not found in the switcher.")
     return False
 
 
