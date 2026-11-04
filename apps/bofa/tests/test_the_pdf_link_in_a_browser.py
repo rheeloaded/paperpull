@@ -311,15 +311,18 @@ def test_a_tile_focus_handler_that_opens_a_cover_stops_as_covered(browser, monke
 
 def test_seven_links_sharing_one_name_counts_as_several_with_nothing_pressed(browser):
     """When more than six links share one name, they count as several and
-    nothing is pressed."""
+    nothing is pressed. Only the first and the seventh are shown, so the
+    first six read hold one shown link, and only the count of seven says
+    another shown link of that name is further down."""
     context = browser.new_context()
     page = context.new_page()
     try:
         link_html = "".join(
-            '<div class="row" tabindex="0"><div aria-hidden="true">'
+            '<div class="row" tabindex="0"%s><div aria-hidden="true">'
             '<a href="#"><span>Download PDF</span><span class="sr"> for '
             'January Statement for Checking</span></a></div></div>'
-            for _ in range(7)
+            % ("" if i in (0, 6) else " hidden")
+            for i in range(7)
         )
         page.set_content(
             "<!doctype html><html><head><meta charset='utf-8'>"
@@ -329,7 +332,7 @@ def test_seven_links_sharing_one_name_counts_as_several_with_nothing_pressed(bro
             "</main></body></html>"
         )
         drawn = site.drawn_links(page)
-        assert len(drawn) == 7
+        assert len(drawn) == 2
         names = ["January Statement for Checking"]
         el, how = site.pdf_link_to_press(page, drawn, names)
         assert el is None

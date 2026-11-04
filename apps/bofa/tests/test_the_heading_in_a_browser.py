@@ -81,6 +81,8 @@ document.querySelector('[aria-controls=panel-stmt]').addEventListener('click', a
 
 COVER = '<div class="cover">Chat with us</div>'
 LOAD_ROW = sb.row("DOC000000000777", sb.ACCOUNTS[0], "2026-03-01", "Tax Form", category="CAT-TAX")
+ROW_OPENS = "'<div class=\"row\" tabindex=\"0\">"
+ROW_ENDS = "</span></a></div></div>'"
 
 
 @pytest.fixture(scope="module")
@@ -94,13 +96,19 @@ def browser():
         b.close()
 
 
-def statements_page(browser, extra="", in_a_form=False):
+def statements_page(browser, extra="", in_a_form=False, deep=False):
     """A tab on the made-up statements page, with every address served
     here, and the list and the PDFs each one asked for. in_a_form puts
-    the Statements heading, with no type, inside a form that posts."""
+    the Statements heading, with no type, inside a form that posts. deep
+    sets each row four wrappers further under its panel, so the panel is
+    the link's seventh ancestor, as in both #121 recordings."""
     context = browser.new_context(viewport={"width": 1000, "height": 700})
     seen = {"lists": [], "pdfs": []}
     html = PAGE % {"list": LIST_PATH, "link": sb.LINK_BASE, "extra": extra}
+    if deep:
+        assert html.count(ROW_OPENS) == 2 and html.count(ROW_ENDS) == 2
+        html = (html.replace(ROW_OPENS, "'<div><div><div><div>" + ROW_OPENS[1:])
+                .replace(ROW_ENDS, ROW_ENDS[:-1] + "</div></div></div></div>'"))
     if in_a_form:
         html = html.replace('<div id="cat-stmt"><button type="button"',
                             '<div id="cat-stmt"><form method="post" action="/paperless"><button', 1)
@@ -168,6 +176,26 @@ def test_the_shut_heading_is_opened_once_and_the_links_form_learned(browser):
                                         document_id="DOC000000000101", year="2026")
         assert data.startswith(b"%PDF") and day == "2026-01-15"
         assert seen["pdfs"] == [sb.LINK_BASE + "DOC000000000101"]
+    finally:
+        context.close()
+
+
+def test_a_link_seven_levels_under_its_shut_panel_is_read_as_not_shown(browser):
+    """The climb reaches a shut panel however far above the link it is. In
+    both #121 recordings the panel is the link's seventh ancestor, and a climb
+    that stopped sooner read the tax row under its shut panel as shown."""
+    context, page, seen = statements_page(browser, deep=True)
+    try:
+        tax = page.locator("#panel-tax a").first
+        tax.wait_for(state="attached", timeout=5000)
+        assert tax.evaluate("""a => { let n = a, d = 0;
+            while (n && n.id !== 'panel-tax') { n = n.parentElement; d++; } return d; }""") == 7
+        assert site.drawn_links(page) == [], "a link under a shut panel read as shown"
+        assert site.hidden_pdf_links(page) == 1
+        call = site.learn(page)
+        assert call.facts["statements_heading"] == "opened"
+        assert call.template is not None and call.links == 2
+        assert call.facts.get("pdf_links_not_shown") == 1
     finally:
         context.close()
 
