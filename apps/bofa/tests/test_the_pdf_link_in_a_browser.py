@@ -44,8 +44,19 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Statements &am
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
       white-space: nowrap; }
 .cover { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 10;
-         background: rgba(0, 0, 0, .25); }</style></head>
+         background: rgba(0, 0, 0, .25); }
+.card { position: relative; width: 300px; height: 100px; margin-bottom: 8px; }
+.card .front { position: absolute; left: 0; top: 0; width: 100%%; height: 100%%; z-index: 2; background: #eee; }
+.card .overlay { position: absolute; left: 0; top: 0; width: 100%%; height: 100%%; z-index: 1; }
+.card.show-overlay .overlay { z-index: 3; }
+</style></head>
 <body><main><h1>Statements &amp; Documents</h1>
+<div id="cat-tax"><button type="button" aria-label="Tax Documents" aria-expanded="false"
+    aria-controls="panel-tax"><span>Tax Documents</span></button><div id="panel-tax" hidden
+    style="display: block; height: 0px; overflow: hidden;">
+  <div class="row" tabindex="0"><div aria-hidden="true"><a href="#"><span>Download PDF</span><span
+      class="sr"> for January Statement for Everyday Checking</span></a></div></div>
+</div></div>
 <div id="cat-stmt"><button type="button" aria-label="Statements" aria-expanded="true"
     aria-controls="panel-stmt"><span>Statements</span></button><div id="panel-stmt"></div></div>
 </main>
@@ -53,6 +64,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Statements &am
 <script>
 window.asked = [];
 const HOW = '%(how)s';
+const TILE = '%(tile)s';
 async function ask(body) {
   window.asked.push(body);
   const r = await fetch('%(list)s', {method: 'POST', body: JSON.stringify(body),
@@ -84,9 +96,35 @@ ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-STMT', lang: 'en', year: '20
   const panel = document.getElementById('panel-stmt');
   got.documentList.forEach(r => {
     const row = document.createElement('div');
-    row.innerHTML = '<a href="#"><span>Download PDF</span><span class="sr"> for ' +
-      r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a>';
-    row.querySelector('a').addEventListener('click', e => { e.preventDefault(); openPdf(r); });
+    row.setAttribute('tabindex', '0');
+    if (TILE) {
+      row.className = 'card';
+      row.innerHTML = '<div class="front">Statement Card</div>' +
+        '<div class="overlay" aria-hidden="true">' +
+        '<span>' + r.date + '</span><br>' +
+        '<a href="#">View PDF</a> ' +
+        '<a href="#"><span>Download PDF</span><span class="sr"> for ' +
+        r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a>' +
+        '</div>';
+      const link = row.querySelectorAll('a')[1];
+      if (TILE === 'lifts') {
+        link.addEventListener('focus', () => { row.classList.add('show-overlay'); });
+      } else if (TILE === 'opens_cover') {
+        link.addEventListener('focus', () => {
+          row.classList.add('show-overlay');
+          const c = document.createElement('div');
+          c.className = 'cover';
+          c.textContent = 'Help';
+          document.body.appendChild(c);
+        });
+      }
+      link.addEventListener('click', e => { e.preventDefault(); openPdf(r); });
+    } else {
+      row.innerHTML = '<div aria-hidden="true"><span>' + r.date + '</span></div>' +
+        '<div aria-hidden="true"><a href="#">View PDF</a><a href="#"><span>Download PDF</span><span class="sr"> for ' +
+        r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a></div>';
+      row.querySelectorAll('a')[1].addEventListener('click', e => { e.preventDefault(); openPdf(r); });
+    }
     panel.appendChild(row);
   });
 });
@@ -131,12 +169,12 @@ def fresh():
     site.forget()
 
 
-def statements_page(browser, how, extra=""):
+def statements_page(browser, how, extra="", tile=""):
     """A tab on the made-up statements page whose links open their PDF
     `how`, with every address served here, and every PDF asked for."""
     context = browser.new_context(viewport={"width": 1000, "height": 700}, accept_downloads=True)
     seen = {"pdfs": []}
-    html = PAGE % {"list": LIST_PATH, "call": CALL_PATH, "how": how, "extra": extra}
+    html = PAGE % {"list": LIST_PATH, "call": CALL_PATH, "how": how, "extra": extra, "tile": tile}
 
     def pdf(route, doc, inline=False):
         seen["pdfs"].append(doc)
@@ -223,5 +261,78 @@ def test_a_chat_bubble_over_the_links_stops_the_run_with_nothing_pressed(browser
         assert isinstance(stopped.value, pressing.Covered)
         assert stopped.value.step == "download a statement"
         assert not seen["pdfs"] and context.pages == [page]
+    finally:
+        context.close()
+
+
+def test_a_tile_overlay_lifts_on_focus_and_call_is_learned(browser):
+    """The statement tile's .front layer covers .overlay until the link receives
+    focus, which adds .show-overlay to bring .overlay to the top."""
+    context, page, seen = statements_page(browser, "fetch", tile="lifts")
+    try:
+        call = site.learn(page)
+        assert call.pdf is not None and call.facts["pdf_link"] == "pressed"
+        assert seen["pdfs"] == ["DOC000000000101"] * 2
+        assert context.pages == [page] and site.on_statements_page(page)
+    finally:
+        context.close()
+
+
+def test_a_tile_overlay_that_never_lifts_stops_as_covered(browser, monkeypatch):
+    """A statement tile whose .front layer never lifts stops the run as covered
+    and presses nothing."""
+    monkeypatch.setattr(pressing, "PRESS_MS", 500)
+    context, page, seen = statements_page(browser, "fetch", tile="never_lifts")
+    try:
+        with pytest.raises(pressing.Stop) as stopped:
+            site.learn(page)
+        assert isinstance(stopped.value, pressing.Covered)
+        assert stopped.value.step == "download a statement"
+        assert not seen["pdfs"] and context.pages == [page]
+    finally:
+        context.close()
+
+
+def test_a_tile_focus_handler_that_opens_a_cover_stops_as_covered(browser, monkeypatch):
+    """A focus handler that opens a cover over the link stops the run as covered
+    and presses nothing."""
+    monkeypatch.setattr(pressing, "PRESS_MS", 500)
+    context, page, seen = statements_page(browser, "fetch", tile="opens_cover")
+    try:
+        with pytest.raises(pressing.Stop) as stopped:
+            site.learn(page)
+        assert isinstance(stopped.value, pressing.Covered)
+        assert stopped.value.facts.get("fixed") is True
+        assert stopped.value.step == "download a statement"
+        assert not seen["pdfs"] and context.pages == [page]
+    finally:
+        context.close()
+
+
+def test_seven_links_sharing_one_name_counts_as_several_with_nothing_pressed(browser):
+    """When more than six links share one name, they count as several and
+    nothing is pressed."""
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        link_html = "".join(
+            '<div class="row" tabindex="0"><div aria-hidden="true">'
+            '<a href="#"><span>Download PDF</span><span class="sr"> for '
+            'January Statement for Checking</span></a></div></div>'
+            for _ in range(7)
+        )
+        page.set_content(
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<style>.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; "
+            "clip: rect(0 0 0 0); white-space: nowrap; }</style></head><body><main>"
+            f"<div id='panel-stmt'>{link_html}</div>"
+            "</main></body></html>"
+        )
+        drawn = site.drawn_links(page)
+        assert len(drawn) == 7
+        names = ["January Statement for Checking"]
+        el, how = site.pdf_link_to_press(page, drawn, names)
+        assert el is None
+        assert how == "several"
     finally:
         context.close()

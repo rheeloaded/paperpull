@@ -163,16 +163,21 @@ def test_a_press_that_takes_the_tab_to_its_pdf_goes_back_to_the_statements_page(
 
 
 def test_a_press_that_takes_the_tab_below_the_second_address_goes_back_to_it():
-    """The second address is known by its whole path, so a page below it,
-    where a PDF could open, is never taken for the statements page and the
-    tab goes back."""
-    page = script_page()
-    page.url = sb.SECOND_PAGE_URL
-    page.press_goes_to = "https://secure.bankofamerica.com/statements-documents/home/viewdoc"
-    call = site.learn(page)
-    assert call.pdf is not None and call.facts["back_to_the_page"] is True
-    assert ("back", page.press_goes_to) in page.asked
-    assert page.url == sb.SECOND_PAGE_URL and site.on_statements_page(page)
+    """The second and third addresses are known by their whole path, so a
+    page below either, where a PDF could open, is never taken for the
+    statements page and the tab goes back."""
+    for start, gone in (
+        (sb.SECOND_PAGE_URL, "https://secure.bankofamerica.com/statements-documents/home/viewdoc"),
+        (sb.THIRD_PAGE_URL, "https://secure.bankofamerica.com/mycommunications/statements/statement.go/viewdoc"),
+    ):
+        site.forget()
+        page = script_page()
+        page.url = start
+        page.press_goes_to = gone
+        call = site.learn(page)
+        assert call.pdf is not None and call.facts["back_to_the_page"] is True
+        assert ("back", page.press_goes_to) in page.asked
+        assert page.url == start and site.on_statements_page(page)
 
 
 def test_a_tab_the_press_left_off_the_statements_page_stops_the_run(monkeypatch):
@@ -248,6 +253,22 @@ def test_two_links_of_one_name_are_not_pressed():
     page.links = page.links[:1] * 2
     call = site.learn(page)
     assert call.facts["pdf_link"] == "several" and not pressed(page)
+
+
+def test_a_hidden_link_of_the_same_name_is_ignored_while_the_shown_one_is_pressed():
+    """include_hidden=True finds links inside a shown row with
+    aria-hidden="true", and also any link inside a hidden panel. Only the
+    shown link is counted or pressed (#121, 2026-10-31)."""
+    page = script_page()
+    first = page.links[0]
+    page.role_links = [dict(first, visible=False), dict(first, visible=True)]
+    call = site.learn(page)
+    assert call.facts["pdf_link"] == "pressed" and pressed(page) == [("click", LINK)]
+    site.forget()
+    page = script_page()
+    page.role_links = [dict(x, visible=False) for x in page.links]
+    call = site.learn(page)
+    assert call.facts["pdf_link"] == "not found" and not pressed(page)
 
 
 def test_a_link_drawn_as_a_button_is_not_pressed():

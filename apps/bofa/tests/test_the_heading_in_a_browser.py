@@ -44,10 +44,11 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Statements &am
 <section>
   <div id="cat-stmt"><button type="button" name="stmts" aria-label="Statements"
       aria-expanded="false" aria-controls="panel-stmt"><span class="i"></span><span>Statements</span><span
-      class="i"></span></button><div id="panel-stmt" hidden></div></div>
+      class="i"></span></button><div id="panel-stmt" hidden
+      style="display: block; height: 0px; overflow: hidden;"></div></div>
   <div id="cat-tax"><button type="button" name="tax" aria-label="Tax Documents"
       aria-expanded="false" aria-controls="panel-tax"><span>Tax Documents</span></button><div
-      id="panel-tax" hidden></div></div>
+      id="panel-tax" hidden style="display: block; height: 0px; overflow: hidden;"></div></div>
 </section></main>
 %(extra)s
 <script>
@@ -58,17 +59,23 @@ async function ask(body) {
     headers: {'content-type': 'application/json', 'x-standin-csrf': 'TOKEN-T'}});
   return r.json();
 }
-ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-TAX', year: '2026'});
+ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-TAX', year: '2026'}).then(got => {
+  const tax = document.getElementById('panel-tax');
+  tax.innerHTML = got.documentList.map(r =>
+    '<div class="row" tabindex="0"><div aria-hidden="true"><a href="#"><span>Download PDF</span><span class="sr"> for ' +
+    r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a></div></div>').join('');
+});
 document.querySelector('[aria-controls=panel-stmt]').addEventListener('click', async (e) => {
   const b = e.currentTarget;
   b.setAttribute('aria-expanded', 'true');
   const got = await ask({acctToken: 'K-ALPHA-0001', docCategoryId: 'CAT-STMT', lang: 'en', year: '2026'});
   const panel = document.getElementById('panel-stmt');
   panel.hidden = false;
+  panel.style.height = 'auto';
   panel.innerHTML = got.documentList.map(r =>
-    '<div class="row" tabindex="0"><a href="%(link)s' + r.docId + '" id="d' + r.docId +
+    '<div class="row" tabindex="0"><div aria-hidden="true"><a href="%(link)s' + r.docId + '" id="d' + r.docId +
     '" data-a="x" data-b="' + r.docId + '"><span>Download PDF</span><span class="sr"> for ' +
-    r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a></div>').join('');
+    r.docDisplayName + ' for ' + r.accountDisplayName + '</span></a></div></div>').join('');
 });
 </script></body></html>"""
 
@@ -97,8 +104,8 @@ def statements_page(browser, extra="", in_a_form=False):
     if in_a_form:
         html = html.replace('<div id="cat-stmt"><button type="button"',
                             '<div id="cat-stmt"><form method="post" action="/paperless"><button', 1)
-        html = html.replace('</button><div id="panel-stmt" hidden></div></div>',
-                            '</button></form><div id="panel-stmt" hidden></div></div>', 1)
+        html = html.replace('</button><div id="panel-stmt" hidden',
+                            '</button></form><div id="panel-stmt" hidden', 1)
         assert '<form method="post"' in html and '</button></form>' in html
 
     def serve(route):
@@ -146,6 +153,7 @@ def test_the_shut_heading_is_opened_once_and_the_links_form_learned(browser):
         assert call.facts["statements_heading"] == "opened"
         assert call.template is not None and call.links == 2
         assert call.facts["links_to_other_pages"] == 2 and call.facts["links_with_an_id"] == 2
+        assert call.facts.get("pdf_links_not_shown") == 1
         # The links are of rows only the press's answer lists, so that answer
         # was heard, and the heading says it is open now.
         assert call.facts["list_read_after_the_heading"] is True
@@ -201,5 +209,48 @@ def test_a_chat_bubble_over_the_heading_stops_the_run_with_nothing_pressed(brows
         assert page.get_attribute("[aria-controls=panel-stmt]", "aria-expanded") == "false"
         assert [b.get("lang") for b in page.evaluate("window.asked")] == [None]
         assert not seen["pdfs"]
+    finally:
+        context.close()
+
+
+def test_the_three_checks_in_shown_link_js(browser):
+    """Three checks in _SHOWN_LINK_JS (hidden attribute with height,
+    visibility: hidden, and overflow clipping)."""
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        # 1. hidden attribute on a panel that has height
+        page.set_content(
+            '<div hidden style="display: block; height: 100px; width: 200px;">'
+            '<a id="l1" href="#" style="display: block; height: 20px; width: 100px;">'
+            'Download PDF for January Statement for Checking</a></div>'
+        )
+        l1 = page.locator("#l1").element_handle()
+        assert page.evaluate(site._SHOWN_LINK_JS, l1) is False
+        assert site.drawn_links(page) == []
+        assert site.hidden_pdf_links(page) == 1
+
+        # 2. visibility: hidden with height
+        page.set_content(
+            '<div style="visibility: hidden; height: 100px; width: 200px;">'
+            '<a id="l2" href="#" style="display: block; height: 20px; width: 100px;">'
+            'Download PDF for January Statement for Checking</a></div>'
+        )
+        l2 = page.locator("#l2").element_handle()
+        assert page.evaluate(site._SHOWN_LINK_JS, l2) is False
+        assert site.drawn_links(page) == []
+        assert site.hidden_pdf_links(page) == 1
+
+        # 3. row clipped by its container's overflow-y
+        page.set_content(
+            '<div style="overflow-y: hidden; height: 50px; width: 200px; position: relative;">'
+            '<div style="position: absolute; top: 120px; height: 30px; width: 150px;">'
+            '<a id="l3" href="#" style="display: block; height: 20px; width: 100px;">'
+            'Download PDF for January Statement for Checking</a></div></div>'
+        )
+        l3 = page.locator("#l3").element_handle()
+        assert page.evaluate(site._SHOWN_LINK_JS, l3) is False
+        assert site.drawn_links(page) == []
+        assert site.hidden_pdf_links(page) == 1
     finally:
         context.close()

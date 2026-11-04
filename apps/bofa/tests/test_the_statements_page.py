@@ -68,11 +68,13 @@ def test_a_page_of_another_site_is_not_the_statements_page():
     sb.PAGE_URL,
     sb.SECOND_PAGE_URL,
     "https://secure.bankofamerica.com/statements-documents/home/",
+    sb.THIRD_PAGE_URL,
+    "https://secure.bankofamerica.com/mycommunications/statements/statement.go",
 ])
-def test_both_addresses_of_the_statements_page_are_it(url):
-    """A second tester's window was on Statements & Documents at
-    /statements-documents/home/, and 0.59.1 told by the address alone that
-    it was not, so it asked nothing of the page (#121, 2026-10-28)."""
+def test_the_three_addresses_of_the_statements_page_are_it(url):
+    """The first recording's path held stmts-docs, a second tester's window was
+    on Statements & Documents at /statements-documents/home/, and a tester's
+    window on credit card statements was at /mycommunications/statements/statement.go (#121)."""
     assert site.is_statements_address(url)
     assert site.on_statements_page(sb.Bank(url=url))
 
@@ -82,7 +84,7 @@ def test_both_addresses_of_the_statements_page_are_it(url):
     "https://secure.bankofamerica.com.evil.test/statements-documents/home/",
     "http://secure.bankofamerica.com/statements-documents/home/",
     "https://secure.bankofamerica.com/statements-documents/",
-    # Only the path as the screenshot showed it, letter for letter.
+    # Only the path as the screenshot and recording showed it, letter for letter.
     "https://secure.bankofamerica.com/statements-documents/home",
     "https://secure.bankofamerica.com/Statements-Documents/Home/",
     "https://secure.bankofamerica.com/statements-documents/home/viewdoc",
@@ -91,6 +93,14 @@ def test_both_addresses_of_the_statements_page_are_it(url):
     "https://secure.bankofamerica.com/statements-documents-old/home/",
     "https://secure.bankofamerica.com/myaccounts/overview/?next=/statements-documents/home/",
     "https://secure.bankofamerica.com/myaccounts/overview/#/statements-documents/home/",
+    "https://www.bankofamerica.com/mycommunications/statements/statement.go",
+    "http://secure.bankofamerica.com/mycommunications/statements/statement.go",
+    "https://secure.bankofamerica.com/mycommunications/statements/",
+    "https://secure.bankofamerica.com/mycommunications/statements/statement.go/",
+    "https://secure.bankofamerica.com/mycommunications/statements/statement.go/viewdoc",
+    "https://secure.bankofamerica.com/MyCommunications/Statements/statement.go",
+    "https://secure.bankofamerica.com/mycommunications/statements/statementXgo",
+    "https://secure.bankofamerica.com/myaccounts/overview/?next=/mycommunications/statements/statement.go",
 ])
 def test_no_other_address_is_taken_for_the_second_one(url):
     assert not site.is_statements_address(url)
@@ -98,12 +108,14 @@ def test_no_other_address_is_taken_for_the_second_one(url):
 
 
 def test_the_second_address_is_reloaded_once_and_its_list_call_learned():
-    page = sb.Bank(url=sb.SECOND_PAGE_URL)
-    call = site.learn(page)
-    assert page.reloads == 1 and call.url == sb.LIST_URL
-    assert call.template is not None and call.links == 2
-    no_presses(page)
-    assert not site.on_statements_page(sb.Bank(url=sb.SECOND_PAGE_URL, password=1))
+    for url in (sb.SECOND_PAGE_URL, sb.THIRD_PAGE_URL):
+        site.forget()
+        page = sb.Bank(url=url)
+        call = site.learn(page)
+        assert page.reloads == 1 and call.url == sb.LIST_URL
+        assert call.template is not None and call.links == 2
+        no_presses(page)
+        assert not site.on_statements_page(sb.Bank(url=url, password=1))
 
 
 def test_a_page_that_makes_no_list_call_is_not_guessed_at():
@@ -620,7 +632,9 @@ def test_every_fact_a_survey_writes_keeps_its_name_and_words():
 def test_every_reason_the_failure_file_gets_is_one_it_keeps():
     from paperpull_core.words import shape_tree
     from paperpull_core.failure import _step
-    cases = [dict(pdf_links=0, statements_heading="opened"),
+    cases = [dict(pdf_links=0, pdf_links_not_shown=2),
+             dict(pdf_links=0, pdf_links_not_shown=2, statements_heading="opened"),
+             dict(pdf_links=0, statements_heading="opened"),
              dict(pdf_links=0, statements_heading="not found"),
              dict(pdf_links=2, forms=0, statements_heading="opened",
                   list_read_after_the_heading=False),
@@ -631,6 +645,20 @@ def test_every_reason_the_failure_file_gets_is_one_it_keeps():
         assert _step(reason) == reason and shape_tree(reason) == reason, reason
     for key in site.link_facts([], []):
         assert shape_tree(key) == key, key
+
+
+def test_hidden_pdf_links_are_counted_in_facts_and_reported_in_failure():
+    facts = site.link_facts([], [], not_shown=3)
+    assert facts["pdf_links"] == 0
+    assert facts["pdf_links_not_shown"] == 3
+    why, reason = site.not_learned_why(facts)
+    assert "drew 3 Download PDF links but none shows, and its Statements heading could not be opened (not pressed)" in why
+    assert reason == "pdf links not shown"
+    why_open, reason_open = site.not_learned_why(dict(pdf_links=0, pdf_links_not_shown=3, statements_heading="opened"))
+    assert "drew 3 Download PDF links but none shows, even with its Statements heading open, as links behind a closed section would not" in why_open
+    assert reason_open == "pdf links not shown with the heading expanded"
+    why_one, _ = site.not_learned_why(dict(pdf_links=0, pdf_links_not_shown=1))
+    assert "drew 1 Download PDF link but none shows" in why_one
 
 
 # -- one statement's PDF --------------------------------------------------------

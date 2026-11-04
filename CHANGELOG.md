@@ -7,6 +7,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Bank of America saves statements from the credit card page too, and is
+  confirmed on a real account (#121).** Statements & Documents at
+  /mycommunications/statements/statement.go, where a credit card's page
+  opens, now counts as the statements page. The bank draws each row's
+  Download PDF link behind the front of a card, inside a wrapper marked
+  aria-hidden, and the app now finds those links while leaving out any
+  inside a section that is shut. It focuses a link before pressing it,
+  which lifts the link above the front of the card, so nothing is forced.
+  When links are drawn and not shown, the failure file says how many, and
+  whether the Statements heading was open. Contributed by @appchamp, whose
+  run saved all 388 statements across five accounts, two checking and
+  three credit cards, with none in Manual Review. Bank of America moves
+  from untested to supported.
+
 ## [0.60.1] - 2026-11-02
 
 The Windows and Mac packages and the server image take pypdf 6.21.4,
@@ -223,6 +240,7 @@ only what it needs.
   new settings, copy them into it as a set, and if you turned on the
   setuid sandbox before, move its `SYS_ADMIN` into the new `cap_add` list,
   see "Updating" in SERVER.md.
+
 
 ## [0.59.2] - 2026-10-30
 
