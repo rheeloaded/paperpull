@@ -27,12 +27,23 @@ Mac, or on Apple Silicon through Rosetta, which runs the staged Intel Python
 and so has pip choose Intel wheels. The release workflow builds each on a
 runner of its own architecture, so each is smoke-tested on its own hardware.
 
-The bundle's main executable opens a Terminal window running the panel and
-then opens the browser to it, the same shape as PaperPull.exe on Windows.
-Closing the Terminal window stops it. The executable itself is a dozen lines
-of C, compiled on the build machine, because notarization requires a Mach-O
-main executable with the hardened runtime. It finds its own bundle and hands
-the panel script to Terminal, and that is all it does.
+The bundle's main executable is a small native Cocoa program, written in
+Objective-C (packaging/macos/launcher.m) and compiled on the build machine
+with clang, because notarization requires a Mach-O main executable with the
+hardened runtime. Double-clicking PaperPull.app starts the panel as a child
+process (the bundled Python running uvicorn on 127.0.0.1) and shows it in a
+real window, a WKWebView, with a Dock icon and a menu bar. There is no
+Terminal window and no browser tab. Quitting the app (Cmd-Q) stops the
+panel. The panel's web pages, the providers and the Chrome sign-in are the
+ones the checkout runs, unchanged. The panel's output goes to
+~/Library/Logs/PaperPull/panel.log.
+
+The launcher also has two self-test modes, read from the environment variable
+PAPERPULL_LAUNCHER_SELFTEST, that the release workflow and the tests use:
+"ready" starts the panel, waits for it to answer, prints one READY line and
+stops it, and "window" does the same with the real window created and loaded
+without taking focus. Resources/paperpull-panel.sh is still shipped, for
+anyone who wants the panel in a terminal, but the app does not run it.
 
 WHAT IS NOT IN IT
 
@@ -82,6 +93,11 @@ PY_VERSION = "3.12.16"
 # The oldest macOS the bundle opens on. Info.plist and the launcher say so,
 # and packaging/lock.py takes only wheels that run on it.
 MACOS_MIN = "11.0"
+
+# The launcher's source. It is compiled straight from the checkout into
+# Contents/MacOS and is not copied into the bundle, so it is not subject to
+# the tracked-files rule that stage_code() applies to what ships.
+LAUNCHER_SRC = REPO / "packaging" / "macos" / "launcher.m"
 
 # The architecture being built, set from --arch in main(). Ours is Apple's
 # name, which clang, Info.plist and the dmg's name use, and the other is
@@ -228,16 +244,39 @@ def write_icon() -> str | None:
     return "PaperPull.icns"
 
 
+def compile_launcher() -> None:
+    """The bundle's main executable, compiled from packaging/macos/launcher.m.
+
+    It is Objective-C rather than a script because notarization requires the
+    main executable to be a Mach-O binary carrying the hardened runtime, and
+    a script cannot carry that. ARC, Cocoa for the window and menu bar, and
+    WebKit for the web view the panel is shown in. The architecture and the
+    minimum macOS are the build's own, so an Intel bundle never gets an arm64
+    launcher."""
+    if not LAUNCHER_SRC.is_file():
+        raise SystemExit("the launcher's source is missing: %s" % LAUNCHER_SRC)
+    say("  launcher")
+    subprocess.run(["clang", "-fobjc-arc", "-O2", "-arch", ARCH,
+                    "-mmacosx-version-min=" + MACOS_MIN,
+                    "-framework", "Cocoa", "-framework", "WebKit",
+                    "-o", str(MACOS / "PaperPull"), str(LAUNCHER_SRC)], check=True)
+
+
 def write_bundle() -> None:
     say("Bundle")
     MACOS.mkdir(parents=True, exist_ok=True)
     icon = write_icon()
 
-    # What the Terminal window runs. Same shape as PaperPull.exe on Windows.
+    # The panel in a terminal, for anyone who wants it there. The app does
+    # not run this: the launcher below starts the same command itself, with
+    # the same two environment variables, and shows the panel in its own
+    # window. Same shape as paperpull.bat on Windows.
     (RES / "paperpull-panel.sh").write_text(
         '#!/bin/bash\n'
-        '# The PaperPull control panel. Close this window to stop it.\n'
+        '# The PaperPull control panel, in this terminal. Press Control-C to stop it.\n'
         'DIR="$(cd "$(dirname "$0")" && pwd)"\n'
+        '# 8765 is the panel\'s own port. PAPERPULL_PORT is for tests.\n'
+        'PORT="${PAPERPULL_PORT:-8765}"\n'
         'export PYTHONNOUSERSITE=1\n'
         '# Bytecode goes to the user cache, never into the bundle. macOS blocks\n'
         '# writes into an app under /Applications, and a signed bundle that\n'
@@ -245,41 +284,46 @@ def write_bundle() -> None:
         'export PYTHONPYCACHEPREFIX="$HOME/Library/Caches/PaperPull/pycache"\n'
         'echo "PaperPull %s"\n'
         'echo "The panel binds 127.0.0.1 only. Nothing is reachable from the network."\n'
-        'echo "Close this window to stop it."\n'
+        'echo "Press Control-C to stop it."\n'
         'echo\n'
-        '(sleep 2; open http://127.0.0.1:8765) &\n'
+        'port_answers() { (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; }\n'
+        '# PaperPull.app starts this same panel on this same port. If it is open,\n'
+        '# the port is taken, so say so instead of opening its panel as if it\n'
+        '# were this one.\n'
+        'if port_answers; then\n'
+        '  echo "Port $PORT is already in use, so this panel cannot start." >&2\n'
+        '  echo "If PaperPull.app is open, quit it first (Cmd-Q), then run this again." >&2\n'
+        '  exit 1\n'
+        'fi\n'
         'cd "$DIR"\n'
-        'exec "$DIR/python/bin/python3" -m uvicorn app:app --host 127.0.0.1 --port 8765 --app-dir "$DIR/gui"\n'
+        '# Not exec: the browser is opened only once this panel has itself\n'
+        '# started answering, so the shell stays to watch for that. Control-C\n'
+        '# and TERM are passed on to the panel, which stops it.\n'
+        'stopped=\n'
+        '"$DIR/python/bin/python3" -m uvicorn app:app --host 127.0.0.1 --port "$PORT" --app-dir "$DIR/gui" &\n'
+        'panel=$!\n'
+        'trap \'stopped=1; kill "$panel" 2>/dev/null\' INT TERM\n'
+        '(\n'
+        '  for i in $(seq 1 100); do\n'
+        '    kill -0 "$panel" 2>/dev/null || exit 0\n'
+        '    if port_answers; then open "http://127.0.0.1:$PORT"; exit 0; fi\n'
+        '    sleep 0.2\n'
+        '  done\n'
+        ') &\n'
+        'opener=$!\n'
+        'wait "$panel"; status=$?\n'
+        '# A trapped signal ends the first wait early. Wait again until the panel\n'
+        '# has actually stopped.\n'
+        'while kill -0 "$panel" 2>/dev/null; do wait "$panel"; status=$?; done\n'
+        'kill "$opener" 2>/dev/null\n'
+        'if [ -z "$stopped" ] && [ "$status" -ne 0 ]; then\n'
+        '  echo "The panel stopped with an error (exit $status). If PaperPull.app is open, quit it first (Cmd-Q)." >&2\n'
+        'fi\n'
+        'exit "$status"\n'
         % version(), encoding="utf-8")
     os.chmod(RES / "paperpull-panel.sh", 0o755)
 
-    # The bundle's executable. Opens Terminal on the script above, so the
-    # log is visible and there is an obvious way to quit. It is a few lines
-    # of C rather than a shell script because notarization requires the main
-    # executable to be a Mach-O binary carrying the hardened runtime, and a
-    # script cannot carry that. It does nothing but find its own bundle and
-    # hand the script to Terminal.
-    launcher_c = DIST / "cache" / "launcher.c"
-    launcher_c.parent.mkdir(parents=True, exist_ok=True)
-    launcher_c.write_text(
-        '#include <mach-o/dyld.h>\n'
-        '#include <libgen.h>\n'
-        '#include <stdio.h>\n'
-        '#include <stdlib.h>\n'
-        '#include <string.h>\n'
-        '#include <unistd.h>\n'
-        'int main(void) {\n'
-        '    char exe[4096]; uint32_t n = sizeof exe;\n'
-        '    if (_NSGetExecutablePath(exe, &n) != 0) return 1;\n'
-        '    char real[4096];\n'
-        '    if (!realpath(exe, real)) return 1;\n'
-        '    char script[4096];\n'
-        '    snprintf(script, sizeof script, "%s/../Resources/paperpull-panel.sh", dirname(real));\n'
-        '    execl("/usr/bin/open", "open", "-a", "Terminal", script, (char *)0);\n'
-        '    perror("open"); return 1;\n'
-        '}\n', encoding="utf-8")
-    subprocess.run(["clang", "-arch", ARCH, "-O2", "-mmacosx-version-min=" + MACOS_MIN,
-                    "-o", str(MACOS / "PaperPull"), str(launcher_c)], check=True)
+    compile_launcher()
 
     # The terminal command, preferring the bundled Python.
     shim = RES / "paperpull"
@@ -296,8 +340,10 @@ def write_bundle() -> None:
     (RES / "README-FIRST.txt").write_text(
         "PaperPull %s\n"
         "\n"
-        "Double-click PaperPull. A Terminal window opens running the control panel\n"
-        "and a browser tab opens to it. Close the Terminal window to stop.\n"
+        "Double-click PaperPull. A window opens with the control panel in it, and\n"
+        "PaperPull shows in the Dock and the menu bar. Quit it with Cmd-Q, which\n"
+        "also stops the panel. If something goes wrong, the panel's log is at\n"
+        "  ~/Library/Logs/PaperPull/panel.log\n"
         "\n"
         "The first time, it asks where your downloaders are. If you already have\n"
         "them, paste that folder's full path and it uses them exactly as they\n"
@@ -329,6 +375,12 @@ def write_bundle() -> None:
         "LSMinimumSystemVersion": MACOS_MIN,
         "LSArchitecturePriority": [ARCH],
         "NSHighResolutionCapable": True,
+        "NSPrincipalClass": "NSApplication",
+        "LSApplicationCategoryType": "public.app-category.productivity",
+        # The window shows the panel at http://127.0.0.1:<port>, which App
+        # Transport Security refuses as plain http unless local networking is
+        # allowed. This opens loopback and local addresses only, not the web.
+        "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
         "NSHumanReadableCopyright": "Copyright (c) 2026 PaperPull, a trade name of TNE Enterprises LLC. AGPL-3.0. https://github.com/rheeloaded/paperpull",
     }
     if icon:
@@ -352,6 +404,20 @@ def audit() -> None:
     if bad:
         raise SystemExit("REFUSING TO PACKAGE, personal files found:\n  " + "\n  ".join(bad))
     say("  no config, history, profile or PDF in the bundle")
+    # The main executable is the one file the stage and the signer both treat
+    # specially, so check it is what notarization needs: a Mach-O, of the
+    # architecture being built, that is the native launcher and not a stub.
+    exe = MACOS / "PaperPull"
+    if not _is_macho(exe):
+        raise SystemExit("Contents/MacOS/PaperPull is not a Mach-O binary")
+    archs = subprocess.run(["lipo", "-archs", str(exe)], capture_output=True, text=True)
+    if archs.returncode != 0 or archs.stdout.split() != [ARCH]:
+        raise SystemExit("the launcher is %r, not %s:\n%s"
+                         % (archs.stdout.strip(), ARCH, archs.stderr))
+    libs = subprocess.run(["otool", "-L", str(exe)], capture_output=True, text=True).stdout
+    if "WebKit.framework" not in libs or "Cocoa.framework" not in libs:
+        raise SystemExit("the launcher does not link Cocoa and WebKit:\n" + libs)
+    say("  the main executable is a %s Mach-O linking Cocoa and WebKit" % ARCH)
 
 
 def smoke_test(py: Path) -> None:
@@ -418,17 +484,27 @@ def sign(identity: str) -> None:
     ent = DIST / "cache" / "entitlements.plist"
     with open(ent, "wb") as f:
         plistlib.dump(ENTITLEMENTS, f)
-    base = ["codesign", "--force", "--timestamp", "--options", "runtime",
-            "--entitlements", str(ent), "--sign", identity]
-    binaries = sorted((p for p in APP.rglob("*") if _is_macho(p)),
+    plain = ["codesign", "--force", "--timestamp", "--options", "runtime"]
+    # The Python tree gets the two entitlements above. Nothing else does.
+    base = [*plain, "--entitlements", str(ent), "--sign", identity]
+    plain = [*plain, "--sign", identity]
+    launcher = MACOS / "PaperPull"
+    binaries = sorted((p for p in APP.rglob("*") if _is_macho(p) and p != launcher),
                       key=lambda p: (-len(p.parts), str(p)))
-    # The main executable is signed with the bundle, not on its own.
-    binaries = [b for b in binaries if b != MACOS / "PaperPull"]
     for i in range(0, len(binaries), 50):
         subprocess.run([*base, *map(str, binaries[i:i + 50])], check=True,
                        capture_output=True)
     say("  %d binaries" % len(binaries))
-    subprocess.run([*base, str(APP)], check=True)
+    # The main executable, the native launcher, hosts the web view and loads
+    # only Apple's frameworks. It needs neither entitlement above, so it gets
+    # the hardened runtime and no entitlements at all, and is signed on its
+    # own, before the bundle. The bundle's own signature is made without
+    # --entitlements too: codesign applies a bundle-level --entitlements to
+    # the bundle's main executable, so passing them there would put the
+    # Python pair back on the launcher. The WebKit processes it starts are
+    # Apple's own and carry their own entitlements.
+    subprocess.run([*plain, str(launcher)], check=True, capture_output=True)
+    subprocess.run([*plain, str(APP)], check=True)
     subprocess.run(["codesign", "--verify", "--strict", "--verbose=1", str(APP)], check=True)
     say("  bundle signed and verifies")
 

@@ -122,6 +122,65 @@ jobs:
           curl -fs http://127.0.0.1:8765/ | grep -o 'v0\.[0-9][^<]*' | head -1
           kill %1
 
+      # The step above runs the bundle's Python by hand. This one runs the
+      # bundle's own main executable, the native launcher that a person
+      # double-clicks, in its "ready" self-test: it starts the panel exactly
+      # as the app does, waits for GET / to answer 200, prints one READY line
+      # and stops the panel. That proves the compiled Mach-O, of this
+      # runner's architecture, finds the bundled Python and starts the panel,
+      # which the step above cannot. This is the hard gate. It runs after
+      # the build step, so on a signed build it is the signed executable
+      # that runs. The port is the launcher's own choice (8765, or a free
+      # one), so the line is read for its address, not compared with a
+      # fixed one.
+      - name: Prove the app's own executable starts the panel
+        run: |
+          export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
+          lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull
+          test "$(lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull)" = "${{ matrix.arch }}"
+          # macOS has no timeout(1), so the self-test is given 90 s by a
+          # watchdog; the launcher gives up by itself after 60 s.
+          PAPERPULL_LAUNCHER_SELFTEST=ready dist/PaperPull.app/Contents/MacOS/PaperPull > ready.out 2> ready.err &
+          pid=$!
+          ( sleep 90; kill "$pid" ) > /dev/null 2>&1 &
+          watchdog=$!
+          status=0
+          wait "$pid" || status=$?
+          kill "$watchdog" 2>/dev/null || true
+          cat ready.out
+          cat ready.err >&2
+          test "$status" = 0
+          grep -Eq '^READY http://127\.0\.0\.1:[0-9]+$' ready.out
+
+      # The step above creates no window and no web view, so on its own it
+      # says nothing about WebKit or the plist's App Transport Security key.
+      # This one runs the same signed executable in "window" mode, which
+      # builds the window and the WKWebView, loads the panel into it and
+      # prints one WINDOW line once the page has loaded. It is allowed to
+      # fail, visibly: a hosted macOS runner may have no window server
+      # session, so a failure here can mean "no display" and not "broken
+      # app". It stays in the workflow so that whenever a runner can show a
+      # window, a launcher that cannot is seen on the run, as a failed step
+      # with the job still green, rather than not at all.
+      - name: Prove the app's own executable opens its window (may fail on a headless runner)
+        continue-on-error: true
+        run: |
+          export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
+          lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull
+          test "$(lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull)" = "${{ matrix.arch }}"
+          # Same watchdog as above: 90 s, then the launcher is killed.
+          PAPERPULL_LAUNCHER_SELFTEST=window dist/PaperPull.app/Contents/MacOS/PaperPull > window.out 2> window.err &
+          pid=$!
+          ( sleep 90; kill "$pid" ) > /dev/null 2>&1 &
+          watchdog=$!
+          status=0
+          wait "$pid" || status=$?
+          kill "$watchdog" 2>/dev/null || true
+          cat window.out
+          cat window.err >&2
+          test "$status" = 0
+          grep -Eq '^WINDOW title=PaperPull$' window.out
+
       - name: What Gatekeeper will say
         if: env.HAVE_CERT == 'true'
         # stapler validate asks Apple's ticket server too, which dropped the
