@@ -537,9 +537,12 @@ class App:
                 self._record_rawdoc(r, site.BILLING_URL)
             self.discovery.save()
             print(f"\n!! The Venmo statement list stopped partway, since {stop}.")
+            if stop.month:
+                print(f"   It stopped on {stop.month}.")
             print(f"   The {len(stop.docs)} statement(s) listed before it stopped are kept,")
             print("   and this run stops rather than call the list read. Run it again.")
-            self.write_failure("read the documents list", "the list stopped partway")
+            self.write_failure("read the documents list", "the list stopped partway",
+                               extra={"month_page": stop.seen} if stop.seen else None)
             raise SystemExit(1)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)

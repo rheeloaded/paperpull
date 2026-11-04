@@ -97,6 +97,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   finished build beside it is the one started. With no finished build on the
   computer, a launch through Playwright still starts Playwright's own folder
   as it always did.
+- **Venmo reads past a month with no transactions on its older page (#136).**
+  Venmo has two sentences for a month with nothing in it, and which one a
+  person sees goes by their own account. The app knew "No transactions yet
+  for this month", so a month saying "There are no transactions for these
+  dates" read as a month still drawing, and every Discover and Pilot stopped
+  there with "the month's transactions did not finish drawing" and saved
+  nothing. Both sentences are an empty month now, and each is matched whole.
+  A month that shows neither, as one does when Venmo could not load it, still
+  stops the list, and so does a month holding only pending transactions,
+  each with a reason of its own. The run says which month it stopped on, and
+  its failure file holds what that month's page drew, as counts.
 
 ## [0.60.2] - 2026-11-04
 

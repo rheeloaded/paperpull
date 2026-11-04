@@ -459,6 +459,82 @@ class Listing(unittest.TestCase):
                     dict(ok, lists=0, rows=0, kids=0), dict(ok, empty=True), {}):
             self.assertNotEqual(site.settled(bad, "2026-09"), "", repr(bad))
 
+    def test_pending_transactions_are_never_an_empty_month(self):
+        # Beside completed rows they change nothing. With none, the month
+        # is neither read nor empty, whatever the page says.
+        ok = {"months": ["September 2026"], "heading": True, "lists": 1, "rows": 2, "kids": 2,
+              "empty": False, "loading": 0}
+        self.assertEqual(site.settled(dict(ok, pending=1), "2026-09"), "")
+        for bad in (dict(ok, lists=0, rows=0, kids=0, pending=1),
+                    dict(ok, lists=0, rows=0, kids=0, pending=1, empty=True)):
+            self.assertNotEqual(site.settled(bad, "2026-09"), "", repr(bad))
+
+    def test_each_page_that_is_not_a_month_has_its_own_reason(self):
+        # What a tester sends back says which page it was (#136).
+        ok = {"months": ["September 2026"], "heading": True, "lists": 1, "rows": 2, "kids": 2,
+              "empty": False, "loading": 0}
+        none = dict(ok, lists=0, rows=0, kids=0)
+        reasons = {site.settled(state, "2026-09") for state in (
+            none, dict(none, pending=1), dict(ok, empty=True), dict(ok, kids=3))}
+        self.assertEqual(len(reasons), 4, reasons)
+
+    def test_only_venmo_s_two_sentences_are_an_empty_month(self):
+        for said in ("No transactions yet for this month, but as soon as they start rolling in, "
+                     "we\u2019ll list them here.",
+                     "There are no transactions for these dates.\nTo view past transactions, "
+                     "select new dates."):
+            self.assertTrue(site.EMPTY_MONTH_RE.search(said), said)
+        for said in ("Completed transactions", "Pending transactions", "No transactions", "no transactions",
+                     "Your transaction history on this page hasn't loaded yet. Check back in a couple "
+                     "of minutes.", "Error loading data", "We couldn't get the information for the "
+                     "selected period. Please try again.", "To view past transactions, select new dates.",
+                     "There are no statements for these dates."):
+            self.assertIsNone(site.EMPTY_MONTH_RE.search(said), said)
+
+    def test_a_stopped_month_keeps_what_its_page_held(self):
+        page = Page(rows=0, kids=0, body={"data": {"transactionsHistory": {
+            "completedTransaction": {"edges": []}, "pendingTransaction": {"edges": [{"node": {"note": FAKE_NAME}}]}}}})
+        with self.assertRaises(site.ListStopped) as stop:
+            site.collect_download_docs(page, today=TODAY, limit=1)
+        self.assertEqual(stop.exception.month, "2026-09")
+        seen = stop.exception.seen
+        self.assertEqual((seen["lists"], seen["rows"], seen["children"], seen["status"]), (1, 0, 0, 200))
+        self.assertEqual(seen["answer"], {"errors": False, "completed": 0, "pending": 1})
+        self.assertNotIn("Zyxwvut", repr(seen))
+
+    def test_what_an_answer_held_is_counted_and_nothing_else(self):
+        two = {"edges": [{"node": {"note": FAKE_NAME}}, {"node": None}]}
+        self.assertEqual(site.answer_counts({"data": {"transactionsHistory": {
+            "completedTransaction": two, "pendingTransaction": {"edges": []}}}}),
+            {"errors": False, "completed": 2, "pending": 0})
+        # A failed month, and an answer that holds no list for a part.
+        failed = {"errors": [{"message": FAKE_NAME}], "data": None}
+        self.assertEqual(site.answer_counts(failed), {"errors": True, "completed": None, "pending": None})
+        self.assertEqual(site.answer_counts([failed]), {"errors": True, "completed": None, "pending": None})
+        self.assertEqual(site.answer_counts({"data": {"transactionsHistory": {"completedTransaction": None}}}),
+                         {"errors": False, "completed": None, "pending": None})
+        for odd in ("text", 3, None, [], [1], {"data": "x"}, {"data": {"transactionsHistory": []}}):
+            self.assertEqual(site.answer_counts(odd), {"errors": False, "completed": None, "pending": None},
+                             repr(odd))
+
+    def test_the_newest_answer_read_is_the_one_counted_and_a_new_month_starts_clean(self):
+        def said(*bodies):
+            heard = site.Heard()
+            heard.on_request(Request(statement_url(9), navigation=True))
+            for body in bodies:
+                r = Response(GRAPHQL, 200, "TransactionsHistory", body=body)
+                heard.on_request(r.request)
+                heard.on_response(r)
+            heard.statement()
+            return heard
+        one = {"data": {"transactionsHistory": {"completedTransaction": {"edges": [{}]}}}}
+        none = {"data": {"transactionsHistory": {"completedTransaction": {"edges": []}}}}
+        self.assertEqual(said(one, none).said["completed"], 0)
+        self.assertEqual(said(none, ValueError("gone")).said["completed"], 0, "an answer not read counts nothing")
+        heard = said(one)
+        heard.on_request(Request(statement_url(8), navigation=True))
+        self.assertIsNone(heard.said)
+
     def test_a_month_not_drawn_whole_stops(self):
         for page in (Page(heading=False), Page(picker=[]), Page(rows=0, kids=0),
                      Page(picker=["September 2026", "August 2026"]), Page(loading=8),
@@ -815,6 +891,22 @@ class Orchestrator(WithPrinter):
         self.assertTrue({f"id:{site.profile_tag(FAKE_PROFILE_ID)}:2026-08"} <= set(app.discovery.data))
         self.assertIn("stopped partway", said.getvalue())
         self.assertTrue(hasattr(listing, "read_whole"))
+
+    def test_a_list_that_stops_says_what_the_page_held_in_the_failure_file(self):
+        app = make_app(self.tmp, "--discover")
+        page = Page(rows=0, kids=0, start=statement_url(), body={"errors": [{"message": FAKE_NAME}], "data": None})
+        app.page = lambda: page
+        app.check_session = lambda p: None
+        with redirect_stdout(io.StringIO()) as said, self.assertRaises(SystemExit):
+            app.cmd_discover()
+        self.assertIn("It stopped on 2026-09.", said.getvalue())
+        text = next(app.paths.diagnostics.glob("failure-*.json")).read_text(encoding="utf-8")
+        for word in (FAKE_PROFILE_ID, "Zyxwvut", "Qponmlk"):
+            self.assertNotIn(word, text, word)
+        seen = json.loads(text)["extra"]["month_page"]
+        self.assertEqual((seen["lists"], seen["rows"], seen["children"], seen["pending"], seen["status"]),
+                         (1, 0, 0, 0, 200))
+        self.assertEqual(seen["answer"], {"errors": True, "completed": None, "pending": None})
 
     def test_a_resume_on_another_profile_stops_and_records_nothing(self):
         app = make_app(self.tmp, "--resume")

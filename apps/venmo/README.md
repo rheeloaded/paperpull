@@ -86,8 +86,10 @@ that date. A run of one year walks back to that year's first day. A month is lis
 and later printed, only when the address still names that month, the
 month picker shows exactly that month, an "Account Statement" heading is
 drawn, nothing is still loading, and either the month's transaction rows
-are drawn, the same on two reads in a row, or Venmo's own "No transactions
-yet for this month" is, unchanged for two seconds. When the page's own
+are drawn, the same on two reads in a row, or Venmo's own words for a month
+with none are, unchanged for two seconds. Venmo has two sentences for that,
+"No transactions yet for this month" and "There are no transactions for
+these dates", and which one you see goes by your own account. When the page's own
 request for the month's transactions is heard, an answer that says more
 are to come stops the month, and one that says signed out stops the run.
 The month still under way is left out, since its statement is not final
@@ -105,9 +107,12 @@ and prints nothing.
 
 A page the app cannot read whole stops the run rather than being called
 complete. That is a month the page will not show as asked, a "Load more"
-control on a month, a business profile, or a month that never finishes
-drawing. If Venmo answers as signed out, the run stops and keeps what it
-saved. Sign in again and run Resume.
+control on a month, a business profile, a month that never finishes
+drawing, a month that shows neither transactions nor either sentence, as
+one does when Venmo could not load it, or a month that holds only pending
+transactions. The run says which month it stopped on. If Venmo answers as
+signed out, the run stops and keeps what it saved. Sign in again and run
+Resume.
 
 ## Validation status
 
@@ -118,6 +123,8 @@ Resume). Every PDF holds the whole statement, and the two busy months
 printed 12 and 11 transactions with no "Show more" left. Not yet seen are
 the following.
 
+- "There are no transactions for these dates" on a live account. The app
+  knows it from Venmo's own page code.
 - How far back Venmo's statements go past two years. A month before the
   account opened shows the same "No transactions yet" as an empty month,
   so it is skipped, and with a start date the walk goes back to it.
@@ -146,4 +153,6 @@ python -m pytest tests -q
 ```
 
 Run from this folder with PaperPull's bundled Python. They use invented
-values only and need no browser.
+values only. `tests/test_a_month_with_no_transactions.py` drives a real
+browser on made-up pages, and nothing it does reaches Venmo. The others need
+no browser.

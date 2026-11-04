@@ -38,6 +38,15 @@ WHAT THE SURVEY ESTABLISHED
     opened shows. Venmo does NOT ask TransactionsHistory for every month
     (its client cache answers some), and over CDP that answer's body is
     often gone before it can be read.
+  * Read from Venmo's own page code on 2026-11-03 (#136), its public files
+    and no account. An empty month has a second sentence, "There are no
+    transactions for these dates.", which the older page draws, and which
+    page a person gets goes by a setting of their own account. A month
+    whose request fails draws the heading and the picker with no list and
+    no words, for as long as it stays open (its notice goes away by
+    itself). A month's pending transactions are a list of their own,
+    [class*=pendingTransactionList], and a month holding only those draws
+    no completed list and no words either.
   * A busy month draws ten rows at a time: the list's last child is then
     not a row but a block holding one "Show more" button (2025-08 and
     2025-07, seen live).
@@ -50,9 +59,11 @@ THE SHAPE THIS APP TAKES
   bound by the page's own state (settled): the address still names it,
   the picker shows it, the heading is drawn, nothing is loading, and
   either its rows (with at most the list's own "Show more" pager after
-  them) or its no-transactions words are drawn, holding still across two
-  reads, or for the no-transactions words across EMPTY_HOLD_MS. A month
-  with no transactions is not listed. Before printing, the
+  them) or either of its no-transactions sentences is drawn, holding still
+  across two reads, or for the no-transactions words across EMPTY_HOLD_MS.
+  A month with no transactions is not listed. Neither words nor rows, or
+  pending transactions with no completed ones, stops the list. Before
+  printing, the
   one press this app ever makes, the list's own "Show more", is pressed
   until every row is drawn (show_all, each press required to draw more,
   at most SHOW_MORE_PRESSES). Only then is the page printed and filed as
@@ -64,6 +75,9 @@ THE SHAPE THIS APP TAKES
 UNCONFIRMED (the app stops at each until a run shows it)
   * The account type's value. Only "personal" is accepted (a business
     profile is not listed).
+  * The older page's "There are no transactions for these dates." on a live
+    account. It is read from Venmo's own page code, and a month that shows
+    it has drawn only once its request came back with nothing in it.
   * How far back the months go. A month before the account opened shows
     the same no-transactions words as an empty month, so it is skipped.
     The walk goes back to the run's start date, and with none set it reads
@@ -192,10 +206,18 @@ LOGIN_URL_MARKERS = ["id.venmo.com", "/signin", "/sign-in", "/login", "/account/
 # list per statement, each row an <a> holding a [data-testid=money] amount.
 TX_LIST = "[class*='completedTransactionList']"
 TX_ROW = ":scope > a[class*='transactionItem']"
-# What a month with no transactions says instead of drawing the list, seen
-# on 2026-10-13: "No transactions yet for this month, but as soon as they
-# start rolling in, we'll list them here."
-EMPTY_MONTH_RE = re.compile(r"No transactions yet for this month")
+# A month's pending transactions, a list of their own beside the completed
+# one. They are not what a statement is listed for, and they are never an
+# empty month.
+TX_PENDING = "[class*='pendingTransactionList']"
+# What a month with no transactions says instead of drawing a list. Which of
+# the two goes by a setting of the person's own account (#136). The first was
+# seen on 2026-10-13, whole "No transactions yet for this month, but as soon
+# as they start rolling in, we'll list them here." The second, whole "There
+# are no transactions for these dates.", then a line break and "To view past
+# transactions, select new dates.", is read from Venmo's own page code. Each
+# is the sentence itself, so that nothing looser passes for an empty month.
+EMPTY_MONTH_RE = re.compile(r"No transactions yet for this month|There are no transactions for these dates")
 # The one control this app ever presses: the completed list's own pager,
 # labeled exactly "Show more", seen live 2026-10-13 under a busy month's
 # first ten rows. Pressed only by show_all, before a month is printed, at
@@ -552,11 +574,15 @@ class RawDoc:
 
 class ListStopped(Exception):
     """The list has a part this could not read, so what was read is not all
-    of it. `docs` holds what was read before it stopped."""
+    of it. `docs` holds what was read before it stopped. `month`, when one
+    month stopped it, is that month, and `seen` what that month's page held
+    (_seen), for the failure file."""
 
-    def __init__(self, why: str, docs=None):
+    def __init__(self, why: str, docs=None, month: str = "", seen: Optional[dict] = None):
         super().__init__(why)
         self.docs = list(docs or [])
+        self.month = month
+        self.seen = dict(seen or {})
 
 
 class CapReached(ListStopped):
@@ -585,7 +611,11 @@ class Heard:
     by a later one that says the list is whole. Hearing it is an extra
     check, never a requirement: Venmo does not ask for every month (its
     client cache answers some), and over CDP the body is often gone before
-    it can be read, which is logged and otherwise ignored."""
+    it can be read, which is logged and otherwise ignored.
+
+    `said` is how many transactions the newest readable answer held
+    (answer_counts). It only goes in the failure file, since what a month
+    is called is decided by what the page shows."""
 
     def __init__(self, arms=None):
         self.arms = arms or (lambda url: statement_query(url) is not None)
@@ -594,6 +624,7 @@ class Heard:
         self.answers: List[Tuple[str, int]] = []
         self.pending: list = []
         self.partial = False
+        self.said: Optional[dict] = None
 
     @staticmethod
     def _graphql(url) -> bool:
@@ -610,6 +641,7 @@ class Heard:
                     self.armed, self.asked, self.answers = True, [], []
                     self.pending = []
                     self.partial = False
+                    self.said = None
                 return
             if self.armed and self._graphql(request.url):
                 self.asked.append(request)
@@ -656,6 +688,7 @@ class Heard:
                 # the answer to the press that drew the last rows replaces
                 # what the first answer said.
                 self.partial = more_to_come(body)
+                self.said = answer_counts(body)
 
     def listen(self, page) -> None:
         page.on("request", self.on_request)
@@ -717,6 +750,24 @@ def more_to_come(body) -> bool:
     return any(nexts)
 
 
+def answer_counts(body) -> dict:
+    """What a TransactionsHistory answer held, as counts and a yes or no,
+    which are whether it carried errors and how many completed and pending
+    transactions it held, None for a part it has no list for. Nothing from
+    a transaction is read. These tell a month whose request failed from one
+    with nothing in it when the page, which draws neither, cannot."""
+    parts = body if isinstance(body, list) else [body]
+    parts = [p for p in parts if isinstance(p, dict)]
+    data = [p.get("data") for p in parts if isinstance(p.get("data"), dict)]
+    history = [d.get("transactionsHistory") for d in data if isinstance(d.get("transactionsHistory"), dict)]
+    out = {"errors": any(bool(p.get("errors")) for p in parts)}
+    for name, key in (("completed", "completedTransaction"), ("pending", "pendingTransaction")):
+        held = history[0].get(key) if history else None
+        edges = held.get("edges") if isinstance(held, dict) else None
+        out[name] = len(edges) if isinstance(edges, list) else None
+    return out
+
+
 def _operation(body: str) -> str:
     """The operationName of a GraphQL request body, or "" when it has none
     this can read. Only the name is read; the variables are private."""
@@ -734,10 +785,11 @@ def _operation(body: str) -> str:
 # 2026-10-13: the value of every text input shaped like a month (the month
 # picker), whether the "Account Statement" heading is drawn, how many
 # transaction rows the completed list holds (each an <a> carrying an
-# amount), whether a loading shimmer is drawn inside the statement, whether
-# the page says the month has no transactions, and every control's label,
-# for the Load more check. Read only; no text of a row is read.
-_STATE_JS = r"""([listSel, rowSel, emptyRe]) => {
+# amount), how many pending lists are drawn beside it, whether a loading
+# shimmer is drawn inside the statement, whether the page says the month has
+# no transactions, and every control's label, for the Load more check. Read
+# only, and no text of a row is read.
+_STATE_JS = r"""([listSel, rowSel, emptyRe, pendingSel]) => {
   const months = Array.from(document.querySelectorAll('input'))
     .map(i => (i.value || '').replace(/\s+/g, ' ').trim())
     .filter(v => /^[A-Z][a-z]+ [0-9]{4}$/.test(v));
@@ -746,6 +798,7 @@ _STATE_JS = r"""([listSel, rowSel, emptyRe]) => {
   const lists = document.querySelectorAll(listSel);
   const rows = lists.length === 1 ? lists[0].querySelectorAll(rowSel).length : 0;
   const kids = lists.length === 1 ? lists[0].children.length : 0;
+  const pending = document.querySelectorAll(pendingSel).length;
   // The list's own pager: its last child, not a row, holding exactly one
   // control and that control reading exactly "Show more".
   let pager = 0;
@@ -763,13 +816,13 @@ _STATE_JS = r"""([listSel, rowSel, emptyRe]) => {
     .map(b => (b.textContent || b.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim())
     .filter(t => t && t.length < 40);
   return {months: months, heading: heading, lists: lists.length, rows: rows, kids: kids, pager: pager,
-          empty: empty, loading: loading, labels: labels};
+          pending: pending, empty: empty, loading: loading, labels: labels};
 }"""
 
 
 def _state(page) -> dict:
     try:
-        got = page.evaluate(_STATE_JS, [TX_LIST, TX_ROW, EMPTY_MONTH_RE.pattern])
+        got = page.evaluate(_STATE_JS, [TX_LIST, TX_ROW, EMPTY_MONTH_RE.pattern, TX_PENDING])
     except Exception as e:
         log.info("reading the statement page failed (%s)", type(e).__name__)
         return {}
@@ -881,8 +934,13 @@ def settled(state: dict, month: str) -> str:
     "Account Statement" heading, no loading shimmer in the statement, and
     either one completed list whose every child is a transaction row but
     for, at most, its own last "Show more" pager (a busy month draws ten
-    rows at a time; show_all draws the rest before printing), or no list
-    and the page's own words for a month with no transactions."""
+    rows at a time, and show_all draws the rest before printing), or no list of
+    either kind and the page's own words for a month with no transactions.
+
+    Everything else has a reason of its own, since each is a different page
+    and the reason is what a tester sends back. No list with no words is
+    never an empty month, since a month whose request failed draws exactly
+    that."""
     if not state.get("heading"):
         return "the statement did not finish drawing"
     shown = [month_of(v) for v in state.get("months") or []]
@@ -890,14 +948,31 @@ def settled(state: dict, month: str) -> str:
         return "the month picker does not show the month asked for"
     if state.get("loading"):
         return "the statement is still loading"
-    lists, rows = state.get("lists") or 0, state.get("rows") or 0
-    if state.get("empty") and lists:
+    lists, rows, pending = state.get("lists") or 0, state.get("rows") or 0, state.get("pending") or 0
+    if state.get("empty") and (lists or pending):
         return "the page draws transactions and says there are none"
     if lists == 1 and rows > 0 and rows + (1 if state.get("pager") else 0) == state.get("kids"):
         return ""
+    if lists == 0 and pending:
+        return "the month shows pending transactions and no completed ones"
     if lists == 0 and state.get("empty"):
         return ""
+    if lists == 0:
+        return "the page drew neither the month's transactions nor its words for a month with none"
     return "the month's transactions did not finish drawing"
+
+
+def _seen(state: dict, heard: "Heard") -> dict:
+    """What a month's page held when it stopped, for the failure file, as
+    counts and yes or no, with no word of the page. It says which of
+    settled's pages this was, and what Venmo's own answer held when it could
+    be read."""
+    seen = {name: state.get(key) or 0 for name, key in (
+        ("lists", "lists"), ("rows", "rows"), ("children", "kids"), ("pager", "pager"),
+        ("pending", "pending"), ("loading", "loading"))}
+    seen.update(heading=bool(state.get("heading")), empty=bool(state.get("empty")),
+                months=len(state.get("months") or []), answer=heard.said, status=heard.statement())
+    return seen
 
 
 def _month_heard(month: str) -> "Heard":
@@ -964,7 +1039,8 @@ def _open_month(page, where: Where, month: str, heard: Optional["Heard"] = None)
             last = seen if not why else None
             page.wait_for_timeout(POLL_MS)
         else:
-            raise ListStopped(why or "the statement did not hold still")
+            raise ListStopped(why or "the statement did not hold still", month=month,
+                              seen=_seen(state, heard))
         if heard.signed_out():
             raise SessionExpired("Venmo answered the statement as signed out")
         if heard.partial and not state.get("pager"):
@@ -1145,7 +1221,7 @@ def collect_download_docs(page, today: Optional[_date] = None, floor: str = "",
         try:
             rows = _open_month(page, where, month)
         except ListStopped as stop:
-            raise ListStopped(str(stop), docs)
+            raise ListStopped(str(stop), docs, month=month, seen=stop.seen)
         if rows == 0:
             # "No transactions yet for this month": nothing to keep, and a
             # month before the account opened shows the same.
