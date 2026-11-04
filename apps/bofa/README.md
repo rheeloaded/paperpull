@@ -4,7 +4,8 @@ Downloads your own **Bank of America statements** as PDFs, checking,
 savings and credit card accounts alike, for your records. Read-only,
 delete-safe, and part of [PaperPull](../../README.md).
 
-**UNTESTED.** Built on 2026-10-25 from two recordings a tester made on
+**Working on a tester's checking and credit card accounts.** Built on
+2026-10-25 from two recordings a tester made on
 [issue #121](https://github.com/rheeloaded/paperpull/issues/121), one trip
 to a checking statement and one to a credit card statement. Its first run
 on an account, on 2026-10-26, listed every statement and saved none, since
@@ -12,14 +13,18 @@ the page drew no Download PDF link until its Statements heading was opened,
 which the app now does. Its second, on 2026-10-27, met Download PDF links
 that open their PDF by a script of the page's own, with no address to
 read, so the app now presses one such link to learn how the page asks for
-a PDF. If you bank with Bank of America, a Pilot run tells whether it
-works, see below. Tax forms are not covered yet.
+a PDF. The same tester then taught it the credit card page and the links
+drawn behind the front of a card, and that run saved all 388 statements
+across five checking and credit card accounts, with none in Manual Review. Savings statements have not been run on a real account
+yet, so if you hold one with Bank of America, a Pilot run tells whether
+they work, see below. Tax forms are not covered yet.
 
 ## How it reads the site
 
-Statements & Documents fills its list from a call of its own, one account
-and one year at a time, and draws a Download PDF link for each statement
-under its Statements heading. The app reloads that page, keeps the list
+Statements & Documents opens at more than one address, a credit card's
+page among them, and the app knows each. The page fills its list from a
+call of its own, one account and one year at a time, and draws a Download
+PDF link for each statement under its Statements heading. The app reloads that page, keeps the list
 call the page makes, and asks every account's statements the same way from
 inside the page, year by year, at a person's pace, and reloads the page
 again only when what it heard is five minutes old, in a long run. A reload
@@ -57,7 +62,7 @@ guess.
 6. Look at what landed. A statement in `Statements` was checked against
    its day and account. One in `Manual Review` was not filed, and the run
    says why.
-7. Say on [issue #121](https://github.com/rheeloaded/paperpull/issues/121)
+7. Say in a [new issue](https://github.com/rheeloaded/paperpull/issues/new/choose)
    whether the statements are the right ones, and paste any line that
    starts with `Waited for`.
 

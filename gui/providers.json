@@ -23,7 +23,7 @@
     "att": {"gets": "Monthly bills for wireless, fiber and internet", "group": "bills"},
     "bestbuy": {"gets": "Receipts for online and store purchases and returns, back to 2015", "group": "shopping"},
     "bilt": {"gets": "Bilt Card statements from the wallet", "group": "banks"},
-    "bofa": {"gets": "Checking, savings and credit card statements", "group": "banks", "tested": false},
+    "bofa": {"gets": "Checking, savings and credit card statements", "group": "banks", "note": "Tested on checking and credit card statements, not yet on savings"},
     "capitalone": {"gets": "Bank and card statements, tax forms, letters", "group": "banks"},
     "chase": {"gets": "Credit card statements", "group": "banks"},
     "chasebusiness": {"gets": "Business checking and business card statements, up to seven years", "group": "banks", "note": "Tested on one profile"},

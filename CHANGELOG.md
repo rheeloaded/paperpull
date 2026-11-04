@@ -20,9 +20,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   which lifts the link above the front of the card, so nothing is forced.
   When links are drawn and not shown, the failure file says how many, and
   whether the Statements heading was open. Contributed by @appchamp, whose
-  run saved all 388 statements across five accounts, two checking and
-  three credit cards, with none in Manual Review. Bank of America moves
-  from untested to supported.
+  run saved all 388 statements across five checking and credit card
+  accounts, with none in Manual Review. Bank of America moves from
+  untested to supported.
 
 ## [0.60.1] - 2026-11-02
 
