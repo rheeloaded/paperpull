@@ -81,6 +81,8 @@ STOPS = {
     ("amex", "select_card", "click", "close the card switcher"): (1,
         "closes the switcher if card option was not found, and an open dropdown covers "
         "every press after it"),
+    ("amex", "select_card", "click", "switch card"): (1,
+        "the card option that switches to the document's card"),
     ("amex", "expand_sections", "click", "open a section"): (1,
         "opens a section of the statements page for every document in it"),
     ("amex", "close_file_type_dialog", "click", "close the file type dialog"): (1,
@@ -625,21 +627,6 @@ def _amex_button(off: bool) -> str:
             'onclick="window.presses++">Download</button>' % (" disabled" if off else ""))
 
 
-def _amex_select(site, page, out, staging, trace):
-    return site.select_card(page, {"label": "Delta Skymiles (12345)", "digits": "12345"})
-
-
-def _amex_card_option(off: bool) -> str:
-    return (
-        '<div role="combobox" aria-label="Card switcher" aria-expanded="true" data-testid="simple_switcher_combobox">'
-        'Delta Skymiles (12345)</div>'
-        '<button id="get" type="button" class="ctl" role="option" '
-        'data-testid="Delta Skymiles (12345)"%s '
-        'onclick="window.presses++">Delta Skymiles (12345)</button>'
-        % (" disabled" if off else "")
-    )
-
-
 def _coinbase_button(off: bool) -> str:
     return ('<button id="get" type="button" class="ctl" data-testid="statements-pdf-v2"%s '
             'onclick="window.presses++; fetch(\'/statement.pdf\');">PDF</button>'
@@ -780,8 +767,6 @@ def _how(app: str, function: str, monkeypatch):
             "2026-06-30</td><td>trade_confirmation"
     if (app, function) == ("amex", "download_document"):
         return "amex_site", _amex, _amex_button, "June 30, 2026"
-    if (app, function) == ("amex", "select_card"):
-        return "amex_site", _amex_select, _amex_card_option, "Delta Skymiles"
     if (app, function) == ("bilt", "_press"):
         return "bilt_site", _bilt, _bilt_button, "Statements"
     if (app, function) == ("vanguard", "download_document"):

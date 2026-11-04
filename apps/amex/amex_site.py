@@ -893,18 +893,9 @@ def select_card(page, card: dict) -> bool:
     old_empty_handle = old_empty.element_handle() if old_empty else None
     old_url = page.url or ""
 
-    try:
-        pressing.click(page, opt, css=opt_css,
-                       what="the card option",
-                       words=_words(), step="switch card")
-    except pressing.TurnedOff:
-        log.info("card option %s is turned off; leaving card for review", card.get("label"))
-        try:
-            if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
-                cb.first.click(timeout=1000)
-        except Exception:
-            pass
-        return False
+    pressing.click(page, opt, css=opt_css,
+                   what="the card option",
+                   words=_words(), step="switch card")
 
     # Wait until the selected card display shows exactly that card's digits
     switched = False

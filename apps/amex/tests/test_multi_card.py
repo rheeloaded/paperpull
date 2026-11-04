@@ -939,20 +939,17 @@ def test_cmd_discover_one_empty_card_one_full_card(browser, monkeypatch):
     ctx.close()
 
 
-def test_card_switch_turned_off_option_returns_false(browser):
-    """A disabled/turned off card option in the switcher catches TurnedOff,
-    closes the switcher, and returns False rather than raising."""
+def test_card_switch_turned_off_option_raises_turned_off(browser):
+    """A disabled/turned off card option in the switcher raises TurnedOff,
+    stopping the run as registered in STOPS."""
     ctx = browser.new_context()
     pg = ctx.new_page()
     pg.set_content(HTML_TURNED_OFF_CARD_OPTION)
     cards = site.list_cards(pg)
     assert len(cards) == 2
     # Card 2 is disabled
-    res = site.select_card(pg, cards[1])
-    assert res is False
-    cb = pg.locator(site._SWITCHER_COMBOBOX_SEL)
-    # The switcher must be closed after failed switch
-    assert (cb.first.get_attribute("aria-expanded") or "").lower() != "true"
+    with pytest.raises(pressing.TurnedOff):
+        site.select_card(pg, cards[1])
     ctx.close()
 
 
@@ -974,14 +971,28 @@ def test_download_one_on_single_card_does_not_call_list_cards(monkeypatch):
         manual_review=Path("/tmp/manual_review"),
     )
     app.config = {"max_path_length": 200, "min_pdf_bytes": 100}
-    app.stats = {"duplicate_filenames": 0, "manual_review": 0}
+    class _Stats(dict):
+        def __missing__(self, key):
+            if key in ("new_files", "dates"):
+                self[key] = []
+            else:
+                self[key] = 0
+            return self[key]
+
+    app.stats = _Stats()
     app.check_session = lambda p: None
     app.discovery = SimpleNamespace(data={})
+    app.journal = SimpleNamespace(checkpoint=lambda *a, **kw: None)
+    app._record = lambda *a, **kw: None
+    app._write_row = lambda *a, **kw: None
 
     called = []
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
     monkeypatch.setattr(site, "list_cards", lambda p: called.append("list_cards") or [])
     monkeypatch.setattr(site, "download_document", lambda p, c, d, o: True)
+    monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=True: None)
+    monkeypatch.setattr(app_mod.receipt_pdf, "validate_pdf",
+                        lambda *a, **kw: SimpleNamespace(ok=True, message="", size_bytes=1000, page_count=1))
 
     doc = Document(title="Monthly Statement", category="Statement", date="2026-10-11", account="")
     fake_page = SimpleNamespace()
