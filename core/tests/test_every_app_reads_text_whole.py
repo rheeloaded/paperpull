@@ -34,6 +34,7 @@ PDF_TEXT = {"extract_text", "extract_text_lines", "extract_text_simple", "extrac
 OWN = {
     ("browser.py", "debug_port_holder"): "the local browser's own /json/version",
     ("browser.py", "wait_for_debug_port"): "the local browser's own /json/version",
+    ("browser.py", "_wanted_chromium_build"): "Playwright's own browsers.json, packaged with it",
     ("classification.py", "load_rules"): "rules packaged with the app",
     ("doc_types.py", "load_rules"): "rules packaged with the app",
     ("export_transactions.py", "statement_name"): "a list of folders the core wrote itself",
