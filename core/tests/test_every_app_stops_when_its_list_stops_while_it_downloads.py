@@ -157,6 +157,10 @@ ITS_OWN = {
     ("portlandgeneral", "download_bill", ("_fetch",)):
         "a refusal of the authorization this run kept from an earlier read, which "
         "reads the list again once. A refusal of a list just read reaches the run",
+    ("nwnatural", "download_bill", ("_fetch",)):
+        "a refusal of a View address read earlier in this run, which reads the list "
+        "again once, or of one right after a list that answered, which is that bill's "
+        "alone. A refusal of the list itself reaches the run",
 }
 
 # A handler in a download path that turns a list stop into a stop of the run
@@ -234,6 +238,9 @@ NOT_A_LIST = {
     ("portlandgeneral", "OtherAccountShown"):
         "another account shown on the site than the one a bill was listed under, "
         "which the person chooses again before Continue",
+    ("nwnatural", "Challenged"):
+        "the portal's bot protection answering in the list's place, which the person "
+        "answers in the browser before Continue",
 }
 
 

@@ -268,6 +268,10 @@ def lists_read():
     return sum(1 for s in SITE.seen if s == ("GET", PORTAL, "/cp/bills.action"))
 
 
+def listing_note(tmp_path):
+    return json.loads((tmp_path / "out" / "last-listing.json").read_text(encoding="utf-8"))
+
+
 def their_tab(attached, server, host=PORTAL, path="/cp/home.action?CSRF_TOKEN=" + TOKEN,
               title="Paymentus"):
     """The person's own tab, the one at home they signed in with."""
@@ -412,6 +416,12 @@ def test_a_list_that_stops_during_resume_stops_once(attached, server, tmp_path, 
     assert "marked for manual review" not in out, folded(out)
     assert lists_read() == 1, SITE.seen
     assert saved(tmp_path) == []
+    # A second Resume would read the same list and stop at the same bill
+    # (#124), so the list is noted as one that stopped and the run says to
+    # use a run that lists first, never to carry on from here.
+    assert listing_note(tmp_path)["complete"] is False
+    assert "reads the list first" in folded(out) or "read the list first" in folded(out), folded(out)
+    assert "then Resume" not in folded(out), folded(out)
 
 
 def test_page_n_of_m_touching_the_text_before_it_stops_discover(attached, server, tmp_path, capsys):

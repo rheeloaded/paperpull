@@ -55,7 +55,7 @@ stops the run once.
 - **Once a run.** The list is read once a run. It is read again only when
   a bill is not in it or is not answered with a PDF. When that read stops
   the list, the run stops there once, saying why, and nothing goes to
-  Manual Review. Run Discover, then Resume.
+  Manual Review. The panel then offers a run that reads the list first.
 - **Signing out.** A redirect, a 401 or a 403 on Bill History stops the
   run and keeps what it saved. Sign in again and run Resume. A bill refused
   that way is read for again in a fresh list, and refused right after a

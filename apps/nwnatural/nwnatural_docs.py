@@ -659,14 +659,15 @@ class App:
     def list_stopped(self, stop) -> None:
         """Stop the run because Bill History, read again for a bill, could
         not be read whole. Every bill after it would read it again and
-        fail the same way, so the run stops once. Progress is saved and
-        nothing is recorded for review (tabs.stop)."""
-        self.write_failure("read the documents list", "the list stopped partway")
-        tabs.stop(self, [
-            f"The NW Natural bill history stopped while bills were being fetched, since {stop}.",
-            "So this run stops here. Everything saved so far is kept, and nothing was",
-            "sent to Manual Review. Run Discover to read the list again, then Resume.",
-        ])
+        fail the same way, so the run stops once. Nothing is recorded
+        against the bill, and the run leaves as one whose list did not end
+        whole, which only a run that lists carries on from
+        (listing.read_again_stopped)."""
+        log.info("the bill history could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        listing.read_again_stopped(self, (
+            f"The NW Natural bill history stopped while bills were being fetched, since {stop}, "
+            "so this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one bill. The site layer finds the bill by its due date in
