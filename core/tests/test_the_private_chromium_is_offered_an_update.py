@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from paperpull_core import browser  # noqa: E402
 
 OLD, WANTED = 1228, 1248
+REAL_WANTED_BUILD = browser._wanted_chromium_build
 INSTALL = ["/pkg/python3", "-m", "playwright", "install", "chromium"]
 INNER = ("chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/"
          "Google Chrome for Testing")
@@ -323,6 +324,67 @@ def test_ctrl_c_is_answered_by_the_offer_itself(machine, monkeypatch):
     machine.arrives = None
     machine.stopped_by = KeyboardInterrupt()
     assert browser.offer_chromium_update(OLD, WANTED) is False
+
+
+# -- nothing in the offer can end a sign-in -----------------------------------------
+#
+# The sign-in needs none of this, and the shapes below are not likely, but
+# each one got out of the sign-in and took it along.
+
+def _a_driver_folder(tmp_path, browsers_json):
+    package = tmp_path / "playwright"
+    (package / "driver" / "package").mkdir(parents=True)
+    (package / "driver" / "package" / "browsers.json").write_bytes(browsers_json)
+    return package
+
+
+@pytest.mark.parametrize("browsers_json", [
+    b'{"browsers": [{"name": "chromium", "revision": 1e400}]}',
+    b"[" * 200000,
+], ids=["a revision too big for a number", "nested too deep"])
+def test_a_browsers_json_that_raises_does_not_end_the_sign_in(
+        machine, monkeypatch, tmp_path, browsers_json):
+    """json reads 1e400 as infinity, which int() answers with OverflowError,
+    and it answers nesting that deep with RecursionError."""
+    monkeypatch.setattr(browser, "_wanted_chromium_build", REAL_WANTED_BUILD)
+    package = _a_driver_folder(tmp_path, browsers_json)
+    monkeypatch.setattr(browser, "_playwright_package", lambda: package)
+    with pytest.raises((OverflowError, RecursionError)):
+        browser._wanted_chromium_build()
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.old, "profile")]
+
+
+def _raises(error):
+    def offer(*a, **k):
+        raise error
+    return offer
+
+
+@pytest.mark.parametrize("error", [
+    UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+    OverflowError("cannot convert float infinity to integer"),
+    RecursionError("maximum recursion depth exceeded"),
+    OSError("the console went away"),
+    KeyboardInterrupt()], ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("where", ["chromium_update_due", "offer_chromium_update"])
+def test_nothing_the_offer_meets_ends_the_sign_in(machine, monkeypatch, tmp_path, error, where):
+    monkeypatch.setattr(browser, where, _raises(error))
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.old, "profile")]
+    assert machine.cleared == []
+
+
+def test_an_offer_that_raises_after_a_build_arrived_still_starts_it(machine, monkeypatch, tmp_path):
+    """The folder is read again, or the sign-in would go on with what it read
+    before the download, and the build that arrived would wait for the next."""
+    def offer(have, want):
+        _lay(machine.root, WANTED)
+        raise OSError("the console went away")
+    monkeypatch.setattr(browser, "offer_chromium_update", offer)
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.new, "profile")]
+    assert machine.cleared == []
 
 
 # -- a new build that will not open ---------------------------------------------------

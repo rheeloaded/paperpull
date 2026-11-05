@@ -878,12 +878,20 @@ def _set_aside_new_build(path: str, old: str) -> None:
 def _offer_update_at_sign_in(had: Tuple[str, str], allow_fetch: bool) -> Optional[bool]:
     """Offer the update when `had`, the browser about to start, is the
     private copy and has fallen behind. Answers as offer_chromium_update, and
-    None when there was nothing to offer."""
-    if allow_fetch and had[0] == CHROMIUM and os.environ.get("PAPERPULL_SERVER") != "1":
-        due = chromium_update_due(had[1])
-        if due:
-            return offer_chromium_update(*due)
-    return None
+    None when there was nothing to offer. All of this is optional, so nothing
+    it meets, a Ctrl-C or a browsers.json no one could read included, keeps
+    the sign-in from going on (_say_shared_port). An offer that ended that way
+    answers False, since a download may have left something."""
+    tried = None
+    try:
+        if allow_fetch and had[0] == CHROMIUM and os.environ.get("PAPERPULL_SERVER") != "1":
+            due = chromium_update_due(had[1])
+            if due:
+                tried = False
+                tried = offer_chromium_update(*due)
+    except (Exception, KeyboardInterrupt):
+        pass
+    return tried
 
 
 def launch_own_browser(chromium, user_data_dir, **kwargs):
