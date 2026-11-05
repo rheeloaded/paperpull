@@ -35,6 +35,7 @@ OWN = {
     ("browser.py", "debug_port_holder"): "the local browser's own /json/version",
     ("browser.py", "wait_for_debug_port"): "the local browser's own /json/version",
     ("browser.py", "_wanted_chromium_build"): "Playwright's own browsers.json, packaged with it",
+    ("browser.py", "_install_takes_no_remove"): "Playwright's own package.json, packaged with it",
     ("classification.py", "load_rules"): "rules packaged with the app",
     ("doc_types.py", "load_rules"): "rules packaged with the app",
     ("export_transactions.py", "statement_name"): "a list of folders the core wrote itself",
