@@ -17,12 +17,19 @@ a machine at home, has a page of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md)
   fetches the PDFs the provider already generated. It never sends your
   password or a verification code anywhere, because it never has them. You
   type those into the provider's own page.
-- **A browser download, once, if you agree.** If no usable browser is found
-  on your computer and you sign in from a terminal, the sign-in step offers to
+- **A browser download, if you agree.** If no usable browser is found on your
+  computer and you sign in from a terminal, the sign-in step offers to
   download a private copy of Chromium from Playwright's release server. It
   asks first and does nothing if you decline. The control panel cannot ask,
   so there it only says no browser was found. If Edge, Chrome, Brave, Vivaldi
-  or Opera is already installed, it uses that and never offers the download.
+  or Opera is already installed, it uses that and does not offer this download.
+- **An update of that private copy, if you agree.** When a sign-in is about to
+  start your private copy and it is older than the build this PaperPull was
+  made for, the sign-in step offers the newer build from the same server. The
+  two are compared on your computer, so no server is asked. It asks first,
+  and a no holds until PaperPull wants a newer build still. The control panel
+  cannot ask, so there it only says so and gives the line to run. Nobody who
+  signs in with Edge, Chrome or another browser of their own is offered this.
 
 Nothing else. There is no update check, no crash reporting, no usage
 statistics, no analytics, and no account with this project. The program has

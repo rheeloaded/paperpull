@@ -1304,7 +1304,9 @@ def open_signin_browser(profile_dir, port: str, url: str,
     Each candidate is tried in turn, because a launch is the only honest test.
     A browser can be installed and still fail to open a debugging port, and
     checking for the file on disk cannot tell the difference. Only when nothing
-    answers, and only then, is the 400 MB download offered.
+    answers is the 400 MB download of a first copy offered. A private copy that
+    is about to start and has fallen behind is offered its update first, and
+    whatever comes of that the sign-in goes on (_offer_update_at_sign_in).
 
     A port another browser already holds is said and used, never launched
     over. A browser started there cannot take the port, so it opened as a

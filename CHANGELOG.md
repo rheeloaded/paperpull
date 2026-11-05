@@ -22,6 +22,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Contributed by crazyhorse90210 and run on the contributor's own account.
   Before merging, a list that stops while bills download was made to stop
   the run once with the list unread, as the other apps do.
+- **Sign-in offers to update PaperPull's own Chromium when it falls behind
+  (#132).** Nothing updated the private copy after its first download, so a
+  computer that took it months ago went on signing in with that build while
+  each release carried a newer one with its security fixes. When that copy
+  is the browser about to start and it is older than the build this
+  PaperPull was made for, a sign-in from a terminal now offers the update,
+  about 400 MB, and a no holds until PaperPull wants a newer build still.
+  Nobody who signs in with their own Edge or Chrome is asked, and neither is
+  PaperPull Server. The control panel cannot ask, so its log says so and gives
+  the line to run. The Store edition, which cannot run it, says so too. The
+  build you have stays until the new one has opened, so a download that
+  fails, is stopped or dies partway costs you nothing, and sign-in goes on
+  with what you had. Contributed by @JasperDale420.
 - **City of Tualatin, the 81st app, monthly utility bills (#127).** It
   saves the water, sewer, stormwater, parks and road fee bills of a
   Tualatin Water account from CivicPay Online, about two years of them.
@@ -45,6 +58,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account or the receipt, and give the one line that downloads it. The
   Store edition, where that line cannot run, and PaperPull Server each get
   words that fit them. Contributed by JasperDale420.
+- **A Chromium download that stopped partway no longer takes over the
+  sign-in (#132).** Playwright marks a build finished last of all, and
+  nothing looked for that mark, so a closed window or a power cut during the
+  unpacking left a folder that counted as the newest build. The sign-in
+  tried it with the finished build beside it never started, and no repair
+  was offered. A build without the mark now counts as not there, wherever
+  builds are counted, offered or started.
 
 ## [0.60.2] - 2026-11-04
 
