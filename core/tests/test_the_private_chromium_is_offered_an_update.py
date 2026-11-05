@@ -479,6 +479,33 @@ def test_the_store_edition_is_told_it_cannot_and_goes_on_with_the_build_it_has(
     assert not (machine.root / browser.DECLINED_UPDATE).exists()
 
 
+@pytest.mark.parametrize("nobody", [EOFError(), KeyboardInterrupt()], ids=lambda e: type(e).__name__)
+def test_a_question_nobody_answers_is_no_answer(machine, monkeypatch, tmp_path, nobody):
+    """A console that reads end of file, which is what NUL gives where
+    isatty says yes on Windows, or a Ctrl-C at the question. Nothing is
+    downloaded, and nothing is remembered, since nobody said no."""
+    def answer(prompt):
+        raise nobody
+    monkeypatch.setattr("builtins.input", answer)
+    assert browser.offer_chromium_update(OLD, WANTED) is None
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.old, "profile")]
+    assert machine.downloads == []
+    assert not (machine.root / browser.DECLINED_UPDATE).exists()
+
+
+def test_a_download_that_cannot_start_goes_on_with_the_old_build(machine, monkeypatch, tmp_path, capsys):
+    def cannot(cmd, **kw):
+        raise OSError("no such file")
+    monkeypatch.setattr(browser.subprocess, "call", cannot)
+    machine.answers = ["y", "y"]
+    assert browser.offer_chromium_update(OLD, WANTED) is False
+    assert "Could not start the download (no such file)" in capsys.readouterr().out
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.old, "profile")]
+    assert machine.cleared == []
+
+
 # -- at sign-in, with no one to ask (the control panel) -----------------------------
 
 def test_with_no_one_to_ask_it_says_so_and_gives_the_command(machine, tmp_path, capsys):
@@ -573,6 +600,11 @@ def test_a_build_in_chrome_linux64_is_offered_it_with_no_browser_of_their_own(
 
 # -- where it is not offered ---------------------------------------------------------
 
+# Their own browser, in a folder whose name reads as an old build of
+# Playwright's, so only the browser's own name keeps it from being offered.
+OWN_CHROME = (browser.CHROME, "/opt/chromium-1200/chrome")
+
+
 def test_an_up_to_date_copy_is_not_offered_anything(machine, tmp_path, capsys):
     _lay(machine.root, WANTED)
     _sign_in(tmp_path)
@@ -583,14 +615,16 @@ def test_an_up_to_date_copy_is_not_offered_anything(machine, tmp_path, capsys):
 def test_nothing_is_offered_about_a_copy_that_would_not_be_started(machine, monkeypatch, tmp_path):
     """Their own Edge or Chrome goes first for an app that asks for it, so a
     stale private copy they do not use is none of their business."""
-    machine.real = [(browser.EDGE, "/x/edge")]
+    machine.real = [OWN_CHROME]
     _sign_in(tmp_path, prefer_real=True)
-    assert machine.opened[0][0] == "/x/edge"
+    assert machine.opened[0][0] == OWN_CHROME[1]
     assert machine.asked == [] and machine.downloads == []
 
 
 def test_an_app_set_to_use_only_their_own_browser_is_not_asked(machine, tmp_path):
+    machine.real = [OWN_CHROME]
     _sign_in(tmp_path, mode=browser.INSTALLED)
+    assert machine.opened == [(OWN_CHROME[1], "profile")]
     assert machine.asked == [] and machine.downloads == []
 
 
