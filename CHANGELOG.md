@@ -61,9 +61,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   cards are saved. Login says Success only on a list it saw. With one card,
   keys, file names and files stay as they were. A switcher that cannot be
   read, because it does not show, is turned off, is covered or offers no
-  card, no longer matters to a run with one card, which goes on with the card on
-  show and says so, and the list is not noted as whole, since there may be
-  more cards behind it. Contributed by @appchamp, who ran a
+  card, no longer matters to a run with one card, which goes on with the
+  card on show and says so, and the list is not noted as whole, since
+  there may be more cards behind it. Contributed by @appchamp, who ran a
   Pilot across two cards and read the PDFs. Before merging, the wait was
   made to hold a button that shows, the turned off card was made to leave
   only itself, an empty card was made to wait on its own words, and Login

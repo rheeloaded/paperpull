@@ -1003,6 +1003,10 @@ def select_card(page, card: dict) -> bool:
         card["turned_off"] = True
         _close_switcher(page, cb)
         return False
+    except pressing.Stop as stop:
+        # The press may have reached the page, so the switcher may move.
+        stop.list_unread = stop.list_unread or stop.after_a_press
+        raise
 
     # Wait until the selected card display shows exactly that card's digits
     switched = False

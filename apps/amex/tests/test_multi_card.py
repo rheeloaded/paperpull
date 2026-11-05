@@ -1418,3 +1418,23 @@ def test_goto_documents_presses_the_option_that_shows(open_page, monkeypatch):
     page = open_page("/overview", server)
     assert site.goto_documents(page) is True
     assert "/activity/statements" in page.url
+
+
+@pytest.mark.parametrize("after_a_press", [True, False], ids=["may-have-landed", "refused"])
+def test_a_stop_at_the_option_leaves_the_list_unread_once_it_may_have_landed(page_of, monkeypatch,
+                                                                            after_a_press):
+    """A press of the option that may have reached the page can move the
+    switcher with the run stopped, so a Resume must not carry on from it. One
+    refused before it was made changed nothing."""
+    pg = page_of(switch_page(statement_row("2030-11-11")))
+    cards = site.list_cards(pg)
+    real = pressing.click
+
+    def press(page, locator, **kwargs):
+        if kwargs.get("step") == "switch card":
+            raise pressing.NoAnswer("switch card", "the press", ["The press."], after_a_press=after_a_press)
+        return real(page, locator, **kwargs)
+    monkeypatch.setattr(pressing, "click", press)
+    with pytest.raises(pressing.NoAnswer) as stop:
+        site.select_card(pg, cards[1])
+    assert stop.value.list_unread is after_a_press
