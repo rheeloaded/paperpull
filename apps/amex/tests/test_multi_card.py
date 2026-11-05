@@ -1170,3 +1170,26 @@ def test_goto_documents_leaves_the_switcher_alone_where_the_link_shows(open_page
     page = open_page("/overview", server)
     assert site.goto_documents(page) is True
     assert "/activity/statements" in page.url
+
+
+@pytest.mark.parametrize("html,says", [
+    ("<main><section id='table-area'><p>No statements available</p></section></main>", True),
+    ("<main><section id='table-area'></section><section><p>Older cards, there are no statements "
+     "available before 2015.</p></section></main>", False),
+    ("<main><section id='table-area'></section><p>If you just opened your account, you have no "
+     "statements yet.</p></main>", False),
+    ("<main><section id='table-area'></section><section><p>You chose paperless, so you will get "
+     "no billing statements by mail.</p></section></main>", False),
+    ("<main><section id='table-area'><p>You chose paperless, so you will get no billing "
+     "statements by mail.</p></section></main>", False),
+    ("<main><section id='table-area'></section><section><p>Sie erhalten keine Abrechnungen per "
+     "Post.</p></section></main>", False),
+    ("<main><section id='table-area'></section></main><footer><p>There are no statements "
+     "available yet.</p></footer>", False),
+], ids=["the-pages-own-words", "help-line-in-a-section", "help-line-in-a-paragraph",
+        "paperless-note-in-a-section", "paperless-note-in-the-area", "german-paperless-note",
+        "footer-help-line"])
+def test_only_the_statements_own_region_says_a_card_is_empty(page_of, html, says):
+    """A card read as empty is a card whose statements are never read, so a
+    help line with the same words and no list drawn must not pass for it."""
+    assert site.has_no_statements(page_of("<!doctype html>" + html)) is says

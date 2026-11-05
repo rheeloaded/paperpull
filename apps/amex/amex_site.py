@@ -327,6 +327,11 @@ _STATEMENTS_AREA_SEL = (
 )
 
 
+# A note that paper statements no longer come says nothing of the list on the
+# page, in German or in English.
+_BY_POST_RE = re.compile(r"\b(per\s+post|by\s+post|by\s+mail|in\s+the\s+mail)\b", re.I)
+
+
 def _says_no_statements(el) -> bool:
     """Whether `el` shows and says the page has no statements. Words in a
     page's header or footer are about something else."""
@@ -335,7 +340,7 @@ def _says_no_statements(el) -> bool:
     if el.locator("xpath=ancestor::footer | ancestor::header | ancestor::*[@role='contentinfo']").count() > 0:
         return False
     txt = (el.inner_text() or "").strip()
-    return bool(NO_STATEMENTS_RE.search(txt)) and "per post" not in txt.lower()
+    return bool(NO_STATEMENTS_RE.search(txt)) and not _BY_POST_RE.search(txt)
 
 
 def _innermost_saying(el):
@@ -351,21 +356,16 @@ def _innermost_saying(el):
 
 
 def _get_no_statements_element(page):
-    """Find the innermost element declaring no statements, or None."""
+    """The innermost element that says the card has no statements, or None.
+    Only the statements' own region is read, since a help line anywhere else
+    on the page can use the same words with no list drawn at all."""
     try:
-        # Check statement table/area elements first
-        for sel in (_STATEMENTS_AREA_SEL, "table tbody", "section"):
+        for sel in (_STATEMENTS_AREA_SEL, "table tbody"):
             loc = page.locator(sel)
             for i in range(min(loc.count(), 5)):
                 el = loc.nth(i)
                 if _says_no_statements(el):
                     return _innermost_saying(el)
-        # Fallback for bare test pages without container elements
-        loc = page.locator("p, div[role='alert'], [class*='message']")
-        for i in range(min(loc.count(), 10)):
-            el = loc.nth(i)
-            if _says_no_statements(el):
-                return _innermost_saying(el)
         return None
     except Exception:
         return None
