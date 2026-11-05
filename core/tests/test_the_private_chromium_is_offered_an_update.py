@@ -21,6 +21,7 @@ import http.server
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -484,6 +485,47 @@ def test_with_no_driver_to_read_the_flag_is_not_used(monkeypatch, tmp_path):
     assert browser._install_takes_no_remove() is False
     monkeypatch.setattr(browser, "_playwright_package", lambda: tmp_path)
     assert browser._install_takes_no_remove() is False
+
+
+def _on_linux(machine, monkeypatch, inner):
+    """The machine with its old build laid out in a Linux folder, and the
+    real _real_first, which is what the skip is there for."""
+    shutil.rmtree(machine.root / ("chromium-%d" % OLD))
+    monkeypatch.setattr(sys, "platform", "linux")
+    machine.old = _lay(machine.root, OLD, inner=inner)
+
+
+@pytest.mark.parametrize("real", [[(browser.CHROME, "/usr/bin/google-chrome")], []],
+                         ids=["with a browser of their own", "with none"])
+def test_a_build_in_chrome_linux_is_not_offered_an_update(machine, monkeypatch, tmp_path, real):
+    """The bundled copy goes first on Linux only where a build sits in
+    chrome-linux, and a new build never does. Saying yes would turn that and
+    start their own browser on Chromium's profile."""
+    _on_linux(machine, monkeypatch, "chrome-linux/chrome")
+    machine.real = real
+    assert browser.bundled_chromium_first()
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.old, "profile")]
+    assert machine.asked == [] and machine.downloads == []
+
+
+def test_a_new_build_beside_chrome_linux_would_have_moved_them(machine, monkeypatch):
+    """What the skip keeps from happening, read from the real order."""
+    _on_linux(machine, monkeypatch, "chrome-linux/chrome")
+    machine.real = [(browser.CHROME, "/usr/bin/google-chrome")]
+    assert browser.browser_candidates()[0][0] == browser.CHROMIUM
+    shutil.rmtree(machine.root / ("chromium-%d" % OLD))
+    _lay(machine.root, WANTED, inner="chrome-linux64/chrome")
+    assert browser.browser_candidates()[0][0] == browser.CHROME
+
+
+def test_a_build_in_chrome_linux64_is_offered_it_with_no_browser_of_their_own(
+        machine, monkeypatch, tmp_path):
+    """Where the new build lands in the folder the old one has, nothing turns."""
+    _on_linux(machine, monkeypatch, "chrome-linux64/chrome")
+    machine.answers = ["n"]
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert len(machine.asked) == 1
 
 
 # -- where it is not offered ---------------------------------------------------------

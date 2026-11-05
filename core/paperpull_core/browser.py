@@ -881,10 +881,17 @@ def _offer_update_at_sign_in(had: Tuple[str, str], allow_fetch: bool) -> Optiona
     None when there was nothing to offer. All of this is optional, so nothing
     it meets, a Ctrl-C or a browsers.json no one could read included, keeps
     the sign-in from going on (_say_shared_port). An offer that ended that way
-    answers False, since a download may have left something."""
+    answers False, since a download may have left something.
+
+    Never for a build in chrome-linux. Every new build lands in chrome-linux64
+    or chrome-linux-arm64, so with that one gone _real_first would turn and
+    move the person onto a browser of their own with Chromium's profile,
+    which browser_candidates warns against, and on Ubuntu 23.10 and later the
+    new build may not even start its sandbox."""
     tried = None
     try:
-        if allow_fetch and had[0] == CHROMIUM and os.environ.get("PAPERPULL_SERVER") != "1":
+        if (allow_fetch and had[0] == CHROMIUM and os.environ.get("PAPERPULL_SERVER") != "1"
+                and Path(had[1]).parent.name != "chrome-linux"):
             due = chromium_update_due(had[1])
             if due:
                 tried = False
