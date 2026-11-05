@@ -493,8 +493,10 @@ def goto_documents(page) -> bool:
         if "/activity/statements" not in url:
             # Multi-card sign-ins frequently land on /overview rather than /dashboard.
             # /overview does not draw the 'Statements & Activity' top-nav link until
-            # a specific card product is selected from the switcher.
-            if "/overview" in (page.url or ""):
+            # a specific card product is selected from the switcher. With that
+            # link on show the switcher is left alone, since the link is the way
+            # a person with one card has always gone.
+            if "/overview" in (page.url or "") and _english_link(page) is None:
                 cb = page.locator(_SWITCHER_COMBOBOX_SEL)
                 if cb.count() and cb.first.is_visible():
                     pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
@@ -763,6 +765,12 @@ def list_cards(page) -> List[dict]:
     same product type do not collide.
 
     Returns list of dicts: [{'index': int, 'tid': str, 'label': str, 'digits': str, 'name': str}]
+
+    An empty list means no switcher shows. None means one shows that the page
+    has turned off or that offered no card, so which cards there are could
+    not be read. Nothing pressed it before cards were told apart, so a person
+    with one card has always gone on from here, and a caller goes on with the
+    card on show, says so, and never takes that card for every card.
     """
     try:
         page.wait_for_selector(_SWITCHER_COMBOBOX_SEL, timeout=LINK_WAIT_MS)
@@ -772,20 +780,24 @@ def list_cards(page) -> List[dict]:
     if not (cb.count() and cb.first.is_visible()):
         return []
     if (cb.first.get_attribute("aria-expanded") or "").lower() != "true":
-        pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
-                       what="the card switcher",
-                       words=_words(), step="open the card switcher")
+        try:
+            pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                           what="the card switcher",
+                           words=_words(), step="open the card switcher")
+        except pressing.TurnedOff:
+            log.info("the card switcher is turned off on the page, so no card was listed")
+            return None
     try:
         page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
     except Exception:
-        raise pressing.no_answer(
-            "open the card switcher", "the card options did not show",
-            "The card switcher was opened and its options did not show.")
+        log.info("the card switcher offered no card")
+        _close_switcher(page, cb)
+        return None
     opts = page.locator(_SWITCHER_OPTION_SEL)
     if not (opts.count() and opts.first.is_visible()):
-        raise pressing.no_answer(
-            "open the card switcher", "the card options did not show",
-            "The card switcher was opened and its options did not show.")
+        log.info("the card switcher offered no card")
+        _close_switcher(page, cb)
+        return None
     cards = []
     for i in range(opts.count()):
         opt = opts.nth(i)
@@ -1019,7 +1031,7 @@ def ensure_card(page, account: str) -> bool:
     current_digits = _current_card_digits(page)
     if current_digits and current_digits == digits:
         return True
-    cards = list_cards(page)
+    cards = list_cards(page) or []
     for c in cards:
         if c.get("digits") == digits:
             return select_card(page, c)

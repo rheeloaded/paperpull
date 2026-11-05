@@ -433,9 +433,12 @@ class App:
                 raise SystemExit(0)
         self.check_session(page)
 
-        cards = site.list_cards(page)
-        self._card_count = len(cards)
         self._cards_left = []
+        cards = site.list_cards(page)
+        if cards is None:
+            self._only_the_card_on_show(page)
+            cards = []
+        self._card_count = len(cards)
         total_controls = 0
         if len(cards) > 1:
             for card in cards:
@@ -512,6 +515,33 @@ class App:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
             self._say_cards_left()
         return n_new
+
+    def _only_the_card_on_show(self, page) -> None:
+        """A card switcher that shows and would not open or offered no card.
+
+        Nothing pressed the switcher before cards were told apart, so on one
+        card this is the path that has always worked, and the run goes on with
+        the card on show, its keys, names and files as they always were. Yet
+        several cards may be behind a broken switcher, so that card is never
+        taken for every card. What was not read is said, counted for review
+        and written to the failure file, and the listing is not noted as
+        whole, so no Resume calls the list finished. Noting it whole would say
+        what nobody saw, and on one card not noting it costs only a Resume
+        that says to run Run All.
+
+        An archive already filed by card is not one card, and its statements
+        would come again under no card's name, so that stops the run."""
+        if any(d.get("account") for d in self.discovery.data.values()):
+            raise pressing.no_answer("open the card switcher", "the card options did not show",
+                                     "The card switcher would not open, and this archive "
+                                     "holds statements filed by card.")
+        shown = site.current_card_label(page) or "the card on show"
+        print(f"\n!! The card switcher on the statements page would not open, so only {shown} was read.")
+        print("   Any other card on this sign-in was not read, and this list is not noted as whole.")
+        print("   With one card, nothing is missing.")
+        self._cards_left.append(f"any card but {shown}, since the card switcher would not open")
+        self.stats["manual_review"] += 1
+        self.write_failure("open the card switcher", "the card options did not show")
 
     def _leave_card(self, label: str) -> None:
         """Leave a card whose option the page has turned off, a canceled card

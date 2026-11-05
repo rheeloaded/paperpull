@@ -1125,3 +1125,48 @@ def test_the_empty_message_held_is_the_words_and_not_the_region_around_them(page
 def test_the_region_is_held_when_nothing_inside_it_says_the_words(page_of):
     pg = page_of(switch_page("No statements available"))
     assert site._get_no_statements_element(pg).get_attribute("id") == "table-area"
+
+
+def test_a_switcher_that_opens_on_no_card_answers_none_and_is_closed(page_of, monkeypatch):
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 300)
+    pg = page_of("""<!doctype html><meta charset="utf-8">
+<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;"
+     onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded') === 'true' ? 'false' : 'true')">
+  <span data-testid="simple_switcher_display_name">Solo Card</span>
+</div>""")
+    assert site.list_cards(pg) is None
+    assert pg.locator(site._SWITCHER_COMBOBOX_SEL).get_attribute("aria-expanded") == "false"
+
+
+def test_no_switcher_at_all_is_an_empty_list_and_not_a_switcher_unread(page_of, monkeypatch):
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 300)
+    assert site.list_cards(page_of("<!doctype html><p>Statements</p>")) == []
+
+
+def test_a_document_of_a_card_behind_a_switcher_that_will_not_open_is_left(page_of, monkeypatch,
+                                                                         capsys):
+    """A statement filed by card and a switcher that shows none is left for
+    review by the caller, which a False says, and never taken from whatever
+    card is on show."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 300)
+    pg = page_of("""<!doctype html><meta charset="utf-8">
+<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox">
+  <span data-testid="simple_switcher_display_number">••••11111</span>
+</div>""")
+    assert site.ensure_card(pg, "Bravo Card (22222)") is False
+
+
+def test_goto_documents_leaves_the_switcher_alone_where_the_link_shows(open_page, monkeypatch):
+    """A person with one card reached the statements through this link before
+    any switcher was pressed, so a switcher that would not open, here one
+    turned off, must not stop them on /overview."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 100)
+    server = MockAmexServer()
+    server.routes["/overview"] = """<!doctype html><html><head><meta charset="utf-8"><title>Overview</title></head>
+<body>
+<button disabled data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox">Solo Card</button>
+<a href="/activity/statements">Statements &amp; Activity</a>
+</body></html>"""
+    page = open_page("/overview", server)
+    assert site.goto_documents(page) is True
+    assert "/activity/statements" in page.url

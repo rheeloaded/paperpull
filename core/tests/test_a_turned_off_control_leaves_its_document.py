@@ -69,9 +69,6 @@ STOPS = {
     ("amex", "goto_documents", "click", "select card on overview"): (1,
         "the card option on the overview page reaches the dashboard where "
         "statements are located, so a turned off card option leaves every document"),
-    ("amex", "list_cards", "click", "open the card switcher"): (1,
-        "on a multi-card account, the card switcher on the statements page reaches each card's statements, "
-        "so a turned off switcher leaves every other card's documents"),
     ("amex", "_close_switcher", "click", "close the card switcher"): (1,
         "closes the switcher once it has been read, and an open dropdown covers "
         "every press after it"),
@@ -159,8 +156,8 @@ STOPS = {
 # this census. It finds them by what they do, this only keeps it from
 # passing on finding none.
 LEAVES = {
-    ("alpaca", "_press"), ("amex", "download_document"), ("amex", "select_card"),
-    ("bilt", "_press"),
+    ("alpaca", "_press"), ("amex", "download_document"), ("amex", "list_cards"),
+    ("amex", "select_card"), ("bilt", "_press"),
     ("amfam", "_catch_pdf"), ("applecard", "_catch_pdf"), ("att", "_catch_pdf"),
     ("chasebusiness", "_press_row"), ("coinbase", "_catch_statement"),
     ("coinbase", "_press_card_pdf"), ("firsthorizon", "_press"),
@@ -623,6 +620,16 @@ def _amex_button(off: bool) -> str:
             'onclick="window.presses++">Download</button>' % (" disabled" if off else ""))
 
 
+def _amex_cards(site, page, out, staging, trace):
+    return site.list_cards(page)
+
+
+def _amex_switcher(off: bool) -> str:
+    return ('<button id="get" type="button" class="ctl" role="combobox" aria-expanded="false" '
+            'data-testid="simple_switcher_combobox"%s onclick="window.presses++">Alpha Card'
+            '</button>' % (" disabled" if off else ""))
+
+
 def _amex_select(site, page, out, staging, trace):
     return site.select_card(page, {"label": "Bravo Card (12345)", "digits": "12345"})
 
@@ -778,6 +785,8 @@ def _how(app: str, function: str, monkeypatch):
             "2026-06-30</td><td>trade_confirmation"
     if (app, function) == ("amex", "download_document"):
         return "amex_site", _amex, _amex_button, "June 30, 2026"
+    if (app, function) == ("amex", "list_cards"):
+        return "amex_site", _amex_cards, _amex_switcher, "Statements"
     if (app, function) == ("amex", "select_card"):
         return "amex_site", _amex_select, _amex_card_option, "Statements"
     if (app, function) == ("bilt", "_press"):

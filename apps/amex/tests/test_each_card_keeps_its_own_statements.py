@@ -189,6 +189,7 @@ A = dict(name="Alpha Card", digits="11111", dates=["2030-11-11"], years=["2030"]
 B = dict(name="Bravo Card", digits="22222", dates=["2030-11-22"], years=["2030"])
 EMPTY_ONE = dict(name="Empty One", digits="33333", dates=[], years=[])
 EMPTY_TWO = dict(name="Empty Two", digits="44444", dates=[], years=[])
+SOLO = dict(name="Solo Card", digits="77777", dates=["2030-11-07"], years=["2030"])
 CANCELED = dict(name="Canceled Card", digits="55555", dates=["2029-05-05"], years=["2029"], off=True)
 
 
@@ -542,3 +543,102 @@ def test_login_says_success_only_on_a_list_it_saw(attached, serve, tmp_path, cap
 
     assert ("Success: connected" in said) is success, said
     assert ("the Documents list did not load" in said) is not success, said
+
+
+# What a person with one card has on main, word for word. A key of a record
+# that changes downloads the whole history again under a new name.
+ONE_CARD = {
+    "Statement:2030-11-07:Monthly Statement - November 7, 2030:Unnamed":
+        "2030-11-07 American Express Monthly Statement.pdf",
+    "Year-End Summary:2030-12-31:2030 Year-End Summary:Unnamed":
+        "2030-12-31 American Express Year-End Summary.pdf",
+}
+
+
+def holds_one_cards_archive(tmp_path):
+    kept = saved(tmp_path)
+    assert {k: r["name"] for k, r in kept.items()} == ONE_CARD
+    for rec in kept.values():
+        assert rec["state"] == State.COMPLETED.value and rec["account"] == "", rec
+        assert rec["card"] == SOLO["digits"], rec
+
+
+@pytest.mark.parametrize("switcher", ["none", "normal"])
+def test_one_card_that_reads_as_one_card_keeps_its_archive_and_says_nothing(
+        attached, serve, tmp_path, capsys, switcher):
+    amex = serve(cards=[SOLO], switcher=switcher)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_one_cards_archive(tmp_path)
+    assert noted_whole(tmp_path) is True
+    assert panel_reads(out)["manual_review"] == 0
+    assert "would not open" not in out and "Not read" not in out
+
+
+@pytest.mark.parametrize("switcher", ["off", "no_options"])
+def test_a_switcher_that_will_not_open_keeps_one_cards_path_and_is_not_quiet(
+        attached, serve, tmp_path, capsys, monkeypatch, switcher):
+    """Nothing pressed the switcher before cards were told apart, so this
+    person's run works today and has to go on working, with the same keys,
+    names and bytes. It may be several cards behind a broken switcher, so the
+    run says what it read, counts it, and does not note the list as whole."""
+    monkeypatch.setattr(pressing, "PRESS_MS", 1000)
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    amex = serve(cards=[SOLO], switcher=switcher)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    said = folded(out)
+
+    holds_one_cards_archive(tmp_path)
+    assert "would not open, so only Solo Card (77777) was read" in said
+    assert "!! Not read: any card but Solo Card (77777)" in out[out.rindex("[2/2]"):]
+    assert "Discovery complete" not in said
+    result = panel_reads(out)
+    assert (result["manual_review"], result["stopped"], result["new_files"]) == (1, 0, 2), result
+    assert noted_whole(tmp_path) is False
+    failures = sorted((tmp_path / "out").rglob("failure-*.json"))
+    assert len(failures) == 1
+    written = failures[0].read_text(encoding="utf-8")
+    assert "the card options did not show" in written
+    assert "Solo" not in written and "77777" not in written
+
+
+def test_several_cards_behind_a_switcher_that_will_not_open_are_not_called_whole(
+        attached, serve, tmp_path, capsys, monkeypatch):
+    """Two cards behind a broken switcher on a first run. What can be read is
+    read, the second card is said not to be, and Resume does not call it done."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    amex = serve(switcher="no_options")
+    their_tab(attached, amex)
+    cfg = config(tmp_path, attached)
+    code, out = run_all(cfg, capsys)
+
+    kept = saved(tmp_path)
+    assert sorted(r["card"] for r in kept.values()) == ["11111", "11111"], kept
+    assert "only Alpha Card (11111) was read" in folded(out)
+    assert noted_whole(tmp_path) is False
+
+    code, out = run_all(cfg, capsys, "--resume")
+    assert "everything in scope is complete" not in folded(out)
+    assert panel_reads(out)["list_not_read"] == 1
+
+
+def test_a_switcher_that_will_not_open_stops_an_archive_filed_by_card(attached, serve, tmp_path,
+                                                                      capsys, monkeypatch):
+    """An archive filed by card is not one card, and carrying on would save
+    its statements again under no card's name."""
+    cfg = config(tmp_path, attached)
+    their_tab(attached, serve())
+    code, out = run_all(cfg, capsys)
+    assert len(saved(tmp_path)) == 4
+
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    their_tab(attached, serve(switcher="no_options"))
+    code, out = run_all(cfg, capsys)
+
+    assert panel_reads(out)["stopped"] == 1, folded(out)
+    assert "holds statements filed by card" in folded(out)
+    assert all(r["account"] for r in records(tmp_path, "discovery.json").values())
+    assert len(saved(tmp_path)) == 4
+    assert noted_whole(tmp_path) is False
