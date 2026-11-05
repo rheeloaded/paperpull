@@ -810,9 +810,10 @@ def real_launches(monkeypatch, tmp_path):
     m.real = []
     m.waits = []
     m.port = _free_port()
+    m.inner = OWN_INNER
 
     def lay(build, answers=True, program=True, writes=""):
-        exe = m.root / ("chromium-%d" % build) / OWN_INNER
+        exe = m.root / ("chromium-%d" % build) / m.inner
         m.notes[build] = tmp_path / ("started-%d.txt" % build)
         if program:
             _program(exe, m.notes[build], answers, writes)
@@ -838,7 +839,8 @@ def real_launches(monkeypatch, tmp_path):
 
     def update_to(build, **how):
         """The next sign-in is offered `build`, says yes, and the download
-        leaves it on disk as `how` says."""
+        leaves it on disk as `how` says. Not from chrome-linux, which is
+        never offered one."""
         m.cleared = []
         monkeypatch.setattr(browser, "_wanted_chromium_build", lambda: build)
         monkeypatch.setattr(browser, "browser_install_command", lambda: list(INSTALL))
@@ -976,6 +978,7 @@ def test_an_update_that_wrote_the_profile_and_missed_the_port_keeps_the_old_buil
     and never answers on its port, as a real build with its port taken was
     measured to."""
     r = real_launches
+    r.inner = OWN_INNER.replace("chrome-linux/", "chrome-linux64/")
     r.lay(1228)
     if had_before:
         r.profile.mkdir()
@@ -997,6 +1000,7 @@ def test_an_update_that_never_reached_the_profile_gives_it_back_to_the_old_build
     """Nothing was written, so the new build cannot start here. The old build
     is safe on their own profile, and the new one is set aside."""
     r = real_launches
+    r.inner = OWN_INNER.replace("chrome-linux/", "chrome-linux64/")
     r.lay(1228, writes="149.0.7827.55")
     r.update_to(1248, answers=False, program=program)
     r.waits = [4.0]
