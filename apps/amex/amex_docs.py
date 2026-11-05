@@ -441,6 +441,11 @@ class App:
         self._card_count = len(cards)
         total_controls = 0
         if len(cards) > 1:
+            # A run that stopped at a switch can leave the switcher ahead of
+            # the list on show, so after a list that stopped no card is read on
+            # the switcher's word (paperpull_core.listing keeps what it said).
+            if getattr(self, "_listing_before", None) is False:
+                cards = site.card_on_show_last(page, cards)
             for card in cards:
                 switched = site.select_card(page, card)
                 if card.get("turned_off"):
@@ -867,6 +872,13 @@ class App:
         self.stats["mode"] = "resume"
         accounts = {d.get("account") for d in self.discovery.data.values() if d.get("account")}
         self._card_count = len(accounts) if accounts else 1
+        # The switcher can be ahead of the list on show after a list that
+        # stopped, and only a run that lists goes through a switch's waits, so
+        # with statements filed by card this Resume takes nothing.
+        if accounts and listing.last(self) == listing.STOPPED:
+            print("\n!! The last run stopped before it read the whole list. With more than one card the")
+            print("   list on show may not be the card on show, so nothing was taken.")
+            raise listing.say_unread(self)
         # Resume reads no list of its own. With nothing listed, or after a
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished

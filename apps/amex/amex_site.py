@@ -916,6 +916,24 @@ def _goes_away(handle) -> bool:
         return False
 
 
+def _switch_stopped(card: dict, reason: str) -> pressing.NoAnswer:
+    """A card option was pressed and the card's list could not be told to have
+    come, so the switcher may be ahead of the list on show. A Resume reads no
+    list and would take the switcher's word for whose list it is, so this
+    leaves the list unread, and the panel offers a run that lists (#124)."""
+    return pressing.NoAnswer("switch card", reason, [
+        f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.",
+        "Nothing more was pressed, and the run stops here rather than take a document "
+        "from a list that may be another card's."], after_a_press=True, list_unread=True)
+
+
+def card_on_show_last(page, cards: List[dict]) -> List[dict]:
+    """`cards` with the card the switcher shows moved to the end, so that card
+    is read after a switch and its waits, and not on the switcher's word."""
+    shown = _current_card_digits(page)
+    return sorted(cards, key=lambda c: c.get("digits") == shown)
+
+
 def select_card(page, card: dict) -> bool:
     """Switch to the card specified by dict.
     Returns True if successfully switched or already on that card.
@@ -1002,26 +1020,20 @@ def select_card(page, card: dict) -> bool:
 
     if not switched:
         log.info("switched card option but selected card display did not update to digits %s", digits)
-        raise pressing.no_answer(
-            "switch card", "the card did not switch",
-            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+        raise _switch_stopped(card, "the card did not switch")
 
     # Wait until the previous card's statement buttons are gone / hidden. The
     # address says nothing here, since it never changes on this page.
     if old_handle is not None and not _goes_away(old_handle):
         log.info("switched card option but old statements list never cleared")
-        raise pressing.no_answer(
-            "switch card", "the statements did not switch",
-            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+        raise _switch_stopped(card, "the statements did not switch")
 
     # Wait until the previous card's empty message is gone / hidden. That card
     # left no Download behind it, so one on the page now is the new card's.
     if old_empty_handle is not None and not _goes_away(old_empty_handle) \
             and _safe_count(old_buttons) == 0:
         log.info("switched card option but old empty-statements message never cleared")
-        raise pressing.no_answer(
-            "switch card", "the statements did not switch",
-            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+        raise _switch_stopped(card, "the statements did not switch")
 
     # Wait for either a new Download that shows or a no-statements message. A
     # list hidden while the next one loads is still in the page, so a button

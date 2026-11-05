@@ -660,8 +660,9 @@ def test_card_switch_that_never_takes_stops_the_run(browser):
     cards = site.list_cards(pg)
     assert len(cards) == 2
     # Switching to card 2 when switch never takes must raise NoAnswer
-    with pytest.raises(pressing.NoAnswer):
+    with pytest.raises(pressing.NoAnswer) as stop:
         site.select_card(pg, cards[1])
+    assert stop.value.list_unread is True
     ctx.close()
 
 
@@ -1287,6 +1288,7 @@ def test_an_empty_message_that_never_goes_stops_the_switch(page_of, monkeypatch)
     with pytest.raises(pressing.NoAnswer) as stop:
         site.select_card(pg, cards[1])
     assert stop.value.reason == "the statements did not switch"
+    assert stop.value.list_unread is True
 
 
 # A hidden copy of the switcher, drawn first, naming a card nobody has. Each
@@ -1365,3 +1367,15 @@ def test_copies_of_the_switcher_with_none_showing_cannot_say_which_cards_there_a
                              before=HIDDEN_SWITCHER))
     assert site.list_cards(pg) is None
     assert site.select_card(pg, {"label": "Bravo Card (22222)", "digits": "22222"}) is False
+
+
+def test_an_old_list_that_never_goes_leaves_the_list_unread(page_of, monkeypatch):
+    """The switcher moves and the old list stays. Only a run that lists goes
+    through this wait again, so the stop leaves the list unread."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 500)
+    pg = page_of(switch_page(statement_row("2030-11-11"), "moveSwitcher();"))
+    cards = site.list_cards(pg)
+    with pytest.raises(pressing.NoAnswer) as stop:
+        site.select_card(pg, cards[1])
+    assert stop.value.reason == "the statements did not switch"
+    assert stop.value.list_unread is True

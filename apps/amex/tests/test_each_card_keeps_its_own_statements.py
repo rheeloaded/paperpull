@@ -92,6 +92,7 @@ const C = CFG.cards;
 let shownCard = CFG.start;   // what the switcher says
 let listCard = CFG.start;    // whose list the rows are
 let current = null;
+let switches = 0;
 const P = 'myca-activity-statements/common/Table/';
 function button(kind, testid) {
   return '<button class="dl ' + kind + '" data-testid="' + testid + '">Download</button>';
@@ -165,7 +166,8 @@ function drawSwitcher() {
       for (const d of document.querySelectorAll('[data-testid="simple_switcher_selected_option_display"]'))
         d.innerHTML = card(i);
     }, CFG.switch_ms);
-    setTimeout(() => drawList(i), CFG.list_ms);
+    const late = CFG.list_ms_of[++switches] ?? CFG.list_ms;
+    if (late >= 0) setTimeout(() => drawList(i), late);
   });
 }
 drawSwitcher();
@@ -203,12 +205,13 @@ CANCELED = dict(name="Canceled Card", digits="55555", dates=["2029-05-05"], year
 class FakeAmex:
     """One made-up American Express, of a test's own. The switcher moves
     `switch_ms` after a card is pressed and the card's list comes `list_ms`
-    after, the old list showing until then."""
+    after, the old list showing until then. `list_ms_of` gives the nth switch
+    a time of its own, and a time below nought means its list never comes."""
 
     def __init__(self, **cfg):
         self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
                         narrow_copy_first=False, address_moves_first=False,
-                        switcher_copies=False, switcher_gone=False)
+                        switcher_copies=False, switcher_gone=False, list_ms_of={})
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -524,7 +527,7 @@ def test_a_turned_off_card_costs_nothing_but_itself(attached, serve, tmp_path, c
     assert "Canceled" not in written and "55555" not in written
 
     code, out = run_all(cfg, capsys, "--resume")
-    assert "stopped before it read American Express's whole list" in folded(out)
+    assert "stopped before it read the whole list" in folded(out)
     assert panel_reads(out)["list_not_read"] == 1
 
 
@@ -693,3 +696,39 @@ def test_an_address_that_moves_first_is_not_the_old_list_going(attached, serve, 
     assert not [r for r in records(tmp_path, "discovery.json").values()
                 if digits_of(r["account"]) == B["digits"]]
     assert saved(tmp_path) == {}
+
+
+@pytest.mark.parametrize("never,saved_first", [(3, 2), (2, 0)],
+                         ids=["on-the-way-to-the-second-card", "on-the-way-to-the-first-card"])
+def test_a_stop_at_a_switch_leaves_nothing_for_a_resume_to_take(attached, serve, tmp_path, capsys,
+                                                                monkeypatch, never, saved_first):
+    """A download stops with the switcher on the next card and the old list
+    still on show. The year-end summaries share a date, so a Resume that took
+    the switcher's word saved the old card's summary as the new card's,
+    Completed. Resume now saves nothing, and Run All, which goes through the
+    waits, saves each card's own. The list never comes on the way to the first
+    card too, where Run All's first card would otherwise be read on the
+    switcher's word."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    amex = serve(list_ms=300, list_ms_of={str(never): -1})
+    their_tab(attached, amex)
+    conf = config(tmp_path, attached)
+
+    code, out = run_all(conf, capsys)
+    result = panel_reads(out)
+    assert (result["stopped"], result["list_not_read"]) == (1, 1), folded(out)
+    assert "the card's statements did not open" in folded(out)
+    assert "press Resume" not in folded(out)
+    assert "Resume would only stop here again, so run Pilot or Run All" in folded(out)
+    kept = saved(tmp_path)
+    assert len(kept) == saved_first, kept
+    served = list(amex.downloads)
+
+    code, out = run_all(conf, capsys, "--resume")
+    assert "so nothing was taken" in folded(out)
+    assert panel_reads(out)["list_not_read"] == 1
+    assert amex.downloads == served, "a Resume pressed a Download on a list it could not trust"
+    assert saved(tmp_path) == kept
+
+    code, out = run_all(conf, capsys)
+    holds_each_cards_own(tmp_path, out)
