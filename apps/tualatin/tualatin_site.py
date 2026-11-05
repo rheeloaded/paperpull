@@ -867,7 +867,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     """Save the bill discovery recorded with bill number `document_id`,
     dated `iso_date`. Activity is opened again and the bill is fetched only
     when exactly one Billing row there carries that number and date.
-    `dl_dir` is unused. Nothing is pressed. SessionExpired propagates."""
+    `dl_dir` is unused. Nothing is pressed. SessionExpired propagates, and
+    so does ListStopped when Activity cannot be read again, since every
+    bill after this one would read the same list."""
     out_path = Path(out_path)
     number = (document_id or "").strip()
     if not BILL_NUMBER_RE.fullmatch(number) or href != bill_path(number):
@@ -880,7 +882,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                  if d.document_id == number and d.date_text == (iso_date or "")]
     except ListStopped as stop:
         log.info("the bill list stopped while looking for the bill dated %s: %s", iso_date, stop)
-        return False
+        raise
     if len(found) != 1:
         log.info("%d rows match the recorded bill and date %s, none taken", len(found), iso_date)
         if trace is not None:

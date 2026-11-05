@@ -419,6 +419,37 @@ def test_anything_saying_activity_is_not_whole_stops_discover(attached, server, 
     assert said in folded(out), folded(out)
 
 
+@pytest.mark.parametrize("change", [
+    {"extra_type": "Late Fee"},
+    {"activity_extra": "<button>Load more</button>"},
+    {"activity_extra": "<div>Showing 1 to 4 of 4 entries (filtered from 6 total entries)</div>"},
+])
+def test_a_list_that_stops_during_resume_stops_once(attached, server, tmp_path, capsys, change):
+    """Discover read Activity whole. Resume reads no list of its own, so the
+    first bill reads it, and when it stops the run stops there. Each bill
+    used to go to Manual Review in turn, and the run ended looking finished.
+    A second Resume would read the same list and stop at the same bill
+    (#124), so the list is noted as one that stopped and the run says to use
+    a run that lists first."""
+    their_tab(attached, server)
+    ended, out = run(tmp_path, attached, capsys, "--discover")
+    assert "Discovery complete" in out, folded(out)
+    for k, v in change.items():
+        setattr(SITE, k, v)
+    SITE.seen.clear()
+
+    ended, out = run(tmp_path, attached, capsys, "--resume")
+
+    said = folded(out)
+    assert "stopped while bills were being fetched" in said, said
+    assert "marked for manual review" not in out, said
+    assert asked(site.DOCUMENTS_PATH) == 1, SITE.seen
+    assert saved(tmp_path) == []
+    note = json.loads((tmp_path / "out" / "last-listing.json").read_text(encoding="utf-8"))
+    assert note["complete"] is False
+    assert "the list first" in said, said
+
+
 def test_a_screen_stylesheet_never_shapes_the_printed_bill(attached, server, tmp_path, capsys, drawn):
     """A stylesheet linked for the screen keeps its media when written in,
     so the printed bill is whole."""

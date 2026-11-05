@@ -222,6 +222,16 @@ class Download(unittest.TestCase):
             self.assertEqual(page.asked, [])
             draw.assert_not_called()
 
+    def test_a_list_that_cannot_be_read_again_stops(self):
+        """The list read for a bill is the list every bill after it reads
+        too, so a list that stops is raised to the run, never this bill's
+        False."""
+        page = Page(extra={"pager": True})
+        with self.assertRaises(site.ListStopped):
+            self.save(page)
+        self.assertEqual(page.asked, [], "no bill is asked for")
+        self.assertFalse(self.out.exists())
+
     def test_a_page_that_is_not_a_bill_is_not_drawn(self):
         for page in (Page(said="Something else"), Page(print_status=500),
                      Page(print_type="application/json"), Page(said=SAID.replace("8/31", "7/31")),

@@ -62,6 +62,10 @@ site is never used.
 - **Signing out.** A redirect, a 401 or 403, or a print page asking for a
   password stops the run and keeps what it saved. Sign in again and run
   Resume. Any other answer that is not a printed bill fails that one bill.
+- **Reading Activity again.** Each bill reads Activity again. When that
+  read stops the list, the run stops there once, saying why, and nothing
+  goes to Manual Review. The panel then offers a run that reads the list
+  first.
 
 ## Validation status
 
