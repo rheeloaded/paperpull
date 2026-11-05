@@ -748,23 +748,26 @@ def test_an_address_that_moves_first_is_not_the_old_list_going(attached, serve, 
     assert saved(tmp_path) == {}
 
 
-@pytest.mark.parametrize("never,saved_first", [(3, 2), (2, 0)],
-                         ids=["on-the-way-to-the-second-card", "on-the-way-to-the-first-card"])
+@pytest.mark.parametrize("start,flags,saved_first", [
+    (0, (), 2), (1, (), 0), (1, ("--all", "--yes", "--year", "2030"), 0)],
+    ids=["on-the-way-to-the-second-card", "on-the-way-to-the-first-card", "in-a-scoped-run"])
 def test_a_stop_at_a_switch_leaves_nothing_for_a_resume_to_take(attached, serve, tmp_path, capsys,
-                                                                monkeypatch, never, saved_first):
+                                                                monkeypatch, start, flags, saved_first):
     """A download stops with the switcher on the next card and the old list
     still on show. The year-end summaries share a date, so a Resume that took
     the switcher's word saved the old card's summary as the new card's,
     Completed. Resume now saves nothing, and Run All, which goes through the
-    waits, saves each card's own. The list never comes on the way to the first
-    card too, where Run All's first card would otherwise be read on the
-    switcher's word."""
+    waits, saves each card's own. The third switch of the run is the first of
+    its download. Starting on the second card, it is on the way to the first,
+    the first card Run All comes to, which it would read on the switcher's
+    word. A stop in a scoped run leaves no note that says so, so nothing may
+    hang on the note."""
     monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
-    amex = serve(list_ms=300, list_ms_of={str(never): -1})
+    amex = serve(start=start, list_ms=300, list_ms_of={"3": -1})
     their_tab(attached, amex)
     conf = config(tmp_path, attached)
 
-    code, out = run_all(conf, capsys)
+    code, out = run_all(conf, capsys, *flags)
     result = panel_reads(out)
     assert (result["stopped"], result["list_not_read"]) == (1, 1), folded(out)
     assert "the card's statements did not open" in folded(out)

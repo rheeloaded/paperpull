@@ -513,6 +513,8 @@ cb.addEventListener('click', () => {
   opts.forEach(o => o.style.display = open ? 'none' : 'block');
 });
 document.querySelector('[data-testid="simple_switcher_product_option_CARD_2"]').addEventListener('click', () => {
+  cb.setAttribute('aria-expanded', 'false');
+  opts.forEach(o => o.style.display = 'none');
   setTimeout(() => {
     document.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = `
       <span data-testid="simple_switcher_display_name">Full Card</span>
@@ -523,6 +525,19 @@ document.querySelector('[data-testid="simple_switcher_product_option_CARD_2"]').
     document.querySelector('#table-area').innerHTML = `
       <button data-testid="axp-pdf-statements/common/Table/recent-statements/2026-09-18/download-button">Download</button>
     `;
+  }, 1200);
+});
+document.querySelector('[data-testid="simple_switcher_product_option_CARD_1"]').addEventListener('click', () => {
+  cb.setAttribute('aria-expanded', 'false');
+  opts.forEach(o => o.style.display = 'none');
+  setTimeout(() => {
+    document.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = `
+      <span data-testid="simple_switcher_display_name">Empty Card</span>
+      <span data-testid="simple_switcher_display_number">••••11111</span>
+    `;
+  }, 100);
+  setTimeout(() => {
+    document.querySelector('#table-area').innerHTML = `<p id="empty-msg">No billing statements available</p>`;
   }, 1200);
 });
 </script>
@@ -774,6 +789,7 @@ def test_cmd_discover_stops_when_card_has_zero_buttons_and_no_message(monkeypatc
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
     monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=False: None)
+    monkeypatch.setattr(site, "card_on_show_last", lambda p, cards: cards)
     monkeypatch.setattr(site, "list_cards", lambda p: [{"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
                                                         {"index": 1, "tid": "2", "label": "Card 2 (22222)", "digits": "22222", "name": "Card 2"}])
     monkeypatch.setattr(site, "select_card", lambda p, c: True)
@@ -1025,13 +1041,14 @@ def statement_row(date: str) -> str:
 
 
 def switch_page(area: str, on_switch: str = "", style: str = "", before: str = "",
-                on_load: str = "") -> str:
+                on_load: str = "", on_back: str = "") -> str:
     """A statements page with eval off and two cards, Alpha on show, that
     counts the presses of Bravo's option in #presses. `area` is what the
     statements area holds and `on_switch` what pressing Bravo's option does,
     with moveSwitcher() to show Bravo in the switcher and draw(html) to fill
     the statements area. `before` is drawn ahead of the switcher, #card-switcher,
-    and `on_load` runs as the page opens."""
+    `on_load` runs as the page opens, and `on_back` runs when Alpha's option
+    is pressed, which shows Alpha in the switcher."""
     def card(name, digits):
         return ('<span data-testid="simple_switcher_display_name">%s</span>'
                 '<span data-testid="simple_switcher_display_number">••••%s</span>' % (name, digits))
@@ -1068,10 +1085,16 @@ document.querySelector('[data-testid="simple_switcher_product_option_CARD_2"]').
   opts.forEach(o => o.style.display = 'none');
   %(on_switch)s
 });
+document.querySelector('[data-testid="simple_switcher_product_option_CARD_1"]').addEventListener('click', () => {
+  cb.setAttribute('aria-expanded', 'false');
+  opts.forEach(o => o.style.display = 'none');
+  cb.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = `%(alpha)s`;
+  %(on_back)s
+});
 %(on_load)s
 </script></body></html>""" % {"alpha": card("Alpha Card", "11111"), "bravo": card("Bravo Card", "22222"),
                               "area": area, "on_switch": on_switch, "style": style,
-                              "before": before, "on_load": on_load}
+                              "before": before, "on_load": on_load, "on_back": on_back}
 
 
 @pytest.fixture
@@ -1116,6 +1139,7 @@ def test_discover_stops_on_a_switch_that_failed_for_any_other_reason(monkeypatch
     monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: noted.append("whole"))
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
     monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=False: None)
+    monkeypatch.setattr(site, "card_on_show_last", lambda p, cards: cards)
     monkeypatch.setattr(site, "list_cards", lambda p: [
         {"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
         {"index": 1, "tid": "2", "label": "Card 2 (22222)", "digits": "22222", "name": "Card 2"}])
@@ -1256,7 +1280,8 @@ def test_a_card_with_no_list_and_no_message_beside_a_full_card_stops_discover(pa
     card's statements keep the check after the loop happy, so the check has to
     be made card by card, or the list is noted whole with a card missing."""
     monkeypatch.setattr(site, "LIST_WAIT_MS", 500)
-    pg = page_of(switch_page(statement_row("2030-11-11"), "moveSwitcher(); draw('');"))
+    pg = page_of(switch_page(statement_row("2030-11-11"), "moveSwitcher(); draw('');",
+                             on_back="draw(`%s`);" % statement_row("2030-11-11")))
     app = SimpleNamespace(page=lambda: pg, check_session=lambda p: None,
                           _record_rawdoc=lambda r, url: 1, stats={"discovered": 0},
                           discovery=SimpleNamespace(data={}, save=lambda **k: None))

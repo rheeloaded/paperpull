@@ -449,11 +449,11 @@ class App:
         self._card_count = len(cards)
         total_controls = 0
         if len(cards) > 1 or (cards and filed):
-            # A run that stopped at a switch can leave the switcher ahead of
-            # the list on show, so after a list that stopped no card is read on
-            # the switcher's word (paperpull_core.listing keeps what it said).
-            if getattr(self, "_listing_before", None) is False:
-                cards = site.card_on_show_last(page, cards)
+            # A run that stopped at a switch, scoped or not, can leave the
+            # switcher ahead of the list on show, and no note says so for
+            # certain. So no card is read on the switcher's word, and each is
+            # reached through a real switch and its waits, the one on show last.
+            cards = site.card_on_show_last(page, cards)
             for card in cards:
                 switched = site.select_card(page, card)
                 if card.get("turned_off"):
