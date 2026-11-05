@@ -432,9 +432,9 @@ def _next_older_build(candidates) -> Optional[Tuple[str, str]]:
     A build that will not start can arrive by the line the panel prints, with
     no sign-in there to see it, and it is the newest from then on."""
     name, exe = candidates[0]
-    build = _build_number(exe)
-    if name != CHROMIUM or build < 0:
+    if name != CHROMIUM:
         return None
+    build = _build_number(exe)
     older = [path for path in _bundled_chromium() if 0 <= _build_number(path) < build]
     return (CHROMIUM, max(older, key=_build_number)) if older else None
 
@@ -880,10 +880,9 @@ def _set_aside_new_build(path: str, old: str) -> None:
     be tried first at every sign-in from now on, so its mark is taken away,
     and its headless shell's, which makes both builds that are not there
     (_finished), and the update is not offered again until Playwright wants a
-    newer build still. Should the
-    new build only have been slow, this costs an update and nothing else.
-    Only here, where the build has just arrived. _next_older_build's step
-    changes nothing on disk."""
+    newer build still. Should the new build only have been slow, this costs an
+    update and nothing else. Only here, where the build has just arrived.
+    _next_older_build's step changes nothing on disk."""
     build = _build_number(path)
     try:
         print()

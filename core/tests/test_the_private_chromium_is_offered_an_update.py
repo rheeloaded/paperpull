@@ -912,10 +912,20 @@ def test_a_browser_of_their_own_at_the_head_has_no_older_build(machine, tmp_path
     """Only the private copy steps back. Their own browser goes on to the
     private copy as it always did, on that copy's own profile."""
     _lay(machine.root, WANTED)
-    machine.real = [(browser.EDGE, "/x/edge")]
-    machine.refused = {"/x/edge", machine.new}
+    own = "/opt/chromium-1300/chrome"       # reads as a build newer than both
+    machine.real = [(browser.CHROME, own)]
+    machine.refused = {own, machine.new}
     assert _sign_in(tmp_path, prefer_real=True) is None
-    assert machine.opened == [("/x/edge", "profile"), (machine.new, "profile-chromium")]
+    assert machine.opened == [(own, "profile"), (machine.new, "profile-chromium")]
+
+
+def test_a_folder_with_no_build_number_is_not_an_older_build(machine, tmp_path):
+    """Nobody can say what it is, so it is not started on their profile."""
+    shutil.copytree(machine.root / ("chromium-%d" % OLD), machine.root / "chromium-backup")
+    machine.refused = {machine.old}
+    machine.tty = False
+    assert _sign_in(tmp_path) is None
+    assert machine.opened == [(machine.old, "profile")]
 
 
 def test_a_step_back_after_an_update_is_the_one_step_back(machine, tmp_path):
