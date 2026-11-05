@@ -15,13 +15,15 @@ Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N
 
 Statements of checking, savings and credit card accounts, from Statements &
-Documents. Built from a tester's two recordings, and its first run listed
-the statements and saved none. Sign in, open Statements & Documents in that
-window, and leave it open.
+Documents. Built from a tester's two recordings, and confirmed on that
+tester's checking and credit card statements, not yet on savings. Sign in,
+open Statements & Documents in that window, and leave it open.
 
-READ-ONLY: the one press is the statements page's Statements heading, when
+READ-ONLY: the two presses are the statements page's Statements heading, when
 the page leaves it shut and a statement is to be downloaded, to open its
-list the way a person would. Login and Discover press nothing. It
+list the way a person would, and one Download PDF link, when every link's
+address is a script, to learn how the page asks for a PDF. Login and
+Discover press nothing. It
 reloads the statements page to hear its list, at the start and every five
 minutes of a long run, and asks for lists and PDFs from inside the
 signed-in page the way the page itself does. It never pays,
@@ -332,7 +334,7 @@ class App:
             lines = ["The statements page did not answer the way this app knows, "
                      "because %s. Nothing was guessed at and nothing was saved "
                      "for it. The failure file above says what the page did, as "
-                     "counts. Attach it to issue #121." % e]
+                     "counts. Attach it to a new issue on GitHub." % e]
         print()
         for text in lines:
             for line in textwrap.wrap(text, width=72):
@@ -352,7 +354,7 @@ class App:
         text = ("Bank of America's statements list did not answer the way this app "
                 "knows when it was read again for a statement, because %s. Nothing was "
                 "guessed at and nothing was saved for it. The failure file above says "
-                "what the page did, as counts. Attach it to issue #121." % e)
+                "what the page did, as counts. Attach it to a new issue on GitHub." % e)
         print()
         for i, line in enumerate(textwrap.wrap(text, width=69)):
             print(("!! " if i == 0 else "   ") + line)

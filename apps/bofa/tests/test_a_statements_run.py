@@ -136,7 +136,7 @@ def test_a_page_the_app_does_not_know_stops_with_a_failure_file_of_counts(tmp_pa
     bank.first_body = {"unknown": "K-ALPHA-0001", "other": "x", "year": "2026"}
     assert run(tmp_path, "--pilot") == ("exit", 0)
     out = " ".join(capsys.readouterr().out.split())
-    assert "did not answer the way this app knows" in out and "#121" in out
+    assert "did not answer the way this app knows" in out and "a new issue" in out
     files = list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
     assert len(files) == 1
     written = files[0].read_text(encoding="utf-8")
@@ -269,7 +269,7 @@ def test_a_page_whose_links_hide_their_address_stops_with_its_counts(tmp_path, b
     bank.press_calls = lambda row: [dict(sb.json_call(row)[0], answer="application/json")]
     assert run(tmp_path, "--pilot", "--max-docs", "1") == ("exit", 0)
     out = " ".join(capsys.readouterr().out.split())
-    assert "brought no PDF this app could hear" in out and "#121" in out
+    assert "brought no PDF this app could hear" in out and "a new issue" in out
     (written,) = list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
     report = json.loads(written.read_text(encoding="utf-8"))
     assert report["step"] == "download a statement"
