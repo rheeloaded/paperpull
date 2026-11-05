@@ -87,9 +87,11 @@ accounts keep the simple filename with no card name.
 ## More than one card
 
 With more than one card on a sign-in, the run reads each card in the switcher
-on the statements page, one after the other, and waits for one card's list to
-go before it reads the next. When it cannot tell that the next card's list has
-come, the run stops there. A card the site has turned off in the switcher, a
+on the statements page, one after the other, and waits for every Download that
+shows of one card's list to go before it reads the next. If any of them stays,
+even under another statement's name, the run stops there, since rows redrawn one
+by one cannot be told from the old card's, and the failure file counts how many
+stayed. A card the site has turned off in the switcher, a
 canceled card say, is not read. The run names it, counts it for review, writes
 a failure file and goes on with the other cards. A card the switcher holds but
 does not show, in a collapsed group say, cannot be chosen, so the run names it

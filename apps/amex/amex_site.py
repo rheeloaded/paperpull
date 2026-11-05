@@ -915,30 +915,61 @@ def current_card_label(page) -> str:
         return ""
 
 
-def _goes_away(page, handle, ids=()) -> bool:
-    """Whether what `handle` holds stops showing within LINK_WAIT_MS, or, given
-    its test `ids`, comes to name something else. A table can redraw in place,
-    keeping a row's button and giving it the next card's test id. Only this one
-    button is read, since older statements loading late can change the rest of
-    a list that is still the old card's. These reads work with eval off, and
+def _handle_shows(handle) -> bool:
+    """Whether what `handle` holds shows. This read works with eval off, and
     one that fails says nothing about the page, so it never counts as the
     element having gone."""
+    try:
+        return bool(handle.is_visible())
+    except Exception:
+        return True
+
+
+def _still_showing(page, handles) -> list:
+    """Those of `handles` that still show after LINK_WAIT_MS, reading only the
+    ones that have not stopped."""
     looks = LINK_WAIT_MS // 250
+    still = list(handles)
     for i in range(looks + 1):
-        try:
-            if not handle.is_visible():
-                return True
-            now = _test_ids_of(handle)
-            if ids and now and now != ids:
-                return True
-        except Exception:
-            pass
+        still = [h for h in still if _handle_shows(h)]
+        if not still:
+            break
         if i < looks:
             page.wait_for_timeout(250)
-    return False
+    return still
 
 
-def _switch_stopped(card: dict, reason: str) -> pressing.NoAnswer:
+def _shown_downloads(buttons) -> list:
+    """Every Download that shows, each with its test ids as they are now. A
+    list can redraw a part at a time, and a year-end summary read from what is
+    left of the old list is saved as the new card's with nothing to show for
+    it, so one button says nothing of the rest. A hidden copy is not held,
+    since it reads as gone from the start."""
+    held = []
+    for i in range(_safe_count(buttons)):
+        if _shows(buttons.nth(i)):
+            handle = buttons.nth(i).element_handle()
+            held.append((handle, _test_ids_of(handle)))
+    return held
+
+
+def _what_stayed(held: list, stayed: list) -> dict:
+    """For the failure file, how the old list went, so one report says what the
+    page does. Counts alone, since a test id holds a closing date."""
+    renamed = 0
+    for handle, ids in held:
+        if handle in stayed:
+            try:
+                now = _test_ids_of(handle)
+            except Exception:
+                continue
+            if now and now != ids:
+                renamed += 1
+    return {"downloads_shown": len(held), "downloads_gone": len(held) - len(stayed),
+            "stayed_under_another_id": renamed}
+
+
+def _switch_stopped(card: dict, reason: str, facts: Optional[dict] = None) -> pressing.NoAnswer:
     """A card option was pressed and the card's list could not be told to have
     come, so the switcher may be ahead of the list on show. A Resume reads no
     list and would take the switcher's word for whose list it is, so this
@@ -946,7 +977,7 @@ def _switch_stopped(card: dict, reason: str) -> pressing.NoAnswer:
     return pressing.NoAnswer("switch card", reason, [
         f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.",
         "Nothing more was pressed, and the run stops here rather than take a document "
-        "from a list that may be another card's."], after_a_press=True, list_unread=True)
+        "from a list that may be another card's."], facts, after_a_press=True, list_unread=True)
 
 
 def card_on_show_last(page, cards: List[dict]) -> List[dict]:
@@ -1002,16 +1033,13 @@ def select_card(page, card: dict) -> bool:
         return False
 
     # Every Download is on the page twice, a copy for a wide window and a
-    # hidden one for a narrow window, and either can come first. A hidden copy
-    # reads as gone from the start, so the button held is the first that shows.
+    # hidden one for a narrow window, and either can come first. What shows of
+    # the old list is held, and the old list has gone once all of it has.
     old_buttons = page.locator(_DOWNLOAD_BUTTONS)
-    shown_button = _first_visible(old_buttons)
-    has_old = shown_button is not None and _shows(shown_button)
-    old_handle = shown_button.element_handle() if has_old else None
-    old_ids = _test_ids_of(old_handle) if has_old else []
-    old_empty = _get_no_statements_element(page) if not has_old else None
+    held = _shown_downloads(old_buttons)
+    old_empty = _get_no_statements_element(page) if not held else None
     old_empty_handle = old_empty.element_handle() if old_empty else None
-    if old_handle is None and old_empty_handle is None and _safe_count(old_buttons) > 0:
+    if not held and old_empty_handle is None and _safe_count(old_buttons) > 0:
         log.info("the page holds Download buttons and none of them shows")
         _close_switcher(page, cb)
         raise pressing.Stop("switch card", "no download button shows", [
@@ -1046,14 +1074,17 @@ def select_card(page, card: dict) -> bool:
         raise _switch_stopped(card, "the card did not switch")
 
     # Wait until the previous card's statement buttons are gone / hidden. The
-    # address says nothing here, since it never changes on this page.
-    if old_handle is not None and not _goes_away(page, old_handle, old_ids):
+    # address says nothing here, since it never changes on this page, and nor
+    # does a new test id on a button that stays, since rows can change one by
+    # one. A stop beats a wrong PDF.
+    stayed = _still_showing(page, [handle for handle, _ in held])
+    if stayed:
         log.info("switched card option but old statements list never cleared")
-        raise _switch_stopped(card, "the statements did not switch")
+        raise _switch_stopped(card, "the statements did not switch", _what_stayed(held, stayed))
 
     # Wait until the previous card's empty message is gone / hidden. That card
     # left no Download behind it, so one on the page now is the new card's.
-    if old_empty_handle is not None and not _goes_away(page, old_empty_handle) \
+    if old_empty_handle is not None and _still_showing(page, [old_empty_handle]) \
             and _safe_count(old_buttons) == 0:
         log.info("switched card option but old empty-statements message never cleared")
         raise _switch_stopped(card, "the statements did not switch")
