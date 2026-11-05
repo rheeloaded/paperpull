@@ -112,9 +112,32 @@ def _build_number(path: str) -> int:
     return int(found[-1]) if found else -1
 
 
+# The file Playwright writes into a build's folder last of all, once every
+# file of the build is unpacked. A folder without it is an install that
+# stopped partway, a closed window or a power cut at the wrong moment. That
+# folder can hold the executable and most of the build, so looking for the
+# executable alone took it for the newest build. The sign-in then started it
+# with the finished build beside it never tried, nothing was due because the
+# number was not behind, and a browser counted as being there, so no repair
+# was offered either (#132). Playwright's own removal reads it the same way,
+# and chromium_builds in tools/run_all_tests.py does too.
+INSTALLED_MARK = "INSTALLATION_COMPLETE"
+
+
+def _finished(found: List[str], above: int) -> List[str]:
+    """The executables in `found` whose build finished installing, the folder
+    of the build being `above` folders over each one. Counted from the
+    executable, so a folder of any name, chromium-1248 - Copy included, is
+    read as Playwright's own is. isfile, which never raises, since a folder
+    that cannot be read must not stop a sign-in."""
+    return [path for path in found
+            if os.path.isfile(Path(path).parents[above] / INSTALLED_MARK)]
+
+
 def _bundled_chromium(root: Optional[Path] = None) -> List[str]:
     """Every full Chromium build of Playwright's on disk, newest first, in
-    root or else in the folder Playwright keeps its browsers in."""
+    root or else in the folder Playwright keeps its browsers in. A build that
+    never finished installing is not there (_finished)."""
     root = root or _playwright_root()
     if root is None:
         return []
@@ -144,7 +167,7 @@ def _bundled_chromium(root: Optional[Path] = None) -> List[str]:
                     "chromium-*/chrome-linux/chrome"]
     found: List[str] = []
     for pattern in patterns:
-        found += glob.glob(str(root / pattern))
+        found += _finished(glob.glob(str(root / pattern)), pattern.count("/") - 1)
 
     # Newest build first. Playwright pins a build per release, and an older
     # build stays on disk while another installation still uses it (an app
@@ -180,11 +203,13 @@ _HEADLESS_SHELLS = {
 
 def _headless_shells(root: Path) -> List[str]:
     """Every headless shell build of Playwright's in root, newest first.
-    Each has no window, so it is only ever handed to a headless launch."""
+    Each has no window, so it is only ever handed to a headless launch. A
+    shell that never finished installing is not there (_finished)."""
     inner = _HEADLESS_SHELLS.get(sys.platform, _HEADLESS_SHELLS["linux"])
     found: List[str] = []
     for pattern in inner:
-        found += sorted(glob.glob(str(root / "chromium_headless_shell-*" / pattern)))
+        found += _finished(sorted(glob.glob(str(root / "chromium_headless_shell-*" / pattern))),
+                           pattern.count("/"))
     return sorted(found, key=_build_number, reverse=True)
 
 
@@ -397,8 +422,8 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
 
 
 def bundled_chromium_present() -> bool:
-    """Whether a Chromium of Playwright's is on disk. Any build will do, an
-    older one than the installed Playwright's included, since a launch
+    """Whether a Chromium of Playwright's is on disk. Any finished build will
+    do, an older one than the installed Playwright's included, since a launch
     takes the newest one there when Playwright's own is missing (_on_disk)."""
     return bool(_bundled_chromium())
 
@@ -1007,7 +1032,10 @@ def _on_disk(chromium, kwargs: dict) -> dict:
     Playwright's own build is on disk, or with nothing at all on disk, so
     Playwright says what is missing as it always did. A headless launch
     takes the newest build, its headless shell ahead of the full build of
-    the same number, and a launch with a window takes only a full build."""
+    the same number, and a launch with a window takes only a full build.
+    Playwright looks for the executable and never for INSTALLED_MARK, so a
+    build of its own that stopped partway counts as missing here, or it
+    would be started as it is."""
     if kwargs.get("executable_path") or kwargs.get("channel"):
         return kwargs
     own = _playwrights_own(chromium)
@@ -1029,7 +1057,7 @@ def _on_disk(chromium, kwargs: dict) -> dict:
                        reverse=True)
         found = [path for _b, _shell, path in found]
     else:
-        if own.is_file():
+        if own.is_file() and os.path.isfile(folder / INSTALLED_MARK):
             return kwargs
         found = _bundled_chromium(root)
     if not found:
