@@ -712,7 +712,9 @@ class Answer(http.server.BaseHTTPRequestHandler):
         pass
 http.server.HTTPServer(("127.0.0.1", port), Answer).serve_forever()
 """
-OWN_INNER = {"win32": "chrome-win64/chrome.exe", "darwin": INNER}.get(sys.platform, "chrome-linux64/chrome")
+# On Linux the bundled copy goes ahead of a browser of their own only from
+# chrome-linux (_real_first), so that is where these builds are laid out.
+OWN_INNER = {"win32": "chrome-win64/chrome.exe", "darwin": INNER}.get(sys.platform, "chrome-linux/chrome")
 
 
 def _program(path, note, answers=True):
