@@ -481,7 +481,9 @@ def goto_documents(page) -> bool:
     """Reach the PDF Statements page ('Statements and Year End Summaries') by
     CLICKING within the SPA. Amex holds the session in an in-memory token, so a
     hard page.goto drops the session and bounces to login - we never use it for
-    authenticated pages. Ready when statement download-buttons are present.
+    authenticated pages. Arrival is told by the address, since a card with no
+    statements has no Download to arrive by. Whether the list shows is for the
+    caller to read (list_shows).
 
     Each link on the way is pressed once. A press whose page does not come
     stops the run with nothing more pressed (pressing.no_answer), since every

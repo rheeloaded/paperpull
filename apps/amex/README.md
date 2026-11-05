@@ -84,6 +84,22 @@ in the summary and filename (e.g. `2025-12-31 American Express Monthly Statement
 so statements from different cards on the same date do not collide. Single-card
 accounts keep the simple filename with no card name.
 
+## More than one card
+
+With more than one card on a sign-in, the run reads each card in the switcher
+on the statements page, one after the other, and waits for one card's list to
+go before it reads the next. A card the site has turned off in the switcher, a
+canceled card say, is not read. The run names it, counts it for review, writes
+a failure file and goes on with the other cards, and a Resume says the list was
+not read whole.
+
+When the switcher itself shows and will not open, the run goes on with the card
+on show, as it always has for one card, with the same file names. It names that
+card and says any other card was not read, so with one card nothing is missing,
+and with several the failure file is worth sending. An archive already filed by
+card stops there instead, since going on would save its statements again under
+no card's name.
+
 ## If a site change breaks it
 
 All the site-specific logic lives in `amex_site.py`. If American Express

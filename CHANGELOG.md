@@ -45,6 +45,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account or the receipt, and give the one line that downloads it. The
   Store edition, where that line cannot run, and PaperPull Server each get
   words that fit them. Contributed by JasperDale420.
+- **American Express reads every card on a sign-in (#134).** With two
+  cards, Discover found nothing, because a sign-in that lands on the
+  overview page never reached the statements, and a page it never reached
+  read as a whole list of nothing. The app now reaches the statements from
+  there, reads each card in the switcher in turn, and files each statement
+  under its card, with the card's name and last digits in the file name.
+  It waits for one card's list to go before it reads the next, at any
+  window width, so a list is never read as another card's, and a year-end
+  summary, the one document with the same date on both cards, is never
+  saved as the other card's. A card the site has turned off, a canceled
+  card say, is named, counted for review and left, and the other cards
+  are saved. Login says Success only on a list it saw. With one card,
+  keys, file names and files stay as they were. A switcher that will not
+  open no longer matters to a run with one card, which goes on with the
+  card on show and says so, and the list is not noted as whole, since
+  there may be more cards behind it. Contributed by @appchamp, who ran a
+  Pilot across two cards and read the PDFs. Before merging, the wait was
+  made to hold a button that shows, the turned off card was made to leave
+  only itself, an empty card was made to wait on its own words, and Login
+  was made to ask for the list.
 
 ## [0.60.2] - 2026-11-04
 
