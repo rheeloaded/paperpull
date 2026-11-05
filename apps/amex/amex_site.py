@@ -1002,9 +1002,11 @@ def select_card(page, card: dict) -> bool:
             "switch card", "the statements did not switch",
             f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
 
-    # Wait for either new download buttons or a no-statements message to appear
+    # Wait for either a new Download that shows or a no-statements message. A
+    # list hidden while the next one loads is still in the page, so a button
+    # that does not show says nothing here.
     for _ in range(int(LIST_WAIT_MS / 250)):
-        if page.locator(_DOWNLOAD_BUTTONS).count() > 0 or has_no_statements(page):
+        if _shows(_first_visible(old_buttons)) or has_no_statements(page):
             break
         page.wait_for_timeout(250)
     expand_sections(page)

@@ -991,9 +991,10 @@ def test_download_one_on_single_card_does_not_call_list_cards(monkeypatch):
     app._write_row = lambda *a, **kw: None
 
     called = []
+    taken = []
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
     monkeypatch.setattr(site, "list_cards", lambda p: called.append("list_cards") or [])
-    monkeypatch.setattr(site, "download_document", lambda p, c, d, o: True)
+    monkeypatch.setattr(site, "download_document", lambda p, c, d, o: taken.append(d) or True)
     monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=True: None)
     monkeypatch.setattr(app_mod.receipt_pdf, "validate_pdf",
                         lambda *a, **kw: SimpleNamespace(ok=True, message="", size_bytes=1000, page_count=1))
@@ -1003,6 +1004,7 @@ def test_download_one_on_single_card_does_not_call_list_cards(monkeypatch):
     app_mod.App.download_one(app, fake_page, doc, "stmt.pdf")
 
     assert called == [], "list_cards should not be called for single-card account downloads"
+    assert taken == ["2026-10-11"], "the document went to review instead of being taken"
 
 
 # ---------------------------------------------------------------------------
@@ -1193,3 +1195,63 @@ def test_only_the_statements_own_region_says_a_card_is_empty(page_of, html, says
     """A card read as empty is a card whose statements are never read, so a
     help line with the same words and no list drawn must not pass for it."""
     assert site.has_no_statements(page_of("<!doctype html>" + html)) is says
+
+
+NEW_ROW = statement_row("2030-11-22")
+
+
+def test_a_list_that_redraws_while_the_switcher_never_moves_stops(page_of, monkeypatch):
+    """The list changes and the switcher goes on showing the old card, so
+    whose list this is could not be told, and it is read as nobody's."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    pg = page_of(switch_page(statement_row("2030-11-11"), "draw(`%s`);" % NEW_ROW))
+    cards = site.list_cards(pg)
+    with pytest.raises(pressing.NoAnswer) as stop:
+        site.select_card(pg, cards[1])
+    assert stop.value.reason == "the card did not switch"
+
+
+@pytest.mark.parametrize("on_switch", [
+    "moveSwitcher(); draw(''); setTimeout(() => draw(`%s`), 2000);" % NEW_ROW,
+    "moveSwitcher(); area.hidden = true; "
+    "setTimeout(() => { draw(`%s`); area.hidden = false; }, 2000);" % NEW_ROW,
+], ids=["cleared", "hidden"])
+def test_a_list_that_goes_at_once_and_comes_back_is_waited_for(page_of, on_switch):
+    """The old list goes the moment the card is pressed and the new one comes
+    two seconds later. Read in between, the card has no list, or the old one
+    still in the page under a hidden parent."""
+    pg = page_of(switch_page(statement_row("2030-11-11"), on_switch))
+    cards = site.list_cards(pg)
+    assert site.select_card(pg, cards[1]) is True
+    docs = site.collect_download_docs(pg, account=cards[1]["label"])
+    assert [d.date_text for d in docs] == ["2030-11-22"]
+
+
+def test_goto_documents_arrives_on_a_card_with_no_statements(open_page, monkeypatch):
+    """An empty card has no Download to arrive by. The address says the page
+    is open, and the list is for the caller to read."""
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 200)
+    server = MockAmexServer()
+    server.routes["/activity/statements"] = HTML_GERMAN_NO_STATEMENTS
+    page = open_page("/activity/statements", server)
+    assert site.goto_documents(page) is True
+    assert site.list_shows(page) is True
+
+
+def test_a_card_with_no_list_and_no_message_beside_a_full_card_stops_discover(page_of, monkeypatch):
+    """The second card shows neither a list nor the page's own words. The first
+    card's statements keep the check after the loop happy, so the check has to
+    be made card by card, or the list is noted whole with a card missing."""
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 500)
+    pg = page_of(switch_page(statement_row("2030-11-11"), "moveSwitcher(); draw('');"))
+    app = SimpleNamespace(page=lambda: pg, check_session=lambda p: None,
+                          _record_rawdoc=lambda r, url: 1, stats={"discovered": 0},
+                          discovery=SimpleNamespace(data={}, save=lambda **k: None))
+    noted = []
+    monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
+    monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: noted.append("whole"))
+    monkeypatch.setattr(site, "goto_documents", lambda p: True)
+
+    with pytest.raises(SystemExit):
+        app_mod.App.cmd_discover(app, quiet=True)
+    assert noted == []
