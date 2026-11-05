@@ -57,6 +57,7 @@
     "netbenefits": {"gets": "401(k) statements, quarterly or monthly", "group": "investing"},
     "newrez": {"gets": "Mortgage statements, escrow analysis, 1098", "group": "loans"},
     "optum": {"gets": "HSA statements, 5498-SA and 1099-SA", "group": "insurance"},
+    "nwnatural": {"gets": "Monthly gas bills, the whole history the portal keeps", "group": "bills", "note": "Works in the tab you signed in with"},
     "paylocity": {"gets": "Pay statements", "group": "pay"},
     "paypal": {"gets": "Monthly statements, about three years online", "group": "banks", "note": "Business accounts not tested yet"},
     "pge": {"gets": "Billing statements", "group": "bills"},
