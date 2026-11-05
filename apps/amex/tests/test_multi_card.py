@@ -770,6 +770,7 @@ def test_cmd_discover_stops_when_card_has_zero_buttons_and_no_message(monkeypatc
     app = SimpleNamespace()
     app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/activity/statements")
     app.check_session = lambda p: None
+    app.discovery = SimpleNamespace(data={})
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
     monkeypatch.setattr(site, "list_cards", lambda p: [{"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
@@ -1107,6 +1108,7 @@ def test_discover_stops_on_a_switch_that_failed_for_any_other_reason(monkeypatch
     app = SimpleNamespace()
     app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/activity/statements")
     app.check_session = lambda p: None
+    app.discovery = SimpleNamespace(data={})
     noted = []
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: noted.append("whole"))

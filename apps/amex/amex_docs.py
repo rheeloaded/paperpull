@@ -435,12 +435,19 @@ class App:
 
         self._cards_left = []
         cards = site.list_cards(page)
+        # An archive already filed by card is not one card, and the one-card
+        # way would save that card's history again under no card's name.
+        filed = any(d.get("account") for d in self.discovery.data.values())
+        if not cards and filed:
+            raise pressing.no_answer("read the card switcher", "the card options did not show",
+                                     "The card switcher could not be read, and this archive "
+                                     "holds statements filed by card.")
         if cards is None:
             self._only_the_card_on_show(page)
             cards = []
         self._card_count = len(cards)
         total_controls = 0
-        if len(cards) > 1:
+        if len(cards) > 1 or (cards and filed):
             # A run that stopped at a switch can leave the switcher ahead of
             # the list on show, so after a list that stopped no card is read on
             # the switcher's word (paperpull_core.listing keeps what it said).
@@ -533,14 +540,7 @@ class App:
         and written to the failure file, and the listing is not noted as
         whole, so no Resume calls the list finished. Noting it whole would say
         what nobody saw, and on one card not noting it costs only a Resume
-        that says to run Run All.
-
-        An archive already filed by card is not one card, and its statements
-        would come again under no card's name, so that stops the run."""
-        if any(d.get("account") for d in self.discovery.data.values()):
-            raise pressing.no_answer("read the card switcher", "the card options did not show",
-                                     "The card switcher could not be read, and this archive "
-                                     "holds statements filed by card.")
+        that says to run Run All."""
         shown = site.current_card_label(page) or "the card on show"
         print(f"\n!! The card switcher on the statements page could not be read, so only {shown} was read.")
         print("   Any other card on this sign-in was not read, and this list is not noted as whole.")

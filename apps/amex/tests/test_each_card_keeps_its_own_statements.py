@@ -663,17 +663,19 @@ def test_several_cards_behind_a_switcher_that_cannot_be_read_are_not_called_whol
     assert panel_reads(out)["list_not_read"] == 1
 
 
+@pytest.mark.parametrize("switcher", ["no_options", "none"])
 def test_a_switcher_that_cannot_be_read_stops_an_archive_filed_by_card(attached, serve, tmp_path,
-                                                                       capsys, monkeypatch):
+                                                                       capsys, monkeypatch, switcher):
     """An archive filed by card is not one card, and carrying on would save
-    its statements again under no card's name."""
+    its statements again under no card's name, with every other card unread.
+    A page with no switcher at all is no different for such an archive."""
     cfg = config(tmp_path, attached)
     their_tab(attached, serve())
     code, out = run_all(cfg, capsys)
     assert len(saved(tmp_path)) == 4
 
     monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
-    their_tab(attached, serve(switcher="no_options"))
+    their_tab(attached, serve(switcher=switcher))
     code, out = run_all(cfg, capsys)
 
     assert panel_reads(out)["stopped"] == 1, folded(out)
@@ -732,3 +734,26 @@ def test_a_stop_at_a_switch_leaves_nothing_for_a_resume_to_take(attached, serve,
 
     code, out = run_all(conf, capsys)
     holds_each_cards_own(tmp_path, out)
+
+
+def test_one_option_left_of_an_archive_filed_by_card_keeps_its_keys(attached, serve, tmp_path, capsys):
+    """Two cards, and later a switcher with only one of them. That card is read
+    under its label, so nothing it saved comes again, and what is new is named
+    by card. The one-card way would save its whole history again unnamed."""
+    conf = config(tmp_path, attached)
+    their_tab(attached, serve())
+    code, out = run_all(conf, capsys)
+    assert len(saved(tmp_path)) == 4
+
+    amex = serve(cards=[dict(A, dates=["2030-12-11"] + A["dates"])])
+    their_tab(attached, amex)
+    code, out = run_all(conf, capsys)
+
+    assert amex.downloads == ["11111/st-2030-12-11.pdf"], (amex.downloads, folded(out))
+    kept = saved(tmp_path)
+    assert len(kept) == 5
+    new = [r for r in kept.values() if r["date"] == "2030-12-11"]
+    assert new[0]["account"] == "Alpha Card (11111)" and new[0]["card"] == "11111", new
+    assert "Alpha Card (11111)" in new[0]["name"]
+    assert all(r["account"] for r in records(tmp_path, "discovery.json").values())
+    assert noted_whole(tmp_path) is True
