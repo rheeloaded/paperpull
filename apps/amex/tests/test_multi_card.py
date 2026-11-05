@@ -1405,3 +1405,16 @@ def test_a_press_of_the_switcher_that_did_not_land_answers_none(page_of, monkeyp
             site.list_cards(pg)
     else:
         assert site.list_cards(pg) is None
+
+
+def test_goto_documents_presses_the_option_that_shows(open_page, monkeypatch):
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 100)
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 200)
+    server = MockAmexServer()
+    server.routes["/overview"] = HTML_OVERVIEW.replace('<div role="listbox">', """<div style="display:none">
+  <div data-testid="simple_switcher_product_option_CARD_1" role="option">Hidden Copy</div>
+</div>
+<div role="listbox">""")
+    page = open_page("/overview", server)
+    assert site.goto_documents(page) is True
+    assert "/activity/statements" in page.url

@@ -504,13 +504,8 @@ def goto_documents(page) -> bool:
                     pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                                    what="the card switcher",
                                    words=_words(), step="open the card switcher")
-                    try:
-                        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
-                    except Exception:
-                        pass
-                    opts = page.locator(_SWITCHER_OPTION_SEL)
-                    if opts.count() and opts.first.is_visible():
-                        opt = opts.first
+                    opt = _wait_to_show(page, _SWITCHER_OPTION_SEL)
+                    if opt is not None:
                         tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
                         opt_css = _by_test_id("=", tid) if tid else _SWITCHER_OPTION_SEL
                         pressing.click(page, opt, css=opt_css,
@@ -775,7 +770,7 @@ def list_cards(page) -> List[dict]:
     person with one card has always gone on from here, and a caller goes on
     with the card on show, says so, and never takes that card for every card.
     """
-    cb = _wait_for_switcher(page)
+    cb = _wait_to_show(page, _SWITCHER_COMBOBOX_SEL)
     if cb is None:
         if _safe_count(page.locator(_SWITCHER_COMBOBOX_SEL)) > 0:
             log.info("the card switcher is in the page and does not show, so no card was listed")
@@ -793,20 +788,12 @@ def list_cards(page) -> List[dict]:
                 raise
             log.info("the card switcher was not pressed, so no card was listed (%s)", stop.reason)
             return None
-    try:
-        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
-    except Exception:
-        log.info("the card switcher offered no card")
-        _close_switcher(page, cb)
-        return None
-    opts = page.locator(_SWITCHER_OPTION_SEL)
-    if not (opts.count() and opts.first.is_visible()):
+    if _wait_to_show(page, _SWITCHER_OPTION_SEL) is None:
         log.info("the card switcher offered no card")
         _close_switcher(page, cb)
         return None
     cards = []
-    for i in range(opts.count()):
-        opt = opts.nth(i)
+    for i, opt in enumerate(_shown_options(page)):
         tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
         name_el = opt.locator(_SWITCHER_NAME_SEL)
         num_el = opt.locator(_SWITCHER_NUM_SEL)
@@ -837,18 +824,25 @@ def _shown_switcher(page):
     return el if el is not None and _shows(el) else None
 
 
-def _wait_for_switcher(page):
-    """The first copy of the card switcher to show within LINK_WAIT_MS, or
-    None. page.wait_for_selector watches the first copy in the page alone,
-    and that can be the hidden one."""
+def _wait_to_show(page, css: str):
+    """The first element of `css` to show within LINK_WAIT_MS, or None.
+    page.wait_for_selector watches the first in the page alone, and that can
+    be a hidden copy."""
     looks = LINK_WAIT_MS // 250
     for i in range(looks + 1):
-        cb = _shown_switcher(page)
-        if cb is not None:
-            return cb
+        el = _first_visible(page.locator(css))
+        if el is not None and _shows(el):
+            return el
         if i < looks:
             page.wait_for_timeout(250)
     return None
+
+
+def _shown_options(page) -> list:
+    """The card options that show. A hidden copy of one would read as a second
+    card of the same name."""
+    opts = page.locator(_SWITCHER_OPTION_SEL)
+    return [opts.nth(i) for i in range(_safe_count(opts)) if _shows(opts.nth(i))]
 
 
 def _close_switcher(page, cb) -> None:
@@ -957,9 +951,7 @@ def select_card(page, card: dict) -> bool:
     pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                    what="the card switcher",
                    words=_words(), step="open the card switcher")
-    try:
-        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
-    except Exception:
+    if _wait_to_show(page, _SWITCHER_OPTION_SEL) is None:
         raise pressing.no_answer(
             "open the card switcher", "the card options did not show",
             "The card switcher was opened and its options did not show.")
@@ -973,9 +965,7 @@ def select_card(page, card: dict) -> bool:
             opt = opt_loc.first
             opt_css = _by_test_id("=", tid)
     if not opt:
-        opts = page.locator(_SWITCHER_OPTION_SEL)
-        for i in range(opts.count()):
-            candidate = opts.nth(i)
+        for candidate in _shown_options(page):
             num_el = candidate.locator(_SWITCHER_NUM_SEL)
             opt_digits = re.sub(r"\D", "", num_el.inner_text() if num_el.count() else "")
             if digits and opt_digits == digits:

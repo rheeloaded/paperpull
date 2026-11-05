@@ -171,6 +171,15 @@ function drawSwitcher() {
   });
 }
 drawSwitcher();
+if (CFG.option_copies) {
+  const copies = document.getElementById('lb').cloneNode(true);
+  copies.removeAttribute('id');
+  copies.hidden = false;
+  const hidden = document.createElement('div');
+  hidden.style.display = 'none';
+  hidden.appendChild(copies);
+  document.getElementById('sw')[CFG.option_copies](hidden);
+}
 if (CFG.tip_over_switcher) {
   const box = document.getElementById('sw');
   box.style.position = 'relative';
@@ -219,7 +228,7 @@ class FakeAmex:
         self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
                         narrow_copy_first=False, address_moves_first=False,
                         switcher_copies=False, switcher_gone=False, list_ms_of={},
-                        tip_over_switcher=False, dialog_left_open=False)
+                        tip_over_switcher=False, dialog_left_open=False, option_copies="")
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -780,3 +789,25 @@ def test_a_dialog_left_open_is_closed_before_the_switcher_is_read(attached, serv
     assert "could not be read" not in out
     assert noted_whole(tmp_path) is True
     assert panel_reads(out)["manual_review"] == 0
+
+
+@pytest.mark.parametrize("where", ["prepend", "append"], ids=["before", "after"])
+def test_a_hidden_copy_of_the_options_costs_one_card_nothing(attached, serve, tmp_path, capsys, where):
+    """A hidden copy doubled the card's label, which stopped a run that works
+    on main, or was first and read as a switcher with no card."""
+    amex = serve(cards=[SOLO], option_copies=where)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_one_cards_archive(tmp_path)
+    assert noted_whole(tmp_path) is True
+    assert panel_reads(out)["manual_review"] == 0
+
+
+@pytest.mark.parametrize("where", ["prepend", "append"], ids=["before", "after"])
+def test_a_hidden_copy_of_the_options_costs_two_cards_nothing(attached, serve, tmp_path, capsys, where):
+    amex = serve(option_copies=where)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_each_cards_own(tmp_path, out)
