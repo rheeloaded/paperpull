@@ -770,10 +770,10 @@ def list_cards(page) -> List[dict]:
 
     An empty list means no switcher is in the page. None means which cards
     there are could not be read, from a switcher in the page that does not
-    show, that the page has turned off or that offered no card. Nothing
-    pressed it before cards were told apart, so a person with one card has
-    always gone on from here, and a caller goes on with the card on show,
-    says so, and never takes that card for every card.
+    show, that the page has turned off, that something covers or that
+    offered no card. Nothing pressed it before cards were told apart, so a
+    person with one card has always gone on from here, and a caller goes on
+    with the card on show, says so, and never takes that card for every card.
     """
     cb = _wait_for_switcher(page)
     if cb is None:
@@ -786,8 +786,12 @@ def list_cards(page) -> List[dict]:
             pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                            what="the card switcher",
                            words=_words(), step="open the card switcher")
-        except pressing.TurnedOff:
-            log.info("the card switcher is turned off on the page, so no card was listed")
+        except (pressing.TurnedOff, pressing.NotPressed, pressing.Covered, pressing.Unread) as stop:
+            # A press that did not land, nothing else. Something that came over
+            # the switcher as it was pressed may have taken the press.
+            if stop.after_a_press and not isinstance(stop, pressing.NotPressed):
+                raise
+            log.info("the card switcher was not pressed, so no card was listed (%s)", stop.reason)
             return None
     try:
         page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)

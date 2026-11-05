@@ -152,6 +152,15 @@ STOPS = {
         "list shown in full leaves only the statement not shown"),
 }
 
+# The presses that leave their document and go on when something covers them
+# too, each with why. Every other one stops at a cover.
+GOES_ON_UNDER_A_COVER = {
+    ("amex", "list_cards"):
+        "the card switcher is pressed only to learn which cards there are, which a run went "
+        "without before cards were told apart, so nothing is pressed, the run says which card "
+        "it read, and every press after it is read for itself",
+}
+
 # The presses that catch TurnedOff and leave their document, by app, before
 # this census. It finds them by what they do, this only keeps it from
 # passing on finding none.
@@ -863,7 +872,10 @@ def test_a_turned_off_control_drawn_to_take_no_pointer_is_left_too(drive, app, f
 def test_a_turned_off_control_under_a_cover_stops_the_run(drive, app, function, monkeypatch):
     module, call, control, row = _how(app, function, monkeypatch)
     ran = drive(app, module, call, row=row, control=control(True), extra=COVER)
-    assert isinstance(ran.stop, pressing.Covered), ran.stop
+    if (app, function) in GOES_ON_UNDER_A_COVER:
+        assert ran.stop is None and not ran.result, (ran.stop, ran.result)
+    else:
+        assert isinstance(ran.stop, pressing.Covered), ran.stop
     assert ran.count("presses") == 0
     assert ran.count("coverPresses") == 0
 

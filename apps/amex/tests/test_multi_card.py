@@ -773,6 +773,7 @@ def test_cmd_discover_stops_when_card_has_zero_buttons_and_no_message(monkeypatc
     app.discovery = SimpleNamespace(data={})
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=False: None)
     monkeypatch.setattr(site, "list_cards", lambda p: [{"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
                                                         {"index": 1, "tid": "2", "label": "Card 2 (22222)", "digits": "22222", "name": "Card 2"}])
     monkeypatch.setattr(site, "select_card", lambda p, c: True)
@@ -805,6 +806,7 @@ def test_cmd_discover_single_card_preserves_unnamed_key(monkeypatch):
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: None)
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=False: None)
     monkeypatch.setattr(site, "list_cards", lambda p: [{"index": 0, "tid": "1", "label": "Only Card (12345)", "digits": "12345", "name": "Only Card"}])
     monkeypatch.setattr(site, "collect_download_docs", lambda p, account="": [
         site.RawDoc(title="Monthly Statement - October 11, 2026", date_text="2026-10-11", href="tid1", account=account)
@@ -1113,6 +1115,7 @@ def test_discover_stops_on_a_switch_that_failed_for_any_other_reason(monkeypatch
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: noted.append("whole"))
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=False: None)
     monkeypatch.setattr(site, "list_cards", lambda p: [
         {"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
         {"index": 1, "tid": "2", "label": "Card 2 (22222)", "digits": "22222", "name": "Card 2"}])
@@ -1381,3 +1384,24 @@ def test_an_old_list_that_never_goes_leaves_the_list_unread(page_of, monkeypatch
         site.select_card(pg, cards[1])
     assert stop.value.reason == "the statements did not switch"
     assert stop.value.list_unread is True
+
+
+@pytest.mark.parametrize("kind,after_a_press,answers", [
+    (pressing.Covered, False, None), (pressing.Unread, False, None), (pressing.NotPressed, True, None),
+    (pressing.Covered, True, "stops"), (pressing.NoAnswer, True, "stops"), (pressing.Unsure, True, "stops")],
+    ids=["covered", "unread", "not-pressed", "came-over-as-it-was-pressed", "no-answer", "unsure"])
+def test_a_press_of_the_switcher_that_did_not_land_answers_none(page_of, monkeypatch, kind,
+                                                                after_a_press, answers):
+    """A press refused or not made leaves the page as it was, so the run goes
+    on as it did before anything pressed the switcher. A press that may have
+    reached something stops the run like any other."""
+    pg = page_of(switch_page(statement_row("2030-11-11")))
+
+    def press(*args, **kwargs):
+        raise kind("open the card switcher", "the press", ["The press."], after_a_press=after_a_press)
+    monkeypatch.setattr(pressing, "click", press)
+    if answers == "stops":
+        with pytest.raises(kind):
+            site.list_cards(pg)
+    else:
+        assert site.list_cards(pg) is None

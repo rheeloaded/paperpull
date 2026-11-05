@@ -171,6 +171,12 @@ function drawSwitcher() {
   });
 }
 drawSwitcher();
+if (CFG.tip_over_switcher) {
+  const box = document.getElementById('sw');
+  box.style.position = 'relative';
+  box.insertAdjacentHTML('beforeend', '<div style="position:absolute;left:0;top:0;width:100%%;' +
+    'height:100%%;background:#ffc;z-index:3">Tip</div>');
+}
 if (!CFG.list_never) drawList(CFG.start);
 const dialog = document.getElementById('filetype');
 const backdrop = document.getElementById('backdrop');
@@ -191,6 +197,7 @@ document.querySelector('[data-test-id$="download-footer-download-confirm-anchor"
     const kind = document.getElementById('ft-pdf').checked ? 'pdf' : 'csv';
     location.href = '/download/' + C[listCard].digits + '/' + current + '.' + kind;
   });
+if (CFG.dialog_left_open) { backdrop.hidden = false; dialog.hidden = false; }
 </script>
 </body></html>"""
 
@@ -211,7 +218,8 @@ class FakeAmex:
     def __init__(self, **cfg):
         self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
                         narrow_copy_first=False, address_moves_first=False,
-                        switcher_copies=False, switcher_gone=False, list_ms_of={})
+                        switcher_copies=False, switcher_gone=False, list_ms_of={},
+                        tip_over_switcher=False, dialog_left_open=False)
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -610,8 +618,9 @@ def test_one_card_that_reads_as_one_card_keeps_its_archive_and_says_nothing(
 
 @pytest.mark.parametrize("cfg,shown", [
     (dict(switcher="off"), "Solo Card (77777)"), (dict(switcher="no_options"), "Solo Card (77777)"),
-    (dict(switcher_copies=True, switcher_gone=True), "the card on show")],
-    ids=["off", "no_options", "none_showing"])
+    (dict(switcher_copies=True, switcher_gone=True), "the card on show"),
+    (dict(tip_over_switcher=True), "Solo Card (77777)")],
+    ids=["off", "no_options", "none_showing", "covered"])
 def test_a_switcher_that_cannot_be_read_keeps_one_cards_path_and_is_not_quiet(
         attached, serve, tmp_path, capsys, monkeypatch, cfg, shown):
     """Nothing pressed the switcher before cards were told apart, so this
@@ -757,3 +766,17 @@ def test_one_option_left_of_an_archive_filed_by_card_keeps_its_keys(attached, se
     assert "Alpha Card (11111)" in new[0]["name"]
     assert all(r["account"] for r in records(tmp_path, "discovery.json").values())
     assert noted_whole(tmp_path) is True
+
+
+def test_a_dialog_left_open_is_closed_before_the_switcher_is_read(attached, serve, tmp_path, capsys):
+    """A run that stopped at the file type dialog left it open, and it covers
+    the switcher. On main a person with one card just went on, so it is closed
+    first, and the run reads as any other."""
+    amex = serve(cards=[SOLO], dialog_left_open=True)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_one_cards_archive(tmp_path)
+    assert "could not be read" not in out
+    assert noted_whole(tmp_path) is True
+    assert panel_reads(out)["manual_review"] == 0

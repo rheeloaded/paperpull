@@ -434,6 +434,8 @@ class App:
         self.check_session(page)
 
         self._cards_left = []
+        # A dialog left open by a run that stopped would cover the switcher.
+        site.close_file_type_dialog(page, quiet=True)
         cards = site.list_cards(page)
         # An archive already filed by card is not one card, and the one-card
         # way would save that card's history again under no card's name.
@@ -530,7 +532,8 @@ class App:
 
     def _only_the_card_on_show(self, page) -> None:
         """A card switcher that could not be read, one in the page that does
-        not show, that is turned off or that offered no card.
+        not show, that is turned off, that something covers or that offered
+        no card.
 
         Nothing pressed the switcher before cards were told apart, so on one
         card this is the path that has always worked, and the run goes on with
