@@ -91,38 +91,52 @@ html, body { margin: 0; font: 16px sans-serif; }
 <script>
 const C = CFG.cards;
 let shownCard = CFG.start;   // what the switcher says
-let listCard = CFG.start;    // whose list the rows are
 let current = null;
+let currentCard = null;
 let switches = 0;
 const P = 'myca-activity-statements/common/Table/';
-function button(kind, testid) {
-  return '<button class="dl ' + kind + '" data-testid="' + testid + '">Download</button>';
+function button(kind, testid, digits) {
+  return '<button class="dl ' + kind + '" data-card="' + digits + '" data-testid="' + testid +
+    '">Download</button>';
 }
-function row(kind, when) {
+function row(kind, when, digits) {
   const t = P + (kind === 'ye' ? 'year-end-summary/' : 'recent-statements/') + when +
             '/download-button';
-  const copies = [button('desk', t), button('mobile', t)];
+  const copies = [button('desk', t, digits), button('mobile', t, digits)];
   if (CFG.narrow_copy_first) copies.reverse();
-  return '<div class="row">' + (kind === 'ye' ? 'Year End Summary ' : 'Statement closing ') + when +
-    copies.join('') + '</div>';
+  return '<div class="row ' + kind + '">' + (kind === 'ye' ? 'Year End Summary ' : 'Statement closing ') +
+    when + copies.join('') + '</div>';
 }
 function listHtml(c) {
   if (!c.dates.length && !c.years.length) return '<p class="msg">No statements available</p>';
-  return c.dates.map(d => row('st', d)).join('') + c.years.map(y => row('ye', y)).join('');
+  return c.dates.map(d => row('st', d, c.digits)).join('') +
+    c.years.map(y => row('ye', y, c.digits)).join('');
 }
 const area = document.getElementById('table-area');
 function drawList(i) {
-  listCard = i;
-  const kept = area.querySelectorAll('[data-testid$="/download-button"]');
-  if (CFG.reuse_rows && kept.length) {
-    // In place, the way a table can redraw, the same nodes with new test ids.
-    const next = document.createElement('div');
-    next.innerHTML = listHtml(C[i]);
-    const ids = next.querySelectorAll('[data-testid$="/download-button"]');
-    kept.forEach((b, n) => b.setAttribute('data-testid', ids[n].getAttribute('data-testid')));
+  const next = document.createElement('div');
+  next.innerHTML = listHtml(C[i]);
+  const kept = [...area.querySelectorAll('.row')];
+  const fresh = [...next.querySelectorAll('.row')];
+  if (!(CFG.reuse_rows || CFG.stage_ms || CFG.keep_year_row) || kept.length !== fresh.length) {
+    area.innerHTML = listHtml(C[i]);
     return;
   }
-  area.innerHTML = listHtml(C[i]);
+  // Row by row. Reused rows keep their nodes and take the next card's test
+  // ids and PDFs, and any other row is replaced.
+  const redraw = (n) => {
+    if (!CFG.reuse_rows) { kept[n].replaceWith(fresh[n]); return; }
+    const from = fresh[n].querySelectorAll('.dl');
+    kept[n].querySelectorAll('.dl').forEach((b, k) => {
+      b.setAttribute('data-testid', from[k].getAttribute('data-testid'));
+      b.dataset.card = from[k].dataset.card;
+    });
+  };
+  kept.forEach((r, n) => {
+    if (!r.classList.contains('ye')) redraw(n);
+    else if (CFG.stage_ms) setTimeout(() => redraw(n), CFG.stage_ms);
+    else if (!CFG.keep_year_row) redraw(n);
+  });
 }
 function card(i) {
   return '<span data-testid="simple_switcher_display_name">' + C[i].name + '</span>' +
@@ -213,6 +227,7 @@ document.addEventListener('click', (e) => {
   if (!b) return;
   const parts = b.dataset.testid.split('/');
   current = (parts.includes('year-end-summary') ? 'ye-' : 'st-') + parts[parts.length - 2];
+  currentCard = b.dataset.card;
   for (const r of document.querySelectorAll('input[name=ft]')) r.checked = false;
   backdrop.hidden = false; dialog.hidden = false;
 });
@@ -223,7 +238,7 @@ document.querySelector('[data-test-id$="download-footer-download-confirm-anchor"
   .addEventListener('click', (e) => {
     e.preventDefault();
     const kind = document.getElementById('ft-pdf').checked ? 'pdf' : 'csv';
-    location.href = '/download/' + C[listCard].digits + '/' + current + '.' + kind;
+    location.href = '/download/' + currentCard + '/' + current + '.' + kind;
   });
 if (CFG.dialog_left_open) { backdrop.hidden = false; dialog.hidden = false; }
 </script>
@@ -241,14 +256,18 @@ class FakeAmex:
     """One made-up American Express, of a test's own. The switcher moves
     `switch_ms` after a card is pressed and the card's list comes `list_ms`
     after, the old list showing until then. `list_ms_of` gives the nth switch
-    a time of its own, and a time below nought means its list never comes."""
+    a time of its own, and a time below nought means its list never comes.
+    `stage_ms` redraws the year-end rows that long after the monthly rows,
+    `reuse_rows` keeps every row's nodes and changes their test ids and PDFs,
+    and `keep_year_row` leaves the year-end rows as they are. Each Download's
+    PDF is of the card whose rows it was drawn for."""
 
     def __init__(self, **cfg):
         self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
                         narrow_copy_first=False, address_moves_first=False,
                         switcher_copies=False, switcher_gone=False, list_ms_of={},
                         tip_over_switcher=False, dialog_left_open=False, option_copies="",
-                        hidden_options=[], reuse_rows=False)
+                        hidden_options=[], reuse_rows=False, stage_ms=0, keep_year_row=False)
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -877,34 +896,60 @@ def test_a_hidden_option_whose_digits_cannot_be_read_counts_as_another_card(atta
     assert saved(tmp_path) == {} and amex.downloads == []
 
 
+def read_failure(tmp_path):
+    """The one failure file, as data and as the text it is."""
+    failures = sorted((tmp_path / "out").rglob("failure-*.json"))
+    assert len(failures) == 1, failures
+    written = failures[0].read_text(encoding="utf-8")
+    return json.loads(written), written
+
+
 @pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
-def test_rows_redrawn_in_place_read_both_cards_as_their_own(attached, serve, tmp_path, capsys, width):
-    """The table keeps its nodes and gives them the next card's test ids, and
-    the PDFs behind them change with it. The held button never hides, so the
-    wait has only its test id to go by."""
-    amex = serve(reuse_rows=True)
+def test_a_list_redrawn_in_stages_is_waited_for_to_its_last_part(attached, serve, tmp_path, capsys,
+                                                                 width):
+    """The monthly rows are replaced and the year-end rows a second and a half
+    later. A year-end summary carries only its year, so one read from the old
+    card's rows while they still show is saved as the new card's, Completed."""
+    amex = serve(stage_ms=1500)
     their_tab(attached, amex, width)
     code, out = run_all(config(tmp_path, attached), capsys)
 
     holds_each_cards_own(tmp_path, out)
 
 
-@pytest.mark.parametrize("cfg", [
-    dict(cards=[A, dict(B, dates=A["dates"])]), dict(list_ms_of={"1": -1})],
-    ids=["same-first-date", "list-never-changes"])
-def test_rows_kept_with_the_same_id_stop_with_the_list_unread(attached, serve, tmp_path, capsys,
-                                                              monkeypatch, cfg):
-    """Reused rows whose first date is the same on both cards cannot be told
-    from a list that never changed, so both stop rather than guess."""
-    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
-    amex = serve(reuse_rows=True, list_ms=300, **cfg)
-    their_tab(attached, amex)
+@pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
+@pytest.mark.parametrize("cfg,gone,renamed", [
+    (dict(reuse_rows=True), 0, 1),
+    (dict(reuse_rows=True, stage_ms=1500), 0, 1),
+    (dict(reuse_rows=True, cards=[A, dict(B, dates=A["dates"])]), 0, 0),
+    (dict(keep_year_row=True), 1, 0),
+    (dict(list_ms_of={"1": -1}), 0, 0)],
+    ids=["rows-reused", "rows-reused-in-stages", "rows-reused-same-ids", "year-end-row-kept",
+         "list-never-changes"])
+def test_a_list_that_stays_in_any_part_stops_with_the_list_unread(attached, serve, tmp_path, capsys,
+                                                                  monkeypatch, width, cfg, gone,
+                                                                  renamed):
+    """A Download that goes on showing cannot be told from the old card's, even
+    under a new test id, since the rows can change one by one. So the run stops
+    and nothing is listed under the next card. The failure file counts what
+    showed, what went and what stayed under another id, so one report says what
+    the real page does, and it holds nothing else of the page's. The year-end
+    rows of both cards share their id, so of the two that stay here at most
+    one is under another."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 3000)
+    amex = serve(list_ms=300, **cfg)
+    their_tab(attached, amex, width)
     code, out = run_all(config(tmp_path, attached), capsys)
     result = panel_reads(out)
 
     assert (result["stopped"], result["list_not_read"]) == (1, 1), folded(out)
     assert "the card's statements did not open" in folded(out)
     assert noted_whole(tmp_path) is False
-    assert not [r for r in records(tmp_path, "discovery.json").values()
-                if digits_of(r["account"]) == B["digits"]]
+    assert records(tmp_path, "discovery.json") == {}
     assert saved(tmp_path) == {} and amex.downloads == []
+
+    report, written = read_failure(tmp_path)
+    assert report["extra"] == {"downloads_shown": 2, "downloads_gone": gone,
+                               "stayed_under_another_id": renamed}, report["extra"]
+    for word in ("2030-", "year-end-summary", "recent-statements", "11111", "22222", "Alpha", "Bravo"):
+        assert word not in written, word
