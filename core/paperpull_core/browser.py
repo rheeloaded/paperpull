@@ -878,8 +878,9 @@ def _set_aside_new_build(path: str, old: str) -> None:
     """The build an update brought would not open, so the old one signs in
     and goes on being the one that does. Left as it was, the new build would
     be tried first at every sign-in from now on, so its mark is taken away,
-    which makes it a build that is not there (_finished), and the update is
-    not offered again until Playwright wants a newer build still. Should the
+    and its headless shell's, which makes both builds that are not there
+    (_finished), and the update is not offered again until Playwright wants a
+    newer build still. Should the
     new build only have been slow, this costs an update and nothing else.
     Only here, where the build has just arrived. _next_older_build's step
     changes nothing on disk."""
@@ -894,6 +895,10 @@ def _set_aside_new_build(path: str, old: str) -> None:
         for folder in Path(path).parents:
             if os.path.isfile(folder / INSTALLED_MARK):
                 os.remove(folder / INSTALLED_MARK)
+                # Or a headless launch would go on picking this build's shell
+                own_shell = folder.with_name("chromium_headless_shell-%d" % build)
+                if os.path.isfile(own_shell / INSTALLED_MARK):
+                    os.remove(own_shell / INSTALLED_MARK)
                 break
     except Exception:
         pass

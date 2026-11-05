@@ -42,16 +42,17 @@ REAL_WANTED_BUILD = browser._wanted_chromium_build
 INSTALL = ["/pkg/python3", "-m", "playwright", "install", "chromium"]
 INNER = ("chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/"
          "Google Chrome for Testing")
+SHELL = "chrome-headless-shell-mac-arm64/chrome-headless-shell"
 
 
-def _lay(root, build, finished=True, inner=INNER):
+def _lay(root, build, finished=True, inner=INNER, folder="chromium-%d"):
     """A build in root as an install leaves it, with Playwright's mark when
     it finished. Returns its executable."""
-    exe = root / ("chromium-%d" % build) / inner
+    exe = root / (folder % build) / inner
     exe.parent.mkdir(parents=True, exist_ok=True)
     exe.write_bytes(b"chromium %d" % build)
     if finished:
-        (root / ("chromium-%d" % build) / browser.INSTALLED_MARK).write_text("")
+        (root / (folder % build) / browser.INSTALLED_MARK).write_text("")
     return str(exe)
 
 
@@ -453,6 +454,23 @@ def test_the_person_keeps_their_profile_ahead_of_a_browser_of_their_own(machine,
     _sign_in(tmp_path)
     assert machine.opened == [(machine.new, "profile"), (machine.old, "profile"),
                               ("/x/edge", "profile-microsoftedge")]
+
+
+def test_a_new_build_set_aside_takes_its_headless_shell_with_it(machine, monkeypatch, tmp_path):
+    """Or a headless launch, the receipt renderer's, would go on picking a
+    shell of the build that would not open."""
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    old_shell = _lay(machine.root, OLD, inner=SHELL, folder="chromium_headless_shell-%d")
+    new_shell = _lay(machine.root, WANTED, inner=SHELL, folder="chromium_headless_shell-%d")
+    assert browser._headless_shells(machine.root) == [new_shell, old_shell]
+    machine.answers = ["y"]
+    machine.refused = {machine.new}
+    _sign_in(tmp_path)
+    assert browser._headless_shells(machine.root) == [old_shell]
+    chromium = type("Chromium", (), {"executable_path": machine.new})()
+    assert browser._on_disk(chromium, {"headless": True})["executable_path"] == old_shell
+    assert browser._on_disk(chromium, {"headless": False})["executable_path"] == machine.old
+    assert os.path.exists(new_shell), "only the mark goes, and a later install replaces the rest"
 
 
 def test_a_new_build_that_would_not_open_is_not_the_newest_at_the_next_sign_in(machine, tmp_path):
