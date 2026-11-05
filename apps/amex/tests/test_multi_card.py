@@ -1188,9 +1188,11 @@ def test_goto_documents_leaves_the_switcher_alone_where_the_link_shows(open_page
      "Post.</p></section></main>", False),
     ("<main><section id='table-area'></section></main><footer><p>There are no statements "
      "available yet.</p></footer>", False),
+    ("<main><section id='table-area'></section></main><footer><div class='empty-note'>There are "
+     "no statements available yet.</div></footer>", False),
 ], ids=["the-pages-own-words", "help-line-in-a-section", "help-line-in-a-paragraph",
         "paperless-note-in-a-section", "paperless-note-in-the-area", "german-paperless-note",
-        "footer-help-line"])
+        "footer-help-line", "footer-help-line-in-an-empty-note"])
 def test_only_the_statements_own_region_says_a_card_is_empty(page_of, html, says):
     """A card read as empty is a card whose statements are never read, so a
     help line with the same words and no list drawn must not pass for it."""
@@ -1255,3 +1257,28 @@ def test_a_card_with_no_list_and_no_message_beside_a_full_card_stops_discover(pa
     with pytest.raises(SystemExit):
         app_mod.App.cmd_discover(app, quiet=True)
     assert noted == []
+
+
+def test_a_read_that_fails_never_counts_as_the_old_list_gone():
+    """Any evaluate throws on American Express, so a wait that took a throw
+    for the list having gone would pass at once there."""
+    class Broken:
+        def wait_for_element_state(self, state, timeout):
+            raise RuntimeError("eval is disabled")
+
+        def is_visible(self):
+            raise RuntimeError("eval is disabled")
+
+    assert site._goes_away(Broken()) is False
+
+
+def test_an_empty_message_that_never_goes_stops_the_switch(page_of, monkeypatch):
+    """The switcher moves and the words of the card before stay, with no list
+    drawn. Whether the new card is empty or its list is late cannot be told,
+    so it is not called empty."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 500)
+    pg = page_of(switch_page("<p>No statements available</p>", "moveSwitcher();"))
+    cards = site.list_cards(pg)
+    with pytest.raises(pressing.NoAnswer) as stop:
+        site.select_card(pg, cards[1])
+    assert stop.value.reason == "the statements did not switch"
