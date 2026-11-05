@@ -162,7 +162,7 @@ function drawSwitcher() {
   });
 }
 drawSwitcher();
-drawList(CFG.start);
+if (!CFG.list_never) drawList(CFG.start);
 const dialog = document.getElementById('filetype');
 const backdrop = document.getElementById('backdrop');
 document.addEventListener('click', (e) => {
@@ -527,3 +527,18 @@ def test_two_empty_cards_in_a_row_do_not_cost_the_third_card(attached, serve, tm
         assert rec["state"] == State.COMPLETED.value and rec["account"] == "Bravo Card (22222)", rec
     assert noted_whole(tmp_path) is True
     assert panel_reads(out)["stopped"] == 0, said
+
+
+@pytest.mark.parametrize("cfg,success", [
+    (dict(list_never=True), False), (dict(), True), (dict(cards=[EMPTY_ONE]), True)],
+    ids=["nothing-drawn", "a-list", "the-pages-own-empty-words"])
+def test_login_says_success_only_on_a_list_it_saw(attached, serve, tmp_path, capsys, cfg, success):
+    """A tab at the statements address with nothing drawn says no session.
+    A blank page once read as signed in on another provider."""
+    amex = serve(switcher="none", **cfg)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys, "--login")
+    said = folded(out)
+
+    assert ("Success: connected" in said) is success, said
+    assert ("the Documents list did not load" in said) is not success, said

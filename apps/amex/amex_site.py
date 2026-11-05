@@ -375,6 +375,13 @@ def has_no_statements(page) -> bool:
     """Whether the page explicitly states there are no statements."""
     return _get_no_statements_element(page) is not None
 
+
+def list_shows(page) -> bool:
+    """Whether the statements page shows its list, a Download or its own
+    words that there are none. Being at the page's address says neither,
+    since a tab can sit there with nothing drawn."""
+    return _safe_count(page.locator(_DOWNLOAD_BUTTONS)) > 0 or has_no_statements(page)
+
 # How long the tab is given to show a press's page after the wait it was
 # always given, LINK_WAIT_MS after the first link and PDF_LINK_WAIT_MS after
 # Go to PDF Statements. A single page app can take its time, and a press it
@@ -568,6 +575,13 @@ def goto_documents(page) -> bool:
     except Exception as e:
         log.info("goto_documents (click-nav) failed: %s", e)
         return "/activity/statements" in (page.url or "") or page.locator(_DOWNLOAD_BUTTONS).count() > 0
+
+
+def open_the_list(page) -> bool:
+    """Whether the statements page opens and shows its list, for what says a
+    person is signed in. goto_documents answers by the address, which is
+    right for a card with no statements and says nothing of the list."""
+    return goto_documents(page) and list_shows(page)
 
 
 # The collapsible sections, each by its English words and then by the part

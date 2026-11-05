@@ -309,7 +309,7 @@ class App:
     def cmd_login(self):
         print("Checking the connection to your signed-in American Express browser...\n")
         page = self.page()
-        ok = site.goto_documents(page)
+        ok = site.open_the_list(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
