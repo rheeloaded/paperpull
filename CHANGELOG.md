@@ -34,7 +34,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the line to run. The Store edition, which cannot run it, says so too. The
   build you have stays until the new one has opened, so a download that
   fails, is stopped or dies partway costs you nothing, and sign-in goes on
-  with what you had. Contributed by @JasperDale420.
+  with what you had. If the newest private copy does not open, the next older
+  finished build on the computer is tried on the same profile, ahead of any
+  other browser, so a build it cannot start does not take the one beside it
+  out of use. Contributed by @JasperDale420.
 - **City of Tualatin, the 81st app, monthly utility bills (#127).** It
   saves the water, sewer, stormwater, parks and road fee bills of a
   Tualatin Water account from CivicPay Online, about two years of them.
