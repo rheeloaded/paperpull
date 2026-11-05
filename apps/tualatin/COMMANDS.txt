@@ -1,0 +1,3 @@
+Tualatin Water bills from CivicPay Online, tualatin.merchanttransact.com
+
+See README.md for setup and supervised pilot instructions.
