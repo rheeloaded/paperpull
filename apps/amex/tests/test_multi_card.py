@@ -939,17 +939,21 @@ def test_cmd_discover_one_empty_card_one_full_card(browser, monkeypatch):
     ctx.close()
 
 
-def test_card_switch_turned_off_option_raises_turned_off(browser):
-    """A disabled/turned off card option in the switcher raises TurnedOff,
-    stopping the run as registered in STOPS."""
+def test_card_switch_turned_off_option_leaves_its_card(browser, monkeypatch):
+    """A disabled/turned off card option in the switcher is not pressed. The
+    card is marked for Discover to go on without it, the switcher is closed
+    so nothing covers the next press, and the card on show stays on show."""
+    monkeypatch.setattr(pressing, "PRESS_MS", 500)
     ctx = browser.new_context()
     pg = ctx.new_page()
     pg.set_content(HTML_TURNED_OFF_CARD_OPTION)
     cards = site.list_cards(pg)
     assert len(cards) == 2
     # Card 2 is disabled
-    with pytest.raises(pressing.TurnedOff):
-        site.select_card(pg, cards[1])
+    assert site.select_card(pg, cards[1]) is False
+    assert cards[1]["turned_off"] is True
+    assert pg.locator(site._SWITCHER_COMBOBOX_SEL).get_attribute("aria-expanded") == "false"
+    assert site.current_card_label(pg) == "Active Card (11111)"
     ctx.close()
 
 
@@ -1087,3 +1091,23 @@ def test_a_list_none_of_whose_downloads_shows_stops_before_the_switch(page_of):
     assert stop.value.reason == "no download button shows"
     assert pg.locator("#presses").inner_text() == "0"
     assert pg.locator(site._SWITCHER_COMBOBOX_SEL).get_attribute("aria-expanded") == "false"
+
+
+def test_discover_stops_on_a_switch_that_failed_for_any_other_reason(monkeypatch):
+    """Only a card the page has turned off is gone on from. Any other False
+    from select_card is a switch that failed, which stops Discover."""
+    app = SimpleNamespace()
+    app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/activity/statements")
+    app.check_session = lambda p: None
+    noted = []
+    monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
+    monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: noted.append("whole"))
+    monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "list_cards", lambda p: [
+        {"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
+        {"index": 1, "tid": "2", "label": "Card 2 (22222)", "digits": "22222", "name": "Card 2"}])
+    monkeypatch.setattr(site, "select_card", lambda p, c: False)
+
+    with pytest.raises(pressing.NoAnswer):
+        app_mod.App.cmd_discover(app)
+    assert noted == []

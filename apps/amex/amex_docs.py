@@ -165,6 +165,7 @@ class App:
         self._work_page = None
         self._cdp_mode = False
         self._card_count = None
+        self._cards_left = []
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -434,10 +435,15 @@ class App:
 
         cards = site.list_cards(page)
         self._card_count = len(cards)
+        self._cards_left = []
         total_controls = 0
         if len(cards) > 1:
             for card in cards:
-                if not site.select_card(page, card):
+                switched = site.select_card(page, card)
+                if card.get("turned_off"):
+                    self._leave_card(card["label"])
+                    continue
+                if not switched:
                     raise pressing.no_answer("switch card", "the card did not switch",
                                              f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
                 docs = site.collect_download_docs(page, account=card["label"])
@@ -469,13 +475,18 @@ class App:
         log.info("statements page: %d download controls, %d new", total_controls, n_new)
 
         # The whole list is in, and only now may a Resume that carries on
-        # from it call the run finished (paperpull_core.listing).
-        listing.read_whole(self)
+        # from it call the run finished (paperpull_core.listing). A card left
+        # out leaves it short, so it stays noted as a listing that stopped,
+        # and the run goes on with the cards it did read.
+        if not self._cards_left:
+            listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
-            print(f"\nDiscovery complete. Documents known: {len(docs)}")
+            finished = "Discovery did not finish every card" if self._cards_left \
+                else "Discovery complete"
+            print(f"\n{finished}. Documents known: {len(docs)}")
             accounts = {}
             for d in docs:
                 if d.account:
@@ -499,7 +510,26 @@ class App:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
+            self._say_cards_left()
         return n_new
+
+    def _leave_card(self, label: str) -> None:
+        """Leave a card whose option the page has turned off, a canceled card
+        say, which would otherwise stop every run at the same place and cost a
+        person all their other cards. It is said by name, counted for review
+        and written to the failure file, which never holds its name, and the
+        listing is not noted as whole."""
+        print(f"\n!! {label} is turned off in the card switcher, so its statements were not read.")
+        print("   The other cards are read as usual, and this list is not noted as whole.")
+        self._cards_left.append(f"{label}, turned off in the card switcher")
+        self.stats["manual_review"] += 1
+        self.write_failure("switch card", "a card option is turned off")
+
+    def _say_cards_left(self) -> None:
+        """What this run's list left out, by name, again where a person reads
+        last, since a long run scrolls the first time away."""
+        for left in self._cards_left:
+            print(f"!! Not read: {left}.")
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -776,6 +806,7 @@ class App:
                 problems.append(f"{d.key}: {saved_copy.tried(self, d.key)}")
             if state != State.COMPLETED.value:
                 problems.append(f"{d.key}: {state} - {rec.get('notes', '')}")
+        problems.extend(f"Not read: {left}" for left in self._cards_left)
         print("\n" + "-" * 70)
         if problems:
             print("Needs attention:")
@@ -799,6 +830,7 @@ class App:
         docs = self._select()
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
+        self._say_cards_left()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"

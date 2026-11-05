@@ -78,8 +78,6 @@ STOPS = {
     ("amex", "select_card", "click", "open the card switcher"): (1,
         "on a multi-card account, opens the card switcher before choosing the card to download from, "
         "so a turned off switcher leaves that card's documents"),
-    ("amex", "select_card", "click", "switch card"): (1,
-        "the card option that switches to the document's card"),
     ("amex", "expand_sections", "click", "open a section"): (1,
         "opens a section of the statements page for every document in it"),
     ("amex", "close_file_type_dialog", "click", "close the file type dialog"): (1,
@@ -161,7 +159,8 @@ STOPS = {
 # this census. It finds them by what they do, this only keeps it from
 # passing on finding none.
 LEAVES = {
-    ("alpaca", "_press"), ("amex", "download_document"), ("bilt", "_press"),
+    ("alpaca", "_press"), ("amex", "download_document"), ("amex", "select_card"),
+    ("bilt", "_press"),
     ("amfam", "_catch_pdf"), ("applecard", "_catch_pdf"), ("att", "_catch_pdf"),
     ("chasebusiness", "_press_row"), ("coinbase", "_catch_statement"),
     ("coinbase", "_press_card_pdf"), ("firsthorizon", "_press"),
@@ -624,6 +623,21 @@ def _amex_button(off: bool) -> str:
             'onclick="window.presses++">Download</button>' % (" disabled" if off else ""))
 
 
+def _amex_select(site, page, out, staging, trace):
+    return site.select_card(page, {"label": "Bravo Card (12345)", "digits": "12345"})
+
+
+def _amex_card_option(off: bool) -> str:
+    return (
+        '<div role="combobox" aria-expanded="true" data-testid="simple_switcher_combobox">'
+        'Alpha Card (67890)</div>'
+        '<button id="get" type="button" class="ctl" role="option" '
+        'data-testid="simple_switcher_product_option_1"%s onclick="window.presses++">Bravo Card '
+        '<span data-testid="simple_switcher_display_number">12345</span></button>'
+        % (" disabled" if off else "")
+    )
+
+
 def _coinbase_button(off: bool) -> str:
     return ('<button id="get" type="button" class="ctl" data-testid="statements-pdf-v2"%s '
             'onclick="window.presses++; fetch(\'/statement.pdf\');">PDF</button>'
@@ -764,6 +778,8 @@ def _how(app: str, function: str, monkeypatch):
             "2026-06-30</td><td>trade_confirmation"
     if (app, function) == ("amex", "download_document"):
         return "amex_site", _amex, _amex_button, "June 30, 2026"
+    if (app, function) == ("amex", "select_card"):
+        return "amex_site", _amex_select, _amex_card_option, "Statements"
     if (app, function) == ("bilt", "_press"):
         return "bilt_site", _bilt, _bilt_button, "Statements"
     if (app, function) == ("vanguard", "download_document"):

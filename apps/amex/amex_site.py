@@ -847,7 +847,12 @@ def current_card_label(page) -> str:
 
 def select_card(page, card: dict) -> bool:
     """Switch to the card specified by dict.
-    Returns True if successfully switched or already on that card."""
+    Returns True if successfully switched or already on that card.
+
+    False leaves the page on the card it was on. A card option the page has
+    turned off also marks the card, card["turned_off"], since a canceled card
+    must not cost a person their other cards. Anything else that goes wrong
+    after the press stops the run."""
     cb = page.locator(_SWITCHER_COMBOBOX_SEL)
     if not (cb.count() and cb.first.is_visible()):
         return False
@@ -907,9 +912,15 @@ def select_card(page, card: dict) -> bool:
             "Nothing more was pressed.", pressing.AGAIN])
     old_url = page.url or ""
 
-    pressing.click(page, opt, css=opt_css,
-                   what="the card option",
-                   words=_words(), step="switch card")
+    try:
+        pressing.click(page, opt, css=opt_css,
+                       what="the card option",
+                       words=_words(), step="switch card")
+    except pressing.TurnedOff:
+        log.info("the card option is turned off on the page, so its card was not read")
+        card["turned_off"] = True
+        _close_switcher(page, cb)
+        return False
 
     # Wait until the selected card display shows exactly that card's digits
     switched = False

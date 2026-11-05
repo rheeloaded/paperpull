@@ -37,7 +37,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import amex_docs as app_mod
 import amex_site as site
 from paperpull_core import browser as browser_launcher
-from paperpull_core import run_reporting, testkit
+from paperpull_core import pressing, run_reporting, testkit
 from paperpull_core.models import State
 from paperpull_core.receipt_pdf import pdf_text
 
@@ -187,6 +187,7 @@ document.querySelector('[data-test-id$="download-footer-download-confirm-anchor"
 
 A = dict(name="Alpha Card", digits="11111", dates=["2030-11-11"], years=["2030"])
 B = dict(name="Bravo Card", digits="22222", dates=["2030-11-22"], years=["2030"])
+CANCELED = dict(name="Canceled Card", digits="55555", dates=["2029-05-05"], years=["2029"], off=True)
 
 
 class FakeAmex:
@@ -452,3 +453,56 @@ def test_a_list_that_never_goes_stops_the_run_in_a_narrow_window(attached, serve
                 if digits_of(r["account"]) == B["digits"]]
     assert saved(tmp_path) == {}
     assert noted_whole(tmp_path) is False
+
+
+def test_a_turned_off_card_costs_nothing_but_itself(attached, serve, tmp_path, capsys, monkeypatch):
+    """Three cards with the middle one's option turned off. Both other cards'
+    PDFs are saved, each its own. The turned off card is said by name, in
+    what the run says first and in what it says last, and counted, and it is
+    in the failure file without its name. The list is not noted as whole, so
+    the Resume after it says so and stops."""
+    monkeypatch.setattr(pressing, "PRESS_MS", 1000)
+    amex = serve(cards=[A, CANCELED, B], list_ms=500)
+    their_tab(attached, amex)
+    cfg = config(tmp_path, attached)
+    code, out = run_all(cfg, capsys)
+    said = folded(out)
+
+    kept = saved(tmp_path)
+    assert sorted(r["card"] for r in kept.values()) == ["11111", "11111", "22222", "22222"], (kept, said)
+    for rec in kept.values():
+        assert rec["state"] == State.COMPLETED.value and rec["card"] == digits_of(rec["account"]), rec
+    assert not [r for r in records(tmp_path, "discovery.json").values()
+                if r["account"] == "Canceled Card (55555)"]
+    assert not [p for p in amex.pressed if p.startswith("option/1")], amex.pressed
+
+    first = "Canceled Card (55555) is turned off in the card switcher"
+    assert first in said
+    assert out.rstrip().splitlines()[-1].startswith(run_reporting.PREFIX)
+    assert "!! Not read: Canceled Card (55555)" in out[out.rindex("[4/4]"):]
+    assert "Discovery complete" not in said
+    result = panel_reads(out)
+    assert (result["manual_review"], result["stopped"], result["new_files"]) == (1, 0, 4), result
+    assert noted_whole(tmp_path) is False
+
+    failures = sorted((tmp_path / "out").rglob("failure-*.json"))
+    assert len(failures) == 1
+    written = failures[0].read_text(encoding="utf-8")
+    assert "a card option is turned off" in written
+    assert "Canceled" not in written and "55555" not in written
+
+    code, out = run_all(cfg, capsys, "--resume")
+    assert "stopped before it read American Express's whole list" in folded(out)
+    assert panel_reads(out)["list_not_read"] == 1
+
+
+def test_a_pilot_does_not_call_a_list_with_a_card_left_out_clean(attached, serve, tmp_path, capsys,
+                                                                 monkeypatch):
+    monkeypatch.setattr(pressing, "PRESS_MS", 1000)
+    amex = serve(cards=[A, CANCELED, B], list_ms=500)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys, "--pilot")
+    report = folded(out[out.index("PILOT RESULTS"):])
+
+    assert "No problems detected" not in report
+    assert "Not read: Canceled Card (55555)" in report
