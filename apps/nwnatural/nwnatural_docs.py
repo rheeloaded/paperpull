@@ -2,7 +2,7 @@
 
 NW Natural keeps its customers' bills on its Paymentus payment portal,
 reached from www.nwnatural.com. This downloads the bill PDFs the portal's
-Bill History lists, about eight years of them. The orchestrator below is the same one every
+Bill History lists, about seven years of them. The orchestrator below is the same one every
 other statement app runs on. Everything about the site itself is in
 nwnatural_site.py.
 

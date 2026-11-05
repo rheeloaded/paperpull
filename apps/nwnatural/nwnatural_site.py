@@ -304,7 +304,7 @@ def is_safe_control(name: str) -> bool:
 ALLOWED_HOSTS = {"www.nwnatural.com", PORTAL_HOST}
 BILL_ID_RE = re.compile(r"bill-[0-9]{4}-[0-9]{2}-[0-9]{2}")
 # Bill History lists every bill from this day on. A start this early takes
-# the whole history the portal keeps (eight years were seen).
+# the whole history the portal keeps (seven years were seen).
 HISTORY_FROM = (1, 1, 2000)
 MAX_LIST_BYTES = 5 * 1024 * 1024
 MAX_PDF_BYTES = 25 * 1024 * 1024

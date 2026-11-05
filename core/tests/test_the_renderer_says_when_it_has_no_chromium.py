@@ -138,21 +138,25 @@ def test_the_store_edition_is_not_given_a_line_it_cannot_run(monkeypatch, python
     assert "run this line" not in said
 
 
-def test_the_python_the_store_installs_keeps_its_line(monkeypatch):
+@pytest.mark.parametrize("python", [
+    r"C:\Users\a\AppData\Local\Microsoft\WindowsApps"
+    r"\PythonSoftwareFoundation.Python.3.12_abc123\python.exe",
+    r"C:\Users\a\AppData\Local\Microsoft\WindowsApps\python.exe",
+    r"C:\dev\WindowsApps\paperpull\gui\.venv\Scripts\python.exe",
+])
+def test_a_python_that_is_in_no_store_package_keeps_its_line(monkeypatch, python):
     """Windows keeps its app aliases in a folder of the same name, and a
-    checkout on the Store's own Python does run from there, so that is not
-    PaperPull's package."""
-    python = (r"C:\Users\a\AppData\Local\Microsoft\WindowsApps"
-              r"\PythonSoftwareFoundation.Python.3.12_abc123\python.exe")
+    checkout on the Store's own Python does run from there. Somebody may
+    also keep a checkout in a folder called that. Neither is a package."""
     monkeypatch.delattr(browser.sys, "frozen", raising=False)
     monkeypatch.setattr(browser.sys, "executable", python)
     assert browser.browser_install_command() == [python, "-m", "playwright", "install", "chromium"]
 
 
 def test_the_server_is_told_nothing_of_terminals_or_a_browser_of_its_own(tmp_path, monkeypatch):
-    """The container's root is read-only and its Chrome is its own, so a
-    command to paste and the Chrome or Edge you already have fit nobody
-    there."""
+    """The container's Chrome is its own and a download there would not
+    last, so a command to paste and the Chrome or Edge you already have fit
+    nobody there."""
     monkeypatch.setenv("PAPERPULL_SERVER", "1")
     monkeypatch.setattr(browser, "browser_install_command",
                         lambda: ["/opt/python", "-m", "playwright", "install", "chromium"])
@@ -180,14 +184,18 @@ def test_the_mac_apps_line_keeps_bytecode_out_of_its_signed_bundle(monkeypatch):
     assert python + " -B -s -m playwright install chromium" in browser.missing_chromium_words()
 
 
-def test_a_checkout_on_a_mac_keeps_a_playwright_in_its_own_site_folder(monkeypatch):
+@pytest.mark.parametrize("python", [
+    "/usr/local/bin/python3",
+    "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+])
+def test_a_checkout_on_a_mac_keeps_a_playwright_in_its_own_site_folder(monkeypatch, python):
     """-s would hide a Playwright kept in the person's own site folder, so
-    only the app takes it."""
+    only the app's Python takes it, not one that happens to sit in a bundle."""
     monkeypatch.delattr(browser.sys, "frozen", raising=False)
-    monkeypatch.setattr(browser.sys, "executable", "/usr/local/bin/python3")
+    monkeypatch.setattr(browser.sys, "executable", python)
     monkeypatch.setattr(sys, "platform", "darwin")
     assert browser.browser_install_command() == \
-        ["/usr/local/bin/python3", "-m", "playwright", "install", "chromium"]
+        [python, "-m", "playwright", "install", "chromium"]
 
 
 def test_any_other_failure_to_launch_is_passed_on_as_it_was(tmp_path):

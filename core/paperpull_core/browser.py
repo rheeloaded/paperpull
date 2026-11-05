@@ -507,14 +507,16 @@ def pause_for_sign_in(say=print, next_step: str = "Discover or Pilot") -> bool:
 
 
 def _in_a_store_package(program) -> bool:
-    """Whether `program` sits in a Microsoft Store package's own folder, one
-    named WindowsApps. A program in there that the package does not declare
-    will not start from a person's Command Prompt. The WindowsApps folder
-    inside a Microsoft folder is another thing, where Windows keeps its app
-    aliases, and the Python the Store installs does run from there."""
+    """Whether `program` sits in a Microsoft Store package's own folder, a
+    folder named WindowsApps holding one with the package's full name, which
+    has two underscores before its publisher. A program in there that the
+    package does not declare will not start from a person's Command Prompt.
+    The folder of that name where Windows keeps its app aliases, which the
+    Python the Store installs runs from, holds no such name, and neither does
+    a checkout somebody keeps in a folder called WindowsApps."""
     parts = [part.lower() for part in re.split(r"[\\/]+", str(program))]
-    return any(part == "windowsapps" and parts[i - 1:i] != ["microsoft"]
-               for i, part in enumerate(parts))
+    return any(part == "windowsapps" and "__" in following
+               for part, following in zip(parts, parts[1:]))
 
 
 def browser_install_command():
@@ -536,7 +538,7 @@ def browser_install_command():
     if _in_a_store_package(sys.executable):
         return None
     if not getattr(sys, "frozen", False):
-        flags = ["-B", "-s"] if ".app/Contents/" in sys.executable else []
+        flags = ["-B", "-s"] if ".app/Contents/Resources/python/" in sys.executable else []
         return [sys.executable, *flags, "-m", "playwright", "install", "chromium"]
     try:
         # Private API, hence the guard. If it moves, saying so plainly beats
@@ -700,8 +702,8 @@ def _terminal_name() -> str:
 def missing_chromium_words() -> str:
     """What to tell somebody whose step needed PaperPull's own Chromium and
     found none: what it is, that nothing of theirs is wrong, and how to get it.
-    PaperPull Server's root is read-only and its Chrome is its own, so neither
-    a download nor the person's own browser fits there (#110)."""
+    PaperPull Server's Chrome is its own and a download there would not last,
+    so neither a download nor the person's own browser fits (#110)."""
     if os.environ.get("PAPERPULL_SERVER") == "1":
         return ("This step prints the page in a copy of Chromium that this PaperPull Server "
                 "container does not hold. Nothing is wrong with your account or with this "

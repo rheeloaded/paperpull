@@ -13,7 +13,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 - **NW Natural, the 80th app, monthly gas bills (#126).** It downloads
   each month's bill from NW Natural's Paymentus payment portal, about
-  eight years of them. Nothing is clicked. The app reads Bill History from
+  seven years of them. Nothing is clicked. The app reads Bill History from
   inside the tab the person signed in with, and each bill's address, which
   carries the session's token, stays in memory for the run and is never
   written down. A second account, a pager, a history with no bills or a

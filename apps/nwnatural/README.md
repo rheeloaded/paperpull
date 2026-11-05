@@ -3,7 +3,7 @@
 Bills are read from NW Natural's Paymentus payment portal, from inside the tab you signed in with; nothing is clicked. See the notes at the top of `nwnatural_site.py`.
 
 Downloads the monthly gas bills of your NW Natural account from its
-Paymentus payment portal, `ipn2.paymentus.com`, as PDFs, about eight years
+Paymentus payment portal, `ipn2.paymentus.com`, as PDFs, about seven years
 of them. You sign in yourself on `www.nwnatural.com`, with your password
 and any verification code, in a browser on the port named in
 `config.json` (see `config.example.json`, port 9301), and go on to the

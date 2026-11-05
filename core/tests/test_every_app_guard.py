@@ -415,7 +415,6 @@ _ALLOWLIST_NAMES = {"is_safe_control", "SAFE_DOC_CONTROL_RE", "SAFE_DOC_CONTROL_
 CLICK_NOTHING = {
     "affirm", "anthem", "apple", "citi", "ezpassva", "fedex", "fidelity", "gap", "github",
     "homedepot", "invest529", "irs", "kroger", "lowes", "myecp", "mypay", "netbenefits",
-    "homedepot", "invest529", "irs", "kroger", "lowes", "myecp", "mypay", "netbenefits",
     "nwnatural", "optum", "paylocity", "portlandgeneral", "sdge", "stripe", "tsp",
     "tualatin", "uber", "ukg", "ups",
 }

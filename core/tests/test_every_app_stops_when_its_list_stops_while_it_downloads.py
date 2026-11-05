@@ -239,8 +239,8 @@ NOT_A_LIST = {
         "another account shown on the site than the one a bill was listed under, "
         "which the person chooses again before Continue",
     ("nwnatural", "Challenged"):
-        "the portal's bot protection answering in the list's place, which the person "
-        "answers in the browser before Continue",
+        "the portal's bot protection answering in place of the list or a bill, which "
+        "the person answers in the browser before Continue",
 }
 
 
