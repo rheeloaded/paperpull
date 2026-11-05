@@ -1190,8 +1190,9 @@ def _on_disk(chromium, kwargs: dict) -> dict:
     takes the newest build, its headless shell ahead of the full build of
     the same number, and a launch with a window takes only a full build.
     Playwright looks for the executable and never for INSTALLED_MARK, so a
-    build of its own that stopped partway counts as missing here, or it
-    would be started as it is."""
+    build of its own that stopped partway counts as missing here, and a
+    finished build is named where there is one. With none, the launch is left
+    as it is and Playwright starts that folder."""
     if kwargs.get("executable_path") or kwargs.get("channel"):
         return kwargs
     own = _playwrights_own(chromium)

@@ -66,8 +66,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   nothing looked for that mark, so a closed window or a power cut during the
   unpacking left a folder that counted as the newest build. The sign-in
   tried it with the finished build beside it never started, and no repair
-  was offered. A build without the mark now counts as not there, wherever
-  builds are counted, offered or started.
+  was offered. A build without the mark now counts as not there, and the
+  finished build beside it is the one started. With no finished build on the
+  computer, a launch through Playwright still starts Playwright's own folder
+  as it always did.
 
 ## [0.60.2] - 2026-11-04
 
