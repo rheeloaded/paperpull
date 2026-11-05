@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import glob
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -111,9 +112,32 @@ def _build_number(path: str) -> int:
     return int(found[-1]) if found else -1
 
 
+# The file Playwright writes into a build's folder last of all, once every
+# file of the build is unpacked. A folder without it is an install that
+# stopped partway, a closed window or a power cut at the wrong moment. That
+# folder can hold the executable and most of the build, so looking for the
+# executable alone took it for the newest build. The sign-in then started it
+# with the finished build beside it never tried, nothing was due because the
+# number was not behind, and a browser counted as being there, so no repair
+# was offered either (#132). Playwright's own removal reads it the same way,
+# and chromium_builds in tools/run_all_tests.py does too.
+INSTALLED_MARK = "INSTALLATION_COMPLETE"
+
+
+def _finished(found: List[str], above: int) -> List[str]:
+    """The executables in `found` whose build finished installing, the folder
+    of the build being `above` folders over each one. Counted from the
+    executable, so a folder of any name, chromium-1248 - Copy included, is
+    read as Playwright's own is. isfile, which never raises, since a folder
+    that cannot be read must not stop a sign-in."""
+    return [path for path in found
+            if os.path.isfile(Path(path).parents[above] / INSTALLED_MARK)]
+
+
 def _bundled_chromium(root: Optional[Path] = None) -> List[str]:
     """Every full Chromium build of Playwright's on disk, newest first, in
-    root or else in the folder Playwright keeps its browsers in."""
+    root or else in the folder Playwright keeps its browsers in. A build that
+    never finished installing is not there (_finished)."""
     root = root or _playwright_root()
     if root is None:
         return []
@@ -143,7 +167,7 @@ def _bundled_chromium(root: Optional[Path] = None) -> List[str]:
                     "chromium-*/chrome-linux/chrome"]
     found: List[str] = []
     for pattern in patterns:
-        found += glob.glob(str(root / pattern))
+        found += _finished(glob.glob(str(root / pattern)), pattern.count("/") - 1)
 
     # Newest build first. Playwright pins a build per release, and an older
     # build stays on disk while another installation still uses it (an app
@@ -179,11 +203,13 @@ _HEADLESS_SHELLS = {
 
 def _headless_shells(root: Path) -> List[str]:
     """Every headless shell build of Playwright's in root, newest first.
-    Each has no window, so it is only ever handed to a headless launch."""
+    Each has no window, so it is only ever handed to a headless launch. A
+    shell that never finished installing is not there (_finished)."""
     inner = _HEADLESS_SHELLS.get(sys.platform, _HEADLESS_SHELLS["linux"])
     found: List[str] = []
     for pattern in inner:
-        found += sorted(glob.glob(str(root / "chromium_headless_shell-*" / pattern)))
+        found += _finished(sorted(glob.glob(str(root / "chromium_headless_shell-*" / pattern))),
+                           pattern.count("/"))
     return sorted(found, key=_build_number, reverse=True)
 
 
@@ -396,8 +422,8 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
 
 
 def bundled_chromium_present() -> bool:
-    """Whether a Chromium of Playwright's is on disk. Any build will do, an
-    older one than the installed Playwright's included, since a launch
+    """Whether a Chromium of Playwright's is on disk. Any finished build will
+    do, an older one than the installed Playwright's included, since a launch
     takes the newest one there when Playwright's own is missing (_on_disk)."""
     return bool(_bundled_chromium())
 
@@ -610,6 +636,275 @@ def fetch_bundled_chromium(assume_yes: bool = False) -> bool:
     return True
 
 
+# -- keeping the private Chromium from falling behind (#132) ------------------------
+#
+# After the first download nothing updated PaperPull's own Chromium. Sign-in
+# always starts the newest build on disk, and a PaperPull upgrade that brings
+# a newer Playwright does not download that Playwright's Chromium, so a
+# computer that took the download months ago kept signing in with that build.
+# Each Playwright release carries a newer Chromium with its security fixes,
+# so the copy fell further behind with every release. Nothing broke, since
+# Playwright 1.64.1 drove builds 1234 and 1228 without trouble, it only got
+# old (_on_disk keeps every launch working on whatever build is there).
+#
+# So the sign-in offers the update, in the place and the way it offers the
+# first download, when the copy it is about to start is older than the build
+# the installed Playwright was made for. It is offered only when that copy is
+# the one that would start. Someone who signs in through their own Edge or
+# Chrome is never asked about a copy they do not use. Under the control panel
+# nobody can be asked, so the panel's log says so and gives the command.
+#
+# A failed update must never cost a person the browser they had. Playwright's
+# install removes builds nothing else uses BEFORE it downloads
+# (registry.install in its coreBundle.js, from 1.62 to 1.64.1 alike), and after
+# an upgrade the old build counts as unused. Measured on 2026-11-04 with the
+# download refused, the install removed the build and exited 1, and the sign-in
+# then had nothing to start, or fell through to Edge on an empty profile. So
+# the download runs with KEEP_OLD_BUILDS set, and the old build stays until the
+# new one has opened a window on the person's own profile. Only then is the
+# same command run again without it, which downloads nothing and removes what
+# nothing else uses, so the disk use ends up about the same.
+#
+# That second run is started and left to itself. Playwright's removal keeps
+# trying a file a running program holds, and it waited 745 seconds on one left
+# open from the old build's folder. Each app has its own port, so a sign-in
+# cannot see another app's window, and the offer says to close them first. A
+# window left open on a Mac or Linux should lose its files as the removal runs,
+# which could not be run here.
+#
+# A person who says no is not asked again until the Playwright wants a newer
+# build still. The answer is a file beside the builds, so every app shares it
+# and it goes with them.
+
+DECLINED_UPDATE = "paperpull-chromium-update-declined"
+
+# With this set, Playwright's install leaves builds nothing else uses alone.
+# 1.62 reads it as well as 1.64.1. Its --no-remove came in with 1.63, and
+# checkouts still have 1.62.
+KEEP_OLD_BUILDS = "PLAYWRIGHT_SKIP_BROWSER_GC"
+
+
+def _wanted_chromium_build() -> Optional[int]:
+    """The Chromium build the installed Playwright was made for, from its
+    browsers.json, or None when it cannot be read."""
+    package = _playwright_package()
+    if package is None:
+        return None
+    try:
+        with open(package / "driver" / "package" / "browsers.json", encoding="utf-8") as f:
+            for entry in json.load(f)["browsers"]:
+                if entry.get("name") == "chromium":
+                    return int(entry["revision"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def chromium_update_due(path: str) -> Optional[Tuple[int, int]]:
+    """(the build `path` is, the build Playwright wants) when the Chromium at
+    `path`, a build of Playwright's, is older than the one the installed
+    Playwright was made for. None when it is as new, or newer, or either
+    cannot be told."""
+    have, want = _build_number(path), _wanted_chromium_build()
+    if have < 0 or want is None or have >= want:
+        return None
+    return have, want
+
+
+def _declined_file() -> Optional[Path]:
+    root = _playwright_root()
+    return root / DECLINED_UPDATE if root else None
+
+
+def _update_declined(want: int) -> bool:
+    """Whether somebody said no to `want` or a build at least as new. Apps on
+    two Playwrights can share one folder of builds, and were an exact match
+    asked for, each would overwrite the other's answer and ask again."""
+    marker = _declined_file()
+    try:
+        return bool(marker) and int(marker.read_text(encoding="utf-8").strip()) >= want
+    except (OSError, ValueError):
+        return False
+
+
+def _remember_declined(want: int) -> None:
+    marker = _declined_file()
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("%d\n" % want, encoding="utf-8")
+    except (OSError, AttributeError):
+        pass    # asked again next time, which is all that costs
+
+
+def _install_takes_no_remove() -> bool:
+    """Whether the installed Playwright's install takes --no-remove, which
+    came in with 1.63, by the version its driver gives. 1.62 stops at a flag
+    it does not know, and downloads nothing."""
+    package = _playwright_package()
+    if package is None:
+        return False
+    try:
+        with open(package / "driver" / "package" / "package.json", encoding="utf-8") as f:
+            major, minor = str(json.load(f)["version"]).split(".")[:2]
+        return (int(major), int(minor)) >= (1, 63)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _update_line(cmd) -> str:
+    """The line somebody pastes to update, which keeps the old build as the
+    sign-in's own download does. Pasted without that, it removes the build
+    first, and a download that fails then leaves them nothing."""
+    if _install_takes_no_remove():
+        return _command_line([*cmd, "--no-remove"])
+    if sys.platform == "win32":
+        return "set %s=1&& %s" % (KEEP_OLD_BUILDS, _command_line(cmd))
+    return "%s=1 %s" % (KEEP_OLD_BUILDS, _command_line(cmd))
+
+
+def offer_chromium_update(have: int, want: int, assume_yes: bool = False) -> Optional[bool]:
+    """Offer to download the Chromium build Playwright wants, beside the
+    older one on disk, and do it if agreed. None when nothing was tried. True
+    when the install ended well with a finished build at least that new on
+    disk. False when it was tried and did not, which can still have left a
+    finished build, so the caller reads the folder again either way."""
+    if _update_declined(want):
+        return None
+    cmd = browser_install_command()
+
+    print()
+    print("The private copy of Chromium on this computer is build %d. This PaperPull's" % have)
+    print("Playwright was made for build %d. Newer builds carry newer security fixes," % want)
+    print("and the copy falls further behind with every release. Signing in works")
+    print("with the old one, so nothing is wrong, but it is better kept up to date.")
+    print()
+
+    if cmd is None:
+        # The Store edition (browser_install_command), so a yes could do
+        # nothing and nobody is asked for one.
+        print("This build cannot download it for you.")
+        print("Signing in goes on with the build that is here.")
+        return None
+
+    if not assume_yes and not can_ask():
+        # The control panel, which cannot ask, or anything else with no one
+        # at the keyboard. Nothing is remembered, since nobody said no.
+        print("Updating downloads about 400 MB, and the build you have stays beside it.")
+        print("To update it, open %s, run the line below, and sign in again:" % _terminal_name())
+        print(_update_line(cmd))
+        print("Signing in goes on with the build that is here.")
+        return None
+
+    print("Updating downloads about 400 MB. The build you have stays until the new one")
+    print("has opened, and is then cleared away, so the space used stays about the same.")
+    print("Close any other sign-in windows first, since they run from that build.")
+    print()
+    if not assume_yes:
+        try:
+            answer = input("Update it now? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if answer not in ("y", "yes"):
+            _remember_declined(want)
+            print("Nothing was downloaded. You will be asked again when PaperPull wants")
+            print("a newer build than %d." % want)
+            return None
+
+    print()
+    print("Downloading. This takes a few minutes on a slow connection.")
+    try:
+        rc = subprocess.call(cmd, env=dict(os.environ, **{KEEP_OLD_BUILDS: "1"}))
+    except KeyboardInterrupt:
+        print()
+        print("The download was stopped. Signing in goes on with the build that is here,")
+        print("and you will be asked again at the next sign-in.")
+        return False
+    except OSError as e:
+        print("Could not start the download (%s)." % e)
+        return False
+    newest = _bundled_chromium()
+    if rc != 0 or not newest or _build_number(newest[0]) < want:
+        print()
+        print("The download did not finish. Signing in goes on with the build that")
+        print("is here, and you can try again at the next sign-in.")
+        return False
+    print()
+    print("Done. Now signing in with build %d." % _build_number(newest[0]))
+    return True
+
+
+def _clear_old_builds() -> None:
+    """Run the install again with nothing held back, now that the new build
+    has opened, so Playwright removes what nothing else uses, and do not wait
+    for it. It downloads nothing. Playwright's removal can spend minutes on a
+    file another window holds, and nobody signing in should wait on that. It
+    outlives this process and writes nowhere, as a sign-in window does
+    (_launch). On Windows it gets a console nobody sees, since a process with
+    none would open a new window for the Node driver Playwright's Python
+    starts. A run that cannot start costs only the space the old build takes."""
+    try:
+        cmd = browser_install_command()
+        if cmd is None:
+            return
+        hidden = {}
+        if sys.platform == "win32":
+            hidden["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True, **hidden)
+    except Exception:
+        pass
+
+
+def _set_aside_new_build(path: str, old: str) -> None:
+    """The build an update brought would not open, so the old one signs in
+    and goes on being the one that does. Left as it was, the new build would
+    be the newest at every sign-in from now on, so its mark is taken away,
+    which makes it a build that is not there (_finished), and the update is
+    not offered again until Playwright wants a newer build still. Should the
+    new build only have been slow, this costs an update and nothing else."""
+    build = _build_number(path)
+    try:
+        print()
+        print("Build %d did not open on this computer, so signing in goes on with build"
+              " %d," % (build, _build_number(old)))
+        print("which stays where it is. You will be asked again when PaperPull wants a")
+        print("newer build than %d." % build)
+        _remember_declined(build)
+        for folder in Path(path).parents:
+            if os.path.isfile(folder / INSTALLED_MARK):
+                os.remove(folder / INSTALLED_MARK)
+                break
+    except Exception:
+        pass
+
+
+def _offer_update_at_sign_in(had: Tuple[str, str], allow_fetch: bool) -> Optional[bool]:
+    """Offer the update when `had`, the browser about to start, is the
+    private copy and has fallen behind. Answers as offer_chromium_update, and
+    None when there was nothing to offer. All of this is optional, so nothing
+    it meets, a Ctrl-C or a browsers.json no one could read included, keeps
+    the sign-in from going on (_say_shared_port). An offer that ended that way
+    answers False, since a download may have left something.
+
+    Never for a build in chrome-linux. Every new build lands in chrome-linux64
+    or chrome-linux-arm64, so with that one gone _real_first would turn and
+    move the person onto a browser of their own with Chromium's profile,
+    which browser_candidates warns against, and on Ubuntu 23.10 and later the
+    new build may not even start its sandbox."""
+    tried = None
+    try:
+        if (allow_fetch and had[0] == CHROMIUM and os.environ.get("PAPERPULL_SERVER") != "1"
+                and Path(had[1]).parent.name != "chrome-linux"):
+            due = chromium_update_due(had[1])
+            if due:
+                tried = False
+                tried = offer_chromium_update(*due)
+    except (Exception, KeyboardInterrupt):
+        pass
+    return tried
+
+
 def launch_own_browser(chromium, user_data_dir, **kwargs):
     """A browser of the app's own, for settings that name no cdp_url, said
     out loud. Every app opens one that way when its config has no cdp_url,
@@ -695,6 +990,14 @@ def is_missing_chromium(error) -> bool:
     return "executable doesn't exist" in str(error).lower()
 
 
+def _command_line(cmd) -> str:
+    """`cmd` as one line that can be pasted into a terminal, each part
+    quoted the way this system's shell reads it."""
+    if sys.platform == "win32":
+        return subprocess.list2cmdline(cmd)
+    return " ".join(shlex.quote(part) for part in cmd)
+
+
 def _terminal_name() -> str:
     return {"darwin": "Terminal", "win32": "Command Prompt"}.get(sys.platform, "a terminal")
 
@@ -717,8 +1020,7 @@ def missing_chromium_words() -> str:
     if cmd is None:
         return (head + " This build cannot download it for you, so the document was "
                 "not saved. Ask at https://github.com/rheeloaded/paperpull/issues.")
-    shown = subprocess.list2cmdline(cmd) if sys.platform == "win32" else " ".join(
-        shlex.quote(part) for part in cmd)
+    shown = _command_line(cmd)
     return (head + " To download it, about 400 MB, kept for PaperPull alone, open "
             + _terminal_name() + ", run this line, and then run this step again: "
             + shown)
@@ -861,7 +1163,10 @@ def _on_disk(chromium, kwargs: dict) -> dict:
     Playwright's own build is on disk, or with nothing at all on disk, so
     Playwright says what is missing as it always did. A headless launch
     takes the newest build, its headless shell ahead of the full build of
-    the same number, and a launch with a window takes only a full build."""
+    the same number, and a launch with a window takes only a full build.
+    Playwright looks for the executable and never for INSTALLED_MARK, so a
+    build of its own that stopped partway counts as missing here, or it
+    would be started as it is."""
     if kwargs.get("executable_path") or kwargs.get("channel"):
         return kwargs
     own = _playwrights_own(chromium)
@@ -883,7 +1188,7 @@ def _on_disk(chromium, kwargs: dict) -> dict:
                        reverse=True)
         found = [path for _b, _shell, path in found]
     else:
-        if own.is_file():
+        if own.is_file() and os.path.isfile(folder / INSTALLED_MARK):
             return kwargs
         found = _bundled_chromium(root)
     if not found:
@@ -999,7 +1304,9 @@ def open_signin_browser(profile_dir, port: str, url: str,
     Each candidate is tried in turn, because a launch is the only honest test.
     A browser can be installed and still fail to open a debugging port, and
     checking for the file on disk cannot tell the difference. Only when nothing
-    answers, and only then, is the 400 MB download offered.
+    answers is the 400 MB download of a first copy offered. A private copy that
+    is about to start and has fallen behind is offered its update first, and
+    whatever comes of that the sign-in goes on (_offer_update_at_sign_in).
 
     A port another browser already holds is said and used, never launched
     over. A browser started there cannot take the port, so it opened as a
@@ -1046,6 +1353,25 @@ def open_signin_browser(profile_dir, port: str, url: str,
         else:
             print("No browser this tool can drive is available.")
         return None
+
+    # The private copy of Chromium that is about to be started may be older
+    # than the one this Playwright was made for (#132). Asked only when it is
+    # the browser that would start, and never on PaperPull Server.
+    had = candidates[0]
+    update = _offer_update_at_sign_in(had, allow_fetch)
+    if update is not None:
+        # Read again whatever came of it, since Playwright fetches Chromium
+        # first and an install can end with an error and a finished build.
+        candidates = browser_candidates(prefer_real=prefer_real, mode=mode) or candidates
+        if candidates[0] != had:
+            name, exe = candidates[0]
+            opened = _launch(exe, name, profile_dir, port, url, explain_failure=False, mode=mode)
+            if opened:
+                if update:
+                    _clear_old_builds()
+                return opened
+            _set_aside_new_build(exe, had[1])
+            candidates = [had] + candidates[1:]
 
     opened = _try_each(candidates, profile_dir, port, url, mode=mode)
     if opened:

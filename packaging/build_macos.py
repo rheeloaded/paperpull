@@ -37,8 +37,9 @@ the panel script to Terminal, and that is all it does.
 WHAT IS NOT IN IT
 
 The 400 MB Chromium. Chrome, Edge, Brave, Vivaldi or Opera already on the Mac
-is used, and the download is offered at sign-in only if none is found. Safari
-cannot be driven this way.
+is used, and the first download is offered at sign-in only if none is found. A
+private copy somebody took that way is offered its update at sign-in when it
+falls behind. Safari cannot be driven this way.
 
 Anything untracked. Only files git knows about go in.
 
