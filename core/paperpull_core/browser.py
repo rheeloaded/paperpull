@@ -717,10 +717,13 @@ def _declined_file() -> Optional[Path]:
 
 
 def _update_declined(want: int) -> bool:
+    """Whether somebody said no to `want` or a build at least as new. Apps on
+    two Playwrights can share one folder of builds, and were an exact match
+    asked for, each would overwrite the other's answer and ask again."""
     marker = _declined_file()
     try:
-        return bool(marker) and marker.read_text(encoding="utf-8").strip() == str(want)
-    except OSError:
+        return bool(marker) and int(marker.read_text(encoding="utf-8").strip()) >= want
+    except (OSError, ValueError):
         return False
 
 

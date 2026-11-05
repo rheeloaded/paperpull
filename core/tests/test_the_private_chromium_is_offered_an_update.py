@@ -240,6 +240,34 @@ def test_a_newer_wanted_build_asks_again_after_a_no(machine, monkeypatch, tmp_pa
     assert len(machine.asked) == 2
 
 
+def test_two_playwrights_in_one_checkout_share_a_no(machine, monkeypatch, tmp_path):
+    """Apps on 1.63 and 1.64.1 want different builds of one folder. A no for
+    the newer one holds for the older, so alternating sign-ins stop asking."""
+    machine.answers = ["n"]
+    for want in (WANTED, WANTED - 5, WANTED, WANTED - 5):
+        monkeypatch.setattr(browser, "_wanted_chromium_build", lambda want=want: want)
+        _sign_in(tmp_path)
+    assert len(machine.asked) == 1
+
+
+def test_a_no_to_the_older_build_does_not_answer_for_the_newer(machine, monkeypatch, tmp_path):
+    machine.answers = ["n", "n"]
+    for want in (WANTED - 5, WANTED, WANTED - 5, WANTED):
+        monkeypatch.setattr(browser, "_wanted_chromium_build", lambda want=want: want)
+        _sign_in(tmp_path)
+    assert len(machine.asked) == 2
+
+
+@pytest.mark.parametrize("held", [b"\xff\xfe\x00bad", b"", b"not a build", b"1248.5"],
+                         ids=["bad bytes", "empty", "words", "not a whole number"])
+def test_an_answer_that_cannot_be_read_is_no_answer(machine, tmp_path, held):
+    (machine.root / browser.DECLINED_UPDATE).write_bytes(held)
+    assert browser._update_declined(WANTED) is False
+    machine.answers = ["n"]
+    _sign_in(tmp_path)
+    assert len(machine.asked) == 1
+
+
 def test_an_empty_answer_is_a_no(machine, tmp_path):
     machine.answers = [""]
     _sign_in(tmp_path)
