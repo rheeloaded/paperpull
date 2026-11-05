@@ -771,7 +771,6 @@ def offer_chromium_update(have: int, want: int, assume_yes: bool = False) -> Opt
     if _update_declined(want):
         return None
     cmd = browser_install_command()
-    shown = _update_line(cmd) if cmd is not None else ""
 
     print()
     print("The private copy of Chromium on this computer is build %d. This PaperPull's" % have)
@@ -779,15 +778,20 @@ def offer_chromium_update(have: int, want: int, assume_yes: bool = False) -> Opt
     print("and the copy falls further behind with every release. Signing in works")
     print("with the old one, so nothing is wrong, but it is better kept up to date.")
     print()
+
+    if cmd is None:
+        # The Store edition (browser_install_command), so a yes could do
+        # nothing and nobody is asked for one.
+        print("This build cannot download it for you.")
+        print("Signing in goes on with the build that is here.")
+        return None
+
     if not assume_yes and not can_ask():
         # The control panel, which cannot ask, or anything else with no one
         # at the keyboard. Nothing is remembered, since nobody said no.
-        if shown:
-            print("Updating downloads about 400 MB, and the build you have stays beside it.")
-            print("To update it, open %s, run the line below, and sign in again:" % _terminal_name())
-            print(shown)
-        else:
-            print("This build cannot download it for you.")
+        print("Updating downloads about 400 MB, and the build you have stays beside it.")
+        print("To update it, open %s, run the line below, and sign in again:" % _terminal_name())
+        print(_update_line(cmd))
         print("Signing in goes on with the build that is here.")
         return None
 
@@ -807,9 +811,6 @@ def offer_chromium_update(have: int, want: int, assume_yes: bool = False) -> Opt
             print("a newer build than %d." % want)
             return None
 
-    if cmd is None:
-        print("This build cannot download a browser for you.")
-        return None
     print()
     print("Downloading. This takes a few minutes on a slow connection.")
     try:

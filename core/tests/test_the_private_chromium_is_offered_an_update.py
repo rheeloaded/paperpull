@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from paperpull_core import browser  # noqa: E402
 
 OLD, WANTED = 1228, 1248
+REAL_INSTALL_COMMAND = browser.browser_install_command
 REAL_WANTED_BUILD = browser._wanted_chromium_build
 INSTALL = ["/pkg/python3", "-m", "playwright", "install", "chromium"]
 INNER = ("chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/"
@@ -456,12 +457,26 @@ def test_a_new_build_that_would_not_open_is_not_the_newest_at_the_next_sign_in(m
     assert len(machine.downloads) == 1
 
 
-def test_a_build_that_cannot_download_says_so(machine, monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(browser, "browser_install_command", lambda: None)
-    machine.answers = ["y"]
-    _sign_in(tmp_path)
-    assert machine.downloads == []
-    assert "cannot download" in capsys.readouterr().out
+@pytest.mark.parametrize("tty", [True, False], ids=["from a terminal", "under the panel"])
+def test_the_store_edition_is_told_it_cannot_and_goes_on_with_the_build_it_has(
+        machine, monkeypatch, tmp_path, capsys, tty):
+    """browser_install_command's own answer for a Python inside a Store
+    package, which will not start from a person's Command Prompt. A yes could
+    do nothing there, so nobody is asked, and nothing is printed to paste."""
+    monkeypatch.setattr(browser, "browser_install_command", REAL_INSTALL_COMMAND)
+    monkeypatch.setattr(sys, "executable", "C:\\Program Files\\WindowsApps\\"
+                                           "PaperPull_0.61.0.0_x64__abcdefghijklm\\python\\python.exe")
+    assert browser.browser_install_command() is None
+    machine.tty = tty
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.old, "profile")]
+    assert machine.asked == [] and machine.downloads == [] and machine.cleared == []
+    said = capsys.readouterr().out
+    assert "cannot download it for you" in said
+    assert "Signing in goes on with the build that is here" in said
+    assert "playwright install" not in said and "400 MB" not in said
+    # Nobody said no, so nothing is remembered
+    assert not (machine.root / browser.DECLINED_UPDATE).exists()
 
 
 # -- at sign-in, with no one to ask (the control panel) -----------------------------
