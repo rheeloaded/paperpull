@@ -327,36 +327,45 @@ _STATEMENTS_AREA_SEL = (
 )
 
 
+def _says_no_statements(el) -> bool:
+    """Whether `el` shows and says the page has no statements. Words in a
+    page's header or footer are about something else."""
+    if not el.is_visible():
+        return False
+    if el.locator("xpath=ancestor::footer | ancestor::header | ancestor::*[@role='contentinfo']").count() > 0:
+        return False
+    txt = (el.inner_text() or "").strip()
+    return bool(NO_STATEMENTS_RE.search(txt)) and "per post" not in txt.lower()
+
+
+def _innermost_saying(el):
+    """The innermost element of `el` that says there are no statements, or
+    `el` when no element inside it does. The region around the words goes on
+    showing whatever is drawn in it. The element that holds the words is the
+    one that goes when another card's list or message comes."""
+    inner = el.locator("xpath=.//*").filter(has_text=NO_STATEMENTS_RE)
+    for i in range(min(inner.count(), 12) - 1, -1, -1):
+        if _says_no_statements(inner.nth(i)):
+            return inner.nth(i)
+    return el
+
+
 def _get_no_statements_element(page):
-    """Find the specific element declaring no statements, or None."""
+    """Find the innermost element declaring no statements, or None."""
     try:
         # Check statement table/area elements first
         for sel in (_STATEMENTS_AREA_SEL, "table tbody", "section"):
             loc = page.locator(sel)
             for i in range(min(loc.count(), 5)):
                 el = loc.nth(i)
-                if not el.is_visible():
-                    continue
-                if el.locator("xpath=ancestor::footer | ancestor::header | ancestor::*[@role='contentinfo']").count() > 0:
-                    continue
-                txt = (el.inner_text() or "").strip()
-                if "per post" in txt.lower():
-                    continue
-                if NO_STATEMENTS_RE.search(txt):
-                    return el
+                if _says_no_statements(el):
+                    return _innermost_saying(el)
         # Fallback for bare test pages without container elements
         loc = page.locator("p, div[role='alert'], [class*='message']")
         for i in range(min(loc.count(), 10)):
             el = loc.nth(i)
-            if not el.is_visible():
-                continue
-            if el.locator("xpath=ancestor::footer | ancestor::header | ancestor::*[@role='contentinfo']").count() > 0:
-                continue
-            txt = (el.inner_text() or "").strip()
-            if "per post" in txt.lower():
-                continue
-            if NO_STATEMENTS_RE.search(txt):
-                return el
+            if _says_no_statements(el):
+                return _innermost_saying(el)
         return None
     except Exception:
         return None

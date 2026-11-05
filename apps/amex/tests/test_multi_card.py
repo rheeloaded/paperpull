@@ -1111,3 +1111,17 @@ def test_discover_stops_on_a_switch_that_failed_for_any_other_reason(monkeypatch
     with pytest.raises(pressing.NoAnswer):
         app_mod.App.cmd_discover(app)
     assert noted == []
+
+
+def test_the_empty_message_held_is_the_words_and_not_the_region_around_them(page_of):
+    """The region around the words stays whatever is drawn in it, so a wait on
+    it could only run out. The words are held however deep they sit."""
+    pg = page_of(switch_page('<div class="wrap"><p id="empty"><span id="words">'
+                             "No statements available</span></p></div>"))
+    el = site._get_no_statements_element(pg)
+    assert el.get_attribute("id") == "words"
+
+
+def test_the_region_is_held_when_nothing_inside_it_says_the_words(page_of):
+    pg = page_of(switch_page("No statements available"))
+    assert site._get_no_statements_element(pg).get_attribute("id") == "table-area"

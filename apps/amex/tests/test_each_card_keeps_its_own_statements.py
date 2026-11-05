@@ -187,6 +187,8 @@ document.querySelector('[data-test-id$="download-footer-download-confirm-anchor"
 
 A = dict(name="Alpha Card", digits="11111", dates=["2030-11-11"], years=["2030"])
 B = dict(name="Bravo Card", digits="22222", dates=["2030-11-22"], years=["2030"])
+EMPTY_ONE = dict(name="Empty One", digits="33333", dates=[], years=[])
+EMPTY_TWO = dict(name="Empty Two", digits="44444", dates=[], years=[])
 CANCELED = dict(name="Canceled Card", digits="55555", dates=["2029-05-05"], years=["2029"], off=True)
 
 
@@ -506,3 +508,22 @@ def test_a_pilot_does_not_call_a_list_with_a_card_left_out_clean(attached, serve
 
     assert "No problems detected" not in report
     assert "Not read: Canceled Card (55555)" in report
+
+
+def test_two_empty_cards_in_a_row_do_not_cost_the_third_card(attached, serve, tmp_path, capsys):
+    """Two empty cards and then a full one, with the page's own words for the
+    first two. After an empty card there are no Download buttons, so the wait
+    has only the words to go by, and the wait held the region around them,
+    which never goes, and stopped the run at the second card."""
+    amex = serve(cards=[EMPTY_ONE, EMPTY_TWO, B], list_ms=1000)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    said = folded(out)
+
+    kept = saved(tmp_path)
+    assert sorted((r["category"], r["card"]) for r in kept.values()) == [
+        ("Statement", "22222"), ("Year-End Summary", "22222")], (kept, said)
+    for rec in kept.values():
+        assert rec["state"] == State.COMPLETED.value and rec["account"] == "Bravo Card (22222)", rec
+    assert noted_whole(tmp_path) is True
+    assert panel_reads(out)["stopped"] == 0, said
