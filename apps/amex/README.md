@@ -91,7 +91,9 @@ on the statements page, one after the other, and waits for one card's list to
 go before it reads the next. When it cannot tell that the next card's list has
 come, the run stops there. A card the site has turned off in the switcher, a
 canceled card say, is not read. The run names it, counts it for review, writes
-a failure file and goes on with the other cards.
+a failure file and goes on with the other cards. A card the switcher holds but
+does not show, in a collapsed group say, cannot be chosen, so the run names it
+and stops, and with one card shown it does not go the one-card way.
 
 With statements filed by card, a Resume after a list that was not read whole
 takes nothing, since the card the switcher shows may not be the list on show.

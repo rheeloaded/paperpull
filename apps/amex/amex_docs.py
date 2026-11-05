@@ -461,7 +461,8 @@ class App:
                     continue
                 if not switched:
                     raise pressing.no_answer("switch card", "the card did not switch",
-                                             f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+                                             f"{card.get('label', 'A card')} could not be chosen in the card "
+                                             "switcher, so the list was not read whole.")
                 docs = site.collect_download_docs(page, account=card["label"])
                 if not docs and not site.has_no_statements(page):
                     log.info("card %s has no statements and page did not say so", card["label"])

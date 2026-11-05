@@ -181,6 +181,15 @@ if (CFG.option_copies) {
   hidden.appendChild(copies);
   document.getElementById('sw')[CFG.option_copies](hidden);
 }
+if (CFG.hidden_options.length) {
+  const group = document.createElement('div');
+  group.style.display = 'none';
+  group.innerHTML = CFG.hidden_options.map((c, i) => '<div role="option" ' +
+    'data-testid="simple_switcher_product_option_hidden' + i + '">' +
+    '<span data-testid="simple_switcher_display_name">' + c.name + '</span>' +
+    '<span data-testid="simple_switcher_display_number">••••' + c.digits + '</span></div>').join('');
+  document.getElementById('lb').appendChild(group);
+}
 if (CFG.tip_over_switcher) {
   const box = document.getElementById('sw');
   box.style.position = 'relative';
@@ -229,7 +238,8 @@ class FakeAmex:
         self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
                         narrow_copy_first=False, address_moves_first=False,
                         switcher_copies=False, switcher_gone=False, list_ms_of={},
-                        tip_over_switcher=False, dialog_left_open=False, option_copies="")
+                        tip_over_switcher=False, dialog_left_open=False, option_copies="",
+                        hidden_options=[])
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -822,3 +832,34 @@ def test_a_hidden_copy_of_the_options_costs_two_cards_nothing(attached, serve, t
     code, out = run_all(config(tmp_path, attached), capsys)
 
     holds_each_cards_own(tmp_path, out)
+
+
+@pytest.mark.parametrize("cards", [[SOLO], [A, B]], ids=["one-shown", "two-shown"])
+def test_a_hidden_option_naming_another_card_stops_and_nothing_is_called_whole(
+        attached, serve, tmp_path, capsys, cards):
+    """A card in a collapsed group, say. It cannot be chosen, so leaving it out
+    would be a quiet short list, and with one card shown it would go the
+    one-card way. The run names it and stops before any card is read."""
+    amex = serve(cards=cards, hidden_options=[dict(name="Business Card", digits="88888")])
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    said = folded(out)
+
+    assert "Business Card (88888) could not be chosen in the card switcher" in said
+    assert panel_reads(out)["stopped"] == 1, said
+    assert noted_whole(tmp_path) is False
+    assert records(tmp_path, "discovery.json") == {}
+    assert saved(tmp_path) == {} and amex.downloads == []
+    assert not [p for p in amex.pressed if p.startswith("option/")], amex.pressed
+
+
+def test_a_hidden_option_whose_digits_cannot_be_read_counts_as_another_card(attached, serve, tmp_path,
+                                                                            capsys):
+    amex = serve(cards=[SOLO], hidden_options=[dict(name="Business Card", digits="")])
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    assert "at least one card has no account number" in folded(out)
+    assert panel_reads(out)["stopped"] == 1
+    assert noted_whole(tmp_path) is False
+    assert saved(tmp_path) == {} and amex.downloads == []

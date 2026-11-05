@@ -752,6 +752,18 @@ def clean_account_name(raw: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _option_card(opt, index: int) -> dict:
+    """What a card option in the switcher says of its card."""
+    tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
+    name_el = opt.locator(_SWITCHER_NAME_SEL)
+    num_el = opt.locator(_SWITCHER_NUM_SEL)
+    name = clean_account_name(name_el.inner_text()) if name_el.count() else ""
+    num = (num_el.inner_text() if num_el.count() else "").strip()
+    digits = re.sub(r"\D", "", num)
+    label = f"{name} ({digits})" if digits else name
+    return {"index": index, "tid": tid, "label": label, "digits": digits, "name": name}
+
+
 def list_cards(page) -> List[dict]:
     """List every card/account available in the switcher.
 
@@ -792,16 +804,20 @@ def list_cards(page) -> List[dict]:
         log.info("the card switcher offered no card")
         _close_switcher(page, cb)
         return None
-    cards = []
-    for i, opt in enumerate(_shown_options(page)):
-        tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
-        name_el = opt.locator(_SWITCHER_NAME_SEL)
-        num_el = opt.locator(_SWITCHER_NUM_SEL)
-        name = clean_account_name(name_el.inner_text()) if name_el.count() else ""
-        num = (num_el.inner_text() if num_el.count() else "").strip()
-        digits = re.sub(r"\D", "", num)
-        label = f"{name} ({digits})" if digits else name
-        cards.append({"index": i, "tid": tid, "label": label, "digits": digits, "name": name})
+    opts = page.locator(_SWITCHER_OPTION_SEL)
+    read = [(_option_card(opts.nth(i), i), _shows(opts.nth(i))) for i in range(_safe_count(opts))]
+    cards = [card for card, shows in read if shows]
+    # A hidden option goes only as the copy of an option that shows. One that
+    # names another card, or whose digits cannot be read, may be a card in a
+    # collapsed group. select_card cannot press it, so it goes first, and the
+    # run stops there with nothing read and the list not noted whole.
+    known = {c["digits"] for c in cards if c["digits"]}
+    others = []
+    for card, shows in read:
+        if not shows and card["digits"] not in known:
+            known.add(card["digits"])
+            others.append(card)
+    cards = others + cards
     _close_switcher(page, cb)
     if len(cards) > 1 and any(not c["digits"] for c in cards):
         raise pressing.Stop(
