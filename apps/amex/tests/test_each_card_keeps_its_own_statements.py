@@ -113,6 +113,15 @@ function listHtml(c) {
 const area = document.getElementById('table-area');
 function drawList(i) {
   listCard = i;
+  const kept = area.querySelectorAll('[data-testid$="/download-button"]');
+  if (CFG.reuse_rows && kept.length) {
+    // In place, the way a table can redraw, the same nodes with new test ids.
+    const next = document.createElement('div');
+    next.innerHTML = listHtml(C[i]);
+    const ids = next.querySelectorAll('[data-testid$="/download-button"]');
+    kept.forEach((b, n) => b.setAttribute('data-testid', ids[n].getAttribute('data-testid')));
+    return;
+  }
   area.innerHTML = listHtml(C[i]);
 }
 function card(i) {
@@ -239,7 +248,7 @@ class FakeAmex:
                         narrow_copy_first=False, address_moves_first=False,
                         switcher_copies=False, switcher_gone=False, list_ms_of={},
                         tip_over_switcher=False, dialog_left_open=False, option_copies="",
-                        hidden_options=[])
+                        hidden_options=[], reuse_rows=False)
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -739,23 +748,26 @@ def test_an_address_that_moves_first_is_not_the_old_list_going(attached, serve, 
     assert saved(tmp_path) == {}
 
 
-@pytest.mark.parametrize("never,saved_first", [(3, 2), (2, 0)],
-                         ids=["on-the-way-to-the-second-card", "on-the-way-to-the-first-card"])
+@pytest.mark.parametrize("start,flags,saved_first", [
+    (0, (), 2), (1, (), 0), (1, ("--all", "--yes", "--year", "2030"), 0)],
+    ids=["on-the-way-to-the-second-card", "on-the-way-to-the-first-card", "in-a-scoped-run"])
 def test_a_stop_at_a_switch_leaves_nothing_for_a_resume_to_take(attached, serve, tmp_path, capsys,
-                                                                monkeypatch, never, saved_first):
+                                                                monkeypatch, start, flags, saved_first):
     """A download stops with the switcher on the next card and the old list
     still on show. The year-end summaries share a date, so a Resume that took
     the switcher's word saved the old card's summary as the new card's,
     Completed. Resume now saves nothing, and Run All, which goes through the
-    waits, saves each card's own. The list never comes on the way to the first
-    card too, where Run All's first card would otherwise be read on the
-    switcher's word."""
+    waits, saves each card's own. The third switch of the run is the first of
+    its download. Starting on the second card, it is on the way to the first,
+    the first card Run All comes to, which it would read on the switcher's
+    word. A stop in a scoped run leaves no note that says so, so nothing may
+    hang on the note."""
     monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
-    amex = serve(list_ms=300, list_ms_of={str(never): -1})
+    amex = serve(start=start, list_ms=300, list_ms_of={"3": -1})
     their_tab(attached, amex)
     conf = config(tmp_path, attached)
 
-    code, out = run_all(conf, capsys)
+    code, out = run_all(conf, capsys, *flags)
     result = panel_reads(out)
     assert (result["stopped"], result["list_not_read"]) == (1, 1), folded(out)
     assert "the card's statements did not open" in folded(out)
@@ -862,4 +874,37 @@ def test_a_hidden_option_whose_digits_cannot_be_read_counts_as_another_card(atta
     assert "at least one card has no account number" in folded(out)
     assert panel_reads(out)["stopped"] == 1
     assert noted_whole(tmp_path) is False
+    assert saved(tmp_path) == {} and amex.downloads == []
+
+
+@pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
+def test_rows_redrawn_in_place_read_both_cards_as_their_own(attached, serve, tmp_path, capsys, width):
+    """The table keeps its nodes and gives them the next card's test ids, and
+    the PDFs behind them change with it. The held button never hides, so the
+    wait has only its test id to go by."""
+    amex = serve(reuse_rows=True)
+    their_tab(attached, amex, width)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_each_cards_own(tmp_path, out)
+
+
+@pytest.mark.parametrize("cfg", [
+    dict(cards=[A, dict(B, dates=A["dates"])]), dict(list_ms_of={"1": -1})],
+    ids=["same-first-date", "list-never-changes"])
+def test_rows_kept_with_the_same_id_stop_with_the_list_unread(attached, serve, tmp_path, capsys,
+                                                              monkeypatch, cfg):
+    """Reused rows whose first date is the same on both cards cannot be told
+    from a list that never changed, so both stop rather than guess."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    amex = serve(reuse_rows=True, list_ms=300, **cfg)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    result = panel_reads(out)
+
+    assert (result["stopped"], result["list_not_read"]) == (1, 1), folded(out)
+    assert "the card's statements did not open" in folded(out)
+    assert noted_whole(tmp_path) is False
+    assert not [r for r in records(tmp_path, "discovery.json").values()
+                if digits_of(r["account"]) == B["digits"]]
     assert saved(tmp_path) == {} and amex.downloads == []
