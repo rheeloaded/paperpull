@@ -68,6 +68,7 @@ def machine(monkeypatch, tmp_path):
     m.answers = []
     m.asked = []
     m.exit_code = 0
+    m.stopped_by = None
     m.arrives = "finished"      # or "partway", or None
     m.tty = True
 
@@ -86,6 +87,8 @@ def machine(monkeypatch, tmp_path):
         m.downloads.append((list(cmd), (env or {}).get(browser.KEEP_OLD_BUILDS)))
         if m.arrives:
             _lay(m.root, WANTED, finished=m.arrives == "finished")
+        if m.stopped_by:
+            raise m.stopped_by
         return m.exit_code
 
     class Clearing:
@@ -295,6 +298,31 @@ def test_an_install_killed_partway_leaves_the_finished_build_in_charge(machine, 
     _sign_in(tmp_path)
     assert len(machine.asked) == 2
     assert machine.opened[-1] == (machine.old, "profile")
+
+
+@pytest.mark.parametrize("arrives", [None, "partway"], ids=["downloading", "unpacking"])
+def test_ctrl_c_during_the_download_goes_on_to_the_old_build(machine, tmp_path, capsys, arrives):
+    """Somebody tired of a slow download lands on the build they had, and it
+    took the whole sign-in with it until this was caught."""
+    machine.answers = ["y"]
+    machine.arrives = arrives
+    machine.stopped_by = KeyboardInterrupt()
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.old, "profile")]
+    assert machine.cleared == []
+    assert "The download was stopped" in capsys.readouterr().out
+    # Nobody said no, so it is offered at the next sign-in
+    assert not (machine.root / browser.DECLINED_UPDATE).exists()
+    assert browser.chromium_update_due(machine.old) == (OLD, WANTED)
+
+
+def test_ctrl_c_is_answered_by_the_offer_itself(machine, monkeypatch):
+    """The offer says the download stopped, so it stops here and not in
+    whatever stands around it."""
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    machine.arrives = None
+    machine.stopped_by = KeyboardInterrupt()
+    assert browser.offer_chromium_update(OLD, WANTED) is False
 
 
 # -- a new build that will not open ---------------------------------------------------

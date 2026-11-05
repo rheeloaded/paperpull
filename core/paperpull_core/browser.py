@@ -811,6 +811,11 @@ def offer_chromium_update(have: int, want: int, assume_yes: bool = False) -> Opt
     print("Downloading. This takes a few minutes on a slow connection.")
     try:
         rc = subprocess.call(cmd, env=dict(os.environ, **{KEEP_OLD_BUILDS: "1"}))
+    except KeyboardInterrupt:
+        print()
+        print("The download was stopped. Signing in goes on with the build that is here,")
+        print("and you will be asked again at the next sign-in.")
+        return False
     except OSError as e:
         print("Could not start the download (%s)." % e)
         return False
