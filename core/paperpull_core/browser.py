@@ -397,13 +397,15 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
     list until one actually answers.
     """
     found = _bundled_chromium()
-    # Only the newest bundled build. Playwright leaves older ones behind, and a
-    # candidate after the first gets a profile of its own, which holds none of
-    # the person's sign-ins. So the step back to an older build is not here. It
-    # is open_signin_browser's, once, on the same profile, ahead of any other
-    # browser (_next_older_build). Where the port and not the build was the
-    # cause, as it usually is, that step costs a second window that fails the
-    # same way, which is the price of not losing a build that does start.
+    # Only the newest bundled build. Playwright leaves older ones behind. An
+    # older one never runs on a profile a newer one may have used, since a
+    # profile taken from 1248 to 1228 and back lost every earlier localStorage
+    # key, twice in two runs. So open_signin_browser adds the next older build
+    # as a candidate right after this one, where it gets a profile of its own
+    # (_next_older_build). Where the port and not the build was the cause, as
+    # it usually is, that costs a second window, which starts with no sign-ins
+    # and may fail the same way. Without it a build that will not start would
+    # leave a computer with no other browser with no window at all.
     bundled = [(CHROMIUM, p) for p in found[:1]]
     if mode == BUNDLED:
         # Their own browsers are not even looked for. Until 2026-10-06 they
@@ -425,12 +427,14 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
 
 
 def _next_older_build(candidates) -> Optional[Tuple[str, str]]:
-    """What to try on the person's own profile should the private copy at the
-    head of `candidates` not open, the newest finished build older than it,
-    or None. A copy of the same build is no older, and any other browser at
-    the head has no older build, so those sign-ins go on as they always did.
-    A build that will not start can arrive by the line the panel prints, with
-    no sign-in there to see it, and it is the newest from then on."""
+    """The candidate to add right after the private copy at the head of
+    `candidates`, the newest finished build older than it, or None. After the
+    head, so _try_each gives it a profile of its own and never the person's
+    (browser_candidates says why). A copy of the same build is no older, and
+    any other browser at the head has no older build, so those sign-ins go on
+    as they always did. A build that will not start can arrive by the line
+    the panel prints, with no sign-in there to see it, and it is the newest
+    from then on."""
     name, exe = candidates[0]
     if name != CHROMIUM:
         return None
@@ -880,9 +884,9 @@ def _set_aside_new_build(path: str, old: str) -> None:
     be tried first at every sign-in from now on, so its mark is taken away,
     and its headless shell's, which makes both builds that are not there
     (_finished), and the update is not offered again until Playwright wants a
-    newer build still. Should the new build only have been slow, this costs an
-    update and nothing else. Only here, where the build has just arrived.
-    _next_older_build's step changes nothing on disk."""
+    newer build still. Only for a build that never reached the profile
+    (_last_version), which is one that cannot start here. Nothing else on this
+    path or _next_older_build's changes anything on disk."""
     build = _build_number(path)
     try:
         print()
@@ -1334,10 +1338,11 @@ def open_signin_browser(profile_dir, port: str, url: str,
     whatever comes of that the sign-in goes on (_offer_update_at_sign_in).
 
     A private copy that does not open is followed by the next older finished
-    build, on the same profile, ahead of any other browser (_next_older_build).
-    One older build and not every one, and nothing on disk changes, since from
-    here a build that will not start and a port that would not answer look
-    the same. A computer with one build goes on as it always did.
+    build, ahead of any other browser, on a profile of its own, so its window
+    starts with no sign-ins (_next_older_build). One older build and not every
+    one, and nothing on disk changes, since from here a build that will not
+    start and a port that would not answer look the same. A computer with one
+    build goes on as it always did.
 
     A port another browser already holds is said and used, never launched
     over. A browser started there cannot take the port, so it opened as a
@@ -1390,35 +1395,36 @@ def open_signin_browser(profile_dir, port: str, url: str,
     # the browser that would start, and never on PaperPull Server.
     had = candidates[0]
     update = _offer_update_at_sign_in(had, allow_fetch)
-    stepped_back = False
+    stepped_back = keep_off_profile = False
     if update is not None:
         # Read again whatever came of it, since Playwright fetches Chromium
         # first and an install can end with an error and a finished build.
         candidates = browser_candidates(prefer_real=prefer_real, mode=mode) or candidates
         if candidates[0] != had:
             name, exe = candidates[0]
+            before = _last_version(profile_dir)
             opened = _launch(exe, name, profile_dir, port, url, explain_failure=False, mode=mode)
             if opened:
                 if update:
                     _clear_old_builds()
                 return opened
-            _set_aside_new_build(exe, had[1])
-            candidates = [had] + candidates[1:]
             stepped_back = True
+            if _last_version(profile_dir) == before:
+                # It never reached the profile, so it cannot start here, and
+                # the old build is safe on the person's own profile.
+                _set_aside_new_build(exe, had[1])
+            else:
+                # It runs here and only missed the port, and it has been on
+                # the profile, so the old build stays off it.
+                keep_off_profile = True
+                _say_older_build(exe, had[1])
+            candidates = [had] + candidates[1:]
 
     older = None if stepped_back else _next_older_build(candidates)
     if older:
-        name, exe = candidates[0]
-        opened = _launch(exe, name, profile_dir, port, url, explain_failure=False, mode=mode)
-        if opened:
-            return opened
-        print()
-        print("Chromium build %d did not open, so build %d, the next older one on this"
-              % (_build_number(exe), _build_number(older[1])))
-        print("computer, is being tried on the same profile.")
-        candidates = [older] + candidates[1:]
+        candidates = [candidates[0], older] + candidates[1:]
 
-    opened = _try_each(candidates, profile_dir, port, url, mode=mode)
+    opened = _try_each(candidates, profile_dir, port, url, fallback=keep_off_profile, mode=mode)
     if opened:
         return opened
 
@@ -1484,6 +1490,33 @@ def _say_port_silent(port: str) -> None:
     print("Then sign in again.")
 
 
+def _last_version(profile_dir):
+    """What a profile's `Last Version` file says and when it was written, None
+    with no such file. Chromium rewrites it at every start, at the same
+    version too, so the time moves when the words do not. Measured on
+    2026-11-05 on Windows with builds 1228 and 1248, a window or headless, it
+    is written about 0.3 seconds into the start, before the debugging port
+    answers, and with the port taken and never answering as well. A build that
+    leaves this as it was never reached the profile. One that cannot be read
+    equals nothing, not even itself, so it reads as reached, which keeps an
+    older build off the profile. Mac and Linux were not measured."""
+    last = Path(profile_dir).expanduser().resolve() / "Last Version"
+    try:
+        return last.read_bytes(), last.stat().st_mtime_ns
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return object()
+
+
+def _say_older_build(exe: str, older: str) -> None:
+    print()
+    print("Chromium build %d did not open, so build %d, the next older one on this"
+          % (_build_number(exe), _build_number(older)))
+    print("computer, is being tried. It opens on a profile of its own, so this window")
+    print("starts with no sign-ins, and your usual one is left as it was.")
+
+
 def _try_each(candidates, profile_dir, port, url, fallback: bool = False, mode: str = AUTO):
     """Launch each in turn until a debugging port answers. mode is the app's
     browser setting, which the last one tried needs to say what to do."""
@@ -1501,7 +1534,9 @@ def _try_each(candidates, profile_dir, port, url, fallback: bool = False, mode: 
         opened = _launch(exe, name, target, port, url, explain_failure=last, mode=mode)
         if opened:
             return opened
-        if not last:
+        if not last and name == candidates[index + 1][0] == CHROMIUM:
+            _say_older_build(exe, candidates[index + 1][1])
+        elif not last:
             print("Trying %s instead." % candidates[index + 1][0])
     return None
 
