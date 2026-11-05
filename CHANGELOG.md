@@ -53,14 +53,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   files each statement under its card, with the card's name and last digits
   in the file name.
   It waits for one card's list to go before it reads the next, at any
-  window width, so a list is never read as another card's, and a year-end
-  summary, the one document with the same date on both cards, is never
-  saved as the other card's. A card the site has turned off, a canceled
-  card say, is named, counted for review and left, and the other cards
-  are saved. Login says Success only on a list it saw. With one card,
+  window width, since a year-end summary has the same date on both cards.
+  A run that cannot tell the next card's list has come stops there, and a
+  Resume does not carry on from such a stop, so Pilot or Run All read each
+  card again through the same waits. A card the site has turned off, a
+  canceled card say, is named, counted for review and left, and the other
+  cards are saved. Login says Success only on a list it saw. With one card,
   keys, file names and files stay as they were. A switcher that cannot be
-  read, because it does not show, is turned off or offers no card, no
-  longer matters to a run with one card, which goes on with the card on
+  read, because it does not show, is turned off, is covered or offers no
+  card, no longer matters to a run with one card, which goes on with the card on
   show and says so, and the list is not noted as whole, since there may be
   more cards behind it. Contributed by @appchamp, who ran a
   Pilot across two cards and read the PDFs. Before merging, the wait was
