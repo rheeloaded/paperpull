@@ -140,9 +140,12 @@ def test_the_terminal_script_and_the_command_line_shim_still_ship(bm, monkeypatc
     panel = (bm.RES / "paperpull-panel.sh").read_text(encoding="utf-8")
     assert '--host 127.0.0.1 --port "$PORT" --app-dir "$DIR/gui"' in panel
     assert 'PORT="${PAPERPULL_PORT:-8765}"' in panel, "8765 unless a test says otherwise"
-    assert (bm.RES / "paperpull-panel.sh").stat().st_mode & 0o111
     assert (bm.RES / "paperpull").is_file()
-    assert (bm.RES / "paperpull").stat().st_mode & 0o111
+    if sys.platform != "win32":
+        # Windows has no execute bit, so os.chmod(0o755) leaves both at 0o666
+        # there. The bundle is only ever built and run on a Mac.
+        assert (bm.RES / "paperpull-panel.sh").stat().st_mode & 0o111
+        assert (bm.RES / "paperpull").stat().st_mode & 0o111
 
 
 # -- the terminal script, run for real against a stand-in Python ---------------
