@@ -517,7 +517,8 @@ class App:
         return n_new
 
     def _only_the_card_on_show(self, page) -> None:
-        """A card switcher that shows and would not open or offered no card.
+        """A card switcher that could not be read, one in the page that does
+        not show, that is turned off or that offered no card.
 
         Nothing pressed the switcher before cards were told apart, so on one
         card this is the path that has always worked, and the run goes on with
@@ -532,16 +533,16 @@ class App:
         An archive already filed by card is not one card, and its statements
         would come again under no card's name, so that stops the run."""
         if any(d.get("account") for d in self.discovery.data.values()):
-            raise pressing.no_answer("open the card switcher", "the card options did not show",
-                                     "The card switcher would not open, and this archive "
+            raise pressing.no_answer("read the card switcher", "the card options did not show",
+                                     "The card switcher could not be read, and this archive "
                                      "holds statements filed by card.")
         shown = site.current_card_label(page) or "the card on show"
-        print(f"\n!! The card switcher on the statements page would not open, so only {shown} was read.")
+        print(f"\n!! The card switcher on the statements page could not be read, so only {shown} was read.")
         print("   Any other card on this sign-in was not read, and this list is not noted as whole.")
         print("   With one card, nothing is missing.")
-        self._cards_left.append(f"any card but {shown}, since the card switcher would not open")
+        self._cards_left.append(f"any card but {shown}, since the card switcher could not be read")
         self.stats["manual_review"] += 1
-        self.write_failure("open the card switcher", "the card options did not show")
+        self.write_failure("read the card switcher", "the card options did not show")
 
     def _leave_card(self, label: str) -> None:
         """Leave a card whose option the page has turned off, a canceled card

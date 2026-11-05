@@ -1354,3 +1354,14 @@ def test_goto_documents_presses_the_copy_of_the_switcher_that_shows(open_page, m
     page = open_page("/overview", server)
     assert site.goto_documents(page) is True
     assert "/activity/statements" in page.url
+
+
+def test_copies_of_the_switcher_with_none_showing_cannot_say_which_cards_there_are(page_of,
+                                                                                   monkeypatch):
+    """A switcher in the page that does not show is not a page with no
+    switcher, so the answer is None, never the [] of one card."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 300)
+    pg = page_of(switch_page(statement_row("2030-11-11"), style="#card-switcher { display: none; }",
+                             before=HIDDEN_SWITCHER))
+    assert site.list_cards(pg) is None
+    assert site.select_card(pg, {"label": "Bravo Card (22222)", "digits": "22222"}) is False

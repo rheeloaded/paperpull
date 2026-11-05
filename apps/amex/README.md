@@ -93,12 +93,13 @@ canceled card say, is not read. The run names it, counts it for review, writes
 a failure file and goes on with the other cards, and a Resume says the list was
 not read whole.
 
-When the switcher itself shows and will not open, the run goes on with the card
-on show, as it always has for one card, with the same file names. It names that
-card and says any other card was not read, so with one card nothing is missing,
-and with several the failure file is worth sending. An archive already filed by
-card stops there instead, since going on would save its statements again under
-no card's name.
+When the switcher itself cannot be read, because it does not show, is turned off
+or offers no card, the run goes on with the card on show, as it always has for
+one card, with the same file names. It names that card, or says the card on show
+when its name is hidden too, and says any other card was not read, so with one
+card nothing is missing, and with several the failure file is worth sending. An
+archive already filed by card stops there instead, since going on would save its
+statements again under no card's name.
 
 ## If a site change breaks it
 

@@ -768,14 +768,18 @@ def list_cards(page) -> List[dict]:
 
     Returns list of dicts: [{'index': int, 'tid': str, 'label': str, 'digits': str, 'name': str}]
 
-    An empty list means no switcher shows. None means one shows that the page
-    has turned off or that offered no card, so which cards there are could
-    not be read. Nothing pressed it before cards were told apart, so a person
-    with one card has always gone on from here, and a caller goes on with the
-    card on show, says so, and never takes that card for every card.
+    An empty list means no switcher is in the page. None means which cards
+    there are could not be read, from a switcher in the page that does not
+    show, that the page has turned off or that offered no card. Nothing
+    pressed it before cards were told apart, so a person with one card has
+    always gone on from here, and a caller goes on with the card on show,
+    says so, and never takes that card for every card.
     """
     cb = _wait_for_switcher(page)
     if cb is None:
+        if _safe_count(page.locator(_SWITCHER_COMBOBOX_SEL)) > 0:
+            log.info("the card switcher is in the page and does not show, so no card was listed")
+            return None
         return []
     if (cb.get_attribute("aria-expanded") or "").lower() != "true":
         try:

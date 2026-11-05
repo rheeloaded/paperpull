@@ -602,26 +602,29 @@ def test_one_card_that_reads_as_one_card_keeps_its_archive_and_says_nothing(
     holds_one_cards_archive(tmp_path)
     assert noted_whole(tmp_path) is True
     assert panel_reads(out)["manual_review"] == 0
-    assert "would not open" not in out and "Not read" not in out
+    assert "could not be read" not in out and "Not read" not in out
 
 
-@pytest.mark.parametrize("switcher", ["off", "no_options"])
-def test_a_switcher_that_will_not_open_keeps_one_cards_path_and_is_not_quiet(
-        attached, serve, tmp_path, capsys, monkeypatch, switcher):
+@pytest.mark.parametrize("cfg,shown", [
+    (dict(switcher="off"), "Solo Card (77777)"), (dict(switcher="no_options"), "Solo Card (77777)"),
+    (dict(switcher_copies=True, switcher_gone=True), "the card on show")],
+    ids=["off", "no_options", "none_showing"])
+def test_a_switcher_that_cannot_be_read_keeps_one_cards_path_and_is_not_quiet(
+        attached, serve, tmp_path, capsys, monkeypatch, cfg, shown):
     """Nothing pressed the switcher before cards were told apart, so this
     person's run works today and has to go on working, with the same keys,
     names and bytes. It may be several cards behind a broken switcher, so the
     run says what it read, counts it, and does not note the list as whole."""
     monkeypatch.setattr(pressing, "PRESS_MS", 1000)
     monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
-    amex = serve(cards=[SOLO], switcher=switcher)
+    amex = serve(cards=[SOLO], **cfg)
     their_tab(attached, amex)
     code, out = run_all(config(tmp_path, attached), capsys)
     said = folded(out)
 
     holds_one_cards_archive(tmp_path)
-    assert "would not open, so only Solo Card (77777) was read" in said
-    assert "!! Not read: any card but Solo Card (77777)" in out[out.rindex("[2/2]"):]
+    assert "could not be read, so only %s was read" % shown in said
+    assert "!! Not read: any card but %s" % shown in out[out.rindex("[2/2]"):]
     assert "Discovery complete" not in said
     result = panel_reads(out)
     assert (result["manual_review"], result["stopped"], result["new_files"]) == (1, 0, 2), result
@@ -633,28 +636,32 @@ def test_a_switcher_that_will_not_open_keeps_one_cards_path_and_is_not_quiet(
     assert "Solo" not in written and "77777" not in written
 
 
-def test_several_cards_behind_a_switcher_that_will_not_open_are_not_called_whole(
-        attached, serve, tmp_path, capsys, monkeypatch):
+@pytest.mark.parametrize("cfg,shown", [
+    (dict(switcher="no_options"), "Alpha Card (11111)"),
+    (dict(switcher_copies=True, switcher_gone=True), "the card on show")],
+    ids=["no_options", "none_showing"])
+def test_several_cards_behind_a_switcher_that_cannot_be_read_are_not_called_whole(
+        attached, serve, tmp_path, capsys, monkeypatch, cfg, shown):
     """Two cards behind a broken switcher on a first run. What can be read is
     read, the second card is said not to be, and Resume does not call it done."""
     monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
-    amex = serve(switcher="no_options")
+    amex = serve(**cfg)
     their_tab(attached, amex)
-    cfg = config(tmp_path, attached)
-    code, out = run_all(cfg, capsys)
+    conf = config(tmp_path, attached)
+    code, out = run_all(conf, capsys)
 
     kept = saved(tmp_path)
     assert sorted(r["card"] for r in kept.values()) == ["11111", "11111"], kept
-    assert "only Alpha Card (11111) was read" in folded(out)
+    assert "only %s was read" % shown in folded(out)
     assert noted_whole(tmp_path) is False
 
-    code, out = run_all(cfg, capsys, "--resume")
+    code, out = run_all(conf, capsys, "--resume")
     assert "everything in scope is complete" not in folded(out)
     assert panel_reads(out)["list_not_read"] == 1
 
 
-def test_a_switcher_that_will_not_open_stops_an_archive_filed_by_card(attached, serve, tmp_path,
-                                                                      capsys, monkeypatch):
+def test_a_switcher_that_cannot_be_read_stops_an_archive_filed_by_card(attached, serve, tmp_path,
+                                                                       capsys, monkeypatch):
     """An archive filed by card is not one card, and carrying on would save
     its statements again under no card's name."""
     cfg = config(tmp_path, attached)
