@@ -506,6 +506,17 @@ def pause_for_sign_in(say=print, next_step: str = "Discover or Pilot") -> bool:
     return False
 
 
+def _in_a_store_package(program) -> bool:
+    """Whether `program` sits in a Microsoft Store package's own folder, one
+    named WindowsApps. A program in there that the package does not declare
+    will not start from a person's Command Prompt. The WindowsApps folder
+    inside a Microsoft folder is another thing, where Windows keeps its app
+    aliases, and the Python the Store installs does run from there."""
+    parts = [part.lower() for part in re.split(r"[\\/]+", str(program))]
+    return any(part == "windowsapps" and parts[i - 1:i] != ["microsoft"]
+               for i, part in enumerate(parts))
+
+
 def browser_install_command():
     """The command that downloads a browser, or None if this build cannot.
 
@@ -514,9 +525,19 @@ def browser_install_command():
     application itself. That would re-launch the app rather than install
     anything. Playwright ships its own Node driver, whose path does not depend
     on how this process was started, so a frozen build uses that instead.
+
+    The Store edition has no terminal to run this in, and its Python will not
+    start from a person's Command Prompt, so it answers None. In the Mac app
+    this line can be pasted into Terminal, which has neither setting the
+    app's own scripts export, so -B and -s stand in for them and keep bytecode
+    out of the signed bundle. Only there, since -s would hide a Playwright
+    that a checkout on a plain Python keeps in the person's own site folder.
     """
+    if _in_a_store_package(sys.executable):
+        return None
     if not getattr(sys, "frozen", False):
-        return [sys.executable, "-m", "playwright", "install", "chromium"]
+        flags = ["-B", "-s"] if ".app/Contents/" in sys.executable else []
+        return [sys.executable, *flags, "-m", "playwright", "install", "chromium"]
     try:
         # Private API, hence the guard. If it moves, saying so plainly beats
         # running a command that silently does the wrong thing.
@@ -678,7 +699,14 @@ def _terminal_name() -> str:
 
 def missing_chromium_words() -> str:
     """What to tell somebody whose step needed PaperPull's own Chromium and
-    found none: what it is, that nothing of theirs is wrong, and how to get it."""
+    found none: what it is, that nothing of theirs is wrong, and how to get it.
+    PaperPull Server's root is read-only and its Chrome is its own, so neither
+    a download nor the person's own browser fits there (#110)."""
+    if os.environ.get("PAPERPULL_SERVER") == "1":
+        return ("This step prints the page in a copy of Chromium that this PaperPull Server "
+                "container does not hold. Nothing is wrong with your account or with this "
+                "document, but the document was not saved. Ask at "
+                "https://github.com/rheeloaded/paperpull/issues.")
     head = ("This step prints the page in PaperPull's own copy of Chromium, and it has "
             "not been downloaded on this computer. Nothing is wrong with your account or "
             "with this document. Sign-in does not need it, since it uses the Chrome or "
@@ -690,7 +718,7 @@ def missing_chromium_words() -> str:
     shown = subprocess.list2cmdline(cmd) if sys.platform == "win32" else " ".join(
         shlex.quote(part) for part in cmd)
     return (head + " To download it, about 400 MB, kept for PaperPull alone, open "
-            + _terminal_name() + ", run the line below, and then run this again: "
+            + _terminal_name() + ", run this line, and then run this step again: "
             + shown)
 
 

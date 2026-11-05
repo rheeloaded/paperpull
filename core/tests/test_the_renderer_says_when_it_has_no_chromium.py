@@ -100,6 +100,7 @@ def test_a_command_with_spaces_in_its_path_is_quoted_so_it_can_be_pasted(monkeyp
     said = browser.missing_chromium_words()
     assert "'/Users/a b/PaperPull.app/python3' -m playwright install chromium" in said
     assert "open Terminal" in said
+    assert "run this line" in said
 
 
 def test_windows_is_told_to_open_a_command_prompt_and_quoted_its_way(monkeypatch):
@@ -117,7 +118,76 @@ def test_a_build_that_cannot_download_it_says_so_and_where_to_ask(monkeypatch):
     said = browser.missing_chromium_words()
     assert "cannot download it for you" in said
     assert "github.com/rheeloaded/paperpull/issues" in said
-    assert "run the line below" not in said
+    assert "run this line" not in said
+
+
+@pytest.mark.parametrize("python", [
+    r"C:\Program Files\WindowsApps\Publisher.PaperPull_0.60.2.0_x64__abc123\python\python.exe",
+    r"D:\WindowsApps\Publisher.PaperPull_0.60.2.0_x64__abc123\python\python.exe",
+    r"c:\program files\windowsapps\Publisher.PaperPull_0.60.2.0_x64__abc123\python\python.exe",
+])
+def test_the_store_edition_is_not_given_a_line_it_cannot_run(monkeypatch, python):
+    """The Store package leaves the terminal command out, and a program in
+    its folder that it does not declare will not start from Command Prompt."""
+    monkeypatch.delattr(browser.sys, "frozen", raising=False)
+    monkeypatch.setattr(browser.sys, "executable", python)
+    assert browser.browser_install_command() is None
+    said = browser.missing_chromium_words()
+    assert "cannot download it for you" in said
+    assert "playwright" not in said
+    assert "run this line" not in said
+
+
+def test_the_python_the_store_installs_keeps_its_line(monkeypatch):
+    """Windows keeps its app aliases in a folder of the same name, and a
+    checkout on the Store's own Python does run from there, so that is not
+    PaperPull's package."""
+    python = (r"C:\Users\a\AppData\Local\Microsoft\WindowsApps"
+              r"\PythonSoftwareFoundation.Python.3.12_abc123\python.exe")
+    monkeypatch.delattr(browser.sys, "frozen", raising=False)
+    monkeypatch.setattr(browser.sys, "executable", python)
+    assert browser.browser_install_command() == [python, "-m", "playwright", "install", "chromium"]
+
+
+def test_the_server_is_told_nothing_of_terminals_or_a_browser_of_its_own(tmp_path, monkeypatch):
+    """The container's root is read-only and its Chrome is its own, so a
+    command to paste and the Chrome or Edge you already have fit nobody
+    there."""
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    monkeypatch.setattr(browser, "browser_install_command",
+                        lambda: ["/opt/python", "-m", "playwright", "install", "chromium"])
+    with pytest.raises(browser.NoOwnChromium) as e:
+        _render(tmp_path, Exception(PLAYWRIGHT_MISSING))
+    said = str(e.value)
+    assert "PaperPull Server" in said
+    assert "Nothing is wrong with your account" in said
+    assert "was not saved" in said
+    assert "github.com/rheeloaded/paperpull/issues" in said
+    for not_there in ("Chrome or", "Edge", "Terminal", "Command Prompt", "a terminal",
+                      "playwright install", "download", "\n"):
+        assert not_there not in said, not_there
+
+
+def test_the_mac_apps_line_keeps_bytecode_out_of_its_signed_bundle(monkeypatch):
+    """A line pasted into Terminal has neither setting the app's own scripts
+    export, and a signed bundle that grows files reads as damaged."""
+    python = "/Applications/PaperPull.app/Contents/Resources/python/bin/python3"
+    monkeypatch.delattr(browser.sys, "frozen", raising=False)
+    monkeypatch.setattr(browser.sys, "executable", python)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert browser.browser_install_command() == \
+        [python, "-B", "-s", "-m", "playwright", "install", "chromium"]
+    assert python + " -B -s -m playwright install chromium" in browser.missing_chromium_words()
+
+
+def test_a_checkout_on_a_mac_keeps_a_playwright_in_its_own_site_folder(monkeypatch):
+    """-s would hide a Playwright kept in the person's own site folder, so
+    only the app takes it."""
+    monkeypatch.delattr(browser.sys, "frozen", raising=False)
+    monkeypatch.setattr(browser.sys, "executable", "/usr/local/bin/python3")
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert browser.browser_install_command() == \
+        ["/usr/local/bin/python3", "-m", "playwright", "install", "chromium"]
 
 
 def test_any_other_failure_to_launch_is_passed_on_as_it_was(tmp_path):
