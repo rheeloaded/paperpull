@@ -113,6 +113,15 @@ function listHtml(c) {
 const area = document.getElementById('table-area');
 function drawList(i) {
   listCard = i;
+  const kept = area.querySelectorAll('[data-testid$="/download-button"]');
+  if (CFG.reuse_rows && kept.length) {
+    // In place, the way a table can redraw, the same nodes with new test ids.
+    const next = document.createElement('div');
+    next.innerHTML = listHtml(C[i]);
+    const ids = next.querySelectorAll('[data-testid$="/download-button"]');
+    kept.forEach((b, n) => b.setAttribute('data-testid', ids[n].getAttribute('data-testid')));
+    return;
+  }
   area.innerHTML = listHtml(C[i]);
 }
 function card(i) {
@@ -239,7 +248,7 @@ class FakeAmex:
                         narrow_copy_first=False, address_moves_first=False,
                         switcher_copies=False, switcher_gone=False, list_ms_of={},
                         tip_over_switcher=False, dialog_left_open=False, option_copies="",
-                        hidden_options=[])
+                        hidden_options=[], reuse_rows=False)
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -862,4 +871,37 @@ def test_a_hidden_option_whose_digits_cannot_be_read_counts_as_another_card(atta
     assert "at least one card has no account number" in folded(out)
     assert panel_reads(out)["stopped"] == 1
     assert noted_whole(tmp_path) is False
+    assert saved(tmp_path) == {} and amex.downloads == []
+
+
+@pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
+def test_rows_redrawn_in_place_read_both_cards_as_their_own(attached, serve, tmp_path, capsys, width):
+    """The table keeps its nodes and gives them the next card's test ids, and
+    the PDFs behind them change with it. The held button never hides, so the
+    wait has only its test id to go by."""
+    amex = serve(reuse_rows=True)
+    their_tab(attached, amex, width)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_each_cards_own(tmp_path, out)
+
+
+@pytest.mark.parametrize("cfg", [
+    dict(cards=[A, dict(B, dates=A["dates"])]), dict(list_ms_of={"1": -1})],
+    ids=["same-first-date", "list-never-changes"])
+def test_rows_kept_with_the_same_id_stop_with_the_list_unread(attached, serve, tmp_path, capsys,
+                                                              monkeypatch, cfg):
+    """Reused rows whose first date is the same on both cards cannot be told
+    from a list that never changed, so both stop rather than guess."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    amex = serve(reuse_rows=True, list_ms=300, **cfg)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    result = panel_reads(out)
+
+    assert (result["stopped"], result["list_not_read"]) == (1, 1), folded(out)
+    assert "the card's statements did not open" in folded(out)
+    assert noted_whole(tmp_path) is False
+    assert not [r for r in records(tmp_path, "discovery.json").values()
+                if digits_of(r["account"]) == B["digits"]]
     assert saved(tmp_path) == {} and amex.downloads == []

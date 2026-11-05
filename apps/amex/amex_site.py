@@ -915,19 +915,27 @@ def current_card_label(page) -> str:
         return ""
 
 
-def _goes_away(handle) -> bool:
-    """Whether what `handle` holds stops showing within LINK_WAIT_MS. Both of
-    these reads work with eval off. Anything else that goes wrong says nothing
-    about the page, so it never counts as the element having gone."""
-    try:
-        handle.wait_for_element_state("hidden", timeout=LINK_WAIT_MS)
-        return True
-    except Exception:
-        pass
-    try:
-        return not handle.is_visible()
-    except Exception:
-        return False
+def _goes_away(page, handle, ids=()) -> bool:
+    """Whether what `handle` holds stops showing within LINK_WAIT_MS, or, given
+    its test `ids`, comes to name something else. A table can redraw in place,
+    keeping a row's button and giving it the next card's test id. Only this one
+    button is read, since older statements loading late can change the rest of
+    a list that is still the old card's. These reads work with eval off, and
+    one that fails says nothing about the page, so it never counts as the
+    element having gone."""
+    looks = LINK_WAIT_MS // 250
+    for i in range(looks + 1):
+        try:
+            if not handle.is_visible():
+                return True
+            now = _test_ids_of(handle)
+            if ids and now and now != ids:
+                return True
+        except Exception:
+            pass
+        if i < looks:
+            page.wait_for_timeout(250)
+    return False
 
 
 def _switch_stopped(card: dict, reason: str) -> pressing.NoAnswer:
@@ -1000,6 +1008,7 @@ def select_card(page, card: dict) -> bool:
     shown_button = _first_visible(old_buttons)
     has_old = shown_button is not None and _shows(shown_button)
     old_handle = shown_button.element_handle() if has_old else None
+    old_ids = _test_ids_of(old_handle) if has_old else []
     old_empty = _get_no_statements_element(page) if not has_old else None
     old_empty_handle = old_empty.element_handle() if old_empty else None
     if old_handle is None and old_empty_handle is None and _safe_count(old_buttons) > 0:
@@ -1038,13 +1047,13 @@ def select_card(page, card: dict) -> bool:
 
     # Wait until the previous card's statement buttons are gone / hidden. The
     # address says nothing here, since it never changes on this page.
-    if old_handle is not None and not _goes_away(old_handle):
+    if old_handle is not None and not _goes_away(page, old_handle, old_ids):
         log.info("switched card option but old statements list never cleared")
         raise _switch_stopped(card, "the statements did not switch")
 
     # Wait until the previous card's empty message is gone / hidden. That card
     # left no Download behind it, so one on the page now is the new card's.
-    if old_empty_handle is not None and not _goes_away(old_empty_handle) \
+    if old_empty_handle is not None and not _goes_away(page, old_empty_handle) \
             and _safe_count(old_buttons) == 0:
         log.info("switched card option but old empty-statements message never cleared")
         raise _switch_stopped(card, "the statements did not switch")

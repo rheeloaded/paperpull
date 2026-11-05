@@ -1274,13 +1274,13 @@ def test_a_read_that_fails_never_counts_as_the_old_list_gone():
     """Any evaluate throws on American Express, so a wait that took a throw
     for the list having gone would pass at once there."""
     class Broken:
-        def wait_for_element_state(self, state, timeout):
-            raise RuntimeError("eval is disabled")
-
         def is_visible(self):
             raise RuntimeError("eval is disabled")
 
-    assert site._goes_away(Broken()) is False
+        def get_attribute(self, name):
+            raise RuntimeError("eval is disabled")
+
+    assert site._goes_away(SimpleNamespace(wait_for_timeout=lambda ms: None), Broken(), ["id"]) is False
 
 
 def test_an_empty_message_that_never_goes_stops_the_switch(page_of, monkeypatch):
