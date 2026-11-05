@@ -504,13 +504,8 @@ def goto_documents(page) -> bool:
                     pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                                    what="the card switcher",
                                    words=_words(), step="open the card switcher")
-                    try:
-                        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
-                    except Exception:
-                        pass
-                    opts = page.locator(_SWITCHER_OPTION_SEL)
-                    if opts.count() and opts.first.is_visible():
-                        opt = opts.first
+                    opt = _wait_to_show(page, _SWITCHER_OPTION_SEL)
+                    if opt is not None:
                         tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
                         opt_css = _by_test_id("=", tid) if tid else _SWITCHER_OPTION_SEL
                         pressing.click(page, opt, css=opt_css,
@@ -757,6 +752,18 @@ def clean_account_name(raw: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _option_card(opt, index: int) -> dict:
+    """What a card option in the switcher says of its card."""
+    tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
+    name_el = opt.locator(_SWITCHER_NAME_SEL)
+    num_el = opt.locator(_SWITCHER_NUM_SEL)
+    name = clean_account_name(name_el.inner_text()) if name_el.count() else ""
+    num = (num_el.inner_text() if num_el.count() else "").strip()
+    digits = re.sub(r"\D", "", num)
+    label = f"{name} ({digits})" if digits else name
+    return {"index": index, "tid": tid, "label": label, "digits": digits, "name": name}
+
+
 def list_cards(page) -> List[dict]:
     """List every card/account available in the switcher.
 
@@ -770,12 +777,12 @@ def list_cards(page) -> List[dict]:
 
     An empty list means no switcher is in the page. None means which cards
     there are could not be read, from a switcher in the page that does not
-    show, that the page has turned off or that offered no card. Nothing
-    pressed it before cards were told apart, so a person with one card has
-    always gone on from here, and a caller goes on with the card on show,
-    says so, and never takes that card for every card.
+    show, that the page has turned off, that something covers or that
+    offered no card. Nothing pressed it before cards were told apart, so a
+    person with one card has always gone on from here, and a caller goes on
+    with the card on show, says so, and never takes that card for every card.
     """
-    cb = _wait_for_switcher(page)
+    cb = _wait_to_show(page, _SWITCHER_COMBOBOX_SEL)
     if cb is None:
         if _safe_count(page.locator(_SWITCHER_COMBOBOX_SEL)) > 0:
             log.info("the card switcher is in the page and does not show, so no card was listed")
@@ -786,31 +793,31 @@ def list_cards(page) -> List[dict]:
             pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                            what="the card switcher",
                            words=_words(), step="open the card switcher")
-        except pressing.TurnedOff:
-            log.info("the card switcher is turned off on the page, so no card was listed")
+        except (pressing.TurnedOff, pressing.NotPressed, pressing.Covered, pressing.Unread) as stop:
+            # A press that did not land, nothing else. Something that came over
+            # the switcher as it was pressed may have taken the press.
+            if stop.after_a_press and not isinstance(stop, pressing.NotPressed):
+                raise
+            log.info("the card switcher was not pressed, so no card was listed (%s)", stop.reason)
             return None
-    try:
-        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
-    except Exception:
+    if _wait_to_show(page, _SWITCHER_OPTION_SEL) is None:
         log.info("the card switcher offered no card")
         _close_switcher(page, cb)
         return None
     opts = page.locator(_SWITCHER_OPTION_SEL)
-    if not (opts.count() and opts.first.is_visible()):
-        log.info("the card switcher offered no card")
-        _close_switcher(page, cb)
-        return None
-    cards = []
-    for i in range(opts.count()):
-        opt = opts.nth(i)
-        tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
-        name_el = opt.locator(_SWITCHER_NAME_SEL)
-        num_el = opt.locator(_SWITCHER_NUM_SEL)
-        name = clean_account_name(name_el.inner_text()) if name_el.count() else ""
-        num = (num_el.inner_text() if num_el.count() else "").strip()
-        digits = re.sub(r"\D", "", num)
-        label = f"{name} ({digits})" if digits else name
-        cards.append({"index": i, "tid": tid, "label": label, "digits": digits, "name": name})
+    read = [(_option_card(opts.nth(i), i), _shows(opts.nth(i))) for i in range(_safe_count(opts))]
+    cards = [card for card, shows in read if shows]
+    # A hidden option goes only as the copy of an option that shows. One that
+    # names another card, or whose digits cannot be read, may be a card in a
+    # collapsed group. select_card cannot press it, so it goes first, and the
+    # run stops there with nothing read and the list not noted whole.
+    known = {c["digits"] for c in cards if c["digits"]}
+    others = []
+    for card, shows in read:
+        if not shows and card["digits"] not in known:
+            known.add(card["digits"])
+            others.append(card)
+    cards = others + cards
     _close_switcher(page, cb)
     if len(cards) > 1 and any(not c["digits"] for c in cards):
         raise pressing.Stop(
@@ -833,18 +840,25 @@ def _shown_switcher(page):
     return el if el is not None and _shows(el) else None
 
 
-def _wait_for_switcher(page):
-    """The first copy of the card switcher to show within LINK_WAIT_MS, or
-    None. page.wait_for_selector watches the first copy in the page alone,
-    and that can be the hidden one."""
+def _wait_to_show(page, css: str):
+    """The first element of `css` to show within LINK_WAIT_MS, or None.
+    page.wait_for_selector watches the first in the page alone, and that can
+    be a hidden copy."""
     looks = LINK_WAIT_MS // 250
     for i in range(looks + 1):
-        cb = _shown_switcher(page)
-        if cb is not None:
-            return cb
+        el = _first_visible(page.locator(css))
+        if el is not None and _shows(el):
+            return el
         if i < looks:
             page.wait_for_timeout(250)
     return None
+
+
+def _shown_options(page) -> list:
+    """The card options that show. A hidden copy of one would read as a second
+    card of the same name."""
+    opts = page.locator(_SWITCHER_OPTION_SEL)
+    return [opts.nth(i) for i in range(_safe_count(opts)) if _shows(opts.nth(i))]
 
 
 def _close_switcher(page, cb) -> None:
@@ -916,6 +930,24 @@ def _goes_away(handle) -> bool:
         return False
 
 
+def _switch_stopped(card: dict, reason: str) -> pressing.NoAnswer:
+    """A card option was pressed and the card's list could not be told to have
+    come, so the switcher may be ahead of the list on show. A Resume reads no
+    list and would take the switcher's word for whose list it is, so this
+    leaves the list unread, and the panel offers a run that lists (#124)."""
+    return pressing.NoAnswer("switch card", reason, [
+        f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.",
+        "Nothing more was pressed, and the run stops here rather than take a document "
+        "from a list that may be another card's."], after_a_press=True, list_unread=True)
+
+
+def card_on_show_last(page, cards: List[dict]) -> List[dict]:
+    """`cards` with the card the switcher shows moved to the end, so that card
+    is read after a switch and its waits, and not on the switcher's word."""
+    shown = _current_card_digits(page)
+    return sorted(cards, key=lambda c: c.get("digits") == shown)
+
+
 def select_card(page, card: dict) -> bool:
     """Switch to the card specified by dict.
     Returns True if successfully switched or already on that card.
@@ -935,9 +967,7 @@ def select_card(page, card: dict) -> bool:
     pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                    what="the card switcher",
                    words=_words(), step="open the card switcher")
-    try:
-        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
-    except Exception:
+    if _wait_to_show(page, _SWITCHER_OPTION_SEL) is None:
         raise pressing.no_answer(
             "open the card switcher", "the card options did not show",
             "The card switcher was opened and its options did not show.")
@@ -951,9 +981,7 @@ def select_card(page, card: dict) -> bool:
             opt = opt_loc.first
             opt_css = _by_test_id("=", tid)
     if not opt:
-        opts = page.locator(_SWITCHER_OPTION_SEL)
-        for i in range(opts.count()):
-            candidate = opts.nth(i)
+        for candidate in _shown_options(page):
             num_el = candidate.locator(_SWITCHER_NUM_SEL)
             opt_digits = re.sub(r"\D", "", num_el.inner_text() if num_el.count() else "")
             if digits and opt_digits == digits:
@@ -991,6 +1019,10 @@ def select_card(page, card: dict) -> bool:
         card["turned_off"] = True
         _close_switcher(page, cb)
         return False
+    except pressing.Stop as stop:
+        # The press may have reached the page, so the switcher may move.
+        stop.list_unread = stop.list_unread or stop.after_a_press
+        raise
 
     # Wait until the selected card display shows exactly that card's digits
     switched = False
@@ -1002,26 +1034,20 @@ def select_card(page, card: dict) -> bool:
 
     if not switched:
         log.info("switched card option but selected card display did not update to digits %s", digits)
-        raise pressing.no_answer(
-            "switch card", "the card did not switch",
-            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+        raise _switch_stopped(card, "the card did not switch")
 
     # Wait until the previous card's statement buttons are gone / hidden. The
     # address says nothing here, since it never changes on this page.
     if old_handle is not None and not _goes_away(old_handle):
         log.info("switched card option but old statements list never cleared")
-        raise pressing.no_answer(
-            "switch card", "the statements did not switch",
-            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+        raise _switch_stopped(card, "the statements did not switch")
 
     # Wait until the previous card's empty message is gone / hidden. That card
     # left no Download behind it, so one on the page now is the new card's.
     if old_empty_handle is not None and not _goes_away(old_empty_handle) \
             and _safe_count(old_buttons) == 0:
         log.info("switched card option but old empty-statements message never cleared")
-        raise pressing.no_answer(
-            "switch card", "the statements did not switch",
-            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+        raise _switch_stopped(card, "the statements did not switch")
 
     # Wait for either a new Download that shows or a no-statements message. A
     # list hidden while the next one loads is still in the page, so a button

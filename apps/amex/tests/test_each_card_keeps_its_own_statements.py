@@ -22,6 +22,7 @@ over says the card of the list on show when its Download was pressed, so a
 run is judged by the bytes it kept and not by the names it gave them. Every
 name, number and date is invented.
 """
+import csv
 import json
 import sys
 import threading
@@ -92,6 +93,7 @@ const C = CFG.cards;
 let shownCard = CFG.start;   // what the switcher says
 let listCard = CFG.start;    // whose list the rows are
 let current = null;
+let switches = 0;
 const P = 'myca-activity-statements/common/Table/';
 function button(kind, testid) {
   return '<button class="dl ' + kind + '" data-testid="' + testid + '">Download</button>';
@@ -165,10 +167,35 @@ function drawSwitcher() {
       for (const d of document.querySelectorAll('[data-testid="simple_switcher_selected_option_display"]'))
         d.innerHTML = card(i);
     }, CFG.switch_ms);
-    setTimeout(() => drawList(i), CFG.list_ms);
+    const late = CFG.list_ms_of[++switches] ?? CFG.list_ms;
+    if (late >= 0) setTimeout(() => drawList(i), late);
   });
 }
 drawSwitcher();
+if (CFG.option_copies) {
+  const copies = document.getElementById('lb').cloneNode(true);
+  copies.removeAttribute('id');
+  copies.hidden = false;
+  const hidden = document.createElement('div');
+  hidden.style.display = 'none';
+  hidden.appendChild(copies);
+  document.getElementById('sw')[CFG.option_copies](hidden);
+}
+if (CFG.hidden_options.length) {
+  const group = document.createElement('div');
+  group.style.display = 'none';
+  group.innerHTML = CFG.hidden_options.map((c, i) => '<div role="option" ' +
+    'data-testid="simple_switcher_product_option_hidden' + i + '">' +
+    '<span data-testid="simple_switcher_display_name">' + c.name + '</span>' +
+    '<span data-testid="simple_switcher_display_number">••••' + c.digits + '</span></div>').join('');
+  document.getElementById('lb').appendChild(group);
+}
+if (CFG.tip_over_switcher) {
+  const box = document.getElementById('sw');
+  box.style.position = 'relative';
+  box.insertAdjacentHTML('beforeend', '<div style="position:absolute;left:0;top:0;width:100%%;' +
+    'height:100%%;background:#ffc;z-index:3">Tip</div>');
+}
 if (!CFG.list_never) drawList(CFG.start);
 const dialog = document.getElementById('filetype');
 const backdrop = document.getElementById('backdrop');
@@ -189,6 +216,7 @@ document.querySelector('[data-test-id$="download-footer-download-confirm-anchor"
     const kind = document.getElementById('ft-pdf').checked ? 'pdf' : 'csv';
     location.href = '/download/' + C[listCard].digits + '/' + current + '.' + kind;
   });
+if (CFG.dialog_left_open) { backdrop.hidden = false; dialog.hidden = false; }
 </script>
 </body></html>"""
 
@@ -203,12 +231,15 @@ CANCELED = dict(name="Canceled Card", digits="55555", dates=["2029-05-05"], year
 class FakeAmex:
     """One made-up American Express, of a test's own. The switcher moves
     `switch_ms` after a card is pressed and the card's list comes `list_ms`
-    after, the old list showing until then."""
+    after, the old list showing until then. `list_ms_of` gives the nth switch
+    a time of its own, and a time below nought means its list never comes."""
 
     def __init__(self, **cfg):
         self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
                         narrow_copy_first=False, address_moves_first=False,
-                        switcher_copies=False, switcher_gone=False)
+                        switcher_copies=False, switcher_gone=False, list_ms_of={},
+                        tip_over_switcher=False, dialog_left_open=False, option_copies="",
+                        hidden_options=[])
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -467,6 +498,7 @@ def holds_each_cards_own(tmp_path, out):
             "%s saved as %s came from the list of %s" % (rec["name"], rec["account"], rec["card"])
     summaries = {r["account"]: r["card"] for r in kept.values() if r["category"] == "Year-End Summary"}
     assert summaries == {"Alpha Card (11111)": "11111", "Bravo Card (22222)": "22222"}
+    assert not any(source_urls(tmp_path))
     assert noted_whole(tmp_path) is True
     assert panel_reads(out)["stopped"] == 0
 
@@ -524,7 +556,7 @@ def test_a_turned_off_card_costs_nothing_but_itself(attached, serve, tmp_path, c
     assert "Canceled" not in written and "55555" not in written
 
     code, out = run_all(cfg, capsys, "--resume")
-    assert "stopped before it read American Express's whole list" in folded(out)
+    assert "stopped before it read the whole list" in folded(out)
     assert panel_reads(out)["list_not_read"] == 1
 
 
@@ -584,9 +616,18 @@ ONE_CARD = {
 }
 
 
+def source_urls(tmp_path):
+    """The Source URL of each row of the index, which main leaves empty."""
+    index = [p for p in (tmp_path / "out").rglob("*.csv")
+             if "Source URL" in p.read_text(encoding="utf-8-sig").splitlines()[0]]
+    with index[0].open(encoding="utf-8-sig", newline="") as f:
+        return [row["Source URL"] for row in csv.DictReader(f)]
+
+
 def holds_one_cards_archive(tmp_path):
     kept = saved(tmp_path)
     assert {k: r["name"] for k, r in kept.items()} == ONE_CARD
+    assert source_urls(tmp_path) == ["", ""]
     for rec in kept.values():
         assert rec["state"] == State.COMPLETED.value and rec["account"] == "", rec
         assert rec["card"] == SOLO["digits"], rec
@@ -607,8 +648,9 @@ def test_one_card_that_reads_as_one_card_keeps_its_archive_and_says_nothing(
 
 @pytest.mark.parametrize("cfg,shown", [
     (dict(switcher="off"), "Solo Card (77777)"), (dict(switcher="no_options"), "Solo Card (77777)"),
-    (dict(switcher_copies=True, switcher_gone=True), "the card on show")],
-    ids=["off", "no_options", "none_showing"])
+    (dict(switcher_copies=True, switcher_gone=True), "the card on show"),
+    (dict(tip_over_switcher=True), "Solo Card (77777)")],
+    ids=["off", "no_options", "none_showing", "covered"])
 def test_a_switcher_that_cannot_be_read_keeps_one_cards_path_and_is_not_quiet(
         attached, serve, tmp_path, capsys, monkeypatch, cfg, shown):
     """Nothing pressed the switcher before cards were told apart, so this
@@ -660,17 +702,19 @@ def test_several_cards_behind_a_switcher_that_cannot_be_read_are_not_called_whol
     assert panel_reads(out)["list_not_read"] == 1
 
 
+@pytest.mark.parametrize("switcher", ["no_options", "none"])
 def test_a_switcher_that_cannot_be_read_stops_an_archive_filed_by_card(attached, serve, tmp_path,
-                                                                       capsys, monkeypatch):
+                                                                       capsys, monkeypatch, switcher):
     """An archive filed by card is not one card, and carrying on would save
-    its statements again under no card's name."""
+    its statements again under no card's name, with every other card unread.
+    A page with no switcher at all is no different for such an archive."""
     cfg = config(tmp_path, attached)
     their_tab(attached, serve())
     code, out = run_all(cfg, capsys)
     assert len(saved(tmp_path)) == 4
 
     monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
-    their_tab(attached, serve(switcher="no_options"))
+    their_tab(attached, serve(switcher=switcher))
     code, out = run_all(cfg, capsys)
 
     assert panel_reads(out)["stopped"] == 1, folded(out)
@@ -693,3 +737,129 @@ def test_an_address_that_moves_first_is_not_the_old_list_going(attached, serve, 
     assert not [r for r in records(tmp_path, "discovery.json").values()
                 if digits_of(r["account"]) == B["digits"]]
     assert saved(tmp_path) == {}
+
+
+@pytest.mark.parametrize("never,saved_first", [(3, 2), (2, 0)],
+                         ids=["on-the-way-to-the-second-card", "on-the-way-to-the-first-card"])
+def test_a_stop_at_a_switch_leaves_nothing_for_a_resume_to_take(attached, serve, tmp_path, capsys,
+                                                                monkeypatch, never, saved_first):
+    """A download stops with the switcher on the next card and the old list
+    still on show. The year-end summaries share a date, so a Resume that took
+    the switcher's word saved the old card's summary as the new card's,
+    Completed. Resume now saves nothing, and Run All, which goes through the
+    waits, saves each card's own. The list never comes on the way to the first
+    card too, where Run All's first card would otherwise be read on the
+    switcher's word."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    amex = serve(list_ms=300, list_ms_of={str(never): -1})
+    their_tab(attached, amex)
+    conf = config(tmp_path, attached)
+
+    code, out = run_all(conf, capsys)
+    result = panel_reads(out)
+    assert (result["stopped"], result["list_not_read"]) == (1, 1), folded(out)
+    assert "the card's statements did not open" in folded(out)
+    assert "press Resume" not in folded(out)
+    assert "Resume would only stop here again, so run Pilot or Run All" in folded(out)
+    kept = saved(tmp_path)
+    assert len(kept) == saved_first, kept
+    served = list(amex.downloads)
+
+    code, out = run_all(conf, capsys, "--resume")
+    assert "so nothing was taken" in folded(out)
+    assert panel_reads(out)["list_not_read"] == 1
+    assert amex.downloads == served, "a Resume pressed a Download on a list it could not trust"
+    assert saved(tmp_path) == kept
+
+    code, out = run_all(conf, capsys)
+    holds_each_cards_own(tmp_path, out)
+
+
+def test_one_option_left_of_an_archive_filed_by_card_keeps_its_keys(attached, serve, tmp_path, capsys):
+    """Two cards, and later a switcher with only one of them. That card is read
+    under its label, so nothing it saved comes again, and what is new is named
+    by card. The one-card way would save its whole history again unnamed."""
+    conf = config(tmp_path, attached)
+    their_tab(attached, serve())
+    code, out = run_all(conf, capsys)
+    assert len(saved(tmp_path)) == 4
+
+    amex = serve(cards=[dict(A, dates=["2030-12-11"] + A["dates"])])
+    their_tab(attached, amex)
+    code, out = run_all(conf, capsys)
+
+    assert amex.downloads == ["11111/st-2030-12-11.pdf"], (amex.downloads, folded(out))
+    kept = saved(tmp_path)
+    assert len(kept) == 5
+    new = [r for r in kept.values() if r["date"] == "2030-12-11"]
+    assert new[0]["account"] == "Alpha Card (11111)" and new[0]["card"] == "11111", new
+    assert "Alpha Card (11111)" in new[0]["name"]
+    assert all(r["account"] for r in records(tmp_path, "discovery.json").values())
+    assert noted_whole(tmp_path) is True
+
+
+def test_a_dialog_left_open_is_closed_before_the_switcher_is_read(attached, serve, tmp_path, capsys):
+    """A run that stopped at the file type dialog left it open, and it covers
+    the switcher. On main a person with one card just went on, so it is closed
+    first, and the run reads as any other."""
+    amex = serve(cards=[SOLO], dialog_left_open=True)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_one_cards_archive(tmp_path)
+    assert "could not be read" not in out
+    assert noted_whole(tmp_path) is True
+    assert panel_reads(out)["manual_review"] == 0
+
+
+@pytest.mark.parametrize("where", ["prepend", "append"], ids=["before", "after"])
+def test_a_hidden_copy_of_the_options_costs_one_card_nothing(attached, serve, tmp_path, capsys, where):
+    """A hidden copy doubled the card's label, which stopped a run that works
+    on main, or was first and read as a switcher with no card."""
+    amex = serve(cards=[SOLO], option_copies=where)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_one_cards_archive(tmp_path)
+    assert noted_whole(tmp_path) is True
+    assert panel_reads(out)["manual_review"] == 0
+
+
+@pytest.mark.parametrize("where", ["prepend", "append"], ids=["before", "after"])
+def test_a_hidden_copy_of_the_options_costs_two_cards_nothing(attached, serve, tmp_path, capsys, where):
+    amex = serve(option_copies=where)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    holds_each_cards_own(tmp_path, out)
+
+
+@pytest.mark.parametrize("cards", [[SOLO], [A, B]], ids=["one-shown", "two-shown"])
+def test_a_hidden_option_naming_another_card_stops_and_nothing_is_called_whole(
+        attached, serve, tmp_path, capsys, cards):
+    """A card in a collapsed group, say. It cannot be chosen, so leaving it out
+    would be a quiet short list, and with one card shown it would go the
+    one-card way. The run names it and stops before any card is read."""
+    amex = serve(cards=cards, hidden_options=[dict(name="Business Card", digits="88888")])
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    said = folded(out)
+
+    assert "Business Card (88888) could not be chosen in the card switcher" in said
+    assert panel_reads(out)["stopped"] == 1, said
+    assert noted_whole(tmp_path) is False
+    assert records(tmp_path, "discovery.json") == {}
+    assert saved(tmp_path) == {} and amex.downloads == []
+    assert not [p for p in amex.pressed if p.startswith("option/")], amex.pressed
+
+
+def test_a_hidden_option_whose_digits_cannot_be_read_counts_as_another_card(attached, serve, tmp_path,
+                                                                            capsys):
+    amex = serve(cards=[SOLO], hidden_options=[dict(name="Business Card", digits="")])
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    assert "at least one card has no account number" in folded(out)
+    assert panel_reads(out)["stopped"] == 1
+    assert noted_whole(tmp_path) is False
+    assert saved(tmp_path) == {} and amex.downloads == []

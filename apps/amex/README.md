@@ -88,18 +88,26 @@ accounts keep the simple filename with no card name.
 
 With more than one card on a sign-in, the run reads each card in the switcher
 on the statements page, one after the other, and waits for one card's list to
-go before it reads the next. A card the site has turned off in the switcher, a
+go before it reads the next. When it cannot tell that the next card's list has
+come, the run stops there. A card the site has turned off in the switcher, a
 canceled card say, is not read. The run names it, counts it for review, writes
-a failure file and goes on with the other cards, and a Resume says the list was
-not read whole.
+a failure file and goes on with the other cards. A card the switcher holds but
+does not show, in a collapsed group say, cannot be chosen, so the run names it
+and stops, and with one card shown it does not go the one-card way.
 
-When the switcher itself cannot be read, because it does not show, is turned off
-or offers no card, the run goes on with the card on show, as it always has for
-one card, with the same file names. It names that card, or says the card on show
-when its name is hidden too, and says any other card was not read, so with one
-card nothing is missing, and with several the failure file is worth sending. An
-archive already filed by card stops there instead, since going on would save its
-statements again under no card's name.
+With statements filed by card, a Resume after a list that was not read whole
+takes nothing, since the card the switcher shows may not be the list on show.
+Run Pilot or Run All instead, which read each card again.
+
+When the switcher itself cannot be read, because it does not show, is turned off,
+is covered or offers no card, the run goes on with the card on show, as it always
+has for one card, with the same file names. It names that card, or says the card
+on show when its name is hidden too, and says any other card was not read, so
+with one card nothing is missing, and with several the failure file is worth
+sending. An archive already filed by card stops there instead, and at a page with
+no switcher, since going on would save its statements again under no card's name.
+With one option left in the switcher, such an archive reads that card under its
+own name.
 
 ## If a site change breaks it
 

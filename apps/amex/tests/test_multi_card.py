@@ -660,8 +660,9 @@ def test_card_switch_that_never_takes_stops_the_run(browser):
     cards = site.list_cards(pg)
     assert len(cards) == 2
     # Switching to card 2 when switch never takes must raise NoAnswer
-    with pytest.raises(pressing.NoAnswer):
+    with pytest.raises(pressing.NoAnswer) as stop:
         site.select_card(pg, cards[1])
+    assert stop.value.list_unread is True
     ctx.close()
 
 
@@ -769,8 +770,10 @@ def test_cmd_discover_stops_when_card_has_zero_buttons_and_no_message(monkeypatc
     app = SimpleNamespace()
     app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/activity/statements")
     app.check_session = lambda p: None
+    app.discovery = SimpleNamespace(data={})
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=False: None)
     monkeypatch.setattr(site, "list_cards", lambda p: [{"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
                                                         {"index": 1, "tid": "2", "label": "Card 2 (22222)", "digits": "22222", "name": "Card 2"}])
     monkeypatch.setattr(site, "select_card", lambda p, c: True)
@@ -803,6 +806,7 @@ def test_cmd_discover_single_card_preserves_unnamed_key(monkeypatch):
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: None)
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=False: None)
     monkeypatch.setattr(site, "list_cards", lambda p: [{"index": 0, "tid": "1", "label": "Only Card (12345)", "digits": "12345", "name": "Only Card"}])
     monkeypatch.setattr(site, "collect_download_docs", lambda p, account="": [
         site.RawDoc(title="Monthly Statement - October 11, 2026", date_text="2026-10-11", href="tid1", account=account)
@@ -1106,10 +1110,12 @@ def test_discover_stops_on_a_switch_that_failed_for_any_other_reason(monkeypatch
     app = SimpleNamespace()
     app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/activity/statements")
     app.check_session = lambda p: None
+    app.discovery = SimpleNamespace(data={})
     noted = []
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(app_mod.listing, "read_whole", lambda a: noted.append("whole"))
     monkeypatch.setattr(site, "goto_documents", lambda p: True)
+    monkeypatch.setattr(site, "close_file_type_dialog", lambda p, quiet=False: None)
     monkeypatch.setattr(site, "list_cards", lambda p: [
         {"index": 0, "tid": "1", "label": "Card 1 (11111)", "digits": "11111", "name": "Card 1"},
         {"index": 1, "tid": "2", "label": "Card 2 (22222)", "digits": "22222", "name": "Card 2"}])
@@ -1287,6 +1293,7 @@ def test_an_empty_message_that_never_goes_stops_the_switch(page_of, monkeypatch)
     with pytest.raises(pressing.NoAnswer) as stop:
         site.select_card(pg, cards[1])
     assert stop.value.reason == "the statements did not switch"
+    assert stop.value.list_unread is True
 
 
 # A hidden copy of the switcher, drawn first, naming a card nobody has. Each
@@ -1365,3 +1372,69 @@ def test_copies_of_the_switcher_with_none_showing_cannot_say_which_cards_there_a
                              before=HIDDEN_SWITCHER))
     assert site.list_cards(pg) is None
     assert site.select_card(pg, {"label": "Bravo Card (22222)", "digits": "22222"}) is False
+
+
+def test_an_old_list_that_never_goes_leaves_the_list_unread(page_of, monkeypatch):
+    """The switcher moves and the old list stays. Only a run that lists goes
+    through this wait again, so the stop leaves the list unread."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 500)
+    pg = page_of(switch_page(statement_row("2030-11-11"), "moveSwitcher();"))
+    cards = site.list_cards(pg)
+    with pytest.raises(pressing.NoAnswer) as stop:
+        site.select_card(pg, cards[1])
+    assert stop.value.reason == "the statements did not switch"
+    assert stop.value.list_unread is True
+
+
+@pytest.mark.parametrize("kind,after_a_press,answers", [
+    (pressing.Covered, False, None), (pressing.Unread, False, None), (pressing.NotPressed, True, None),
+    (pressing.Covered, True, "stops"), (pressing.NoAnswer, True, "stops"), (pressing.Unsure, True, "stops")],
+    ids=["covered", "unread", "not-pressed", "came-over-as-it-was-pressed", "no-answer", "unsure"])
+def test_a_press_of_the_switcher_that_did_not_land_answers_none(page_of, monkeypatch, kind,
+                                                                after_a_press, answers):
+    """A press refused or not made leaves the page as it was, so the run goes
+    on as it did before anything pressed the switcher. A press that may have
+    reached something stops the run like any other."""
+    pg = page_of(switch_page(statement_row("2030-11-11")))
+
+    def press(*args, **kwargs):
+        raise kind("open the card switcher", "the press", ["The press."], after_a_press=after_a_press)
+    monkeypatch.setattr(pressing, "click", press)
+    if answers == "stops":
+        with pytest.raises(kind):
+            site.list_cards(pg)
+    else:
+        assert site.list_cards(pg) is None
+
+
+def test_goto_documents_presses_the_option_that_shows(open_page, monkeypatch):
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 100)
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 200)
+    server = MockAmexServer()
+    server.routes["/overview"] = HTML_OVERVIEW.replace('<div role="listbox">', """<div style="display:none">
+  <div data-testid="simple_switcher_product_option_CARD_1" role="option">Hidden Copy</div>
+</div>
+<div role="listbox">""")
+    page = open_page("/overview", server)
+    assert site.goto_documents(page) is True
+    assert "/activity/statements" in page.url
+
+
+@pytest.mark.parametrize("after_a_press", [True, False], ids=["may-have-landed", "refused"])
+def test_a_stop_at_the_option_leaves_the_list_unread_once_it_may_have_landed(page_of, monkeypatch,
+                                                                            after_a_press):
+    """A press of the option that may have reached the page can move the
+    switcher with the run stopped, so a Resume must not carry on from it. One
+    refused before it was made changed nothing."""
+    pg = page_of(switch_page(statement_row("2030-11-11")))
+    cards = site.list_cards(pg)
+    real = pressing.click
+
+    def press(page, locator, **kwargs):
+        if kwargs.get("step") == "switch card":
+            raise pressing.NoAnswer("switch card", "the press", ["The press."], after_a_press=after_a_press)
+        return real(page, locator, **kwargs)
+    monkeypatch.setattr(pressing, "click", press)
+    with pytest.raises(pressing.NoAnswer) as stop:
+        site.select_card(pg, cards[1])
+    assert stop.value.list_unread is after_a_press

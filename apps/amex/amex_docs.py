@@ -404,15 +404,14 @@ class App:
         full_summary = f"{summary} {acct}".strip() if acct else summary
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, source_url=source_url,
-                       account=acct, href=r.href or "", date_text=r.date_text or date)
+                       account=acct)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
         # refresh which page the doc's download link lives on
-        self.discovery.update(doc.key, {"source_url": source_url, "href": r.href or "",
-                                        "account": acct}, save=False)
+        self.discovery.update(doc.key, {"source_url": source_url, "account": acct}, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
@@ -434,13 +433,27 @@ class App:
         self.check_session(page)
 
         self._cards_left = []
+        # A dialog left open by a run that stopped would cover the switcher.
+        site.close_file_type_dialog(page, quiet=True)
         cards = site.list_cards(page)
+        # An archive already filed by card is not one card, and the one-card
+        # way would save that card's history again under no card's name.
+        filed = any(d.get("account") for d in self.discovery.data.values())
+        if not cards and filed:
+            raise pressing.no_answer("read the card switcher", "the card options did not show",
+                                     "The card switcher could not be read, and this archive "
+                                     "holds statements filed by card.")
         if cards is None:
             self._only_the_card_on_show(page)
             cards = []
         self._card_count = len(cards)
         total_controls = 0
-        if len(cards) > 1:
+        if len(cards) > 1 or (cards and filed):
+            # A run that stopped at a switch can leave the switcher ahead of
+            # the list on show, so after a list that stopped no card is read on
+            # the switcher's word (paperpull_core.listing keeps what it said).
+            if getattr(self, "_listing_before", None) is False:
+                cards = site.card_on_show_last(page, cards)
             for card in cards:
                 switched = site.select_card(page, card)
                 if card.get("turned_off"):
@@ -448,7 +461,8 @@ class App:
                     continue
                 if not switched:
                     raise pressing.no_answer("switch card", "the card did not switch",
-                                             f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+                                             f"{card.get('label', 'A card')} could not be chosen in the card "
+                                             "switcher, so the list was not read whole.")
                 docs = site.collect_download_docs(page, account=card["label"])
                 if not docs and not site.has_no_statements(page):
                     log.info("card %s has no statements and page did not say so", card["label"])
@@ -518,7 +532,8 @@ class App:
 
     def _only_the_card_on_show(self, page) -> None:
         """A card switcher that could not be read, one in the page that does
-        not show, that is turned off or that offered no card.
+        not show, that is turned off, that something covers or that offered
+        no card.
 
         Nothing pressed the switcher before cards were told apart, so on one
         card this is the path that has always worked, and the run goes on with
@@ -528,14 +543,7 @@ class App:
         and written to the failure file, and the listing is not noted as
         whole, so no Resume calls the list finished. Noting it whole would say
         what nobody saw, and on one card not noting it costs only a Resume
-        that says to run Run All.
-
-        An archive already filed by card is not one card, and its statements
-        would come again under no card's name, so that stops the run."""
-        if any(d.get("account") for d in self.discovery.data.values()):
-            raise pressing.no_answer("read the card switcher", "the card options did not show",
-                                     "The card switcher could not be read, and this archive "
-                                     "holds statements filed by card.")
+        that says to run Run All."""
         shown = site.current_card_label(page) or "the card on show"
         print(f"\n!! The card switcher on the statements page could not be read, so only {shown} was read.")
         print("   Any other card on this sign-in was not read, and this list is not noted as whole.")
@@ -867,6 +875,13 @@ class App:
         self.stats["mode"] = "resume"
         accounts = {d.get("account") for d in self.discovery.data.values() if d.get("account")}
         self._card_count = len(accounts) if accounts else 1
+        # The switcher can be ahead of the list on show after a list that
+        # stopped, and only a run that lists goes through a switch's waits, so
+        # with statements filed by card this Resume takes nothing.
+        if accounts and listing.last(self) == listing.STOPPED:
+            print("\n!! The last run stopped before it read the whole list. With more than one card the")
+            print("   list on show may not be the card on show, so nothing was taken.")
+            raise listing.say_unread(self)
         # Resume reads no list of its own. With nothing listed, or after a
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished
