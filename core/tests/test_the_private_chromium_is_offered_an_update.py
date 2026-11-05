@@ -73,6 +73,7 @@ def machine(monkeypatch, tmp_path):
     m.answers = []
     m.asked = []
     m.exit_code = 0
+    m.writes = {}
     m.stopped_by = None
     m.arrives = "finished"      # or "partway", or None
     m.tty = True
@@ -111,6 +112,9 @@ def machine(monkeypatch, tmp_path):
 
     def launch(exe, name, profile_dir, port, url, explain_failure=True, mode=browser.AUTO):
         m.opened.append((exe, Path(profile_dir).name))
+        if exe in m.writes:
+            Path(profile_dir).mkdir(parents=True, exist_ok=True)
+            (Path(profile_dir) / "Last Version").write_bytes(m.writes[exe])
         return None if exe in m.refused else name
 
     monkeypatch.setattr(browser.subprocess, "call", download)
@@ -435,6 +439,54 @@ def test_an_offer_that_raises_after_a_build_arrived_still_starts_it(machine, mon
 # made for a newer system or one a security program holds. That is a failed
 # update like any other.
 
+def test_a_build_that_never_reached_the_profile_is_told_from_one_that_did(tmp_path):
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    assert browser._last_version(profile) is None
+    last = profile / "Last Version"
+    last.write_bytes(b"149.0.7827.55")
+    os.utime(last, (1000, 1000))
+    before = browser._last_version(profile)
+    assert before == browser._last_version(profile), "read twice with nothing done is unchanged"
+    last.write_bytes(b"149.0.7827.55")
+    assert browser._last_version(profile) != before, "Chromium rewrites it at the same version"
+
+
+def test_a_last_version_that_cannot_be_read_counts_as_reached(tmp_path):
+    (tmp_path / "Last Version").mkdir()
+    assert browser._last_version(tmp_path) != browser._last_version(tmp_path)
+
+
+@pytest.mark.parametrize("had_before", [None, b"149.0.7827.55", b"156.0.8078.4"],
+                         ids=["newly there", "changed", "rewritten at the same version"])
+def test_a_new_build_that_reached_the_profile_keeps_the_old_one_off_it(
+        machine, tmp_path, capsys, had_before):
+    """It wrote the profile and missed the port, so it runs here, and the old
+    build on that profile is what lost site data. Neither is set aside, and
+    the new build is not started a second time."""
+    if had_before:
+        (tmp_path / "profile").mkdir()
+        (tmp_path / "profile" / "Last Version").write_bytes(had_before)
+        os.utime(tmp_path / "profile" / "Last Version", (1000, 1000))
+    machine.answers = ["y"]
+    machine.refused = {machine.new}
+    machine.writes = {machine.new: b"156.0.8078.4"}
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened == [(machine.new, "profile"), (machine.old, "profile-chromium")]
+    assert machine.cleared == []
+    assert (machine.root / ("chromium-%d" % WANTED) / browser.INSTALLED_MARK).is_file()
+    assert not (machine.root / browser.DECLINED_UPDATE).exists()
+    said = capsys.readouterr().out
+    assert "Chromium build %d did not open, so build %d" % (WANTED, OLD) in said
+    assert "starts with no sign-ins" in said
+
+    # At the next sign-in the new build is what starts, on their own profile
+    machine.refused = set()
+    machine.writes = {}
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert machine.opened[-1] == (machine.new, "profile")
+
+
 def test_a_new_build_that_will_not_open_hands_the_sign_in_back_to_the_old_one(
         machine, tmp_path, capsys):
     machine.answers = ["y"]
@@ -698,6 +750,9 @@ port = int(next(a for a in args if a.startswith("--remote-debugging-port=")).spl
 profile = next(a for a in args if a.startswith("--user-data-dir=")).split("=", 1)[1]
 with open({note!r}, "a", encoding="utf-8") as f:
     f.write("%d %s\\n" % (os.getpid(), profile))
+if {writes!r}:
+    with open(os.path.join(profile, "Last Version"), "w", encoding="utf-8") as f:
+        f.write({writes!r})
 threading.Timer(60, os._exit, [0]).start()
 if not {answers!r}:
     time.sleep(60)
@@ -717,12 +772,12 @@ http.server.HTTPServer(("127.0.0.1", port), Answer).serve_forever()
 OWN_INNER = {"win32": "chrome-win64/chrome.exe", "darwin": INNER}.get(sys.platform, "chrome-linux/chrome")
 
 
-def _program(path, note, answers=True):
+def _program(path, note, answers=True, writes=""):
     """A real program at `path`. On Windows that has to be an executable, so
     it is the launcher pip makes its own commands with, with this script
     behind it, and no window of its own, as _launch starts a browser with no
     console."""
-    script = _PROGRAM.format(note=str(note), answers=answers)
+    script = _PROGRAM.format(note=str(note), answers=answers, writes=writes)
     path.parent.mkdir(parents=True, exist_ok=True)
     if sys.platform != "win32":
         path.write_text("#!%s\n%s" % (sys.executable, script), encoding="utf-8")
@@ -755,12 +810,13 @@ def real_launches(monkeypatch, tmp_path):
     m.real = []
     m.waits = []
     m.port = _free_port()
+    m.inner = OWN_INNER
 
-    def lay(build, answers=True, program=True):
-        exe = m.root / ("chromium-%d" % build) / OWN_INNER
+    def lay(build, answers=True, program=True, writes=""):
+        exe = m.root / ("chromium-%d" % build) / m.inner
         m.notes[build] = tmp_path / ("started-%d.txt" % build)
         if program:
-            _program(exe, m.notes[build], answers)
+            _program(exe, m.notes[build], answers, writes)
         else:
             exe.parent.mkdir(parents=True, exist_ok=True)
             exe.write_bytes(b"this is no program")
@@ -781,7 +837,19 @@ def real_launches(monkeypatch, tmp_path):
     def wait(port, timeout=20.0, alive=None):
         return real_wait(port, m.waits.pop(0) if m.waits else timeout, alive)
 
-    m.lay, m.started, m.sign_in = lay, started, sign_in
+    def update_to(build, **how):
+        """The next sign-in is offered `build`, says yes, and the download
+        leaves it on disk as `how` says. Not from chrome-linux, which is
+        never offered one."""
+        m.cleared = []
+        monkeypatch.setattr(browser, "_wanted_chromium_build", lambda: build)
+        monkeypatch.setattr(browser, "browser_install_command", lambda: list(INSTALL))
+        monkeypatch.setattr(browser, "can_ask", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda prompt: "y")
+        monkeypatch.setattr(browser.subprocess, "call", lambda cmd, env=None: lay(build, **how) and 0)
+        monkeypatch.setattr(browser, "_clear_old_builds", lambda: m.cleared.append(build))
+
+    m.lay, m.started, m.sign_in, m.update_to = lay, started, sign_in, update_to
     monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(m.root))
     monkeypatch.setattr(browser, "_real_browsers", lambda: list(m.real))
@@ -808,17 +876,32 @@ def test_a_newest_build_that_is_no_program_hands_the_sign_in_to_the_older_one(re
     r.lay(1228)
     before = _what_is_on_disk(r.root)
     assert r.sign_in() == browser.CHROMIUM
-    assert r.started(1228) == [r.own_profile]
+    assert r.started(1228) == [r.own_profile + "-chromium"]
     said = capsys.readouterr().out
     assert "Chromium build 1248 did not open, so build 1228" in said
-    assert "is being tried on the same profile" in said
+    assert "starts with no sign-ins" in said
+    assert "Trying Chromium instead" not in said
     assert _what_is_on_disk(r.root) == before, "this path can tell nothing, so it changes nothing"
+
+
+def test_an_older_build_never_touches_a_profile_the_newest_may_have_used(real_launches):
+    """A profile taken from 1248 to 1228 and back lost every earlier
+    localStorage key, and a missed port is all it takes to get here, so the
+    older build gets a profile of its own and theirs is left as it was."""
+    r = real_launches
+    r.lay(1248, answers=False, writes="156.0.8078.4")
+    r.lay(1228, writes="149.0.7827.55")
+    r.waits = [4.0]
+    assert r.sign_in() == browser.CHROMIUM
+    assert r.started(1248) == [r.own_profile]
+    assert r.started(1228) == [r.own_profile + "-chromium"]
+    assert (r.profile / "Last Version").read_text(encoding="utf-8") == "156.0.8078.4"
 
 
 def test_a_newest_build_whose_port_never_answers_hands_it_on_too(real_launches, capsys):
     """A build that starts and answers nothing, which from here looks the
     same as a port another program spoiled. So its window is closed, the older
-    build opens on the same profile, and the newest keeps its mark."""
+    build opens on a profile of its own, and the newest keeps its mark."""
     r = real_launches
     r.lay(1248, answers=False)
     r.lay(1228)
@@ -826,7 +909,7 @@ def test_a_newest_build_whose_port_never_answers_hands_it_on_too(real_launches, 
     before = _what_is_on_disk(r.root)
     assert r.sign_in() == browser.CHROMIUM
     assert r.started(1248) == [r.own_profile]
-    assert r.started(1228) == [r.own_profile]
+    assert r.started(1228) == [r.own_profile + "-chromium"]
     said = capsys.readouterr().out
     assert "no debugging port answered" in said and "That window was closed" in said
     assert "Chromium build 1248 did not open, so build 1228" in said
@@ -842,12 +925,12 @@ def test_every_sign_in_finds_the_older_build_again(real_launches):
     assert r.sign_in() == browser.CHROMIUM
     r.port = _free_port()
     assert r.sign_in() == browser.CHROMIUM
-    assert r.started(1228) == [r.own_profile, r.own_profile]
+    assert r.started(1228) == [r.own_profile + "-chromium"] * 2
 
 
 def test_the_older_build_goes_ahead_of_a_browser_of_their_own(real_launches, tmp_path):
-    """Their sign-ins are on this profile, and Edge would open on an empty
-    one."""
+    """They came for Chromium, and with a build of it on the computer it is
+    what opens, on its own profile as Edge would be on its own."""
     r = real_launches
     r.lay(1248, program=False)
     r.lay(1228)
@@ -855,7 +938,7 @@ def test_the_older_build_goes_ahead_of_a_browser_of_their_own(real_launches, tmp
     _program(tmp_path / "edge" / "msedge.exe", r.notes["edge"])
     r.real = [(browser.EDGE, str(tmp_path / "edge" / "msedge.exe"))]
     assert r.sign_in() == browser.CHROMIUM
-    assert r.started(1228) == [r.own_profile]
+    assert r.started(1228) == [r.own_profile + "-chromium"]
     assert r.started("edge") == []
 
 
@@ -888,6 +971,46 @@ def test_a_computer_with_one_build_goes_on_exactly_as_it_did(real_launches, caps
     assert _what_is_on_disk(r.root) == before
 
 
+@pytest.mark.parametrize("had_before", ["", "149.0.7827.55"], ids=["newly there", "changed"])
+def test_an_update_that_wrote_the_profile_and_missed_the_port_keeps_the_old_build_off_it(
+        real_launches, capsys, had_before):
+    """The real hazard, a program that writes `Last Version` as Chromium does
+    and never answers on its port, as a real build with its port taken was
+    measured to."""
+    r = real_launches
+    r.inner = OWN_INNER.replace("chrome-linux/", "chrome-linux64/")
+    r.lay(1228)
+    if had_before:
+        r.profile.mkdir()
+        (r.profile / "Last Version").write_text(had_before, encoding="utf-8")
+    r.update_to(1248, answers=False, writes="156.0.8078.4")
+    r.waits = [4.0]
+    assert r.sign_in() == browser.CHROMIUM
+    assert r.started(1248) == [r.own_profile], "started once, and not a second time"
+    assert r.started(1228) == [r.own_profile + "-chromium"]
+    assert (r.root / "chromium-1248" / browser.INSTALLED_MARK).is_file(), "it runs here"
+    assert not (r.root / browser.DECLINED_UPDATE).exists()
+    assert r.cleared == []
+    assert "starts with no sign-ins" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("program", [False, True], ids=["no program", "starts and writes nothing"])
+def test_an_update_that_never_reached_the_profile_gives_it_back_to_the_old_build(
+        real_launches, capsys, program):
+    """Nothing was written, so the new build cannot start here. The old build
+    is safe on their own profile, and the new one is set aside."""
+    r = real_launches
+    r.inner = OWN_INNER.replace("chrome-linux/", "chrome-linux64/")
+    r.lay(1228, writes="149.0.7827.55")
+    r.update_to(1248, answers=False, program=program)
+    r.waits = [4.0]
+    assert r.sign_in() == browser.CHROMIUM
+    assert r.started(1228) == [r.own_profile]
+    assert not (r.root / "chromium-1248" / browser.INSTALLED_MARK).exists()
+    assert r.cleared == []
+    assert "Build 1248 did not open on this computer" in capsys.readouterr().out
+
+
 def test_a_copy_of_the_same_build_is_not_an_older_build(machine, tmp_path):
     """It would fail the same way, and the real older build would go untried."""
     _lay(machine.root, WANTED)
@@ -898,7 +1021,7 @@ def test_a_copy_of_the_same_build_is_not_an_older_build(machine, tmp_path):
     assert _sign_in(tmp_path) == browser.CHROMIUM
     assert len(machine.opened) == 2
     assert machine.opened[0][0] in machine.refused
-    assert machine.opened[1] == (machine.old, "profile")
+    assert machine.opened[1] == (machine.old, "profile-chromium")
 
 
 def test_two_copies_of_one_build_are_one_build(machine, tmp_path):
