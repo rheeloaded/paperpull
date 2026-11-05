@@ -404,15 +404,14 @@ class App:
         full_summary = f"{summary} {acct}".strip() if acct else summary
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, source_url=source_url,
-                       account=acct, href=r.href or "", date_text=r.date_text or date)
+                       account=acct)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
         # refresh which page the doc's download link lives on
-        self.discovery.update(doc.key, {"source_url": source_url, "href": r.href or "",
-                                        "account": acct}, save=False)
+        self.discovery.update(doc.key, {"source_url": source_url, "account": acct}, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:

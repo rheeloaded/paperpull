@@ -22,6 +22,7 @@ over says the card of the list on show when its Download was pressed, so a
 run is judged by the bytes it kept and not by the names it gave them. Every
 name, number and date is invented.
 """
+import csv
 import json
 import sys
 import threading
@@ -487,6 +488,7 @@ def holds_each_cards_own(tmp_path, out):
             "%s saved as %s came from the list of %s" % (rec["name"], rec["account"], rec["card"])
     summaries = {r["account"]: r["card"] for r in kept.values() if r["category"] == "Year-End Summary"}
     assert summaries == {"Alpha Card (11111)": "11111", "Bravo Card (22222)": "22222"}
+    assert not any(source_urls(tmp_path))
     assert noted_whole(tmp_path) is True
     assert panel_reads(out)["stopped"] == 0
 
@@ -604,9 +606,18 @@ ONE_CARD = {
 }
 
 
+def source_urls(tmp_path):
+    """The Source URL of each row of the index, which main leaves empty."""
+    index = [p for p in (tmp_path / "out").rglob("*.csv")
+             if "Source URL" in p.read_text(encoding="utf-8-sig").splitlines()[0]]
+    with index[0].open(encoding="utf-8-sig", newline="") as f:
+        return [row["Source URL"] for row in csv.DictReader(f)]
+
+
 def holds_one_cards_archive(tmp_path):
     kept = saved(tmp_path)
     assert {k: r["name"] for k, r in kept.items()} == ONE_CARD
+    assert source_urls(tmp_path) == ["", ""]
     for rec in kept.values():
         assert rec["state"] == State.COMPLETED.value and rec["account"] == "", rec
         assert rec["card"] == SOLO["digits"], rec
