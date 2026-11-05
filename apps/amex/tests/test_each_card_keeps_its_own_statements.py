@@ -58,10 +58,12 @@ function said(what) { navigator.sendBeacon('/pressed/' + what); }
 html, body { margin: 0; font: 16px sans-serif; }
 .row { height: 56px; border-top: 1px solid #ccc; line-height: 56px; padding-left: 16px; }
 .row button { margin-left: 16px; width: 110px; height: 34px; }
-.row button.mobile { display: none; }
+.row button.mobile, .swc.mobile { display: none; }
+.swc.gone { display: none !important; }
 @media (max-width: 700px) {
-  .row button.desk { display: none; }
+  .row button.desk, .swc.desk { display: none; }
   .row button.mobile { display: inline-block; }
+  .swc.mobile { display: block; }
 }
 #lb { border: 1px solid #333; width: 300px; }
 #lb [role=option] { display: block; height: 40px; width: 300px; }
@@ -128,9 +130,13 @@ function drawSwitcher() {
       card(shownCard) + '</div></button>';
     return;
   }
-  sw.innerHTML = '<div role="combobox" tabindex="0" aria-expanded="false" style="cursor:pointer; width:300px" ' +
+  const copy = (kind) => '<div class="swc ' + kind + (CFG.switcher_gone ? ' gone' : '') + '">' +
+    '<div role="combobox" tabindex="0" aria-expanded="false" style="cursor:pointer; width:300px" ' +
     'data-testid="simple_switcher_combobox"><div data-testid="simple_switcher_selected_option_display">' +
-    card(shownCard) + '</div></div><div role="listbox" id="lb" hidden></div>';
+    card(shownCard) + '</div></div></div>';
+  const copies = CFG.switcher_copies ? ['desk', 'mobile'] : ['only'];
+  if (CFG.narrow_copy_first) copies.reverse();
+  sw.innerHTML = copies.map(copy).join('') + '<div role="listbox" id="lb" hidden></div>';
   const lb = document.getElementById('lb');
   if (CFG.switcher !== 'no_options') {
     lb.innerHTML = C.map((c, i) => (c.off
@@ -138,9 +144,9 @@ function drawSwitcher() {
       : '<div role="option" data-testid="simple_switcher_product_option_' + i + '">') + card(i) +
       (c.off ? '</button>' : '</div>')).join('');
   }
-  const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
-  cb.addEventListener('click', () => {
-    said('switcher');
+  const copyOf = document.querySelectorAll('[data-testid="simple_switcher_combobox"]');
+  for (const cb of copyOf) cb.addEventListener('click', () => {
+    said('switcher/first-copy-shows/' + (getComputedStyle(copyOf[0].parentNode).display !== 'none'));
     if (CFG.switcher === 'no_options') return;
     const open = cb.getAttribute('aria-expanded') === 'true';
     cb.setAttribute('aria-expanded', open ? 'false' : 'true');
@@ -151,12 +157,13 @@ function drawSwitcher() {
     if (!o || o.disabled) return;
     const i = Number(o.dataset.testid.split('_').pop());
     said('option/' + i + '/first-copy-shows/' + firstCopyShows());
-    cb.setAttribute('aria-expanded', 'false');
+    for (const cb of copyOf) cb.setAttribute('aria-expanded', 'false');
     lb.hidden = true;
     if (CFG.address_moves_first) history.pushState({}, '', '/activity/statements?account_key=KEY' + i);
     setTimeout(() => {
       shownCard = i;
-      document.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = card(i);
+      for (const d of document.querySelectorAll('[data-testid="simple_switcher_selected_option_display"]'))
+        d.innerHTML = card(i);
     }, CFG.switch_ms);
     setTimeout(() => drawList(i), CFG.list_ms);
   });
@@ -200,7 +207,8 @@ class FakeAmex:
 
     def __init__(self, **cfg):
         self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
-                        narrow_copy_first=False, address_moves_first=False)
+                        narrow_copy_first=False, address_moves_first=False,
+                        switcher_copies=False, switcher_gone=False)
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
@@ -415,14 +423,35 @@ def test_each_cards_statements_and_summary_are_its_own(attached, serve, tmp_path
     amex = serve(narrow_copy_first=narrow_copy_first)
     their_tab(attached, amex, width)
     code, out = run_all(config(tmp_path, attached), capsys)
-    said = folded(out)
 
     # Not vacuous. The window is the one the test says, so in two of these
     # the first copy of a Download is the hidden one.
     pressed = [p for p in amex.pressed if p.startswith("option/1/")]
     assert pressed and pressed[0].endswith("first-copy-shows/%s" % str(first_copy_shows).lower()), \
         amex.pressed
+    holds_each_cards_own(tmp_path, out)
 
+
+@pytest.mark.parametrize("width,narrow_copy_first", [(WIDE, True), (NARROW, False)],
+                         ids=["wide", "narrow"])
+def test_a_hidden_first_copy_of_the_switcher_costs_no_card(attached, serve, tmp_path, capsys, width,
+                                                           narrow_copy_first):
+    """The switcher is on the page twice like every other control, and the
+    first copy is the hidden one at this width. Both cards are read and each
+    keeps its own. Going by the first copy read as no switcher at all, so two
+    cards went as one with the list noted whole and nothing said."""
+    amex = serve(switcher_copies=True, narrow_copy_first=narrow_copy_first)
+    their_tab(attached, amex, width)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    assert "switcher/first-copy-shows/false" in amex.pressed, amex.pressed
+    holds_each_cards_own(tmp_path, out)
+
+
+def holds_each_cards_own(tmp_path, out):
+    """Each card's records hold its own dates, and each PDF came from its own
+    card's list, read from the PDF. The list is noted whole."""
+    said = folded(out)
     listed = records(tmp_path, "discovery.json")
     for rec in listed.values():
         card = A if digits_of(rec["account"]) == A["digits"] else B

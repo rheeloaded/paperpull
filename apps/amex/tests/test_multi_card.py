@@ -15,7 +15,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import amex_docs as app_mod
 import amex_site as site
 from amex_docs import Document
-from paperpull_core import pressing
+from paperpull_core import pressing, testkit
 from paperpull_core.models import State
 
 BASE = "https://global.americanexpress.com"
@@ -1020,19 +1020,22 @@ def statement_row(date: str) -> str:
             % (tid, tid))
 
 
-def switch_page(area: str, on_switch: str = "", style: str = "") -> str:
+def switch_page(area: str, on_switch: str = "", style: str = "", before: str = "",
+                on_load: str = "") -> str:
     """A statements page with eval off and two cards, Alpha on show, that
     counts the presses of Bravo's option in #presses. `area` is what the
     statements area holds and `on_switch` what pressing Bravo's option does,
     with moveSwitcher() to show Bravo in the switcher and draw(html) to fill
-    the statements area."""
+    the statements area. `before` is drawn ahead of the switcher, #card-switcher,
+    and `on_load` runs as the page opens."""
     def card(name, digits):
         return ('<span data-testid="simple_switcher_display_name">%s</span>'
                 '<span data-testid="simple_switcher_display_number">••••%s</span>' % (name, digits))
     return """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title>
 <script>window.eval = function () { throw new Error('eval is disabled'); };</script>
 <style>%(style)s</style></head><body>
-<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;">
+%(before)s
+<div id="card-switcher" data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;">
   <div data-testid="simple_switcher_selected_option_display">%(alpha)s</div>
 </div>
 <div role="listbox">
@@ -1042,11 +1045,11 @@ def switch_page(area: str, on_switch: str = "", style: str = "") -> str:
 <section id="table-area">%(area)s</section>
 <span id="presses">0</span>
 <script>
-const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
+const cb = document.getElementById('card-switcher');
 const opts = document.querySelectorAll('[role="option"]');
 const area = document.getElementById('table-area');
 function moveSwitcher() {
-  document.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = `%(bravo)s`;
+  cb.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = `%(bravo)s`;
 }
 function draw(html) { area.innerHTML = html; }
 cb.addEventListener('click', () => {
@@ -1061,8 +1064,10 @@ document.querySelector('[data-testid="simple_switcher_product_option_CARD_2"]').
   opts.forEach(o => o.style.display = 'none');
   %(on_switch)s
 });
+%(on_load)s
 </script></body></html>""" % {"alpha": card("Alpha Card", "11111"), "bravo": card("Bravo Card", "22222"),
-                              "area": area, "on_switch": on_switch, "style": style}
+                              "area": area, "on_switch": on_switch, "style": style,
+                              "before": before, "on_load": on_load}
 
 
 @pytest.fixture
@@ -1282,3 +1287,70 @@ def test_an_empty_message_that_never_goes_stops_the_switch(page_of, monkeypatch)
     with pytest.raises(pressing.NoAnswer) as stop:
         site.select_card(pg, cards[1])
     assert stop.value.reason == "the statements did not switch"
+
+
+# A hidden copy of the switcher, drawn first, naming a card nobody has. Each
+# read of it would answer this card or nothing.
+HIDDEN_SWITCHER = """<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="display:none">
+  <div data-testid="simple_switcher_selected_option_display">
+    <span data-testid="simple_switcher_display_name">Hidden Copy</span>
+    <span data-testid="simple_switcher_display_number">••••99999</span>
+  </div>
+</div>"""
+
+
+def test_a_hidden_first_copy_of_the_switcher_is_passed_over(page_of):
+    """Listing, reading the card on show, switching and closing all go by the
+    copy that shows. The first copy answered [] from list_cards, which reads
+    two cards as one with nothing said."""
+    pg = page_of(switch_page(statement_row("2030-11-11"), "moveSwitcher(); draw(`%s`);" % NEW_ROW,
+                             before=HIDDEN_SWITCHER))
+    cards = site.list_cards(pg)
+    assert [c["label"] for c in cards] == ["Alpha Card (11111)", "Bravo Card (22222)"]
+    assert pg.locator("#card-switcher").get_attribute("aria-expanded") == "false"
+    assert site.current_card_label(pg) == "Alpha Card (11111)"
+    assert site.select_card(pg, cards[1]) is True
+    assert pg.locator("#presses").inner_text() == "1"
+    assert site.current_card_label(pg) == "Bravo Card (22222)"
+    assert [d.date_text for d in site.collect_download_docs(pg)] == ["2030-11-22"]
+
+
+def test_a_copy_that_shows_late_is_waited_for_past_a_hidden_first_copy(page_of, monkeypatch):
+    """The wait ends when any copy shows. page.wait_for_selector watches the
+    first copy alone, so it would run out its whole time on the hidden one."""
+    pg = page_of(switch_page(statement_row("2030-11-11"), style="#card-switcher { display: none; }",
+                             before=HIDDEN_SWITCHER,
+                             on_load="setTimeout(() => { cb.style.display = 'block'; }, 1000);"))
+    waits = testkit.Waits(monkeypatch)
+    with waits.counted() as taken:
+        cards = site.list_cards(pg)
+    assert len(cards) == 2
+    assert not [w for w in taken if "Timeout" in w.what], taken
+
+
+def test_the_card_on_show_is_read_from_the_display_that_shows(page_of):
+    """A display drawn beside the switcher rather than inside it, with the
+    first copy of it hidden."""
+    pg = page_of("""<!doctype html><meta charset="utf-8">
+<div data-testid="simple_switcher_combobox" role="combobox">Change card</div>
+<div data-testid="simple_switcher_selected_option_display" style="display:none">
+  <span data-testid="simple_switcher_display_name">Hidden Copy</span>
+  <span data-testid="simple_switcher_display_number">••••99999</span>
+</div>
+<div data-testid="simple_switcher_selected_option_display">
+  <span data-testid="simple_switcher_display_name">Alpha Card</span>
+  <span data-testid="simple_switcher_display_number">••••11111</span>
+</div>""")
+    assert site.current_card_label(pg) == "Alpha Card (11111)"
+
+
+def test_goto_documents_presses_the_copy_of_the_switcher_that_shows(open_page, monkeypatch):
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 100)
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 200)
+    server = MockAmexServer()
+    server.routes["/overview"] = HTML_OVERVIEW.replace("<body>", "<body>" + HIDDEN_SWITCHER).replace(
+        "const cb = document.querySelector('[data-testid=\"simple_switcher_combobox\"]');",
+        "const cb = document.querySelectorAll('[data-testid=\"simple_switcher_combobox\"]')[1];")
+    page = open_page("/overview", server)
+    assert site.goto_documents(page) is True
+    assert "/activity/statements" in page.url

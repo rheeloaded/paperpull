@@ -499,9 +499,9 @@ def goto_documents(page) -> bool:
             # link on show the switcher is left alone, since the link is the way
             # a person with one card has always gone.
             if "/overview" in (page.url or "") and _english_link(page) is None:
-                cb = page.locator(_SWITCHER_COMBOBOX_SEL)
-                if cb.count() and cb.first.is_visible():
-                    pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                cb = _shown_switcher(page)
+                if cb is not None:
+                    pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                                    what="the card switcher",
                                    words=_words(), step="open the card switcher")
                     try:
@@ -774,16 +774,12 @@ def list_cards(page) -> List[dict]:
     with one card has always gone on from here, and a caller goes on with the
     card on show, says so, and never takes that card for every card.
     """
-    try:
-        page.wait_for_selector(_SWITCHER_COMBOBOX_SEL, timeout=LINK_WAIT_MS)
-    except Exception:
-        pass
-    cb = page.locator(_SWITCHER_COMBOBOX_SEL)
-    if not (cb.count() and cb.first.is_visible()):
+    cb = _wait_for_switcher(page)
+    if cb is None:
         return []
-    if (cb.first.get_attribute("aria-expanded") or "").lower() != "true":
+    if (cb.get_attribute("aria-expanded") or "").lower() != "true":
         try:
-            pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+            pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                            what="the card switcher",
                            words=_words(), step="open the card switcher")
         except pressing.TurnedOff:
@@ -825,23 +821,42 @@ def list_cards(page) -> List[dict]:
     return cards
 
 
+def _shown_switcher(page):
+    """The first copy of the card switcher that shows, or None. American
+    Express keeps a hidden copy of a control for a narrow window, and either
+    copy can come first in the page."""
+    el = _first_visible(page.locator(_SWITCHER_COMBOBOX_SEL))
+    return el if el is not None and _shows(el) else None
+
+
+def _wait_for_switcher(page):
+    """The first copy of the card switcher to show within LINK_WAIT_MS, or
+    None. page.wait_for_selector watches the first copy in the page alone,
+    and that can be the hidden one."""
+    looks = LINK_WAIT_MS // 250
+    for i in range(looks + 1):
+        cb = _shown_switcher(page)
+        if cb is not None:
+            return cb
+        if i < looks:
+            page.wait_for_timeout(250)
+    return None
+
+
 def _close_switcher(page, cb) -> None:
-    """Close the card switcher when it is open, since an open dropdown covers
-    every press after it."""
-    if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
-        pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+    """Close the copy of the card switcher that was opened, when it is open,
+    since an open dropdown covers every press after it."""
+    if (cb.get_attribute("aria-expanded") or "").lower() == "true":
+        pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                        what="the card switcher",
                        words=_words(), step="close the card switcher")
 
 
 def _switcher_selected_container(page):
-    disp = page.locator(_SWITCHER_SELECTED_DISPLAY_SEL)
-    if disp.count() and disp.first.is_visible():
-        return disp.first
-    cb = page.locator(_SWITCHER_COMBOBOX_SEL)
-    if cb.count() and cb.first.is_visible():
-        return cb.first
-    return None
+    disp = _first_visible(page.locator(_SWITCHER_SELECTED_DISPLAY_SEL))
+    if disp is not None and _shows(disp):
+        return disp
+    return _shown_switcher(page)
 
 
 def _current_card_digits(page) -> str:
@@ -905,15 +920,15 @@ def select_card(page, card: dict) -> bool:
     turned off also marks the card, card["turned_off"], since a canceled card
     must not cost a person their other cards. Anything else that goes wrong
     after the press stops the run."""
-    cb = page.locator(_SWITCHER_COMBOBOX_SEL)
-    if not (cb.count() and cb.first.is_visible()):
+    cb = _shown_switcher(page)
+    if cb is None:
         return False
     digits = card.get("digits", "")
     current_digits = _current_card_digits(page)
     if digits and current_digits == digits:
         return True
 
-    pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+    pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                    what="the card switcher",
                    words=_words(), step="open the card switcher")
     try:
