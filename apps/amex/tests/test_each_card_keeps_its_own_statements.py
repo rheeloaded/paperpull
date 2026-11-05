@@ -1,0 +1,454 @@
+"""Each card's statements are saved as that card's, read from the PDFs
+themselves, in a real browser attached the way it is at home.
+
+American Express writes the card on show in its switcher and draws the list
+of that card a moment later, in place, with the address never changing. So a
+run that reads the list as soon as the switcher moves reads the old card's
+list as the new card's. A monthly statement of the wrong card is then only
+not found, but a year-end summary carries nothing but its year, the same on
+every card, so the two cards' summaries come out swapped, with both marked
+Completed.
+
+Every Download is on the page twice, a copy for a wide window and a hidden
+copy for a narrow one, and either copy can come first in the page, so these
+runs are made at both widths with both orders.
+
+The browser is started as a program of its own with a debugging port and the
+app attaches over CDP and runs its own Run All. American Express is a made-up
+host name the browser is told to find on this machine, and every other name
+fails to resolve. Its page replaces eval as American Express does, so
+page.evaluate fails on it as it fails there. Each PDF the made-up site hands
+over says the card of the list on show when its Download was pressed, so a
+run is judged by the bytes it kept and not by the names it gave them. Every
+name, number and date is invented.
+"""
+import json
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import storage  # noqa: F401  binds this provider's AppSpec
+import amex_docs as app_mod
+import amex_site as site
+from paperpull_core import browser as browser_launcher
+from paperpull_core import run_reporting, testkit
+from paperpull_core.models import State
+from paperpull_core.receipt_pdf import pdf_text
+
+AMEX_HOST = "global.americanexpress.test"
+HOSTS = ("--host-resolver-rules=MAP %s 127.0.0.1, MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
+         % AMEX_HOST)
+TITLE = "Statements and Year End Summaries"
+WIDE, NARROW = 1200, 620
+
+PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>%(title)s</title>
+<script>
+window.eval = function () { throw new Error('eval is disabled'); };
+window.CFG = %(cfg)s;
+function said(what) { navigator.sendBeacon('/pressed/' + what); }
+</script>
+<style>
+[hidden] { display: none !important; }
+html, body { margin: 0; font: 16px sans-serif; }
+.row { height: 56px; border-top: 1px solid #ccc; line-height: 56px; padding-left: 16px; }
+.row button { margin-left: 16px; width: 110px; height: 34px; }
+.row button.mobile { display: none; }
+@media (max-width: 700px) {
+  .row button.desk { display: none; }
+  .row button.mobile { display: inline-block; }
+}
+#lb { border: 1px solid #333; width: 300px; }
+#lb [role=option] { display: block; height: 40px; width: 300px; }
+.dialog { position: fixed; left: 40px; top: 60px; width: 380px; background: #fff; z-index: 5;
+          padding: 16px; border: 1px solid #333; }
+.backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 4; }
+</style></head><body>
+<main>
+<h1>%(title)s</h1>
+<div id="sw"></div>
+<section id="table-area"></section>
+</main>
+<div class="backdrop" id="backdrop" hidden></div>
+<div class="dialog" id="filetype" role="dialog" aria-modal="true" aria-label="Select File Type" hidden>
+  <h3>Select File Type</h3>
+  <div><input type="radio" id="ft-pdf" name="ft" value="statement_pdf">
+    <label for="ft-pdf">Billing Statement (PDF)</label></div>
+  <div><input type="radio" id="ft-csv" name="ft" value="csv">
+    <label for="ft-csv">Spreadsheet (CSV)</label></div>
+  <div><button type="button" id="ft-cancel">Cancel</button>
+  <a href="#" role="button" id="myca-activity-download-footer-download-confirm-anchor"
+     data-test-id="myca-activity-download-footer-download-confirm-anchor">&#x2913;</a></div>
+</div>
+<script>
+const C = CFG.cards;
+let shownCard = CFG.start;   // what the switcher says
+let listCard = CFG.start;    // whose list the rows are
+let current = null;
+const P = 'myca-activity-statements/common/Table/';
+function button(kind, testid) {
+  return '<button class="dl ' + kind + '" data-testid="' + testid + '">Download</button>';
+}
+function row(kind, when) {
+  const t = P + (kind === 'ye' ? 'year-end-summary/' : 'recent-statements/') + when +
+            '/download-button';
+  const copies = [button('desk', t), button('mobile', t)];
+  if (CFG.narrow_copy_first) copies.reverse();
+  return '<div class="row">' + (kind === 'ye' ? 'Year End Summary ' : 'Statement closing ') + when +
+    copies.join('') + '</div>';
+}
+function listHtml(c) {
+  if (!c.dates.length && !c.years.length) return '<p class="msg">No statements available</p>';
+  return c.dates.map(d => row('st', d)).join('') + c.years.map(y => row('ye', y)).join('');
+}
+const area = document.getElementById('table-area');
+function drawList(i) {
+  listCard = i;
+  area.innerHTML = listHtml(C[i]);
+}
+function card(i) {
+  return '<span data-testid="simple_switcher_display_name">' + C[i].name + '</span>' +
+         '<span data-testid="simple_switcher_display_number">••••' + C[i].digits + '</span>';
+}
+function firstCopyShows() {
+  const b = document.querySelector('[data-testid$="/download-button"]');
+  return b ? getComputedStyle(b).display !== 'none' : null;
+}
+function drawSwitcher() {
+  const sw = document.getElementById('sw');
+  if (CFG.switcher === 'none') return;
+  if (CFG.switcher === 'off') {
+    sw.innerHTML = '<button disabled role="combobox" aria-expanded="false" ' +
+      'data-testid="simple_switcher_combobox"><div data-testid="simple_switcher_selected_option_display">' +
+      card(shownCard) + '</div></button>';
+    return;
+  }
+  sw.innerHTML = '<div role="combobox" tabindex="0" aria-expanded="false" style="cursor:pointer; width:300px" ' +
+    'data-testid="simple_switcher_combobox"><div data-testid="simple_switcher_selected_option_display">' +
+    card(shownCard) + '</div></div><div role="listbox" id="lb" hidden></div>';
+  const lb = document.getElementById('lb');
+  if (CFG.switcher !== 'no_options') {
+    lb.innerHTML = C.map((c, i) => (c.off
+      ? '<button disabled role="option" data-testid="simple_switcher_product_option_' + i + '">'
+      : '<div role="option" data-testid="simple_switcher_product_option_' + i + '">') + card(i) +
+      (c.off ? '</button>' : '</div>')).join('');
+  }
+  const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
+  cb.addEventListener('click', () => {
+    said('switcher');
+    if (CFG.switcher === 'no_options') return;
+    const open = cb.getAttribute('aria-expanded') === 'true';
+    cb.setAttribute('aria-expanded', open ? 'false' : 'true');
+    lb.hidden = open;
+  });
+  lb.addEventListener('click', (e) => {
+    const o = e.target.closest('[role=option]');
+    if (!o || o.disabled) return;
+    const i = Number(o.dataset.testid.split('_').pop());
+    said('option/' + i + '/first-copy-shows/' + firstCopyShows());
+    cb.setAttribute('aria-expanded', 'false');
+    lb.hidden = true;
+    if (CFG.address_moves_first) history.pushState({}, '', '/activity/statements?account_key=KEY' + i);
+    setTimeout(() => {
+      shownCard = i;
+      document.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = card(i);
+    }, CFG.switch_ms);
+    setTimeout(() => drawList(i), CFG.list_ms);
+  });
+}
+drawSwitcher();
+drawList(CFG.start);
+const dialog = document.getElementById('filetype');
+const backdrop = document.getElementById('backdrop');
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-testid$="/download-button"]');
+  if (!b) return;
+  const parts = b.dataset.testid.split('/');
+  current = (parts.includes('year-end-summary') ? 'ye-' : 'st-') + parts[parts.length - 2];
+  for (const r of document.querySelectorAll('input[name=ft]')) r.checked = false;
+  backdrop.hidden = false; dialog.hidden = false;
+});
+document.getElementById('ft-cancel').addEventListener('click', () => {
+  dialog.hidden = true; backdrop.hidden = true;
+});
+document.querySelector('[data-test-id$="download-footer-download-confirm-anchor"]')
+  .addEventListener('click', (e) => {
+    e.preventDefault();
+    const kind = document.getElementById('ft-pdf').checked ? 'pdf' : 'csv';
+    location.href = '/download/' + C[listCard].digits + '/' + current + '.' + kind;
+  });
+</script>
+</body></html>"""
+
+A = dict(name="Alpha Card", digits="11111", dates=["2030-11-11"], years=["2030"])
+B = dict(name="Bravo Card", digits="22222", dates=["2030-11-22"], years=["2030"])
+
+
+class FakeAmex:
+    """One made-up American Express, of a test's own. The switcher moves
+    `switch_ms` after a card is pressed and the card's list comes `list_ms`
+    after, the old list showing until then."""
+
+    def __init__(self, **cfg):
+        self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
+                        narrow_copy_first=False, address_moves_first=False)
+        self.cfg.update(cfg)
+        self.pressed = []
+        self.downloads = []
+
+    def page(self):
+        return PAGE % {"title": TITLE, "cfg": json.dumps(self.cfg)}
+
+
+def _handler(fake):
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _send(self, data, kind, extra=()):
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            for name, value in extra:
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            host = (self.headers.get("Host") or "").split(":")[0]
+            path = urlsplit(self.path).path
+            if host != AMEX_HOST:
+                self.send_error(404)
+            elif path == "/activity/statements":
+                self._send(fake.page().encode("utf-8"), "text/html; charset=utf-8")
+            elif path.startswith("/download/"):
+                _, _, digits, name = path.split("/")
+                fake.downloads.append(digits + "/" + name)
+                body = testkit.text_pdf(["American Express", "LIST OF CARD %s" % digits,
+                                         name.rsplit(".", 1)[0]])
+                self._send(body, "application/pdf",
+                           [("Content-Disposition", 'attachment; filename="statement-%s"' % name)])
+            else:
+                self.send_error(404)
+
+        def do_POST(self):
+            path = urlsplit(self.path).path
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                self.rfile.read(length)
+            if path.startswith("/pressed/"):
+                fake.pressed.append(path[len("/pressed/"):])
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    return Handler
+
+
+@pytest.fixture()
+def serve():
+    """Start a made-up American Express for a test, on a port of its own."""
+    servers = []
+
+    def start(**cfg):
+        fake = FakeAmex(**cfg)
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), _handler(fake))
+        httpd.block_on_close = False
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        fake.port = httpd.server_address[1]
+        servers.append(httpd)
+        return fake
+
+    yield start
+    for httpd in servers:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+@pytest.fixture(scope="module")
+def browser_exe():
+    pytest.importorskip("playwright.sync_api")
+    found = browser_launcher.browser_candidates(mode=browser_launcher.BUNDLED)
+    if not found:
+        pytest.skip("no browser to drive")
+    return found[0][1]
+
+
+@pytest.fixture(scope="module")
+def attached(browser_exe, tmp_path_factory):
+    try:
+        with testkit.drawn_browser(browser_exe, lambda: tmp_path_factory.mktemp("attached-profile"),
+                                   args=(HOSTS,)) as url:
+            yield url
+    except testkit.NoDebugPort:
+        pytest.skip("the browser opened no debugging port")
+
+
+@pytest.fixture(autouse=True)
+def on_the_made_up_site(monkeypatch):
+    """American Express is the made-up site. Opening the statements page
+    waits for the first copy of a Download to show, which in a window where
+    that copy is hidden is the whole of this wait for every document, so it
+    is cut to fit a test."""
+    monkeypatch.setattr(site, "is_safe_url",
+                        lambda url: urlsplit(url or "").hostname == AMEX_HOST)
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 2000)
+
+
+def their_tab(attached, amex, width=WIDE):
+    """The person's American Express tab, open on the statements page, the
+    only tab in the browser, in a window `width` pixels wide."""
+    from playwright.sync_api import sync_playwright
+    at = "http://%s:%d/activity/statements" % (AMEX_HOST, amex.port)
+    tab = testkit.open_tab(attached, at, TITLE)
+    testkit.keep_only(attached, {tab})
+    with sync_playwright() as p:
+        browser = p.chromium.connect_over_cdp(attached)
+        page = [t for t in browser.contexts[0].pages if AMEX_HOST in (t.url or "")][0]
+        cdp = page.context.new_cdp_session(page)
+        window = cdp.send("Browser.getWindowForTarget")["windowId"]
+        cdp.send("Browser.setWindowBounds",
+                 {"windowId": window, "bounds": {"width": width, "height": 900}})
+        cdp.detach()
+        browser.close()
+
+
+def config(tmp_path, cdp_url):
+    out = tmp_path / "out"
+    out.mkdir(parents=True, exist_ok=True)
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({
+        "owner": "Dana Example", "output_dir": str(out),
+        "profile_dir": str(tmp_path / "launched-profile"), "cdp_url": cdp_url,
+        "document_types": ["Statement", "Year-End Summary"], "default_start_date": "",
+        "delay_min_seconds": 0, "delay_max_seconds": 0}), encoding="utf-8")
+    return cfg
+
+
+def run_all(cfg, capsys, *flags):
+    """A run as the panel starts it, Run All unless told, and what it said
+    and how it ended."""
+    code = "finished"
+    try:
+        code = app_mod.main(list(flags or ("--all", "--yes")) + ["--config", str(cfg)])
+    except SystemExit as stopped:
+        code = stopped.code
+    return code, capsys.readouterr().out
+
+
+def folded(out):
+    return " ".join(out.split())
+
+
+def panel_reads(out):
+    for line in out.splitlines():
+        if line.startswith(run_reporting.PREFIX):
+            return json.loads(line[len(run_reporting.PREFIX):])
+    raise AssertionError("no result line for the panel in\n" + out)
+
+
+def records(tmp_path, name):
+    path = tmp_path / "out" / name
+    got = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    return {k: v for k, v in got.items() if isinstance(v, dict) and "category" in v}
+
+
+def noted_whole(tmp_path):
+    return json.loads((tmp_path / "out" / "last-listing.json").read_text(encoding="utf-8"))["complete"]
+
+
+def saved(tmp_path):
+    """Each record the run finished, with the card its PDF's own bytes say
+    it came from, by the record's key."""
+    out = {}
+    for key, rec in records(tmp_path, "progress.json").items():
+        path = Path(rec.get("pdf_path") or "")
+        words = pdf_text(path).split() if path.is_file() else []
+        out[key] = {"state": rec.get("state"), "account": rec.get("account"), "name": path.name,
+                    "date": rec.get("date"), "category": rec.get("category"),
+                    "card": words[words.index("CARD") + 1] if "CARD" in words else ""}
+    return out
+
+
+def digits_of(account):
+    return account.rsplit("(", 1)[1].rstrip(")")
+
+
+def test_the_made_up_page_refuses_evaluate_as_american_express_does(attached, serve):
+    """Not vacuous. On this page page.evaluate and locator.evaluate fail as
+    they fail on American Express, and a locator still reads it, so what the
+    app does here is what it can do there."""
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+    their_tab(attached, serve())
+    with sync_playwright() as p:
+        browser = p.chromium.connect_over_cdp(attached)
+        page = [t for t in browser.contexts[0].pages if AMEX_HOST in (t.url or "")][0]
+        with pytest.raises(PlaywrightError, match="eval is disabled"):
+            page.evaluate("1 + 1")
+        with pytest.raises(PlaywrightError, match="eval is disabled"):
+            page.locator("h1").evaluate("e => e.tagName")
+        assert page.locator("[data-testid$='/download-button']").count() == 4
+        browser.close()
+
+
+@pytest.mark.parametrize("width,narrow_copy_first,first_copy_shows", [
+    (WIDE, False, True), (NARROW, False, False), (WIDE, True, False), (NARROW, True, True)],
+    ids=["wide", "narrow", "wide-narrow-copy-first", "narrow-narrow-copy-first"])
+def test_each_cards_statements_and_summary_are_its_own(attached, serve, tmp_path, capsys, width,
+                                                       narrow_copy_first, first_copy_shows):
+    """The switcher moves at once and the list a second and a half later.
+    Every record of a card holds that card's own dates, and every PDF, the
+    two year-end summaries with the one date above all, came from that
+    card's own list."""
+    amex = serve(narrow_copy_first=narrow_copy_first)
+    their_tab(attached, amex, width)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    said = folded(out)
+
+    # Not vacuous. The window is the one the test says, so in two of these
+    # the first copy of a Download is the hidden one.
+    pressed = [p for p in amex.pressed if p.startswith("option/1/")]
+    assert pressed and pressed[0].endswith("first-copy-shows/%s" % str(first_copy_shows).lower()), \
+        amex.pressed
+
+    listed = records(tmp_path, "discovery.json")
+    for rec in listed.values():
+        card = A if digits_of(rec["account"]) == A["digits"] else B
+        assert rec["date"] in card["dates"] + ["%s-12-31" % y for y in card["years"]], \
+            "%s was listed under %s\n%s" % (rec["date"], rec["account"], said)
+    assert len(listed) == 4, sorted(listed)
+
+    kept = saved(tmp_path)
+    assert len(kept) == 4, (kept, said)
+    for rec in kept.values():
+        assert rec["state"] == State.COMPLETED.value, (rec, said)
+        assert rec["card"] == digits_of(rec["account"]), \
+            "%s saved as %s came from the list of %s" % (rec["name"], rec["account"], rec["card"])
+    summaries = {r["account"]: r["card"] for r in kept.values() if r["category"] == "Year-End Summary"}
+    assert summaries == {"Alpha Card (11111)": "11111", "Bravo Card (22222)": "22222"}
+    assert noted_whole(tmp_path) is True
+    assert panel_reads(out)["stopped"] == 0
+
+
+def test_a_list_that_never_goes_stops_the_run_in_a_narrow_window(attached, serve, tmp_path, capsys):
+    """The list comes after the wait for the old one has run out, in the
+    window where the first copy is the hidden one. The run stops with the
+    switch unread, and nothing is listed under the second card."""
+    amex = serve(list_ms=8000)
+    their_tab(attached, amex, NARROW)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    assert panel_reads(out)["stopped"] == 1, folded(out)
+    assert "the card's statements did not open" in folded(out)
+    assert not [r for r in records(tmp_path, "discovery.json").values()
+                if digits_of(r["account"]) == B["digits"]]
+    assert saved(tmp_path) == {}
+    assert noted_whole(tmp_path) is False

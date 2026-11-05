@@ -774,10 +774,7 @@ def list_cards(page) -> List[dict]:
         digits = re.sub(r"\D", "", num)
         label = f"{name} ({digits})" if digits else name
         cards.append({"index": i, "tid": tid, "label": label, "digits": digits, "name": name})
-    if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
-        pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
-                       what="the card switcher",
-                       words=_words(), step="close the card switcher")
+    _close_switcher(page, cb)
     if len(cards) > 1 and any(not c["digits"] for c in cards):
         raise pressing.Stop(
             "read the card switcher", "a card has no account number",
@@ -789,6 +786,15 @@ def list_cards(page) -> List[dict]:
             ["Two cards in the switcher share the same label, so their statements cannot be told apart.",
              pressing.AGAIN])
     return cards
+
+
+def _close_switcher(page, cb) -> None:
+    """Close the card switcher when it is open, since an open dropdown covers
+    every press after it."""
+    if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
+        pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                       what="the card switcher",
+                       words=_words(), step="close the card switcher")
 
 
 def _switcher_selected_container(page):
@@ -880,17 +886,25 @@ def select_card(page, card: dict) -> bool:
                 opt_css = _by_test_id("=", cand_tid) if cand_tid else _SWITCHER_OPTION_SEL
                 break
     if not opt:
-        if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
-            pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
-                           what="the card switcher",
-                           words=_words(), step="close the card switcher")
+        _close_switcher(page, cb)
         return False
 
+    # Every Download is on the page twice, a copy for a wide window and a
+    # hidden one for a narrow window, and either can come first. A hidden copy
+    # reads as gone from the start, so the button held is the first that shows.
     old_buttons = page.locator(_DOWNLOAD_BUTTONS)
-    has_old = old_buttons.count() > 0 and old_buttons.first.is_visible()
-    old_handle = old_buttons.first.element_handle() if has_old else None
+    shown_button = _first_visible(old_buttons)
+    has_old = shown_button is not None and _shows(shown_button)
+    old_handle = shown_button.element_handle() if has_old else None
     old_empty = _get_no_statements_element(page) if not has_old else None
     old_empty_handle = old_empty.element_handle() if old_empty else None
+    if old_handle is None and old_empty_handle is None and _safe_count(old_buttons) > 0:
+        log.info("the page holds Download buttons and none of them shows")
+        _close_switcher(page, cb)
+        raise pressing.Stop("switch card", "no download button shows", [
+            "The page holds this card's Download buttons and none of them shows, so when "
+            "the next card's list came could not be told, and the card was not switched.",
+            "Nothing more was pressed.", pressing.AGAIN])
     old_url = page.url or ""
 
     pressing.click(page, opt, css=opt_css,

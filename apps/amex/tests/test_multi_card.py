@@ -999,3 +999,91 @@ def test_download_one_on_single_card_does_not_call_list_cards(monkeypatch):
     app_mod.App.download_one(app, fake_page, doc, "stmt.pdf")
 
     assert called == [], "list_cards should not be called for single-card account downloads"
+
+
+# ---------------------------------------------------------------------------
+# A card switch, on pages made for what each wait is there for
+# ---------------------------------------------------------------------------
+
+def statement_row(date: str) -> str:
+    """One row, with its Download twice, the copy for a wide window and the
+    hidden one for a narrow window, the wide one first."""
+    tid = "axp-pdf-statements/common/Table/recent-statements/%s/download-button" % date
+    return ('<div class="row"><button class="dl" data-testid="%s">Download</button>'
+            '<button class="dl mobile" style="display:none" data-testid="%s">Download</button></div>'
+            % (tid, tid))
+
+
+def switch_page(area: str, on_switch: str = "", style: str = "") -> str:
+    """A statements page with eval off and two cards, Alpha on show, that
+    counts the presses of Bravo's option in #presses. `area` is what the
+    statements area holds and `on_switch` what pressing Bravo's option does,
+    with moveSwitcher() to show Bravo in the switcher and draw(html) to fill
+    the statements area."""
+    def card(name, digits):
+        return ('<span data-testid="simple_switcher_display_name">%s</span>'
+                '<span data-testid="simple_switcher_display_number">••••%s</span>' % (name, digits))
+    return """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title>
+<script>window.eval = function () { throw new Error('eval is disabled'); };</script>
+<style>%(style)s</style></head><body>
+<div data-testid="simple_switcher_combobox" aria-expanded="false" role="combobox" style="cursor:pointer;">
+  <div data-testid="simple_switcher_selected_option_display">%(alpha)s</div>
+</div>
+<div role="listbox">
+  <div data-testid="simple_switcher_product_option_CARD_1" role="option" style="display:none;">%(alpha)s</div>
+  <div data-testid="simple_switcher_product_option_CARD_2" role="option" style="display:none;">%(bravo)s</div>
+</div>
+<section id="table-area">%(area)s</section>
+<span id="presses">0</span>
+<script>
+const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
+const opts = document.querySelectorAll('[role="option"]');
+const area = document.getElementById('table-area');
+function moveSwitcher() {
+  document.querySelector('[data-testid="simple_switcher_selected_option_display"]').innerHTML = `%(bravo)s`;
+}
+function draw(html) { area.innerHTML = html; }
+cb.addEventListener('click', () => {
+  const open = cb.getAttribute('aria-expanded') === 'true';
+  cb.setAttribute('aria-expanded', open ? 'false' : 'true');
+  opts.forEach(o => o.style.display = open ? 'none' : 'block');
+});
+document.querySelector('[data-testid="simple_switcher_product_option_CARD_2"]').addEventListener('click', () => {
+  const presses = document.getElementById('presses');
+  presses.textContent = Number(presses.textContent) + 1;
+  cb.setAttribute('aria-expanded', 'false');
+  opts.forEach(o => o.style.display = 'none');
+  %(on_switch)s
+});
+</script></body></html>""" % {"alpha": card("Alpha Card", "11111"), "bravo": card("Bravo Card", "22222"),
+                              "area": area, "on_switch": on_switch, "style": style}
+
+
+@pytest.fixture
+def page_of(browser):
+    """A page in a context of its own, drawn from the html handed to it."""
+    contexts = []
+
+    def _page(html: str):
+        ctx = browser.new_context()
+        contexts.append(ctx)
+        pg = ctx.new_page()
+        pg.set_content(html)
+        return pg
+
+    yield _page
+    for ctx in contexts:
+        ctx.close()
+
+
+def test_a_list_none_of_whose_downloads_shows_stops_before_the_switch(page_of):
+    """A button that does not show reads as gone from the start, so with every
+    Download hidden there is nothing to hold, and the old list would be taken
+    for the new card's. The card is not pressed, and the switcher is closed."""
+    pg = page_of(switch_page(statement_row("2030-11-11"), style=".dl { display: none; }"))
+    cards = site.list_cards(pg)
+    with pytest.raises(pressing.Stop) as stop:
+        site.select_card(pg, cards[1])
+    assert stop.value.reason == "no download button shows"
+    assert pg.locator("#presses").inner_text() == "0"
+    assert pg.locator(site._SWITCHER_COMBOBOX_SEL).get_attribute("aria-expanded") == "false"

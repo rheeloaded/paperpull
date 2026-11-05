@@ -72,15 +72,12 @@ STOPS = {
     ("amex", "list_cards", "click", "open the card switcher"): (1,
         "on a multi-card account, the card switcher on the statements page reaches each card's statements, "
         "so a turned off switcher leaves every other card's documents"),
-    ("amex", "list_cards", "click", "close the card switcher"): (1,
-        "closes the switcher after listing cards, and an open dropdown covers "
+    ("amex", "_close_switcher", "click", "close the card switcher"): (1,
+        "closes the switcher once it has been read, and an open dropdown covers "
         "every press after it"),
     ("amex", "select_card", "click", "open the card switcher"): (1,
         "on a multi-card account, opens the card switcher before choosing the card to download from, "
         "so a turned off switcher leaves that card's documents"),
-    ("amex", "select_card", "click", "close the card switcher"): (1,
-        "closes the switcher if card option was not found, and an open dropdown covers "
-        "every press after it"),
     ("amex", "select_card", "click", "switch card"): (1,
         "the card option that switches to the document's card"),
     ("amex", "expand_sections", "click", "open a section"): (1,
