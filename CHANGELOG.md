@@ -7,11 +7,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.60.2] - 2026-11-04
+
+Bank of America now saves statements, and is confirmed on a real account.
 
 ### Fixed
-- **Bank of America saves statements from the credit card page too, and is
-  confirmed on a real account (#121).** Statements & Documents at
+- **Bank of America now saves statements, and is confirmed on a real
+  account (#121).** Statements & Documents at
   /mycommunications/statements/statement.go, where a credit card's page
   opens, now counts as the statements page. The bank draws each row's
   Download PDF link behind the front of a card, inside a wrapper marked

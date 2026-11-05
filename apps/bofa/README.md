@@ -22,7 +22,8 @@ they work, see below. Tax forms are not covered yet.
 ## How it reads the site
 
 Statements & Documents opens at more than one address, a credit card's
-page among them, and the app knows each. The page fills its list from a
+page among them, and the app knows the ones testers have shown it. The
+page fills its list from a
 call of its own, one account and one year at a time, and draws a Download
 PDF link for each statement under its Statements heading. The app reloads that page, keeps the list
 call the page makes, and asks every account's statements the same way from
