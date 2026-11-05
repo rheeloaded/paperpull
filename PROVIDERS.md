@@ -18,6 +18,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`adp`](apps/adp) | ADP Workforce Now | Pay statements and W-2s, everything the statement services list, nothing clicked | Payroll |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
+| [`cetera`](apps/cetera) | Cetera (AdviceWorks) | Brokerage account statements and quarterly performance reports, every account and quarter the client portal keeps, from the page's own statement and report lists asked from inside the signed-in page, nothing clicked. Built and run on a contributor's own account, 56 statements and 5 reports | Brokerage |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
 | [`alpaca`](apps/alpaca) | Alpaca (Live brokerage account) | Brokerage and crypto statements and trade confirmations for the Live account, each row's own Download pressed once and the presigned file taken through the browser. The JSON twins of trade confirmations and the account application are skipped, and a Paper account is never read. Built and run on a contributor's own Live account, 22 documents | Brokerage / crypto |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. Confirmed by @watling777 on two accounts, wireless and internet, with a full run on each (#26) | Telecom |
