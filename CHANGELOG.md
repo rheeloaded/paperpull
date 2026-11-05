@@ -49,8 +49,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   cards, Discover found nothing, because a sign-in that lands on the
   overview page never reached the statements, and a page it never reached
   read as a whole list of nothing. The app now reaches the statements from
-  there, reads each card in the switcher in turn, and files each statement
-  under its card, with the card's name and last digits in the file name.
+  there, stops when it cannot, reads each card in the switcher in turn, and
+  files each statement under its card, with the card's name and last digits
+  in the file name.
   It waits for one card's list to go before it reads the next, at any
   window width, so a list is never read as another card's, and a year-end
   summary, the one document with the same date on both cards, is never
