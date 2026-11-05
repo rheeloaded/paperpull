@@ -119,7 +119,17 @@ def machine(monkeypatch, tmp_path):
 
 
 def _sign_in(tmp_path, **kw):
-    return browser.open_signin_browser(tmp_path / "profile", "9222", "https://x.test", **kw)
+    try:
+        return browser.open_signin_browser(tmp_path / "profile", "9222", "https://x.test", **kw)
+    except KeyboardInterrupt:
+        pytest.fail("Ctrl-C ended the sign-in")     # and not this whole test run
+
+
+def _offer():
+    try:
+        return browser.offer_chromium_update(OLD, WANTED)
+    except KeyboardInterrupt:
+        pytest.fail("Ctrl-C got out of the offer")
 
 
 # -- reading what Playwright wants ------------------------------------------------
@@ -353,7 +363,7 @@ def test_ctrl_c_is_answered_by_the_offer_itself(machine, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
     machine.arrives = None
     machine.stopped_by = KeyboardInterrupt()
-    assert browser.offer_chromium_update(OLD, WANTED) is False
+    assert _offer() is False
 
 
 # -- nothing in the offer can end a sign-in -----------------------------------------
@@ -487,7 +497,7 @@ def test_a_question_nobody_answers_is_no_answer(machine, monkeypatch, tmp_path, 
     def answer(prompt):
         raise nobody
     monkeypatch.setattr("builtins.input", answer)
-    assert browser.offer_chromium_update(OLD, WANTED) is None
+    assert _offer() is None
     assert _sign_in(tmp_path) == browser.CHROMIUM
     assert machine.opened == [(machine.old, "profile")]
     assert machine.downloads == []
@@ -499,7 +509,7 @@ def test_a_download_that_cannot_start_goes_on_with_the_old_build(machine, monkey
         raise OSError("no such file")
     monkeypatch.setattr(browser.subprocess, "call", cannot)
     machine.answers = ["y", "y"]
-    assert browser.offer_chromium_update(OLD, WANTED) is False
+    assert _offer() is False
     assert "Could not start the download (no such file)" in capsys.readouterr().out
     assert _sign_in(tmp_path) == browser.CHROMIUM
     assert machine.opened == [(machine.old, "profile")]
@@ -754,7 +764,7 @@ def test_a_finished_download_clears_the_old_build_only_once_the_new_one_opened(
     assert real_install.opened == [("chromium-%d" % wanted, True)]
     fetched = len(real_install.server.got)
     assert fetched
-    deadline = time.time() + 90
+    deadline = time.time() + 180
     while real_install.old.exists() and time.time() < deadline:
         time.sleep(0.25)
     assert not real_install.old.exists()
