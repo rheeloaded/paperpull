@@ -7,6 +7,45 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+
+- **NW Natural, the 80th app, monthly gas bills (#126).** It downloads
+  each month's bill from NW Natural's Paymentus payment portal, about
+  eight years of them. Nothing is clicked. The app reads Bill History from
+  inside the tab the person signed in with, and each bill's address, which
+  carries the session's token, stays in memory for the run and is never
+  written down. A second account, a pager, a history with no bills or a
+  count that does not match stops the list rather than be read as whole,
+  and Login and a run say so when the portal's bot protection answers.
+  Contributed by crazyhorse90210 and run on the contributor's own account.
+  Before merging, a list that stops while bills download was made to stop
+  the run once with the list unread, as the other apps do.
+- **City of Tualatin, the 81st app, monthly utility bills (#127).** It
+  saves the water, sewer, stormwater, parks and road fee bills of a
+  Tualatin Water account from CivicPay Online, about two years of them.
+  Nothing is clicked. The portal has no PDF of a bill, so each bill's
+  print page is drawn as one, loading nothing, and the PDF's own text is
+  read for the bill's words and Billing Date before it is kept. A pager, a
+  filtered view, a second transaction table or a row of a type it does not
+  know stops the list rather than be read as whole. Contributed by
+  crazyhorse90210 and run on the contributor's own account. Before
+  merging, a list that stops while bills download was made to stop the run
+  once with the list unread, as the other apps do.
+
+### Fixed
+
+- **Target says in plain words when its fallback has no Chromium to print
+  with (#131).** Target's fallback prints a receipt page in PaperPull's
+  own Chromium, which most installs never download, since sign-in uses the
+  Edge or Chrome already on the computer. A purchase's notes used to carry
+  Playwright's own error, which names a command the packaged app does not
+  have. They now say what is missing and that nothing is wrong with the
+  account or the receipt, and give the one line that downloads it. The
+  Store edition, where that line cannot run, and PaperPull Server each get
+  words that fit them. Contributed by JasperDale420.
+
 ## [0.60.2] - 2026-11-04
 
 Bank of America now saves statements, and is confirmed on a real account.
