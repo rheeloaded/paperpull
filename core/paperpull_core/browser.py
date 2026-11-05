@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import glob
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -610,6 +611,144 @@ def fetch_bundled_chromium(assume_yes: bool = False) -> bool:
     return True
 
 
+# -- keeping the private Chromium from falling behind (#132) ------------------------
+#
+# After the first download nothing updated PaperPull's own Chromium. Sign-in
+# always starts the newest build on disk, and a PaperPull upgrade that brings
+# a newer Playwright does not download that Playwright's Chromium, so a
+# computer that took the download months ago kept signing in with that build.
+# Each Playwright release carries a newer Chromium with its security fixes,
+# so the copy fell further behind with every release. Nothing broke, since
+# Playwright 1.64.1 drove builds 1234 and 1228 without trouble, it only got
+# old (_on_disk keeps every launch working on whatever build is there).
+#
+# So the sign-in offers the update, in the place and the way it offers the
+# first download, when the copy it is about to start is older than the build
+# the installed Playwright was made for. It is offered only when that copy is
+# the one that would start. Someone who signs in through their own Edge or
+# Chrome is never asked about a copy they do not use. Under the control panel
+# nobody can be asked, so the panel's log says so and gives the command.
+# `playwright install chromium` takes away builds nothing else uses, so the
+# disk use stays about the same.
+#
+# A person who says no is not asked again until the Playwright wants a newer
+# build still. The answer is a file beside the builds, so every app shares it
+# and it goes with them.
+
+DECLINED_UPDATE = "paperpull-chromium-update-declined"
+
+
+def _wanted_chromium_build() -> Optional[int]:
+    """The Chromium build the installed Playwright was made for, from its
+    browsers.json, or None when it cannot be read."""
+    package = _playwright_package()
+    if package is None:
+        return None
+    try:
+        with open(package / "driver" / "package" / "browsers.json", encoding="utf-8") as f:
+            for entry in json.load(f)["browsers"]:
+                if entry.get("name") == "chromium":
+                    return int(entry["revision"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def chromium_update_due(path: str) -> Optional[Tuple[int, int]]:
+    """(the build `path` is, the build Playwright wants) when the Chromium at
+    `path`, a build of Playwright's, is older than the one the installed
+    Playwright was made for. None when it is as new, or newer, or either
+    cannot be told."""
+    have, want = _build_number(path), _wanted_chromium_build()
+    if have < 0 or want is None or have >= want:
+        return None
+    return have, want
+
+
+def _declined_file() -> Optional[Path]:
+    root = _playwright_root()
+    return root / DECLINED_UPDATE if root else None
+
+
+def _update_declined(want: int) -> bool:
+    marker = _declined_file()
+    try:
+        return bool(marker) and marker.read_text(encoding="utf-8").strip() == str(want)
+    except OSError:
+        return False
+
+
+def _remember_declined(want: int) -> None:
+    marker = _declined_file()
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("%d\n" % want, encoding="utf-8")
+    except (OSError, AttributeError):
+        pass    # asked again next time, which is all that costs
+
+
+def offer_chromium_update(have: int, want: int, assume_yes: bool = False) -> bool:
+    """Offer to download the Chromium build Playwright wants, in place of the
+    older one on disk, and do it if agreed. Returns True only if a build at
+    least that new is on disk afterwards."""
+    if _update_declined(want):
+        return False
+    cmd = browser_install_command()
+    shown = _command_line(cmd) if cmd is not None else ""
+
+    print()
+    print("The private copy of Chromium on this computer is build %d. This PaperPull's" % have)
+    print("Playwright was made for build %d. Newer builds carry newer security fixes," % want)
+    print("and the copy falls further behind with every release. Signing in works")
+    print("with the old one, so nothing is wrong, but it is better kept up to date.")
+    print()
+    print("Updating downloads about 400 MB. Playwright then removes builds nothing")
+    print("else uses, so the space used stays about the same.")
+    print()
+
+    if not assume_yes:
+        if not can_ask():
+            # The control panel, which cannot ask, or anything else with no
+            # one at the keyboard. Nothing is remembered, since nobody said no.
+            if shown:
+                print("To update it, open %s, run the line below, and sign in again:" % _terminal_name())
+                print(shown)
+            else:
+                print("This build cannot download it for you.")
+            print("Signing in goes on with the build that is here.")
+            return False
+        try:
+            answer = input("Update it now? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if answer not in ("y", "yes"):
+            _remember_declined(want)
+            print("Nothing was downloaded. You will be asked again when PaperPull wants")
+            print("a newer build than %d." % want)
+            return False
+
+    if cmd is None:
+        print("This build cannot download a browser for you.")
+        return False
+    print()
+    print("Downloading. This takes a few minutes on a slow connection.")
+    try:
+        rc = subprocess.call(cmd)
+    except OSError as e:
+        print("Could not start the download (%s)." % e)
+        return False
+    newest = _bundled_chromium()
+    if rc != 0 or not newest or _build_number(newest[0]) < want:
+        print()
+        print("The download did not finish. Signing in goes on with the build that")
+        print("is here, and you can try again at the next sign-in.")
+        return False
+    print()
+    print("Done. Now signing in with build %d." % _build_number(newest[0]))
+    return True
+
+
 def launch_own_browser(chromium, user_data_dir, **kwargs):
     """A browser of the app's own, for settings that name no cdp_url, said
     out loud. Every app opens one that way when its config has no cdp_url,
@@ -695,6 +834,14 @@ def is_missing_chromium(error) -> bool:
     return "executable doesn't exist" in str(error).lower()
 
 
+def _command_line(cmd) -> str:
+    """`cmd` as one line that can be pasted into a terminal, each part
+    quoted the way this system's shell reads it."""
+    if sys.platform == "win32":
+        return subprocess.list2cmdline(cmd)
+    return " ".join(shlex.quote(part) for part in cmd)
+
+
 def _terminal_name() -> str:
     return {"darwin": "Terminal", "win32": "Command Prompt"}.get(sys.platform, "a terminal")
 
@@ -717,8 +864,7 @@ def missing_chromium_words() -> str:
     if cmd is None:
         return (head + " This build cannot download it for you, so the document was "
                 "not saved. Ask at https://github.com/rheeloaded/paperpull/issues.")
-    shown = subprocess.list2cmdline(cmd) if sys.platform == "win32" else " ".join(
-        shlex.quote(part) for part in cmd)
+    shown = _command_line(cmd)
     return (head + " To download it, about 400 MB, kept for PaperPull alone, open "
             + _terminal_name() + ", run this line, and then run this step again: "
             + shown)
@@ -1046,6 +1192,15 @@ def open_signin_browser(profile_dir, port: str, url: str,
         else:
             print("No browser this tool can drive is available.")
         return None
+
+    # The private copy of Chromium that is about to be started may be older
+    # than the one this Playwright was made for (#132). Asked only when it is
+    # the browser that would start, and never on PaperPull Server.
+    if (allow_fetch and mode != INSTALLED and candidates[0][0] == CHROMIUM
+            and os.environ.get("PAPERPULL_SERVER") != "1"):
+        due = chromium_update_due(candidates[0][1])
+        if due and offer_chromium_update(*due):
+            candidates = browser_candidates(prefer_real=prefer_real, mode=mode)
 
     opened = _try_each(candidates, profile_dir, port, url, mode=mode)
     if opened:
