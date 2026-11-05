@@ -642,3 +642,18 @@ def test_a_switcher_that_will_not_open_stops_an_archive_filed_by_card(attached, 
     assert all(r["account"] for r in records(tmp_path, "discovery.json").values())
     assert len(saved(tmp_path)) == 4
     assert noted_whole(tmp_path) is False
+
+
+def test_an_address_that_moves_first_is_not_the_old_list_going(attached, serve, tmp_path, capsys):
+    """The address moves as the card is pressed and the old list stays past
+    the wait for it. The address never moves on the real page, so all it can
+    do here is say the old list went while it still shows, and A's list would
+    go under B."""
+    amex = serve(list_ms=7000, address_moves_first=True)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    assert panel_reads(out)["stopped"] == 1, folded(out)
+    assert not [r for r in records(tmp_path, "discovery.json").values()
+                if digits_of(r["account"]) == B["digits"]]
+    assert saved(tmp_path) == {}

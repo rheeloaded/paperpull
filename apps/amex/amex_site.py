@@ -880,6 +880,21 @@ def current_card_label(page) -> str:
         return ""
 
 
+def _goes_away(handle) -> bool:
+    """Whether what `handle` holds stops showing within LINK_WAIT_MS. Both of
+    these reads work with eval off. Anything else that goes wrong says nothing
+    about the page, so it never counts as the element having gone."""
+    try:
+        handle.wait_for_element_state("hidden", timeout=LINK_WAIT_MS)
+        return True
+    except Exception:
+        pass
+    try:
+        return not handle.is_visible()
+    except Exception:
+        return False
+
+
 def select_card(page, card: dict) -> bool:
     """Switch to the card specified by dict.
     Returns True if successfully switched or already on that card.
@@ -945,7 +960,6 @@ def select_card(page, card: dict) -> bool:
             "The page holds this card's Download buttons and none of them shows, so when "
             "the next card's list came could not be told, and the card was not switched.",
             "Nothing more was pressed.", pressing.AGAIN])
-    old_url = page.url or ""
 
     try:
         pressing.click(page, opt, css=opt_css,
@@ -971,45 +985,22 @@ def select_card(page, card: dict) -> bool:
             "switch card", "the card did not switch",
             f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
 
-    # Wait until the previous card's statement buttons are gone / hidden
-    if old_handle is not None:
-        detached = False
-        try:
-            old_handle.wait_for_element_state("hidden", timeout=LINK_WAIT_MS)
-            detached = True
-        except Exception:
-            try:
-                if not old_handle.is_visible():
-                    detached = True
-            except Exception:
-                pass
-            if not detached and (page.locator(_DOWNLOAD_BUTTONS).count() == 0 or (_card_of(page.url) and _card_of(page.url) != _card_of(old_url))):
-                detached = True
-        if not detached:
-            log.info("switched card option but old statements list never cleared")
-            raise pressing.no_answer(
-                "switch card", "the statements did not switch",
-                f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+    # Wait until the previous card's statement buttons are gone / hidden. The
+    # address says nothing here, since it never changes on this page.
+    if old_handle is not None and not _goes_away(old_handle):
+        log.info("switched card option but old statements list never cleared")
+        raise pressing.no_answer(
+            "switch card", "the statements did not switch",
+            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
 
-    # Wait until the previous card's empty message is gone / hidden
-    if old_empty_handle is not None:
-        detached = False
-        try:
-            old_empty_handle.wait_for_element_state("hidden", timeout=LINK_WAIT_MS)
-            detached = True
-        except Exception:
-            try:
-                if not old_empty_handle.is_visible():
-                    detached = True
-            except Exception:
-                pass
-            if not detached and (page.locator(_DOWNLOAD_BUTTONS).count() > 0 or (_card_of(page.url) and _card_of(page.url) != _card_of(old_url))):
-                detached = True
-        if not detached:
-            log.info("switched card option but old empty-statements message never cleared")
-            raise pressing.no_answer(
-                "switch card", "the statements did not switch",
-                f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+    # Wait until the previous card's empty message is gone / hidden. That card
+    # left no Download behind it, so one on the page now is the new card's.
+    if old_empty_handle is not None and not _goes_away(old_empty_handle) \
+            and _safe_count(old_buttons) == 0:
+        log.info("switched card option but old empty-statements message never cleared")
+        raise pressing.no_answer(
+            "switch card", "the statements did not switch",
+            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
 
     # Wait for either new download buttons or a no-statements message to appear
     for _ in range(int(LIST_WAIT_MS / 250)):
