@@ -22,6 +22,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -41,16 +42,17 @@ REAL_WANTED_BUILD = browser._wanted_chromium_build
 INSTALL = ["/pkg/python3", "-m", "playwright", "install", "chromium"]
 INNER = ("chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/"
          "Google Chrome for Testing")
+SHELL = "chrome-headless-shell-mac-arm64/chrome-headless-shell"
 
 
-def _lay(root, build, finished=True, inner=INNER):
+def _lay(root, build, finished=True, inner=INNER, folder="chromium-%d"):
     """A build in root as an install leaves it, with Playwright's mark when
     it finished. Returns its executable."""
-    exe = root / ("chromium-%d" % build) / inner
+    exe = root / (folder % build) / inner
     exe.parent.mkdir(parents=True, exist_ok=True)
     exe.write_bytes(b"chromium %d" % build)
     if finished:
-        (root / ("chromium-%d" % build) / browser.INSTALLED_MARK).write_text("")
+        (root / (folder % build) / browser.INSTALLED_MARK).write_text("")
     return str(exe)
 
 
@@ -454,6 +456,23 @@ def test_the_person_keeps_their_profile_ahead_of_a_browser_of_their_own(machine,
                               ("/x/edge", "profile-microsoftedge")]
 
 
+def test_a_new_build_set_aside_takes_its_headless_shell_with_it(machine, monkeypatch, tmp_path):
+    """Or a headless launch, the receipt renderer's, would go on picking a
+    shell of the build that would not open."""
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    old_shell = _lay(machine.root, OLD, inner=SHELL, folder="chromium_headless_shell-%d")
+    new_shell = _lay(machine.root, WANTED, inner=SHELL, folder="chromium_headless_shell-%d")
+    assert browser._headless_shells(machine.root) == [new_shell, old_shell]
+    machine.answers = ["y"]
+    machine.refused = {machine.new}
+    _sign_in(tmp_path)
+    assert browser._headless_shells(machine.root) == [old_shell]
+    chromium = type("Chromium", (), {"executable_path": machine.new})()
+    assert browser._on_disk(chromium, {"headless": True})["executable_path"] == old_shell
+    assert browser._on_disk(chromium, {"headless": False})["executable_path"] == machine.old
+    assert os.path.exists(new_shell), "only the mark goes, and a later install replaces the rest"
+
+
 def test_a_new_build_that_would_not_open_is_not_the_newest_at_the_next_sign_in(machine, tmp_path):
     """Left as it was it would be the build every later sign-in starts, with
     the one that works on disk and never tried, and asked about for nothing."""
@@ -657,6 +676,268 @@ def test_an_unwritable_folder_for_the_answer_costs_only_a_second_question(machin
     _sign_in(tmp_path)
     _sign_in(tmp_path)
     assert len(machine.asked) == 2
+
+
+# -- a newest build that will not open, however it got there ---------------------------
+#
+# The panel's line can finish a build this computer cannot start with no
+# sign-in there to see it. It is the newest from then on, and browser_candidates
+# hands over only the newest, so the older build beside it, which the words
+# promised stays, was never tried. A probe with a bogus finished 1248 beside a
+# working 1228 got None at every sign-in, and with Edge installed went on to an
+# empty profile.
+#
+# What a browser does here matters, so these launches are real, of a program
+# that stands in for one. It notes the profile it was given, and answers on its
+# debugging port as a browser does, or does not.
+
+_PROGRAM = """
+import http.server, json, os, sys, threading, time
+args = sys.argv[1:]
+port = int(next(a for a in args if a.startswith("--remote-debugging-port=")).split("=")[1])
+profile = next(a for a in args if a.startswith("--user-data-dir=")).split("=", 1)[1]
+with open({note!r}, "a", encoding="utf-8") as f:
+    f.write("%d %s\\n" % (os.getpid(), profile))
+threading.Timer(60, os._exit, [0]).start()
+if not {answers!r}:
+    time.sleep(60)
+class Answer(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({{"Browser": "Chrome/0", "webSocketDebuggerUrl": "ws://127.0.0.1/x"}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+http.server.HTTPServer(("127.0.0.1", port), Answer).serve_forever()
+"""
+# On Linux the bundled copy goes ahead of a browser of their own only from
+# chrome-linux (_real_first), so that is where these builds are laid out.
+OWN_INNER = {"win32": "chrome-win64/chrome.exe", "darwin": INNER}.get(sys.platform, "chrome-linux/chrome")
+
+
+def _program(path, note, answers=True):
+    """A real program at `path`. On Windows that has to be an executable, so
+    it is the launcher pip makes its own commands with, with this script
+    behind it, and no window of its own, as _launch starts a browser with no
+    console."""
+    script = _PROGRAM.format(note=str(note), answers=answers)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform != "win32":
+        path.write_text("#!%s\n%s" % (sys.executable, script), encoding="utf-8")
+        path.chmod(0o755)
+        return
+    distlib = pytest.importorskip("pip._vendor.distlib")
+    packed = io.BytesIO()
+    with zipfile.ZipFile(packed, "w") as z:
+        z.writestr("__main__.py", script)
+    python = Path(sys.executable).with_name("pythonw.exe")
+    path.write_bytes((Path(distlib.__file__).parent / "w64.exe").read_bytes()
+                     + b'#!"%s"\r\n' % str(python).encode() + packed.getvalue())
+
+
+def _free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return str(s.getsockname()[1])
+
+
+@pytest.fixture
+def real_launches(monkeypatch, tmp_path):
+    """Builds that are real programs in a folder of the test's own, with no
+    update due, so the sign-in goes straight to starting them."""
+    m = type("RealLaunches", (), {})()
+    m.root = tmp_path / "ms-playwright"
+    m.profile = tmp_path / "profile"
+    m.own_profile = str(m.profile.resolve())
+    m.notes = {}
+    m.real = []
+    m.waits = []
+    m.port = _free_port()
+
+    def lay(build, answers=True, program=True):
+        exe = m.root / ("chromium-%d" % build) / OWN_INNER
+        m.notes[build] = tmp_path / ("started-%d.txt" % build)
+        if program:
+            _program(exe, m.notes[build], answers)
+        else:
+            exe.parent.mkdir(parents=True, exist_ok=True)
+            exe.write_bytes(b"this is no program")
+        (m.root / ("chromium-%d" % build) / browser.INSTALLED_MARK).write_text("")
+        return str(exe)
+
+    def started(key):
+        note = m.notes[key]
+        if not note.exists():
+            return []
+        return [line.split(" ", 1)[1] for line in note.read_text(encoding="utf-8").splitlines()]
+
+    def sign_in(**kw):
+        return browser.open_signin_browser(m.profile, m.port, "https://x.test", **kw)
+
+    real_wait = browser.wait_for_debug_port
+
+    def wait(port, timeout=20.0, alive=None):
+        return real_wait(port, m.waits.pop(0) if m.waits else timeout, alive)
+
+    m.lay, m.started, m.sign_in = lay, started, sign_in
+    monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(m.root))
+    monkeypatch.setattr(browser, "_real_browsers", lambda: list(m.real))
+    monkeypatch.setattr(browser, "_wanted_chromium_build", lambda: None)
+    monkeypatch.setattr(browser, "_say_shared_port", lambda port: None)
+    monkeypatch.setattr(browser, "wait_for_debug_port", wait)
+    yield m
+    for note in m.notes.values():
+        if note.exists():
+            for line in note.read_text(encoding="utf-8").splitlines():
+                try:
+                    os.kill(int(line.split(" ", 1)[0]), 9)
+                except OSError:
+                    pass
+
+
+def _what_is_on_disk(root):
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+
+
+def test_a_newest_build_that_is_no_program_hands_the_sign_in_to_the_older_one(real_launches, capsys):
+    r = real_launches
+    r.lay(1248, program=False)
+    r.lay(1228)
+    before = _what_is_on_disk(r.root)
+    assert r.sign_in() == browser.CHROMIUM
+    assert r.started(1228) == [r.own_profile]
+    said = capsys.readouterr().out
+    assert "Chromium build 1248 did not open, so build 1228" in said
+    assert "is being tried on the same profile" in said
+    assert _what_is_on_disk(r.root) == before, "this path can tell nothing, so it changes nothing"
+
+
+def test_a_newest_build_whose_port_never_answers_hands_it_on_too(real_launches, capsys):
+    """A build that starts and answers nothing, which from here looks the
+    same as a port another program spoiled. So its window is closed, the older
+    build opens on the same profile, and the newest keeps its mark."""
+    r = real_launches
+    r.lay(1248, answers=False)
+    r.lay(1228)
+    r.waits = [4.0]
+    before = _what_is_on_disk(r.root)
+    assert r.sign_in() == browser.CHROMIUM
+    assert r.started(1248) == [r.own_profile]
+    assert r.started(1228) == [r.own_profile]
+    said = capsys.readouterr().out
+    assert "no debugging port answered" in said and "That window was closed" in said
+    assert "Chromium build 1248 did not open, so build 1228" in said
+    assert _what_is_on_disk(r.root) == before
+
+
+def test_every_sign_in_finds_the_older_build_again(real_launches):
+    """Nothing is remembered, so the newest goes first each time, as it must
+    while the cause may have been the port."""
+    r = real_launches
+    r.lay(1248, program=False)
+    r.lay(1228)
+    assert r.sign_in() == browser.CHROMIUM
+    r.port = _free_port()
+    assert r.sign_in() == browser.CHROMIUM
+    assert r.started(1228) == [r.own_profile, r.own_profile]
+
+
+def test_the_older_build_goes_ahead_of_a_browser_of_their_own(real_launches, tmp_path):
+    """Their sign-ins are on this profile, and Edge would open on an empty
+    one."""
+    r = real_launches
+    r.lay(1248, program=False)
+    r.lay(1228)
+    r.notes["edge"] = tmp_path / "started-edge.txt"
+    _program(tmp_path / "edge" / "msedge.exe", r.notes["edge"])
+    r.real = [(browser.EDGE, str(tmp_path / "edge" / "msedge.exe"))]
+    assert r.sign_in() == browser.CHROMIUM
+    assert r.started(1228) == [r.own_profile]
+    assert r.started("edge") == []
+
+
+def test_only_one_older_build_is_tried(real_launches, tmp_path):
+    """The next browser comes after that, on a profile of its own, as it
+    always did. A third build is not started."""
+    r = real_launches
+    r.lay(1248, program=False)
+    r.lay(1234, program=False)
+    r.lay(1228)
+    r.notes["edge"] = tmp_path / "started-edge.txt"
+    _program(tmp_path / "edge" / "msedge.exe", r.notes["edge"])
+    r.real = [(browser.EDGE, str(tmp_path / "edge" / "msedge.exe"))]
+    assert r.sign_in() == browser.EDGE
+    assert r.started(1228) == []
+    assert r.started("edge") == [r.own_profile + "-microsoftedge"]
+
+
+@pytest.mark.parametrize("program", [False, True], ids=["no program", "a port that never answers"])
+def test_a_computer_with_one_build_goes_on_exactly_as_it_did(real_launches, capsys, program):
+    r = real_launches
+    r.lay(1228, answers=False, program=program)
+    r.waits = [4.0]
+    before = _what_is_on_disk(r.root)
+    assert r.sign_in() is None
+    said = capsys.readouterr().out
+    assert "being tried" not in said and "did not open" not in said
+    if program:
+        assert "Try closing any other copy of the browser" in said
+    assert _what_is_on_disk(r.root) == before
+
+
+def test_a_copy_of_the_same_build_is_not_an_older_build(machine, tmp_path):
+    """It would fail the same way, and the real older build would go untried."""
+    _lay(machine.root, WANTED)
+    shutil.copytree(machine.root / ("chromium-%d" % WANTED),
+                    machine.root / ("chromium-%d - Copy" % WANTED))
+    copy = machine.new.replace("chromium-%d" % WANTED, "chromium-%d - Copy" % WANTED)
+    machine.refused = {machine.new, copy}
+    assert _sign_in(tmp_path) == browser.CHROMIUM
+    assert len(machine.opened) == 2
+    assert machine.opened[0][0] in machine.refused
+    assert machine.opened[1] == (machine.old, "profile")
+
+
+def test_two_copies_of_one_build_are_one_build(machine, tmp_path):
+    shutil.copytree(machine.root / ("chromium-%d" % OLD), machine.root / ("chromium-%d - Copy" % OLD))
+    copy = machine.old.replace("chromium-%d" % OLD, "chromium-%d - Copy" % OLD)
+    machine.refused = {machine.old, copy}
+    machine.tty = False
+    assert _sign_in(tmp_path) is None
+    assert len(machine.opened) == 1
+
+
+def test_a_browser_of_their_own_at_the_head_has_no_older_build(machine, tmp_path):
+    """Only the private copy steps back. Their own browser goes on to the
+    private copy as it always did, on that copy's own profile."""
+    _lay(machine.root, WANTED)
+    own = "/opt/chromium-1300/chrome"       # reads as a build newer than both
+    machine.real = [(browser.CHROME, own)]
+    machine.refused = {own, machine.new}
+    assert _sign_in(tmp_path, prefer_real=True) is None
+    assert machine.opened == [(own, "profile"), (machine.new, "profile-chromium")]
+
+
+def test_a_folder_with_no_build_number_is_not_an_older_build(machine, tmp_path):
+    """Nobody can say what it is, so it is not started on their profile."""
+    shutil.copytree(machine.root / ("chromium-%d" % OLD), machine.root / "chromium-backup")
+    machine.refused = {machine.old}
+    machine.tty = False
+    assert _sign_in(tmp_path) is None
+    assert machine.opened == [(machine.old, "profile")]
+
+
+def test_a_step_back_after_an_update_is_the_one_step_back(machine, tmp_path):
+    """With the new build set aside the build they had is the one older
+    build, so nothing older than that is started as well."""
+    _lay(machine.root, OLD - 28)
+    machine.answers = ["y"]
+    machine.refused = {machine.new, machine.old}
+    assert _sign_in(tmp_path) is None
+    assert machine.opened == [(machine.new, "profile"), (machine.old, "profile")]
 
 
 # -- Playwright's real install ---------------------------------------------------------
