@@ -302,6 +302,70 @@ _ACTIVITY_HREF = "a[href='/activity'], a[href^='/activity?']"
 _STATEMENTS_HREF = "a[href^='/activity/statements']"
 _DOWNLOAD_BUTTONS = _by_test_id("*=", "download-button")
 
+_SWITCHER_COMBOBOX_SEL = _by_test_id("=", "simple_switcher_combobox")
+_SWITCHER_OPTION_SEL = _by_test_id("^=", "simple_switcher_product_option_")
+_SWITCHER_NAME_SEL = _by_test_id("=", "simple_switcher_display_name")
+_SWITCHER_NUM_SEL = _by_test_id("=", "simple_switcher_display_number")
+_SWITCHER_SELECTED_DISPLAY_SEL = _by_test_id("=", "simple_switcher_selected_option_display")
+
+NO_STATEMENTS_RE = re.compile(
+    r"(no\s+statements?\s+(available|found|to\s+display)|"
+    r"there\s+are\s+no\s+statements?|"
+    r"you\s+have\s+no\s+statements?|"
+    r"no\s+documents?\s+available|"
+    r"no\s+billing\s+statements?|"
+    r"keine\s+(abrechnungen|dokumente|kontoausz[üu]ge)\s+(vorhanden|verf[üu]gbar|gefunden|anzuzeigen)|"
+    r"es\s+liegen\s+keine\s+(abrechnungen|dokumente|kontoausz[üu]ge)\s+vor|"
+    r"^\s*keine\s+(abrechnungen|dokumente|kontoausz[üu]ge)\s*[\.\!]?\s*$)", re.I)
+
+_STATEMENTS_AREA_SEL = (
+    "#table-area, #statements-list, "
+    + _by_test_id("*=", "statement") + ", "
+    + _by_test_id("*=", "empty") + ", "
+    + _by_test_id("*=", "no-statement") + ", "
+    + "[class*='empty'], [class*='no-statement'], section#table-area"
+)
+
+
+def _get_no_statements_element(page):
+    """Find the specific element declaring no statements, or None."""
+    try:
+        # Check statement table/area elements first
+        for sel in (_STATEMENTS_AREA_SEL, "table tbody", "section"):
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 5)):
+                el = loc.nth(i)
+                if not el.is_visible():
+                    continue
+                if el.locator("xpath=ancestor::footer | ancestor::header | ancestor::*[@role='contentinfo']").count() > 0:
+                    continue
+                txt = (el.inner_text() or "").strip()
+                if "per post" in txt.lower():
+                    continue
+                if NO_STATEMENTS_RE.search(txt):
+                    return el
+        # Fallback for bare test pages without container elements
+        loc = page.locator("p, div[role='alert'], [class*='message']")
+        for i in range(min(loc.count(), 10)):
+            el = loc.nth(i)
+            if not el.is_visible():
+                continue
+            if el.locator("xpath=ancestor::footer | ancestor::header | ancestor::*[@role='contentinfo']").count() > 0:
+                continue
+            txt = (el.inner_text() or "").strip()
+            if "per post" in txt.lower():
+                continue
+            if NO_STATEMENTS_RE.search(txt):
+                return el
+        return None
+    except Exception:
+        return None
+
+
+def has_no_statements(page) -> bool:
+    """Whether the page explicitly states there are no statements."""
+    return _get_no_statements_element(page) is not None
+
 # How long the tab is given to show a press's page after the wait it was
 # always given, LINK_WAIT_MS after the first link and PDF_LINK_WAIT_MS after
 # Go to PDF Statements. A single page app can take its time, and a press it
@@ -411,8 +475,38 @@ def goto_documents(page) -> bool:
     try:
         url = page.url or ""
         if "/activity/statements" not in url:
+            # Multi-card sign-ins frequently land on /overview rather than /dashboard.
+            # /overview does not draw the 'Statements & Activity' top-nav link until
+            # a specific card product is selected from the switcher.
+            if "/overview" in (page.url or ""):
+                cb = page.locator(_SWITCHER_COMBOBOX_SEL)
+                if cb.count() and cb.first.is_visible():
+                    pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                                   what="the card switcher",
+                                   words=_words(), step="open the card switcher")
+                    try:
+                        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
+                    except Exception:
+                        pass
+                    opts = page.locator(_SWITCHER_OPTION_SEL)
+                    if opts.count() and opts.first.is_visible():
+                        opt = opts.first
+                        tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
+                        opt_css = _by_test_id("=", tid) if tid else _SWITCHER_OPTION_SEL
+                        pressing.click(page, opt, css=opt_css,
+                                       what="the card option",
+                                       words=_words(), step="select card on overview")
+                        if not _arrived(page, "/dashboard", LINK_WAIT_MS):
+                            log.info("selected card on overview and dashboard did not come")
+                            raise pressing.no_answer(
+                                "open the dashboard", "the dashboard did not open",
+                                "The card was selected on the overview page and the dashboard did not open.")
+                    else:
+                        raise pressing.no_answer(
+                            "open the card switcher", "the card options did not show",
+                            "The card switcher on the overview page was opened and its options did not show.")
             pressed = ""
-            if "/activity" not in url:
+            if "/activity" not in (page.url or ""):
                 link, want = _english_link(page), "/activity"
                 if link is None:
                     # The PDF statements themselves, which a dashboard in
@@ -461,10 +555,10 @@ def goto_documents(page) -> bool:
         except Exception:
             pass
         expand_sections(page)
-        return page.locator(_DOWNLOAD_BUTTONS).count() > 0
+        return "/activity/statements" in (page.url or "") or page.locator(_DOWNLOAD_BUTTONS).count() > 0
     except Exception as e:
         log.info("goto_documents (click-nav) failed: %s", e)
-        return page.locator(_DOWNLOAD_BUTTONS).count() > 0
+        return "/activity/statements" in (page.url or "") or page.locator(_DOWNLOAD_BUTTONS).count() > 0
 
 
 # The collapsible sections, each by its English words and then by the part
@@ -630,7 +724,263 @@ _STMT_TESTID_RE = re.compile(r"/(recent|older)-statements/(\d{4}-\d{2}-\d{2})/do
 _YE_TESTID_RE = re.compile(r"/year-end-summary/(\d{4})/download-button")
 
 
-def collect_download_docs(page) -> List[RawDoc]:
+def clean_account_name(raw: str) -> str:
+    """Strip trademark symbols and extra whitespace from account name."""
+    s = re.sub(r"[®™]", "", raw or "")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def list_cards(page) -> List[dict]:
+    """List every card/account available in the switcher.
+
+    Amex disables eval on its pages, so locators and attributes are used
+    directly instead of page.evaluate(). Each card option in the switcher
+    combobox provides a display name and the masked card number (e.g. ••••12345).
+    The card label is formatted as '<name> (<last_digits>)' so cards of the
+    same product type do not collide.
+
+    Returns list of dicts: [{'index': int, 'tid': str, 'label': str, 'digits': str, 'name': str}]
+    """
+    try:
+        page.wait_for_selector(_SWITCHER_COMBOBOX_SEL, timeout=LINK_WAIT_MS)
+    except Exception:
+        pass
+    cb = page.locator(_SWITCHER_COMBOBOX_SEL)
+    if not (cb.count() and cb.first.is_visible()):
+        return []
+    if (cb.first.get_attribute("aria-expanded") or "").lower() != "true":
+        pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                       what="the card switcher",
+                       words=_words(), step="open the card switcher")
+    try:
+        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
+    except Exception:
+        raise pressing.no_answer(
+            "open the card switcher", "the card options did not show",
+            "The card switcher was opened and its options did not show.")
+    opts = page.locator(_SWITCHER_OPTION_SEL)
+    if not (opts.count() and opts.first.is_visible()):
+        raise pressing.no_answer(
+            "open the card switcher", "the card options did not show",
+            "The card switcher was opened and its options did not show.")
+    cards = []
+    for i in range(opts.count()):
+        opt = opts.nth(i)
+        tid = opt.get_attribute("data-testid") or opt.get_attribute("data-test-id") or ""
+        name_el = opt.locator(_SWITCHER_NAME_SEL)
+        num_el = opt.locator(_SWITCHER_NUM_SEL)
+        name = clean_account_name(name_el.inner_text()) if name_el.count() else ""
+        num = (num_el.inner_text() if num_el.count() else "").strip()
+        digits = re.sub(r"\D", "", num)
+        label = f"{name} ({digits})" if digits else name
+        cards.append({"index": i, "tid": tid, "label": label, "digits": digits, "name": name})
+    if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
+        pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                       what="the card switcher",
+                       words=_words(), step="close the card switcher")
+    if len(cards) > 1 and any(not c["digits"] for c in cards):
+        raise pressing.Stop(
+            "read the card switcher", "a card has no account number",
+            ["More than one card was found in the switcher, but at least one card has no account number to identify it.",
+             pressing.AGAIN])
+    if len(set(c["label"] for c in cards)) < len(cards):
+        raise pressing.Stop(
+            "read the card switcher", "two cards share a label",
+            ["Two cards in the switcher share the same label, so their statements cannot be told apart.",
+             pressing.AGAIN])
+    return cards
+
+
+def _switcher_selected_container(page):
+    disp = page.locator(_SWITCHER_SELECTED_DISPLAY_SEL)
+    if disp.count() and disp.first.is_visible():
+        return disp.first
+    cb = page.locator(_SWITCHER_COMBOBOX_SEL)
+    if cb.count() and cb.first.is_visible():
+        return cb.first
+    return None
+
+
+def _current_card_digits(page) -> str:
+    container = _switcher_selected_container(page)
+    if not container:
+        return ""
+    num_el = container.locator(_SWITCHER_NUM_SEL)
+    if num_el.count() and num_el.first.is_visible():
+        return re.sub(r"\D", "", num_el.first.inner_text())
+    txt = container.inner_text()
+    m = re.findall(r"\b\d{4,5}\b", txt)
+    if m:
+        return m[-1]
+    digits = re.sub(r"\D", "", txt)
+    return digits[-5:] if len(digits) >= 5 else digits
+
+
+def current_card_label(page) -> str:
+    """The label of the currently selected card in the switcher, or ''."""
+    container = _switcher_selected_container(page)
+    if not container:
+        return ""
+    try:
+        name_el = container.locator(_SWITCHER_NAME_SEL)
+        num_el = container.locator(_SWITCHER_NUM_SEL)
+        name = clean_account_name(name_el.first.inner_text()) if name_el.count() and name_el.first.is_visible() else ""
+        num = num_el.first.inner_text() if num_el.count() and num_el.first.is_visible() else ""
+        digits = re.sub(r"\D", "", num)
+        if not name:
+            txt = container.inner_text().strip()
+            lines = [l.strip() for l in txt.splitlines() if l.strip()]
+            if lines:
+                name = clean_account_name(lines[0])
+                num = lines[1] if len(lines) > 1 else ""
+                digits = re.sub(r"\D", "", num)
+        return f"{name} ({digits})" if digits else name
+    except Exception:
+        return ""
+
+
+def select_card(page, card: dict) -> bool:
+    """Switch to the card specified by dict.
+    Returns True if successfully switched or already on that card."""
+    cb = page.locator(_SWITCHER_COMBOBOX_SEL)
+    if not (cb.count() and cb.first.is_visible()):
+        return False
+    digits = card.get("digits", "")
+    current_digits = _current_card_digits(page)
+    if digits and current_digits == digits:
+        return True
+
+    pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                   what="the card switcher",
+                   words=_words(), step="open the card switcher")
+    try:
+        page.wait_for_selector(_SWITCHER_OPTION_SEL, timeout=LINK_WAIT_MS)
+    except Exception:
+        raise pressing.no_answer(
+            "open the card switcher", "the card options did not show",
+            "The card switcher was opened and its options did not show.")
+
+    tid = card.get("tid", "")
+    opt = None
+    opt_css = _SWITCHER_OPTION_SEL
+    if tid:
+        opt_loc = page.locator(_by_test_id("=", tid))
+        if opt_loc.count() and opt_loc.first.is_visible():
+            opt = opt_loc.first
+            opt_css = _by_test_id("=", tid)
+    if not opt:
+        opts = page.locator(_SWITCHER_OPTION_SEL)
+        for i in range(opts.count()):
+            candidate = opts.nth(i)
+            num_el = candidate.locator(_SWITCHER_NUM_SEL)
+            opt_digits = re.sub(r"\D", "", num_el.inner_text() if num_el.count() else "")
+            if digits and opt_digits == digits:
+                opt = candidate
+                cand_tid = candidate.get_attribute("data-testid") or candidate.get_attribute("data-test-id") or ""
+                opt_css = _by_test_id("=", cand_tid) if cand_tid else _SWITCHER_OPTION_SEL
+                break
+    if not opt:
+        if (cb.first.get_attribute("aria-expanded") or "").lower() == "true":
+            pressing.click(page, cb.first, css=_SWITCHER_COMBOBOX_SEL,
+                           what="the card switcher",
+                           words=_words(), step="close the card switcher")
+        return False
+
+    old_buttons = page.locator(_DOWNLOAD_BUTTONS)
+    has_old = old_buttons.count() > 0 and old_buttons.first.is_visible()
+    old_handle = old_buttons.first.element_handle() if has_old else None
+    old_empty = _get_no_statements_element(page) if not has_old else None
+    old_empty_handle = old_empty.element_handle() if old_empty else None
+    old_url = page.url or ""
+
+    pressing.click(page, opt, css=opt_css,
+                   what="the card option",
+                   words=_words(), step="switch card")
+
+    # Wait until the selected card display shows exactly that card's digits
+    switched = False
+    for _ in range(int(LINK_WAIT_MS / 250)):
+        page.wait_for_timeout(250)
+        if _current_card_digits(page) == digits:
+            switched = True
+            break
+
+    if not switched:
+        log.info("switched card option but selected card display did not update to digits %s", digits)
+        raise pressing.no_answer(
+            "switch card", "the card did not switch",
+            f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+
+    # Wait until the previous card's statement buttons are gone / hidden
+    if old_handle is not None:
+        detached = False
+        try:
+            old_handle.wait_for_element_state("hidden", timeout=LINK_WAIT_MS)
+            detached = True
+        except Exception:
+            try:
+                if not old_handle.is_visible():
+                    detached = True
+            except Exception:
+                pass
+            if not detached and (page.locator(_DOWNLOAD_BUTTONS).count() == 0 or (_card_of(page.url) and _card_of(page.url) != _card_of(old_url))):
+                detached = True
+        if not detached:
+            log.info("switched card option but old statements list never cleared")
+            raise pressing.no_answer(
+                "switch card", "the statements did not switch",
+                f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+
+    # Wait until the previous card's empty message is gone / hidden
+    if old_empty_handle is not None:
+        detached = False
+        try:
+            old_empty_handle.wait_for_element_state("hidden", timeout=LINK_WAIT_MS)
+            detached = True
+        except Exception:
+            try:
+                if not old_empty_handle.is_visible():
+                    detached = True
+            except Exception:
+                pass
+            if not detached and (page.locator(_DOWNLOAD_BUTTONS).count() > 0 or (_card_of(page.url) and _card_of(page.url) != _card_of(old_url))):
+                detached = True
+        if not detached:
+            log.info("switched card option but old empty-statements message never cleared")
+            raise pressing.no_answer(
+                "switch card", "the statements did not switch",
+                f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+
+    # Wait for either new download buttons or a no-statements message to appear
+    for _ in range(int(LIST_WAIT_MS / 250)):
+        if page.locator(_DOWNLOAD_BUTTONS).count() > 0 or has_no_statements(page):
+            break
+        page.wait_for_timeout(250)
+    expand_sections(page)
+    return True
+
+
+def ensure_card(page, account: str) -> bool:
+    """Ensure that the page is on the card matching `account`."""
+    if not account:
+        return True
+    m = re.search(r"\((\d+)\)", account)
+    digits = m.group(1) if m else re.sub(r"\D", "", account)
+    if not digits:
+        return False
+    current_digits = _current_card_digits(page)
+    if current_digits and current_digits == digits:
+        return True
+    cards = list_cards(page)
+    for c in cards:
+        if c.get("digits") == digits:
+            return select_card(page, c)
+    log.info("card %s was not found in the switcher", account)
+    print(f"Card {account} was not found in the switcher.")
+    return False
+
+
+def collect_download_docs(page, account: str = "") -> List[RawDoc]:
     """Every downloadable statement + year-end summary on the statements page,
     read from the download-button testids (deduped by category+date)."""
     docs: List[RawDoc] = []
@@ -671,10 +1021,11 @@ def collect_download_docs(page) -> List[RawDoc]:
                 human = _human_date(when)
                 docs.append(RawDoc(title=f"Monthly Statement - {human}", date_text=when,
                                    href=tid, text=f"Monthly Statement {human}",
-                                   kind="statement"))
+                                   kind="statement", account=account))
             else:
                 docs.append(RawDoc(title=f"{when} Year-End Summary", date_text=f"{when}-12-31",
-                                   href=tid, text=f"{when} Year-End Summary", kind="year-end"))
+                                   href=tid, text=f"{when} Year-End Summary",
+                                   kind="year-end", account=account))
     return docs
 
 

@@ -63,6 +63,26 @@ STOPS = {
     ("amex", "goto_documents", "click", "open the statements page"): (2,
         "reaches the statements page every document is taken from, so a turned off "
         "link there would leave every document"),
+    ("amex", "goto_documents", "click", "open the card switcher"): (1,
+        "the card switcher on the overview page reaches the dashboard where "
+        "statements are located, so a turned off switcher leaves every document"),
+    ("amex", "goto_documents", "click", "select card on overview"): (1,
+        "the card option on the overview page reaches the dashboard where "
+        "statements are located, so a turned off card option leaves every document"),
+    ("amex", "list_cards", "click", "open the card switcher"): (1,
+        "on a multi-card account, the card switcher on the statements page reaches each card's statements, "
+        "so a turned off switcher leaves every other card's documents"),
+    ("amex", "list_cards", "click", "close the card switcher"): (1,
+        "closes the switcher after listing cards, and an open dropdown covers "
+        "every press after it"),
+    ("amex", "select_card", "click", "open the card switcher"): (1,
+        "on a multi-card account, opens the card switcher before choosing the card to download from, "
+        "so a turned off switcher leaves that card's documents"),
+    ("amex", "select_card", "click", "close the card switcher"): (1,
+        "closes the switcher if card option was not found, and an open dropdown covers "
+        "every press after it"),
+    ("amex", "select_card", "click", "switch card"): (1,
+        "the card option that switches to the document's card"),
     ("amex", "expand_sections", "click", "open a section"): (1,
         "opens a section of the statements page for every document in it"),
     ("amex", "close_file_type_dialog", "click", "close the file type dialog"): (1,

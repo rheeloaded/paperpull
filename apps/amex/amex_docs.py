@@ -164,6 +164,7 @@ class App:
         self._context = None
         self._work_page = None
         self._cdp_mode = False
+        self._card_count = None
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -366,8 +367,8 @@ class App:
         doc = Document(title=r.title, category=category, summary=full_summary,
                        date=date or "", period=period, href=r.href,
                        row_index=r.row_index, confidence=confidence,
+                       account=acct,
                        date_text=getattr(r, "date_text", ""))
-        doc.account = acct
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -378,7 +379,7 @@ class App:
         return 0
 
     def _record_rawdoc(self, r, source_url: str) -> int:
-        """Record one scraped document (a RawDoc) from a American Express page.
+        """Record one scraped document (a RawDoc) from an American Express page.
         Returns 1 if new."""
         title = re.sub(r"\s+", " ", (r.title or "")).strip()
         if not title:
@@ -398,15 +399,19 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+        acct = (r.account or "").strip()
+        full_summary = f"{summary} {acct}".strip() if acct else summary
+        doc = Document(title=title, category=category, summary=full_summary,
+                       date=date, confidence=confidence, source_url=source_url,
+                       account=acct, href=r.href or "", date_text=r.date_text or date)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
         # refresh which page the doc's download link lives on
-        self.discovery.update(doc.key, {"source_url": source_url}, save=False)
+        self.discovery.update(doc.key, {"source_url": source_url, "href": r.href or "",
+                                        "account": acct}, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
@@ -421,13 +426,47 @@ class App:
         # live on that one page as download-button controls.
         if not site.goto_documents(page):
             self.check_session(page)
-            site.goto_documents(page)
+            if not site.goto_documents(page):
+                log.info("could not reach the statements page after two tries")
+                print("\n!! Could not reach the statements page. Discovery was not completed.")
+                raise SystemExit(0)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
-        for r in docs:
-            n_new += self._record_rawdoc(r, page.url)
+
+        cards = site.list_cards(page)
+        self._card_count = len(cards)
+        total_controls = 0
+        if len(cards) > 1:
+            for card in cards:
+                if not site.select_card(page, card):
+                    raise pressing.no_answer("switch card", "the card did not switch",
+                                             f"The switcher was set to {card.get('label', 'card')} and the card's statements did not open.")
+                docs = site.collect_download_docs(page, account=card["label"])
+                if not docs and not site.has_no_statements(page):
+                    log.info("card %s has no statements and page did not say so", card["label"])
+                    print(f"\n!! Could not find statements for {card['label']}. Discovery was not completed.")
+                    raise SystemExit(0)
+                total_controls += len(docs)
+                for r in docs:
+                    n_new += self._record_rawdoc(r, page.url)
+        else:
+            # When there is only one card (or no switcher), keep account empty ("")
+            # so a one-card archive keeps its keys, file names and summaries as they are.
+            docs = site.collect_download_docs(page, account="")
+            if not docs and not site.has_no_statements(page):
+                log.info("no statements found and page did not say so")
+                print("\n!! Could not find statements. Discovery was not completed.")
+                raise SystemExit(0)
+            total_controls += len(docs)
+            for r in docs:
+                n_new += self._record_rawdoc(r, page.url)
+
+        if total_controls == 0 and not site.has_no_statements(page):
+            log.info("no download buttons were ever seen")
+            print("\n!! No statement download controls were found. Discovery was not completed.")
+            raise SystemExit(0)
+
         self.discovery.save()
-        log.info("statements page: %d download controls, %d new", len(docs), n_new)
+        log.info("statements page: %d download controls, %d new", total_controls, n_new)
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -437,6 +476,14 @@ class App:
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
             print(f"\nDiscovery complete. Documents known: {len(docs)}")
+            accounts = {}
+            for d in docs:
+                if d.account:
+                    accounts[d.account] = accounts.get(d.account, 0) + 1
+            if accounts:
+                print(f"  Accounts with statements ({len(accounts)}):")
+                for acct, count in sorted(accounts.items(), key=lambda x: -x[1]):
+                    print(f"    {count:7d}  {acct}")
             by_cat = {}
             for d in docs:
                 by_cat.setdefault(d.category, []).append(d)
@@ -459,7 +506,28 @@ class App:
         docs = [d for d in docs if self._in_scope(d)]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
-        return docs[:limit] if limit else docs
+        if limit and len(docs) > limit:
+            by_acct = {}
+            for d in docs:
+                by_acct.setdefault(d.account or "", []).append(d)
+            if len(by_acct) > 1 and limit >= len(by_acct):
+                # Take from each card so a Pilot tests card switching,
+                # then fill up to limit with the newest remaining documents.
+                per_card = max(1, limit // len(by_acct))
+                chosen = []
+                for acct_docs in by_acct.values():
+                    chosen.extend(acct_docs[:per_card])
+                remaining = [d for d in docs if d not in chosen]
+                chosen.extend(remaining[:max(0, limit - len(chosen))])
+                docs = chosen
+            else:
+                docs = docs[:limit]
+        if limit and len(docs) > limit:
+            docs = docs[:limit]
+        # Group by card account so all statements for a single card are
+        # downloaded consecutively before switching to the next card.
+        docs.sort(key=lambda d: d.account or "")
+        return docs
 
     def _already_done(self, doc: Document) -> bool:
         """Skip documents already handled. A document that was successfully
@@ -548,6 +616,29 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
+        if not doc.account:
+            card_count = getattr(self, "_card_count", None)
+            if card_count is None:
+                accounts = {d.get("account") for d in self.discovery.data.values() if d.get("account")}
+                card_count = len(accounts) if accounts else 1
+                self._card_count = card_count
+            if card_count > 1:
+                log.info("record has no account but multiple cards are in switcher")
+                self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                             notes="Record has no account and multiple cards exist in switcher")
+                self._write_row(doc, "Needs Account", "Needs Manual Review")
+                self.stats["manual_review"] += 1
+                print("  Record has no card account on a multi-card account - marked for manual review.")
+                return
+        else:
+            if not site.ensure_card(page, doc.account):
+                log.info("could not switch to card %s for download; left for manual review", doc.account)
+                self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                             notes=f"Could not switch to card {doc.account}")
+                self._write_row(doc, "Card switch failed", "Needs Manual Review")
+                self.stats["manual_review"] += 1
+                print(f"  Could not switch to card {doc.account} - marked for manual review.")
+                return
         saved = site.download_document(page, doc.category, doc.date, out_path)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
@@ -711,6 +802,8 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        accounts = {d.get("account") for d in self.discovery.data.values() if d.get("account")}
+        self._card_count = len(accounts) if accounts else 1
         # Resume reads no list of its own. With nothing listed, or after a
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished
@@ -865,6 +958,10 @@ class App:
             info["challenge"] = site.detect_security_challenge(page)
             site.expand_all(page)
             site.scroll_full_page(page)
+            cards = site.list_cards(page)
+            info["cards"] = cards
+            cur_card = site.current_card_label(page)
+            info["current_card"] = cur_card
             info["row_counts"] = {}
             for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
                               ("table rows", "table tbody tr"),
@@ -874,7 +971,7 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            docs = site.collect_download_docs(page)
+            docs = site.collect_download_docs(page, account=cur_card)
             info["collected"] = len(docs)
             info["samples"] = []
             for d in docs[:8]:

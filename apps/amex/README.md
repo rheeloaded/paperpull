@@ -79,6 +79,10 @@ Filenames: `YYYY-MM-DD American Express <Summary>.pdf`, e.g.
 `2025-12-31 American Express Monthly Statement.pdf`,
 `2025-12-31 American Express Year-End Summary.pdf`,
 `2025-12-31 American Express 1099-INT Tax Form.pdf`.
+For accounts with more than one card, the card name and last digits are included
+in the summary and filename (e.g. `2025-12-31 American Express Monthly Statement Blue Cash Everyday (12345).pdf`),
+so statements from different cards on the same date do not collide. Single-card
+accounts keep the simple filename with no card name.
 
 ## If a site change breaks it
 
