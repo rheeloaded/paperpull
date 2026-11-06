@@ -7,7 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.61.0] - 2026-11-06
+
+NW Natural and City of Tualatin are the 80th and 81st apps, both contributed
+by crazyhorse90210. American Express reads every card on a sign-in and checks
+that each PDF names its card, Charles Schwab finds view-only accounts,
+Wealthfront keeps the files of a tax form together, Venmo reads past an empty
+month on its older page, and a sign-in offers to update PaperPull's own
+Chromium when it falls behind.
 
 ### Added
 
@@ -123,7 +130,6 @@ All notable changes to PaperPull are recorded here. Versioning follows
   stops the list, and so does a month holding only pending transactions,
   each with a reason of its own. The run says which month it stopped on, and
   its failure file holds what that month's page drew, as counts.
-
 - **Charles Schwab finds view-only accounts, and stops on an answer it cannot
   read (#137).** A sign-in whose accounts all sit in Schwab's view-only list
   read as no accounts, and Discover ended clean with no documents. Both lists
