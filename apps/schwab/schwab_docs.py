@@ -930,9 +930,8 @@ class App:
             try:
                 accounts = site.list_accounts(page)
                 docs = site.list_documents(page, accounts)
-            except site.ListStopped as stop:
+            except site.ListStopped:
                 # What the page shows is still worth having for a repair.
-                log.info("the list stopped: %s", stop)
                 info["error"] = "the list stopped"
             info["accounts_api"] = [{"label": site.redact_label(a["label"]),
                                      "account_type": a["account_type"],
