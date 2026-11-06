@@ -190,9 +190,11 @@ def test_mixed_brokerage_and_view_only_accounts(monkeypatch):
     assert {a["account_id"] for a in accounts} == {"11112222", "33334444"}
 
     docs_collected = site.collect_documents(PAGE)
-    assert len(docs_collected) == 2
-    assert "11112222" in sent_headers.get("schwab-client-ids", "")
-    assert "33334444" in sent_headers.get("schwab-client-ids", "")
+    assert [(d["document_id"], d["account_id"], d["account"]) for d in docs_collected] == [
+        ("D1", "11112222", "Active Trading (...2222)"),
+        ("D2", "33334444", "Custodial (...4444)"),
+    ]
+    assert sent_headers.get("schwab-client-ids") == "11112222,33334444"
 
 
 def test_view_only_account_end_to_end_discover_and_download(tmp_path, monkeypatch):

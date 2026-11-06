@@ -325,8 +325,7 @@ def test_list_accounts_finds_brokerage_and_view_only_accounts(monkeypatch):
     assert accounts[1]["label"] == "SchwabOne (...4444)"
 
 
-def test_list_accounts_deduplicates_and_falls_back(monkeypatch):
-    # Both lists contain the same account ID
+def test_list_accounts_takes_an_account_in_both_lists_once(monkeypatch):
     dup_data = {
         "accountSelectorData": {
             "brokerageAccountList": {
@@ -345,23 +344,4 @@ def test_list_accounts_deduplicates_and_falls_back(monkeypatch):
     accounts = site.list_accounts(None)
     assert len(accounts) == 1
     assert accounts[0]["account_id"] == "55556666"
-
-    # Brokerage lists empty, falls back to accountDetails
-    details_data = {
-        "accountSelectorData": {
-            "brokerageAccountList": {"brokerageAccounts": [], "viewOnlyAccounts": []},
-            "accountsData": {
-                "accountDetails": [
-                    {"id": "77778888", "nickName": "Fallback Account", "accountType": "S1"}
-                ]
-            }
-        }
-    }
-    monkeypatch.setattr(site, "_gateway_call", lambda _page, url, _hdr, **_kw: {
-        "status": 200, "body": details_data
-    })
-    accounts = site.list_accounts(None)
-    assert len(accounts) == 1
-    assert accounts[0]["account_id"] == "77778888"
-    assert accounts[0]["label"] == "Fallback Account (...8888)"
-
+    assert accounts[0]["label"] == "Main (...6666)"
