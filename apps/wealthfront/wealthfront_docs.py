@@ -83,6 +83,7 @@ class Document:
         self.pdf_pages = kw.get("pdf_pages", "")
         self.notes = kw.get("notes", "")
         self.discovered_at = kw.get("discovered_at", now_iso())
+        self.invoices = kw.get("invoices", None)
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -545,7 +546,7 @@ class App:
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        out_path = unique_path(folder, filename, self.config["max_path_length"])
+        out_path = unique_path(folder, filename, self.config["max_path_length"], make=False)
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
@@ -683,6 +684,8 @@ class App:
 
         # A form set can include corrected versions (idx=1, ...). Save those
         # alongside the primary file so nothing is silently dropped.
+        extra_names: List[str] = []
+        extra_paths: List[Path] = []
         for n, href in enumerate(extra_hrefs, start=2):
             try:
                 url = href if href.startswith("http") else site.BASE + href
@@ -702,17 +705,25 @@ class App:
                 suggested = getattr(download, "suggested_filename", "") or ""
                 ext = Path(suggested).suffix.lower() or ".pdf"
                 stem = f"{out_path.stem} ({n} of {len(extra_hrefs) + 1})"
-                extra_path = unique_path(folder, stem + ext,
-                                         self.config["max_path_length"])
+                extra_path = unique_path(out_path.parent, stem + ext,
+                                         self.config["max_path_length"],
+                                         make=False)
                 receipt_pdf.save_download(download, extra_path)
                 if receipt_pdf.is_zip(extra_path) and ext not in (".zip", ".xlsx"):
                     opened = receipt_pdf.open_zip(extra_path)
                     extra_path = opened.pdf or opened.kept or extra_path
                 print(f"  + additional file: {extra_path.name}")
-                doc.notes = (doc.notes + "; " if doc.notes else "") + \
-                    f"form set has {len(extra_hrefs) + 1} files"
+                extra_names.append(extra_path.name)
+                extra_paths.append(extra_path)
+                self.stats["new_files"].append(str(extra_path))
             except Exception as e:
                 log.warning("Extra tax file %s failed: %s", href, e)
+
+        if extra_names:
+            doc.notes = (doc.notes + "; " if doc.notes else "") + \
+                f"form set has {len(extra_hrefs) + 1} files; Also saved: " + ", ".join(extra_names)
+            doc.invoices = [{"file": str(out_path), "kept": True}] + [
+                {"file": str(p), "kept": True} for p in extra_paths]
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later

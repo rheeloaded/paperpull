@@ -183,7 +183,9 @@ def _held_row(row: dict, real_folders: List[Path],
 
 # The temporary name apply gives a file trading names with others
 # (_rename_ring), once or, for a file put aside again, more than once.
-_ASIDE = re.compile(r"\.pdf(\.renaming\d*)+$")
+_ASIDE = re.compile(r"\.(?:pdf|xlsx?|csv)(\.renaming\d*)+$", re.IGNORECASE)
+VALID_DOC_EXTS = (".pdf", ".xls", ".xlsx", ".csv")
+_EXT_PAT = r"\.(?:pdf|xlsx?|csv)"
 
 
 def _real(folders) -> List[Path]:
@@ -209,7 +211,7 @@ def _held(text: str, real_folders: List[Path], staged: bool = False,
     text = _text(text)
     if not text:
         return None
-    ends = (".pdf", ".pdf.delivering") if staged else (".pdf",)
+    ends = tuple(f"{ext}.delivering" for ext in VALID_DOC_EXTS) + VALID_DOC_EXTS if staged else VALID_DOC_EXTS
     try:
         path = Path(text).resolve()
         name = path.name.lower()
@@ -1203,9 +1205,9 @@ def _follow_invoices(invoices, moved: Callable[[str], Optional[str]]) -> Optiona
 # order it saved in several, Target's "Also saved a.pdf, b.pdf" and Amazon's
 # "Also saved: a.pdf, b.pdf". Every name ends ".pdf", so a name with a comma
 # in it is read whole.
-_ALSO_SAVED = re.compile(r"(?P<head>Also saved:? )(?P<names>.+?\.pdf(?:, .+?\.pdf)*)"
-                         r"(?=$|;|\. )")
-_NEXT_NAME = re.compile(r"(?<=\.pdf), ")
+_ALSO_SAVED = re.compile(rf"(?P<head>Also saved:? )(?P<names>.+?{_EXT_PAT}(?:, .+?{_EXT_PAT})*)"
+                         r"(?=$|;|\. )", re.IGNORECASE)
+_NEXT_NAME = re.compile(r"(?<=\.pdf), |(?<=\.xls), |(?<=\.xlsx), |(?<=\.csv), ", re.IGNORECASE)
 
 
 def _plain_name(name: str) -> bool:
@@ -1445,9 +1447,17 @@ def run_for(app, apply_changes: bool = False, say=print,
         saved = current.record_for(row, saved=True) or {}
         record = dict(record, **{k: saved.get(k, "") for k in (*_AS_SAVED, *as_saved)})
         summary = _text(record.get("summary")) or _first(row, _SUMMARY_KEYS)
-        return build_pdf_filename(_first(row, _DATE_KEYS), summary,
+        raw = (row.get("PDF Full Path") or "").strip()
+        orig_ext = Path(raw).suffix if raw else ""
+        name = build_pdf_filename(_first(row, _DATE_KEYS), summary,
                                   _first(row, _TYPE_KEYS), part=_part_of(row),
                                   record=record)
+        if orig_ext and orig_ext.lower() != ".pdf" and orig_ext.lower() in VALID_DOC_EXTS:
+            if isinstance(name, FileName):
+                name = FileName(Path(name).stem + orig_ext, name.folder)
+            else:
+                name = Path(name).stem + orig_ext
+        return name
 
     rule = told_apart or told_apart_by
     before = tuple(told_apart_before)
@@ -1501,7 +1511,7 @@ def run_for(app, apply_changes: bool = False, say=print,
         "", which leaves it where it is, for one not saved and checked."""
         raw = (row.get("PDF Full Path") or "").strip()
         home = homes.home(Path(raw)) if raw else None
-        if home is None or not raw.lower().endswith(".pdf"):
+        if home is None or not raw.lower().endswith(VALID_DOC_EXTS):
             return ""
         if only is not None and _same_file(raw) not in only:
             return ""
@@ -1697,6 +1707,10 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
                     if where and _same_file((r.get("PDF Full Path") or "").strip()) == where
                     and _one_file((r.get("PDF Full Path") or "").strip(), main)),
                    theirs[0] if theirs else None)
+        if own is None and where:
+            own = next((r for r in rows
+                        if _same_file((r.get("PDF Full Path") or "").strip()) == where
+                        and _one_file((r.get("PDF Full Path") or "").strip(), main)), None)
         for raw in invoices:
             if _same_file(raw) in named:
                 continue
@@ -1786,7 +1800,7 @@ def _part_of(row: dict):
     read only at the very end as it always was."""
     name = (row.get("PDF Filename") or "").strip()
     stem, ext = os.path.splitext(name)
-    found = list(_PART.finditer(stem)) if ext.lower() == ".pdf" else []
+    found = list(_PART.finditer(stem)) if ext.lower() in VALID_DOC_EXTS else []
     if not found:
         return None
     last = found[-1]
@@ -1951,6 +1965,9 @@ class _Known:
             return None
         named = [n for n, spelled in self._by_file.get(where, {}).items()
                  if any(_one_file(s, raw) for s in spelled)]
+        if not named and len(owners) == 1:
+            named = [n for n, spelled in self._claims.get(where, {}).items()
+                     if any(_one_file(s, raw) for s in spelled)]
         if named:
             # Several records of one document naming one file is a rename's
             # own view at work. Robinhood and Newrez show it a copy of a

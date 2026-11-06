@@ -556,6 +556,29 @@ def test_every_invoice_of_an_order_split_into_several_moves(tmp_path, monkeypatc
     assert all(Path(e["file"]).is_file() for e in invoices[:2])
 
 
+def test_companion_files_of_a_document_move(tmp_path, monkeypatch):
+    """A document app with companion files (.xls, .pdf) in its notes or invoices
+    moves them to the documents folder, with no order number."""
+    office = Office(tmp_path)
+    first = office.saved("Tax 2024")
+    second = first.with_name("2026-09-12 Testco Monthly Statement (2 of 2).xls")
+    second.write_bytes(b"dummy xls content")
+    rec = office.progress.data["Tax 2024"]
+    rec["invoices"] = [{"file": str(first), "kept": True}, {"file": str(second), "kept": True}]
+    rec["notes"] = f"Also saved: {second.name}"
+    rows = office.index_csv.read_all()
+    rows[-1]["Notes"] = f"form set has 2 files; Also saved: {second.name}"
+    office.index_csv.rewrite(rows)
+    office.build(documents=True)
+    moving(monkeypatch)
+    code, said = office.rename()
+    assert code == 0 and "Moved 2 file(s)" in said, said
+    office.progress.save()
+    invoices = office.progress.data["Tax 2024"]["invoices"]
+    assert [Path(e["file"]).parent for e in invoices] == [office.docs / "Statements"] * 2
+    assert all(Path(e["file"]).is_file() for e in invoices)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="only Windows keeps a read-only file from being deleted, "
                                             "elsewhere its folder decides and the move goes ahead")
 def test_a_read_only_file_on_its_way_to_another_drive_stays_where_it_was(
