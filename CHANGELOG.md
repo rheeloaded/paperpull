@@ -101,12 +101,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **Charles Schwab finds view-only accounts, and stops on an answer it cannot
   read (#137).** A sign-in whose accounts all sit in Schwab's view-only list
   read as no accounts, and Discover ended clean with no documents. Both lists
-  are now read. An accounts or documents answer the app cannot read stops the
-  list with nothing recorded, rather than read as an empty one, and a day's
-  list that stops during a download run stops the run once with the list
-  unread. The app also goes to Statements & Tax Forms at its newer address
-  first. A Discover has been run on a view-only account, and a download from
-  one has not been seen yet. Contributed by appchamp.
+  are now read. An accounts or documents answer the app cannot read stops
+  Discover with nothing recorded, rather than read as an empty list. The app
+  also goes to Statements & Tax Forms at its newer address first. A Discover
+  has been run on a view-only account, and a download from one has not been
+  seen yet. Contributed by appchamp.
 
 ## [0.60.2] - 2026-11-04
 

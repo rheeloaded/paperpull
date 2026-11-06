@@ -446,7 +446,7 @@ def list_accounts(page) -> List[dict]:
     rows: list = []
     for key in ("brokerageAccounts", "viewOnlyAccounts"):
         items = brokerage.get(key)
-        if items is None:
+        if not items:
             continue
         if not isinstance(items, list):
             raise ListStopped("a list in the accounts answer could not be read")
@@ -578,7 +578,14 @@ def listed_alike(page, account_id: str, charitable: bool, doc_type: str,
     and account, in the order it gives them."""
     account = {"account_id": account_id, "charitable": charitable}
     day = mdy(date)
-    docs = list_documents(page, [account], from_mdy=day, to_mdy=day)
+    try:
+        docs = list_documents(page, [account], from_mdy=day, to_mdy=day)
+    except ListStopped as stop:
+        # One account's one day. The id its record keeps is still there to
+        # try, and a document that will not come goes to review by itself,
+        # so a refusal here costs no other account its documents.
+        log.info("the list of one day could not be read: %s", stop)
+        return []
     want_title = re.sub(r"\s+", " ", title or "").strip()
     out = []
     for doc in docs:
