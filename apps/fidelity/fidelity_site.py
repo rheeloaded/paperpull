@@ -373,14 +373,28 @@ def _first(d: dict, *keys):
     return ""
 
 
-def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str) -> Optional[dict]:
-    num = str(d.get("acctNum") or "")
-    date = epoch_date(_first(d, "periodEndDate", "generatedDate", "availableDate", "date"))
+def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str,
+         year: Optional[int] = None) -> Optional[dict]:
+    num = str(_first(d, "acctNum", "accountNumber", "accountNum", "acctNo") or "")
+    date = epoch_date(_first(d, "periodEndDate", "generatedDate", "availableDate", "date", "formDate", "issueDate"))
     if not date:
-        date = parse_date(str(_first(d, "periodEndDate", "generatedDate", "availableDate", "date")))
+        date = parse_date(str(_first(d, "periodEndDate", "generatedDate", "availableDate", "date", "formDate", "issueDate")))
+    if not date and doc_type == "TAX":
+        ty = _first(d, "taxYear", "year") or (str(year) if year else "")
+        if ty and str(ty).isdigit():
+            date = f"{ty}-12-31"
     if not date:
         return None
     label = account_label(num, accounts)
+    if not label:
+        explicit_name = str(_first(d, "accountName", "accountDisplayName", "acctName") or "").strip()
+        if explicit_name:
+            label = explicit_name
+        elif not num:
+            label = "Combined"
+        else:
+            tail = num[-4:] if len(num) >= 4 else num
+            label = f"Account {tail}"
     acct_type = (accounts.get(num) or {}).get("type") or "Brokerage"
     title = kind
     if doc_type == "STMT" and d.get("periodStartDate") and d.get("periodEndDate"):
@@ -392,12 +406,21 @@ def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str) -> Op
         except (TypeError, ValueError):
             pass
     if doc_type == "TAX":
-        name = str(_first(d, "formName", "taxFormName", "formType", "type", "description") or "Tax Form")
-        title = name
+        name = str(_first(d, "formName", "taxFormName", "formType", "taxFormType",
+                          "type", "description", "documentName") or "Tax Form")
+        ty = _first(d, "taxYear", "year") or (str(year) if year else "")
+        if ty and str(ty) not in name:
+            title = f"{ty} {name}"
+        else:
+            title = name
     start = epoch_date(d.get("periodStartDate")) if d.get("periodStartDate") else ""
+    if not start and doc_type == "TAX":
+        ty = _first(d, "taxYear", "year") or (str(year) if year else "")
+        if ty and str(ty).isdigit():
+            start = f"{ty}-01-01"
     return {
         "title": title, "date": date, "account": label, "category": category,
-        "item_id": str(_first(d, "id", "docId", "documentId")),
+        "item_id": str(_first(d, "id", "docId", "documentId", "taxFormId")),
         "client_id": doc_type + "|" + acct_type,        # what the download call needs
         "period_start": start, "href": API["download"],
     }
@@ -423,7 +446,7 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
                 fmt = ((d.get("formatTypes") or {}).get("formatType") or {})
                 if fmt and fmt.get("isPDF") is False:
                     continue
-                r = _row(kind, category, d, accounts, doc_type)
+                r = _row(kind, category, d, accounts, doc_type, year=y)
                 if r:
                     rows.append(r)
     if "Tax Document" in wanted:
@@ -437,7 +460,7 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
                 continue
             log.info("tax forms %d: %d", y, len(items))
             for d in items:
-                r = _row("Tax Form", "Tax Document", d, accounts, "TAX")
+                r = _row("Tax Form", "Tax Document", d, accounts, "TAX", year=y)
                 if r:
                     rows.append(r)
     return rows
@@ -455,8 +478,9 @@ def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0)
     else:
         items = list_tax_year(page, year) if year < _dt.now().year else []
         doc_type, kind, category = "TAX", "Tax Form", "Tax Document"
-    matches = [r for r in (_row(kind, category, d, accounts, doc_type) for d in items)
-               if r and r["title"] == title and r["date"] == date and r["account"] == account]
+    matches = [r for r in (_row(kind, category, d, accounts, doc_type, year=year) for d in items)
+               if r and r["title"] == title and r["date"] == date and
+                  (r["account"] == account or (not account and r["account"] == "Combined"))]
     return matches[occurrence] if occurrence < len(matches) else None
 
 
