@@ -1118,7 +1118,7 @@ def page_of(browser):
 @pytest.mark.parametrize("text,account,named", [
     ("Account Ending 1-11111", "Alpha Card (11111)", True),
     ("Account Ending 1-22222", "Alpha Card (11111)", False),
-    ("Card Number XXXX-XXXXXX-11111 Prepared for", "Alpha Card (11111)", True),
+    ("Card Number XXXX-XXXXXX-11111", "Alpha Card (11111)", True),
     ("Reference 111112", "Alpha Card (11111)", False),
     ("", "Alpha Card (11111)", False),
     ("Account Ending 1-11111", "Alpha Card", False),
