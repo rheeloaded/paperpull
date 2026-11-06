@@ -75,7 +75,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   same date on both cards. If any of them stays, even under another
   statement's name, the run stops there, the failure file counts how many
   stayed, and a Resume does not carry on from such a stop, so Pilot or Run
-  All read each card again through the same waits. A card the site has
+  All read each card again through the same waits. A card whose own list
+  has not come is waited for and then left as it is, since that list could
+  draw after the switch and read as the next card's. A card the site has
   turned off, a canceled card say, is named, counted for review and left,
   and the other cards are saved. A card the switcher holds but does not
   show stops the run. Login says Success only on a list it saw. With one card,

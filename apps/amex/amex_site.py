@@ -987,6 +987,28 @@ def card_on_show_last(page, cards: List[dict]) -> List[dict]:
     return sorted(cards, key=lambda c: c.get("digits") == shown)
 
 
+def _list_comes(page) -> bool:
+    """Whether a Download that shows, or the card's own words that it has
+    none, comes within LIST_WAIT_MS. A list hidden while the next one loads
+    is still in the page, so a button that does not show says nothing."""
+    buttons = page.locator(_DOWNLOAD_BUTTONS)
+    for _ in range(int(LIST_WAIT_MS / 250)):
+        if _shows(_first_visible(buttons)) or has_no_statements(page):
+            return True
+        page.wait_for_timeout(250)
+    return False
+
+
+def _nothing_to_hold(what: str) -> pressing.Stop:
+    """The card on show has nothing that shows to hold across a switch. Its
+    list could then come after the press and read as the next card's, its
+    year-end summary saved under that card's name for good, so the card is
+    not switched."""
+    return pressing.Stop("switch card", "no download button shows", [
+        f"{what}, so when the next card's list came could not be told, and the card "
+        "was not switched.", "Nothing more was pressed.", pressing.AGAIN])
+
+
 def select_card(page, card: dict) -> bool:
     """Switch to the card in dict.
     Returns True if successfully switched or already on that card.
@@ -1002,6 +1024,11 @@ def select_card(page, card: dict) -> bool:
     current_digits = _current_card_digits(page)
     if digits and current_digits == digits:
         return True
+
+    # What is on show is held across the switch, so it has to have come.
+    if not _list_comes(page):
+        log.info("the card on show drew no list to hold")
+        raise _nothing_to_hold("The card on show drew no list")
 
     pressing.click(page, cb, css=_SWITCHER_COMBOBOX_SEL,
                    what="the card switcher",
@@ -1039,13 +1066,10 @@ def select_card(page, card: dict) -> bool:
     held = _shown_downloads(old_buttons)
     old_empty = _get_no_statements_element(page) if not held else None
     old_empty_handle = old_empty.element_handle() if old_empty else None
-    if not held and old_empty_handle is None and _safe_count(old_buttons) > 0:
-        log.info("the page holds Download buttons and none of them shows")
+    if not held and old_empty_handle is None:
+        log.info("nothing of the card on show shows")
         _close_switcher(page, cb)
-        raise pressing.Stop("switch card", "no download button shows", [
-            "The page holds this card's Download buttons and none of them shows, so when "
-            "the next card's list came could not be told, and the card was not switched.",
-            "Nothing more was pressed.", pressing.AGAIN])
+        raise _nothing_to_hold("Nothing of the card on show shows")
 
     try:
         pressing.click(page, opt, css=opt_css,
@@ -1089,13 +1113,8 @@ def select_card(page, card: dict) -> bool:
         log.info("switched card option but old empty-statements message never cleared")
         raise _switch_stopped(card, "the statements did not switch")
 
-    # Wait for either a new Download that shows or a no-statements message. A
-    # list hidden while the next one loads is still in the page, so a button
-    # that does not show says nothing here.
-    for _ in range(int(LIST_WAIT_MS / 250)):
-        if _shows(_first_visible(old_buttons)) or has_no_statements(page):
-            break
-        page.wait_for_timeout(250)
+    # Wait for either a new Download that shows or a no-statements message.
+    _list_comes(page)
     expand_sections(page)
     return True
 

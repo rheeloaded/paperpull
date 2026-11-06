@@ -172,6 +172,10 @@ function drawSwitcher() {
   const copyOf = document.querySelectorAll('[data-testid="simple_switcher_combobox"]');
   for (const cb of copyOf) cb.addEventListener('click', () => {
     said('switcher/first-copy-shows/' + (getComputedStyle(copyOf[0].parentNode).display !== 'none'));
+    if (CFG.first_list_after_open) {
+      setTimeout(() => drawList(CFG.start), CFG.first_list_after_open);
+      CFG.first_list_after_open = 0;
+    }
     if (CFG.switcher === 'no_options') return;
     const open = cb.getAttribute('aria-expanded') === 'true';
     cb.setAttribute('aria-expanded', open ? 'false' : 'true');
@@ -190,6 +194,7 @@ function drawSwitcher() {
       for (const d of document.querySelectorAll('[data-testid="simple_switcher_selected_option_display"]'))
         d.innerHTML = card(i);
     }, CFG.switch_ms);
+    if (CFG.old_list_on_press) drawList(CFG.start);
     const late = CFG.list_ms_of[++switches] ?? CFG.list_ms;
     if (late >= 0) setTimeout(() => drawList(i), late);
   });
@@ -529,6 +534,34 @@ def holds_each_cards_own(tmp_path, out):
     assert not any(source_urls(tmp_path))
     assert noted_whole(tmp_path) is True
     assert panel_reads(out)["stopped"] == 0
+
+
+@pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
+def test_a_first_list_drawn_late_is_read_as_its_own_cards(attached, serve, tmp_path, capsys, width):
+    """The first card's list comes after the wait on opening the page has run
+    out, while the switcher's cards are read, and the switch waits for it, so
+    it is held like any other."""
+    amex = serve(list_never=True, first_list_after_open=1000)
+    their_tab(attached, amex, width)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    holds_each_cards_own(tmp_path, out)
+
+
+def test_a_first_list_that_comes_after_the_press_is_never_taken_for_the_next_card(
+        attached, serve, tmp_path, capsys):
+    """With nothing drawn there is nothing to hold, so a list drawing after
+    the press would pass as the next card's, and its year-end summary be
+    saved under that card's name for good. No card is pressed."""
+    amex = serve(list_never=True, old_list_on_press=True, list_ms=-1)
+    their_tab(attached, amex, WIDE)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    assert panel_reads(out)["stopped"] == 1, folded(out)
+    assert "the card was not switched" in folded(out)
+    assert not [p for p in amex.pressed if p.startswith("option/")]
+    assert records(tmp_path, "discovery.json") == {}
+    assert saved(tmp_path) == {}
+    assert noted_whole(tmp_path) is False
 
 
 def test_a_list_that_never_goes_stops_the_run_in_a_narrow_window(attached, serve, tmp_path, capsys):

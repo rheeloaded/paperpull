@@ -650,6 +650,7 @@ def _amex_card_option(off: bool) -> str:
         '<button id="get" type="button" class="ctl" role="option" '
         'data-testid="simple_switcher_product_option_1"%s onclick="window.presses++">Bravo Card '
         '<span data-testid="simple_switcher_display_number">12345</span></button>'
+        '<button data-testid="recent-statements/2030-11-11/download-button">Download</button>'
         % (" disabled" if off else "")
     )
 

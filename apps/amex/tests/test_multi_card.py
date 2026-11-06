@@ -561,6 +561,7 @@ HTML_TURNED_OFF_CARD_OPTION = """<!doctype html><html><head><meta charset="utf-8
     <span data-testid="simple_switcher_display_number">••••99999</span>
   </button>
 </div>
+<button data-testid="axp-pdf-statements/common/Table/recent-statements/2030-11-11/download-button">Download</button>
 <script>
 const cb = document.querySelector('[data-testid="simple_switcher_combobox"]');
 const opts = document.querySelectorAll('[role="option"]');
@@ -1114,14 +1115,28 @@ def page_of(browser):
         ctx.close()
 
 
-def test_a_list_none_of_whose_downloads_shows_stops_before_the_switch(page_of):
+def test_a_list_none_of_whose_downloads_shows_stops_before_the_switch(page_of, monkeypatch):
     """A button that does not show reads as gone from the start, so with every
     Download hidden there is nothing to hold, and the old list would be taken
     for the new card's. The card is not pressed, and the switcher is closed."""
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 500)
     pg = page_of(switch_page(statement_row("2030-11-11"), style=".dl { display: none; }"))
     cards = site.list_cards(pg)
     with pytest.raises(pressing.Stop) as stop:
         site.select_card(pg, cards[1])
+    assert stop.value.reason == "no download button shows"
+    assert pg.locator("#presses").inner_text() == "0"
+    assert pg.locator(site._SWITCHER_COMBOBOX_SEL).get_attribute("aria-expanded") == "false"
+
+
+def test_a_list_that_goes_as_the_switcher_opens_stops_before_the_switch(page_of):
+    """The list showed, and is gone by the time it is to be held, so there is
+    again nothing to hold. The card is not pressed, and the switcher is closed."""
+    pg = page_of(switch_page(statement_row("2030-11-11"), on_load=(
+        "cb.addEventListener('click', () => document.querySelectorAll('.dl')"
+        ".forEach(b => b.style.display = 'none'));")))
+    with pytest.raises(pressing.Stop) as stop:
+        site.select_card(pg, {"label": "Bravo Card (22222)", "digits": "22222"})
     assert stop.value.reason == "no download button shows"
     assert pg.locator("#presses").inner_text() == "0"
     assert pg.locator(site._SWITCHER_COMBOBOX_SEL).get_attribute("aria-expanded") == "false"
