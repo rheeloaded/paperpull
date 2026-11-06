@@ -31,6 +31,13 @@ its shell with a trade ticket, which is why the app stays off the page's
 controls entirely. The one click it ever makes is on a "Continue session" or
 "I'm still here" button when Schwab's timeout prompt appears.
 
+Accounts come from two lists in that answer, brokerage accounts and view-only
+accounts, and an account in both is read once. An accounts or documents answer
+the app cannot read stops the list with nothing recorded, rather than read as
+an empty one, and a day's list that stops during a download run stops the run
+once with the list unread. A Discover has been run on a view-only account, and
+a download from one has not been seen yet, so start one with a pilot.
+
 Download identifiers are opaque and not stable, so a document is identified by
 what it is (type, name, date, account) plus its position among identical
 descriptors on the same day. Before each download the list for that day is

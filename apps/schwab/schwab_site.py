@@ -42,7 +42,8 @@ GATEWAY = "https://ausgateway.schwab.com/api/is.StatementsWeb/StatementsInterfac
 URLS = {
     "home": f"{BASE}/app/accounts/summary/",
     "login": f"{BASE}/Areas/Access/Login",
-    "documents": f"{BASE}/app/accounts/statements/",
+    "documents": f"{BASE}/retail/accounts/statements/",
+    "documents_legacy": f"{BASE}/app/accounts/statements/",
 }
 API = {
     "token": "/api/auth/authorize/scope/api",
@@ -50,7 +51,7 @@ API = {
     "documents": f"{GATEWAY}/brokerage/documents",
     "download": f"{GATEWAY}/download",
 }
-DOCUMENT_URL_CANDIDATES = [URLS["documents"]]
+DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["documents_legacy"]]
 
 
 GATEWAY_HEADERS = {
@@ -421,21 +422,46 @@ def account_id_from_display(display: str) -> str:
     return re.sub(r"\D", "", display or "")
 
 
+class ListStopped(Exception):
+    """The accounts or documents answer could not be read whole. An answer
+    the app could not read used to read as an empty list, so a Discover
+    ended clean with no documents at all (#137)."""
+
+
 def list_accounts(page) -> List[dict]:
+    """Every account of this sign-in, from the two lists Charles Schwab has
+    been seen to keep them in. A sign-in with accounts has rows in one of
+    them, so no rows, or a row with no id, stops the list (ListStopped)
+    rather than leave a short list to be called whole."""
     res = _gateway_call(page, API["accounts"], {})
     body = res.get("body")
     if res.get("status") != 200 or not isinstance(body, dict):
         log.info("accounts API answered %s %r", res.get("status"),
                  (res.get("text") or "")[:120])
-        return []
-    rows = (((body.get("accountSelectorData") or {})
-             .get("brokerageAccountList") or {})
-            .get("brokerageAccounts")) or []
-    out = []
-    for a in rows:
-        if not isinstance(a, dict):
+        raise ListStopped(f"the accounts answer came back as {res.get('status')}")
+    selector = body.get("accountSelectorData")
+    brokerage = selector.get("brokerageAccountList") if isinstance(selector, dict) else None
+    if not isinstance(brokerage, dict):
+        raise ListStopped("the accounts answer holds no list of accounts")
+    rows: list = []
+    for key in ("brokerageAccounts", "viewOnlyAccounts"):
+        items = brokerage.get(key)
+        if items is None:
             continue
-        acct_id = str(a.get("id") or "")
+        if not isinstance(items, list):
+            raise ListStopped("a list in the accounts answer could not be read")
+        rows.extend(items)
+    if not rows:
+        raise ListStopped("the accounts answer holds no account")
+    out = []
+    seen = set()
+    for a in rows:
+        acct_id = str(a.get("id") or "") if isinstance(a, dict) else ""
+        if not acct_id:
+            raise ListStopped("a row of the accounts answer has no account id")
+        if acct_id in seen:
+            continue
+        seen.add(acct_id)
         nick = a.get("nickName") or a.get("accountType") or "Account"
         out.append({
             "account_id": acct_id,
@@ -446,7 +472,7 @@ def list_accounts(page) -> List[dict]:
             "charitable": bool(a.get("isCharitable")),
             "closed": bool(a.get("isClosed")),
         })
-    return [a for a in out if a["account_id"]]
+    return out
 
 
 def _id_headers(accounts: List[dict]) -> Dict[str, str]:
@@ -479,12 +505,15 @@ def list_documents(page, accounts: List[dict],
     if res.get("status") != 200 or not isinstance(body, dict):
         log.info("documents API answered %s %r", res.get("status"),
                  (res.get("text") or "")[:120])
-        return []
+        raise ListStopped(f"the documents answer came back as {res.get('status')}")
     if body.get("nonCharitableSuccess") is False:
         log.warning("documents API: nonCharitableSuccess=false (brokerage list may be partial)")
     if body.get("charitableSuccess") is False:
         log.warning("documents API: charitableSuccess=false (DAF list may be partial)")
-    return [d for d in (body.get("documents") or []) if isinstance(d, dict)]
+    documents = body.get("documents")
+    if documents is not None and not isinstance(documents, list):
+        raise ListStopped("the documents answer holds no list of documents")
+    return [d for d in (documents or []) if isinstance(d, dict)]
 
 
 def classify_document(doc: dict) -> Tuple[str, str, str, str]:
@@ -513,8 +542,6 @@ def document_descriptor(doc: dict) -> Tuple[str, str, str, str]:
 
 def collect_documents(page) -> List[dict]:
     accounts = list_accounts(page)
-    if not accounts:
-        return []
     label_for_id = {a["account_id"]: a["label"] for a in accounts}
     docs = list_documents(page, accounts)
     log.info("Schwab: %d document(s) across %d account(s)", len(docs), len(accounts))
