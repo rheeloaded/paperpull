@@ -42,7 +42,8 @@ GATEWAY = "https://ausgateway.schwab.com/api/is.StatementsWeb/StatementsInterfac
 URLS = {
     "home": f"{BASE}/app/accounts/summary/",
     "login": f"{BASE}/Areas/Access/Login",
-    "documents": f"{BASE}/app/accounts/statements/",
+    "documents": f"{BASE}/retail/accounts/statements/",
+    "documents_legacy": f"{BASE}/app/accounts/statements/",
 }
 API = {
     "token": "/api/auth/authorize/scope/api",
@@ -50,7 +51,7 @@ API = {
     "documents": f"{GATEWAY}/brokerage/documents",
     "download": f"{GATEWAY}/download",
 }
-DOCUMENT_URL_CANDIDATES = [URLS["documents"]]
+DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["documents_legacy"]]
 
 
 GATEWAY_HEADERS = {
@@ -428,14 +429,28 @@ def list_accounts(page) -> List[dict]:
         log.info("accounts API answered %s %r", res.get("status"),
                  (res.get("text") or "")[:120])
         return []
-    rows = (((body.get("accountSelectorData") or {})
-             .get("brokerageAccountList") or {})
-            .get("brokerageAccounts")) or []
+    selector = body.get("accountSelectorData") or {}
+    brokerage = selector.get("brokerageAccountList") or {}
+    rows: list = []
+    for key in ("brokerageAccounts", "viewOnlyAccounts"):
+        items = brokerage.get(key)
+        if isinstance(items, list):
+            rows.extend(items)
+    if not rows:
+        details = (selector.get("accountsData") or {}).get("accountDetails")
+        if isinstance(details, list):
+            rows.extend(details)
+        elif isinstance((body.get("profile") or {}).get("accounts"), list):
+            rows.extend(body["profile"]["accounts"])
     out = []
+    seen = set()
     for a in rows:
         if not isinstance(a, dict):
             continue
         acct_id = str(a.get("id") or "")
+        if not acct_id or acct_id in seen:
+            continue
+        seen.add(acct_id)
         nick = a.get("nickName") or a.get("accountType") or "Account"
         out.append({
             "account_id": acct_id,
@@ -446,7 +461,7 @@ def list_accounts(page) -> List[dict]:
             "charitable": bool(a.get("isCharitable")),
             "closed": bool(a.get("isClosed")),
         })
-    return [a for a in out if a["account_id"]]
+    return out
 
 
 def _id_headers(accounts: List[dict]) -> Dict[str, str]:
