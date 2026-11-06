@@ -58,10 +58,10 @@ def test_select_groups_by_card_account():
     app.args = SimpleNamespace(max_docs=None, start_date=None, end_date=None, doc_types=[])
     app.config = {"default_start_date": "", "document_types": ["Statement"]}
     app.discovery = SimpleNamespace(data={
-        "k1": {"category": "Statement", "date": "2026-10-11", "account": "Card B (22222)", "title": "Statement"},
-        "k2": {"category": "Statement", "date": "2026-09-18", "account": "Card A (11111)", "title": "Statement"},
-        "k3": {"category": "Statement", "date": "2026-08-19", "account": "Card A (11111)", "title": "Statement"},
-        "k4": {"category": "Statement", "date": "2026-05-11", "account": "Card B (22222)", "title": "Statement"},
+        "k1": {"category": "Statement", "date": "2031-10-11", "account": "Card B (22222)", "title": "Statement"},
+        "k2": {"category": "Statement", "date": "2031-09-18", "account": "Card A (11111)", "title": "Statement"},
+        "k3": {"category": "Statement", "date": "2031-08-19", "account": "Card A (11111)", "title": "Statement"},
+        "k4": {"category": "Statement", "date": "2031-05-11", "account": "Card B (22222)", "title": "Statement"},
     })
     app._in_scope = lambda doc: True
 
@@ -72,9 +72,9 @@ def test_select_groups_by_card_account():
     # All Card A statements should come together, followed by Card B
     assert accounts == ["Card A (11111)", "Card A (11111)", "Card B (22222)", "Card B (22222)"]
     # Within Card A, dates should be descending
-    assert dates[:2] == ["2026-09-18", "2026-08-19"]
+    assert dates[:2] == ["2031-09-18", "2031-08-19"]
     # Within Card B, dates should be descending
-    assert dates[2:] == ["2026-10-11", "2026-05-11"]
+    assert dates[2:] == ["2031-10-11", "2031-05-11"]
 
 
 def test_select_pilot_takes_from_both_cards():
@@ -84,14 +84,14 @@ def test_select_pilot_takes_from_both_cards():
     app.args = SimpleNamespace(max_docs=None, start_date=None, end_date=None, doc_types=[])
     app.config = {"default_start_date": "", "document_types": ["Statement"]}
     app.discovery = SimpleNamespace(data={
-        "k1": {"category": "Statement", "date": "2026-10-11", "account": "Card A (11111)", "title": "Statement"},
-        "k2": {"category": "Statement", "date": "2026-09-11", "account": "Card A (11111)", "title": "Statement"},
-        "k3": {"category": "Statement", "date": "2026-08-11", "account": "Card A (11111)", "title": "Statement"},
-        "k4": {"category": "Statement", "date": "2026-07-11", "account": "Card A (11111)", "title": "Statement"},
-        "k5": {"category": "Statement", "date": "2026-06-11", "account": "Card A (11111)", "title": "Statement"},
-        "k6": {"category": "Statement", "date": "2026-05-18", "account": "Card B (22222)", "title": "Statement"},
-        "k7": {"category": "Statement", "date": "2026-04-18", "account": "Card B (22222)", "title": "Statement"},
-        "k8": {"category": "Statement", "date": "2026-03-18", "account": "Card B (22222)", "title": "Statement"},
+        "k1": {"category": "Statement", "date": "2031-10-11", "account": "Card A (11111)", "title": "Statement"},
+        "k2": {"category": "Statement", "date": "2031-09-11", "account": "Card A (11111)", "title": "Statement"},
+        "k3": {"category": "Statement", "date": "2031-08-11", "account": "Card A (11111)", "title": "Statement"},
+        "k4": {"category": "Statement", "date": "2031-07-11", "account": "Card A (11111)", "title": "Statement"},
+        "k5": {"category": "Statement", "date": "2031-06-11", "account": "Card A (11111)", "title": "Statement"},
+        "k6": {"category": "Statement", "date": "2031-05-18", "account": "Card B (22222)", "title": "Statement"},
+        "k7": {"category": "Statement", "date": "2031-04-18", "account": "Card B (22222)", "title": "Statement"},
+        "k8": {"category": "Statement", "date": "2031-03-18", "account": "Card B (22222)", "title": "Statement"},
     })
     app._in_scope = lambda doc: True
 
@@ -434,7 +434,7 @@ HTML_GERMAN_PAPERLESS_NOTICE = """<!doctype html><html><head><meta charset="utf-
 </section>
 </body></html>"""
 
-HTML_EVAL_DISABLED_DELAYED_REDRAW = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title>
+HTML_EVAL_DISABLED_LATE_REDRAW = """<!doctype html><html><head><meta charset="utf-8"><title>Statements</title>
 <script>
 window.eval = function () { throw new Error('eval is disabled'); };
 </script>
@@ -904,7 +904,7 @@ def test_card_switch_with_eval_disabled(browser):
     via driver-level wait_for_element_state, not evaluate(), and succeed."""
     ctx = browser.new_context()
     pg = ctx.new_page()
-    pg.set_content(HTML_EVAL_DISABLED_DELAYED_REDRAW)
+    pg.set_content(HTML_EVAL_DISABLED_LATE_REDRAW)
     cards = site.list_cards(pg)
     assert len(cards) == 2
     assert site.select_card(pg, cards[1]) is True

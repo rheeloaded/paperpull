@@ -988,7 +988,7 @@ def card_on_show_last(page, cards: List[dict]) -> List[dict]:
 
 
 def select_card(page, card: dict) -> bool:
-    """Switch to the card specified by dict.
+    """Switch to the card in dict.
     Returns True if successfully switched or already on that card.
 
     False leaves the page on the card it was on. A card option the page has
