@@ -364,9 +364,18 @@ class App:
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
+        updates = {}
         if doc.item_id and existing.get("item_id") != doc.item_id:
-            self.discovery.update(doc.key, {"item_id": doc.item_id,
-                                            "client_id": doc.client_id}, save=False)
+            updates["item_id"] = doc.item_id
+            updates["client_id"] = doc.client_id
+            if existing.get("state") == State.NEEDS_MANUAL_REVIEW.value and not existing.get("downloaded_ok"):
+                updates["state"] = State.DISCOVERED.value
+        if doc.account and existing.get("account") != doc.account:
+            updates["account"] = doc.account
+        if doc.summary and existing.get("summary") != doc.summary:
+            updates["summary"] = doc.summary
+        if updates:
+            self.discovery.update(doc.key, updates, save=False)
         return 0
 
 

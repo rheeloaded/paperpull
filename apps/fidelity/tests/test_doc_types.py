@@ -204,7 +204,7 @@ def test_a_tax_form_reads_tax_year_when_period_dates_are_absent():
     assert r["date"] == "2025-12-31"
     assert r["period_start"] == "2025-01-01"
     assert r["category"] == "Tax Document"
-    assert r["client_id"] == "TAX|Brokerage"
+    assert r["client_id"] == "TF|Brokerage"
 
 
 def test_a_consolidated_tax_form_without_acct_num_labels_as_combined():
@@ -213,6 +213,30 @@ def test_a_consolidated_tax_form_without_acct_num_labels_as_combined():
     assert r["account"] == "Combined"
     assert r["title"] == "2025 Consolidated 1099"
     assert r["date"] == "2025-12-31"
+
+
+def test_nested_tax_form_extracts_details_correctly():
+    d = {
+        "docName": "Form 5498",
+        "acctDetails": {
+            "acctDetail": [
+                {"nickname": "ROTH IRA 2025", "acctNum": "123456789", "acctType": "Brokerage"}
+            ]
+        },
+        "docDetail": {
+            "docId": "doc-5498-abc",
+            "docType": "7131",
+            "docPeriodStartDate": 1778821200,
+            "docPeriodEndDate": 1778821200,
+            "docGeneratedDate": 1778302800,
+        }
+    }
+    r = site._row("Tax Form", "Tax Document", d, ACCOUNTS, "TAX", year=2025)
+    assert r["account"] == "BrokerageLink 6789"
+    assert r["title"] == "2025 Form 5498"
+    assert r["date"] == "2026-05-15"
+    assert r["item_id"] == "doc-5498-abc"
+    assert r["client_id"] == "TF|Brokerage"
 
 
 def test_resolve_item_matches_combined_statement_with_or_without_account_name(monkeypatch):
@@ -229,4 +253,24 @@ def test_resolve_item_matches_combined_statement_with_or_without_account_name(mo
     # Caller passes legacy empty account=""
     res2 = site.resolve_item(None, "Monthly Statement", "2026-08-31", "")
     assert res2 is not None and res2["item_id"] == "fresh-combined"
+
+
+def test_resolve_item_resolves_tax_form_from_title_year(monkeypatch):
+    d = {
+        "docName": "Form 5498",
+        "acctDetails": {
+            "acctDetail": [
+                {"nickname": "ROTH IRA 2025", "acctNum": "123456789", "acctType": "Brokerage"}
+            ]
+        },
+        "docDetail": {
+            "docId": "doc-5498-abc",
+            "docPeriodEndDate": 1778821200,
+        }
+    }
+    monkeypatch.setattr(site, "list_accounts", lambda page: ACCOUNTS)
+    monkeypatch.setattr(site, "list_tax_year", lambda page, y: [d] if y == 2025 else [])
+    res = site.resolve_item(None, "2025 Form 5498", "2026-05-15", "BrokerageLink 6789")
+    assert res is not None
+    assert res["item_id"] == "doc-5498-abc"
 
