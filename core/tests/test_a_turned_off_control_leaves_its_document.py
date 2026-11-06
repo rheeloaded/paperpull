@@ -63,6 +63,18 @@ STOPS = {
     ("amex", "goto_documents", "click", "open the statements page"): (2,
         "reaches the statements page every document is taken from, so a turned off "
         "link there would leave every document"),
+    ("amex", "goto_documents", "click", "open the card switcher"): (1,
+        "the card switcher on the overview page reaches the dashboard where "
+        "statements are located, so a turned off switcher leaves every document"),
+    ("amex", "goto_documents", "click", "select card on overview"): (1,
+        "the card option on the overview page reaches the dashboard where "
+        "statements are located, so a turned off card option leaves every document"),
+    ("amex", "_close_switcher", "click", "close the card switcher"): (1,
+        "closes the switcher once it has been read, and an open dropdown covers "
+        "every press after it"),
+    ("amex", "select_card", "click", "open the card switcher"): (1,
+        "on a multi-card account, opens the card switcher before choosing the card to download from, "
+        "so a turned off switcher leaves that card's documents"),
     ("amex", "expand_sections", "click", "open a section"): (1,
         "opens a section of the statements page for every document in it"),
     ("amex", "close_file_type_dialog", "click", "close the file type dialog"): (1,
@@ -140,11 +152,21 @@ STOPS = {
         "list shown in full leaves only the statement not shown"),
 }
 
+# The presses that leave their document and go on when something covers them
+# too, each with why. Every other one stops at a cover.
+GOES_ON_UNDER_A_COVER = {
+    ("amex", "list_cards"):
+        "the card switcher is pressed only to learn which cards there are, which a run went "
+        "without before cards were told apart, so nothing is pressed, the run says which card "
+        "it read, and every press after it is read for itself",
+}
+
 # The presses that catch TurnedOff and leave their document, by app, before
 # this census. It finds them by what they do, this only keeps it from
 # passing on finding none.
 LEAVES = {
-    ("alpaca", "_press"), ("amex", "download_document"), ("bilt", "_press"),
+    ("alpaca", "_press"), ("amex", "download_document"), ("amex", "list_cards"),
+    ("amex", "select_card"), ("bilt", "_press"),
     ("amfam", "_catch_pdf"), ("applecard", "_catch_pdf"), ("att", "_catch_pdf"),
     ("chasebusiness", "_press_row"), ("coinbase", "_catch_statement"),
     ("coinbase", "_press_card_pdf"), ("firsthorizon", "_press"),
@@ -607,6 +629,31 @@ def _amex_button(off: bool) -> str:
             'onclick="window.presses++">Download</button>' % (" disabled" if off else ""))
 
 
+def _amex_cards(site, page, out, staging, trace):
+    return site.list_cards(page)
+
+
+def _amex_switcher(off: bool) -> str:
+    return ('<button id="get" type="button" class="ctl" role="combobox" aria-expanded="false" '
+            'data-testid="simple_switcher_combobox"%s onclick="window.presses++">Alpha Card'
+            '</button>' % (" disabled" if off else ""))
+
+
+def _amex_select(site, page, out, staging, trace):
+    return site.select_card(page, {"label": "Bravo Card (12345)", "digits": "12345"})
+
+
+def _amex_card_option(off: bool) -> str:
+    return (
+        '<div role="combobox" aria-expanded="true" data-testid="simple_switcher_combobox">'
+        'Alpha Card (67890)</div>'
+        '<button id="get" type="button" class="ctl" role="option" '
+        'data-testid="simple_switcher_product_option_1"%s onclick="window.presses++">Bravo Card '
+        '<span data-testid="simple_switcher_display_number">12345</span></button>'
+        % (" disabled" if off else "")
+    )
+
+
 def _coinbase_button(off: bool) -> str:
     return ('<button id="get" type="button" class="ctl" data-testid="statements-pdf-v2"%s '
             'onclick="window.presses++; fetch(\'/statement.pdf\');">PDF</button>'
@@ -747,6 +794,10 @@ def _how(app: str, function: str, monkeypatch):
             "2026-06-30</td><td>trade_confirmation"
     if (app, function) == ("amex", "download_document"):
         return "amex_site", _amex, _amex_button, "June 30, 2026"
+    if (app, function) == ("amex", "list_cards"):
+        return "amex_site", _amex_cards, _amex_switcher, "Statements"
+    if (app, function) == ("amex", "select_card"):
+        return "amex_site", _amex_select, _amex_card_option, "Statements"
     if (app, function) == ("bilt", "_press"):
         return "bilt_site", _bilt, _bilt_button, "Statements"
     if (app, function) == ("vanguard", "download_document"):
@@ -821,7 +872,10 @@ def test_a_turned_off_control_drawn_to_take_no_pointer_is_left_too(drive, app, f
 def test_a_turned_off_control_under_a_cover_stops_the_run(drive, app, function, monkeypatch):
     module, call, control, row = _how(app, function, monkeypatch)
     ran = drive(app, module, call, row=row, control=control(True), extra=COVER)
-    assert isinstance(ran.stop, pressing.Covered), ran.stop
+    if (app, function) in GOES_ON_UNDER_A_COVER:
+        assert ran.stop is None and not ran.result, (ran.stop, ran.result)
+    else:
+        assert isinstance(ran.stop, pressing.Covered), ran.stop
     assert ran.count("presses") == 0
     assert ran.count("coverPresses") == 0
 

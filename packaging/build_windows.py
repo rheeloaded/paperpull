@@ -40,7 +40,9 @@ checked against the SHA-256 written below before anything is built from it.
 WHAT IS NOT IN IT
 
 The 400 MB Chromium. Any Chromium-based browser already on the machine is used,
-and the download is offered at sign-in only if none is found.
+and the first download is offered at sign-in only if none is found. A private
+copy somebody took that way is offered its update at sign-in when it falls
+behind.
 
 Anything untracked. Only files git knows about go in, which is what guarantees
 no config.json, browser profile, PDF or download history from this machine can

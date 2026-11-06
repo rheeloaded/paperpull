@@ -7,6 +7,97 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+
+- **NW Natural, the 80th app, monthly gas bills (#126).** It downloads
+  each month's bill from NW Natural's Paymentus payment portal, about
+  seven years of them. Nothing is clicked. The app reads Bill History from
+  inside the tab the person signed in with, and each bill's address, which
+  carries the session's token, stays in memory for the run and is never
+  written down. A second account, a pager, a history with no bills or a
+  count that does not match stops the list rather than be read as whole,
+  and Login and a run say so when the portal's bot protection answers.
+  Contributed by crazyhorse90210 and run on the contributor's own account.
+  Before merging, a list that stops while bills download was made to stop
+  the run once with the list unread, as the other apps do.
+- **Sign-in offers to update PaperPull's own Chromium when it falls behind
+  (#132).** Nothing updated the private copy after its first download, so a
+  computer that took it months ago went on signing in with that build while
+  each release carried a newer one with its security fixes. When that copy
+  is the browser about to start and it is older than the build this
+  PaperPull was made for, a sign-in from a terminal now offers the update,
+  about 400 MB, and a no holds until PaperPull wants a newer build still.
+  Nobody who signs in with their own Edge or Chrome is asked, and neither is
+  PaperPull Server. The control panel cannot ask, so its log says so and gives
+  the line to run. The Store edition, which cannot run it, says so too. The
+  build you have stays until the new one has opened, so a download that
+  fails, is stopped or dies partway costs you nothing, and sign-in goes on
+  with what you had. If the newest private copy does not open, the next older
+  finished build on the computer is tried, ahead of any other browser, so a
+  build it cannot start does not leave you with no window. That window has a
+  profile of its own and starts with no sign-ins, since running an older build
+  on a profile a newer one used lost that profile's saved site data.
+  Contributed by @JasperDale420.
+- **City of Tualatin, the 81st app, monthly utility bills (#127).** It
+  saves the water, sewer, stormwater, parks and road fee bills of a
+  Tualatin Water account from CivicPay Online, about two years of them.
+  Nothing is clicked. The portal has no PDF of a bill, so each bill's
+  print page is drawn as one, loading nothing, and the PDF's own text is
+  read for the bill's words and Billing Date before it is kept. A pager, a
+  filtered view, a second transaction table or a row of a type it does not
+  know stops the list rather than be read as whole. Contributed by
+  crazyhorse90210 and run on the contributor's own account. Before
+  merging, a list that stops while bills download was made to stop the run
+  once with the list unread, as the other apps do.
+
+### Fixed
+
+- **Target says in plain words when its fallback has no Chromium to print
+  with (#131).** Target's fallback prints a receipt page in PaperPull's
+  own Chromium, which most installs never download, since sign-in uses the
+  Edge or Chrome already on the computer. A purchase's notes used to carry
+  Playwright's own error, which names a command the packaged app does not
+  have. They now say what is missing and that nothing is wrong with the
+  account or the receipt, and give the one line that downloads it. The
+  Store edition, where that line cannot run, and PaperPull Server each get
+  words that fit them. Contributed by JasperDale420.
+- **American Express reads every card on a sign-in (#134).** With two
+  cards, Discover found nothing, because a sign-in that lands on the
+  overview page never reached the statements, and a page it never reached
+  read as a whole list of nothing. The app now reaches the statements from
+  there, stops when it cannot, reads each card in the switcher in turn, and
+  files each statement under its card, with the card's name and last digits
+  in the file name.
+  It waits for every Download that shows of one card's list to go before
+  it reads the next, at any window width, since a year-end summary has the
+  same date on both cards. If any of them stays, even under another
+  statement's name, the run stops there, the failure file counts how many
+  stayed, and a Resume does not carry on from such a stop, so Pilot or Run
+  All read each card again through the same waits. A card the site has
+  turned off, a canceled card say, is named, counted for review and left,
+  and the other cards are saved. A card the switcher holds but does not
+  show stops the run. Login says Success only on a list it saw. With one card,
+  keys, file names and files stay as they were. A switcher that cannot be
+  read, because it does not show, is turned off, is covered or offers no
+  card, no longer matters to a run with one card, which goes on with the
+  card on show and says so, and the list is not noted as whole, since
+  there may be more cards behind it. Contributed by @appchamp, who ran a
+  Pilot across two cards and read the PDFs. Before merging, the wait was
+  made to hold every button that shows, the turned off card was made to leave
+  only itself, an empty card was made to wait on its own words, and Login
+  was made to ask for the list.
+- **A Chromium download that stopped partway no longer takes over the
+  sign-in (#132).** Playwright marks a build finished last of all, and
+  nothing looked for that mark, so a closed window or a power cut during the
+  unpacking left a folder that counted as the newest build. The sign-in
+  tried it with the finished build beside it never started, and no repair
+  was offered. A build without the mark now counts as not there, and the
+  finished build beside it is the one started. With no finished build on the
+  computer, a launch through Playwright still starts Playwright's own folder
+  as it always did.
+
 ## [0.60.2] - 2026-11-04
 
 Bank of America now saves statements, and is confirmed on a real account.
