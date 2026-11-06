@@ -197,6 +197,35 @@ def test_no_folder_is_made_when_no_download_arrives(tmp_path, monkeypatch):
     assert not (app.paths.tax_documents / "Wealthfront").exists()
 
 
+def test_a_second_try_saves_under_the_same_name(tmp_path, monkeypatch):
+    """A first try that stopped partway leaves what it wrote at the path, and
+    the row's own button saves over it, not beside it under a " (2)"."""
+    app = make_app(tmp_path)
+    doc = a_form()
+    stand_in(monkeypatch, app)
+
+    def save(download, path):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(download.body)
+        if download.stops:
+            raise OSError("the connection went")
+
+    monkeypatch.setattr(receipt_pdf, "save_download", save)
+    monkeypatch.setattr(app_mod.site, "resolve_tax_file_links",
+                        lambda *a: ["http://example.com/form.pdf"])
+    monkeypatch.setattr(app_mod.site, "find_row_download", lambda *a: MagicMock())
+    whole = PDF_START + b"the whole form"
+    page = MagicMock()
+    page.expect_download = MagicMock(side_effect=[
+        Arrives(SimpleNamespace(suggested_filename="form.pdf", body=PDF_START[:9], stops=True)),
+        Arrives(SimpleNamespace(suggested_filename="form.pdf", body=whole, stops=False))])
+    page.locator().count.return_value = 1
+    app.download_one(page, doc, storage.build_pdf_filename(doc.date, doc.summary, "", record=doc))
+    assert list(files(tmp_path)) == [whole]
+    assert Path(doc.pdf_path).name == "2031-12-31 Tax Document.pdf"
+
+
 def test_a_folder_that_cannot_be_made_leaves_the_files_in_the_folder_of_their_kind(
         tmp_path, monkeypatch):
     """A folder is made through unique_path, as every app's is, which is also

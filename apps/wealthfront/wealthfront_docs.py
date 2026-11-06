@@ -546,17 +546,19 @@ class App:
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        out_path = None
+        # Planned with no folder made, since a form with nothing to download
+        # left the folders a naming pattern names empty.
+        out_path = unique_path(folder, filename, self.config["max_path_length"], make=False)
+        if out_path.name != filename:
+            self.stats["duplicate_filenames"] += 1
 
         def saving_to() -> Path:
-            """Where a download that has arrived goes, asked only then, since
-            asking makes the folders a naming pattern names and a form with
-            nothing to download left them empty."""
+            """The path for a download that has arrived, with its folders made
+            now through unique_path, as every app's are, or the folder of its
+            kind when they cannot be."""
             nonlocal out_path
-            if out_path is None:
-                out_path = unique_path(folder, filename, self.config["max_path_length"])
-                if out_path.name != filename:
-                    self.stats["duplicate_filenames"] += 1
+            out_path = unique_path(folder, filename, self.config["max_path_length"],
+                                   ignoring=out_path)
             return out_path
 
         # Tax rows carry no href: their "Download" button opens a dialog that
@@ -615,8 +617,8 @@ class App:
             # statement name in the output folder, indistinguishable from a
             # real download until it is opened.
             try:
-                if out_path is not None and out_path.exists() and (
-                        out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):
+                if out_path.exists() and (out_path.stat().st_size == 0
+                                          or out_path.read_bytes()[:5] != b"%PDF-"):
                     out_path.unlink()
             except OSError:
                 pass
@@ -644,7 +646,7 @@ class App:
             # empty shell save_as created and never filled. It must not be left
             # behind wearing a real statement's name.
             try:
-                if out_path is not None and out_path.exists() and out_path.stat().st_size == 0:
+                if out_path.exists() and out_path.stat().st_size == 0:
                     out_path.unlink()
             except OSError:
                 pass
