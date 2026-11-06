@@ -7,6 +7,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Venmo reads both tabs of its newer Statements page.** Some accounts get a
+  page where a month has a Wallet tab and, with a Balance account, a Balance
+  tab, with only the open tab on the page. The app stopped at the first month
+  of such an account, and simply letting it through would have called a month
+  empty while its Balance tab held transactions. It now reads both, saves each
+  tab that holds transactions as its own statement, the Balance tab as
+  `<month end> Venmo Balance Statement.pdf`, and calls a month empty only when
+  neither does. That page also says a month has no transactions when Venmo
+  could not load it, so on the Wallet tab those words count only when Venmo's
+  own answer says the same. A Balance tab that will not open stops the list,
+  unless Venmo's answer says there is no Balance account, and a Balance month
+  past the ten transactions that tab can show goes to review rather than be
+  saved with some missing. All of it comes from Venmo's public page code, and
+  no run has met this page yet.
+
 ## [0.61.0] - 2026-11-06
 
 NW Natural and City of Tualatin are the 80th and 81st apps, both contributed

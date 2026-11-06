@@ -141,6 +141,7 @@ def page(chromium, venmo, monkeypatch):
     monkeypatch.setattr(site, "POLL_MS", 25)
     monkeypatch.setattr(site, "EMPTY_HOLD_MS", 300)
     monkeypatch.setattr(site, "SETTLE_MS", 1500)
+    monkeypatch.setattr(site, "LAYOUT_HOLD_MS", 50)
     context = chromium.new_context()
     context.route("**/*", venmo.answer)
     tab = context.new_page()

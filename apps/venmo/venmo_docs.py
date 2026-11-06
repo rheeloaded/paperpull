@@ -3,7 +3,8 @@
 Venmo shows an account statement for each month on its web account pages,
 account.venmo.com, under Statements, as a web page with a CSV download and
 no PDF. This saves each finished month's statement page as a PDF, printed
-from the page itself, back to the run's start date. With no start date it
+from the page itself, back to the run's start date, and on a statement with
+Wallet and Balance tabs each tab as a PDF of its own. With no start date it
 reads two years, and when the oldest of them has transactions the list
 stops rather than be called whole. The orchestrator below is the same one
 every other statement app runs on.
@@ -140,7 +141,9 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        # The statement's month, YYYY-MM, how it is reached and known by.
+        # The statement's month, YYYY-MM, how it is reached and known by,
+        # with -balance after it for the Balance tab of a statement with tabs
+        # (venmo_site.month_and_tab).
         self.document_id = document_id
         # How many transaction rows the printed statement drew.
         self.rows_printed = kw.get("rows_printed", "")
@@ -194,10 +197,10 @@ def told_apart_by(record: dict) -> str:
     """What a statement's file adds to its name when another file already
     has that name, the same on every run: its month, never " (2)"
     (core/tests/test_every_app_renames_each_file_for_its_own_record). The
-    walk names each month once (venmo_site.months_to_walk), and a month is
-    keyed by its profile and month, so this is reached only when a file of
-    that name is already in the folder. The download and Rename both ask
-    this, so they agree."""
+    walk names each month once (venmo_site.months_to_walk), and a statement
+    is keyed by its profile, its month and its tab, so this is reached only
+    when a file of that name is already in the folder. The download and
+    Rename both ask this, so they agree."""
     return str((record or {}).get("document_id") or "").strip()
 
 

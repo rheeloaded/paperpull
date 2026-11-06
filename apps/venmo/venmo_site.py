@@ -50,6 +50,24 @@ WHAT THE SURVEY ESTABLISHED
   * A busy month draws ten rows at a time: the list's last child is then
     not a row but a block holding one "Show more" button (2025-08 and
     2025-07, seen live).
+  * Read from the same public files on 2026-11-03, a newer page, set per
+    account and not yet seen on a live one, where a personal profile's month
+    is tabs, Wallet and Balance, in [data-testid=account-statement-layout].
+    Only the open tab is in the page, a section of its own
+    ([data-testid=venmo-account-tab-body] and
+    [data-testid=venmo-balance-account-tab-body]), and a tab's lists and rows
+    are the ones above. The page writes accountTab=venmo-account into the
+    address and reads the tab from there, so venmo-balance opens the Balance
+    tab with nothing pressed. Its rows come from a request of their own,
+    BalanceAccountStatement, and the tab is offered only once that answer is
+    in and not null. Until then, and for good when it is null, the page draws
+    the Wallet under an address naming Balance. Null is how Venmo's own menu
+    tells a profile with no Balance account, and a failed request looks the
+    same on the page, so only the answer tells them apart. The Wallet draws
+    "No transactions yet for this month" whenever it has no rows and is not
+    loading, so before its request begins and after it fails as well, while
+    the Balance tab, drawn only after a whole answer, means it. The Balance
+    tab asks for ten of each list and its "Show more" does nothing.
 
 THE SHAPE THIS APP TAKES
   The statement page itself is printed to PDF through the core's
@@ -72,12 +90,39 @@ THE SHAPE THIS APP TAKES
   validation and rename all take a PDF. Keeping it would be a core change
   first.
 
+  A month that draws tabs is read on both, since a month whose Wallet is
+  empty can hold transactions on its Balance tab. Its plain address is the
+  Wallet, the Balance tab is opened by naming it in the address, and each tab
+  holding transactions is a statement of its own, the Wallet's "2026-09" as
+  on any other page and the Balance's "2026-09-balance", filed as "<month
+  end> Venmo Balance Statement.pdf". A month is empty only when neither tab
+  holds a transaction. The Wallet's words count only with Venmo's own answer
+  saying the same (_unproved_empty), and the Balance tab counts as nothing
+  only when it draws its own words or Venmo's answer says the profile has
+  no Balance account (no_balance_account). Anything else stops the list.
+
 UNCONFIRMED (the app stops at each until a run shows it)
   * The account type's value. Only "personal" is accepted (a business
     profile is not listed).
   * The older page's "There are no transactions for these dates." on a live
     account. It is read from Venmo's own page code, and a month that shows
     it has drawn only once its request came back with nothing in it.
+  * All of the page with tabs, which no run has met. Its server code is not
+    public, so a visit naming the Balance tab may not keep that address (the
+    list stops). The page takes its layout from the server, whose yes or no
+    is in the page's own data and settles it at once. With neither, it goes
+    by a setting that can arrive after it has drawn, with no upper bound, so
+    such a month is given LAYOUT_HOLD_MS for tabs, and tabs first seen after
+    months read without them stop the list. A server that says nothing on
+    any month with a setting later than LAYOUT_HOLD_MS on every month would
+    be read as a page with none, the one point here that does not stop.
+    Whether the server says on every account is not known, and Diagnose
+    writes what it said. The answers' bodies decide a month the page cannot,
+    and a month whose answer cannot be read stops. A
+    Balance month past its first ten transactions cannot be drawn whole (a
+    Show more press that draws nothing stops that month, and nothing is
+    printed). What a Balance answer says of a month before the Balance
+    account opened, and whether the two tabs' lists overlap, are not known.
   * How far back the months go. A month before the account opened shows
     the same no-transactions words as an empty month, so it is skipped.
     The walk goes back to the run's start date, and with none set it reads
@@ -135,7 +180,7 @@ import json
 import logging
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date as _date, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -180,8 +225,19 @@ URLS = {
 API_HOST = "api.venmo.com"
 GRAPHQL_PATH = "/graphql"
 STATEMENT_OP = "TransactionsHistory"
+STATEMENT_FIELD = "transactionsHistory"
+# The Balance tab's own data request, heard and never made.
+BALANCE_OP = "BalanceAccountStatement"
+BALANCE_FIELD = "balanceAccountStatement"
 # The statement address's query, exactly these keys, one value each.
 QUERY_KEYS = {"accountType", "month", "year", "profileId"}
+# On a statement with tabs the address also names the tab, by this key and
+# one of these two values. Venmo's page writes the Wallet's itself.
+TAB_KEY = "accountTab"
+WALLET_TAB = "venmo-account"
+BALANCE_TAB = "venmo-balance"
+# A month's Balance statement is known by its month and this, 2026-09-balance.
+BALANCE_ID = "-balance"
 
 # ===========================================================================
 # UNCONFIRMED. Each value below is a choice made without a run behind it;
@@ -238,6 +294,10 @@ POLL_MS = 250
 # How long a month's "No transactions yet" must hold before the month is
 # skipped, since a page can say it for a moment before its rows draw.
 EMPTY_HOLD_MS = 2000
+# How long a month is given to draw statement tabs when the server has not
+# said whether it has any, since the page can then learn of them after it has
+# drawn. A yes or a no from the server is not waited on.
+LAYOUT_HOLD_MS = 5000
 # ===========================================================================
 # End of UNCONFIRMED.
 # ===========================================================================
@@ -264,7 +324,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
 # offers none it presses; these are kept so the shared guard tests hold
 # this app to the same rules as every other.
 SAFE_DOC_CONTROL_RES = (
-    re.compile(r"^(view|download)(\s+the)?(\s+monthly)?\s+(statement|pdf)(\s+pdf)?$", re.I),
+    re.compile(r"^(view|download)(\s+the)?(\s+(monthly|balance))?\s+(statement|pdf)(\s+pdf)?$", re.I),
     re.compile(r"^download$", re.I),
 )
 
@@ -507,16 +567,21 @@ def profile_tag(profile_id: str) -> str:
 @dataclass(frozen=True)
 class Where:
     """The profile the Statements page settled on: its account type and
-    its id, which is private and never written down."""
+    its id, which is private and never written down. `tab` is the statement
+    tab a month is opened on, BALANCE_TAB for the Balance tab and "" for the
+    month's plain address, which is the Wallet tab on a statement with tabs."""
     account_type: str
     profile_id: str
+    tab: str = ""
 
 
 def statement_query(url) -> Optional[dict]:
     """The statement address's query as {accountType, month, year,
     profileId}, or None unless the URL is exactly this host's Statements
     page with exactly those four keys, one plain value each, a month of 1
-    to 12, a four-digit year and a profile id of the right shape."""
+    to 12, a four-digit year and a profile id of the right shape. A
+    statement with tabs adds accountTab, naming one of its two tabs, and the
+    answer then holds that too."""
     if not is_safe_url(url):
         return None
     try:
@@ -526,9 +591,11 @@ def statement_query(url) -> Optional[dict]:
     if parts.path.rstrip("/") != DOCUMENTS_PATH or parts.fragment:
         return None
     q = parse_qs(parts.query or "", keep_blank_values=True)
-    if set(q) != QUERY_KEYS or any(len(v) != 1 for v in q.values()):
+    if set(q) - {TAB_KEY} != QUERY_KEYS or any(len(v) != 1 for v in q.values()):
         return None
     got = {k: v[0] for k, v in q.items()}
+    if got.get(TAB_KEY, WALLET_TAB) not in (WALLET_TAB, BALANCE_TAB):
+        return None
     if not re.fullmatch(r"[1-9]|1[0-2]|0[1-9]", got["month"]) or not re.fullmatch(r"20[0-9]{2}", got["year"]):
         return None
     if not re.fullmatch(r"[A-Za-z]{2,20}", got["accountType"]) or not _PROFILE_ID_RE.fullmatch(got["profileId"]):
@@ -538,13 +605,27 @@ def statement_query(url) -> Optional[dict]:
 
 def month_url(where: Where, month_id: str) -> str:
     """The Statements page's address for this YYYY-MM month on this
-    profile, or "" when the month is not one."""
+    profile, naming `where`'s tab when it has one, or "" when the month is
+    not one."""
     m = _MONTH_ID_RE.fullmatch(str(month_id or ""))
     if not m or not where or not where.profile_id:
         return ""
-    url = DOCUMENTS_URL + "?" + urlencode({"accountType": where.account_type, "month": str(int(m.group(2))),
-                                            "profileId": where.profile_id, "year": m.group(1)})
+    query = {"accountType": where.account_type, "month": str(int(m.group(2))),
+             "profileId": where.profile_id, "year": m.group(1)}
+    if where.tab:
+        query[TAB_KEY] = where.tab
+    url = DOCUMENTS_URL + "?" + urlencode(query)
     return url if statement_query(url) else ""
+
+
+def month_and_tab(document_id) -> Tuple[str, str]:
+    """The month a statement's document id names and the tab it is printed
+    from. 2026-09 is the month's plain address, and 2026-09-balance its
+    Balance tab."""
+    text = str(document_id or "").strip()
+    if text.endswith(BALANCE_ID):
+        return text[:-len(BALANCE_ID)], BALANCE_TAB
+    return text, ""
 
 
 def _month_in(q: dict) -> str:
@@ -614,17 +695,27 @@ class Heard:
     it can be read, which is logged and otherwise ignored.
 
     `said` is how many transactions the newest readable answer held
-    (answer_counts). It only goes in the failure file, since what a month
-    is called is decided by what the page shows."""
+    (answer_counts). It goes in the failure file, and it is what the Wallet
+    tab's words for an empty month are checked against (_unproved_empty),
+    since that tab draws them when the request failed too. On a statement
+    with no tabs what a month is called is decided by what the page shows.
 
-    def __init__(self, arms=None):
+    `op` is the answer that speaks for what is being read, the Balance tab's
+    own when that is open. The page asks for the Wallet's transactions on
+    the Balance tab too, and what that answer says of its own list is not
+    this tab's. `no_balance` is true when the newest answer read says the
+    profile has no Balance account (no_balance_account)."""
+
+    def __init__(self, arms=None, op=STATEMENT_OP):
         self.arms = arms or (lambda url: statement_query(url) is not None)
+        self.op = op
         self.armed = False
         self.asked: list = []
         self.answers: List[Tuple[str, int]] = []
         self.pending: list = []
         self.partial = False
         self.said: Optional[dict] = None
+        self.no_balance = False
 
     @staticmethod
     def _graphql(url) -> bool:
@@ -642,6 +733,7 @@ class Heard:
                     self.pending = []
                     self.partial = False
                     self.said = None
+                    self.no_balance = False
                 return
             if self.armed and self._graphql(request.url):
                 self.asked.append(request)
@@ -655,10 +747,10 @@ class Heard:
             request = response.request
             if not any(request is r for r in self.asked):
                 return
-            op = _operation(request.post_data or "")
+            op = _operation(request.post_data or "", self.op)
             status = int(response.status)
             self.answers.append((op, status))
-            if op == STATEMENT_OP and status == 200:
+            if op == self.op and status == 200:
                 # The body is read later, from statement(): inside the event
                 # handler the answer is still on its way and cannot be read.
                 self.pending.append(response)
@@ -666,8 +758,8 @@ class Heard:
             return
 
     def _read_pending(self) -> None:
-        """Walk the TransactionsHistory answers heard so far, once each, in
-        memory. One whose body cannot be read is skipped."""
+        """Walk the answers to `op` heard so far, once each, in memory. One
+        whose body cannot be read is skipped."""
         while self.pending:
             response = self.pending.pop(0)
             try:
@@ -688,7 +780,9 @@ class Heard:
                 # the answer to the press that drew the last rows replaces
                 # what the first answer said.
                 self.partial = more_to_come(body)
-                self.said = answer_counts(body)
+                balance = self.op == BALANCE_OP
+                self.said = answer_counts(body, BALANCE_FIELD if balance else STATEMENT_FIELD)
+                self.no_balance = balance and no_balance_account(body)
 
     def listen(self, page) -> None:
         page.on("request", self.on_request)
@@ -708,11 +802,11 @@ class Heard:
         return any(s in (401, 403) for _op, s in self.answers)
 
     def statement(self) -> Optional[int]:
-        """The status of the newest TransactionsHistory answer to this
-        navigation, or None. The answers' bodies are read here, after the
-        event that brought them."""
+        """The status of the newest answer to `op` for this navigation, or
+        None. The answers' bodies are read here, after the event that brought
+        them."""
         self._read_pending()
-        found = [s for op, s in self.answers if op == STATEMENT_OP]
+        found = [s for op, s in self.answers if op == self.op]
         return found[-1] if found else None
 
 
@@ -750,16 +844,18 @@ def more_to_come(body) -> bool:
     return any(nexts)
 
 
-def answer_counts(body) -> dict:
-    """What a TransactionsHistory answer held, as counts and a yes or no,
-    which are whether it carried errors and how many completed and pending
+def answer_counts(body, field: str = STATEMENT_FIELD) -> dict:
+    """What a TransactionsHistory answer held, or a BalanceAccountStatement
+    answer's when `field` says so, as counts and a yes or no, which are
+    whether it carried errors and how many completed and pending
     transactions it held, None for a part it has no list for. Nothing from
     a transaction is read. These tell a month whose request failed from one
-    with nothing in it when the page, which draws neither, cannot."""
+    with nothing in it when the page, which draws neither or the same words
+    for both, cannot."""
     parts = body if isinstance(body, list) else [body]
     parts = [p for p in parts if isinstance(p, dict)]
     data = [p.get("data") for p in parts if isinstance(p.get("data"), dict)]
-    history = [d.get("transactionsHistory") for d in data if isinstance(d.get("transactionsHistory"), dict)]
+    history = [d.get(field) for d in data if isinstance(d.get(field), dict)]
     out = {"errors": any(bool(p.get("errors")) for p in parts)}
     for name, key in (("completed", "completedTransaction"), ("pending", "pendingTransaction")):
         held = history[0].get(key) if history else None
@@ -768,16 +864,32 @@ def answer_counts(body) -> dict:
     return out
 
 
-def _operation(body: str) -> str:
+def no_balance_account(body) -> bool:
+    """Whether a BalanceAccountStatement answer says the profile has no
+    Balance account, which takes an answer that was read, with no errors and
+    the field there and null. Venmo's own menu reads the same answer that
+    way. A failed request leaves the page looking just the same, so this
+    answer is the only thing that tells a month with no Balance tab from one
+    whose tab did not load."""
+    parts = body if isinstance(body, list) else [body]
+    parts = [p for p in parts if isinstance(p, dict)]
+    if not parts or any(p.get("errors") for p in parts):
+        return False
+    data = [p.get("data") for p in parts]
+    return all(isinstance(d, dict) and BALANCE_FIELD in d and d[BALANCE_FIELD] is None for d in data)
+
+
+def _operation(body: str, wanted: str = STATEMENT_OP) -> str:
     """The operationName of a GraphQL request body, or "" when it has none
-    this can read. Only the name is read; the variables are private."""
+    this can read, and of a batch `wanted` when it is among them. Only the
+    name is read, since the variables are private."""
     try:
         data = whole_json(json.loads(body))
     except (TypeError, ValueError):
         return ""
     if isinstance(data, list):
         names = {str(d.get("operationName") or "") for d in data if isinstance(d, dict)}
-        return STATEMENT_OP if STATEMENT_OP in names else ""
+        return wanted if wanted in names else ""
     return str(data.get("operationName") or "") if isinstance(data, dict) else ""
 
 
@@ -787,8 +899,12 @@ def _operation(body: str) -> str:
 # transaction rows the completed list holds (each an <a> carrying an
 # amount), how many pending lists are drawn beside it, whether a loading
 # shimmer is drawn inside the statement, whether the page says the month has
-# no transactions, and every control's label, for the Load more check. Read
-# only, and no text of a row is read.
+# no transactions, and every control's label, for the Load more check. On a
+# statement with tabs, read from Venmo's own page code on 2026-11-03: whether
+# the tabbed layout is drawn, how many of each tab's bodies are, which tab the
+# address names, and the server's own yes or no in the page's data, null when
+# it gave neither, and nothing else of that data is read. Read only, and no
+# text of a row is read.
 _STATE_JS = r"""([listSel, rowSel, emptyRe, pendingSel]) => {
   const months = Array.from(document.querySelectorAll('input'))
     .map(i => (i.value || '').replace(/\s+/g, ' ').trim())
@@ -812,11 +928,19 @@ _STATE_JS = r"""([listSel, rowSel, emptyRe, pendingSel]) => {
   const main = document.querySelector('main') || document.body;
   const empty = new RegExp(emptyRe, 'i').test((main && main.innerText) || '');
   const loading = main ? main.querySelectorAll('[data-testid="shimmer"]').length : 0;
+  const drawn = id => document.querySelectorAll('[data-testid="' + id + '"]').length;
+  const next = window.__NEXT_DATA__;
+  const props = next && next.props && next.props.pageProps;
+  const told = props ? props.isAccountRestructuringEnabledSSR : null;
   const labels = Array.from(document.querySelectorAll('button, [role="button"], a'))
     .map(b => (b.textContent || b.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim())
     .filter(t => t && t.length < 40);
   return {months: months, heading: heading, lists: lists.length, rows: rows, kids: kids, pager: pager,
-          pending: pending, empty: empty, loading: loading, labels: labels};
+          pending: pending, empty: empty, loading: loading, labels: labels,
+          tabbed: drawn('account-statement-layout'), wallet: drawn('venmo-account-tab-body'),
+          balance: drawn('venmo-balance-account-tab-body'),
+          asked: new URLSearchParams(location.search).get('accountTab') || '',
+          told: told === true || told === false ? told : null};
 }"""
 
 
@@ -928,14 +1052,38 @@ def _where(page) -> Where:
     return Where(q["accountType"], q["profileId"])
 
 
+def _tab_drawn(state: dict) -> str:
+    """"" when the page and its address agree on the statement's tabs, which
+    is no tabs in either, or else the one tab the address names drawn alone,
+    and otherwise why not. Under an address naming the Balance tab the page
+    draws the Wallet's until Balance's answer is in, and for good when none
+    comes, so that tab's rows and words are never taken for the Balance's.
+    A server that says the statement has tabs is not answered by a page with
+    none."""
+    tabbed, asked = state.get("tabbed") or 0, state.get("asked") or ""
+    if state.get("told") is True and not tabbed:
+        return "the server says the statement has tabs and the page draws none"
+    if not tabbed and not asked:
+        return ""
+    if not tabbed:
+        return "the address names a statement tab and the page draws none"
+    if not asked:
+        return "the page draws statement tabs and its address names none"
+    drawn = (state.get("wallet") or 0, state.get("balance") or 0)
+    if drawn != ((0, 1) if asked == BALANCE_TAB else (1, 0)):
+        return "the page has not drawn the statement tab its address names"
+    return ""
+
+
 def settled(state: dict, month: str) -> str:
     """Whether the page state read by _STATE_JS shows `month` drawn: "" when
     it does, else why not. Exactly one month picker reading that month, the
-    "Account Statement" heading, no loading shimmer in the statement, and
-    either one completed list whose every child is a transaction row but
-    for, at most, its own last "Show more" pager (a busy month draws ten
-    rows at a time, and show_all draws the rest before printing), or no list of
-    either kind and the page's own words for a month with no transactions.
+    "Account Statement" heading, no loading shimmer in the statement, on a
+    statement with tabs the tab the address names (_tab_drawn), and either
+    one completed list whose every child is a transaction row but for, at
+    most, its own last "Show more" pager (a busy month draws ten rows at a
+    time, and show_all draws the rest before printing), or no list of either
+    kind and the page's own words for a month with no transactions.
 
     Everything else has a reason of its own, since each is a different page
     and the reason is what a tester sends back. No list with no words is
@@ -948,6 +1096,9 @@ def settled(state: dict, month: str) -> str:
         return "the month picker does not show the month asked for"
     if state.get("loading"):
         return "the statement is still loading"
+    tab = _tab_drawn(state)
+    if tab:
+        return tab
     lists, rows, pending = state.get("lists") or 0, state.get("rows") or 0, state.get("pending") or 0
     if state.get("empty") and (lists or pending):
         return "the page draws transactions and says there are none"
@@ -962,6 +1113,24 @@ def settled(state: dict, month: str) -> str:
     return "the month's transactions did not finish drawing"
 
 
+def _unproved_empty(state: dict, heard: "Heard") -> str:
+    """Why the Wallet tab's words for a month with no transactions are not
+    believed yet, or "". That tab draws them whenever it has no rows and is
+    not loading, so before its request has begun and after it has failed as
+    well as for an empty month, so only Venmo's own answer can say which. The
+    Balance tab's are believed as they are, since it is drawn only after an
+    answer that came back whole, and the older pages draw no words at all
+    until their answer is in."""
+    if not state.get("wallet") or state.get("rows"):
+        return ""
+    said = heard.said
+    if said is None:
+        return "the Wallet tab says the month has no transactions and Venmo's own answer could not be read"
+    if said.get("errors") or said.get("completed") != 0 or said.get("pending") != 0:
+        return "the Wallet tab says the month has no transactions and Venmo's own answer does not"
+    return ""
+
+
 def _seen(state: dict, heard: "Heard") -> dict:
     """What a month's page held when it stopped, for the failure file, as
     counts and yes or no, with no word of the page. It says which of
@@ -969,27 +1138,32 @@ def _seen(state: dict, heard: "Heard") -> dict:
     be read."""
     seen = {name: state.get(key) or 0 for name, key in (
         ("lists", "lists"), ("rows", "rows"), ("children", "kids"), ("pager", "pager"),
-        ("pending", "pending"), ("loading", "loading"))}
+        ("pending", "pending"), ("loading", "loading"), ("tabs", "tabbed"), ("wallet", "wallet"),
+        ("balance", "balance"))}
     seen.update(heading=bool(state.get("heading")), empty=bool(state.get("empty")),
-                months=len(state.get("months") or []), answer=heard.said, status=heard.statement())
+                months=len(state.get("months") or []), answer=heard.said, status=heard.statement(),
+                balance_asked=state.get("asked") == BALANCE_TAB, server_says_tabs=state.get("told"))
     return seen
 
 
-def _month_heard(month: str) -> "Heard":
-    """A Heard armed by the navigation to this month's own address."""
+def _month_heard(month: str, tab: str = "") -> "Heard":
+    """A Heard armed by the navigation to this month's own address, and
+    listening for the answer that speaks for `tab`."""
     return Heard(arms=lambda u: (statement_query(u) or {}).get("month") is not None
-                 and _month_in(statement_query(u)) == month)
+                 and _month_in(statement_query(u)) == month, op=BALANCE_OP if tab else STATEMENT_OP)
 
 
 def _still_here(page, where: Where, month: str, heard: "Heard") -> None:
     """Raise unless the tab is still at exactly this month's statement
-    address on this profile and account type, and nothing heard or shown
-    says it is signed out."""
+    address on this profile and account type, on the statement tab `where`
+    names, and nothing heard or shown says it is signed out."""
     if heard.signed_out():
         raise SessionExpired("Venmo answered the statement as signed out")
     q = statement_query(page.url or "")
+    # The plain address gains the Wallet's name once the page has drawn it.
+    tabs = (where.tab,) if where.tab else ("", WALLET_TAB)
     if q is None or _month_in(q) != month or q["profileId"] != where.profile_id \
-            or q["accountType"] != where.account_type:
+            or q["accountType"] != where.account_type or q.get(TAB_KEY, "") not in tabs:
         if looks_signed_out(page):
             raise SessionExpired("Venmo showed its sign-in page")
         raise ListStopped("the Statements page did not stay on the month asked for")
@@ -1002,7 +1176,11 @@ def _open_month(page, where: Where, month: str, heard: Optional["Heard"] = None)
     page shows it whole (settled), twice in a row with the same rows, and
     return how many transaction rows it drew (0 for a month with none). A
     month that says it has none must say so for EMPTY_HOLD_MS before it is
-    taken as empty, since a page can say it a moment before its rows draw.
+    taken as empty, since a page can say it a moment before its rows draw,
+    and the Wallet tab's words must have Venmo's own answer behind them
+    (_unproved_empty). A `where` with a tab opens the month on that tab, and
+    an answer that says the profile has no Balance account is 0 at once,
+    since no such tab will ever draw.
 
     The month is bound by the page's own state, never by hearing its data:
     Venmo does not ask for every month (its client cache answers some).
@@ -1021,7 +1199,7 @@ def _open_month(page, where: Where, month: str, heard: Optional["Heard"] = None)
         raise ListStopped("a statement address could not be made")
     own = heard is None
     if own:
-        heard = _month_heard(month)
+        heard = _month_heard(month, where.tab)
         heard.listen(page)
     try:
         _goto(page, url)
@@ -1029,8 +1207,11 @@ def _open_month(page, where: Where, month: str, heard: Optional["Heard"] = None)
         state = {}
         for _ in range(max(2, SETTLE_MS // POLL_MS)):
             _still_here(page, where, month, heard)
+            if heard.no_balance:
+                state = {}
+                break
             state = _state(page)
-            why = settled(state, month)
+            why = settled(state, month) or _unproved_empty(state, heard)
             seen = (state.get("rows"), state.get("empty"))
             # How many waits the same settled page has held across.
             held = held + 1 if not why and seen == last else 0
@@ -1150,11 +1331,32 @@ def ready_to_print(page, where: Where, month: str, heard: "Heard") -> None:
         raise ListStopped("the month now shows no transactions")
 
 
-def _rawdoc(month: str, i: int, where: Where) -> RawDoc:
-    title = f"Venmo Statement {month}"
+def _rawdoc(month: str, i: int, where: Where, tab: str = "") -> RawDoc:
+    title = f"Venmo Balance Statement {month}" if tab else f"Venmo Statement {month}"
     return RawDoc(title=title, date_text=month_end(month), href=DOCUMENTS_PATH, text=title,
-                  row_index=i, kind="statement", document_id=month,
+                  row_index=i, kind="statement", document_id=month + (BALANCE_ID if tab else ""),
                   profile=profile_tag(where.profile_id))
+
+
+def _has_tabs(page) -> bool:
+    """Whether the month just opened names a tab in its address, which
+    _open_month has made sure a page drawing tabs has done by now."""
+    return TAB_KEY in (statement_query(page.url or "") or {})
+
+
+def _draws_tabs(page) -> bool:
+    """Whether the month just opened is a statement with tabs. The server's
+    yes or no settles it. With neither, the page can draw a whole month as
+    the older page and only then learn it has tabs, and that month's Balance
+    tab would go unread with nothing said, so it is given LAYOUT_HOLD_MS to
+    turn out to be one."""
+    for _ in range(LAYOUT_HOLD_MS // POLL_MS):
+        if _has_tabs(page):
+            return True
+        if _state(page).get("told") is not None:
+            return False
+        page.wait_for_timeout(POLL_MS)
+    return _has_tabs(page)
 
 
 def goto_documents(page) -> bool:
@@ -1203,11 +1405,17 @@ def collect_download_docs(page, today: Optional[_date] = None, floor: str = "",
     run's start date) when one is set, and otherwise MAX_MONTHS months
     (months_to_walk). Each month is opened by its own address and listed
     only when the page shows it (_open_month) with at least one
-    transaction. A month with none is skipped, counted only in the log, and
-    the walk goes on. The first month the page will not show as asked stops
-    the list, holding the months read before it, since what a month before
-    the account opened looks like has not been seen, so it is not taken
-    for the start of the history. With no start date, a walk whose oldest
+    transaction. On a statement with tabs each tab is a statement of its
+    own, since only the open tab is in the page, and a month is empty only
+    when neither holds a transaction. Tabs go by the account, so once a
+    month has drawn them (_draws_tabs) every month after is read on both,
+    and tabs first seen after months read without them stop the list. A
+    month with none is skipped, counted only in the log, and the walk goes
+    on. The first month
+    the page will not show as asked stops the list, holding the months read
+    before it, since what a month before the account opened looks like has
+    not been seen, so it is not taken for the start of the history. With no
+    start date, a walk whose oldest
     month has transactions stops the list too (CapReached), since older
     months may have them as well. A `limit`, as Diagnose gives, reads that
     many months only and is never the whole list. A signed-out page raises
@@ -1217,20 +1425,30 @@ def collect_download_docs(page, today: Optional[_date] = None, floor: str = "",
     docs: List[RawDoc] = []
     empty = 0
     walk = months_to_walk(today or _date.today(), floor, limit)
+    tabs = False
     for month in walk:
         try:
             rows = _open_month(page, where, month)
+            if rows:
+                docs.append(_rawdoc(month, len(docs), where))
+            if not tabs:
+                tabs = _draws_tabs(page)
+                if tabs and month != walk[0]:
+                    raise ListStopped("the page drew statement tabs only after months read without them")
+            if tabs:
+                held = _open_month(page, replace(where, tab=BALANCE_TAB), month)
+                if held:
+                    docs.append(_rawdoc(month, len(docs), where, BALANCE_TAB))
+                rows += held
         except ListStopped as stop:
             raise ListStopped(str(stop), docs, month=month, seen=stop.seen)
         if rows == 0:
             # "No transactions yet for this month": nothing to keep, and a
             # month before the account opened shows the same.
             empty += 1
-            continue
-        docs.append(_rawdoc(month, len(docs), where))
     if empty:
         log.info("%d month(s) with no transactions were not listed", empty)
-    if not floor and limit is None and walk and docs and docs[-1].document_id == walk[-1]:
+    if not floor and limit is None and walk and docs and month_and_tab(docs[-1].document_id)[0] == walk[-1]:
         raise CapReached("the oldest of the %d months read has transactions, so older "
                          "months may have them too" % len(walk), docs)
     return docs
@@ -1241,11 +1459,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   document_id: str = "", today: Optional[_date] = None, profile: str = "",
                   drawn: Optional[dict] = None) -> bool:
     """Save the statement discovery recorded for month `document_id`
-    (YYYY-MM), dated `iso_date`, its last day, on the profile tagged
-    `profile`, by printing that month's statement page to PDF once
-    _open_month has shown it is that month and show_all has drawn every
-    row. `drawn`, when given, is told how many rows were printed. A month
-    not yet over, a record with no profile, or a month that now shows no
+    (YYYY-MM, or that and BALANCE_ID for its Balance tab), dated `iso_date`,
+    its last day, on the profile tagged `profile`, by printing that month's
+    statement page to PDF once _open_month has shown it is that month and
+    show_all has drawn every row. `drawn`, when given, is told how many rows
+    were printed. A month not yet over, a record with no profile, or a month that now shows no
     transactions is refused. `dl_dir` is unused: nothing here goes through
     the browser's downloads. Nothing but the list's own "Show more" is
     pressed. SessionExpired, and ProfileChanged when the browser is on
@@ -1255,7 +1473,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     month after this one opens the same page first. A month's own page
     that does not show as asked is that month's matter, False."""
     out_path = Path(out_path)
-    month = (document_id or "").strip()
+    month, tab = month_and_tab(document_id)
     today = today or _date.today()
     if href != DOCUMENTS_PATH or not month_end(month) or month_end(month) != (iso_date or "") \
             or month_end(month) >= (today - timedelta(days=SETTLE_DAYS)).isoformat() or not profile:
@@ -1263,12 +1481,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         if trace is not None:
             trace.append({"note": "no recorded statement"})
         return False
-    heard = _month_heard(month)
+    heard = _month_heard(month, tab)
     heard.listen(page)
     try:
         where = _where(page)
         if profile_tag(where.profile_id) != profile:
             raise ProfileChanged("the browser is on another Venmo profile than the one listed")
+        where = replace(where, tab=tab)
         try:
             if not _open_month(page, where, month, heard=heard):
                 raise ListStopped("the month now shows no transactions")
@@ -1369,6 +1588,9 @@ def _query_fields(href) -> list:
 def _page_summary(page, heard: Optional[Heard] = None) -> dict:
     out = {"path": _path_only(page.url or ""), "query_fields": _query_fields(page.url or ""),
            "title": "", "statement_address": statement_query(page.url or "") is not None}
+    state = _state(page)
+    out["statement_tabs"] = {name: state.get(name) or 0 for name in ("tabbed", "wallet", "balance")}
+    out["statement_tabs"]["server_says_tabs"] = state.get("told")
     try:
         out["title"] = redact(page.title() or "")
     except Exception:
